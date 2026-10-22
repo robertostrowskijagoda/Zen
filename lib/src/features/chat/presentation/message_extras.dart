@@ -83,7 +83,7 @@ class ChatReplyQuote extends StatelessWidget {
           decoration: BoxDecoration(
             color: ink.withValues(alpha: 0.08),
             borderRadius: context.zenRadius(10),
-            border: Border(left: BorderSide(color: line, width: 3)),
+            border: BorderDirectional(start: BorderSide(color: line, width: 3)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,23 +268,27 @@ Future<String?> pickReaction(BuildContext context) {
   return showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
+    isScrollControlled: true,
+    useSafeArea: true,
     builder: (BuildContext sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Wrap(
-          key: const Key('reaction-picker'),
-          alignment: WrapAlignment.center,
-          spacing: 6,
-          runSpacing: 6,
-          children: <Widget>[
-            for (final String emoji in kQuickReactions)
-              IconButton(
-                key: Key('reaction-pick-$emoji'),
-                tooltip: emoji,
-                onPressed: () => Navigator.of(sheetContext).pop(emoji),
-                icon: Text(emoji, style: const TextStyle(fontSize: 26)),
-              ),
-          ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Wrap(
+            key: const Key('reaction-picker'),
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String emoji in kQuickReactions)
+                IconButton(
+                  key: Key('reaction-pick-$emoji'),
+                  tooltip: emoji,
+                  onPressed: () => Navigator.of(sheetContext).pop(emoji),
+                  icon: Text(emoji, style: const TextStyle(fontSize: 26)),
+                ),
+            ],
+          ),
         ),
       ),
     ),
@@ -297,6 +301,7 @@ Future<String?> showEditMessageDialog(BuildContext context, String current) {
   return showDialog<String>(
     context: context,
     builder: (BuildContext dialogContext) => AlertDialog(
+      scrollable: true,
       title: Text(t('Edytuj wiadomość')),
       content: TextField(
         key: const Key('edit-message-field'),
@@ -536,11 +541,13 @@ class ChatReplyComposerBar extends StatelessWidget {
     return Container(
       key: const Key('reply-composer-bar'),
       margin: const EdgeInsets.fromLTRB(10, 6, 10, 0),
-      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 6, 4, 6),
       decoration: BoxDecoration(
         color: zen.surfaceRaised,
         borderRadius: context.zenRadius(14),
-        border: Border(left: BorderSide(color: zen.accent, width: 3)),
+        border: BorderDirectional(
+          start: BorderSide(color: zen.accent, width: 3),
+        ),
       ),
       child: Row(
         children: <Widget>[

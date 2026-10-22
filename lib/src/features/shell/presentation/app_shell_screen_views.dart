@@ -38,7 +38,7 @@ class _StatusBar extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Padding(
-                padding: EdgeInsets.fromLTRB(
+                padding: EdgeInsetsDirectional.fromSTEB(
                   toggleRail == null ? 16 : 6,
                   6,
                   10,
@@ -61,12 +61,19 @@ class _StatusBar extends ConsumerWidget {
                         ),
                         padding: EdgeInsets.zero,
                         onPressed: toggleRail,
-                        icon: Icon(
-                          railHidden
-                              ? Icons.keyboard_double_arrow_right_rounded
-                              : Icons.keyboard_double_arrow_left_rounded,
-                          size: 20,
-                          color: zen.textSecondary,
+                        // Points away from the rail's edge to show it, towards
+                        // it to hide it; mirrored here, not by the icon font.
+                        icon: Directionality(
+                          textDirection: TextDirection.ltr,
+                          child: Icon(
+                            railHidden ==
+                                    (Directionality.of(context) ==
+                                        TextDirection.ltr)
+                                ? Icons.keyboard_double_arrow_right_rounded
+                                : Icons.keyboard_double_arrow_left_rounded,
+                            size: 20,
+                            color: zen.textSecondary,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -114,6 +121,8 @@ class _StatusBar extends ConsumerWidget {
                         color: zen.textPrimary,
                         glowRadius: 0,
                         glowAlpha: 0,
+                        // Flickers when the count changes, still otherwise.
+                        trigger: unreadCount,
                         child: Text(
                           tn(
                             unreadCount,
@@ -373,7 +382,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
           // With the rail, the code is under Ustawienia → Zaproś.
           if (plainMessenger)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: TextButton.icon(
                 key: const Key('chats-my-code'),
                 onPressed: () => _openInviteTab(context, ref),
@@ -493,6 +502,18 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                     child: _BackgroundAlertsBanner(alerts: backgroundAlerts),
                   ),
+                // A sideloaded iPhone build: its signature runs out soon.
+                const SigningExpiryBanner(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // iPhone: receives only while Zen is open (one-time card).
+                const IPhoneDeliveryNotice(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // Enough friends for the recovery circle and none yet.
+                const CircleReminderCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 if (actionableInbox.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -500,7 +521,12 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 8, 0, 6),
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                            4,
+                            8,
+                            0,
+                            6,
+                          ),
                           child: Row(
                             children: <Widget>[
                               Container(
@@ -803,6 +829,15 @@ class _SettingsScreen extends ConsumerWidget {
                     subtitle: t('Wersja, dokumenty, licencje, kontakt'),
                     onTap: () => unawaited(AboutScreen.open(context)),
                   ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-github'),
+                    icon: Icons.code_rounded,
+                    tone: ZenTone.system,
+                    title: t('Zen na GitHubie'),
+                    subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
+                    onTap: () =>
+                        unawaited(openOrCopyLink(context, kZenRepositoryUrl)),
+                  ),
                 ],
               ),
               // Your profile is edited on the profile tab, not here.
@@ -846,7 +881,12 @@ class _SettingsScreen extends ConsumerWidget {
                       subtitle: ref.watch(accountSecureReminderProvider)
                           ? t(
                               'Zabezpiecz konto na wypadek zgubionego telefonu: '
-                              'krąg odzyskiwania albo kopia zapasowa klucza',
+                              'kopia klucza albo krąg odzyskiwania',
+                            )
+                          : ref.watch(circleReminderProvider)
+                          ? t(
+                              'Masz już dość znajomych — ustaw krąg '
+                              'odzyskiwania',
                             )
                           : t(
                               'Hasło konta, krąg odzyskiwania, nowe urządzenie',
@@ -1146,10 +1186,12 @@ class _SettingsScreen extends ConsumerWidget {
                     key: const Key('settings-nav-reset'),
                     tone: ZenTone.safety,
                     icon: Icons.delete_forever_outlined,
-                    title: t('Usuń wszystkie dane'),
-                    subtitle: t('Znajomi, rozmowy i klucze z tego urządzenia'),
+                    title: t('Usuń to konto z tego urządzenia'),
+                    subtitle: t(
+                      'Znajomi, rozmowy i klucze tego konta na tym urządzeniu',
+                    ),
                     danger: true,
-                    pageTitle: t('Usuń wszystkie dane'),
+                    pageTitle: t('Usuń konto z urządzenia'),
                     pageChildren: const <Widget>[_ResetDataPanel()],
                   ),
                 ],
@@ -1238,7 +1280,7 @@ class _SettingsRowBody extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 68),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
         child: Row(
           children: <Widget>[
             ZenIconBadge(icon: icon, tone: tone, size: 40),
@@ -1329,7 +1371,7 @@ class _SettingsNavTile extends StatelessWidget {
         subtitle: subtitle,
         danger: danger,
         trailing: Padding(
-          padding: const EdgeInsets.only(right: 2),
+          padding: const EdgeInsetsDirectional.only(end: 2),
           child: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
         ),
       ),
@@ -1733,7 +1775,7 @@ class _QuickLockPanel extends ConsumerWidget {
                   }
                   final String? password = await _showPasswordDialog(
                     context,
-                    title: t('Ustaw hasło szyfrowania'),
+                    title: t('Ustaw hasło aplikacji'),
                     actionLabel: t('Ustaw hasło'),
                   );
                   if (password == null) {
@@ -2642,8 +2684,8 @@ class _GroupCardState extends ConsumerState<_GroupCard> {
                       size: 50,
                     ),
                     if (callRunning)
-                      Positioned(
-                        right: -3,
+                      PositionedDirectional(
+                        end: -3,
                         bottom: -3,
                         child: Container(
                           padding: const EdgeInsets.all(3),
@@ -2796,6 +2838,7 @@ void _showGroupActionSheet(
                     context: context,
                     builder: (BuildContext dialogContext) {
                       return AlertDialog(
+                        scrollable: true,
                         icon: Icon(
                           Icons.group_remove_outlined,
                           color: zen.danger,
@@ -2957,12 +3000,37 @@ class _LocalCodePanel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
+            // The invitation is the person's public address (the QR shows
+            // it to anyone), so it stays on the clipboard: it is pasted in
+            // another messenger, often a while later.
             FilledButton.icon(
+              key: const Key('my-invite-copy'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(50),
               ),
               onPressed: () async {
-                await copyWithExpiry(profile.shareText);
+                await copyPublicText(profile.inviteMessage);
+                if (!context.mounted) {
+                  return;
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      t(
+                        'Zaproszenie z linkiem skopiowane — wklej je '
+                        'znajomemu w dowolnym komunikatorze.',
+                      ),
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: Text(t('Kopiuj zaproszenie')),
+            ),
+            TextButton(
+              key: const Key('my-invite-copy-code'),
+              onPressed: () async {
+                await copyPublicText(profile.shareText);
                 if (!context.mounted) {
                   return;
                 }
@@ -2970,8 +3038,7 @@ class _LocalCodePanel extends StatelessWidget {
                   SnackBar(content: Text(t('Kod został skopiowany.'))),
                 );
               },
-              icon: const Icon(Icons.copy_rounded, size: 18),
-              label: Text(t('Kopiuj kod')),
+              child: Text(t('Kopiuj sam kod')),
             ),
           ],
         ),
@@ -3074,6 +3141,17 @@ class _MyCodeScreen extends ConsumerWidget {
                 'Nie ma rejestracji ani serwera. Ten kod to Twój adres w '
                 'sieci — pokaż go albo skopiuj. Kto go wklei, może wysłać '
                 'Ci zaproszenie. Kod jest tylko na tym urządzeniu.',
+              ),
+            ),
+            ZenInfo(
+              key: const Key('invite-mailbox-hint'),
+              title: t('Wiadomości, gdy telefony śpią'),
+              icon: Icons.markunread_mailbox_outlined,
+              text: t(
+                'Jeden komputer z Zen w zasobniku (albo Android) = skrzynka '
+                'dla całej paczki znajomych: przechowa wiadomości, gdy '
+                'telefony są wyłączone. Szczególnie ważne, gdy macie '
+                'iPhone’y — odbierają tylko przy otwartym Zen.',
               ),
             ),
           ],
@@ -3628,7 +3706,7 @@ class _BatteryOptimizationSectionState
             ),
             const SizedBox(height: 4),
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
                 key: const Key('settings-battery-app-settings'),
                 onPressed: () => unawaited(openAndroidAppSettings()),
@@ -3637,7 +3715,7 @@ class _BatteryOptimizationSectionState
               ),
             ),
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
                 key: const Key('settings-battery-vendor-help'),
                 onPressed: () => unawaited(PermissionsScreen.open(context)),
@@ -3799,7 +3877,7 @@ class _BlockedFriendRow extends ConsumerWidget {
     final ZenColors zen = ZenColors.of(context);
     final String note = friend.blockNote?.trim() ?? '';
     return ZenCard(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 12, 12),
       child: Row(
         children: <Widget>[
           ZenBlobAvatar(name: friend.displayLabel, size: 42, showStatus: false),
@@ -3930,10 +4008,12 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
           _PanelHeader(
             icon: Icons.delete_forever_outlined,
             tone: zen.danger,
-            title: t('Reset danych'),
+            title: t('Usuń to konto z tego urządzenia'),
             caption: t(
-              'Usuwa lokalne rozmowy, zaproszenia, ustawienia i zapisane '
-              'klucze blokady, a potem uruchamia aplikację od czystego stanu.',
+              'Usuwa z tego urządzenia rozmowy, zaproszenia, ustawienia i '
+              'klucze otwartego konta, a potem uruchamia aplikację od '
+              'czystego stanu. Inne konta na tym urządzeniu zostają, a to '
+              'konto na innych urządzeniach działa dalej.',
             ),
           ),
           const SizedBox(height: 16),
@@ -4104,22 +4184,52 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
   }
 
   Future<bool> _confirmReset() async {
+    // Nothing proves a way back (no key copy, no circle): say what is lost.
+    final bool secured = accountIsSecured(ref.read);
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
+        final ZenColors zen = ZenColors.of(context);
         return AlertDialog(
+          scrollable: true,
           key: const Key('desktop-reset-confirm-dialog'),
-          icon: Icon(
-            Icons.warning_amber_rounded,
-            color: ZenColors.of(context).danger,
-            size: 32,
-          ),
-          title: Text(t('Reset danych')),
-          content: Text(
-            t(
-              'To usunie wszystkie lokalne dane aplikacji i zapisane '
-              'zabezpieczenia. Kontynuować?',
-            ),
+          icon: Icon(Icons.warning_amber_rounded, color: zen.danger, size: 32),
+          title: Text(t('Usunąć to konto z tego urządzenia?')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                t(
+                  'Rozmowy, znajomi, ustawienia i klucze tego konta znikną '
+                  'z tego urządzenia. Tego nie da się cofnąć.',
+                ),
+              ),
+              if (!secured) ...<Widget>[
+                const SizedBox(height: 12),
+                ZenInfo(
+                  key: const Key('reset-no-backup-warning'),
+                  icon: Icons.report_gmailerrorred_rounded,
+                  tone: zen.danger,
+                  title: t('To konto nie ma kopii'),
+                  text: t(
+                    'Nie ma kopii klucza ani kręgu odzyskiwania. Jeśli nie '
+                    'masz tego konta na innym urządzeniu ani w pliku kopii, '
+                    'po usunięciu nie da się go odzyskać: znajomi zobaczą '
+                    'Cię jako nową osobę, a miejsce w piramidzie przepadnie.',
+                  ),
+                ),
+                TextButton.icon(
+                  key: const Key('reset-backup-first'),
+                  onPressed: () {
+                    Navigator.of(context).pop(false);
+                    unawaited(AccountRecoveryScreen.open(this.context));
+                  },
+                  icon: const Icon(Icons.shield_outlined),
+                  label: Text(t('Najpierw zrób kopię')),
+                ),
+              ],
+            ],
           ),
           actions: <Widget>[
             TextButton(
@@ -4134,7 +4244,7 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
                 ),
               ),
               onPressed: () => Navigator.of(context).pop(true),
-              child: Text(t('Resetuj')),
+              child: Text(t('Usuń')),
             ),
           ],
         );
@@ -4331,7 +4441,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
       final String nickname = sanitizeFriendNickname(_nicknameController.text);
       final String profileName = ref
           .read(userProfileControllerProvider)
-          .displayName;
+          .publicName;
       final String? senderDisplayName =
           PeerShareCodec.buildLocalProfile(
             address: localAddress,

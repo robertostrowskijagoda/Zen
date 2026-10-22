@@ -130,6 +130,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     final String? message = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Napisz do: {name}', {'name': person.pseudonym})),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -400,7 +401,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                   ],
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 20, 0, 8),
+                  padding: const EdgeInsetsDirectional.fromSTEB(4, 20, 0, 8),
                   child: Row(
                     children: <Widget>[
                       Expanded(
@@ -708,8 +709,8 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                       for (final NearbyLine l in s.lines)
                         Align(
                           alignment: l.mine
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
+                              ? AlignmentDirectional.centerEnd
+                              : AlignmentDirectional.centerStart,
                           child: Container(
                             constraints: const BoxConstraints(maxWidth: 320),
                             margin: const EdgeInsets.symmetric(vertical: 4),

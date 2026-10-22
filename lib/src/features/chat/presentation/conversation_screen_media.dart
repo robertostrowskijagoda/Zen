@@ -148,12 +148,13 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                             decoration: InputDecoration(
                               filled: false,
                               isDense: true,
-                              contentPadding: const EdgeInsets.fromLTRB(
-                                18,
-                                13,
-                                8,
-                                13,
-                              ),
+                              contentPadding:
+                                  const EdgeInsetsDirectional.fromSTEB(
+                                    18,
+                                    13,
+                                    8,
+                                    13,
+                                  ),
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
@@ -192,7 +193,12 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                             ? _sendMessage
                             : null;
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(2, 4, 4, 4),
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                            2,
+                            4,
+                            4,
+                            4,
+                          ),
                           child: SizedBox(
                             width: 40,
                             height: 40,
@@ -268,6 +274,8 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     final String? emoji = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext context) => const _EmojiPickerSheet(),
     );
     if (emoji == null) {
@@ -451,47 +459,57 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
 
     final _CaptureOption? option = await showModalBottomSheet<_CaptureOption>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: zen.surfaceRaised,
       shape: context.zenSheetShape(),
       builder: (BuildContext sheetContext) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                ListTile(
-                  leading: Icon(Icons.photo_camera_rounded, color: zen.accent),
-                  title: Text(t('Zrób zdjęcie (Aparat)')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(_CaptureOption.photo),
-                ),
-                ListTile(
-                  leading: Icon(Icons.videocam_rounded, color: zenTone(zen, 2)),
-                  title: Text(t('Nagraj film (Wideo)')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(_CaptureOption.video),
-                ),
-                ListTile(
-                  leading: Icon(
-                    Icons.photo_library_rounded,
-                    color: zenTone(zen, 4),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  ListTile(
+                    leading: Icon(
+                      Icons.photo_camera_rounded,
+                      color: zen.accent,
+                    ),
+                    title: Text(t('Zrób zdjęcie (Aparat)')),
+                    onTap: () =>
+                        Navigator.of(sheetContext).pop(_CaptureOption.photo),
                   ),
-                  title: Text(t('Wybierz z galerii')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(_CaptureOption.gallery),
-                ),
-                ListTile(
-                  key: const Key('capture-audio-file'),
-                  leading: Icon(
-                    Icons.audio_file_rounded,
-                    color: zenTone(zen, 1),
+                  ListTile(
+                    leading: Icon(
+                      Icons.videocam_rounded,
+                      color: zenTone(zen, 2),
+                    ),
+                    title: Text(t('Nagraj film (Wideo)')),
+                    onTap: () =>
+                        Navigator.of(sheetContext).pop(_CaptureOption.video),
                   ),
-                  title: Text(t('Nagranie audio z pliku')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(_CaptureOption.audio),
-                ),
-              ],
+                  ListTile(
+                    leading: Icon(
+                      Icons.photo_library_rounded,
+                      color: zenTone(zen, 4),
+                    ),
+                    title: Text(t('Wybierz z galerii')),
+                    onTap: () =>
+                        Navigator.of(sheetContext).pop(_CaptureOption.gallery),
+                  ),
+                  ListTile(
+                    key: const Key('capture-audio-file'),
+                    leading: Icon(
+                      Icons.audio_file_rounded,
+                      color: zenTone(zen, 1),
+                    ),
+                    title: Text(t('Nagranie audio z pliku')),
+                    onTap: () =>
+                        Navigator.of(sheetContext).pop(_CaptureOption.audio),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -977,87 +995,93 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
                 item.tags.any((String tag) => tag.toLowerCase().contains(q));
           }).toList();
 
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-            child: TextField(
-              key: const Key('emoji-search-field'),
-              controller: _searchController,
-              onChanged: (String text) {
-                setState(() {
-                  _query = text;
-                });
-              },
-              decoration: InputDecoration(
-                hintText: t('Szukaj emotikony...'),
-                prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                suffixIcon: _query.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _query = '';
-                          });
-                        },
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                filled: true,
-                fillColor: zen.surface,
-                border: OutlineInputBorder(
-                  borderRadius: context.zenRadius(16),
-                  borderSide: BorderSide(color: zen.outlineSoft),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: context.zenRadius(16),
-                  borderSide: BorderSide(color: zen.outlineSoft),
+    // Follows the keyboard; the grid gives way when the window is short.
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: TextField(
+                key: const Key('emoji-search-field'),
+                controller: _searchController,
+                onChanged: (String text) {
+                  setState(() {
+                    _query = text;
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: t('Szukaj emotikony...'),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _query.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _query = '';
+                            });
+                          },
+                        )
+                      : null,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  filled: true,
+                  fillColor: zen.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: context.zenRadius(16),
+                    borderSide: BorderSide(color: zen.outlineSoft),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: context.zenRadius(16),
+                    borderSide: BorderSide(color: zen.outlineSoft),
+                  ),
                 ),
               ),
             ),
-          ),
-          SizedBox(
-            height: 220,
-            child: filtered.isEmpty
-                ? Center(
-                    child: Text(
-                      t('Brak emotikonów dla "{query}"', {'query': _query}),
-                      style: TextStyle(color: zen.textMuted, fontSize: 13),
-                    ),
-                  )
-                : GridView.builder(
-                    key: const Key('emoji-picker-grid'),
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 8,
-                          crossAxisSpacing: 4,
-                          mainAxisSpacing: 4,
+            Flexible(
+              child: SizedBox(
+                height: 220,
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Text(
+                          t('Brak emotikonów dla "{query}"', {'query': _query}),
+                          style: TextStyle(color: zen.textMuted, fontSize: 13),
                         ),
-                    itemCount: filtered.length,
-                    itemBuilder: (BuildContext context, int index) {
-                      final item = filtered[index];
-                      return InkWell(
-                        key: Key('emoji-$index'),
-                        borderRadius: context.zenRadius(12),
-                        onTap: () => Navigator.of(context).pop(item.emoji),
-                        child: Center(
-                          child: Text(
-                            item.emoji,
-                            style: const TextStyle(fontSize: 22),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                      )
+                    : GridView.builder(
+                        key: const Key('emoji-picker-grid'),
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 8,
+                              crossAxisSpacing: 4,
+                              mainAxisSpacing: 4,
+                            ),
+                        itemCount: filtered.length,
+                        itemBuilder: (BuildContext context, int index) {
+                          final item = filtered[index];
+                          return InkWell(
+                            key: Key('emoji-$index'),
+                            borderRadius: context.zenRadius(12),
+                            onTap: () => Navigator.of(context).pop(item.emoji),
+                            child: Center(
+                              child: Text(
+                                item.emoji,
+                                style: const TextStyle(fontSize: 22),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1072,7 +1096,7 @@ class _RecordingComposerStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 9, 8, 9),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 9, 8, 9),
       child: Row(
         children: <Widget>[
           ZenPulsingDot(
@@ -1211,7 +1235,7 @@ class _ConversationGifPickerDialogState
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsetsDirectional.only(end: 12),
                     child: ZenPill(text: 'KLIPY', tone: zenTone(zen, 1)),
                   ),
                 ],
@@ -1336,7 +1360,8 @@ class _ConversationGifPickerDialogState
                                           },
                                     ),
                                     Align(
-                                      alignment: Alignment.bottomLeft,
+                                      alignment:
+                                          AlignmentDirectional.bottomStart,
                                       child: DecoratedBox(
                                         decoration: const BoxDecoration(
                                           gradient: LinearGradient(
@@ -1654,9 +1679,16 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
                           ),
                         )
                       else
-                        Text(
-                          t('Transfer w toku'),
-                          style: TextStyle(color: zen.textMuted, fontSize: 11),
+                        Flexible(
+                          child: Text(
+                            t('Transfer w toku'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: zen.textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
                         ),
                     ],
                   ),
@@ -2179,6 +2211,7 @@ Future<void> _saveAttachmentCopy(
     final bool? go = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         key: const Key('attachment-risky-warning'),
         icon: const Icon(Icons.gpp_maybe_rounded),
         title: Text(t('Ten plik może uruchomić program')),

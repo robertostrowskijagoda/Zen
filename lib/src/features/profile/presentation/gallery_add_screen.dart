@@ -200,7 +200,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
           title: Text(t('Dodaj do galerii')),
           actions: <Widget>[
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: FilledButton(
                 key: const Key('gallery-add-save'),
                 onPressed: ready ? () => unawaited(_save()) : null,
@@ -320,9 +320,9 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                                   fit: BoxFit.cover,
                                 ),
                         ),
-                        Positioned(
+                        PositionedDirectional(
                           top: 2,
-                          right: 2,
+                          end: 2,
                           child: IconButton.filledTonal(
                             key: Key('gallery-remove-$i'),
                             visualDensity: VisualDensity.compact,

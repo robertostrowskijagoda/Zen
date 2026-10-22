@@ -635,7 +635,7 @@ void main() {
     expect(await ania.meet.endAlarm('9999'), AlarmEndResult.ended);
     expect(ania.meet.book.ownActiveAlarm, isNull);
     expect(bob.meet.book.alarm(alarm.id)!.duress, isTrue);
-    expect(bob.shown.last.title, contains('PIN-em panicznym'));
+    expect(bob.shown.last.title, contains('PIN-em przymusu'));
 
     // Remembered; off in a new book.
     final MeetBook again = MeetBook.fromJson(

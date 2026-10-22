@@ -330,6 +330,9 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                 ),
               ],
               bottom: TabBar(
+                // Scrolls instead of fading longer translations out.
+                isScrollable: true,
+                tabAlignment: TabAlignment.center,
                 indicatorColor: tone,
                 labelColor: tone,
                 unselectedLabelColor: zen.textSecondary,
@@ -421,7 +424,7 @@ class _PersonRow extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return ZenCard(
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 12, 10, 12),
       child: Row(
         children: <Widget>[
           datingPhoto(photo, size: 52),
@@ -1599,14 +1602,14 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                       for (final DatingLine l in lines)
                         Align(
                           alignment: l.mine
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
+                              ? AlignmentDirectional.centerEnd
+                              : AlignmentDirectional.centerStart,
                           child: Container(
-                            margin: EdgeInsets.only(
+                            margin: EdgeInsetsDirectional.only(
                               top: 3,
                               bottom: 3,
-                              left: l.mine ? 48 : 0,
-                              right: l.mine ? 0 : 48,
+                              start: l.mine ? 48 : 0,
+                              end: l.mine ? 0 : 48,
                             ),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 14,
@@ -1643,7 +1646,12 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                   child: SafeArea(
                     top: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                      padding: const EdgeInsetsDirectional.fromSTEB(
+                        12,
+                        8,
+                        8,
+                        8,
+                      ),
                       child: Row(
                         children: <Widget>[
                           Expanded(
@@ -1697,6 +1705,7 @@ class _FriendCorner extends ConsumerWidget {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(a.question),
         content: SizedBox(
           width: 400,
@@ -1735,6 +1744,7 @@ class _FriendCorner extends ConsumerWidget {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Kilka słów o: {name}', {'name': name})),
         content: SizedBox(
           width: 400,
@@ -1806,7 +1816,7 @@ class _FriendCorner extends ConsumerWidget {
               final Color cardTone = alarmed ? zen.danger : zen.success;
               return ZenCard(
                 tone: cardTone,
-                padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+                padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 8, 14),
                 child: Row(
                   children: <Widget>[
                     ZenIconBadge(
@@ -2351,7 +2361,7 @@ class _DatingVouchListState extends State<DatingVouchList> {
           ),
         if (list.length > widget.first)
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
               key: const Key('dating-vouches-more'),
               onPressed: () => setState(() => _all = !_all),
@@ -2480,7 +2490,7 @@ class DatingSafeMutual extends StatelessWidget {
           ],
           if (both != null && both.isNotEmpty)
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
                 key: const Key('dating-safe-graph'),
                 onPressed: () => unawaited(

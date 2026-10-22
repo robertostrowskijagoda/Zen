@@ -144,7 +144,7 @@ class ZenTile extends StatelessWidget {
             onTap: onTap,
             child: Ink(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+                padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 12, 14),
                 child: Row(
                   children: <Widget>[
                     ZenIconBadge(icon: icon, tone: tone),
@@ -379,7 +379,7 @@ class ZenSection extends StatelessWidget {
     if (look.sections == ZenSectionStyle.prompt) {
       // A terminal comment line.
       return Padding(
-        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        padding: EdgeInsetsDirectional.fromSTEB(4, top, 0, 8),
         child: Row(
           children: <Widget>[
             Expanded(
@@ -399,7 +399,7 @@ class ZenSection extends StatelessWidget {
       // Small caps between fine rules.
       final Widget rule = Container(height: 1, color: zen.outline);
       return Padding(
-        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        padding: EdgeInsetsDirectional.fromSTEB(4, top, 0, 8),
         child: Row(
           children: <Widget>[
             SizedBox(width: 14, child: rule),
@@ -422,7 +422,7 @@ class ZenSection extends StatelessWidget {
     if (look.sections == ZenSectionStyle.ornament) {
       // A diamond, glowing caps and a fading gold line.
       return Padding(
-        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        padding: EdgeInsetsDirectional.fromSTEB(4, top, 0, 8),
         child: Row(
           children: <Widget>[
             Transform.rotate(
@@ -458,7 +458,7 @@ class ZenSection extends StatelessWidget {
     if (look.sections == ZenSectionStyle.pixel) {
       // A pixel block and heavy capitals with a hard shadow.
       return Padding(
-        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        padding: EdgeInsetsDirectional.fromSTEB(4, top, 0, 8),
         child: Row(
           children: <Widget>[
             Container(width: 8, height: 8, color: zen.accent),
@@ -492,7 +492,7 @@ class ZenSection extends StatelessWidget {
           children: <Widget>[
             Flexible(
               child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
+                padding: const EdgeInsetsDirectional.fromSTEB(8, 3, 10, 3),
                 decoration: BoxDecoration(
                   color: zen.accent,
                   border: look.borders == ZenBorderStyle.ink
@@ -531,7 +531,7 @@ class ZenSection extends StatelessWidget {
           : zen.label(color: zen.textMuted),
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+      padding: EdgeInsetsDirectional.fromSTEB(4, top, 0, 8),
       child: Row(
         children: <Widget>[
           if (rule) ...<Widget>[
@@ -889,6 +889,7 @@ class ZenPill extends StatelessWidget {
     this.tone,
     this.filled = false,
     this.icon,
+    this.maxLines = 1,
     super.key,
   });
 
@@ -896,6 +897,9 @@ class ZenPill extends StatelessWidget {
   final Color? tone;
   final bool filled;
   final IconData? icon;
+
+  /// Lines before the text is cut; more than 1 for a short sentence.
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -936,7 +940,7 @@ class ZenPill extends StatelessWidget {
           Flexible(
             child: Text(
               text,
-              maxLines: 1,
+              maxLines: maxLines,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: filled ? ZenColors.foregroundFor(t) : t,
@@ -1069,7 +1073,7 @@ class ZenCountBadge extends StatelessWidget {
         label: text,
         excludeSemantics: true,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(5, 4, 4, 4),
+          padding: const EdgeInsetsDirectional.fromSTEB(5, 4, 4, 4),
           decoration: ShapeDecoration(
             color: zen.surfaceSunk,
             shape: ZenBevelBorder.of(zen, sunken: true),
@@ -1160,8 +1164,8 @@ class ZenRailTabFrame extends StatelessWidget {
         return Stack(
           children: <Widget>[
             plate,
-            Positioned(
-              right: 4,
+            PositionedDirectional(
+              end: 4,
               bottom: 4,
               child: ZenEqualizerBars(color: hue),
             ),
@@ -1202,8 +1206,8 @@ class ZenRailTabFrame extends StatelessWidget {
           padding: padding,
           decoration: BoxDecoration(
             color: selected ? hue.withValues(alpha: 0.08) : clear,
-            border: Border(
-              left: BorderSide(color: selected ? hue : idleEdge, width: 3),
+            border: BorderDirectional(
+              start: BorderSide(color: selected ? hue : idleEdge, width: 3),
             ),
           ),
           child: child,

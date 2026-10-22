@@ -103,7 +103,7 @@ class _TypingBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: AlignmentDirectional.centerStart,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: zen.surfaceRaised,
@@ -463,7 +463,9 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final Widget bubble = Align(
-      alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: outgoing
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           final double maxWidth = constraints.maxWidth.isFinite
@@ -483,7 +485,7 @@ class _MessageBubble extends StatelessWidget {
                     : const BoxDecoration(),
                 position: DecorationPosition.foreground,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 9, 12, 7),
+                  padding: const EdgeInsetsDirectional.fromSTEB(14, 9, 12, 7),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -855,6 +857,7 @@ Future<void> _showRetentionSettingsDialog({
         builder: (BuildContext context) {
           final ZenColors zen = ZenColors.of(context);
           return AlertDialog(
+            scrollable: true,
             title: Text(t('Retencja rozmowy')),
             content: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),

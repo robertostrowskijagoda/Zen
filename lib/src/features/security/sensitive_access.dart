@@ -135,6 +135,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      scrollable: true,
       key: const Key('sensitive-access-dialog'),
       title: Text(t('Potwierdź, że to Ty')),
       content: Column(

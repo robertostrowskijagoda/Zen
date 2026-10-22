@@ -712,7 +712,7 @@ final class MeetService extends ChangeNotifier {
         RuntimeSystemNotification(
           id: 'alarm-end-${merged.id}',
           title: merged.duress
-              ? t('⚠️ {name} odwołał(a) alarm PIN-em panicznym', {'name': name})
+              ? t('⚠️ {name} odwołał(a) alarm PIN-em przymusu', {'name': name})
               : t('{name} jest bezpieczny(-a)', {'name': name}),
           body: merged.duress
               ? t('Może być do tego zmuszony(-a). Sprawdź, co się dzieje.')

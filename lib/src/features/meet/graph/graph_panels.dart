@@ -375,7 +375,7 @@ class BridgesSection extends StatelessWidget {
               icon: Icons.device_hub_rounded,
               tone: zen.textSecondary,
               text: t(
-                'Nie widać jeszcze kręgów do połączenia. Pojawią się, gdy '
+                'Nie widać jeszcze grup znajomych do połączenia. Pojawią się, gdy '
                 'znajomi pokażą Ci swoje listy znajomych.',
               ),
             ),
@@ -385,9 +385,10 @@ class BridgesSection extends StatelessWidget {
               icon: Icons.device_hub_rounded,
               tone: zen.accent,
               title: t('Mosty'),
-              text: t('Tylko przez te osoby łączą się Twoje kręgi: {names}.', {
-                'names': bridges.join(', '),
-              }),
+              text: t(
+                'Tylko przez te osoby łączą się Twoje grupy znajomych: {names}.',
+                {'names': bridges.join(', ')},
+              ),
             ),
           if (islands.isNotEmpty) ...<Widget>[
             const SizedBox(height: 6),
@@ -396,7 +397,7 @@ class BridgesSection extends StatelessWidget {
               icon: Icons.landscape_rounded,
               tone: zenTone(zen, 5),
               title: t('Samotne wyspy'),
-              text: t('Kręgi bez połączeń z innymi: {names}.', {
+              text: t('Grupy znajomych bez połączeń z innymi: {names}.', {
                 'names': islands.join(', '),
               }),
             ),
@@ -663,9 +664,9 @@ class CirclesSection extends StatelessWidget {
           ExpansionTile(
             key: const Key('graph-circles'),
             leading: Icon(Icons.bubble_chart_rounded, color: zen.accent),
-            title: Text(t('Twoje kręgi')),
+            title: Text(t('Twoje grupy znajomych')),
             subtitle: Text(
-              t('Nadaj kręgom własne nazwy — widzisz je tylko Ty.'),
+              t('Nadaj grupom własne nazwy — widzisz je tylko Ty.'),
             ),
             children: <Widget>[
               for (final GraphCircle c in circles)
@@ -712,8 +713,9 @@ Future<String?> askCircleName(
   final String? out = await showDialog<String>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       key: const Key('graph-circle-dialog'),
-      title: Text(t('Nazwa kręgu')),
+      title: Text(t('Nazwa grupy znajomych')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -910,7 +912,7 @@ Future<void> showGraphSnapshot(
             const SizedBox(height: 4),
             Text(
               t(
-                'Tylko inicjały i kolory kręgów — bez imion, nazwisk i '
+                'Tylko inicjały i kolory grup znajomych — bez imion, nazwisk i '
                 'adresów.',
               ),
               style: TextStyle(color: zen.textSecondary, fontSize: 13),

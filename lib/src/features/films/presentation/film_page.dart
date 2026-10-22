@@ -201,14 +201,23 @@ class _FilmPageState extends State<FilmPage>
               );
             },
           ),
-        Positioned(
-          right: 8,
+        // In a short window (split screen) or with large text the column
+        // shrinks instead of losing its top buttons off screen.
+        PositionedDirectional(
+          end: 8,
+          top: MediaQuery.paddingOf(context).top + 56,
           bottom: 28,
-          child: _Rail(film: film, ink: ink, actions: widget.actions),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _Rail(film: film, ink: ink, actions: widget.actions),
+            ),
+          ),
         ),
-        Positioned(
-          left: 16,
-          right: 88,
+        PositionedDirectional(
+          start: 16,
+          end: 88,
           bottom: 24,
           child: _Caption(film: film, style: shadowed, actions: widget.actions),
         ),

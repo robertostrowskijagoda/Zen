@@ -51,7 +51,7 @@ class IntroInboxSection extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 8, 0, 4),
+                padding: const EdgeInsetsDirectional.fromSTEB(4, 8, 0, 4),
                 child: Text(
                   t('Prośby o kontakt ({count})', {'count': open.length}),
                   style: zen.label(color: zen.accent),
@@ -274,6 +274,7 @@ Future<String?> _forwardNote(BuildContext context, String target) async {
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       title: Text(t('Przekaż do: {name}', {'name': target})),
       content: SelectionArea(
         child: TextField(

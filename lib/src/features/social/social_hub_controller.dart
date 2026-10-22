@@ -10,6 +10,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/calls/ongoing_group_call.dart';
@@ -1058,7 +1059,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   }) {
     final String senderName = ref
         .read(userProfileControllerProvider)
-        .displayName;
+        .publicName;
     return <String, dynamic>{
       'type': 'group_invite',
       'groupId': group.id,

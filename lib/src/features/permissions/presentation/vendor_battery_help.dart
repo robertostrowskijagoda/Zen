@@ -166,7 +166,7 @@ class VendorBatteryHelp extends StatelessWidget {
           ),
         ),
         Align(
-          alignment: Alignment.centerLeft,
+          alignment: AlignmentDirectional.centerStart,
           child: TextButton.icon(
             key: const Key('vendor-battery-open-settings'),
             onPressed: onOpenSettings,

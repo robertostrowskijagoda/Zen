@@ -349,45 +349,49 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     final int? choice = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            for (final (int, IconData, String, String) o
-                in <(int, IconData, String, String)>[
-                  (0, Icons.person_rounded, t('Nie ukrywaj'), ''),
-                  (
-                    1,
-                    Icons.visibility_off_rounded,
-                    t('Ukryj tylko przed nim / nią'),
-                    t(
-                      'Jego/jej znajomi mogą Cię dalej zobaczyć, także przez '
-                      'tę osobę. Uwaga: zmodyfikowana aplikacja tej osoby, '
-                      'udająca, że tylko przekazuje cudze pytanie, mogłaby '
-                      'to obejść.',
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (final (int, IconData, String, String) o
+                  in <(int, IconData, String, String)>[
+                    (0, Icons.person_rounded, t('Nie ukrywaj'), ''),
+                    (
+                      1,
+                      Icons.visibility_off_rounded,
+                      t('Ukryj tylko przed nim / nią'),
+                      t(
+                        'Jego/jej znajomi mogą Cię dalej zobaczyć, także przez '
+                        'tę osobę. Uwaga: zmodyfikowana aplikacja tej osoby, '
+                        'udająca, że tylko przekazuje cudze pytanie, mogłaby '
+                        'to obejść.',
+                      ),
                     ),
-                  ),
-                  (
-                    2,
-                    Icons.group_off_rounded,
-                    t('Ukryj przed nim / nią i jego/jej kręgiem'),
-                    t(
-                      'Nikt, do kogo docierasz tylko przez tę osobę, nie '
-                      'zobaczy Twojego profilu (ani Ty jego).',
+                    (
+                      2,
+                      Icons.group_off_rounded,
+                      t('Ukryj przed nim / nią i jego/jej kręgiem'),
+                      t(
+                        'Nikt, do kogo docierasz tylko przez tę osobę, nie '
+                        'zobaczy Twojego profilu (ani Ty jego).',
+                      ),
                     ),
-                  ),
-                ])
-              ListTile(
-                key: Key('dating-hide-choice-${o.$1}'),
-                leading: Icon(o.$2),
-                title: Text(o.$3),
-                subtitle: o.$4.isEmpty ? null : Text(o.$4),
-                trailing: current == o.$1
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () => Navigator.of(context).pop(o.$1),
-              ),
-          ],
+                  ])
+                ListTile(
+                  key: Key('dating-hide-choice-${o.$1}'),
+                  leading: Icon(o.$2),
+                  title: Text(o.$3),
+                  subtitle: o.$4.isEmpty ? null : Text(o.$4),
+                  trailing: current == o.$1
+                      ? const Icon(Icons.check_rounded)
+                      : null,
+                  onTap: () => Navigator.of(context).pop(o.$1),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -410,6 +414,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Pokazać na grafie?')),
         content: Text(
           t(
@@ -521,8 +526,8 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                             child: datingPhoto(_photos[i], size: 76),
                           ),
                           if (i == 0)
-                            Positioned(
-                              left: 4,
+                            PositionedDirectional(
+                              start: 4,
                               bottom: 4,
                               child: IgnorePointer(
                                 child: ZenPill(
@@ -532,8 +537,8 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                                 ),
                               ),
                             ),
-                          Positioned(
-                            right: -6,
+                          PositionedDirectional(
+                            end: -6,
                             top: -6,
                             child: Material(
                               color: zen.surfaceRaised,
@@ -927,7 +932,12 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 for (final DatingVouch v in _shownVouches())
                   ZenCard(
                     tone: v.approved ? null : zen.warning,
-                    padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+                    padding: const EdgeInsetsDirectional.fromSTEB(
+                      14,
+                      12,
+                      6,
+                      12,
+                    ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
@@ -994,7 +1004,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                   ),
                 if (_dating.me.vouches.length > _vouchesFirst)
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerStart,
                     child: TextButton.icon(
                       key: const Key('dating-editor-vouches-more'),
                       onPressed: () =>

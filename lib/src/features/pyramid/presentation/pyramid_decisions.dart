@@ -291,7 +291,7 @@ class DecisionsAgainstMe extends StatelessWidget {
     final String? next = s.nextJudge(m);
     if (problem == null && next != null) {
       return Align(
-        alignment: Alignment.centerRight,
+        alignment: AlignmentDirectional.centerEnd,
         child: OutlinedButton.icon(
           key: Key('decision-appeal-${m.id}'),
           onPressed: () => unawaited(_appeal(context, m)),

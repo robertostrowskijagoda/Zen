@@ -43,7 +43,7 @@ class EmitChangeNotices extends StatelessWidget {
           ),
           if (top)
             Align(
-              alignment: Alignment.centerRight,
+              alignment: AlignmentDirectional.centerEnd,
               child: TextButton.icon(
                 key: Key('emit-change-cancel-${c.id}'),
                 onPressed: () => unawaited(() async {

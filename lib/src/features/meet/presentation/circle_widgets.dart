@@ -197,7 +197,7 @@ class CircleNextDinnerCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
               key: const Key('circle-chat'),
               onPressed: () => unawaited(
@@ -334,6 +334,7 @@ class CircleSettleUp extends StatelessWidget {
     final String? v = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Ile wydałeś(-aś) na zakupy (zł)?')),
         content: TextField(
           key: const Key('circle-spent-input'),
@@ -432,19 +433,23 @@ class CircleSettleUp extends StatelessWidget {
                           ),
                         ),
                         if (c.isSettled(key, x))
-                          Text(
-                            t('Rozliczone ✓'),
-                            style: TextStyle(
-                              color: zen.success,
-                              fontWeight: FontWeight.w700,
+                          Flexible(
+                            child: Text(
+                              t('Rozliczone ✓'),
+                              style: TextStyle(
+                                color: zen.success,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           )
                         else if (x.from == me || x.to == me)
-                          TextButton(
-                            key: Key('circle-settled-${x.from}-${x.to}'),
-                            onPressed: () =>
-                                unawaited(service.markSettled(c.id, day, x)),
-                            child: Text(t('Rozliczone')),
+                          Flexible(
+                            child: TextButton(
+                              key: Key('circle-settled-${x.from}-${x.to}'),
+                              onPressed: () =>
+                                  unawaited(service.markSettled(c.id, day, x)),
+                              child: Text(t('Rozliczone')),
+                            ),
                           ),
                       ],
                     ),
@@ -467,6 +472,7 @@ Future<Set<CircleDiet>?> showCircleDietsDialog(
     context: context,
     builder: (BuildContext context) => StatefulBuilder(
       builder: (BuildContext context, StateSetter set) => AlertDialog(
+        scrollable: true,
         title: Text(t('Twoja dieta')),
         content: Wrap(
           spacing: 6,

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -221,7 +222,7 @@ final class _Saved {
 
   static _Saved fromJson(Object? json) {
     final _Saved s = _Saved();
-    if (json is! Map || json['v'] != 1) {
+    if (json is! Map || !isReadableFormat(json, current: 1)) {
       return s;
     }
     s
@@ -405,7 +406,10 @@ final class EncounterLog extends ChangeNotifier {
     if (raw == null) {
       return _Saved();
     }
-    return _Saved.fromJson(jsonDecode(utf8.decode(raw)));
+    final Object? json = jsonDecode(utf8.decode(raw));
+    // A newer build's file stays as it is (saves are skipped).
+    heldAsNewerOn(disk, kEncountersKey, json, current: 1);
+    return _Saved.fromJson(json);
   }
 
   /// Drops what is older than [kEncountersKeep]; whether anything went.

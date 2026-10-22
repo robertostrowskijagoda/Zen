@@ -255,6 +255,10 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     int backupAt = 0,
   }) async {
     if (backup['v'] != 1) {
+      if (formatAgeOf(backup['v'], current: 1) == FormatAge.newer) {
+        // Saved by a newer Zen on another device of the account.
+        ZenFormatGuard.instance.noteNewer('account/contacts');
+      }
       return 0;
     }
     bool removedSince(String key) => (removedAt[key] ?? -1) >= backupAt;

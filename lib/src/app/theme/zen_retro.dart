@@ -397,7 +397,7 @@ class ZenTitleBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+      padding: const EdgeInsetsDirectional.fromSTEB(8, 3, 4, 3),
       decoration: ShapeDecoration(
         color: zen.surfaceRaised,
         shape: ZenBevelBorder.of(zen),

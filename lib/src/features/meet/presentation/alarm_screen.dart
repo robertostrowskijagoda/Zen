@@ -204,6 +204,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Zapasowy SMS')),
         content: TextField(
           key: const Key('alarm-sms-numbers'),
@@ -523,7 +524,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
           text: t(
             'Alarm przebija tryb „nie przeszkadzać” i dzwoni u przyjaciół jak '
             'połączenie. Wysyła Twoje położenie (tylko teraz, tylko im) i '
-            'odświeża je co minutę. Odwołasz go swoim PIN-em. PIN paniczny '
+            'odświeża je co minutę. Odwołasz go swoim PIN-em. PIN przymusu '
             'też go odwołuje na ekranie, ale przyjaciele dostają wtedy '
             'ostrzeżenie, że możesz być zmuszony(-a).',
           ),
@@ -895,7 +896,7 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
             ),
           ),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: OutlinedButton.icon(
               key: const Key('alarm-resend'),
               onPressed: _resending ? null : () => unawaited(_resend(missing)),
@@ -1028,7 +1029,7 @@ class _PinSetupState extends State<_PinSetup> {
       return;
     }
     if (pin == panic) {
-      setState(() => _error = t('PIN paniczny musi być inny niż zwykły.'));
+      setState(() => _error = t('PIN przymusu musi być inny niż zwykły.'));
       return;
     }
     await widget.service.setAlarmPin(pin, panic);
@@ -1073,22 +1074,23 @@ class _PinSetupState extends State<_PinSetup> {
         ZenSection(t('Zwykły PIN'), top: 12),
         field('alarm-pin-1', _a, t('Zwykły PIN'), Icons.lock_rounded),
         field('alarm-pin-2', _b, t('Powtórz zwykły PIN'), Icons.lock_rounded),
-        ZenSection(t('PIN paniczny')),
+        ZenSection(t('PIN przymusu')),
         ZenInfo(
           icon: Icons.warning_amber_rounded,
           tone: zen.warning,
           text: t(
-            'PIN paniczny wygląda tak samo — alarm znika z ekranu — ale '
+            'PIN przymusu wygląda tak samo — alarm znika z ekranu — ale '
             'przyjaciele dostają ostrzeżenie, że ktoś Cię zmusza. Pomyłka '
-            '(inny PIN) niczego nie odwołuje, możesz wpisać jeszcze raz.',
+            '(inny PIN) niczego nie odwołuje, możesz wpisać jeszcze raz. '
+            'Niczego też nie kasuje (to robi hasło awaryjne kasujące).',
           ),
         ),
         const SizedBox(height: 4),
-        field('alarm-panic-1', _p, t('PIN paniczny'), Icons.shield_rounded),
+        field('alarm-panic-1', _p, t('PIN przymusu'), Icons.shield_rounded),
         field(
           'alarm-panic-2',
           _q,
-          t('Powtórz PIN paniczny'),
+          t('Powtórz PIN przymusu'),
           Icons.shield_rounded,
         ),
         if (_error != null)
@@ -1119,6 +1121,7 @@ Future<String?> _askPin(
   return showDialog<String>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       title: Text(title),
       content: TextField(
         key: const Key('alarm-pin-confirm'),
@@ -1293,7 +1296,7 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                                   )
                                 : a.duress
                                 ? t(
-                                    '{name} odwołał(a) alarm PIN-em panicznym '
+                                    '{name} odwołał(a) alarm PIN-em przymusu '
                                     '— może być do tego zmuszony(-a)',
                                     {'name': name},
                                   )

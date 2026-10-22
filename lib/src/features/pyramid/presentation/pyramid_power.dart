@@ -558,7 +558,7 @@ class PyramidPower extends StatelessWidget {
     Widget? trailing,
     Widget? leading,
   }) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+    padding: const EdgeInsetsDirectional.fromSTEB(14, 10, 10, 10),
     child: Row(
       children: <Widget>[
         if (leading != null) ...<Widget>[leading, const SizedBox(width: 12)],
@@ -729,7 +729,7 @@ class PyramidPower extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Align(
-                    alignment: Alignment.centerRight,
+                    alignment: AlignmentDirectional.centerEnd,
                     child: FilledButton(
                       onPressed: () => unawaited(_decide(context, r)),
                       child: Text(t('Rozpatrz')),
@@ -854,7 +854,7 @@ class PyramidPower extends StatelessWidget {
                   ],
                 ),
                 Align(
-                  alignment: Alignment.centerRight,
+                  alignment: AlignmentDirectional.centerEnd,
                   child: TextButton.icon(
                     onPressed: () => unawaited(() async {
                       final int n = await pyr.broadcastCrisis(a.id);

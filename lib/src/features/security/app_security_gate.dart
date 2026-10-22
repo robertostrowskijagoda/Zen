@@ -804,7 +804,8 @@ class _ForgotPasswordPanel extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               t(
-                'Konto wróci tylko z kopii zapasowej klucza albo z kręgu '
+                'Konto wróci z drugiego urządzenia z tym kontem, z pliku '
+                'kopii całego konta, z kopii klucza albo z kręgu '
                 'odzyskiwania. Tego nie da się cofnąć.',
               ),
               textAlign: TextAlign.center,
@@ -1126,6 +1127,7 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         icon: Icon(
           Icons.no_encryption_outlined,
           color: ZenColors.of(dialog).warning,

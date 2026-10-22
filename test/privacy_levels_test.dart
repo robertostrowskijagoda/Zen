@@ -365,6 +365,48 @@ void main() {
       expect(picked.toSet(), hasLength(picked.length));
     });
 
+    test('weak acquaintances are left out of the default circle', () {
+      final List<String> few = <String>[
+        for (int i = 0; i < 3; i++) PeerShareCodec.normalizeAddress('200::f$i'),
+      ];
+      expect(
+        pickRecoveryHelpers(
+          mailboxes: const <String>[],
+          friends: <String>[...few, weak],
+          levelOf: levelOf,
+        ),
+        isNot(contains(weak)),
+      );
+      expect(
+        pickRecoveryHelpers(
+          mailboxes: const <String>[],
+          friends: <String>[...few, weak],
+          levelOf: levelOf,
+          includeWeak: true,
+        ).last,
+        weak,
+      );
+      // Everyone can still be picked by hand, weak ones last.
+      expect(
+        recoveryHelperCandidates(
+          friends: <String>[weak, ...few, close],
+          levelOf: levelOf,
+        ),
+        <String>[close, ...few, weak],
+      );
+      expect(
+        checkRecoveryCircle(few, minimum: 4),
+        RecoveryCircleProblem.tooFew,
+      );
+      expect(checkRecoveryCircle(<String>[...few, weak], minimum: 4), isNull);
+      expect(
+        checkRecoveryCircle(<String>[
+          for (int i = 0; i < 7; i++) '200::a$i',
+        ], minimum: 4),
+        RecoveryCircleProblem.tooMany,
+      );
+    });
+
     test('free mailbox places go to close friends first', () async {
       final MemoryRelayStateStore store = MemoryRelayStateStore();
       final List<RelayFriend> friends = <RelayFriend>[

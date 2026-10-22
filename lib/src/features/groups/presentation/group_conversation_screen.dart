@@ -348,6 +348,7 @@ class _GroupConversationScreenState
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
+        scrollable: true,
         title: Text(t('Opuścić grupę?')),
         content: Text(
           t(
@@ -945,8 +946,8 @@ class _GroupConversationScreenState
                                 : byId[reply.messageId];
                             final Widget bubble = Align(
                               alignment: isSelf
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
+                                  ? AlignmentDirectional.centerEnd
+                                  : AlignmentDirectional.centerStart,
                               child: Container(
                                 margin: const EdgeInsets.only(bottom: 6),
                                 constraints: BoxConstraints(
@@ -1230,7 +1231,12 @@ class _GroupConversationScreenState
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: <Widget>[
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(4, 4, 0, 4),
+                                padding: const EdgeInsetsDirectional.fromSTEB(
+                                  4,
+                                  4,
+                                  0,
+                                  4,
+                                ),
                                 child: IconButton(
                                   key: Key(
                                     _boardTab
@@ -1284,18 +1290,24 @@ class _GroupConversationScreenState
                                     border: InputBorder.none,
                                     enabledBorder: InputBorder.none,
                                     focusedBorder: InputBorder.none,
-                                    contentPadding: const EdgeInsets.fromLTRB(
-                                      18,
-                                      13,
-                                      8,
-                                      13,
-                                    ),
+                                    contentPadding:
+                                        const EdgeInsetsDirectional.fromSTEB(
+                                          18,
+                                          13,
+                                          8,
+                                          13,
+                                        ),
                                   ),
                                   onSubmitted: (_) => _sendMessage(),
                                 ),
                               ),
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(2, 4, 4, 4),
+                                padding: const EdgeInsetsDirectional.fromSTEB(
+                                  2,
+                                  4,
+                                  4,
+                                  4,
+                                ),
                                 child: IconButton.filled(
                                   key: const Key('group-chat-send-button'),
                                   style: IconButton.styleFrom(
@@ -1434,7 +1446,7 @@ class _RunningCallBanner extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 12, 8),
           child: Row(
             children: <Widget>[
               ZenPulsingDot(color: zen.success, dimension: 10, dotSize: 5),

@@ -30,6 +30,7 @@ Future<bool> confirmScreenShareStart(BuildContext context) async {
   final bool? go = await showDialog<bool>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
+      scrollable: true,
       key: const Key('screen-share-whole-screen-warning'),
       title: Text(t('Udostępnisz cały ekran')),
       content: Text(

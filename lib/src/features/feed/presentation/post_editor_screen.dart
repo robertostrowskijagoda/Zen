@@ -905,7 +905,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     return Container(
       key: const Key('post-recording'),
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 6, 6, 6),
       decoration: BoxDecoration(
         color: zen.danger.withValues(alpha: 0.10),
         borderRadius: context.zenRadius(18),
@@ -966,45 +966,49 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final Audience? picked = await showModalBottomSheet<Audience>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  t('Kto zobaczy ten post?'),
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    t('Kto zobaczy ten post?'),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-            for (final Audience a in Audience.values)
-              ListTile(
-                key: Key('post-audience-${a.name}'),
-                leading: ZenIconBadge(
-                  icon: kAudienceIcons[a]!,
-                  tone: a == _audience
-                      ? ZenColors.of(context).accent
-                      : ZenColors.of(context).textSecondary,
-                  size: 38,
+              for (final Audience a in Audience.values)
+                ListTile(
+                  key: Key('post-audience-${a.name}'),
+                  leading: ZenIconBadge(
+                    icon: kAudienceIcons[a]!,
+                    tone: a == _audience
+                        ? ZenColors.of(context).accent
+                        : ZenColors.of(context).textSecondary,
+                    size: 38,
+                  ),
+                  title: Text(kAudienceLabels[a]!),
+                  subtitle: Text(kAudienceHints[a]!),
+                  trailing: a == _audience
+                      ? Icon(
+                          Icons.check_circle_rounded,
+                          color: ZenColors.of(context).accent,
+                        )
+                      : null,
+                  onTap: () => Navigator.of(context).pop(a),
                 ),
-                title: Text(kAudienceLabels[a]!),
-                subtitle: Text(kAudienceHints[a]!),
-                trailing: a == _audience
-                    ? Icon(
-                        Icons.check_circle_rounded,
-                        color: ZenColors.of(context).accent,
-                      )
-                    : null,
-                onTap: () => Navigator.of(context).pop(a),
-              ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -1021,6 +1025,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final bool? discard = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(
           widget.editing ? t('Porzucić zmiany?') : t('Odrzucić post?'),
         ),
@@ -1085,9 +1090,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
             sizeBytes: m.bytes.length,
           ),
           if (onRemove != null)
-            Positioned(
+            PositionedDirectional(
               top: 0,
-              right: 0,
+              end: 0,
               child: IconButton(
                 key: removeKey,
                 tooltip: t('Usuń nagranie'),
@@ -1136,9 +1141,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         children: <Widget>[
           body,
           if (onRemove != null)
-            Positioned(
+            PositionedDirectional(
               top: 6,
-              right: 6,
+              end: 6,
               child: Material(
                 color: ZenFixed.photoBackdrop.withValues(alpha: 0.55),
                 shape: const CircleBorder(),
@@ -1431,7 +1436,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                   onPressed: () => setState(() => _preview = !_preview),
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsetsDirectional.only(end: 12),
                   child: FilledButton(
                     key: const Key('post-publish'),
                     onPressed: _canPublish ? () => unawaited(_submit()) : null,
@@ -1638,7 +1643,7 @@ class _AudiencePill extends StatelessWidget {
         customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 5, 6, 5),
+          padding: const EdgeInsetsDirectional.fromSTEB(10, 5, 6, 5),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[

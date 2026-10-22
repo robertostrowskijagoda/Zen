@@ -437,8 +437,8 @@ class _IntentChoice extends StatelessWidget {
             ),
           ),
           padding: wide
-              ? const EdgeInsets.fromLTRB(14, 12, 12, 12)
-              : const EdgeInsets.fromLTRB(10, 8, 14, 8),
+              ? const EdgeInsetsDirectional.fromSTEB(14, 12, 12, 12)
+              : const EdgeInsetsDirectional.fromSTEB(10, 8, 14, 8),
           child: Row(
             mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
             children: <Widget>[
@@ -514,7 +514,7 @@ class _MoreIntents extends StatelessWidget {
                 ZenCard(
                   key: const Key('intent-set-custom'),
                   tone: intentTone(zen, IntentKind.custom),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  padding: const EdgeInsetsDirectional.fromSTEB(16, 12, 12, 12),
                   onTap: () => Navigator.of(context).pop(IntentKind.custom),
                   child: Row(
                     children: <Widget>[
@@ -583,7 +583,7 @@ class _MoreIntents extends StatelessWidget {
             borderRadius: r,
             border: Border.all(color: zen.outline),
           ),
-          padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+          padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 14, 8),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -1032,7 +1032,7 @@ class _FriendIntentRow extends StatelessWidget {
     return InkWell(
       onTap: onOpen,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+        padding: const EdgeInsetsDirectional.fromSTEB(14, 8, 6, 8),
         child: Row(
           children: <Widget>[
             Stack(
@@ -1040,8 +1040,8 @@ class _FriendIntentRow extends StatelessWidget {
               children: <Widget>[
                 avatar?.call(address, name, 44) ??
                     ZenBlobAvatar(name: name, size: 44, showStatus: false),
-                Positioned(
-                  right: -5,
+                PositionedDirectional(
+                  end: -5,
                   bottom: -5,
                   child: Container(
                     width: 24,
@@ -1225,7 +1225,7 @@ Future<void> showIntentSheet(
                     children: <Widget>[
                       for (final IntentKind k in kinds)
                         Padding(
-                          padding: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsetsDirectional.only(end: 8),
                           child: ChoiceChip(
                             key: Key('intent-kind-${k.name}'),
                             showCheckmark: false,

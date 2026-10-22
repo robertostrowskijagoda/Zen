@@ -121,12 +121,16 @@ class HiddenContentPlaceholder extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Text(
-          byMe ? t('Pokaż mimo to') : t('Pokaż'),
-          style: TextStyle(
-            color: zen.accent,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+        Flexible(
+          child: Text(
+            byMe ? t('Pokaż mimo to') : t('Pokaż'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: zen.accent,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],

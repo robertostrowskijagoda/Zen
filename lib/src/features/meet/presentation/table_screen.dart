@@ -89,6 +89,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(
           tn(
             guests.length,
@@ -168,6 +169,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     final String? place = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Gdzie kolacja?')),
         content: TextField(
           key: const Key('table-place'),

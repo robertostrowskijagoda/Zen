@@ -101,11 +101,11 @@ const int appSecurityMasterKeyLengthBytes = 32;
 
 /// Message when the main password would be the same as the panic password.
 String get kAppPasswordEqualsPanicMessage =>
-    t('Hasło aplikacji musi różnić się od hasła panic.');
+    t('Hasło aplikacji musi różnić się od hasła awaryjnego kasującego.');
 
 /// Message when the panic password would be the same as the main password.
 String get kPanicPasswordEqualsMainMessage =>
-    t('Hasło panic musi różnić się od głównego hasła.');
+    t('Hasło awaryjne kasujące musi różnić się od hasła aplikacji.');
 
 /// The main and the panic password must never be the same: the panic one
 /// wipes everything when typed on the lock screen.

@@ -40,7 +40,7 @@ class AskPathView extends StatelessWidget {
       shape: const Border(),
       collapsedShape: const Border(),
       tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(left: 4, bottom: 6),
+      childrenPadding: const EdgeInsetsDirectional.only(start: 4, bottom: 6),
       leading: Icon(Icons.account_tree_rounded, color: zen.accent, size: 20),
       title: Text(
         t('Ścieżka odpowiedzi'),
@@ -56,14 +56,17 @@ class AskPathView extends StatelessWidget {
         for (final AskPathBranch b in path.branches)
           Padding(
             key: Key('ask-path-${question.id}-${b.friend}'),
-            padding: const EdgeInsets.only(left: 12, top: 4),
+            padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text('└ ${branchLine(b)}', style: line),
                 for (final String name in b.further)
                   Padding(
-                    padding: const EdgeInsets.only(left: 16, top: 2),
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 16,
+                      top: 2,
+                    ),
                     child: Text(
                       '└ ${t('{name} · odpowiedź', {'name': name})}',
                       style: line.copyWith(color: zen.textSecondary),
@@ -74,7 +77,7 @@ class AskPathView extends StatelessWidget {
           ),
         if (path.quiet > 0)
           Padding(
-            padding: const EdgeInsets.only(left: 12, top: 6),
+            padding: const EdgeInsetsDirectional.only(start: 12, top: 6),
             child: Text(
               tn(
                 path.quiet,

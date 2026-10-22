@@ -59,7 +59,7 @@ Future<Map<String, dynamic>> buildProfilePayload(UserProfile profile) async {
   return <String, dynamic>{
     'type': 'profile_update',
     'v': profile.updatedAtMillis,
-    'name': profile.displayName.trim(),
+    'name': profile.publicName.trim(),
     'status': shared(ProfileField.status) ? profile.customStatus.trim() : '',
     'bio': shared(ProfileField.bio) ? profile.bio.trim() : '',
     'avatar': ?avatar,

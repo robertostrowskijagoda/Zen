@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -169,7 +170,7 @@ final class GraphNotes {
 
   static GraphNotes fromJson(Object? json) {
     final GraphNotes notes = GraphNotes();
-    if (json is! Map || json['v'] != 1) {
+    if (json is! Map || !isReadableFormat(json, current: 1)) {
       return notes;
     }
     final Object? b = json['b'];
@@ -245,9 +246,10 @@ final class GraphNotesService extends ChangeNotifier {
     try {
       _unreadable = true;
       final Uint8List? raw = await disk.read(storeKey);
-      _notes = raw == null
-          ? GraphNotes()
-          : GraphNotes.fromJson(jsonDecode(utf8.decode(raw)));
+      final Object? json = raw == null ? null : jsonDecode(utf8.decode(raw));
+      // A newer build's file stays as it is (saves are skipped).
+      heldAsNewerOn(disk, storeKey, json, current: 1);
+      _notes = json == null ? GraphNotes() : GraphNotes.fromJson(json);
       _unreadable = false;
     } on Object catch (error, stack) {
       logZenError('Graf: odczyt notatek', error, stack);

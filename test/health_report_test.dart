@@ -118,6 +118,19 @@ void main() {
       expect(r.item('network'), isNotNull);
     });
 
+    test('an iPhone is told it receives only with Zen open', () {
+      const HealthInputs iPhone = HealthInputs(
+        net: HealthNetState.active,
+        peers: 5,
+        isIPhone: true,
+      );
+      final HealthItem? item = buildHealthReport(iPhone).item('background');
+      expect(item, isNotNull);
+      expect(item!.level, HealthLevel.warn);
+      expect(item.detail, contains('tylko przy otwartym Zen'));
+      expect(item.fix, HealthFix.none);
+    });
+
     test('a stopped or failed node is a problem; no neighbours a warning', () {
       expect(
         buildHealthReport(

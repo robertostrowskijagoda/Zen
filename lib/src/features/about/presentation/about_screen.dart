@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
 import 'package:zen/src/features/census/census_providers.dart';
@@ -107,6 +108,14 @@ class AboutScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             const _NetworkCountsCard(),
+            _LinkTile(
+              key: const Key('about-github'),
+              icon: Icons.code_rounded,
+              tone: zenTone(zen, 6),
+              title: t('Zen na GitHubie'),
+              subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
+              url: kZenRepositoryUrl,
+            ),
             for (final AboutSection section in AboutSection.values)
               _SectionTile(section: section),
           ],
@@ -240,7 +249,7 @@ class _SectionTile extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return ZenCard(
       key: Key('about-section-${section.name}'),
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
       onTap: () => unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -358,7 +367,7 @@ class _LinkTile extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final String? link = url;
     return ZenCard(
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
       onTap:
           onTap ??
           (link == null

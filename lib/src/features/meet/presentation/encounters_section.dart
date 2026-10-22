@@ -83,6 +83,7 @@ class EncountersSection extends StatelessWidget {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Wyczyścić „Mijani”?')),
         content: Text(
           t('Cała lista zniknie z tego telefonu. Nie da się tego cofnąć.'),
@@ -136,7 +137,7 @@ class EncountersSection extends StatelessWidget {
         shown = day;
         list.add(
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 12, 0, 4),
+            padding: const EdgeInsetsDirectional.fromSTEB(4, 12, 0, 4),
             child: Text(
               switch (day) {
                 EncounterDay.today => t('Dziś'),

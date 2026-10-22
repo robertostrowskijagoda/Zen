@@ -145,6 +145,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Podziękuj')),
         content: TextField(
           key: const Key('profile-thanks-field'),
@@ -655,7 +656,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             label: Text(t('Wiadomość')),
                           ),
                         Container(
-                          padding: const EdgeInsets.only(left: 14, right: 6),
+                          padding: const EdgeInsetsDirectional.only(
+                            start: 14,
+                            end: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: zen.surface,
                             borderRadius: context.zenRadius(999),
@@ -1009,58 +1013,62 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final Object? choice = await showModalBottomSheet<Object>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext context) => SafeArea(
-        child: Column(
-          key: const Key('gallery-item-options'),
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  t('Kto widzi to zdjęcie lub film'),
-                  style: TextStyle(
-                    color: ZenColors.of(context).textPrimary,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
+        child: SingleChildScrollView(
+          child: Column(
+            key: const Key('gallery-item-options'),
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    t('Kto widzi to zdjęcie lub film'),
+                    style: TextStyle(
+                      color: ZenColors.of(context).textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-            for (final Audience a in Audience.values)
-              ListTile(
-                key: Key('gallery-item-audience-${a.name}'),
-                leading: Icon(
-                  kAudienceIcons[a],
-                  color: a == item.audience
-                      ? ZenColors.of(context).accent
-                      : ZenColors.of(context).textSecondary,
+              for (final Audience a in Audience.values)
+                ListTile(
+                  key: Key('gallery-item-audience-${a.name}'),
+                  leading: Icon(
+                    kAudienceIcons[a],
+                    color: a == item.audience
+                        ? ZenColors.of(context).accent
+                        : ZenColors.of(context).textSecondary,
+                  ),
+                  title: Text(kGalleryAudienceLabels[a]!),
+                  subtitle: Text(kGalleryAudienceHints[a]!),
+                  trailing: a == item.audience
+                      ? Icon(
+                          Icons.check_circle_rounded,
+                          color: ZenColors.of(context).accent,
+                        )
+                      : null,
+                  onTap: () => Navigator.of(context).pop(a),
                 ),
-                title: Text(kGalleryAudienceLabels[a]!),
-                subtitle: Text(kGalleryAudienceHints[a]!),
-                trailing: a == item.audience
-                    ? Icon(
-                        Icons.check_circle_rounded,
-                        color: ZenColors.of(context).accent,
-                      )
-                    : null,
-                onTap: () => Navigator.of(context).pop(a),
+              const Divider(),
+              ListTile(
+                key: const Key('gallery-item-remove'),
+                leading: Icon(
+                  Icons.delete_outline_rounded,
+                  color: ZenColors.of(context).danger,
+                ),
+                title: Text(
+                  t('Usuń z galerii'),
+                  style: TextStyle(color: ZenColors.of(context).danger),
+                ),
+                onTap: () => Navigator.of(context).pop('remove'),
               ),
-            const Divider(),
-            ListTile(
-              key: const Key('gallery-item-remove'),
-              leading: Icon(
-                Icons.delete_outline_rounded,
-                color: ZenColors.of(context).danger,
-              ),
-              title: Text(
-                t('Usuń z galerii'),
-                style: TextStyle(color: ZenColors.of(context).danger),
-              ),
-              onTap: () => Navigator.of(context).pop('remove'),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1098,6 +1106,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final bool? yes = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Usunąć z galerii?')),
         content: Text(
           t(
@@ -1455,7 +1464,7 @@ class _ThanksTile extends StatelessWidget {
     final Color tone = zenTone(zen, 5);
     return ZenCard(
       tone: tone,
-      padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 16, 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1588,7 +1597,7 @@ class _ProfilePost extends StatelessWidget {
     return Container(
       key: Key('profile-post-${post.id}'),
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 8, 12),
       decoration: BoxDecoration(
         color: zen.surface,
         borderRadius: context.zenRadius(22),
@@ -1611,7 +1620,7 @@ class _ProfilePost extends StatelessWidget {
               ),
               if (post.audience != Audience.public)
                 Padding(
-                  padding: const EdgeInsets.only(left: 6),
+                  padding: const EdgeInsetsDirectional.only(start: 6),
                   child: Icon(
                     kAudienceIcons[post.audience],
                     size: 15,
@@ -1670,7 +1679,7 @@ class _ProfilePost extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsetsDirectional.only(end: 8),
             child: n != null
                 ? PostContent(post: post, node: n)
                 : Text(

@@ -150,7 +150,7 @@ class ZenThemeCard extends StatelessWidget {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 8, 4, 4),
+                  padding: const EdgeInsetsDirectional.fromSTEB(6, 8, 4, 4),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
@@ -180,7 +180,7 @@ class ZenThemeCard extends StatelessWidget {
                       ),
                       if (selected)
                         Padding(
-                          padding: const EdgeInsets.only(left: 4),
+                          padding: const EdgeInsetsDirectional.only(start: 4),
                           child: Icon(
                             Icons.check_circle_rounded,
                             size: 20,
@@ -257,11 +257,11 @@ class _MiniApp extends StatelessWidget {
         themed ??
         BoxDecoration(
           gradient: zen.accentGradient,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(look.radius(12)),
-            topRight: Radius.circular(look.radius(12)),
-            bottomLeft: Radius.circular(look.radius(12)),
-            bottomRight: Radius.circular(look.radius(3)),
+          borderRadius: BorderRadiusDirectional.only(
+            topStart: Radius.circular(look.radius(12)),
+            topEnd: Radius.circular(look.radius(12)),
+            bottomStart: Radius.circular(look.radius(12)),
+            bottomEnd: Radius.circular(look.radius(3)),
           ),
         );
     return ColoredBox(
@@ -351,7 +351,7 @@ class _MiniApp extends StatelessWidget {
                       ),
                       const SizedBox(height: 7),
                       Align(
-                        alignment: Alignment.centerRight,
+                        alignment: AlignmentDirectional.centerEnd,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -477,7 +477,7 @@ class _MiniHeader extends StatelessWidget {
           ZenHeaderStyle.bar || ZenHeaderStyle.neonTube => Container(
             width: 3,
             height: 13,
-            margin: const EdgeInsets.only(right: 6),
+            margin: const EdgeInsetsDirectional.only(end: 6),
             decoration: BoxDecoration(
               color: zen.accent,
               borderRadius: look.br(2),
@@ -485,17 +485,17 @@ class _MiniHeader extends StatelessWidget {
             ),
           ),
           ZenHeaderStyle.prompt => Padding(
-            padding: const EdgeInsets.only(right: 5),
+            padding: const EdgeInsetsDirectional.only(end: 5),
             child: Text('>', style: style.copyWith(color: zen.accent)),
           ),
           ZenHeaderStyle.pixel => Container(
             width: 7,
             height: 7,
-            margin: const EdgeInsets.only(right: 6),
+            margin: const EdgeInsetsDirectional.only(end: 6),
             color: zen.accent,
           ),
           ZenHeaderStyle.ornament => Padding(
-            padding: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsetsDirectional.only(end: 6),
             child: diamond(),
           ),
           _ => const SizedBox.shrink(),
@@ -550,13 +550,16 @@ class _MiniHeader extends StatelessWidget {
         },
         if (h == ZenHeaderStyle.prompt)
           Container(
-            margin: const EdgeInsets.only(left: 3),
+            margin: const EdgeInsetsDirectional.only(start: 3),
             width: 6,
             height: 12,
             color: zen.accent,
           ),
         if (h == ZenHeaderStyle.ornament)
-          Padding(padding: const EdgeInsets.only(left: 6), child: diamond()),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 6),
+            child: diamond(),
+          ),
       ],
     );
   }

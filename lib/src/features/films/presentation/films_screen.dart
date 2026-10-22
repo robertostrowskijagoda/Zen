@@ -262,6 +262,7 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
               await showDialog<bool>(
                 context: context,
                 builder: (BuildContext dialog) => AlertDialog(
+                  scrollable: true,
                   title: Text(t('Usunąć film?')),
                   actions: <Widget>[
                     TextButton(
@@ -410,21 +411,25 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
       () => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
+        isScrollControlled: true,
+        useSafeArea: true,
         shape: context.zenSheetShape(),
         builder: (BuildContext sheet) => ListenableBuilder(
           listenable: backend,
           builder: (BuildContext sheet, Widget? child) => SafeArea(
-            child: SwitchListTile(
-              key: const Key('films-fof'),
-              value: backend.friendsOfFriends,
-              title: Text(t('Filmy znajomych znajomych')),
-              subtitle: Text(
-                t(
-                  'Publiczne filmy, które polubili Twoi znajomi. Ich autorzy nie dowiedzą się, że je oglądasz.',
+            child: SingleChildScrollView(
+              child: SwitchListTile(
+                key: const Key('films-fof'),
+                value: backend.friendsOfFriends,
+                title: Text(t('Filmy znajomych znajomych')),
+                subtitle: Text(
+                  t(
+                    'Publiczne filmy, które polubili Twoi znajomi. Ich autorzy nie dowiedzą się, że je oglądasz.',
+                  ),
                 ),
+                onChanged: (bool on) =>
+                    unawaited(backend.setFriendsOfFriends(on)),
               ),
-              onChanged: (bool on) =>
-                  unawaited(backend.setFriendsOfFriends(on)),
             ),
           ),
         ),
@@ -527,7 +532,7 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
                 child: Align(
                   alignment: Alignment.topCenter,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 4, 0),
+                    padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 4, 0),
                     child: Row(
                       children: <Widget>[
                         // Wraps in long languages rather than being cut.

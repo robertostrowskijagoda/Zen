@@ -153,29 +153,37 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       context: context,
       backgroundColor: zen.surfaceRaised,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       shape: context.zenSheetShape(),
       builder: (BuildContext sheetContext) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              ListTile(
-                leading: Icon(Icons.photo_library_outlined, color: zen.accent),
-                title: Text(t('Wybierz z galerii')),
-                onTap: () =>
-                    Navigator.of(sheetContext).pop(ImageSource.gallery),
-              ),
-              ListTile(
-                leading: Icon(Icons.photo_camera_outlined, color: zen.accent),
-                title: Text(t('Zrób zdjęcie (Aparat)')),
-                onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
-              ),
-              ListTile(
-                leading: Icon(Icons.folder_open_outlined, color: zen.accent),
-                title: Text(t('Wybierz plik z urządzenia')),
-                onTap: () => Navigator.of(sheetContext).pop(null),
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                ListTile(
+                  leading: Icon(
+                    Icons.photo_library_outlined,
+                    color: zen.accent,
+                  ),
+                  title: Text(t('Wybierz z galerii')),
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(ImageSource.gallery),
+                ),
+                ListTile(
+                  leading: Icon(Icons.photo_camera_outlined, color: zen.accent),
+                  title: Text(t('Zrób zdjęcie (Aparat)')),
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(ImageSource.camera),
+                ),
+                ListTile(
+                  leading: Icon(Icons.folder_open_outlined, color: zen.accent),
+                  title: Text(t('Wybierz plik z urządzenia')),
+                  onTap: () => Navigator.of(sheetContext).pop(null),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -712,7 +720,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     title: t('Kto widzi'),
                   ),
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+                    padding: const EdgeInsetsDirectional.fromSTEB(14, 4, 8, 4),
                     decoration: BoxDecoration(
                       color: zen.surface,
                       borderRadius: context.zenRadius(20),

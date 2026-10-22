@@ -43,7 +43,7 @@ void main() {
     addTearDown(runtime.dispose);
     final ZenBootstrapper bootstrapper = ZenBootstrapper(
       runtimeBuilder: ({required RuntimeSignalBootstrapConfig config}) {
-        expect(config.waitTimeout, const Duration(seconds: 5));
+        expect(config.waitTimeout, const Duration(seconds: 30));
         return runtime;
       },
     );
@@ -53,7 +53,7 @@ void main() {
     );
 
     expect(state.runtime, same(runtime));
-    expect(state.runtimeConfig.waitTimeout, const Duration(seconds: 5));
+    expect(state.runtimeConfig.waitTimeout, const Duration(seconds: 30));
   });
 
   test('bootstrap retries a critical step once before succeeding', () async {

@@ -1704,7 +1704,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
               ),
             if (selected != null && _mode != GraphMode.route)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 8, 0),
+                padding: const EdgeInsetsDirectional.fromSTEB(16, 6, 8, 0),
                 child: Row(
                   children: <Widget>[
                     Expanded(
@@ -2001,13 +2001,13 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   Widget _modeBar(BuildContext context, List<GraphMode> modes) {
     final int active = _filters.active;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 8, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 8, 8),
       child: Row(
         children: <Widget>[
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(left: 16, right: 8),
+              padding: const EdgeInsetsDirectional.only(start: 16, end: 8),
               child: Row(
                 spacing: 8,
                 children: <Widget>[
@@ -2154,7 +2154,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           ],
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
               key: const Key('graph-explore'),
               onPressed: () => unawaited(_explore()),
@@ -2242,7 +2242,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 scene: scene,
                 look: look,
                 progress: _move,
-                labels: _labels,
+                labels: _labels..direction = Directionality.of(context),
                 me: zen.accent,
                 meText: zen.onAccent,
                 text: zen.textPrimary,
@@ -2271,8 +2271,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             child: SizedBox.fromSize(size: size, child: picture),
           ),
         ),
-        Positioned(
-          right: 8,
+        PositionedDirectional(
+          end: 8,
           bottom: 8,
           child: ListenableBuilder(
             listenable: _view,
@@ -2412,7 +2412,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   ],
                 ),
                 if (labels.isNotEmpty || f.label != null) ...<Widget>[
-                  ZenSection(t('Twoje nazwy kręgów')),
+                  ZenSection(t('Twoje nazwy grup znajomych')),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
@@ -2611,7 +2611,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       GraphMode.bridges => <Widget>[
         _LegendDot(
           color: zen.accent,
-          label: t('most — jedyne połączenie kręgów'),
+          label: t('most — jedyne połączenie grup znajomych'),
           ring: true,
         ),
         _LegendDot(color: zenTone(zen, 5), label: t('samotny krąg')),

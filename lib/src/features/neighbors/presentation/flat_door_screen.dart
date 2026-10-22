@@ -209,6 +209,7 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Nowy kod?')),
         content: Text(
           t(
@@ -607,6 +608,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Twoje imię w mieszkaniu')),
         content: SizedBox(
           width: 400,
@@ -715,6 +717,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         icon: Icon(
           Icons.person_remove_rounded,
           color: ZenColors.of(context).danger,
@@ -772,31 +775,50 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
   }
 
   Future<void> _leave(NeighborsService service) async {
+    // The last resident takes the whole flat with them.
+    final bool last = (service.profile?.members.length ?? 0) <= 1;
     final bool? ok = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(t('Odłączyć ten telefon?')),
-        content: Text(
-          t(
-            'Ten telefon przestanie być domownikiem (np. ktoś się wyprowadza '
-            'sam). Pozostali zachowają profil, sąsiadów i wiadomości, ale '
-            'dostaną nowy klucz mieszkania i nowy kod na drzwi — ten telefon '
-            'nie będzie już mógł nic podpisać ani przeczytać. Starą naklejkę '
-            'trzeba będzie wymienić. Jeśli to ostatni telefon, profil '
-            'zniknie.',
+      builder: (BuildContext context) {
+        final ZenColors zen = ZenColors.of(context);
+        return AlertDialog(
+          scrollable: true,
+          key: const Key('flat-leave-dialog'),
+          icon: Icon(Icons.logout_rounded, color: zen.danger, size: 32),
+          title: Text(t('Odłączyć ten telefon?')),
+          content: Text(
+            last
+                ? t(
+                    'To ostatni telefon tego mieszkania. Po odłączeniu '
+                    'profil mieszkania, lista sąsiadów i wiadomości od nich '
+                    'znikną. Tego nie da się cofnąć.',
+                  )
+                : t(
+                    'Ten telefon przestanie być domownikiem (np. ktoś się '
+                    'wyprowadza sam). Pozostali zachowają profil, sąsiadów '
+                    'i wiadomości, ale dostaną nowy klucz mieszkania i nowy '
+                    'kod na drzwi — ten telefon nie będzie już mógł nic '
+                    'podpisać ani przeczytać. Starą naklejkę trzeba będzie '
+                    'wymienić.',
+                  ),
           ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(t('Anuluj')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(t('Opuść')),
-          ),
-        ],
-      ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              key: const Key('flat-leave-confirm'),
+              style: FilledButton.styleFrom(
+                backgroundColor: zen.danger,
+                foregroundColor: ZenColors.foregroundFor(zen.danger),
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('Odłącz')),
+            ),
+          ],
+        );
+      },
     );
     if (ok == true) {
       await service.leaveFlat();

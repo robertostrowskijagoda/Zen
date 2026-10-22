@@ -124,14 +124,26 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
                 decoration: InputDecoration(
                   labelText: t('Pseudonim (opcjonalnie)'),
                   hintText: t('np. Kasia z pracy'),
+                  hintMaxLines: 2,
                   prefixIcon: const Icon(Icons.edit_note_rounded),
-                  helperText: t(
+                ),
+                onSubmitted: (_) => _submit(),
+              ),
+              // Under the field, not as its helper: a helper is cut after a
+              // few lines, and this one is long in some languages and at a
+              // large text size.
+              Padding(
+                padding: const EdgeInsetsDirectional.only(start: 12, top: 2),
+                child: Text(
+                  t(
                     'Widzisz go tylko Ty, pod nazwą tej osoby. '
                     'Nazwę zmienia ona sama w swoim profilu.',
                   ),
-                  helperMaxLines: 3,
+                  key: const Key('friend-nickname-help'),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: zen.textMuted),
                 ),
-                onSubmitted: (_) => _submit(),
               ),
             ],
           ),

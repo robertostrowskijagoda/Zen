@@ -289,6 +289,7 @@ class StrangerMessagesFromTile extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Cena wiadomości od osób spoza znajomych')),
         content: TextField(
           key: const Key('stranger-price-field'),

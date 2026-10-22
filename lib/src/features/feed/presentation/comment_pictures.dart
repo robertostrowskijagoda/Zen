@@ -28,6 +28,7 @@ Future<String?> confirmDeleteComment(
   final bool? sure = await showDialog<bool>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
+      scrollable: true,
       title: Text(t('Usunąć komentarz?')),
       content: Text(
         t('Komentarz i jego obrazki znikną u Ciebie i u znajomych.'),

@@ -440,20 +440,32 @@ class _PendingPicture extends StatelessWidget {
                 : Image.memory(picture.bytes, fit: BoxFit.cover),
           ),
           Align(
-            alignment: Alignment.topRight,
-            child: Material(
-              color: scheme.scrim.withValues(alpha: 0.55),
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
+            alignment: AlignmentDirectional.topEnd,
+            // A finger-sized (48 dp) area around the small round button.
+            child: SizedBox.square(
+              dimension: 48,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                excludeFromSemantics: true,
                 onTap: onRemove,
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 16,
-                    color: ZenColors.foregroundFor(scheme.scrim),
-                    semanticLabel: t('Usuń obrazek'),
+                child: Align(
+                  alignment: AlignmentDirectional.topEnd,
+                  child: Material(
+                    color: scheme.scrim.withValues(alpha: 0.55),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: onRemove,
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 16,
+                          color: ZenColors.foregroundFor(scheme.scrim),
+                          semanticLabel: t('Usuń obrazek'),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

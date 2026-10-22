@@ -71,7 +71,7 @@ class _MetLevelDialogState extends State<MetLevelDialog> {
       'Widzi też Twoją listę znajomych i statusy, może zapraszać do grup.',
     ),
     FriendLevel.close => t(
-      'Widzi wszystko, dostaje alarm, może być w Twoim kręgu zaufanych.',
+      'Widzi wszystko, dostaje alarm, może być w Twoim kręgu odzyskiwania.',
     ),
   };
 
@@ -79,6 +79,7 @@ class _MetLevelDialogState extends State<MetLevelDialog> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return AlertDialog(
+      scrollable: true,
       key: const Key('met-level-dialog'),
       title: Text(t('Poznaliśmy się osobiście?')),
       content: Column(

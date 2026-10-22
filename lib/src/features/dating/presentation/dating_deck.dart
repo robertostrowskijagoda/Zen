@@ -532,8 +532,19 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                                   ? tone.withValues(
                                       alpha: i == page ? 0.9 : 0.25,
                                     )
-                                  : Color(i == page ? 0xFFFFFFFF : 0x73FFFFFF),
+                                  : i == page
+                                  ? ZenFixed.onPhoto
+                                  : ZenFixed.onPhotoFaint,
                               borderRadius: context.zenRadius(2),
+                              // Still seen on a light photo (snow, a wall).
+                              boxShadow: onText
+                                  ? null
+                                  : const <BoxShadow>[
+                                      BoxShadow(
+                                        color: ZenFixed.photoScrimLight,
+                                        blurRadius: 3,
+                                      ),
+                                    ],
                             ),
                           ),
                         ),
@@ -564,8 +575,8 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                 ),
               ),
             if (widget.onOpen != null)
-              Positioned(
-                right: 10,
+              PositionedDirectional(
+                end: 10,
                 bottom: 10,
                 child: IconButton(
                   key: const Key('dating-card-open'),
@@ -680,8 +691,8 @@ class _DescriptionPage extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          Positioned(
-            right: -24,
+          PositionedDirectional(
+            end: -24,
             bottom: -36,
             child: Icon(
               Icons.format_quote_rounded,
@@ -881,9 +892,9 @@ class _PhotoPage extends StatelessWidget {
             ),
           ),
         ),
-        Positioned(
-          left: 18,
-          right: 64,
+        PositionedDirectional(
+          start: 18,
+          end: 64,
           bottom: 18,
           child: IgnorePointer(
             child: Column(

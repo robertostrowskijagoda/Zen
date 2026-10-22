@@ -125,14 +125,14 @@ class PyramidFeedCard extends ConsumerWidget {
                 width: 5,
                 decoration: BoxDecoration(
                   color: tone,
-                  borderRadius: BorderRadius.horizontal(
-                    left: Radius.circular(ZenLook.of(context).radius(18)),
+                  borderRadius: BorderRadiusDirectional.horizontal(
+                    start: Radius.circular(ZenLook.of(context).radius(18)),
                   ),
                 ),
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 6, 6),
+                  padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 6, 6),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
@@ -191,12 +191,14 @@ class PyramidFeedCard extends ConsumerWidget {
                               color: zen.warning,
                             ),
                             const SizedBox(width: 4),
-                            Text(
-                              t('Przypięte w sekcji'),
-                              style: TextStyle(
-                                color: zen.warning,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Text(
+                                t('Przypięte w sekcji'),
+                                style: TextStyle(
+                                  color: zen.warning,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ],
@@ -204,7 +206,7 @@ class PyramidFeedCard extends ConsumerWidget {
                       ],
                       const SizedBox(height: 10),
                       Padding(
-                        padding: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsetsDirectional.only(end: 8),
                         child: Text(
                           post.text,
                           style: TextStyle(
@@ -216,7 +218,10 @@ class PyramidFeedCard extends ConsumerWidget {
                       ),
                       if (reach != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 8, right: 8),
+                          padding: const EdgeInsetsDirectional.only(
+                            top: 8,
+                            end: 8,
+                          ),
                           child: Text(
                             t(
                               'Dotarło: {got} z {count} · przeczytało: {read}',
@@ -237,7 +242,12 @@ class PyramidFeedCard extends ConsumerWidget {
                       if (member && post.comments.isNotEmpty)
                         Container(
                           width: double.infinity,
-                          margin: const EdgeInsets.fromLTRB(0, 10, 8, 0),
+                          margin: const EdgeInsetsDirectional.fromSTEB(
+                            0,
+                            10,
+                            8,
+                            0,
+                          ),
                           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                           decoration: BoxDecoration(
                             color: zen.surfaceMuted,
@@ -357,26 +367,33 @@ class PyramidFeedCard extends ConsumerWidget {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: <Widget>[
                           if (member && post.canComment)
-                            TextButton.icon(
-                              key: Key('feed-pyr-comment-${post.id}'),
-                              onPressed: () => unawaited(
-                                showPyramidCommentSheet(
-                                  context,
-                                  pyr: pyr,
-                                  postId: post.id,
-                                  node: ref.read(ledgerNodeProvider),
+                            Flexible(
+                              child: TextButton.icon(
+                                key: Key('feed-pyr-comment-${post.id}'),
+                                onPressed: () => unawaited(
+                                  showPyramidCommentSheet(
+                                    context,
+                                    pyr: pyr,
+                                    postId: post.id,
+                                    node: ref.read(ledgerNodeProvider),
+                                  ),
                                 ),
-                              ),
-                              icon: const Icon(
-                                Icons.mode_comment_outlined,
-                                size: 18,
-                              ),
-                              label: Text(
-                                post.commentCount == 0
-                                    ? t('Komentuj')
-                                    : t('Komentuj ({count})', <String, Object?>{
-                                        'count': post.commentCount,
-                                      }),
+                                icon: const Icon(
+                                  Icons.mode_comment_outlined,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  post.commentCount == 0
+                                      ? t('Komentuj')
+                                      : t(
+                                          'Komentuj ({count})',
+                                          <String, Object?>{
+                                            'count': post.commentCount,
+                                          },
+                                        ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ),
                           if (leadsSection)
@@ -446,7 +463,7 @@ class PyramidReferendumCard extends StatelessWidget {
     return ZenCard(
       key: Key('feed-ref-${referendum.id}'),
       tone: tone,
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
       onTap: () => unawaited(_open(context)),
       child: Row(
         children: <Widget>[
@@ -716,6 +733,7 @@ Future<void> showPyramidCommentSheet(
   context: context,
   isScrollControlled: true,
   showDragHandle: true,
+  useSafeArea: true,
   builder: (BuildContext sheet) => Padding(
     padding: EdgeInsets.fromLTRB(
       16,
@@ -724,23 +742,25 @@ Future<void> showPyramidCommentSheet(
       16 + MediaQuery.of(sheet).viewInsets.bottom,
     ),
     child: SafeArea(
-      child: CommentComposer(
-        fieldKey: Key('pyr-comment-field-$postId'),
-        sendKey: Key('pyr-comment-send-$postId'),
-        onSend: (String text, List<CommentPicture> pictures) async {
-          final NavigatorState nav = Navigator.of(sheet);
-          final String? failed = await sendPyramidComment(
-            pyr,
-            postId,
-            text,
-            pictures: pictures,
-            node: node,
-          );
-          if (failed == null) {
-            nav.pop();
-          }
-          return failed;
-        },
+      child: SingleChildScrollView(
+        child: CommentComposer(
+          fieldKey: Key('pyr-comment-field-$postId'),
+          sendKey: Key('pyr-comment-send-$postId'),
+          onSend: (String text, List<CommentPicture> pictures) async {
+            final NavigatorState nav = Navigator.of(sheet);
+            final String? failed = await sendPyramidComment(
+              pyr,
+              postId,
+              text,
+              pictures: pictures,
+              node: node,
+            );
+            if (failed == null) {
+              nav.pop();
+            }
+            return failed;
+          },
+        ),
       ),
     ),
   ),

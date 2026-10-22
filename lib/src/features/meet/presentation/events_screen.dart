@@ -388,7 +388,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
               ),
             if (_kind != EventKind.table)
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: AlignmentDirectional.centerStart,
                 child: TextButton.icon(
                   key: const Key('event-open-table'),
                   onPressed: () => unawaited(TableScreen.open(context)),
@@ -829,7 +829,7 @@ class EventScreen extends ConsumerWidget {
                       mine?.status != GuestStatus.going) ...<Widget>[
                     const SizedBox(height: 10),
                     Align(
-                      alignment: Alignment.centerLeft,
+                      alignment: AlignmentDirectional.centerStart,
                       child: ZenPill(
                         text: t('Brak miejsc.'),
                         tone: zen.warning,
@@ -841,7 +841,7 @@ class EventScreen extends ConsumerWidget {
                       mine?.status == GuestStatus.going) ...<Widget>[
                     const SizedBox(height: 6),
                     Align(
-                      alignment: Alignment.centerLeft,
+                      alignment: AlignmentDirectional.centerStart,
                       child: TextButton.icon(
                         key: const Key('event-plus1'),
                         onPressed: () =>
@@ -1148,6 +1148,7 @@ class EventScreen extends ConsumerWidget {
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(text),
         content: notes.isEmpty ? null : Text(notes.join('\n\n')),
         actions: <Widget>[
@@ -1291,7 +1292,7 @@ class _GuestRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 10, 6, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1434,6 +1435,7 @@ class _AfterEvent extends ConsumerWidget {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Karta wdzięczności')),
         content: TextField(
           key: const Key('event-thanks-field'),
@@ -1525,6 +1527,7 @@ class _AfterEvent extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Napiwek dla gospodarza')),
         content: TextField(
           key: const Key('event-tip-amount'),

@@ -4,6 +4,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_join_help.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -40,7 +41,7 @@ class WalletScreen extends ConsumerWidget {
           body: SelectionArea(
             child: member
                 ? PyramidWallet(pyr: pyr, s: s, me: me)
-                : _EmptyWallet(zen: zen),
+                : _EmptyWallet(zen: zen, state: s),
           ),
         );
       },
@@ -49,9 +50,12 @@ class WalletScreen extends ConsumerWidget {
 }
 
 class _EmptyWallet extends StatelessWidget {
-  const _EmptyWallet({required this.zen});
+  const _EmptyWallet({required this.zen, required this.state});
 
   final ZenColors zen;
+
+  /// The pyramid as known here (who of the friends is in it).
+  final PyramidState? state;
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +64,7 @@ class _EmptyWallet extends StatelessWidget {
       children: <Widget>[
         Center(
           child: ZenIconBadge(
-            icon: Icons.attach_money_rounded,
+            icon: Icons.account_balance_wallet_outlined,
             tone: zen.accent,
             size: 64,
           ),
@@ -78,9 +82,9 @@ class _EmptyWallet extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           t(
-            'Punkty to waluta piramidy, do której należysz — każda piramida '
-            'ma własne. Gdy dołączysz do piramidy (zakładka „Piramida”), '
-            'zobaczysz tu saldo, historię i przelewy.',
+            'Punkty to waluta piramidy Zen. Gdy dołączysz do piramidy '
+            '(zakładka „Piramida”), zobaczysz tu saldo, historię i '
+            'przelewy.',
           ),
           textAlign: TextAlign.center,
           style: TextStyle(
@@ -90,6 +94,7 @@ class _EmptyWallet extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
+        PyramidJoinHelp(state: state),
         ZenInfo(
           icon: Icons.bolt_rounded,
           title: t('Po co punkty'),

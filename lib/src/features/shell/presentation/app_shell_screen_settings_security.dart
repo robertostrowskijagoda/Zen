@@ -48,14 +48,14 @@ class _SettingsSecuritySection extends ConsumerWidget {
                 _SecurityStatusRow(
                   icon: Icons.password_rounded,
                   tone: zen.tone(ZenTone.privacy),
-                  title: t('Hasło lokalne'),
+                  title: t('Hasło aplikacji'),
                   subtitle: t('Odblokowuje aplikację i Twoje dane'),
                   isSet: security.hasPassword,
                 ),
                 _SecurityStatusRow(
                   icon: Icons.emergency_outlined,
                   tone: zen.danger,
-                  title: t('Hasło panic'),
+                  title: t('Hasło awaryjne kasujące'),
                   subtitle: t('Wpisane na blokadzie kasuje wszystko'),
                   isSet: security.hasPanicPassword,
                 ),
@@ -80,12 +80,16 @@ class _SettingsSecuritySection extends ConsumerWidget {
                 ),
                 OutlinedButton.icon(
                   key: const Key('settings-panic-password-button'),
-                  onPressed: () => _configurePanicPassword(context, security),
+                  onPressed: () => _configurePanicPassword(
+                    context,
+                    security,
+                    secured: accountIsSecured(ref.read),
+                  ),
                   icon: const Icon(Icons.emergency_outlined, size: 18),
                   label: Text(
                     security.hasPanicPassword
-                        ? t('Hasło panic')
-                        : t('Ustaw hasło panic'),
+                        ? t('Hasło awaryjne kasujące')
+                        : t('Ustaw hasło awaryjne kasujące'),
                   ),
                 ),
               ],
@@ -94,10 +98,11 @@ class _SettingsSecuritySection extends ConsumerWidget {
             ZenInfo(
               icon: Icons.emergency_outlined,
               tone: zen.danger,
-              title: t('Hasło panic'),
+              title: t('Hasło awaryjne kasujące'),
               text: t(
-                'Hasło panic wpisane na ekranie blokady bezpowrotnie kasuje '
-                'wszystkie dane i otwiera świeżą aplikację.',
+                'Hasło awaryjne kasujące wpisane na ekranie blokady bezpowrotnie '
+                'kasuje wszystkie dane i otwiera świeżą aplikację. To coś '
+                'innego niż PIN przymusu alarmu, który niczego nie kasuje.',
               ),
             ),
             ZenSection(t('Automatyczna blokada'), top: 16),
@@ -163,6 +168,27 @@ class _SettingsSecuritySection extends ConsumerWidget {
                             ),
                           ),
                       ],
+                    ),
+                  ],
+                  // Without a lock for a while in the background the phone
+                  // only receives anyway (android_background_runtime.dart).
+                  if (defaultTargetPlatform == TargetPlatform.android &&
+                      (settings.lockMode != AppLockMode.background ||
+                          settings.backgroundLockDelaySeconds >
+                              300)) ...<Widget>[
+                    const SizedBox(height: 12),
+                    Text(
+                      t(
+                        'Po 5 minutach w tle Zen tylko odbiera — tak '
+                        'oszczędza baterię, także bez blokady.',
+                      ),
+                      key: const Key('settings-lock-battery-note'),
+                      softWrap: true,
+                      style: TextStyle(
+                        color: zen.textSecondary,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ],
@@ -277,8 +303,8 @@ class _SettingsSecuritySection extends ConsumerWidget {
     final String? password = await _showPasswordDialog(
       context,
       title: replacing
-          ? t('Zmień hasło szyfrowania')
-          : t('Ustaw hasło szyfrowania'),
+          ? t('Zmień hasło aplikacji')
+          : t('Ustaw hasło aplikacji'),
       actionLabel: replacing ? t('Zapisz hasło') : t('Ustaw hasło'),
     );
     if (password == null || !context.mounted) {
@@ -289,22 +315,44 @@ class _SettingsSecuritySection extends ConsumerWidget {
 
   Future<void> _configurePanicPassword(
     BuildContext context,
-    AppSecurityService security,
-  ) async {
+    AppSecurityService security, {
+    required bool secured,
+  }) async {
     final bool? replace = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
         final ZenColors zen = ZenColors.of(dialogContext);
         return AlertDialog(
+          scrollable: true,
           key: const Key('settings-panic-intro-dialog'),
           icon: Icon(Icons.emergency_outlined, color: zen.danger, size: 32),
-          title: Text(t('Hasło panic')),
-          content: Text(
-            t(
-              'To drugie, tajne hasło. Wpisane na ekranie blokady natychmiast '
-              'i bezpowrotnie kasuje wszystkie dane aplikacji, a potem '
-              'otwiera ją jak po świeżej instalacji — bez żadnego komunikatu.',
-            ),
+          title: Text(t('Hasło awaryjne kasujące')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                t(
+                  'To drugie, tajne hasło. Wpisane na ekranie blokady '
+                  'natychmiast i bezpowrotnie kasuje wszystkie dane '
+                  'aplikacji, a potem otwiera ją jak po świeżej instalacji — '
+                  'bez żadnego komunikatu.',
+                ),
+              ),
+              if (!secured) ...<Widget>[
+                const SizedBox(height: 12),
+                ZenInfo(
+                  key: const Key('settings-panic-no-backup'),
+                  icon: Icons.report_gmailerrorred_rounded,
+                  tone: zen.danger,
+                  text: t(
+                    'To konto nie ma kopii klucza ani kręgu odzyskiwania. Po '
+                    'skasowaniu nie dałoby się go odzyskać. Najpierw zrób '
+                    'kopię: Ustawienia → Konto i odzyskiwanie.',
+                  ),
+                ),
+              ],
+            ],
           ),
           actionsOverflowButtonSpacing: 4,
           actions: <Widget>[
@@ -313,7 +361,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                 key: const Key('settings-panic-clear-button'),
                 onPressed: () => Navigator.of(dialogContext).pop(false),
                 child: Text(
-                  t('Usuń hasło panic'),
+                  t('Usuń hasło awaryjne kasujące'),
                   style: TextStyle(color: zen.danger),
                 ),
               ),
@@ -339,8 +387,14 @@ class _SettingsSecuritySection extends ConsumerWidget {
       context,
       security,
       reason: replace
-          ? t('Potwierdź hasło aplikacji, zanim ustawisz hasło panic.')
-          : t('Potwierdź hasło aplikacji, zanim usuniesz hasło panic.'),
+          ? t(
+              'Potwierdź hasło aplikacji, zanim ustawisz hasło awaryjne '
+              'kasujące.',
+            )
+          : t(
+              'Potwierdź hasło aplikacji, zanim usuniesz hasło awaryjne '
+              'kasujące.',
+            ),
     )) {
       return;
     }
@@ -353,8 +407,8 @@ class _SettingsSecuritySection extends ConsumerWidget {
     }
     final String? password = await _showPasswordDialog(
       context,
-      title: t('Ustaw hasło panic'),
-      actionLabel: t('Zapisz hasło panic'),
+      title: t('Ustaw hasło awaryjne kasujące'),
+      actionLabel: t('Zapisz hasło awaryjne'),
       fieldKey: const Key('settings-panic-password-field'),
       confirmKey: const Key('settings-panic-password-confirm-field'),
       submitKey: const Key('settings-panic-password-submit-button'),
