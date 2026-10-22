@@ -85,14 +85,18 @@ const (
 	pqOpeningSize      = pqChallengeIDSize + pqCiphertextSize
 	pqMaxFrameOverhead = pqDataHeaderSize + pqOpeningSize + chacha20poly1305.Overhead
 	// Bytes a media packet grows by once its session is acknowledged.
-	pqMediaOverhead        = pqDataHeaderSize + chacha20poly1305.Overhead
-	pqSessionInfo          = "zen.pq.session.v2"
-	pqChallengeInfo        = "zen.pq.challenge.v1"
-	pqKeysInfo             = "zen.pq.keys.v2"
-	pqSessionLifetime      = time.Hour
-	pqSessionMaxFrames     = 1 << 24
-	pqReceiveSessionsKept  = 4
-	pqReceiveSessionIdle   = 2*pqSessionLifetime + 10*time.Minute
+	pqMediaOverhead       = pqDataHeaderSize + chacha20poly1305.Overhead
+	pqSessionInfo         = "zen.pq.session.v2"
+	pqChallengeInfo       = "zen.pq.challenge.v1"
+	pqKeysInfo            = "zen.pq.keys.v2"
+	pqSessionLifetime     = time.Hour
+	pqSessionMaxFrames    = 1 << 24
+	pqReceiveSessionsKept = 4
+	pqReceiveSessionIdle  = 2*pqSessionLifetime + 10*time.Minute
+	// A receive session opens nothing once this old: a sender starts a new
+	// one every pqSessionLifetime, so only a session someone keeps alive
+	// on purpose ever gets here.
+	pqReceiveSessionMaxAge = 2 * pqSessionLifetime
 	pqNewSessionsPerMinute = 16
 	pqReplayWindow         = 1024
 	// Media of several calls with one peer shares a session; a wider
@@ -174,7 +178,11 @@ type pqSendSession struct {
 }
 
 type pqReceiveSession struct {
-	id          pqSessionID
+	id pqSessionID
+	// The fingerprint of the peer's device key the session was made with
+	// (its challenge was sealed to that key): what its frames are labelled
+	// with, whatever key the address has by now.
+	fingerprint [sha256.Size]byte
 	signal      cipher.AEAD
 	media       cipher.AEAD
 	created     time.Time
@@ -725,9 +733,16 @@ func (e *pqEndpoint) writeJobs(to net.IP, jobs []pqSealJob) {
 // false for a control message, something that does not open, or anything
 // not sealed (refused).
 func (e *pqEndpoint) receive(source net.IP, wire []byte) ([]byte, bool) {
+	plain, _, ok := e.receiveKeyed(source, wire)
+	return plain, ok
+}
+
+// receiveKeyed is receive, with the fingerprint (hex) of the device key
+// the session that carried the text was made with.
+func (e *pqEndpoint) receiveKeyed(source net.IP, wire []byte) ([]byte, string, bool) {
 	source16 := source.To16()
 	if source16 == nil || len(wire) < len(pqMagic)+1 || string(wire[:len(pqMagic)]) != pqMagic {
-		return nil, false
+		return nil, "", false
 	}
 	body := wire[len(pqMagic)+1:]
 	switch wire[len(pqMagic)] {
@@ -738,9 +753,13 @@ func (e *pqEndpoint) receive(source net.IP, wire []byte) ([]byte, bool) {
 	case pqKindUnknown:
 		e.receiveUnknown(source16, body)
 	case pqKindData:
-		return e.open(source16, wire, pqKindData)
+		plain, fingerprint, ok := e.open(source16, wire, pqKindData)
+		if !ok {
+			return nil, "", false
+		}
+		return plain, hex.EncodeToString(fingerprint[:]), true
 	}
-	return nil, false
+	return nil, "", false
 }
 
 // receiveMedia opens a media frame (a relay packet) from source.
@@ -750,7 +769,8 @@ func (e *pqEndpoint) receiveMedia(source net.IP, wire []byte) ([]byte, bool) {
 		wire[len(pqMagic)] != pqKindMedia {
 		return nil, false
 	}
-	return e.open(source16, wire, pqKindMedia)
+	plain, _, ok := e.open(source16, wire, pqKindMedia)
+	return plain, ok
 }
 
 // acceptRecordLocked takes a verified record of source unless its address
@@ -792,11 +812,14 @@ func (e *pqEndpoint) makeRoomForPinLocked() {
 	delete(e.pins, oldestKey)
 }
 
-// resetPeerKeyLocked forgets everything made with peer's device key.
+// resetPeerKeyLocked forgets everything made with peer's device key: the
+// sessions both ways too, so nothing opened with the old key (a session an
+// impostor started before the real key was pinned) is taken any more.
 func (e *pqEndpoint) resetPeerKeyLocked(peer *pqPeer) {
 	peer.publicKey = nil
 	peer.fingerprint = [sha256.Size]byte{}
 	peer.send = nil
+	peer.receive = nil
 	peer.issued = nil
 	peer.challenge = nil
 }
@@ -930,9 +953,12 @@ func (e *pqEndpoint) unknownReplyLocked(peer *pqPeer, id pqSessionID, now time.T
 	return pqUnknownFrame(id, peer.publicKey == nil, nil, nil)
 }
 
-func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, bool) {
+// open opens a data or media frame: its plaintext and the fingerprint of
+// the device key its session was made with.
+func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, [sha256.Size]byte, bool) {
+	var none [sha256.Size]byte
 	if len(wire) < pqDataHeaderSize+chacha20poly1305.Overhead {
-		return nil, false
+		return nil, none, false
 	}
 	offset := len(pqMagic) + 1
 	flags := wire[offset]
@@ -945,7 +971,7 @@ func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, bool) 
 	var opening []byte
 	if flags&pqFlagCiphertext != 0 {
 		if len(wire) < offset+pqOpeningSize+chacha20poly1305.Overhead {
-			return nil, false
+			return nil, none, false
 		}
 		opening = wire[offset : offset+pqOpeningSize]
 		offset += pqOpeningSize
@@ -960,15 +986,17 @@ func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, bool) 
 	if session == nil {
 		// A new session: opened, checked and kept under the lock (rare).
 		plain, reply, ok := e.openNewLocked(peer, id, opening, kind, counter, sealed, aad, now)
+		fingerprint := peer.fingerprint
 		e.mu.Unlock()
 		if reply != nil {
 			_ = e.write(source, reply)
 		}
-		return plain, ok
+		return plain, fingerprint, ok
 	}
-	if !session.windowFor(kind).fresh(counter) {
+	// Too old: kept (so its opening cannot start it again) but refused.
+	if now.Sub(session.created) >= pqReceiveSessionMaxAge || !session.windowFor(kind).fresh(counter) {
 		e.mu.Unlock()
-		return nil, false
+		return nil, none, false
 	}
 	aead := session.aeadFor(kind)
 	e.mu.Unlock()
@@ -977,13 +1005,13 @@ func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, bool) 
 	// never holds up call media.
 	plain, err := aead.Open(nil, pqNonce(counter), sealed, aad)
 	if err != nil {
-		return nil, false
+		return nil, none, false
 	}
 	e.mu.Lock()
 	window := session.windowFor(kind)
 	if !window.fresh(counter) {
 		e.mu.Unlock()
-		return nil, false
+		return nil, none, false
 	}
 	window.mark(counter)
 	session.lastUsed = now
@@ -995,7 +1023,7 @@ func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, bool) 
 	if ack {
 		_ = e.write(source, pqControlFrame(pqKindAck, id))
 	}
-	return plain, true
+	return plain, session.fingerprint, true
 }
 
 // openNewLocked opens the first frame of a session this node does not know
@@ -1023,7 +1051,7 @@ func (e *pqEndpoint) openNewLocked(peer *pqPeer, id pqSessionID, opening []byte,
 	if err != nil {
 		return nil, nil, false
 	}
-	session := &pqReceiveSession{id: id, signal: signal, media: media, created: now}
+	session := &pqReceiveSession{id: id, fingerprint: peer.fingerprint, signal: signal, media: media, created: now}
 	plain, err := session.aeadFor(kind).Open(nil, pqNonce(counter), sealed, aad)
 	if err != nil {
 		return nil, nil, false

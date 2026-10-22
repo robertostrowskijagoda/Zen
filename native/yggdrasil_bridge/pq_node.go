@@ -44,40 +44,29 @@ func (node *bridgeNode) sealAndSendSignal(destination net.IP, wire string) error
 	return endpoint.send(destination, []byte(wire))
 }
 
-// openSignal is the signal text a reassembled signal from source carries:
-// opened by the session layer and decompressed. Anything not sealed is
-// refused.
-func (node *bridgeNode) openSignal(source net.IP, wire string) (string, bool) {
+// openSignal is the signal text a reassembled signal from source carries,
+// opened by the session layer and decompressed, and the fingerprint (hex)
+// of the device key the session that carried it was made with ("" when
+// unsealed): the app binds it to the sender's hybrid identity. Anything not
+// sealed is refused.
+func (node *bridgeNode) openSignal(source net.IP, wire string) (string, string, bool) {
 	if node.pqPlain {
-		return wire, true
+		return wire, "", true
 	}
 	if !isPQWire(wire) {
 		debugf("[ZEN-GO] pq: refusing an unsealed signal from %s\n", source)
-		return "", false
+		return "", "", false
 	}
 	endpoint, err := node.pqEndpointOf()
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
-	plain, ok := endpoint.receive(source, []byte(wire))
+	plain, key, ok := endpoint.receiveKeyed(source, []byte(wire))
 	if !ok {
-		return "", false
+		return "", "", false
 	}
-	return inflateSignalText(source.String(), string(plain))
-}
-
-// signalKeyOf is the fingerprint of the device key the signals of source
-// are sealed and authenticated with ("" unsealed or unknown): the app
-// binds it to the sender's hybrid identity.
-func (node *bridgeNode) signalKeyOf(source net.IP) string {
-	if node.pqPlain {
-		return ""
-	}
-	endpoint, err := node.pqEndpointOf()
-	if err != nil {
-		return ""
-	}
-	return endpoint.peerFingerprint(source)
+	text, ok := inflateSignalText(source.String(), string(plain))
+	return text, key, ok
 }
 
 // sealRelayFrame seals a relay frame (call media) for destination
