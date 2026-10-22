@@ -8,7 +8,7 @@ location service.
 
 Where the full texts are:
 
-| What | In the source code | In the app ("O aplikacji → Licencje") | Next to the desktop builds |
+| What | In the source code | In the app ("About → Licenses and thanks → Licenses") | Next to the desktop builds |
 |---|---|---|---|
 | Dart and Flutter packages, the Flutter engine | each package's `LICENSE` (pub cache) | yes, collected by Flutter | — |
 | Go modules of the network bridge | `assets/licenses/go/`, `native/yggdrasil_bridge/LICENSES-GO.txt` (`tool/go_licenses.dart`) | yes | `LICENSES-GO.txt` |
@@ -80,7 +80,7 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
   No recorded or third-party samples.
 - **Logo, wordmark and icons** (`assets/branding`, the Android, iOS, macOS,
   Windows and Linux icon files) and **screenshots** (`docs/img`): made for
-  Zen. GPL-3.0-only like the code; NOTICE section 3 keeps the name "Zen" and
+  Zen. GPL-3.0-only like the code; NOTICE section 4 keeps the name "Zen" and
   the logo out of the licence as marks.
 
 ## Network services
@@ -90,8 +90,9 @@ not part of Zen and their terms of use apply:
 
 | Service | What for |
 |---|---|
-| KLIPY (api.klipy.com) | GIF search in the chat (users can enter their own API key) — KLIPY API terms |
+| KLIPY (api.klipy.com) | GIF search in the chat, a proprietary service (can be turned off in Settings → GIFs; users can enter their own API key) — KLIPY API terms |
 | Public Yggdrasil peers (publicpeers.neilalexander.dev and the peers listed there) | joining the Yggdrasil network |
 | Quad9, Cloudflare, Google Public DNS (DNS-over-TLS) | name resolution only when the system resolver does not work |
-| GitHub (api.github.com, github.com) | checking for and downloading updates |
+| GitHub (api.github.com, github.com) | checking for and downloading updates (not in the store variant, which repositories such as F-Droid build) |
 | OpenStreetMap (openstreetmap.org) | a shared location opens there in the browser; no map data is shown in the app |
+| buycoffee.to | the voluntary donation link opens there in the browser; nothing is sent from the app |

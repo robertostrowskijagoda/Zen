@@ -4,6 +4,9 @@ Thank you for wanting to help. Bug reports, translations and code are all
 welcome. Security problems: please do not open a public issue, see
 [SECURITY.md](SECURITY.md).
 
+Questions, ideas or want to talk a change over before you start? Join
+[Zen on Discord](https://discord.gg/g4vHvpKV37).
+
 ## Before you send a pull request
 
 - One change per pull request, with a short description of what it changes
@@ -60,6 +63,12 @@ other material meant to be included in Zen), you agree that:
    agrees, or it is under a licence that allows this). Third-party code is
    marked as such, with its licence, and is subject to its own licence
    rather than to point 2.
+
+This grant is a condition only for having a contribution merged into the
+official repository. It does not change the licence under which anyone
+receives, uses, modifies or redistributes Zen: that stays GPL-3.0-only with
+the additional terms in NOTICE, and every version published as source code
+stays available under it.
 
 You confirm this by ticking the box in the pull request template, or, for
 contributions sent another way, by writing that you agree to the

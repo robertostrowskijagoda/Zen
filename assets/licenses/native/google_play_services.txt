@@ -1,6 +1,0 @@
-Google Play services - Location (com.google.android.gms:play-services-location)
-Used on Android by the geolocator plugin (sharing a location).
-Copyright Google LLC. This library is not free software: it is distributed
-by Google under the Android Software Development Kit License
-(https://developer.android.com/studio/terms) and is not covered by Zen's
-licence. Its source code is not available.
