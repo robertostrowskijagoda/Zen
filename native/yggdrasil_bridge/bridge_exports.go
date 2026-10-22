@@ -196,6 +196,10 @@ func YggAddPeer(handle C.int, peerURI *C.char) *C.char {
 		if err != nil {
 			return responseError(err)
 		}
+		if node.setBridgeAside(uri) {
+			// A computer on battery: dialled once it is plugged in.
+			return responseOK(normalizeNodeState(int32(handle), node))
+		}
 		if err := node.core.AddPeer(parsed, ""); err != nil {
 			return responseError(err)
 		}
@@ -214,6 +218,10 @@ func YggRemovePeer(handle C.int, peerURI *C.char) *C.char {
 		parsed, err := url.Parse(uri)
 		if err != nil {
 			return responseError(err)
+		}
+		if node.forgetBridgeAside(uri) {
+			// Set aside on battery, never dialled.
+			return responseOK(normalizeNodeState(int32(handle), node))
 		}
 		if err := node.core.RemovePeer(parsed, ""); err != nil {
 			return responseError(err)

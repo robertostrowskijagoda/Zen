@@ -62,3 +62,51 @@ func TestComputerOnBatteryIsNoBridgeAndDialsAFew(t *testing.T) {
 		t.Fatalf("plugged in: all %d peers again, got %d", len(pool), len(got))
 	}
 }
+
+func TestComputerOnBatteryKeepsOneFriendsBridge(t *testing.T) {
+	pool := testPool(8)
+	node := testNode(t, pool)
+	node.power = newDesktopPowerSaver(false, pool)
+	bridges := []string{
+		"tls://[200::b1]:443",
+		"tls://[200::b2]:443",
+		"tls://[200::b3]:443",
+	}
+	node.configMu.Lock()
+	node.config.Peers = append(node.config.Peers, bridges...)
+	node.configMu.Unlock()
+
+	node.setDesktopOnBattery(true)
+	if got := node.dialledBridges(); len(got) != desktopBatteryBridgeCount || got[0] != bridges[0] {
+		t.Fatalf("on battery: the first bridge only, got %v", got)
+	}
+	// A bridge chosen meanwhile waits too.
+	if !node.setBridgeAside("tls://[200::b4]:443") {
+		t.Fatal("a new bridge on battery is set aside")
+	}
+	// Dropped by the app meanwhile: forgotten, not dialled later.
+	if !node.forgetBridgeAside(bridges[2]) {
+		t.Fatal("a set-aside bridge is forgotten")
+	}
+
+	node.setDesktopOnBattery(false)
+	got := node.dialledBridges()
+	want := []string{bridges[0], bridges[1], "tls://[200::b4]:443"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("plugged in: %v, want %v", got, want)
+	}
+	if node.setBridgeAside("tls://[200::b5]:443") {
+		t.Fatal("plugged in: nothing is set aside")
+	}
+}
+
+func TestSplitBridges(t *testing.T) {
+	kept, aside := splitBridges([]string{"a", "b", "c"}, 1)
+	if strings.Join(kept, ",") != "a" || strings.Join(aside, ",") != "b,c" {
+		t.Fatalf("got %v / %v", kept, aside)
+	}
+	kept, aside = splitBridges([]string{"a"}, 1)
+	if len(kept) != 1 || aside != nil {
+		t.Fatalf("got %v / %v", kept, aside)
+	}
+}

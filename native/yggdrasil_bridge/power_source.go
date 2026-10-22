@@ -16,6 +16,9 @@ import (
 const (
 	desktopBatteryPeerCount   = 4
 	desktopPowerCheckInterval = 2 * time.Minute
+	// Friends' bridges a computer on battery keeps dialled (the rest wait
+	// until it is plugged in again).
+	desktopBatteryBridgeCount = 1
 )
 
 // desktopPowerSaver remembers whether the computer runs on battery and the
@@ -24,7 +27,10 @@ type desktopPowerSaver struct {
 	mu        sync.Mutex
 	onBattery bool
 	// The public peers to dial again once plugged in.
-	full     []string
+	full []string
+	// Friends' bridges set aside while on battery, dialled again once
+	// plugged in.
+	bridges  []string
 	stop     chan struct{}
 	stopOnce sync.Once
 }
