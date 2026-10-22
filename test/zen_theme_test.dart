@@ -402,6 +402,36 @@ void main() {
       expect(ZenMotion.clockRunning, isFalse);
     });
 
+    testWidgets('perpetual motion stops in a hidden tab (tickers off)', (
+      WidgetTester tester,
+    ) async {
+      final bool previous = ZenMotion.enabled;
+      ZenMotion.enabled = true;
+      addTearDown(() => ZenMotion.enabled = previous);
+      Widget app({required bool shown}) => MaterialApp(
+        home: Scaffold(
+          body: TickerMode(
+            enabled: shown,
+            child: const ZenAnimatedDots(size: 4),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(app(shown: false));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse);
+
+      await tester.pumpWidget(app(shown: true));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isTrue);
+
+      await tester.pumpWidget(app(shown: false));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
     testWidgets('the neon lamp flickers once, then on a new count only', (
       WidgetTester tester,
     ) async {
