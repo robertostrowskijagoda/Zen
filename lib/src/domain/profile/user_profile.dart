@@ -48,16 +48,28 @@ final class UserProfile {
   }
 
   final String? _displayName;
+
+  /// The name shown on this device: the chosen one, else "Ja".
   String get displayName => _displayName ?? t('Ja');
+
+  /// The name others get (invitations, requests, group messages): the
+  /// chosen one, else '' — never the placeholder "Ja" (the receiver then
+  /// shows its own label for the code).
+  String get publicName => _displayName ?? '';
+
+  /// Whether the person chose a name (asked on the first start).
+  bool get hasChosenName => _displayName != null;
   final String avatarPreset;
   final String? avatarPath;
 
   /// The wide photo behind the profile header.
   final String? coverPath;
   final String? _customStatus;
-  String get customStatus => _customStatus ?? t('Dostępny w sieci Yggdrasil');
+
+  /// Empty until the person writes one (no jargon in their name's place).
+  String get customStatus => _customStatus ?? '';
   final String? _bio;
-  String get bio => _bio ?? t('Użytkownik bezpiecznej sieci Zen.');
+  String get bio => _bio ?? '';
   final int updatedAtMillis;
 
   /// Who sees each profile field: field name → visibility name (see

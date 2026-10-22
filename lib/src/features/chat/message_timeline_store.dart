@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 
 final NotifierProvider<MessageTimelineRevisionController, int>
@@ -201,9 +202,14 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
   /// index cannot be read (or the store is locked): nothing may then be
   /// written.
   Future<_Thread> _open(String key) async {
-    final _ThreadIndex? index = _ThreadIndex.decode(
-      await disk.read(_indexKey(key)),
-    );
+    final _ThreadIndex? index;
+    try {
+      index = _ThreadIndex.decode(await disk.read(_indexKey(key)));
+    } on NewerFormatException {
+      // A newer build's conversation: kept as it is (never written).
+      holdNewerOn(disk, _indexKey(key));
+      rethrow;
+    }
     final _Thread? cached = _cache[key];
     if (index == null) {
       if (cached != null && cached.gen == null) {
@@ -238,6 +244,9 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
         return _Segment(id, const <ChatMessage>[]);
       }
       return _Segment(id, _decodeMessages(bytes));
+    } on NewerFormatException {
+      holdNewerOn(disk, _segmentKey(key, id));
+      return _Segment.unreadable(id, countHint);
     } on Object {
       return _Segment.unreadable(id, countHint);
     }
@@ -681,6 +690,13 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
     final BinaryReader reader = BinaryReader(bytes);
     final int marker = reader.readUint8();
     final int version = reader.readUint8();
+    if (marker == _versionMarker && version > _currentVersion) {
+      throw NewerFormatException(
+        'messages',
+        found: version,
+        supported: _currentVersion,
+      );
+    }
     if (marker != _versionMarker || version != _currentVersion) {
       throw FormatException('Unsupported messages version $version.');
     }
@@ -861,6 +877,13 @@ final class _ThreadIndex {
         throw const FormatException('Not a conversation index.');
       }
       final int version = reader.readUint8();
+      if (version > _version) {
+        throw NewerFormatException(
+          'conversation index',
+          found: version,
+          supported: _version,
+        );
+      }
       if (version != _version) {
         throw FormatException('Unsupported conversation index $version.');
       }

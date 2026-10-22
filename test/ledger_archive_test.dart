@@ -124,7 +124,7 @@ void main() {
     );
     expect(utf8.decode(disk.files[segment]!), isNot(contains('dev_cert')));
     expect(
-      utf8.decode(disk.files[LedgerArchive.certificatesKey]!),
+      utf8.decode(disk.files[LedgerArchive.certificatesKeyOf(author.account)]!),
       contains(setup.certificate.signature),
     );
 

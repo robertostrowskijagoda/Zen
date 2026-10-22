@@ -96,10 +96,22 @@ final class _Source implements AccountArchiveSource {
           <String, Object>{'s': 'own/$account', 'w': 'dev', 'n': 1},
           <String, Object>{'s': 'private/$account', 'w': 'dev', 'n': 1},
         ],
+        'certs': <String>[
+          LedgerArchive.certificatesKeyOf(
+            account,
+          ).substring(LedgerArchive.certificatesPrefix.length),
+        ],
         'blobs': <String, Object>{
-          'chunks': <String>['h1'],
-          'manifests': <Object>[],
+          'lists': <String>['0'],
         },
+      }),
+    );
+    await disk.write(
+      LedgerArchive.blobListKeyOf('0'),
+      _json(<String, Object>{
+        'v': 1,
+        'm': <Object>[],
+        'c': <String>['h1'],
       }),
     );
     await disk.write(accountLogKey('feed/$account', 'dev', 0), _json(<int>[1]));
@@ -109,7 +121,10 @@ final class _Source implements AccountArchiveSource {
       _json(<int>[3]),
     );
     await disk.write(DiskBlobChunkBackend.keyOf('h1'), _bytes(4000, 5));
-    await disk.write(LedgerArchive.certificatesKey, _json(<Object>[]));
+    await disk.write(
+      LedgerArchive.certificatesKeyOf(account),
+      _json(<String, Object>{'v': 1, 'a': account, 'c': <Object>[]}),
+    );
   }
 
   @override
@@ -345,7 +360,8 @@ void main() {
             ...kAccountRawKeys[AccountScope.meet]!,
             'films/state',
             LedgerArchive.indexKey,
-            LedgerArchive.certificatesKey,
+            LedgerArchive.certificatesKeyOf('acc-1'),
+            LedgerArchive.blobListKeyOf('0'),
             accountLogKey('feed/acc-1', 'dev', 0),
             accountLogKey('own/acc-1', 'dev', 0),
             accountLogKey('private/acc-1', 'dev', 0),
@@ -504,6 +520,23 @@ void main() {
           'x',
         )).error,
         AccountBackupError.format,
+      );
+    });
+
+    test('a copy from a newer Zen says so instead of "damaged"', () async {
+      final Uint8List file = await _write(build, 'dobre hasło 1');
+      // `ZENACCT2`: a newer layout.
+      final Uint8List newer = Uint8List.fromList(file)..[7] = 0x32;
+      expect(
+        (await _read(newer, 'dobre hasło 1')).error,
+        AccountBackupError.newer,
+      );
+      // A password cost this build does not know (only a newer one picks
+      // it): never tried, reported as newer.
+      final Uint8List costlier = Uint8List.fromList(file)..[12] = 99;
+      expect(
+        (await _read(costlier, 'dobre hasło 1')).error,
+        AccountBackupError.newer,
       );
     });
 

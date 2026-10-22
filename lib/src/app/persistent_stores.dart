@@ -87,7 +87,11 @@ ZenPersistentStores buildZenPersistentStoresForDirectory(
     protector: dataProtector,
   );
   // Leftovers of writes that were killed halfway; best effort.
-  unawaited(binaryStore.sweepOrphanTemporaries().catchError((Object _) => 0));
+  unawaited(
+    binaryStore
+        .sweepOrphanTemporaries(every: const Duration(days: 1))
+        .catchError((Object _) => 0),
+  );
   return ZenPersistentStores(
     signalQueueStore: FileSignalQueueStore(store: binaryStore),
     socialSnapshotStore: FileSocialSnapshotStore(store: binaryStore),

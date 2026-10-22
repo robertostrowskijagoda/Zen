@@ -31,9 +31,15 @@ final class FileSignalQueueStore implements SignalQueueStore {
       return const <QueuedSignal>[];
     }
 
+    if (_isNewer(bytes)) {
+      // A newer build's queue: kept as it is (never written over) and read
+      // as empty until this build is updated.
+      store.holdNewer(storageKey);
+      return const <QueuedSignal>[];
+    }
     if (!_isCurrent(bytes)) {
-      // Another layout: the queue only holds signals in transit, so it is
-      // read as empty (and written over with the next save).
+      // Damaged: the queue only holds signals in transit, so it is read as
+      // empty (and written over with the next save).
       return const <QueuedSignal>[];
     }
     final BinaryReader reader = BinaryReader(bytes);
@@ -66,6 +72,21 @@ final class FileSignalQueueStore implements SignalQueueStore {
     }
     await store.write(storageKey, writer.toBytes());
   }
+
+  bool _hasMagic(Uint8List bytes) {
+    if (bytes.length <= _magicPrefix.length) {
+      return false;
+    }
+    for (int index = 0; index < _magicPrefix.length; index += 1) {
+      if (bytes[index] != _magicPrefix[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _isNewer(Uint8List bytes) =>
+      _hasMagic(bytes) && bytes[_magicPrefix.length] > _currentVersion;
 
   bool _isCurrent(Uint8List bytes) {
     if (bytes.length <= _magicPrefix.length) {

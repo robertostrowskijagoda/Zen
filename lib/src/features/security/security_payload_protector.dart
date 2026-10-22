@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
@@ -79,6 +80,15 @@ final class EncryptedBinaryPayloadProtector
 
   @override
   Future<Uint8List> unsealFor(String storageKey, Uint8List payload) async {
+    if (_isNewerSeal(payload)) {
+      // `ZENENC3`…: sealed by a newer build. Not "nothing stored", which
+      // would be saved over.
+      throw NewerFormatException(
+        'sealed payload',
+        found: payload[_boundMagic.length - 1] - 0x30,
+        supported: 2,
+      );
+    }
     if (!_startsWith(payload, _boundMagic)) {
       throw const UnsupportedStoredPayloadException(
         'Only payloads sealed for their storage key open.',
@@ -98,6 +108,20 @@ final class EncryptedBinaryPayloadProtector
   Future<Uint8List?> fileNameKey() async {
     final Uint8List? key = await _security.currentEncryptionKey();
     return key == null ? null : securitySubkey(key, 'store.names');
+  }
+
+  /// `ZENENC` followed by a version digit above 2.
+  static bool _isNewerSeal(Uint8List payload) {
+    final int last = _boundMagic.length - 1;
+    if (payload.length <= last) {
+      return false;
+    }
+    for (int index = 0; index < last; index++) {
+      if (payload[index] != _boundMagic[index]) {
+        return false;
+      }
+    }
+    return payload[last] > _boundMagic[last] && payload[last] <= 0x39;
   }
 
   static bool _startsWith(Uint8List payload, List<int> magic) {

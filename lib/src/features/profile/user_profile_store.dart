@@ -37,17 +37,28 @@ final class FileUserProfileStore implements UserProfileStore {
       if (bytes == null || bytes.isEmpty) {
         return null;
       }
-      final Map<String, dynamic> map =
-          jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-      return UserProfile.fromJson(map);
+      final Object? json = jsonDecode(utf8.decode(bytes));
+      if (store.heldAsNewer(storageKey, json, current: kFirstFormatVersion) ||
+          json is! Map<String, dynamic>) {
+        return null;
+      }
+      final UserProfile profile = UserProfile.fromJson(json);
+      _carried = unknownFields(json, profile.toJson());
+      return profile;
     } catch (_) {
       return null;
     }
   }
 
+  /// Fields of the file this build does not know (a newer build's),
+  /// written back as read.
+  Map<String, Object?> _carried = const <String, Object?>{};
+
   @override
   Future<void> save(UserProfile profile) async {
-    final String jsonStr = jsonEncode(withFormatVersion(profile.toJson()));
+    final String jsonStr = jsonEncode(
+      withCarriedFields(withFormatVersion(profile.toJson()), _carried),
+    );
     await store.write(storageKey, Uint8List.fromList(utf8.encode(jsonStr)));
   }
 }

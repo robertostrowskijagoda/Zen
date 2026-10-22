@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 
 /// Entries in one segment of the record log.
 const int kPyrLogSegmentEntries = 256;
@@ -56,7 +57,14 @@ final class PyramidRecordLog {
   /// Every entry in order, or `null` when there is no log yet. Throws when
   /// a part cannot be read.
   Future<List<Object?>?> readAll() async {
-    final _LogIndex? index = _LogIndex.decode(await disk.read(indexKey));
+    final _LogIndex? index;
+    try {
+      index = _LogIndex.decode(await disk.read(indexKey));
+    } on NewerFormatException {
+      // A newer build's log: kept as it is (every write fails on it too).
+      holdNewerOn(disk, indexKey);
+      rethrow;
+    }
     if (index == null) {
       _entries = 0;
       return null;
@@ -266,6 +274,13 @@ final class _LogIndex {
       return null;
     }
     final Object? json = jsonDecode(utf8.decode(raw));
+    if (jsonFormatAge(json, current: 1) == FormatAge.newer) {
+      throw NewerFormatException(
+        'pyramid record index',
+        found: (json as Map)['v'],
+        supported: 1,
+      );
+    }
     if (json is! Map || json['v'] != 1) {
       throw const FormatException('Unknown pyramid record index.');
     }

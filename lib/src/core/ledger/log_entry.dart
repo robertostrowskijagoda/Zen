@@ -14,6 +14,18 @@ const int kLedgerFormatVersion = 1;
 /// entries only name blobs by hash.
 const int kMaxEntryBytes = 64 * 1024;
 
+/// Kind of a checkpoint entry. Its writer says: this log may be held, and
+/// handed on, from here on. Every build (from 1.12.0) takes a log that
+/// starts at a checkpoint instead of its first entry
+/// (`LedgerStore.ingest`, `LedgerStore.adoptCheckpoint`), so holders can
+/// later drop what came before (`LedgerStore.pruneBefore`) and logs stop
+/// growing for ever. The body carries nothing that must be understood
+/// (readers of a space skip a kind they do not know).
+const String kLedgerCheckpointKind = 'checkpoint';
+
+/// Whether [entry] is its writer's checkpoint ([kLedgerCheckpointKind]).
+bool isLedgerCheckpoint(LogEntry entry) => entry.kind == kLedgerCheckpointKind;
+
 const int kMaxSpaceLength = 200;
 const int kMaxKindLength = 40;
 const int kMaxBlobsPerEntry = 32;

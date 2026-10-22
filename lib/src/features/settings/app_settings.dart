@@ -338,6 +338,7 @@ final class AppSettings {
     this.wifiDirect = false,
     this.bluetoothLinks = false,
     this.multipeerLinks = false,
+    this.seenTips = const <String>{},
   });
 
   static const int defaultInboxLimitMb = 100;
@@ -460,6 +461,10 @@ final class AppSettings {
   /// Connectivity between nearby Apple devices. Off by default.
   final bool multipeerLinks;
 
+  /// One-time cards and reminders already shown or dismissed, by id (see
+  /// `ZenTips`): a card shows until its id is here.
+  final Set<String> seenTips;
+
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
 
@@ -478,8 +483,10 @@ final class AppSettings {
   bool get inboxUnlimited => inboxLimitMb <= 0;
 
   /// How long the signal transport waits for the next signal in one go
-  /// (a technical constant, not a setting).
-  Duration get signalWaitTimeout => const Duration(seconds: 5);
+  /// (a technical constant, not a setting). Signals end the wait as they
+  /// come and stopping the node ends it at once, so a long wait only means
+  /// fewer pointless wake-ups.
+  Duration get signalWaitTimeout => const Duration(seconds: 30);
 
   String get inboxLimitLabel => inboxUnlimited
       ? t('Bez limitu')
@@ -513,6 +520,7 @@ final class AppSettings {
     bool? wifiDirect,
     bool? bluetoothLinks,
     bool? multipeerLinks,
+    Set<String>? seenTips,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -548,6 +556,7 @@ final class AppSettings {
       wifiDirect: wifiDirect ?? this.wifiDirect,
       bluetoothLinks: bluetoothLinks ?? this.bluetoothLinks,
       multipeerLinks: multipeerLinks ?? this.multipeerLinks,
+      seenTips: seenTips ?? this.seenTips,
     );
   }
 
@@ -581,6 +590,7 @@ final class AppSettings {
     'wifiDirect': wifiDirect,
     'bluetoothLinks': bluetoothLinks,
     'multipeerLinks': multipeerLinks,
+    if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -627,6 +637,10 @@ final class AppSettings {
       wifiDirect: pick<bool>('wifiDirect'),
       bluetoothLinks: pick<bool>('bluetoothLinks'),
       multipeerLinks: pick<bool>('multipeerLinks'),
+      seenTips: switch (json['seenTips']) {
+        final List<dynamic> ids => ids.whereType<String>().toSet(),
+        _ => null,
+      },
     );
   }
 

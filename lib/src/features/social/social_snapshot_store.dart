@@ -5,6 +5,7 @@ import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -30,6 +31,26 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
   static const int _versionMarker = 255;
   static const int _currentVersion = 8;
 
+  /// The oldest layout this build reads (8: the one of 1.12.0).
+  static const int _oldestVersion = 8;
+
+  /// The keys of the JSON document at the end that this build writes.
+  static const List<String> _knownJsonKeys = <String>[
+    'rejectedInviteIds',
+    'nicknames',
+    'peerProfiles',
+    'profileSentVersion',
+    'callAcceptToken',
+    'disappear',
+    'inboxText',
+    'peerVersions',
+    'groups',
+  ];
+
+  /// Keys of the JSON document a newer build added: written back as read,
+  /// so going back to an older build does not erase them.
+  Map<String, Object?> _carried = const <String, Object?>{};
+
   final FileBinaryStore store;
   final String storageKey;
 
@@ -41,6 +62,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     }
     try {
       return _read(bytes);
+    } on NewerFormatException {
+      // Not damaged: a newer build wrote it. Kept exactly as it is (the
+      // store refuses to write over it) until this build is updated.
+      store.holdNewer(storageKey);
+      rethrow;
     } on Object catch (error) {
       // Kept aside before anything can save over it: the friend list must
       // never be lost to a file this build cannot read.
@@ -50,17 +76,39 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     }
   }
 
-  /// The snapshot as [save] writes it; a [FormatException] for another
-  /// version.
+  /// The snapshot as [save] writes it; a [NewerFormatException] for a
+  /// newer version, a [FormatException] for anything else unreadable.
+  ///
+  /// Fields added later go into the JSON document at the end (no new
+  /// version needed; keys this build does not know are carried along by
+  /// [save]). A change of the binary layout raises [_currentVersion] and
+  /// keeps a branch here for every version down to [_oldestVersion].
   SocialHubState _read(Uint8List bytes) {
     final BinaryReader reader = BinaryReader(bytes);
     final int marker = reader.readUint8();
     final int version = reader.readUint8();
-    if (marker != _versionMarker || version != _currentVersion) {
+    if (marker == _versionMarker && version > _currentVersion) {
+      throw NewerFormatException(
+        storageKey,
+        found: version,
+        supported: _currentVersion,
+      );
+    }
+    if (marker != _versionMarker ||
+        formatAgeOf(
+              version,
+              current: _currentVersion,
+              oldest: _oldestVersion,
+            ) !=
+            FormatAge.readable) {
       throw FormatException('Unsupported social snapshot version $version.');
     }
     final LifecycleSnapshot lifecycle = LifecycleSnapshot(
-      visibility: AppVisibilityState.values[reader.readUint8()],
+      visibility: enumAt(
+        AppVisibilityState.values,
+        reader.readUint8(),
+        AppVisibilityState.background,
+      ),
       generation: reader.readUint32(),
       capturedAtMillis: reader.readInt64(),
     );
@@ -76,7 +124,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         blockNote: reader.readNullableString(),
         inboxLimitMb: reader.readUint32(),
         autoCleanupDays: reader.readUint32(),
-        status: FriendRelationshipStatus.values[reader.readUint8()],
+        status: enumAt(
+          FriendRelationshipStatus.values,
+          reader.readUint8(),
+          FriendRelationshipStatus.none,
+        ),
         isOnline: reader.readBool(),
         lastPresenceAtMillis: reader.readInt64(),
         lastMessagePreview: reader.readString(),
@@ -95,7 +147,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       final String id = reader.readString();
       final String peerAddress = reader.readString();
       final String displayName = reader.readString();
-      final CallInviteKind kind = CallInviteKind.values[reader.readUint8()];
+      final CallInviteKind kind = enumAt(
+        CallInviteKind.values,
+        reader.readUint8(),
+        CallInviteKind.audio,
+      );
       activeCall = CallSession(
         id: id,
         peerAddress: peerAddress,
@@ -117,8 +173,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     RuntimeRouteIntent? pendingLaunchIntent;
     if (reader.readBool()) {
       final String intentId = reader.readString();
-      final RuntimeRouteTarget intentTarget =
-          RuntimeRouteTarget.values[reader.readUint8()];
+      final RuntimeRouteTarget intentTarget = enumAt(
+        RuntimeRouteTarget.values,
+        reader.readUint8(),
+        RuntimeRouteTarget.inbox,
+      );
       final String? intentPeerAddress = reader.readNullableString();
       final String? intentTitle = reader.readNullableString();
       pendingLaunchIntent = RuntimeRouteIntent(
@@ -222,6 +281,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     // Newer fields as one JSON document: adding one never needs another
     // layout change.
     final Object? decoded = _tryDecodeJson(reader.readString());
+    _carried = decoded is Map
+        ? unknownFields(decoded, <String, Object?>{
+            for (final String key in _knownJsonKeys) key: null,
+          })
+        : const <String, Object?>{};
     if (decoded is Map) {
       final Object? peers = decoded['peerProfiles'];
       if (peers is List) {
@@ -482,6 +546,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     }
     writer.writeString(
       jsonEncode(<String, dynamic>{
+        ..._carried,
         'rejectedInviteIds': state.rejectedInviteIds,
         'nicknames': <String, String>{
           for (final FriendProfile friend in state.friends.values)
@@ -534,7 +599,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       entries.add(
         InboxEntry(
           id: reader.readString(),
-          type: InboxEntryType.values[reader.readUint8()],
+          type: enumAt(
+            InboxEntryType.values,
+            reader.readUint8(),
+            InboxEntryType.message,
+          ),
           title: reader.readString(),
           body: reader.readString(),
           createdAtMillis: reader.readInt64(),

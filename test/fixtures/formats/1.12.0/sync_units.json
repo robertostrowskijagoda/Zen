@@ -1,0 +1,14 @@
+{
+  "format": "sync_units",
+  "written": "1.12.0",
+  "body": {
+    "d": "settings",
+    "u": {
+      "v\u001ftheme": {
+        "c": 1,
+        "w": "dev-a",
+        "v": "dark"
+      }
+    }
+  }
+}

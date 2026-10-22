@@ -304,4 +304,63 @@ void main() {
       expect(receiver.offers.single.digits, digits);
     },
   );
+
+  test('another linking version is answered, and both sides say "update '
+      'Zen on both devices"', () async {
+    final _Wire old = await wire('200::1');
+    final _Wire fresh = await wire('200::2');
+    final AccountLinkReceiver receiver = AccountLinkReceiver(transport: fresh)
+      ..start();
+    addTearDown(receiver.dispose);
+
+    // A newer build greets this one.
+    await old.send(
+      remoteAddress: fresh.address,
+      payload: <String, dynamic>{
+        'type': kLinkHelloType,
+        'v': kLinkProtocolVersion + 1,
+        'app': '9.0.0',
+        'c': b64(randomBytes(32)),
+      },
+    );
+    await _settle();
+    expect(receiver.versionMismatch, '9.0.0');
+    expect(fresh.sentSignals.single.payload['type'], kLinkVersionType);
+    expect(receiver.peers, isEmpty);
+
+    // The sender of this build hears the same from a newer receiver.
+    final _Wire newer = await wire('200::3');
+    final StreamSubscription<SignalTransportFrame> answer = newer.frames.listen(
+      (SignalTransportFrame f) {
+        if (f.payload['type'] == kLinkHelloType) {
+          unawaited(
+            newer.send(
+              remoteAddress: f.from,
+              payload: <String, dynamic>{
+                'type': kLinkVersionType,
+                'v': <int>[kLinkProtocolVersion + 1],
+                'app': '9.0.0',
+              },
+            ),
+          );
+        }
+      },
+    );
+    addTearDown(answer.cancel);
+    final AccountLinkSender sender = AccountLinkSender(
+      transport: old,
+      target: newer.address,
+    );
+    addTearDown(sender.dispose);
+    await expectLater(
+      sender.start(),
+      throwsA(
+        isA<AccountLinkVersionException>().having(
+          (AccountLinkVersionException e) => e.otherApp,
+          'otherApp',
+          '9.0.0',
+        ),
+      ),
+    );
+  });
 }

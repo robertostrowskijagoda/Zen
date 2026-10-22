@@ -1548,8 +1548,16 @@ final class PyramidService extends ChangeNotifier {
     if (k == null) {
       throw StateError(t('Brak klucza konta na tym urządzeniu.'));
     }
+    if (state?.rulesTooNew != null) {
+      throw StateError(pyramidUpdateNeededText);
+    }
     return k;
   }
+
+  /// The key this person signs with; null without one, and while the
+  /// pyramid follows rules this build does not know
+  /// ([PyramidState.rulesTooNew]): it then signs nothing.
+  LedgerKeyPair? get _signer => state?.rulesTooNew == null ? _identity : null;
 
   // ---- records in and out ----
 
@@ -2305,7 +2313,7 @@ final class PyramidService extends ChangeNotifier {
       return;
     }
     final PyrProposal? p = proposals.remove(id);
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     if (p == null || me == null) {
       return;
     }
@@ -2379,7 +2387,7 @@ final class PyramidService extends ChangeNotifier {
     String alsoTo = '',
     bool manual = true,
   }) async {
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     if (me == null) {
       return;
     }
@@ -2424,7 +2432,7 @@ final class PyramidService extends ChangeNotifier {
   /// Signs a fresh copy of something this person already agreed to,
   /// publishes it when enough, and sends the signature back.
   Future<void> _cosign(PyramidRecord r, int need, String from) async {
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     if (me == null) {
       return;
     }
@@ -2494,7 +2502,7 @@ final class PyramidService extends ChangeNotifier {
   /// person cannot ask in the cell, or a vote is on there.
   Future<bool> requestElection(String cell) async {
     final PyramidState? s = state;
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     final _CardScope? scope = s == null ? null : _rosterScopeOf(s, cell);
     if (s == null ||
         me == null ||
@@ -2576,7 +2584,7 @@ final class PyramidService extends ChangeNotifier {
   /// this person already voted (or chose) in it, or cannot vote.
   Future<bool> voteInCell(String electionId, String choice) async {
     final PyramidState? s = state;
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     final PyrElection? e = s?.elections[electionId];
     if (s == null ||
         me == null ||
@@ -3089,7 +3097,7 @@ final class PyramidService extends ChangeNotifier {
   }
 
   Future<void> leave() async {
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     if (me == null || !isMember) {
       return;
     }
@@ -3170,7 +3178,7 @@ final class PyramidService extends ChangeNotifier {
     String toHead, {
     bool branch = false,
   }) async {
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     if (me == null) {
       return null;
     }
@@ -3734,7 +3742,7 @@ final class PyramidService extends ChangeNotifier {
     String? hash,
   }) async {
     final PyramidState? s = state;
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     final String payer = me?.id ?? '';
     // Not while someone is inside the app's process (a debugger, hooks):
     // a modified memory could sign a payment nobody asked for.
@@ -3815,7 +3823,7 @@ final class PyramidService extends ChangeNotifier {
     bool ok, {
     String? next,
   }) async {
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     final PyramidState? s = state;
     if (me == null || s == null) {
       return null;
@@ -4195,7 +4203,7 @@ final class PyramidService extends ChangeNotifier {
     if (n is! String || n.isEmpty || n.length > 64) {
       return;
     }
-    final LedgerKeyPair? me = _identity;
+    final LedgerKeyPair? me = _signer;
     final String? py = current;
     final PyramidState? s = state;
     final String own = _n(host.ownAddress());

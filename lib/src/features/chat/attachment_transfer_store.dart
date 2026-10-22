@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -534,7 +535,11 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     final String messageId = reader.readString();
     final String text = reader.readString();
     final int sentAtMillis = reader.readInt64();
-    final ChatMessageType type = ChatMessageType.values[reader.readUint8()];
+    final ChatMessageType type = enumAt(
+      ChatMessageType.values,
+      reader.readUint8(),
+      ChatMessageType.file,
+    );
     final String? fileName = reader.readNullableString();
     final String? mimeType = reader.readNullableString();
     final int? attachmentSizeBytes = reader.readNullableUint32();
@@ -571,7 +576,11 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     final String messageId = reader.readString();
     final String text = reader.readString();
     final int sentAtMillis = reader.readInt64();
-    final ChatMessageType type = ChatMessageType.values[reader.readUint8()];
+    final ChatMessageType type = enumAt(
+      ChatMessageType.values,
+      reader.readUint8(),
+      ChatMessageType.file,
+    );
     final Uint8List? attachmentBytes = reader.readNullableBytes();
     final String? attachmentPath = reader.readNullableString();
     final String? fileName = reader.readNullableString();

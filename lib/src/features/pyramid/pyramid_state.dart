@@ -794,6 +794,13 @@ final class PyramidState {
   final Map<String, String> rejected = <String, String>{};
   final Set<String> applied = <String>{};
 
+  /// The rules version (`rv`) of the first record whose rules this build
+  /// does not know ([kPyramidRulesVersion]); `null` while it knows them
+  /// all. From that record on nothing is applied: the pyramid is shown as
+  /// it stood before, and this build signs nothing more in it, instead of
+  /// working out a state other phones would not agree with.
+  int? rulesTooNew;
+
   /// Delegations revoked in the first pass of [fold] → the acts their
   /// revocation listed. A revocation works from its own time on: what the
   /// delegate did before it stays, but an act dated before it and
@@ -1403,6 +1410,14 @@ final class PyramidState {
   /// Applies one record of the fold at [at] (its own time, or when it was
   /// seen late): first what happened by time until then.
   void _applyOne(PyramidRecord r, int at) {
+    final Object? rv = r.body['rv'];
+    if (rv is int && rv > kPyramidRulesVersion) {
+      rulesTooNew ??= rv;
+    }
+    if (rulesTooNew != null) {
+      rejected[r.id] = 'nowsze zasady piramidy';
+      return;
+    }
     _clock = at;
     _timedUpTo(at);
     _lastRecord = r;
@@ -1535,6 +1550,10 @@ final class PyramidState {
   /// Things that happen by time: elections end, emissions and new rules
   /// take effect.
   void _timedUpTo(int upTo) {
+    if (rulesTooNew != null) {
+      // Stopped at rules this build does not know: time moves nothing.
+      return;
+    }
     final List<PyrElection> due =
         elections.values
             .where((PyrElection e) => !e.closed && e.deadline <= upTo)
