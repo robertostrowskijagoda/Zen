@@ -40,11 +40,14 @@
 - **Outbox:** every reliable message is written to disk before the first attempt and retried on a battery-friendly schedule for up to 14 days, also after a restart; mailbox copies after 4 seconds; large payloads split across mailboxes; new posts and comments reach offline friends through their mailboxes. On a locked Android phone a sealed copy of the queue keeps sending.
 - **Delivery icons** under every message (sending, waiting on your phone, waiting with the recipient's trusted friends, sent, delivered, read, failed) with details and **Retry**; groups show *Delivered d of n*.
 - **GIF search switch** (Settings → Messages and calls → GIFs): off, Zen sends nothing to KLIPY and hides the GIF button.
+- **GIFs always play:** event, food, flat, avatar and cover pictures keep a GIF animated (made smaller when needed, never flattened to one frame); on iPhone, **Paste image** in the text menu takes a keyboard GIF in chats, comments and posts.
+- **Call recording on every system:** iPhone, iPad and Mac (`.m4a`, the call and the microphone through flutter_webrtc's audio hooks) and Linux (`.wav`, only Zen's own sound and the microphone through PulseAudio / PipeWire) join Android and Windows.
 
 ### Feed and videos
 - A new **Videos** section: a vertical full-screen player, recording and trimming, compression to about 720p and 20 MB on the device, an order worked out on the phone, block-by-block download from friends and mailboxes, views only for the author, videos from friends of friends (opt-in).
 - **Cameras on computers:** Windows (camera_windows, Media Foundation compression and covers), macOS (own capture and export) and Linux (GStreamer, with OpenH264 and vo-aacenc built into Zen). QR codes can be scanned with a computer's camera too.
 - Feed filters **All · Friends · Close friends · Pyramid · Country**, always shown.
+- **Pictures in comments:** up to 4 photos or GIFs in a comment under posts, videos and pyramid posts, from the camera, gallery, files, GIF search, keyboard or drag and drop; they sync to your other devices like post photos. Your own comment can now be deleted, with its pictures.
 
 ### Pyramid and wallet
 - **Private transfers:** orders go sealed to the treasurers only; a transfer counts when a majority of them sign it; signed statements, a dispute button and a court complaint for a wrong balance. A **daily transfer limit** (5 to 200, 30 by default).
@@ -66,6 +69,7 @@
 
 ### Neighbours
 - A knock rings every household phone, also on a locked Android phone; *Leave* changes the household key; *What a knocker sees*.
+- **Move the flat to this device:** when the phone that runs the flat is lost or replaced, another device of the account takes it over with a new door key; housemates and neighbours follow, the old door is refused from then on, and Zen offers a new sticker. Offered also right after cutting off a lost device.
 - A **one-time housemate code** (10 minutes, confirmed on the phone that showed it), a **24-hour code** for inviting people nearby, messages signed with **your name in the flat**, and removing a housemate of a two-person flat only with their consent or after 7 days.
 
 ### Dating
@@ -76,6 +80,7 @@
 - The Android background service works **without the master key**: a separate background key and small kits let it send the alarm, show you nearby, take knocks and send queued messages while Zen is locked.
 
 ### Look, navigation and settings
+- **Portrait only** on phones and tablets; on computers the window stays a portrait column too (maximizing makes it a tall column, the floating call window is portrait as well).
 - **27 themes in five groups** (Classic, Wild, Muted, Cool, Elegant), every one in a light and a dark version, each with its own shapes, borders, surfaces, buttons, backgrounds, transitions and motion; colours with fixed meanings; contrast checked everywhere. The default stays **Classic**; *Retro* is now *Player*.
 - A **rail** with every section one tap away (no *More*); lock and rail toggle in the top bar; Invite and About at the top of Settings; a **Close friends** filter in chats.
 - A new **About** with its own pages and **network census**: about how many people use Zen (an anonymous estimate) and the exact number in the pyramid.

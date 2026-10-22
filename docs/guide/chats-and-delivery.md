@@ -135,6 +135,11 @@ When you share your screen, notifications are shown without content and a
 red bar reminds you that everything is visible. When a call is recorded,
 everyone hears a signal.
 
+**Recording** works on every system and only takes the call and your
+microphone, never other apps: Android writes `.mp4` (with the other side's
+video in a one-to-one video call), iPhone, iPad and Mac `.m4a`, Windows and
+Linux `.wav`. On Linux it needs PulseAudio or PipeWire.
+
 ## Privacy
 
 - Nobody but the two (or the group) can read a message: not the mesh, not
@@ -165,8 +170,9 @@ everyone hears a signal.
 - A group file sent as blocks arrives only while the sender or another
   member who has it is online.
 - Only text messages can be edited; a Board post may have one photo.
-- Comments take no pictures. Events, food sharing and neighbours take
-  small still pictures only: a GIF there keeps its first frame.
+- A comment takes up to 4 pictures or GIFs. Events, food sharing and
+  neighbours take small pictures: a GIF there is made smaller (and may lose
+  some frames) but keeps playing.
 - Dropping files shows no highlight while you drag (the system reports only
   the drop).
 - On iPhone Zen receives only while it is open (iOS does not allow it to run

@@ -36,6 +36,9 @@ friends, or close friends only.
 - GIFs in a post stay animated. On a computer you can drop or paste photos,
   GIFs and videos (up to 50 MB) into the post editor and into *Add to
   gallery*.
+- A comment can carry up to 4 photos or GIFs (camera, gallery, a file, GIF
+  search, a keyboard GIF, or dropped and pasted on a computer); tap one to
+  see it full screen. Your own comment can be deleted, with its pictures.
 - You can hide comments and block people in your own threads; **Report**
   keeps the signed original as evidence and can remove the post from your
   device.

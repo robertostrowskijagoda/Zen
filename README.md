@@ -269,7 +269,8 @@ may ask for keychain access — choose **Always Allow**.
 
 On a computer the camera works (videos and QR codes), and so does Nearby when
 the computer has Bluetooth LE (a Mac only looks around, it cannot be seen).
-Call recording is on Android and Windows only. Offline links (Wi-Fi Direct on
+Calls can be recorded on every system (after everyone in the call is told).
+Offline links (Wi-Fi Direct on
 Windows, Bluetooth) work. Linux records and shrinks videos with GStreamer and
 encoders built into Zen.
 
@@ -404,7 +405,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 ```
 sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
   libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev
 ```
 
 The finished Zen is in `build/linux/x64/release/bundle/` (the `zen` file with the folders

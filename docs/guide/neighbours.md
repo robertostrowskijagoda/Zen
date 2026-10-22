@@ -80,6 +80,17 @@ until then; **New code** ends it at once.
 **New code** changes the sticker secret and the doors; old stickers stop
 working.
 
+**One phone of your account runs the flat.** Your account's other devices
+keep a copy of it (profile, housemates, neighbours) but do not open the
+door. When that phone is lost, broken or replaced, open **Neighbours** (or
+**Settings → Devices**) on another device of the account and choose **Move
+the flat to this device**. It gets a new door key; housemates and neighbours
+switch to it by themselves and ignore the old door from then on; the old
+phone stops when it hears about the move and never takes the flat back on
+its own. Print a new sticker: the old one leads to the old door. After
+cutting off a lost device in **Settings → Devices**, Zen offers the move at
+once. A restored backup also brings the flat back as such a copy.
+
 **Show my profile.** In a neighbour's screen a resident can reveal their own
 Zen account (never the other housemates') to make friends.
 
@@ -103,6 +114,10 @@ Zen account (never the other housemates') to make friends.
   knock expires after a day on the knocker's side.
 - The sticker lists only the housemates whose doors were known when it was
   printed (up to 8).
+- Moving the flat changes only the door key: a stolen phone that is
+  unlocked keeps the household key until it hears about the move (**New
+  code** changes the sticker secret too). Messages with neighbours stay on
+  the old phone in a one-person flat.
 - A mailbox door accepts 10 knocks a week (4 a day, 2 from one knocker).
 - A housemate code works once and for 10 minutes; the phone that showed it
   has to be on to confirm.
