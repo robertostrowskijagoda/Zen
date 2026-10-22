@@ -8,23 +8,26 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart'
     show SupportDirectoryResolver, supportDirectoryResolverProvider;
+
+export 'package:zen/src/features/media/media_temp_folder.dart'
+    show
+        kMediaTemporaryFolder,
+        mediaTemporaryDirectory,
+        mediaTemporaryFolderName,
+        newTemporaryMediaPath,
+        wipeMediaTemporaryFiles;
 
 /// Extension of an encrypted media file.
 const String kMediaVaultExtension = '.zmedia';
 
 /// Folder of the encrypted media files, in the app's support folder.
 const String kMediaVaultFolder = 'vault';
-
-/// Folder, in the system's temporary folder, of the short-lived plain
-/// copies a player needs. Emptied at every start.
-const String kMediaTemporaryFolder = 'zen-media';
 
 /// Plain bytes in one encrypted segment.
 const int kMediaVaultSegmentBytes = 64 * 1024;
@@ -299,7 +302,7 @@ final class MediaVault {
     final Uint8List key = await _key();
     final int size = await File(path).length();
     final Directory folder = await _temporaryDirectory();
-    final File target = File(
+    final File target = await createPrivateTemporaryFile(
       '${folder.path}${Platform.pathSeparator}'
       '${_newId()}${_cleanExtension(extension)}',
     );
@@ -370,41 +373,12 @@ Future<File> writeTemporaryMedia(
   String extension = '',
 }) async {
   final Directory folder = await mediaTemporaryDirectory();
-  final File file = File(
+  final File file = await createPrivateTemporaryFile(
     '${folder.path}${Platform.pathSeparator}'
     '${_newId()}${_cleanExtension(extension)}',
   );
   await file.writeAsBytes(bytes, flush: true);
   return file;
-}
-
-/// The name of this instance's temporary media folder in the system's
-/// temporary folder: one per test profile on a computer. Everything Zen
-/// leaves in a shared temporary folder lives in it, so a wipe removes
-/// exactly this and nothing another program or profile made.
-String mediaTemporaryFolderName() {
-  final String? profile = ZenInstance.profile;
-  return '$kMediaTemporaryFolder${profile == null ? '' : '-$profile'}';
-}
-
-/// The temporary media folder (one per test profile on a computer).
-Future<Directory> mediaTemporaryDirectory() async {
-  final Directory base = await getTemporaryDirectory();
-  final Directory folder = Directory(
-    '${base.path}${Platform.pathSeparator}${mediaTemporaryFolderName()}',
-  );
-  await folder.create(recursive: true);
-  return folder;
-}
-
-/// Removes the plain copies players left behind (a crash, a killed app).
-Future<void> wipeMediaTemporaryFiles() async {
-  try {
-    final Directory folder = await mediaTemporaryDirectory();
-    await folder.delete(recursive: true);
-  } on Object catch (error) {
-    logZenWarning('Clearing temporary media failed: $error');
-  }
 }
 
 /// An image kept in the [MediaVault]: decrypted in memory, never written

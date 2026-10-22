@@ -30,6 +30,8 @@ final class LedgerChatMediaBlocks implements ChatMediaBlocks {
     if (media == null) {
       return null;
     }
+    // A chat's file: no removal by other people may drop it from here.
+    node.blobs.claim(media.id);
     if (!node.blobs.isComplete(media.id)) {
       final Future<String> done = node.mediaCompleted.firstWhere(
         (String id) => id == media.id,

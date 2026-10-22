@@ -200,11 +200,5 @@ Future<LogEntry> publishFilm(
   }
 }
 
-Future<String> _temporaryFilmPath() async {
-  final Directory dir = await mediaTemporaryDirectory();
-  final String name = List<String>.generate(
-    12,
-    (_) => math.Random.secure().nextInt(16).toRadixString(16),
-  ).join();
-  return '${dir.path}${Platform.pathSeparator}film-$name.mp4';
-}
+Future<String> _temporaryFilmPath() =>
+    newTemporaryMediaPath(prefix: 'film-', extension: '.mp4');

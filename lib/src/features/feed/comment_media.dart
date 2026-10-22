@@ -179,9 +179,22 @@ Future<void> deleteComment(
 /// still name (a comment passed on before it was removed): they are
 /// deleted by the storage limits and never fetched again. A file anything
 /// else still names (a comment that stays, a newest bundle) is left out.
-Set<String> removedCommentMedia(LedgerNode node) {
-  final Set<String> gone = <String>{};
+Set<String> removedCommentMedia(LedgerNode node) =>
+    removedCommentFiles(node).keys.toSet();
+
+/// [removedCommentMedia] with the writer whose removal frees each file.
+///
+/// Another writer's removal frees only a file that writer's own entry
+/// brought to this device (`BlobStore.fetchedFor`) and that the removed
+/// comment really shows (its `img`): naming the id of somebody else's
+/// file (a film sent in a group, a picture under the pyramid, a photo
+/// this phone made) in a comment and removing it does nothing. This
+/// account's own removals (made on another of its devices) are trusted.
+/// An older bundle frees only files some writer's entry brought here.
+Map<String, String> removedCommentFiles(LedgerNode node) {
+  final Map<String, String> gone = <String, String>{};
   final Set<String> live = <String>{};
+  final Map<String, String> fetchedFor = node.blobs.fetchedFor;
   for (final String space in node.store.spaces.toList()) {
     final List<LogEntry> entries = node.store.entries(space);
     if (!space.startsWith('acts/')) {
@@ -209,12 +222,30 @@ Set<String> removedCommentMedia(LedgerNode node) {
     for (final LogEntry e in entries) {
       final bool bundle =
           e.kind == kReactionsKind || e.kind == kReactionsPageKind;
-      if (removed.contains(e.id) || (bundle && !current.contains(e.id))) {
-        gone.addAll(e.blobs);
+      if (removed.contains(e.id)) {
+        final Set<String> shown = <String>{
+          for (final MediaRef m in commentImagesOf(e.body['img'])) m.id,
+        };
+        for (final String id in e.blobs) {
+          if (!shown.contains(id)) {
+            continue;
+          }
+          if (e.account == node.account || fetchedFor[id] == e.account) {
+            gone[id] = e.account;
+          }
+        }
+      } else if (bundle && !current.contains(e.id)) {
+        for (final String id in e.blobs) {
+          final String? by = fetchedFor[id];
+          if (by != null && (by == e.account || e.account == node.account)) {
+            gone[id] = by;
+          }
+        }
       } else {
         live.addAll(e.blobs);
       }
     }
   }
-  return gone.difference(live);
+  gone.removeWhere((String id, String _) => live.contains(id));
+  return gone;
 }

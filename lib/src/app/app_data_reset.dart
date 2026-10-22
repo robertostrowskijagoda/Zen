@@ -10,7 +10,7 @@ import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/account/multi/desktop_background.dart';
-import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -243,6 +243,13 @@ Future<ZenScratchPlaces> findZenScratchPlaces() async {
   if (temporary != null) {
     (phone ? own : shared).add(temporary);
   }
+  if (Platform.isLinux) {
+    // The temporary media folder lives in a per-user folder there.
+    final Directory? media = await _tryFolder(mediaTemporaryBase);
+    if (media != null && media.path != temporary?.path) {
+      shared.add(media);
+    }
+  }
   if (phone) {
     final Directory? cache = await _tryFolder(getApplicationCacheDirectory);
     if (cache != null) {
@@ -323,7 +330,10 @@ Future<void> shredKeysThenDeleteLocalData({
   }
   for (final Directory folder in scratch.sharedFolders) {
     final String own = mediaTemporaryFolderName();
-    await _deleteMatching(folder, (String name) => name == own);
+    await _deleteMatching(
+      folder,
+      (String name) => isMediaTemporaryFolderEntry(name, own),
+    );
   }
   for (final Directory folder in scratch.namedFolders) {
     await _deleteMatching(folder, (String name) => name.toLowerCase() == 'zen');

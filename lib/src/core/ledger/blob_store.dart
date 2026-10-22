@@ -144,6 +144,22 @@ final class BlobStore {
   /// Manifests we want (asked for, not yet complete).
   final Set<String> wanted = <String>{};
 
+  /// Files fetched because of another account's ledger entry: by the
+  /// writer whose entry first asked for each here ([noteFetchFor]). Only
+  /// that writer's removals and the storage limits may drop such a file. A
+  /// file this device made ([put]), or that something else asked for first
+  /// (a chat, the account's own devices), has no writer here: what other
+  /// people remove never touches it.
+  final Map<String, String> fetchedFor = <String, String>{};
+
+  /// Files dropped because of other people's entries, not by the user:
+  /// by the writer whose removal dropped each ([dropFor]), or '' for the
+  /// storage limits ([expire]). They are [refused] only for what that
+  /// writer names: another writer's entry ([allowFor]) may fetch a file
+  /// dropped by someone's removal again, and a chat ([claim]) any of them,
+  /// so nobody can make this device refuse other people's files for good.
+  final Map<String, String> droppedFor = <String, String>{};
+
   /// Called after any change worth saving (manifest added or removed).
   void Function()? onChanged;
 
@@ -160,12 +176,20 @@ final class BlobStore {
     required Iterable<BlobManifest> manifests,
     required Iterable<String> refused,
     required Iterable<String> wanted,
+    Map<String, String> fetchedFor = const <String, String>{},
+    Map<String, String> droppedFor = const <String, String>{},
   }) {
     for (final BlobManifest m in manifests) {
       _manifests[m.id] = m;
     }
     this.refused.addAll(refused);
     this.wanted.addAll(wanted);
+    this.fetchedFor.addAll(fetchedFor);
+    droppedFor.forEach((String id, String by) {
+      if (this.refused.contains(id)) {
+        this.droppedFor[id] = by;
+      }
+    });
   }
 
   /// Stores [bytes] as a new blob; returns its id.
@@ -195,6 +219,9 @@ final class BlobStore {
     _manifests[manifest.id] = manifest;
     refused.remove(manifest.id);
     wanted.remove(manifest.id);
+    // Made here: no writer's removal can drop it.
+    fetchedFor.remove(manifest.id);
+    droppedFor.remove(manifest.id);
     onChanged?.call();
     return manifest.id;
   }
@@ -287,10 +314,86 @@ final class BlobStore {
     }
   }
 
+  /// An entry of [writer] asks for [id]: remembered as the writer that
+  /// brought it, unless something asked for it, holds it or refused it
+  /// before (the first reason wins).
+  void noteFetchFor(String id, String writer) {
+    if (writer.isEmpty ||
+        refused.contains(id) ||
+        wanted.contains(id) ||
+        _manifests.containsKey(id) ||
+        fetchedFor.containsKey(id)) {
+      return;
+    }
+    fetchedFor[id] = writer;
+    onChanged?.call();
+  }
+
+  /// [id] is used by something other than the feed (a chat): no removal
+  /// by other people drops it any more, and such a drop is undone.
+  void claim(String id) {
+    final bool had = fetchedFor.remove(id) != null;
+    final bool dropped = droppedFor.remove(id) != null;
+    if (dropped) {
+      refused.remove(id);
+    }
+    if (had || dropped) {
+      onChanged?.call();
+    }
+  }
+
+  /// An entry of [writer] names [id]: a drop caused by another writer's
+  /// removal no longer stops it from being fetched.
+  void allowFor(String id, String writer) {
+    final String? by = droppedFor[id];
+    if (by == null || by.isEmpty || by == writer) {
+      return;
+    }
+    droppedFor.remove(id);
+    refused.remove(id);
+    onChanged?.call();
+  }
+
+  /// Whether [id] is not to be fetched for an entry of [writer].
+  bool refusedFor(String id, String writer) {
+    if (!refused.contains(id)) {
+      return false;
+    }
+    final String? by = droppedFor[id];
+    return by == null || by.isEmpty || by == writer;
+  }
+
+  /// Drops [id] because [writer] removed what named it, but only when an
+  /// entry of [writer] brought it here ([fetchedFor]): nobody can make this
+  /// device drop a file of others by naming it. Returns whether it went.
+  Future<bool> dropFor(String id, String writer) async {
+    if (writer.isEmpty || fetchedFor[id] != writer) {
+      return false;
+    }
+    await refuse(id);
+    droppedFor[id] = writer;
+    onChanged?.call();
+    return true;
+  }
+
+  /// Drops [id] for the storage limits, only when another account's entry
+  /// brought it here ([fetchedFor]). Returns whether it went.
+  Future<bool> expire(String id) async {
+    if (!fetchedFor.containsKey(id)) {
+      return false;
+    }
+    await refuse(id);
+    droppedFor[id] = '';
+    onChanged?.call();
+    return true;
+  }
+
   /// Removes [id] from this device for good.
   Future<void> refuse(String id) async {
     refused.add(id);
     wanted.remove(id);
+    fetchedFor.remove(id);
+    droppedFor.remove(id);
     final BlobManifest? manifest = _manifests.remove(id);
     if (manifest != null) {
       final Set<String> stillUsed = <String>{

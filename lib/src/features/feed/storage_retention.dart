@@ -188,6 +188,8 @@ Iterable<String> _blobIdsOf(LogEntry e) sync* {
 /// The complete files of other people on this phone, with the newest post
 /// that uses each. A file that anything of this account (or anything the
 /// limits do not cover, like a profile) also uses is left out: it stays.
+/// So is a file no other writer's entry brought here (one this phone made,
+/// or a chat's): an old-dated entry naming it cannot make it expire.
 List<StoredMedia> storedMediaOf(LedgerNode node) {
   final Set<String> friends = node.friendAccounts.values.toSet();
   final Set<String> pinned = <String>{};
@@ -223,6 +225,7 @@ List<StoredMedia> storedMediaOf(LedgerNode node) {
     final BlobManifest? manifest = node.blobs.manifest(u.key);
     if (manifest == null ||
         pinned.contains(u.key) ||
+        !node.blobs.fetchedFor.containsKey(u.key) ||
         !node.blobs.isComplete(u.key)) {
       continue;
     }
@@ -319,13 +322,19 @@ Future<RetentionResult> enforceStorageLimits(
   // account's own too: removed on another of its devices).
   int removedFiles = 0;
   int removedBytes = 0;
-  for (final String id in removedCommentMedia(node)) {
+  for (final MapEntry<String, String> f in removedCommentFiles(node).entries) {
+    final String id = f.key;
     if (node.blobs.refused.contains(id)) {
       continue;
     }
-    removedBytes += node.blobs.manifest(id)?.size ?? 0;
+    final int size = node.blobs.manifest(id)?.size ?? 0;
+    if (f.value == node.account) {
+      await node.blobs.refuse(id);
+    } else if (!await node.blobs.dropFor(id, f.value)) {
+      continue;
+    }
+    removedBytes += size;
     removedFiles++;
-    await node.blobs.refuse(id);
   }
   final RetentionPlan plan = planStorageRetention(
     storedMediaOf(node),
@@ -338,9 +347,12 @@ Future<RetentionResult> enforceStorageLimits(
     );
   }
   int expiredBytes = removedBytes;
+  int expiredFiles = 0;
   for (final StoredMedia m in plan.expired) {
-    await node.blobs.refuse(m.id);
-    expiredBytes += m.bytes;
+    if (await node.blobs.expire(m.id)) {
+      expiredFiles++;
+      expiredBytes += m.bytes;
+    }
   }
   int limitFiles = 0;
   int limitBytes = 0;
@@ -348,17 +360,18 @@ Future<RetentionResult> enforceStorageLimits(
     ...plan.overPersonLimit,
     ...plan.overCache,
   ]) {
-    await node.blobs.refuse(m.id);
-    limitFiles++;
-    limitBytes += m.bytes;
+    if (await node.blobs.expire(m.id)) {
+      limitFiles++;
+      limitBytes += m.bytes;
+    }
   }
   logZenMessage(
     'Limity miejsca: usunięto '
-    '${plan.expired.length + limitFiles + removedFiles} plików '
+    '${expiredFiles + limitFiles + removedFiles} plików '
     '(${expiredBytes + limitBytes} B).',
   );
   return RetentionResult(
-    expiredFiles: plan.expired.length + removedFiles,
+    expiredFiles: expiredFiles + removedFiles,
     expiredBytes: expiredBytes,
     limitFiles: limitFiles,
     limitBytes: limitBytes,
