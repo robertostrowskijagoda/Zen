@@ -20,7 +20,6 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/presentation/own_copy_card.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
-import 'package:zen/src/features/update/store_build.dart';
 
 /// Where donations for Zen go (the only official collection).
 const String kDonationUrl = 'https://buycoffee.to/zen';
@@ -45,12 +44,7 @@ const String kIssuesUrl = 'https://github.com/robertostrowskijagoda/Zen/issues';
 /// "O aplikacji": a header (name, version, build, the author's notice), one
 /// short description, and the sections, each on its own page.
 class AboutScreen extends StatelessWidget {
-  const AboutScreen({super.key, this.storeBuild});
-
-  /// Whether to say this is the store build (default: [isStoreBuild]).
-  /// This screen is the only place that says it (the launcher and the rest
-  /// of the app just say "Zen").
-  final bool? storeBuild;
+  const AboutScreen({super.key});
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -69,7 +63,7 @@ class AboutScreen extends StatelessWidget {
           key: const Key('about-list'),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: <Widget>[
-            _LogoCard(storeBuild: storeBuild ?? isStoreBuild),
+            const _LogoCard(),
             const SizedBox(height: 14),
             Text(
               t(
@@ -1187,9 +1181,7 @@ class _Platform extends StatelessWidget {
 /// The logo (white letters on graphite as on the icon; black on light in the
 /// light theme) with the version.
 class _LogoCard extends StatelessWidget {
-  const _LogoCard({required this.storeBuild});
-
-  final bool storeBuild;
+  const _LogoCard();
 
   @override
   Widget build(BuildContext context) {
@@ -1261,12 +1253,6 @@ class _LogoCard extends StatelessWidget {
                   }),
                   style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
                 ),
-                if (storeBuild)
-                  Text(
-                    t('Wersja ze sklepu'),
-                    key: const Key('about-store-build'),
-                    style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
-                  ),
                 const SizedBox(height: 6),
                 Text(
                   t('Sieć ludzi, którzy się znają.'),
@@ -1391,14 +1377,14 @@ class _DonateCard extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: ZenFixed.qrPaper,
                 borderRadius: context.zenRadius(18),
               ),
               child: QrImageView(
                 key: const Key('about-donate-qr'),
                 data: kDonationUrl,
                 size: 150,
-                backgroundColor: Colors.white,
+                backgroundColor: ZenFixed.qrPaper,
               ),
             ),
           ),

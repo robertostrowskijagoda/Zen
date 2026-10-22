@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -46,6 +47,7 @@ import 'package:zen/src/features/profile/profile_gallery.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_price_list.dart';
+import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -771,7 +773,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       length: 5,
       child: Scaffold(
         key: const Key('profile-screen'),
-        appBar: ZenSectionBar(title: _isOwn ? t('Mój profil') : t('Profil')),
+        appBar: ZenSectionBar(
+          title: _isOwn ? t('Mój profil') : t('Profil'),
+          actions: <Widget>[
+            // Your points wallet, also one tap from your own profile.
+            if (_isOwn &&
+                ref.watch(featureFlagsProvider).isEnabled(ZenFeature.wallet))
+              IconButton(
+                key: const Key('profile-open-wallet'),
+                tooltip: t('Portfel'),
+                onPressed: () => unawaited(WalletScreen.open(context)),
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+              ),
+          ],
+        ),
         body: SelectionArea(
           child: NestedScrollView(
             headerSliverBuilder: (BuildContext context, bool scrolled) =>
@@ -1158,13 +1173,13 @@ class _AvatarRing extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: <Color>[zen.accent, zen.accentSecondary],
         ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.28),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        boxShadow: ZenLook.of(context).tinted(
+          zen,
+          zen.accent,
+          radius: 20,
+          alpha: 0.28,
+          offset: const Offset(0, 6),
+        ),
       ),
       child: Container(
         padding: const EdgeInsets.all(3),

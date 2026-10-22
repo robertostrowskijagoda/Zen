@@ -77,14 +77,13 @@ class _Panel extends StatelessWidget {
                   : tone.withValues(alpha: 0.26)),
         ),
         boxShadow: glow
-            ? <BoxShadow>[
-                BoxShadow(
-                  color: tone.withValues(alpha: 0.14),
-                  blurRadius: 24,
-                  spreadRadius: -6,
-                  offset: const Offset(0, 8),
-                ),
-              ]
+            ? ZenLook.of(context).tinted(
+                zen,
+                tone,
+                radius: 24,
+                alpha: 0.14,
+                offset: const Offset(0, 8),
+              )
             : null,
       ),
       child: ClipRRect(

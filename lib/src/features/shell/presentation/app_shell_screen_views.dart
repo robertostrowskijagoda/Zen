@@ -2855,7 +2855,7 @@ class _LocalCodePanel extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     // The QR code is always dark on white: cameras read it best that way,
     // whatever the app's theme.
-    const Color qrInk = Color(0xFF111114);
+    const Color qrInk = ZenFixed.qrInk;
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -2865,14 +2865,13 @@ class _LocalCodePanel extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.22),
-            blurRadius: 28,
-            spreadRadius: -8,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        boxShadow: ZenLook.of(context).tinted(
+          zen,
+          zen.accent,
+          radius: 28,
+          alpha: 0.22,
+          offset: const Offset(0, 10),
+        ),
       ),
       child: Container(
         padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
@@ -2903,21 +2902,17 @@ class _LocalCodePanel extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: ZenFixed.qrPaper,
                   borderRadius: context.zenRadius(22),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: zen.accent.withValues(alpha: 0.18),
-                      blurRadius: 18,
-                      spreadRadius: -4,
-                    ),
-                  ],
+                  boxShadow: ZenLook.of(
+                    context,
+                  ).tinted(zen, zen.accent, radius: 18, alpha: 0.18),
                 ),
                 child: QrImageView(
                   data: profile.qrData,
                   size: 184,
                   padding: EdgeInsets.zero,
-                  backgroundColor: Colors.white,
+                  backgroundColor: ZenFixed.qrPaper,
                   eyeStyle: QrEyeStyle(
                     color: qrInk,
                     eyeShape: QrEyeShape.square,
@@ -3117,13 +3112,9 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
         ),
         borderRadius: context.zenRadius(22),
         border: Border.all(color: zen.accent.withValues(alpha: 0.5)),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.16),
-            blurRadius: 20,
-            spreadRadius: -4,
-          ),
-        ],
+        boxShadow: ZenLook.of(
+          context,
+        ).tinted(zen, zen.accent, radius: 20, alpha: 0.16),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(

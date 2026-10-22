@@ -318,11 +318,13 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     final String? version = s.release?.manifest.version;
     final (IconData icon, String title, String subtitle) = switch (s.phase) {
       UpdatePhase.disabled => (
-        Icons.block_rounded,
-        t('Aktualizacje przez sieć jeszcze nie działają'),
+        Icons.schedule_rounded,
+        t('Aktualizacje od znajomych jeszcze wyłączone'),
         t(
-          'Ustalamy, jak zatwierdzać nowe wersje bez osób z kluczami. Nową '
-          'wersję zainstalujesz od znajomego przez „Podaj dalej”.',
+          'Włączą się, gdy opiekunowie projektu opublikują swoje klucze do '
+          'podpisywania wydań. Aktualizacje z GitHuba działają już teraz '
+          '(wyżej), a nową wersję możesz też dostać od znajomego przez '
+          '„Podaj dalej”.',
         ),
       ),
       UpdatePhase.upToDate => (

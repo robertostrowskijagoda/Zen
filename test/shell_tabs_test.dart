@@ -21,6 +21,7 @@ Future<void> _pumpApp(
   WidgetTester tester, {
   LedgerDisk? disk,
   AppSecurityService? security,
+  bool? nearbyShown,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -31,6 +32,8 @@ Future<void> _pumpApp(
         ledgerDiskProvider.overrideWithValue(disk ?? MemoryLedgerDisk()),
         if (security != null)
           appSecurityServiceProvider.overrideWithValue(security),
+        if (nearbyShown != null)
+          nearbyTabShownProvider.overrideWithValue(nearbyShown),
       ],
       child: MaterialApp(theme: ZenTheme.dark(), home: const AppShellScreen()),
     ),
@@ -200,6 +203,8 @@ void main() {
     await tester.tap(find.byKey(const Key('side-tab-profile')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const Key('profile-screen')), findsOneWidget);
+    // The wallet opens from your own profile too.
+    expect(find.byKey(const Key('profile-open-wallet')), findsOneWidget);
 
     // Back to chats keeps the page that was there.
     await tester.tap(find.byKey(const Key('side-tab-chats')));
@@ -292,6 +297,26 @@ void main() {
       await tester.pump();
       expect(_tappable(tester, tab), isTrue, reason: id);
     }
+    await _tearDown(tester);
+  });
+
+  testWidgets('where "W pobliżu" cannot work (iPhone), it is not on the rail', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester, nearbyShown: false);
+    expect(find.byKey(const Key('side-tab-nearby')), findsNothing);
+    for (final String id in _railIds) {
+      if (id != 'nearby') {
+        expect(find.byKey(Key('side-tab-$id')), findsOneWidget, reason: id);
+      }
+    }
+    // Asked for anyway (a link): nothing changes.
+    openShellTab('nearby');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('side-tab-label-chats')), findsOneWidget);
     await _tearDown(tester);
   });
 

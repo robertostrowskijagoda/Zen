@@ -45,6 +45,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_host.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/meet/presentation/graph_screen.dart';
 import 'package:zen/src/features/meet/presentation/intro_widgets.dart';

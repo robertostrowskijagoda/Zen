@@ -424,8 +424,9 @@ final class UpdateService extends ChangeNotifier {
   Future<String> importBundle(Uint8List data) async {
     if (!book.enabled) {
       return t(
-        'Aktualizacje przez sieć jeszcze nie działają — nową wersję '
-        'zainstaluj od znajomego przez „Podaj dalej”.',
+        'Aktualizacje od znajomych włączą się, gdy opiekunowie projektu '
+        'opublikują swoje klucze do podpisywania wydań. Do tego czasu nową '
+        'wersję pobierz z GitHuba albo od znajomego przez „Podaj dalej”.',
       );
     }
     if (data.isNotEmpty && data.first == 0x7B) {

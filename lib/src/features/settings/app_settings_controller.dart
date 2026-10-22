@@ -91,10 +91,6 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(autoCleanupDays: value));
   }
 
-  Future<void> setNotificationDelaySeconds(int value) async {
-    await _save(state.copyWith(notificationDelaySeconds: value));
-  }
-
   Future<void> setThemeMode(AppThemeMode value) async {
     await _save(state.copyWith(themeMode: value));
   }
@@ -220,6 +216,9 @@ final class AppSettingsController extends Notifier<AppSettings> {
   Future<void> reset() async {
     await _save(const AppSettings());
   }
+
+  /// All the settings at once (the circle copy after a recovery).
+  Future<void> restoreAll(AppSettings settings) => _save(settings);
 
   Future<void> _save(AppSettings next) async {
     state = next;

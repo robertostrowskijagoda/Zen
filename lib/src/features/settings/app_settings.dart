@@ -313,7 +313,6 @@ final class AppSettings {
   const AppSettings({
     this.inboxLimitMb = defaultInboxLimitMb,
     this.autoCleanupDays = defaultAutoCleanupDays,
-    this.notificationDelaySeconds = defaultNotificationDelaySeconds,
     this.lockMode = defaultLockMode,
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
     this.themeMode = defaultThemeMode,
@@ -344,9 +343,6 @@ final class AppSettings {
   static const int defaultInboxLimitMb = 100;
   static const int minimumInboxLimitMb = 5;
   static const int defaultAutoCleanupDays = 0;
-  static const int defaultNotificationDelaySeconds = 5;
-  static const int minimumNotificationDelaySeconds = 2;
-  static const int maximumNotificationDelaySeconds = 10;
 
   /// Locks when Zen has been in the background for a while (5 min), so a
   /// phone left unlocked on a table does not show the conversations.
@@ -360,7 +356,6 @@ final class AppSettings {
 
   final int inboxLimitMb;
   final int autoCleanupDays;
-  final int notificationDelaySeconds;
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
   final AppThemeMode themeMode;
@@ -482,9 +477,9 @@ final class AppSettings {
 
   bool get inboxUnlimited => inboxLimitMb <= 0;
 
-  Duration get signalWaitTimeout => Duration(
-    seconds: normalizeNotificationDelaySeconds(notificationDelaySeconds),
-  );
+  /// How long the signal transport waits for the next signal in one go
+  /// (a technical constant, not a setting).
+  Duration get signalWaitTimeout => const Duration(seconds: 5);
 
   String get inboxLimitLabel => inboxUnlimited
       ? t('Bez limitu')
@@ -493,7 +488,6 @@ final class AppSettings {
   AppSettings copyWith({
     int? inboxLimitMb,
     int? autoCleanupDays,
-    int? notificationDelaySeconds,
     AppLockMode? lockMode,
     int? backgroundLockDelaySeconds,
     AppThemeMode? themeMode,
@@ -524,9 +518,6 @@ final class AppSettings {
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
       autoCleanupDays: normalizeAutoCleanupDays(
         autoCleanupDays ?? this.autoCleanupDays,
-      ),
-      notificationDelaySeconds: normalizeNotificationDelaySeconds(
-        notificationDelaySeconds ?? this.notificationDelaySeconds,
       ),
       lockMode: lockMode ?? this.lockMode,
       backgroundLockDelaySeconds: normalizeBackgroundLockDelaySeconds(
@@ -565,7 +556,6 @@ final class AppSettings {
   Map<String, Object> toJson() => <String, Object>{
     'inboxLimitMb': inboxLimitMb,
     'autoCleanupDays': autoCleanupDays,
-    'notificationDelaySeconds': notificationDelaySeconds,
     'lockMode': lockMode.name,
     'backgroundLockDelaySeconds': backgroundLockDelaySeconds,
     'themeMode': themeMode.name,
@@ -612,7 +602,6 @@ final class AppSettings {
     return const AppSettings().copyWith(
       inboxLimitMb: pick<int>('inboxLimitMb'),
       autoCleanupDays: pick<int>('autoCleanupDays'),
-      notificationDelaySeconds: pick<int>('notificationDelaySeconds'),
       lockMode: byName(AppLockMode.values, 'lockMode'),
       backgroundLockDelaySeconds: pick<int>('backgroundLockDelaySeconds'),
       themeMode: byName(AppThemeMode.values, 'themeMode'),
@@ -650,16 +639,6 @@ final class AppSettings {
 
   static int normalizeAutoCleanupDays(int value) {
     return value < 0 ? 0 : value;
-  }
-
-  static int normalizeNotificationDelaySeconds(int value) {
-    if (value < minimumNotificationDelaySeconds) {
-      return minimumNotificationDelaySeconds;
-    }
-    if (value > maximumNotificationDelaySeconds) {
-      return maximumNotificationDelaySeconds;
-    }
-    return value;
   }
 
   static int normalizeBackgroundLockDelaySeconds(int value) {

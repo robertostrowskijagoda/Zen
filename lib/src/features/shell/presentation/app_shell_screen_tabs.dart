@@ -152,6 +152,29 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
   ),
 ];
 
+/// Whether this device can use "W pobliżu" at all: Android always (its
+/// screen walks through permissions and Bluetooth), never on iPhone, iPad
+/// or the web, and on a computer only with a Bluetooth LE adapter Zen can
+/// use. Where it cannot, the rail has no "W pobliżu".
+final Provider<bool> nearbyTabShownProvider = Provider<bool>((Ref ref) {
+  if (kIsWeb || Platform.isIOS) {
+    return false;
+  }
+  if (Platform.isAndroid) {
+    return true;
+  }
+  // Tests do not probe the computer's Bluetooth.
+  if (Platform.environment.containsKey('FLUTTER_TEST')) {
+    return true;
+  }
+  return ref.watch(nearbySupportedProvider).value ?? false;
+});
+
+/// Whether the rail shows the tab [id]: its feature is in the build and
+/// works on this device.
+bool _railShows(FeatureFlags flags, bool nearby, String id) =>
+    flags.showsTab(id) && (id != 'nearby' || nearby);
+
 /// Another part of the shell asks to show a tab (e.g. the Tablica asked
 /// for by [openFeed]).
 final ValueNotifier<String?> _shellTabRequest = ValueNotifier<String?>(null);
@@ -226,7 +249,12 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     _shellTabRequest.value = null;
     final int i = _shellTabs.indexWhere((_ShellTab t) => t.id == id);
     // A feature left out of the build has no tab to go to.
-    if (i >= 0 && ref.read(featureFlagsProvider).showsTab(id)) {
+    if (i >= 0 &&
+        _railShows(
+          ref.read(featureFlagsProvider),
+          ref.read(nearbyTabShownProvider),
+          id,
+        )) {
       _select(i);
     }
   }
@@ -274,7 +302,8 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
   Widget build(BuildContext context) {
     final FeatureFlags flags = ref.watch(featureFlagsProvider);
     // The open tab's feature is left out of the build: the start tab.
-    final int index = flags.showsTab(_shellTabs[_index].id)
+    final bool nearby = ref.watch(nearbyTabShownProvider);
+    final int index = _railShows(flags, nearby, _shellTabs[_index].id)
         ? _index
         : _startTab;
     return Scaffold(
@@ -313,7 +342,11 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
                                 // "W pobliżu" scans Bluetooth while it is
                                 // built, so it lives only while it is shown.
                                 _visited.contains(i) &&
-                                        flags.showsTab(_shellTabs[i].id) &&
+                                        _railShows(
+                                          flags,
+                                          nearby,
+                                          _shellTabs[i].id,
+                                        ) &&
                                         (_shellTabs[i].id != 'nearby' ||
                                             i == index)
                                     ? KeyedSubtree(
@@ -396,9 +429,10 @@ class _SideTabs extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final FeatureFlags flags = ref.watch(featureFlagsProvider);
+    final bool nearby = ref.watch(nearbyTabShownProvider);
     final List<int> shown = <int>[
       for (int i = 0; i < _shellTabs.length; i++)
-        if (flags.showsTab(_shellTabs[i].id)) i,
+        if (_railShows(flags, nearby, _shellTabs[i].id)) i,
     ];
     final int groups = <_RailGroup?>{
       for (final int i in shown)

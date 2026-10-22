@@ -514,14 +514,14 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     child: Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: ZenFixed.qrPaper,
         borderRadius: context.zenRadius(20),
       ),
       child: QrImageView(
         key: key,
         data: data,
         size: size,
-        backgroundColor: Colors.white,
+        backgroundColor: ZenFixed.qrPaper,
       ),
     ),
   );

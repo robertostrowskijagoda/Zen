@@ -333,14 +333,14 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: ZenFixed.qrPaper,
                         borderRadius: context.zenRadius(20),
                       ),
                       child: QrImageView(
                         key: const Key('install-page-qr'),
                         data: kInstallPageUrl,
                         size: 180,
-                        backgroundColor: Colors.white,
+                        backgroundColor: ZenFixed.qrPaper,
                       ),
                     ),
                   ),
