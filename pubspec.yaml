@@ -98,9 +98,5 @@ flutter:
     # The terms and the privacy policy, read and accepted in the app.
     - docs/TERMS.md
     - docs/PRIVACY.md
-    # Their translations (the English files above are the source).
-    - docs/TERMS.pl.md
-    - docs/PRIVACY.pl.md
-    - docs/NOTICE.pl.md
     # Zen's own sounds (tool/sounds/generate_sounds.py).
     - assets/sounds/

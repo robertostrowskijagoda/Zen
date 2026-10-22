@@ -57,8 +57,7 @@ class LegalDocumentScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final AsyncValue<LegalTexts> texts = ref.watch(legalTextsProvider);
-    // The document in the app's language when it is translated, else in
-    // English (the source).
+    // The documents exist in English only; another language says so.
     final String language = ZenI18n.code;
     return Scaffold(
       key: Key('legal-document-${document.name}'),
@@ -68,8 +67,7 @@ class LegalDocumentScreen extends ConsumerWidget {
           IconButton(
             key: const Key('legal-document-online'),
             tooltip: t('Otwórz na GitHubie'),
-            onPressed: () =>
-                unawaited(openOrCopyLink(context, document.urlFor(language))),
+            onPressed: () => unawaited(openOrCopyLink(context, document.url)),
             icon: const Icon(Icons.open_in_new_rounded),
           ),
         ],
@@ -82,9 +80,7 @@ class LegalDocumentScreen extends ConsumerWidget {
               key: const Key('legal-document-body'),
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: <Widget>[
-                if (language != 'en' &&
-                    !value.isTranslated(document, language) &&
-                    document != LegalDocument.licence)
+                if (language != 'en' && document != LegalDocument.licence)
                   ZenInfo(
                     icon: Icons.translate_rounded,
                     text: t(
@@ -94,7 +90,7 @@ class LegalDocumentScreen extends ConsumerWidget {
                   ),
                 LegalMarkdownView(
                   key: Key('legal-document-text-${document.name}'),
-                  source: value.inLanguage(document, language),
+                  source: value.of(document),
                   onLink: (String href) => _onLink(context, href),
                 ),
               ],
@@ -112,7 +108,7 @@ class LegalDocumentScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              SelectableText(document.urlFor(language)),
+              SelectableText(document.url),
             ],
           ),
           _ => const Center(child: CircularProgressIndicator()),

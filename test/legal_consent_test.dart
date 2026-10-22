@@ -76,85 +76,39 @@ Future<void> _route(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 1));
 }
 
-const Map<String, int> _englishMonths = <String, int>{
-  'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6, //
-  'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, //
-  'December': 12,
-};
-
-const Map<String, int> _polishMonths = <String, int>{
-  'stycznia': 1, 'lutego': 2, 'marca': 3, 'kwietnia': 4, 'maja': 5, //
-  'czerwca': 6, 'lipca': 7, 'sierpnia': 8, 'września': 9, //
-  'października': 10, 'listopada': 11, 'grudnia': 12,
-};
-
 void main() {
   tearDown(ZenI18n.debugReset);
 
-  group('translations', () {
-    test('every translation the app carries exists and is of the same '
-        'version as its English source', () {
+  group('one language', () {
+    test('the app carries the English documents only', () {
       final String pubspec = File('pubspec.yaml').readAsStringSync();
-      for (final String code in kLegalTranslations) {
-        for (final LegalDocument doc in LegalDocument.values) {
-          final String path = doc.translationPath(code)!;
-          expect(File(path).existsSync(), isTrue, reason: path);
-          expect(pubspec, contains('    - $path\n'), reason: path);
-        }
+      expect(pubspec, isNot(contains('.pl.md')));
+      for (final LegalDocument doc in LegalDocument.values) {
+        expect(File(doc.path).existsSync(), isTrue, reason: doc.path);
+        expect(doc.path, isNot(contains('.pl.')));
       }
-      // The Polish date of the last change is the English one.
-      for (final LegalDocument doc in <LegalDocument>[
-        LegalDocument.terms,
-        LegalDocument.privacy,
+      for (final String gone in <String>[
+        'docs/TERMS.pl.md',
+        'docs/PRIVACY.pl.md',
+        'docs/NOTICE.pl.md',
       ]) {
-        final RegExpMatch en = RegExp(
-          r'last updated (\d+) (\w+) (\d{4})',
-        ).firstMatch(File(doc.path).readAsStringSync())!;
-        final RegExpMatch pl = RegExp(
-          r'ostatnia zmiana (\d+) (\S+) (\d{4})',
-        ).firstMatch(File(doc.translationPath('pl')!).readAsStringSync())!;
-        expect(pl.group(1), en.group(1), reason: doc.name);
-        expect(_polishMonths[pl.group(2)], _englishMonths[en.group(2)]);
-        expect(pl.group(3), en.group(3), reason: doc.name);
+        expect(File(gone).existsSync(), isFalse, reason: gone);
       }
-    });
-
-    test('the version comes from the English sources only', () {
-      final LegalTexts english = _texts();
-      final LegalTexts withPolish = LegalTexts(
-        english.texts,
-        <String, Map<LegalDocument, String>>{
-          'pl': <LegalDocument, String>{LegalDocument.terms: '# Regulamin'},
-        },
-      );
-      expect(withPolish.version, english.version);
-      expect(withPolish.inLanguage(LegalDocument.terms, 'pl'), '# Regulamin');
-      // Not translated: English.
-      expect(withPolish.inLanguage(LegalDocument.privacy, 'pl'), _privacy);
-      expect(withPolish.inLanguage(LegalDocument.terms, 'de'), _terms);
-      // A link to a translation opens the same document.
+      // A link to a file that is no document of the app goes to the web.
       expect(
         resolveLegalLink(LegalDocument.terms, 'PRIVACY.pl.md'),
-        const LegalLinkTarget.document(LegalDocument.privacy),
+        const LegalLinkTarget.url(
+          'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/'
+          'PRIVACY.pl.md',
+        ),
       );
-      expect(LegalDocument.terms.pathFor('pl'), 'docs/TERMS.pl.md');
-      expect(LegalDocument.terms.pathFor('de'), 'docs/TERMS.md');
-      expect(LegalDocument.licence.pathFor('pl'), 'docs/NOTICE.pl.md');
     });
 
     Future<void> pumpDocument(WidgetTester tester) async {
-      final LegalTexts texts = LegalTexts(
-        _texts().texts,
-        <String, Map<LegalDocument, String>>{
-          'pl': <LegalDocument, String>{
-            LegalDocument.terms: '# Zen - Regulamin\n\nTreść.\n',
-          },
-        },
-      );
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            legalTextsProvider.overrideWith((Ref ref) async => texts),
+            legalTextsProvider.overrideWith((Ref ref) async => _texts()),
           ],
           child: MaterialApp(
             theme: ZenTheme.dark(),
@@ -166,21 +120,19 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('in Polish the Polish document is shown', (
+    testWidgets('in Polish the English document is shown, and it says so', (
       WidgetTester tester,
     ) async {
       await pumpDocument(tester);
-      expect(find.text('Zen - Regulamin'), findsOneWidget);
-      expect(find.text('Zen - Terms of Use'), findsNothing);
-      expect(find.textContaining('Dokument jest po angielsku'), findsNothing);
-    });
-
-    testWidgets('in a language without a translation: English, and it says '
-        'so', (WidgetTester tester) async {
-      ZenI18n.debugUse('de', const <String, Object?>{});
-      await pumpDocument(tester);
       expect(find.text('Zen - Terms of Use'), findsOneWidget);
       expect(find.textContaining('Dokument jest po angielsku'), findsOneWidget);
+    });
+
+    testWidgets('in English: no note', (WidgetTester tester) async {
+      ZenI18n.debugUse('en', const <String, Object?>{});
+      await pumpDocument(tester);
+      expect(find.text('Zen - Terms of Use'), findsOneWidget);
+      expect(find.textContaining('Dokument jest po angielsku'), findsNothing);
     });
   });
 
