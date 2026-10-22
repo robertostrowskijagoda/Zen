@@ -1,5 +1,7 @@
-# A version tag (v1.10.0, …) builds the release files: Zen.apk (signed with
-# the release key; arm64-v8a, armeabi-v7a and x86_64 in one APK),
+# A version tag (v1.10.0, …) builds the release files: one APK per Android
+# ABI, all signed with the release key and with the same version code:
+# Zen-arm64-v8a.apk (most phones), Zen-armeabi-v7a.apk (older 32-bit
+# phones) and Zen-x86_64.apk (Chromebooks, emulators),
 # Zen-Windows.zip (x64), Zen-Windows-arm64.zip, Zen-Linux-x64.tar.gz,
 # Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
 # Zen-Linux-x64.flatpak,
@@ -19,7 +21,7 @@
 #   refs/tags/v*, and its "Release key" step checks the ref once more.
 #   Actions -> Release -> Run workflow from a BRANCH still builds the other
 #   files (unsigned, as always: Windows, Linux, macOS ad hoc, iOS) as
-#   artifacts of the run, with SHA256SUMS, but no Zen.apk and nothing is
+#   artifacts of the run, with SHA256SUMS, but no APK and nothing is
 #   attached to a release. Without the key the release APK would be signed
 #   with the debug key (android/app/build.gradle.kts), and such a file must
 #   never look like a release file. For a signed APK push a tag (or run the
@@ -33,7 +35,7 @@
 #     * Environment secrets: ANDROID_KEYSTORE_BASE64 (the .jks file, base64),
 #       ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD;
 #       then delete them from the repository secrets, so that no other job
-#       can read them. Without them the APK is not built (a warning).
+#       can read them. Without them no APK is built (a warning).
 #     * ZEN_RELEASE_SIGNING_KEY: the release signing key (the contents of
 #       the file `dart run tool/zen_release.dart keygen` wrote; its hybrid
 #       id is in kReleaseMaintainers, docs/RELEASES.md, section 8.6). The sign job
@@ -133,7 +135,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if (-not $env:KEYSTORE) {
-            Write-Output "::warning::No release key in the secrets of the environment 'release': Zen.apk is not built."
+            Write-Output "::warning::No release key in the secrets of the environment 'release': the APKs are not built."
             "ready=false" >> $env:GITHUB_OUTPUT
             exit 0
           }
@@ -147,24 +149,35 @@ jobs:
           ) | Set-Content -Encoding ascii android/key.properties
           "ready=true" >> $env:GITHUB_OUTPUT
 
-      # One universal APK, as the self-update and "Podaj dalej" expect;
-      # Gradle builds the Go bridge for each of its three ABIs.
+      # One APK per ABI (a universal one carries all three and is much
+      # bigger); Gradle builds the Go bridge for each of the three ABIs. The
+      # app picks the APK of its device's ABI (android_abi.dart), as does
+      # Obtainium (by the ABI in the file name). The version code is the
+      # same in all three (android/gradle.properties).
       - name: Build (the Go bridge builds itself)
         if: steps.key.outputs.ready == 'true'
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64
 
       - name: Release files
         if: steps.key.outputs.ready == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/app/outputs/flutter-apk/app-release.apk dist/Zen.apk
+          Copy-Item build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/Zen-arm64-v8a.apk
+          Copy-Item build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/Zen-armeabi-v7a.apk
+          Copy-Item build/app/outputs/flutter-apk/app-x86_64-release.apk dist/Zen-x86_64.apk
+
+      # All three signed with one and the same certificate (the app checks
+      # an update against its own certificate; the install page shows one).
+      - name: One signing certificate
+        if: steps.key.outputs.ready == 'true'
+        run: dart run tool/zen_release.dart fingerprint dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
 
       # 16 KB pages: every 64-bit library's LOAD segments aligned to 0x4000
       # and stored on a 16 KB boundary of the APK (Google Play, Android 15+).
       - name: 16 KB page alignment
         if: steps.key.outputs.ready == 'true'
-        run: python tool/ci/check_page_alignment.py dist/Zen.apk
+        run: python tool/ci/check_page_alignment.py dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
 
       - name: Forget the release key
         if: always()
@@ -290,7 +303,14 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
-      - name: Build (the Go bridge builds itself)
+      # Built on its own, with its output in the log; inside MSBuild its
+      # check fails on this runner without saying why, so it is skipped there.
+      - name: Go bridge (ARM64)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_if_changed.ps1 -Target windows -Arch arm64
+
+      - name: Build
+        env:
+          ZEN_SKIP_GO_BRIDGE: '1'
         run: flutter build windows --release
 
       - name: Visual C++ runtime
@@ -358,6 +378,9 @@ jobs:
       - name: Build tools and libraries
         run: |
           sudo apt-get update
+          # Ubuntu 22.04 runners carry libunwind-14-dev, which conflicts
+          # with the libunwind-dev that libgstreamer1.0-dev needs.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             make g++ \

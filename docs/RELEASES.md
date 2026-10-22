@@ -5,21 +5,24 @@ official, which channels to distribute it through (section 4, section 6: Android
 verification, stores, iPhone, costs and plan) and what to do about updates
 over the network.
 
-UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
-"Pass it on", the in-app way of handing Zen to a friend; "O aplikacji" =
-"About").
+UI strings quoted below are the app's English labels ("Pass it on" is the
+in-app way of handing Zen to a friend).
 
 - **Repository:** https://github.com/robertostrowskijagoda/Zen
 - **Website:** the human-facing page is the repository `README.md`. The only
   file on GitHub Pages is the invitation page (`tool/pages/index.html`,
   workflow `pages.yml`); it opens Zen with the code from a QR code or shows
   the download links.
-- **Android package:** `com.roj.zen` (formerly `com.HuraganKodu.zen`).
+- **Android package:** `com.roj.zen`.
 - **License:** `LICENSE` — GPL-3.0-only (the unmodified GNU text), with
-  additional terms under GPL section 7 in `NOTICE`: copies keep "Zen by Robert
-  Ostrowski-Jagoda" and the donation link in the About screen; modified
-  versions are marked as changed and use another name and icon. Every release
-  ships `LICENSE` and `NOTICE`.
+  additional terms under GPL section 7 in `NOTICE`: copies keep the author
+  attribution "Zen by Robert Ostrowski-Jagoda" ("Based on Zen by …" in a
+  modified version) among the legal notices in the About screen; modified
+  versions are marked as modified, use a clearly different name, icon and
+  application ID, and are never passed off as official; no trademark rights.
+  The donation link is not a licence condition (NOTICE, section 2).
+  Repository and distribution builds of a release may keep the name (NOTICE,
+  section 5). Every release ships `LICENSE` and `NOTICE`.
 
 ## 1. Repository
 
@@ -45,8 +48,7 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
    **Settings → Pages → Source: GitHub Actions**. On the free plan GitHub
    Pages works only for **public** repositories.
 3. Enable Issues in the repository settings; description: "A network of people
-   who know each other — a messenger without servers, ads or an algorithm"
-   (the repository description is in Polish).
+   who know each other — a messenger without servers, ads or an algorithm".
 4. **Contributions:** `CONTRIBUTING.md` (checks to run, and the contributor
    licence grant: GPL-3.0-only for everyone plus an additional licence to
    the maintainer that allows store distribution, with the promise that
@@ -73,8 +75,8 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
    and password with Shamir (e.g. 3 of 5) among trusted people; never publicly,
    never in the repository. If the key ever has to change — rotation through
    APK Signature Scheme v3 (the old key signs the new one).
-4. **Certificate fingerprint** (paste it into the README section "Czy to nie
-   wirus?" ("Isn't it a virus?") and into the description of every release):
+4. **Certificate fingerprint** (paste it into the README section "Isn't it a
+   virus? How to check" and into the description of every release):
    ```
    keytool -list -v -keystore zen-release.jks -alias zen | findstr SHA256
    ```
@@ -90,13 +92,12 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
    APK certificates is pure Dart, `apk_signing_block.dart`, shared by the app
    and the tool.)
 
-Earlier builds were signed with the debug key; Android does not let an app be
-overwritten by one signed with a different key. Changing the package to
-`com.roj.zen` creates a new app anyway (item 3.8).
+Android does not let an app be overwritten by one signed with a different
+key, so every release must be signed with this key.
 
 ## 3. Release step by step
 
-**In short** (the details follow in items 1–8):
+**In short** (the details follow in items 1–7):
 
 1. Make sure `main` is green in CI and the "Unreleased" part of
    `CHANGELOG.md` says what is new. For **1.12.0 only**: run
@@ -173,7 +174,7 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    environment** (Settings → Environments; not the repository secrets):
    `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-   — without them the workflow skips `Zen.apk` — and
+   — without them the workflow skips the APKs — and
    `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
    `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
    warning). Only the `android` and `sign` jobs use the environment. It
@@ -188,17 +189,19 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    repository or organization secret: the keys must live only in the
    environment. Environments with required reviewers are free for public
    repositories. A manual run from a branch builds the other files as
-   artifacts, without `Zen.apk` and without a release. **Windows ARM64 is
+   artifacts, without the APKs and without a release. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
    `flutter build apk|windows|linux|macos --release` (requirements: README,
-   "Budowanie ze źródeł" ("Building from source")).
+   "Building from source").
 4. **Files under exactly these names** (what `release.yml` produces):
-   - `Zen.apk` — `build/app/outputs/flutter-apk/app-release.apk`; one
-     universal APK with three ABIs: arm64-v8a, armeabi-v7a (32-bit) and
-     x86_64 (ChromeOS, emulators); no x86 (Flutter has no x86 release
-     engine);
+   - `Zen-arm64-v8a.apk`, `Zen-armeabi-v7a.apk`, `Zen-x86_64.apk` — one APK
+     per ABI (`flutter build apk --release --split-per-abi`, from
+     `build/app/outputs/flutter-apk/app-<abi>-release.apk`): arm64-v8a for
+     most phones, armeabi-v7a for older 32-bit phones, x86_64 for
+     Chromebooks and emulators; no universal APK and no x86 (Flutter has no
+     x86 release engine);
    - `Zen-Windows.zip` — the zipped folder
      `build/windows/x64/runner/Release`, with the Microsoft Visual C++
      runtime (`msvcp140*.dll`, `vcruntime140*.dll`) copied next to
@@ -235,8 +238,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
      in System Settings → Privacy & Security);
    - `Zen-unsigned.ipa` — from the "iOS" workflow;
    - `LICENSES-GO.txt` — `native/yggdrasil_bridge/LICENSES-GO.txt` (licenses
-     of the Go modules in the bridge; they are also in the app: "O aplikacji
-     → Licencje", next to `zen.exe` in the ZIPs and next to `zen` in the Linux
+     of the Go modules in the bridge; they are also in the app: "About →
+     Licenses", next to `zen.exe` in the ZIPs and next to `zen` in the Linux
      archives);
    - `LICENSE` and `NOTICE` — the GPL-3.0 text and the author's additional
      terms (GPL section 4 asks for a copy of the licence with every copy);
@@ -257,16 +260,17 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    (no self-update, no APK handing, no icon camouflage). Never
    attach them to a GitHub release or hand them to people to sideload.
 
-   The README links to `…/releases/latest/download/Zen.apk`,
+   The README links to `…/releases/latest/download/Zen-arm64-v8a.apk`,
    `…/releases/latest/download/Zen-Windows.zip`
    and `…/releases/latest/download/Zen-unsigned.ipa`, so fixed names always
-   give the newest version in one click (likewise `Zen-Windows-arm64.zip`,
+   give the newest version in one click (likewise the other two APKs,
+   `Zen-Windows-arm64.zip`,
    `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, the `.deb` files, `Zen-Linux-x64.flatpak` and
    `Zen-macOS.zip`).
 5. **Checksums:** `SHA256SUMS` is computed by the last-but-one job of
    `release.yml` over all release files (`sha256sum` format; check with
    `sha256sum -c SHA256SUMS`, on Windows
-   `Get-FileHash -Algorithm SHA256 Zen.apk`). Anyone may redistribute copies, and the
+   `Get-FileHash -Algorithm SHA256 Zen-arm64-v8a.apk`). Anyone may redistribute copies, and the
    sums let people check that a copy is the official one, so they must accompany
    every release — also after replacing a file by hand they must be computed
    and signed again (section 8.6). The job runs only when the required builds
@@ -280,12 +284,9 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    Publish it by hand after checking.
 7. **Verification:** `dart run tool/release.dart verify` on the downloaded
    files (step 4 above), then download from `releases/latest/download/`,
-   compare the sum, `apksigner verify --print-certs Zen.apk` (fingerprint as in the
-   README), install on a clean phone and run on Windows, Linux and Mac.
-8. **First release with `com.roj.zen`:** state in the description that it is a
-   new app — the old one (`com.HuraganKodu.zen`) stays alongside with its
-   data. The account moves via "Podłącz nowe urządzenie" ("Connect a new
-   device", section 6.5) or recovery; then the old one can be uninstalled.
+   compare the sum, `apksigner verify --print-certs Zen-<abi>.apk` for each
+   APK (fingerprint as in the README), install on a clean phone and run on
+   Windows, Linux and Mac.
 
 ### 3.1. Go bridge (native/yggdrasil_bridge)
 
@@ -304,19 +305,18 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
   list in `bridge_tools.ps1`); each ABI has its own `.sha256` marker, so only
   changed ones are rebuilt. Gradle takes the ABIs from Flutter's
   `target-platform`: `flutter run` builds the bridge only for the device's ABI,
-  `flutter build apk` for all three (`abiFilters`; the script reads
-  `ZEN_ANDROID_ABIS`). The APK stays a single universal file; its native
-  libraries are compressed (`useLegacyPackaging`) so that three ABIs do not
-  make it ~2.5 times bigger. `--split-per-abi` works (then without
-  `abiFilters`) — an option if the APK gets too big, but self-update and
-  "Podaj dalej" assume a single file. CI (`android-bridge` in `ci.yml`) builds
+  `flutter build apk` for all three (the script reads `ZEN_ANDROID_ABIS`).
+  Releases are split per ABI (`--split-per-abi`), so each APK carries the
+  libraries of one ABI only; there is no universal APK. The self-update
+  downloads the APK of the phone's own ABI, and "Pass it on" hands over the
+  APK installed on the phone. CI (`android-bridge` in `ci.yml`) builds
   all three ABIs and checks the `YggStartNode` export.
 - **16 KB memory pages:** the build scripts link every ABI with
   `-Wl,-z,max-page-size=16384`, and `tool/ci/check_page_alignment.py` checks
   that every 64-bit `.so` has all its `PT_LOAD` segments aligned to at least
   16 KB and that in the APK each uncompressed `.so` starts on a 16 KB
   boundary (as `zipalign -P 16`). CI runs it on the bridge, the release job
-  on the finished `Zen.apk`. `bridge_tools.ps1` picks the newest NDK by
+  on every finished APK. `bridge_tools.ps1` picks the newest NDK by
   version number, not by name.
 - **Without Go** (or without NDK / a C compiler) the existing library is used
   with a warning; without it the build aborts, saying what is missing.
@@ -442,8 +442,8 @@ State as of 15.10.2026 (sources: section 6.6):
 
 - On **certified** phones (with Google services) only apps whose package and
   signing key were registered by a verified developer will be installable and
-  updatable — regardless of where the file comes from (store, browser, "Podaj
-  dalej", self-update).
+  updatable — regardless of where the file comes from (store, browser, "Pass
+  it on", self-update).
 - **From 30.09.2026** this applies only to installs from "participating
   stores" (Google Play, Galaxy Store, HONOR, OPPO, Xiaomi GetApps, vivo, Palm
   Store) in Brazil, Indonesia, Singapore and Thailand. Installing from a file
@@ -458,7 +458,7 @@ State as of 15.10.2026 (sources: section 6.6):
   Google (GrapheneOS, LineageOS without GMS, Huawei) or to corporate devices.
 - Installing a little-known app without internet may fail — Google admitted
   that "in the worst case" verification needs a network (uncertain; matters
-  for "Podaj dalej" offline).
+  for "Pass it on" offline).
 
 **To do by the end of 2026 (~PLN 100):**
 
@@ -475,19 +475,19 @@ State as of 15.10.2026 (sources: section 6.6):
 4. The free "limited distribution" account (no document, up to 20 devices,
    each must accept an invitation) is only good for tests.
 5. When verification covers the EU: on a phone with verification active, check
-   installing through "Podaj dalej" without internet; if it needs a network,
-   say so on the "Podaj dalej" screen.
+   installing through "Pass it on" without internet; if it needs a network,
+   say so on the "Pass it on" screen.
 
 ## 5. How to check that a file is official
 
 - **Certificate fingerprint** and **`SHA256SUMS`** with every release and in
   the README.
 - User: downloads only from the repository (the address starts with
-  `github.com/robertostrowskijagoda/`) or from a friend via "Podaj dalej"; may
+  `github.com/robertostrowskijagoda/`) or from a friend via "Pass it on"; may
   upload the file to virustotal.com; Android scans the app on install; the
   same signing key means a fake will not install "over" the real Zen.
-- In the app: pinned fingerprint, "Oficjalna kopia" ("Official copy")
-  in "O aplikacji", a red warning for every APK with a mismatching signature
+- In the app: pinned fingerprint, "Official copy"
+  in About, a red warning for every APK with a mismatching signature
   or sum, and a **signed manifest** with the donation link, author and
   repository (section 8.2) and a canary (section 8.3).
 - **Windows:** no Authenticode signature today, so SmartScreen shows "Windows
@@ -513,11 +513,11 @@ legal nor tax advice; uncertain places are marked.
 
 | Channel | State | Notes |
 |---|---|---|
-| GitHub Releases | main channel | signed APK (arm64-v8a, armeabi-v7a, x86_64), desktop packages, `SHA256SUMS`; from 2027 only with a registered package (section 4) |
-| "Podaj dalej" in the app | works | hotspot, Wi-Fi, Quick Share, USB from a computer; from 2027 as above, possibly only once online |
+| GitHub Releases | main channel | signed APKs, one per ABI (arm64-v8a, armeabi-v7a, x86_64), desktop packages, `SHA256SUMS`; from 2027 only with a registered package (section 4) |
+| "Pass it on" in the app | works | hotspot, Wi-Fi, Quick Share, USB from a computer; from 2027 as above, possibly only once online |
 | Obtainium | works, nothing to do | installs and updates straight from GitHub Releases; not a store — no review or license requirements. To do: a "Get it on Obtainium" button in the README and the key fingerprint to check (e.g. AppVerifier) |
 | Own F-Droid repository | possible | `fdroidserver` → static files on GitHub Pages; an address or QR to add in F-Droid, Droid-ify, Neo Store; no review |
-| F-Droid (main) and IzzyOnDroid | possible, not set up | the GPL-3.0 license meets their rule (OSI- or FSF-approved). F-Droid builds from source: it needs a build recipe (Flutter + the Go bridge) and the built-in updater off in that build; the GIF search (klipy.com) may get the "NonFreeNet" anti-feature. Such builds may keep the name and icon (`NOTICE`, 3.3) |
+| F-Droid (main) and IzzyOnDroid | possible, not set up | the license meets their rule (FSF- or OSI-approved; the NOTICE terms stay within GPL section 7). What is needed, and what may slow F-Droid down: section 6.1.2. Such builds may keep the name and icon (`NOTICE`, section 5) |
 | Google Play | possible, separate variant (section 6.2) | personal account USD 25; new personal account: closed test with at least 12 testers for 14 days, then a production application (~7 days); name, surname and country public; targetSdk 36 for new apps and updates |
 | Samsung Galaxy Store | possible, same variant | no fees, manual review; from 30.09.2026 a store participating in Google verification |
 | Huawei AppGallery | optional | Huawei phones without Google (Google verification does not apply); Zen uses no Google services — check on one phone |
@@ -552,6 +552,64 @@ variant would have to download Cisco's binary on first use (as Firefox
 does) or use the system's GStreamer encoder. AAC-LC (vo-aacenc): negligible
 risk.
 
+#### 6.1.2 F-Droid and IzzyOnDroid
+
+State as of 22.10.2026; sources: section 6.6.
+
+**License.** Both accept licenses approved by the FSF or the OSI.
+GPL-3.0-only qualifies, and the `NOTICE` terms are only of the kinds GPL
+section 7 permits: keeping the author's name among the legal notices (7(b)),
+marking modified versions and not passing them off as the original (7(c)),
+no trademark rights (7(e)), plus a permission for repository builds. The
+donation link is deliberately **not** a condition: the FSF reads 7(b) as
+covering the identification of authors and legal notices, not links to
+other material, so a required donation link would be a "further
+restriction" that anyone may remove — and a license with such a term looks
+non-free to reviewers. Requiring a different name for modified versions is
+allowed by the Debian Free Software Guidelines (item 4), and F-Droid itself
+requires forks to change the application ID, name and icon. In F-Droid
+metadata: `License: GPL-3.0-only`. The contributor licence grant in
+`CONTRIBUTING.md` binds only contributors and does not change the license
+anyone receives Zen under. To be reviewed by a lawyer before the first
+submission, together with the grant.
+
+**What the code already meets:** no Google Play services, Firebase,
+Crashlytics, ML Kit or other proprietary library (QR codes: zxing in pure
+Dart; location: Android's own `LocationManager`; biometrics: AndroidX); no
+tracker or analytics; no prebuilt binaries in the repository (the Go bridge
+and `jniLibs` are built from source); fonts under the SIL OFL, Material
+Icons under Apache-2.0, sounds generated by a script, logo and icons under
+GPL-3.0 — so no "NonFreeAssets".
+
+**F-Droid (builds from source and signs with its own key):**
+
+| Item | What to do | Effort |
+|---|---|---|
+| Build recipe | a merge request to `fdroiddata` with `metadata/com.roj.zen.yml`: Flutter from the `flutter` srclib at the version in `pubspec.yaml`, Go 1.26 downloaded with a pinned SHA-256 (Debian's is older), the NDK; one build per ABI (`--split-per-abi --target-platform android-arm64`, `android-arm`, `android-x64`, each with its own `VercodeOperation`) | 1–2 days, including a local `fdroid build` run |
+| Self-update | build the store variant: `flutter build apk --release --flavor appStoreOnly` (or `--dart-define=ZEN_STORE=true`). It has no GitHub update check, no APK sharing, no `REQUEST_INSTALL_PACKAGES`, and it skips the "re-signed copy" check, which would otherwise flag F-Droid's signature and block wallet transfers. The app then says it is updated by the store it came from. This is a build option Zen provides, so the build counts as unmodified (NOTICE, section 5) | none (optional: a separate `ZEN_DISTRIBUTION=fdroid` define so About can say "F-Droid build", about half a day) |
+| WebRTC | `flutter_webrtc` pulls the prebuilt `io.github.webrtc-sdk:android` from Maven Central (BSD-3-Clause) and `com.github.davidliu:audioswitch` from JitPack. F-Droid accepts free libraries from trusted Maven repositories, but reviewers may ask for WebRTC to be built from source (F-Droid has discussed hosting its own WebRTC build) | none to days, depending on review; the slowest item |
+| GIF search (KLIPY) | a proprietary network service, on by default (turned off in Settings → GIFs) — expect the `NonFreeNet` anti-feature in the metadata. Optional: a build define that turns GIF search off by default in the F-Droid build | metadata only (define: about 2 hours) |
+| DNS fallback | only when the system resolver fails, the Go bridge asks Quad9, Cloudflare and Google Public DNS over TLS; say so in the description (not an anti-feature by itself) | none |
+| Store listing | `fastlane/metadata/android/en-US/` (title, short and full description, screenshots, changelogs per `versionCode`) — F-Droid and IzzyOnDroid read it | 1–2 hours |
+| Name and ID | F-Droid asks for an application ID based on a domain the developer controls (`roj.com` is not the author's) and for no trademark conflicts ("Zen" is a common word; other apps use it). Low risk: the ID is unique | — |
+
+**IzzyOnDroid** (ships the APK from GitHub Releases, signed by the author):
+APKs of **up to about 30 MB** each — the per-ABI APKs must fit, or ask for
+an exception; the full (GitHub) build keeps its updater because the APK is
+the author's own, but IzzyOnDroid requires that nothing executable is
+downloaded without explicit, opt-in consent: Zen downloads an update only
+after "Update" is pressed, and the automatic check against
+api.github.com could be made a setting (about half a day) if the review
+asks. No `android:debuggable`/`testOnly`. The request is an issue in
+IzzyOnDroid's repository with the GitHub link.
+
+**Debian, Flathub, other distributions:** the license fits (DFSG items 3, 4
+and 8: modified versions may be required to carry a different name; NOTICE
+section 5 gives the same permission to every distribution and to anyone
+redistributing their builds). Practical blockers are not legal: Debian
+does not package Flutter; Flathub would refuse the from-source OpenH264
+(section 6.1.1). Inside a Flatpak Zen already downloads no updates.
+
 ### 6.2 Store variant of Android (Google Play, Galaxy Store)
 
 Model: Signal — **the same package `com.roj.zen` and the same key**, two
@@ -568,9 +626,8 @@ only where the stores force it, in three places, and nothing else changes
 
 1. no self-update and no `REQUEST_INSTALL_PACKAGES` (self-update from
    outside Play is a hard violation of the Device and Network Abuse policy);
-   the Updates screen says "Aktualizacje ze sklepu" ("Updates from the
-   store");
-2. "Podaj dalej" passes Zen on as a link (`--dart-define=ZEN_STORE_URL=…`,
+   the Updates screen says "Store updates";
+2. "Pass it on" passes Zen on as a link (`--dart-define=ZEN_STORE_URL=…`,
    default: the project page), never as an APK;
 3. no launcher disguise (the manifest in `src/appStoreOnly` removes the
    alias).
@@ -638,7 +695,7 @@ changes are planned.
   the release tag; without either, a source with no app). A checksum
   mismatch stops the deployment. The install page data (`release.json`)
   carries the APK certificate fingerprint pinned in `apk_signature.dart` at
-  the tag; the fingerprint of the released `Zen.apk` (from `apksigner`) must
+  the tag; the fingerprint of every released APK (from `apksigner`) must
   match it, or Pages is not deployed.
   The free Apple ID signature lasts 7 days; Zen reads its expiry date from
   the installed profile and reminds the user in Chats 2 days before.
@@ -668,8 +725,8 @@ changes are planned.
   stores; AltStore PAL works in both with the same package.
 - **In every iOS channel:** no persistent background connection; notifications
   about messages and calls would need a server sending APNs (PushKit +
-  CallKit) — owner's decision: none, so Zen on iPhone receives only while it is
-  open; self-update and "Podaj dalej" are impossible. The Enterprise program
+  CallKit) — Zen has none by design, so on iPhone it receives only while it is
+  open; self-update and "Pass it on" are impossible. The Enterprise program
   and "signers" using corporate certificates — no.
 
 ### 6.4 Costs and entity
@@ -723,7 +780,7 @@ Now (October–December 2026):
 8. Privacy policy and terms — required by the stores; with klipy.com and
    public Yggdrasil nodes. Drafts exist in `docs/PRIVACY.md` and
    `docs/TERMS.md` (not legal advice; to be reviewed by the maintainer),
-   with `docs/PROTOCOL.md` (protocol specification from the code); "O aplikacji" links to the privacy
+   with `docs/PROTOCOL.md` (protocol specification from the code); About links to the privacy
    policy and terms on GitHub.
 
 In 2027:
@@ -735,7 +792,7 @@ In 2027:
   Supreme Court ruling in Epic v. Apple (about 06.2027);
 - a foundation, if the project grows (organization account, fee waiver → Web
   Distribution in the EU);
-- F-Droid and IzzyOnDroid: possible since the GPL-3.0 license (section 6.1).
+- F-Droid and IzzyOnDroid: possible since the GPL-3.0 license (section 6.1.2).
 
 ### 6.6 Sources
 
@@ -746,9 +803,15 @@ In 2027:
   [Android Authority 01.10.2026 — first wave](https://www.androidauthority.com/android-sideloading-developer-verification-first-wave-rollout-3717921/),
   [Android Authority 18.08.2026 — advanced flow](https://www.androidauthority.com/google-android-advanced-flow-sideloading-rollout-begins-3700073/).
 - [F-Droid Inclusion Policy](https://f-droid.org/docs/Inclusion_Policy/),
+  [F-Droid Anti-Features](https://f-droid.org/docs/Anti-Features/),
+  [F-Droid: building WebRTC for apps](https://gitlab.com/fdroid/admin/-/issues/364),
   [IzzyOnDroid Inclusion Policy](https://izzyondroid.org/docs/general/AppInclusionPolicy/),
   [own F-Droid repository](https://f-droid.org/docs/Setup_an_F-Droid_App_Repo/),
   [Obtainium](https://github.com/ImranR98/Obtainium).
+- License: [GPL-3.0 section 7](https://www.gnu.org/licenses/gpl-3.0.html#section7),
+  [FSF: GPL-compliant reasonable legal notices and author attributions](https://www.fsf.org/blogs/community/gpl-compliant-legal-notices-author-attributions),
+  [FSF: AGPL is not a tool for taking freedom away](https://www.fsf.org/blogs/licensing/agpl-is-not-a-tool-for-taking-freedom-away),
+  [Debian Free Software Guidelines](https://www.debian.org/social_contract#guidelines).
 - Google Play: [test for new personal accounts](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en),
   [Device and Network Abuse](https://support.google.com/googleplay/android-developer/answer/9888379?hl=en),
   [REQUEST_INSTALL_PACKAGES](https://support.google.com/googleplay/android-developer/answer/12085295?hl=en),
@@ -781,8 +844,8 @@ In 2027:
   quarter. A collection for one's own work is usually not a "public
   collection" within the meaning of the act. The store build keeps the
   donation link like every other build (section 6.2); if a store's review
-  objects to it, the owner decides then.
-- In the app the donation appears only in "O aplikacji" (at the top), with no
+  objects to it, the maintainer decides then.
+- In the app the donation appears only in About (at the top), with no
   nagging elsewhere. Good practices: a clear goal, short reports.
 
 ## 8. Updates over the network (disabled)
@@ -797,7 +860,7 @@ How it works today (if the list were not empty): a release is accepted when at
 least 2 of 3 maintainers signed it (hybrid Ed25519 + ML-DSA-65, both halves
 must hold), 7 days passed since it was first
 seen (any maintainer can hold it back in that time) and the human presses
-"Zainstaluj" ("Install") themselves. Files travel over the network like any
+"Install" themselves. Files travel over the network like any
 other file (256 KB chunks), so a swapped copy is rejected.
 
 The tool `tool/zen_release.dart` (pure Dart; `keygen`, `pubkey`, `sign`,
@@ -825,8 +888,7 @@ dart run tool/zen_release.dart fingerprint APK|--keystore … [--write]   # sect
 ```
 
 A `.zenupdate` (or just `release.json` or a hold-back file) is loaded in
-**Settings → Aktualizacje i Podaj dalej → Wczytaj aktualizację z pliku**
-("Updates and Pass it on → Load an update from a file"); the app checks the
+**Settings → Updates and Pass it on → Load an update from a file**; the app checks the
 signatures and tells friends about the new version. Argument parsing
 distinguishes option values containing "=" from file names.
 
@@ -851,9 +913,8 @@ repository — by default the same as in the app; change with `--donation`,
 signature covers these together with the APK/ZIP sums. Unknown manifest fields
 are preserved, so the signature of newer manifests still verifies. The app
 remembers the latest signed data (also from a release equal to its own, e.g. a
-loaded `release.json`), passes it on to friends and in "Aktualizacje i Podaj
-dalej" shows a red warning ("To może nie być oficjalny Zen" — "This may not be
-the official Zen") when its own donation link, author or repository differ
+loaded `release.json`), passes it on to friends and in "Updates and Pass it
+on" shows a red warning ("This may not be the official Zen") when its own donation link, author or repository differ
 from the signed ones, plus the list of mirrors. It fetches nothing from the
 network: mirrors are just addresses.
 
@@ -878,11 +939,10 @@ be signed before `until` passes.
 Ping and pong to accepted friends carry `ver`, `build`, `caps` and `minv`,
 the oldest version the sender still talks to (`kMinPeerVersion` in
 `lib/src/app/peer_version.dart`). A build older than a friend's `minv` (or
-than `zen-min` of the latest GitHub release) shows a red tile "Ta wersja
-Zen nie jest już obsługiwana" ("This version of Zen is no longer
-supported") above the bar below. When friends have a newer version, Settings
-shows a quiet bar "Znajomi mają nowszą wersję Zen (X)" ("Friends have a newer
-version of Zen") leading to "Aktualizacje i Podaj dalej". The version is the
+than `zen-min` of the latest GitHub release) shows a red tile "This
+version of Zen is no longer supported" above the bar below. When friends have a newer version, Settings
+shows a quiet bar "Friends have a newer version of Zen (X)" leading to
+"Updates and Pass it on". The version is the
 friend's own claim and affects nothing security-related. A signed release
 marker spreading by gossip is not done.
 
@@ -901,8 +961,9 @@ on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the release
 description is the oldest version still supported (section 3, step 6).
 Inside a Flatpak nothing is downloaded: the card shows the
 `flatpak install` command and opens the release page. A newer `v<version>`
-tag shows the bar "Jest nowa wersja X — warto zaktualizować" with
-"Aktualizuj": the platform's file from section 3 (`Zen.apk`, `Zen-Windows.zip`,
+tag shows the bar "New version X is available — worth updating" with
+"Update": the platform's file from section 3 (`Zen-<abi>.apk` for the phone's
+own ABI, `Zen-Windows.zip`,
 `Zen-Windows-arm64.zip`, `Zen-Linux-<arch>.tar.gz` / `.deb` / `.flatpak`,
 `Zen-macOS.zip`) is downloaded and must match the release's `SHA256SUMS` by
 name and sum. Android: the APK must also be signed with the installed app's
@@ -910,9 +971,9 @@ certificate, then the system installer asks. Windows / Linux tar.gz / macOS:
 unpacked next to the app's folder, a helper script swaps the folders after
 Zen exits and starts the new version; where the folder is not writable
 (Program Files, `/opt/zen`) the file is saved to Downloads and shown. iOS: only the bar. When github.com cannot be reached (network error,
-TLS, timeout — not an HTTP error answer), "Updates" says "Nie mogę sprawdzić
-aktualizacji, strona github jest niedostępna. Możliwe, że ktoś zwalcza tę
-aplikację."; the closable bar shows it only after a second failed attempt
+TLS, timeout — not an HTTP error answer), "Updates" says "I can't check
+for updates, GitHub is unavailable. Someone may be trying to block this
+app."; the closable bar shows it only after a second failed attempt
 (2 min later) while the mesh node has peers. Downloads follow redirects
 only to `github.com`, `objects.githubusercontent.com` and
 `release-assets.githubusercontent.com` (HTTPS). `SHA256SUMS` comes from the
@@ -926,8 +987,8 @@ platforms; on Android in addition to the certificate check) installs a file
 only when the release also has `SHA256SUMS.sig`, signed with one of those
 keys, naming this version and this file with its SHA-256. Without that file,
 with a bad signature or another version, nothing is installed. While the
-list is empty (today) the app behaves as in section 8.5 and "Aktualizacje i Podaj
-dalej" says that this build cannot check the author's signature yet.
+list is empty (today) the app behaves as in section 8.5 and "Updates and Pass it
+on" says that this build cannot check the author's signature yet.
 
 `SHA256SUMS.sig` has the format of a signed release, like the canary (section 8.3):
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
@@ -944,7 +1005,7 @@ dart run tool/zen_release.dart sign SHA256SUMS.sig ~/zen-release.key
 dart run tool/zen_release.dart verify SHA256SUMS.sig
 ```
 
-One-time steps for the owner:
+One-time steps for the maintainer:
 
 1. `dart run tool/zen_release.dart keygen ~/zen-release.key` on your own
    computer (outside the repository, with Go installed); it prints the

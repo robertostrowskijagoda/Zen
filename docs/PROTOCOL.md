@@ -274,7 +274,7 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 | `friend_list` | `l`: list of `{a: address, n: name}`, `d`: sha256 hex digest of the list | Reliable. Sent per friend according to the audience for the friend list; an empty list with the empty-list digest means "forget it". |
 | `meet_req` | `w`: list of `"l"`, `"k"`, `"s"`, `"a"` | Asks again for the friend list, nearby keys, status or alarm key. |
 | `nearby_key` | `z` (`"z2."` + base64url JSON `{v:2, h: mask key, p: pair key for this friend, a: {chain: anchor}}`) | Reliable. Lets the friend recognise this phone's Bluetooth tokens and check its alarm waves (2.12). |
-| `intent` | `s`: `{k, at, until, note?<=140, close?, e?}` or absent | Reliable. A "na teraz" status; absent `s` clears it. |
+| `intent` | `s`: `{k, at, until, note?<=140, close?, e?}` or absent | Reliable. A "Right now" status; absent `s` clears it. |
 
 ### 2.3 Messages
 
@@ -363,8 +363,8 @@ Dart code runs per frame), inside DTLS-SRTP.
   than 64 epochs ahead is ignored.
 - **Fallback:** where the device has no frame encryption, or the other side
   sends no `e2ee` block, the call runs on DTLS-SRTP alone and the call screen
-  says "Szyfrowanie standardowe"; with frame encryption it shows "Szyfrowanie
-  odporne na komputery kwantowe". A group call shows the weakest leg.
+  says "Standard encryption"; with frame encryption it shows "Quantum-resistant
+  encryption". A group call shows the weakest leg.
 - **Platforms:** flutter_webrtc 1.5.2 or later on Android, iOS, macOS,
   Windows and Linux.
 
@@ -453,7 +453,7 @@ runs at most 8 for friends). A knock for such a door is sealed for the flat
 the residents' phones): the friend keeps only ciphertext (at most 10 per
 door, 4 a day, 2 per knocker, 7 days), learns neither who knocked nor which
 flat, and hands it to the resident (`flat_held`, through the relay layer) when
-the resident shows up; the answer to "Wpuść" can travel back the same way.
+the resident shows up; the answer to "Let in" can travel back the same way.
 Doors answer no queries; while the app is locked (Android) the background
 service keeps the doors from its door kit and stores what arrives sealed.
 
@@ -797,7 +797,7 @@ The proof binds the address to the post-quantum device key of the session
 that carried the hello: a hello whose `k` is not the frame's `senderKey` is
 refused, the signed key is pinned (replacing the session's) when the hello
 is of the account known at that address, and the chat with that friend
-shows "Klucz urządzenia się nie zgadza". Device records (`device` in
+shows "The device key doesn't match." Device records (`device` in
 `acts`: {`address`, `name`, `pq`}) name the key too, and friend lists
 (`friend_list` items {`a`, `n`, `k`}) carry the keys friends proved, so
 friends' other devices and friends of friends are pinned before the first
@@ -918,7 +918,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   from the records, and the ordinary group frames (2.4) carry the messages.
 - **Pyramid posts outside the pyramid.** `post` at level 0 (the top) and
   `natpost` are readable by friends of members through `pyr_nat`; the
-  Tablica (feed) filters them as "Piramida" and "Kraj" in the app only.
+  Feed filters them as "Pyramid" and "Country" in the app only.
 
 ## 4. Cryptography summary
 
@@ -938,7 +938,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Dating | `DatingBox`: two layers of the classical X25519 box (`zen.relay.v1`) with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)`; every hop is inside the post-quantum session layer | `dating_crypto.dart` |
 | Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; one-time hybrid cards for anonymous requests and votes; LSAG ring signatures (classical) only for card registration between cellmates | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
 | Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |
-| Releases | hybrid maintainer signatures (maintainers pinned by hybrid id) and APK certificate check ("Podaj dalej") | `update/release.dart`, `apk_signature.dart` |
+| Releases | hybrid maintainer signatures (maintainers pinned by hybrid id) and APK certificate check ("Pass it on") | `update/release.dart`, `apk_signature.dart` |
 
 **Note on direct messages:** every signal between two devices (messages,
 calls' signalling, ledger and pyramid frames, keys) is sealed by Zen's
@@ -1038,7 +1038,7 @@ ML-DSA.
   admissions, handovers of the power key, decisions, rules (`const`),
   tallies, payments and settlements of gates and the access market), alarm
   key certificates and alarm frames (copies rest in mailboxes), answers in
-  "Zapytaj sieć" and introduction requests (they prove authorship beyond
+  "Ask the network" and introduction requests (they prove authorship beyond
   one hop), neighbours' flat profiles, frames, kick votes, key changes and
   reveals, dating vouches, releases, vetoes, the canary and `SHA256SUMS.sig`.
 - **Classical on purpose:**

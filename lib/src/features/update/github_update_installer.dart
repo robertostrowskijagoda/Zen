@@ -13,6 +13,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/security/exported_files.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/release.dart';
@@ -93,7 +94,13 @@ LinuxInstall currentLinuxInstall() {
 ///   page instead ([flatpakUpdateHint]).
 final class SystemGithubInstaller implements GithubUpdateInstaller {
   SystemGithubInstaller({Future<void> Function()? quit})
-    : _quit = quit ?? _quitForUpdate;
+    : _quit = quit ?? _quitForUpdate {
+    // Android: the device's ABIs pick the APK (read long before the first
+    // check of GitHub answers; until then the app's own ABI does).
+    if (!kIsWeb && Platform.isAndroid) {
+      unawaited(loadDeviceAndroidAbis());
+    }
+  }
 
   final Future<void> Function() _quit;
 
@@ -106,6 +113,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
           linux: Platform.isLinux
               ? currentLinuxInstall()
               : LinuxInstall.tarball,
+          androidAbis: deviceAndroidAbis,
         );
 
   @override

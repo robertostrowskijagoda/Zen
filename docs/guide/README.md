@@ -41,8 +41,8 @@ More for the technically minded:
 - [Dependencies](../DEPENDENCIES.md): the libraries Zen is built on, and their
   licences.
 - [Protocol specification](../PROTOCOL.md): the frames and records on the wire.
-- [Privacy policy](../PRIVACY.md) and [terms of use](../TERMS.md) (also in
-  Polish: [polityka prywatności](../PRIVACY.pl.md), [regulamin](../TERMS.pl.md)).
+- [Privacy policy](../PRIVACY.md) and [terms of use](../TERMS.md). Using Zen
+  to break the law is forbidden by the terms of use.
 
 ## Words used in this guide
 

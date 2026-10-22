@@ -116,6 +116,14 @@ class AboutScreen extends StatelessWidget {
               subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
               url: kZenRepositoryUrl,
             ),
+            _LinkTile(
+              key: const Key('about-discord'),
+              icon: Icons.forum_rounded,
+              tone: zenTone(zen, 6),
+              title: t('Zen na Discordzie'),
+              subtitle: t('Pytania, nowości i rozmowy o Zen'),
+              url: kZenDiscordUrl,
+            ),
             for (final AboutSection section in AboutSection.values)
               _SectionTile(section: section),
           ],

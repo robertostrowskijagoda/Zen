@@ -9,7 +9,7 @@ Copyright (C) 2026 Robert Ostrowski-Jagoda
   files) and the screenshots in docs/img: made for Zen.
 
 They are part of Zen and licensed like it, under GPL-3.0-only with the
-additional terms in NOTICE. NOTICE section 3 grants no rights to the name
+additional terms in NOTICE. NOTICE section 4 grants no rights to the name
 "Zen" or to the logo and icons as marks.
 
 The texts of the user interface use the fonts listed under "Fredoka",

@@ -179,7 +179,13 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("check_linux_abi.sh", self.release)
         self.assertIn("check_windows_bundle.py", self.release)
         self.assertIn("copy_vc_runtime.ps1 -Arch x64", self.release)
-        self.assertIn("check_page_alignment.py dist/Zen.apk", self.release)
+        self.assertIn("check_page_alignment.py dist/Zen-arm64-v8a.apk "
+                      "dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk", self.release)
+        # One APK per ABI, never a universal one, all with one certificate.
+        self.assertIn("flutter build apk --release --split-per-abi", self.release)
+        self.assertNotIn("app-release.apk", self.release)
+        self.assertIn("zen_release.dart fingerprint dist/Zen-arm64-v8a.apk "
+                      "dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk", self.release)
         self.assertIn("--runtime-repo=", self.release)
         self.assertNotIn("run: flutter pub get\n", self.release)
 

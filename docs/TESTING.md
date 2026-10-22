@@ -35,7 +35,7 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 |---|---|
 | `test/pyramid_core_test.dart` | ring signatures, rules, state assembly |
 | `test/pyramid_sim_test.dart` | admission, swap and anonymous voting, tree referendum, issuance + transfer + veto, report + crisis notice, chaos (30% loss, phones switched off, split → after healing everyone sees the same), forged records |
-| `test/pyramid_scenarios_test.dart` | delegations, immunity, dating ban, migration, absence, removal, advisory referendum and rules changed by the top, national section, paid mailbox, announcement, "Polecenie", power key handover, cell chats |
+| `test/pyramid_scenarios_test.dart` | delegations, immunity, dating ban, migration, absence, removal, advisory referendum and rules changed by the top, national section, paid mailbox, announcement, sponsorship, power key handover, cell chats |
 | `test/pyramid_security_test.dart`, `test/pyramid_attack_sim_test.dart` | attacks on the pyramid |
 | `test/dating_test.dart`, `test/neighbors_test.dart` | dating and neighbors on several phones |
 | `test/wire/golden_frames_test.dart` | protocol golden samples: frozen ping/pong frames (1.10.0 and 1.11), message, group_invite and a signed journal entry (fixed keys, fixed id). Never edit a sample to make a test pass — add a new one for a new format |
@@ -46,12 +46,12 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/apk_signature_test.dart` | reading APK certificates (`apk_signing_block.dart`) and the pinned fingerprint |
 | `test/network_update_test.dart` | update over the network (disabled while `kReleaseMaintainers` is empty), loading from a file |
 | `test/store_build_test.dart` | the store build: only `appFlavor == 'appStoreOnly'` or `ZEN_STORE` make a store build, tests run as the direct build, the shared link defaults to the project page |
-| `test/about_screen_test.dart` | "O aplikacji" (About), including the Privacy policy and Terms tiles with GitHub links |
+| `test/about_screen_test.dart` | About, including the Privacy policy and Terms tiles with GitHub links |
 | `test/hybrid_kem_test.dart`, `test/hybrid_signature_test.dart`, `test/relay_hybrid_cipher_test.dart`, `test/call_media_e2ee_test.dart`, `test/signature_overhead_test.dart` | post-quantum layers: hybrid KEM, hybrid signatures (both halves must verify, key pinning), mailbox sealing, call media key chains and rotation, size of signed records |
 | `test/pyramid_root_test.dart`, `test/pyramid_rules_v2_test.dart`, `test/pyramid_v2_service_test.dart`, `test/pyramid_feed_test.dart`, `test/pyramid_gate_wallet_test.dart` | pinned genesis and power-key handover, voting after 14 days or `known`, rules changed by the top with the 24 h delay, advisory referenda, cell chats, pyramid posts on the feed, gates paid in points |
 | `test/local_links_test.dart`, `test/native_stream_local_link_test.dart`, `test/runtime_lan_discovery_test.dart`, `test/offline_links_section_test.dart` | offline links with fake transports (settings, per-platform transports, secrets, status text) |
 | `test/alarm_kit_test.dart`, `test/nearby_background_test.dart`, `test/locked_background_inbox_test.dart`, `test/locked_signal_test.dart`, `test/neighbors_mailbox_door_test.dart` | the locked Android service: background key, alarm / nearby / door kits, sealed inbox, mailbox doors |
-| `test/encounters_test.dart`, `test/open_to_meet_test.dart`, `test/food_share_test.dart`, `test/graph_model_test.dart`, `test/dating_test.dart` | "Mijani", "open to meet", food sharing, graph modes and routes, dating intentions and filters |
+| `test/encounters_test.dart`, `test/open_to_meet_test.dart`, `test/food_share_test.dart`, `test/graph_model_test.dart`, `test/dating_test.dart` | "Passed by", "open to meet", food sharing, graph modes and routes, dating intentions and filters |
 | `test/github_update_test.dart`, `test/sound_assets_test.dart` | GitHub release check and verified self-update, sound files |
 
 A new scenario: build a world, perform actions, `await w.net.run()`, check the
@@ -99,7 +99,7 @@ dart run tool/zen_drive.dart status 48888 48889         # /x/state of all
 dart run tool/zen_drive.dart friends 48888 48889 48890  # friendships in turn
 dart run tool/zen_drive.dart pyramid 48888 48889 48890 48891
 dart run tool/zen_drive.dart flats 48888 48889
-dart run tool/zen_drive.dart call 48888 /x/pyramid/post '{"text":"hej"}'
+dart run tool/zen_drive.dart call 48888 /x/pyramid/post '{"text":"hello"}'
 ```
 
 `pyramid` befriends the apps into a tree, founds a pyramid, admits further
@@ -118,13 +118,14 @@ the others (`✓` / `✗ did not arrive in time`).
 4. `dart run tool/zen_drive.dart pyramid 48900 48888 48889 48890`.
 
 The phone connects to the apps on the computer over the real Yggdrasil
-network. The universal APK carries arm64-v8a, armeabi-v7a and x86_64; the
-32-bit (armeabi-v7a) and x86_64 builds are checked in CI only for building and
+network. Install the APK of the phone's ABI (`Zen-arm64-v8a.apk` on most
+phones, `Zen-armeabi-v7a.apk` on older 32-bit ones, `Zen-x86_64.apk` on
+Chromebooks and emulators); the 32-bit (armeabi-v7a) and x86_64 builds are checked in CI only for building and
 exporting the bridge (section 6), not run — try an older 32-bit phone or an
 emulator by hand.
 
 The store variant: `flutter run --flavor appStoreOnly` (or
-`--dart-define=ZEN_STORE=true`) — the update service is off, "Podaj dalej"
+`--dart-define=ZEN_STORE=true`) — the update service is off, "Pass it on"
 shows a link dialog, and the manifest has no `REQUEST_INSTALL_PACKAGES`.
 
 ## 4. Visual audit (`tool/ui_tour/ui_audit_test.dart`)
@@ -226,7 +227,7 @@ never fails the job itself. The release workflow's *SHA256SUMS* job lists
 every release file with its size and checksum the same way.
 
 `release.yml` on a `v*` tag builds all the release files — Android (signed
-universal APK), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
+APKs, one per ABI), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
 `.deb`, macOS and iPhone (`RELEASES.md` section 3). Linux, macOS and Windows on ARM
 have not yet passed their first run — after pushing, check these jobs; if the
 Xvfb start proves unstable, building and the symbol check remain. The release

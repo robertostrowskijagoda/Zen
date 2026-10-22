@@ -88,8 +88,10 @@ final class ZenLocationBridge: NSObject, CLLocationManagerDelegate {
       return "denied"
     case .restricted, .denied:
       return "deniedForever"
+    #if os(iOS)
     case .authorizedWhenInUse:
       return "whileInUse"
+    #endif
     case .authorizedAlways:
       return "always"
     @unknown default:
@@ -99,7 +101,12 @@ final class ZenLocationBridge: NSObject, CLLocationManagerDelegate {
 
   private func authorized() -> Bool {
     let status = manager.authorizationStatus
+    #if os(iOS)
     return status == .authorizedAlways || status == .authorizedWhenInUse
+    #else
+    // A Mac has no "while in use": Location Services allow the app or not.
+    return status == .authorizedAlways
+    #endif
   }
 
   private func current(timeoutMs: Int, _ result: @escaping FlutterResult) {

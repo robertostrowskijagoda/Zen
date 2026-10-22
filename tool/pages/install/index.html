@@ -88,6 +88,7 @@
   }
   .note b { color: var(--text); }
   .warn { color: var(--warn); }
+  .other { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
   footer { text-align: center; font-size: 13.5px; color: var(--muted); margin: 18px 0 30px; }
   .hidden { display: none; }
 </style>
@@ -116,7 +117,9 @@
   var DL = REPO + "/releases/latest/download/";
   var SOURCE = "https://robertostrowskijagoda.github.io/Zen/apps.json";
   var LINKS = {
-    apk: DL + "Zen.apk",
+    apk: DL + "Zen-arm64-v8a.apk",
+    apk32: DL + "Zen-armeabi-v7a.apk",
+    apkX64: DL + "Zen-x86_64.apk",
     obtainium: "obtainium://add/" + REPO,
     obtainiumApp: "https://obtainium.imranr.dev/",
     sidestore: "https://docs.sidestore.io/docs/installation/install",
@@ -135,13 +138,16 @@
     releases: REPO + "/releases/latest",
     repo: REPO,
     msSubmit: "https://www.microsoft.com/wdsi/filesubmission",
-    android2027: REPO + "#android"
+    android2027: REPO + "#android",
+    discord: "https://discord.gg/g4vHvpKV37"
   };
   var SYSTEMS = ["android", "iphone", "windows", "macos", "linux"];
 
   // Markup in the texts: **bold**, `code`, [label|link] for a link and
   // {label|link} for a button, with link a key of LINKS; {source} is the
-  // source address.
+  // source address. A system's "other" is a small line under its first
+  // step (Android: the APKs of the less common ABIs; the button is the one
+  // of most phones).
   var TEXTS = {
     en: {
       title: "Install Zen",
@@ -151,10 +157,11 @@
       android: {
         intro: "Takes a minute. No store and no account needed.",
         steps: [
-          "Download Zen on this phone. {⬇ Download Zen.apk|apk}",
+          "Download Zen on this phone. {⬇ Download Zen|apk}",
           "Open the downloaded file. If the phone asks, allow your browser to install apps (**Allow from this source**) and go back.",
           "Tap **Install**. If Play Protect warns about an unknown app: **More details → Install anyway**."
         ],
+        other: "The button fits most phones (arm64-v8a). Other phones: [armeabi-v7a|apk32] (older 32-bit phones), [x86_64|apkX64] (Chromebooks, emulators). The phone says “App not installed”? Try the 32-bit one.",
         notes: [
           "**Updates by themselves:** with the free [Obtainium|obtainiumApp] app, tap {Add Zen to Obtainium|obtainium} once.",
           "**Signing certificate (SHA-256):** {fingerprint}. Android never installs a copy with another key over Zen.",
@@ -215,7 +222,7 @@
           "**Updates:** the tar.gz copy updates itself. With the .deb Zen saves the new package to Downloads; with Flatpak it opens the release page: install the new file the same way as the first one."
         ]
       },
-      footer: "Is it really Zen? Download only from [GitHub|releases] or from a friend, and compare the file with [SHA256SUMS|sums]. Source code: [github.com/robertostrowskijagoda/Zen|repo].",
+      footer: "Is it really Zen? Download only from [GitHub|releases] or from a friend, and compare the file with [SHA256SUMS|sums]. Source code: [github.com/robertostrowskijagoda/Zen|repo]. Questions and news: [Discord|discord].",
       unknown: "shown with each release on GitHub"
     },
     pl: {
@@ -226,10 +233,11 @@
       android: {
         intro: "Zajmie minutę. Bez sklepu i bez konta.",
         steps: [
-          "Pobierz Zen na ten telefon. {⬇ Pobierz Zen.apk|apk}",
+          "Pobierz Zen na ten telefon. {⬇ Pobierz Zen|apk}",
           "Otwórz pobrany plik. Jeśli telefon zapyta, pozwól przeglądarce instalować aplikacje (**Zezwalaj z tego źródła**) i wróć.",
           "Stuknij **Zainstaluj**. Jeśli Play Protect ostrzega o nieznanej aplikacji: **Więcej szczegółów → Zainstaluj mimo to**."
         ],
+        other: "Przycisk pasuje do większości telefonów (arm64-v8a). Inne telefony: [armeabi-v7a|apk32] (starsze telefony 32-bitowe), [x86_64|apkX64] (Chromebooki, emulatory). Telefon pisze „Aplikacja nie została zainstalowana”? Spróbuj wersji 32-bitowej.",
         notes: [
           "**Aktualizacje same:** w darmowej aplikacji [Obtainium|obtainiumApp] stuknij raz {Dodaj Zen do Obtainium|obtainium}.",
           "**Certyfikat podpisu (SHA-256):** {fingerprint}. Android nigdy nie zainstaluje kopii z innym kluczem w miejsce Zen.",
@@ -290,7 +298,7 @@
           "**Aktualizacje:** wersja z tar.gz aktualizuje się sama. Przy .deb Zen zapisuje nowy pakiet w Pobranych, przy Flatpaku otwiera stronę wydania: nowy plik instaluje się tak samo jak pierwszy."
         ]
       },
-      footer: "Czy to na pewno Zen? Pobieraj tylko z [GitHuba|releases] albo od znajomego i porównaj plik z [SHA256SUMS|sums]. Kod źródłowy: [github.com/robertostrowskijagoda/Zen|repo].",
+      footer: "Czy to na pewno Zen? Pobieraj tylko z [GitHuba|releases] albo od znajomego i porównaj plik z [SHA256SUMS|sums]. Kod źródłowy: [github.com/robertostrowskijagoda/Zen|repo]. Pytania i nowości: [Discord|discord].",
       unknown: "podany przy każdym wydaniu na GitHubie"
     }
   };
@@ -372,7 +380,9 @@
     g.steps.forEach(function (step, i) {
       html += "<li>" + (system === "iphone"
         ? '<div class="step"><div class="txt">' + render(step) + "</div>" + picture(i) + "</div>"
-        : render(step)) + "</li>";
+        : render(step)) +
+        (i === 0 && g.other ? '<div class="other">' + render(g.other) + "</div>" : "") +
+        "</li>";
     });
     html += "</ol>";
     g.notes.forEach(function (n) { html += '<div class="note">' + render(n) + "</div>"; });

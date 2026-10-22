@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -94,6 +95,33 @@ void main() {
     );
     expect(chooseShareNetwork(const <ShareNetwork>[]), isNull);
     expect(ranked.first.label, 'ap0 · 192.168.43.1');
+  });
+
+  test('the page says which phones the APK is for', () async {
+    Future<String> page(Set<String>? abis) async {
+      final ShareAppServer server = ShareAppServer(
+        file: apk,
+        fileName: 'Zen-1.0.0-arm64-v8a.apk',
+        apkAbis: abis,
+      );
+      await server.start();
+      addTearDown(server.dispose);
+      final HttpClient client = HttpClient();
+      addTearDown(() => client.close(force: true));
+      final HttpClientResponse response = await (await client.getUrl(
+        server.pageUri(InternetAddress.loopbackIPv4),
+      )).close();
+      expect(response.statusCode, 200);
+      return response.transform(utf8.decoder).join();
+    }
+
+    final String arm64 = await page(<String>{'arm64-v8a'});
+    expect(arm64, contains('arm64-v8a'));
+    expect(arm64, contains('id="abi"'));
+    expect(arm64, contains('var apk = {"abis":["arm64-v8a"]}.abis;'));
+    final String unknown = await page(null);
+    expect(unknown, isNot(contains('id="abi"')));
+    expect(unknown, contains('Zen-1.0.0-arm64-v8a.apk'));
   });
 
   test('the checksum shown is the SHA-256 of the shared file', () async {

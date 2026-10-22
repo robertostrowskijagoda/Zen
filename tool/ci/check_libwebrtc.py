@@ -45,6 +45,15 @@ PLATFORMS = ("linux-x64", "linux-arm64", "windows-x64", "windows-arm64")
 _PIN_LINE = re.compile(r"^([0-9a-f]{64})\s+(\S+)$")
 
 
+
+def _shown(path):
+    """The path relative to the current folder when it can be (on Windows a
+    path on another drive cannot), else as it is."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return path
+
 def sha256_of(path):
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -163,7 +172,7 @@ def check(platform, bundle, pins_path=PINS, package=None, strict=False, out=prin
     if missing:
         level = "error" if strict else "warning"
         out("::%s::No pinned SHA-256 for %d libwebrtc file(s). After checking "
-            "a trusted build, add to %s:" % (level, len(missing), os.path.relpath(pins_path)))
+            "a trusted build, add to %s:" % (level, len(missing), _shown(pins_path)))
         for line in missing:
             out("    " + line)
         if strict:

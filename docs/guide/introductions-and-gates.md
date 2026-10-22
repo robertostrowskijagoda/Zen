@@ -24,18 +24,18 @@ A **gate** is the terms on which a friend opens the way to one of their
 friends. Every gatekeeper sets just three prices, in pyramid points, each of
 which may be 0 (free):
 
-- **Close friends** (*Przyjaciele*),
-- **Friends** (*Znajomi*, weak acquaintances included),
-- **Further away** (*Dalsi*: friends of friends and beyond, who reach the
-  gatekeeper through an earlier gate),
+- **Close friends**,
+- **Friends** (weak acquaintances included),
+- **Others** (friends of friends and beyond, who reach the gatekeeper
+  through an earlier gate),
 
 plus whether they want to approve each request (by default yes for a free
 gate, no for a paid one). On top of that, a gatekeeper can **open the gate
-for free** for chosen people (*Otwórz za darmo*, from a friend's card on the
+for free** for chosen people (*Open for free*, from a friend's card on the
 graph or in the gate settings). There is no request mechanism for that: if
 someone wants it, they ask in a chat. A gatekeeper may also allow their
 terms to be passed further on, which is how your phone learns about longer
-routes (those further away see the *Further away* price).
+routes (those further away see the *Others* price).
 
 <p align="center">
   <img src="../images/gates-route.svg" width="760" alt="A route through two gates, compared with a direct first message">
@@ -71,7 +71,7 @@ write 3 messages before you answer.
 
 - Gate terms are private between you and each friend, and the "free for"
   list never leaves your phone (each friend only learns their own price),
-  unless you allow your *Further away* price to travel further. Friends pass
+  unless you allow your *Others* price to travel further. Friends pass
   such terms on by themselves up to 6 steps (at most 40 gatekeepers per
   card, nearest first). Beyond that, **Search for further routes** (graph,
   *Path* mode, or *How to reach*) asks the gatekeepers at the edge of what

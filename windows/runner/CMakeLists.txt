@@ -60,6 +60,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib" "ws2_32.lib"
   "wlanapi.lib" "iphlpapi.lib" "bcrypt.lib")
 # The C++/WinRT projections make objects with many sections.
 target_compile_options(${BINARY_NAME} PRIVATE /bigobj)
+# C++20: C++/WinRT then uses the standard coroutines; under C++17 it pulls
+# in <experimental/coroutine>, which Visual Studio 2026 refuses.
+target_compile_features(${BINARY_NAME} PRIVATE cxx_std_20)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

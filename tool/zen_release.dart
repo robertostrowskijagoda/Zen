@@ -8,7 +8,9 @@
 //   dart run tool/zen_release.dart create --version 1.10.0 --build 10 \
 //       --notes "Co nowego" --out release.json \
 //       --mirror https://codeberg.org/... \
-//       android=build/app/outputs/flutter-apk/app-release.apk \
+//       android-arm64-v8a=dist/Zen-arm64-v8a.apk \
+//       android-armeabi-v7a=dist/Zen-armeabi-v7a.apk \
+//       android-x86_64=dist/Zen-x86_64.apk \
 //       windows=dist/zen-windows.zip
 //   dart run tool/zen_release.dart sign release.json maintainer.key
 //   dart run tool/zen_release.dart verify release.json
@@ -16,12 +18,13 @@
 //   dart run tool/zen_release.dart sums-manifest --version 1.10.0 \
 //       --out SHA256SUMS.sig SHA256SUMS        # then: sign SHA256SUMS.sig key
 //   dart run tool/zen_release.dart bundle release.json zen-1.10.0.zenupdate \
-//       android=... windows=...
+//       android-arm64-v8a=... windows=...
 //   dart run tool/zen_release.dart revoke --build 10 --why "Powód" \
 //       maintainer.key revoke-10.json
 //   dart run tool/zen_release.dart canary --text "..." --days 90 \
 //       --out canary.json                      # then: sign canary.json key
-//   dart run tool/zen_release.dart fingerprint app-release.apk [--write]
+//   dart run tool/zen_release.dart fingerprint Zen-arm64-v8a.apk \
+//       [Zen-armeabi-v7a.apk Zen-x86_64.apk] [--write]   # one certificate
 //   dart run tool/zen_release.dart fingerprint --keystore zen-release.jks \
 //       [--alias zen]                          # password: $ZEN_STOREPASS
 //
@@ -265,6 +268,27 @@ Future<List<String>> apkFingerprints(File apk) async {
   return newest.toList();
 }
 
+/// The certificates every one of [apks] is signed with (the per-ABI APKs
+/// of a release): throws when there is no file, or when they are not all
+/// signed with exactly the same certificates.
+Future<List<String>> sameApkFingerprints(List<File> apks) async {
+  if (apks.isEmpty) {
+    throw const FormatException('Podaj co najmniej jeden plik APK.');
+  }
+  final List<String> first = await apkFingerprints(apks.first);
+  for (final File apk in apks.skip(1)) {
+    final List<String> other = await apkFingerprints(apk);
+    if (other.toSet().length != first.toSet().length ||
+        !other.toSet().containsAll(first)) {
+      throw FormatException(
+        '${apk.path} jest podpisany innym certyfikatem niż '
+        '${apks.first.path}.',
+      );
+    }
+  }
+  return first;
+}
+
 /// SHA-256 of the certificate of [alias] in [keystore], via `keytool`
 /// (JDK). The password comes from `ZEN_STOREPASS`, or keytool asks.
 Future<String> keystoreFingerprint(String keystore, String alias) async {
@@ -450,7 +474,8 @@ Użycie: dart run tool/zen_release.dart <polecenie>
                                   SHA256SUMS do podpisania (aktualizacja z GitHuba)
   bundle release.json WYJŚCIE.zenupdate platforma=plik...
   revoke --build N --why T KLUCZ WYJŚCIE.json
-  fingerprint PLIK.apk [--write]  odcisk certyfikatu APK
+  fingerprint PLIK.apk... [--write]  odcisk certyfikatu APK (kilka plików:
+                                  muszą mieć ten sam certyfikat)
   fingerprint --keystore PLIK.jks [--alias zen] [--write]''';
 
 String _dartList(String name, List<String> values) =>
@@ -696,7 +721,9 @@ Future<void> _run(String command, List<String> args) async {
                 _option(args, 'alias') ?? 'zen',
               ),
             ]
-          : await apkFingerprints(File(positional.first));
+          : await sameApkFingerprints(<File>[
+              for (final String path in positional) File(path),
+            ]);
       stdout.writeln('Odcisk certyfikatu (SHA-256), do README i wydania:');
       for (final String fp in fingerprints) {
         stdout.writeln('  ${formatCertificateFingerprint(fp)}');

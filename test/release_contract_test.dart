@@ -14,6 +14,8 @@ import '../tool/release_contract.dart';
 Set<String> _appAssetNames() => <String>{
   for (final (String platform, Abi abi) in <(String, Abi)>[
     ('android', Abi.androidArm64),
+    ('android', Abi.androidArm),
+    ('android', Abi.androidX64),
     ('windows', Abi.windowsX64),
     ('windows', Abi.windowsArm64),
     ('macos', Abi.macosArm64),
@@ -42,6 +44,30 @@ void main() {
       );
       expect(workflowProblems(produced, kContractAssets), isEmpty);
       expect(produced, containsAll(kContractAssets));
+    });
+
+    test('Android: one APK per ABI, one version code for all', () {
+      expect(
+        androidBuildProblems(
+          File('.github/workflows/release.yml').readAsStringSync(),
+          File('android/gradle.properties').readAsStringSync(),
+        ),
+        isEmpty,
+      );
+      const String split = 'run: flutter build apk --release --split-per-abi\n';
+      const String props = 'force-version-code-ignoring-abi=true\n';
+      expect(androidBuildProblems(split, props), isEmpty);
+      expect(
+        androidBuildProblems('run: flutter build apk --release\n', props),
+        hasLength(2),
+      );
+      expect(
+        androidBuildProblems('# flutter build apk --split-per-abi\n', props),
+        <String>[
+          'release.yml does not build one APK per ABI (--split-per-abi)',
+        ],
+      );
+      expect(androidBuildProblems(split, ''), hasLength(1));
     });
 
     test('release.yml refuses a tag that is not the version of the build', () {
@@ -187,10 +213,14 @@ void main() {
       );
       expect(
         verifyReleaseJson(
-          release(names: kContractAssets.where((String n) => n != 'Zen.apk')),
+          release(
+            names: kContractAssets.where(
+              (String n) => n != 'Zen-armeabi-v7a.apk',
+            ),
+          ),
           version: '1.12.0',
         ),
-        <String>['Zen.apk is missing'],
+        <String>['Zen-armeabi-v7a.apk is missing'],
       );
       // The optional files may be missing, the signature not when asked for.
       final List<String> required = kContractAssets

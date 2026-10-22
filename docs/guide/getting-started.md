@@ -13,7 +13,7 @@ or from a friend.
 
 | System | How | Steps |
 |---|---|---|
-| Android (arm64, armv7, x86_64) | `Zen.apk`, straight from the page | download, open, **Install** |
+| Android | `Zen-arm64-v8a.apk` for most phones (`Zen-armeabi-v7a.apk` for older 32-bit phones, `Zen-x86_64.apk` for Chromebooks and emulators), straight from the page | download, open, **Install** |
 | iPhone (iOS 15+) | **SideStore**, with the "Add Zen source" link | 8 short steps, a computer once |
 | Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack, run `zen.exe` (the Visual C++ runtime is inside) |
 | macOS 12+ | `Zen-macOS.zip` | drag to Applications; first launch: **Privacy & Security → Open Anyway** |
@@ -49,8 +49,8 @@ to the install page and the same steps for every system.
 ## First start
 
 1. **The rules.** The first screen shows the terms of use, the privacy
-   policy and the licence. Each opens inside the app, in Polish when your
-   app is in Polish (the English licence notice stays binding). You tick
+   policy and the licence. Each opens inside the app. Using Zen to break the
+   law is forbidden by the terms of use. You tick
    *I accept…* and tap **I accept and continue**. Without that nothing is
    created on the device. When a document changes later, Zen asks again.
 2. **The app password.** It encrypts everything Zen keeps on this device and

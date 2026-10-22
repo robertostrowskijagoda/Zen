@@ -1,8 +1,6 @@
 # Zen - Privacy Policy
 
 *Version for Zen 1.11.0 - last updated 22 October 2026.*
-*The app's primary language is Polish; this document is in English. If a
-translation differs, ask on GitHub.*
 
 This policy explains what happens to your data when you use Zen. It is written
 to be honest about how the app actually works, including the places where
@@ -55,10 +53,10 @@ Contact: see section 13.
   gallery, "gratitude cards".
 - **Contacts and conversations:** friends and their levels, groups, messages,
   voice notes, photos, videos and files, your posts, likes and comments.
-- **Features data:** statuses ("na teraz"), events, alarms (including location
+- **Features data:** "Right now" statuses, events, alarms (including location
   and recorded sound, if you use them), neighbours (flats), dating profile and
   decisions, pyramid records and balances, and the ledger of signed entries.
-- **"Mijani" (encounters log):** friends you passed and how many other
+- **"Passed by" (encounters log):** friends you passed and how many other
   Zen phones were around, built only from what "People nearby" hears while it
   scans (nothing scans for it), with the time and, if the phone had a recent
   position, a place rounded to about 100 m. Strangers' tokens are kept in
@@ -100,22 +98,22 @@ Everything below is sent device to device over the Yggdrasil network.
 | You do this | Who receives what |
 |---|---|
 | Send a friend request | The other person: your Zen address, display name and the note you wrote. |
-| Be a friend | Friends can see your profile (name, status, bio, avatar), when you are online / in the foreground (presence pings every ~45 s while the app runs), your current status ("na teraz") if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
+| Be a friend | Friends can see your profile (name, status, bio, avatar), when you are online / in the foreground (presence pings every ~45 s while the app runs), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
 | Like, comment or write to someone who is not your friend | The author of the post and the friends who passed it on get your signed like or comment together with a small signed copy of your profile (name and photo). A first message to a non-friend (only if their settings allow it) carries the same. |
 | Chat | The recipient: message text, attachments, timestamps, typing indicator, delivery and read receipts, disappearing-message timers. |
 | Groups | Every member (up to 256) gets each message. Members learn the group's member list. |
 | Calls | The other participants: call signalling and the media stream (WebRTC). Participants learn your network address and, through WebRTC, network details needed to connect. |
-| Post on your board | The ledger replicates your post to the devices of the chosen audience. Posts with the audience "Wszyscy znajomi", "Znajomi i przyjaciele" or "Tylko przyjaciele" are encrypted so only friends of a high enough level can read them; **public posts and public profile fields can be read by anyone who obtains them**, including people who follow you and anyone they were passed on to. The existence, time and size of entries and your account key are visible to anyone who holds the entry, even for encrypted posts. |
+| Post on your board | The ledger replicates your post to the devices of the chosen audience. Posts with the audience "All friends", "Friends and close friends" or "Close friends only" are encrypted so only friends of a high enough level can read them; **public posts and public profile fields can be read by anyone who obtains them**, including people who follow you and anyone they were passed on to. The existence, time and size of entries and your account key are visible to anyone who holds the entry, even for encrypted posts. |
 | Offline mailboxes | Up to six friends you pick (or the app picks) hold **encrypted** copies of mail addressed to you for up to 14 days, including attachments (up to 24 MB each, within a per-sender quota). They see who it is from and to, size and time, not the content. |
 | Alarm | The friends chosen for alarms: your location (if allowed), a note, recorded sound, and delivery confirmations. Phones nearby may receive a signed Bluetooth "wave" (alarm id and time; only friends can tell whose it is). The location comes from the phone's own location service (never from Google Play services) and is sent only with an alarm or a date-safety request you or the friend triggered. Tapping a map link opens openstreetmap.org in your browser with the coordinates. |
-| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 10 minutes (together with the Bluetooth address); only friends can tell it is you, and they cannot show it to others in your place. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. Friends' phones that hear you may note it in their own private "Mijani" log (section 3.1). |
+| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 10 minutes (together with the Bluetooth address); only friends can tell it is you, and they cannot show it to others in your place. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. Friends' phones that hear you may note it in their own private "Passed by" log (section 3.1). |
 | Offline links | If you leave Wi-Fi discovery on (it is on by default) or turn on Wi-Fi Direct, Bluetooth or Apple Multipeer, your device broadcasts adverts so friends' and your own devices nearby can link with it without internet: on the local network a UDP beacon every 10-30 seconds, over Bluetooth an advertisement with a fixed Zen service id, over Wi-Fi Direct a service record (and, on a phone that hosts a group, the group's name and passphrase). An advert is a Bloom filter of tags only the right devices can test, with a new random salt every time, so strangers see random bytes; they can tell that *a* Zen device with local links is there and roughly how many devices it links with, not who you are. Strangers who join the same Wi-Fi network or group get no link and no data; the handshake proves a shared secret first. |
 | "Open to meet" | Off by default. If you turn it on (a prompt in the dating profile), your friends receive only your intention (dates, new friends or both), and they pass it on to their own friends, so your friends of friends may see a badge on the graph. People you exclude are listed as salted hashes, so friends who pass the flag on can skip them without learning who they are. Nothing else from the dating profile goes with it. |
 | Dinner circles: sharing food | A member's food offer (dish, portions, time window, photo, price or "free") goes to the circle and, if the cook chose, to friends or friends of friends. The place is told only to people the cook accepted; a friend who passes a request between a friend of a friend and the cook also sees the place in the answer. Who fed whom is kept only on the cook's and asker's own phones. |
 | Neighbours | Flat or building members you join: what you choose to reveal in that feature. A knock at a flat's door is held, when no resident is online, by up to six friends of a resident, sealed so that the friend learns neither who knocked nor which flat; if you let your friends run "mailbox doors", your phone does that for them (it holds ciphertext for up to 7 days). |
 | Dating | Your intention (dates, new friends or both) is part of the sealed match test and of your profile, and interests are part of the profile; the filters you set stay on your phone. Small "lanterns" (a one-off key and nothing else: no age, name, gender or preferences; the same shape whether or not you date) are passed up to two hops through friends' phones. A phone that sees a lantern runs a sealed match test; only if the two of you fit does it ask for the profile, which is sent sealed, so the phones on the way cannot read it. Dating never asks about your age. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
 | Pyramid | When you join, you give your birth year, nationality and gender; the person who admits you signs that this is true. Members of the pyramid see your pseudonym, nationality and **age** in your pyramid profile (gender only if you choose to show it). Members also receive the signed records you create (votes, proposals, posts, payments, reports) and share a group chat with the members of their cell and of the cell below (no invitations; all of them see the messages). People outside the pyramid can read posts of the top and of the national section that their friends in the pyramid pass on (the author's pseudonym and the signed post). Votes in your cell are signed anonymously within a ring of members; that signature is classical, so a future quantum computer could in principle link a recorded vote to its signer. |
-| Introductions | The friend who introduces you and the person you are introduced to. Your gate terms (free or a price, consent) go to your friends; if you turn on "Pokazuj moje bramy dalej", your friends pass those terms and your friend list on to their friends, up to two steps. A price for a first message from outside your friends is published on your pyramid price list (members only). Paid gates and first messages are pyramid payments: pyramid members who hold the record can see the pseudonyms of payer and payee, the amount, the time and a label saying that it was a gate or a first message (not the message). A payment is held until the one paid keeps or returns it (or the payer takes it back after a deadline). |
+| Introductions | The friend who introduces you and the person you are introduced to. Your gate terms (free or a price, consent) go to your friends; if you turn on "Show my gates further", your friends pass those terms and your friend list on to their friends, up to two steps. A price for a first message from outside your friends is published on your pyramid price list (members only). Paid gates and first messages are pyramid payments: pyramid members who hold the record can see the pseudonyms of payer and payee, the amount, the time and a label saying that it was a gate or a first message (not the message). A payment is held until the one paid keeps or returns it (or the payer takes it back after a deadline). |
 
 Anything you send can be copied, screenshotted, forwarded or kept by the
 recipient. Ledger entries are **signed and append-only**: other devices may keep
@@ -221,7 +219,7 @@ another Zen user.
   your browser. Zen itself (except the store build) asks GitHub's API for the
   latest release about 20 seconds after start and every 12 hours, and
   downloads the release file (and its `SHA256SUMS`) when you press
-  "Aktualizuj"; GitHub then sees your IP address and the user agent "Zen" and
+  "Update"; GitHub then sees your IP address and the user agent "Zen" and
   which release file you fetched, nothing else (no account, token or device
   id). If GitHub cannot be reached, the app says so. Zen checks the downloaded
   file against the release's checksums (and, on Android, against its own
@@ -232,11 +230,11 @@ another Zen user.
   / macOS maker and, for iPhone, SideStore / AltStore and Apple, may collect
   data about installing and running apps. That is outside Zen.
 - **Phone permissions.** Zen asks for location (alarms, date safety, the
-  "Mijani" place; optional, also in the background if you allow it), Bluetooth
+  "Passed by" place; optional, also in the background if you allow it), Bluetooth
   and nearby Wi-Fi devices (people nearby and offline links, optional), camera and
   microphone (calls, QR scan, recordings), notifications, and a few system
   permissions (foreground service, full-screen alarm, battery optimisation,
-  installing updates from "Podaj dalej" and the self-update). The data is
+  installing updates from "Pass it on" and the self-update). The data is
   used on the device and sent only as described above. Older Android versions
   require the location permission for Wi-Fi Direct (a system rule).
 
@@ -278,11 +276,11 @@ you can exercise most rights yourself:
 - **Access / copy:** it is on your device; features let you export files.
 - **Rectification:** edit your profile and posts; profile changes are sent to
   friends as updates. Edits to posts are new signed entries.
-- **Erasure on your device:** Settings -> *Usuń wszystkie dane* ("Delete all
-  data") wipes keys first, then the files, settings, caches and Zen's
+- **Erasure on your device:** Settings -> *Remove this account from this device* ->
+  *Hold to delete all accounts* wipes keys first, then the files, settings, caches and Zen's
   exported files, and restarts clean. The **panic password** does the same on
   demand. Uninstalling the app removes its data on most systems (platform
-  backups are managed by your OS). "Usuń z mojego urządzenia" removes
+  backups are managed by your OS). "Remove from my device" removes
   reported media from your phone.
 - **Deleting what others hold:** Zen sends friends a delete / removal signal
   where the feature has one (for example removing a friendship, disappearing
@@ -347,6 +345,6 @@ fix and a notice in the GitHub Releases / repository.
 ## 14. Changes
 
 This policy may change when Zen changes. The current version is in the
-repository at docs/PRIVACY.md and linked from the app's "O aplikacji" screen;
+repository at docs/PRIVACY.md and linked from the app's About screen;
 the history is in the repository's change log. A new version applies from the
 Zen release that links to it.

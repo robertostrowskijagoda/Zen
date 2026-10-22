@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 
 /// "Podaj dalej": this device hands the app's installer to someone
 /// nearby over the local network — the same Wi-Fi, or this phone's own
@@ -22,12 +23,18 @@ final class ShareAppServer {
   ShareAppServer({
     required this.file,
     required this.fileName,
+    this.apkAbis,
     this.lifetime = const Duration(minutes: 20),
     Random? random,
   }) : _token = _makeToken(random ?? Random.secure());
 
   final File file;
   final String fileName;
+
+  /// The ABIs of the APK's native code (one per release APK), when known:
+  /// the page says which phones it is for and warns a phone that looks
+  /// like another kind.
+  final Set<String>? apkAbis;
   final Duration lifetime;
   final String _token;
 
@@ -193,7 +200,59 @@ a.b{display:block;text-align:center;background:#2f6f5e;color:#fff;padding:1rem;b
 <li>${text(t('Jeśli telefon zapyta, zezwól przeglądarce na instalowanie aplikacji.'))}</li>
 <li>${text(t('Po instalacji otwórz Zen i dodaj znajomego jego kodem.'))}</li>
 </ol>
-</body></html>''';
+${_abiPart(text)}</body></html>''';
+  }
+
+  /// Which phones the APK is for, and a warning when the browser's phone
+  /// clearly is another kind (best effort: many browsers do not say).
+  String _abiPart(String Function(String) text) {
+    final Set<String>? abis = apkAbis;
+    if (abis == null || abis.isEmpty) {
+      return '';
+    }
+    final String forPhones = t('Ten plik jest dla telefonów typu {type}.', {
+      'type': androidAbisLabel(abis),
+    });
+    final String warning = t(
+      'Ten telefon wygląda na inny typ: Zen może się na nim nie '
+      'zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony '
+      'instalacji Zen, gdy będziesz mieć internet.',
+    );
+    // Data for the script as JSON, never as markup.
+    final String data = jsonEncode(<String, Object>{
+      'abis': abis.toList(),
+    }).replaceAll('<', r'\u003c');
+    return '''<p>${text(forPhones)}</p>
+<p id="abi" style="color:#a33;font-weight:bold" hidden>${text(warning)}</p>
+<script>
+(function () {
+  var apk = $data.abis;
+  // What a phone of this kind can run; null when unsure (a 32-bit
+  // browser on a 64-bit phone, x86 Chromebooks that also run ARM apps).
+  function kinds(arch, bits) {
+    return arch === "arm" && bits === "64" ? ["arm64-v8a", "armeabi-v7a"] : null;
+  }
+  function check(list) {
+    if (!list) { return; }
+    for (var i = 0; i < apk.length; i++) {
+      if (list.indexOf(apk[i]) >= 0) { return; }
+    }
+    document.getElementById("abi").hidden = false;
+  }
+  // armv7l: a 32-bit system (a 32-bit browser on a 64-bit one says
+  // armv8l); Chrome's frozen "Linux armv81" says nothing.
+  var p = String(navigator.platform || "").toLowerCase();
+  if (/armv7l|armv6l/.test(p)) { check(["armeabi-v7a"]); }
+  else if (/aarch64|arm64|armv8l/.test(p)) { check(["arm64-v8a", "armeabi-v7a"]); }
+  var ua = navigator.userAgentData;
+  if (ua && ua.getHighEntropyValues) {
+    ua.getHighEntropyValues(["architecture", "bitness"]).then(function (v) {
+      check(kinds(v.architecture, v.bitness));
+    }, function () {});
+  }
+})();
+</script>
+''';
   }
 }
 

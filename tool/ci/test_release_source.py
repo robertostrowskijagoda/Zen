@@ -8,13 +8,16 @@
   Zen-unsigned.ipa, with the app's bundle id and minimum iOS version, the
   permissions and version numbers of that very IPA (checked against the
   release's SHA256SUMS), and the APK fingerprint the code pins at the tag.
-- Every download link of tool/pages/install/index.html names a file the
-  release workflow makes (the list in tool/release_contract.dart), the
+- Every download link of tool/pages/install/index.html, the invitation
+  page and the door page names a file the release workflow makes (the
+  list in tool/release_contract.dart; Android: one APK per ABI), the
   add-source links use the documented `sidestore://source?url=` /
   `altstore://source?url=` form (AltStore's handler: host "source", query
   "url"; SideStore is a fork of it), Obtainium's is `obtainium://add/<repo>`,
   and every link a text uses exists.
 - The app's constants (install page, source address) are the same.
+- The invitation and door pages start with the "Open in Zen" button, and
+  the pages link the Discord server the app links.
 
 Standard library only.
 """
@@ -181,7 +184,8 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(version["minOSVersion"], target)
         self.assertIsInstance(app["appPermissions"]["entitlements"], list)
         self.assertEqual(page["version"], "9.9.9")
-        self.assertIn("Zen.apk", page["assets"])
+        for apk in ("Zen-arm64-v8a.apk", "Zen-armeabi-v7a.apk", "Zen-x86_64.apk"):
+            self.assertIn(apk, page["assets"])
 
     def test_permissions_come_from_the_released_ipa_not_from_main(self):
         source, _, _ = self.released()
@@ -218,6 +222,14 @@ class SourceTest(unittest.TestCase):
         # An APK signed with another key stops the deployment.
         _, _, status = self.released(apk_signature=APK_SIGNATURE_AT_TAG,
                                      apk_fingerprint="cd" * 32)
+        self.assertEqual(status, 1)
+        # One line per APK (one per ABI): every one must be pinned.
+        _, page, _ = self.released(apk_signature=APK_SIGNATURE_AT_TAG,
+                                   apk_fingerprint=("ab" * 32 + "\n") * 3)
+        self.assertEqual(page["apkCertificateSha256"], FINGERPRINT)
+        _, _, status = self.released(
+            apk_signature=APK_SIGNATURE_AT_TAG,
+            apk_fingerprint="ab" * 32 + "\n" + "cd" * 32 + "\n" + "ab" * 32 + "\n")
         self.assertEqual(status, 1)
         # Nothing pinned at the tag: no fingerprint, even if the APK has one.
         _, page, _ = self.released(apk_signature="", apk_fingerprint="cd" * 32)
@@ -293,6 +305,48 @@ class InstallPageTest(unittest.TestCase):
         self.assertEqual(page, release_source.PAGES + "install/")
         self.assertEqual(source, release_source.PAGES + "apps.json")
         self.assertTrue(os.path.exists(os.path.join(ROOT, "tool/pages/install/index.html")))
+
+
+class InvitationPagesTest(unittest.TestCase):
+    PAGES = ("tool/pages/index.html", "tool/pages/m/index.html")
+
+    def test_downloads_name_release_files(self):
+        assets = set(contract_assets())
+        for path in self.PAGES:
+            html = read(path)
+            downloads = re.findall(r"/releases/latest/download/([^\"]+)\"", html)
+            self.assertIn("Zen-arm64-v8a.apk", downloads, path)
+            self.assertIn("Zen-armeabi-v7a.apk", downloads, path)
+            self.assertIn("Zen-x86_64.apk", downloads, path)
+            for name in downloads:
+                self.assertIn(name, assets, path + ": " + name)
+            # The Android button is the APK of most phones.
+            button = re.search(r'id="android"[^>]*href="([^"]+)"', html).group(1)
+            self.assertTrue(button.endswith("/Zen-arm64-v8a.apk"), path)
+
+    def test_open_in_zen_comes_first_and_big(self):
+        for path in self.PAGES:
+            html = read(path)
+            main = re.search(r"<main>\s*(<[^>]+>)", html).group(1)
+            self.assertIn('id="open"', main, path)
+            self.assertIn("open", re.search(r'class="([^"]+)"', main).group(1).split(), path)
+            self.assertRegex(html, r"a\.btn\.open \{[^}]*font: 800 30px")
+
+    def test_every_language_names_the_other_phones(self):
+        html = read("tool/pages/index.html")
+        texts = re.search(r"var TEXTS = \{(.*?)\n  \};", html, re.S).group(1)
+        languages = re.findall(r'^    "(\w+)": \{', texts, re.M)
+        self.assertEqual(len(languages), 21)
+        self.assertEqual(texts.count('"otherPhones": '), len(languages))
+
+
+class DiscordTest(unittest.TestCase):
+    def test_the_pages_and_the_app_link_the_same_server(self):
+        url = re.search(r"kZenDiscordUrl = '([^']+)'",
+                        read("lib/src/app/zen_web.dart")).group(1)
+        self.assertTrue(url.startswith("https://discord.gg/"))
+        for path in ("tool/pages/index.html", "tool/pages/install/index.html"):
+            self.assertIn(url, read(path), path)
 
 
 if __name__ == "__main__":

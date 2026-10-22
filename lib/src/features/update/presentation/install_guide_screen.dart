@@ -69,7 +69,7 @@ final class InstallStep {
 List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
   InstallSystem.android => <InstallStep>[
     InstallStep(
-      t('Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen.apk”.'),
+      t('Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.'),
     ),
     InstallStep(
       t(

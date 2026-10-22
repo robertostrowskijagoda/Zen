@@ -18,7 +18,7 @@ import 'package:zen/src/features/update/release.dart';
 
 Map<String, Object?> _releaseJson(
   String tag, {
-  Map<String, int> assets = const <String, int>{'Zen.apk': 5},
+  Map<String, int> assets = const <String, int>{'Zen-arm64-v8a.apk': 5},
   bool draft = false,
   bool prerelease = false,
 }) => <String, Object?>{
@@ -32,7 +32,7 @@ Map<String, Object?> _releaseJson(
 };
 
 final class _FakeInstaller implements GithubUpdateInstaller {
-  _FakeInstaller(this.dir, {this.assetName = 'Zen.apk'});
+  _FakeInstaller(this.dir, {this.assetName = 'Zen-arm64-v8a.apk'});
 
   final Directory dir;
   final List<File> installed = <File>[];
@@ -62,11 +62,11 @@ void main() {
         GithubRelease.fromJson(_releaseJson('v1.10.0'))!.isNewerThan('1.9.9'),
         isTrue,
       );
-      expect(r.assets, <String, int>{'Zen.apk': 5});
+      expect(r.assets, <String, int>{'Zen-arm64-v8a.apk': 5});
       expect(
-        r.assetUri('Zen.apk').toString(),
+        r.assetUri('Zen-arm64-v8a.apk').toString(),
         'https://github.com/robertostrowskijagoda/Zen/releases/download/'
-        'v1.12.0/Zen.apk',
+        'v1.12.0/Zen-arm64-v8a.apk',
       );
     });
 
@@ -89,7 +89,11 @@ void main() {
       final GithubRelease r = GithubRelease.fromJson(
         _releaseJson(
           'v2.0.0',
-          assets: <String, int>{'../evil': 3, 'Zen.apk': 0, 'SHA256SUMS': 9},
+          assets: <String, int>{
+            '../evil': 3,
+            'Zen-arm64-v8a.apk': 0,
+            'SHA256SUMS': 9,
+          },
         ),
       )!;
       expect(r.assets, <String, int>{'SHA256SUMS': 9});
@@ -101,7 +105,11 @@ void main() {
         Abi abi, [
         LinuxInstall l = LinuxInstall.tarball,
       ]) => githubAssetName(releasePlatform: p, abi: abi, linux: l);
-      expect(name('android', Abi.androidArm64), 'Zen.apk');
+      expect(name('android', Abi.androidArm64), 'Zen-arm64-v8a.apk');
+      expect(name('android', Abi.androidArm), 'Zen-armeabi-v7a.apk');
+      expect(name('android', Abi.androidX64), 'Zen-x86_64.apk');
+      // No build for 32-bit x86: the APK of most phones.
+      expect(name('android', Abi.androidIA32), 'Zen-arm64-v8a.apk');
       expect(name('windows', Abi.windowsX64), 'Zen-Windows.zip');
       expect(name('windows', Abi.windowsArm64), 'Zen-Windows-arm64.zip');
       expect(name('linux', Abi.linuxX64), 'Zen-Linux-x64.tar.gz');
@@ -120,6 +128,37 @@ void main() {
       );
       expect(name('macos', Abi.macosArm64), 'Zen-macOS.zip');
       expect(name('ios', Abi.iosArm64), isNull);
+    });
+
+    test('Android takes the APK of the best ABI the device supports', () {
+      String apk(List<String> device, Abi running) => githubAssetName(
+        releasePlatform: 'android-armeabi-v7a',
+        abi: running,
+        androidAbis: device,
+      )!;
+      // A 64-bit phone running a 32-bit copy (from a friend) moves to the
+      // 64-bit APK: every APK has the same version code.
+      expect(
+        apk(<String>['arm64-v8a', 'armeabi-v7a', 'armeabi'], Abi.androidArm),
+        'Zen-arm64-v8a.apk',
+      );
+      // 32-bit Android on a 64-bit processor lists only 32-bit ABIs.
+      expect(
+        apk(<String>['armeabi-v7a', 'armeabi'], Abi.androidArm),
+        'Zen-armeabi-v7a.apk',
+      );
+      // A Chromebook: x86_64 first, then the translated ARM ABIs.
+      expect(
+        apk(<String>['x86_64', 'x86', 'arm64-v8a'], Abi.androidX64),
+        'Zen-x86_64.apk',
+      );
+      // Only 32-bit x86 and ARM: not x86 (no build), the ARM one.
+      expect(
+        apk(<String>['x86', 'armeabi-v7a'], Abi.androidArm),
+        'Zen-armeabi-v7a.apk',
+      );
+      // The device said nothing: the ABI the app runs as.
+      expect(apk(const <String>[], Abi.androidArm), 'Zen-armeabi-v7a.apk');
     });
 
     test('Flatpak is recognised (and then nothing is downloaded)', () {
@@ -143,15 +182,20 @@ void main() {
 
     test('SHA256SUMS must list the file by name with its sum', () {
       final String hex = 'ab' * 32;
-      final String sums = '$hex  Zen.apk\n${'cd' * 32} *Zen-macOS.zip\n';
+      final String sums =
+          '$hex  Zen-arm64-v8a.apk\n${'cd' * 32} *Zen-macOS.zip\n';
       expect(
-        sha256SumsConfirm(sumsText: sums, name: 'Zen.apk', sha256Hex: hex),
+        sha256SumsConfirm(
+          sumsText: sums,
+          name: 'Zen-arm64-v8a.apk',
+          sha256Hex: hex,
+        ),
         isTrue,
       );
       expect(
         sha256SumsConfirm(
           sumsText: sums,
-          name: 'Zen.apk',
+          name: 'Zen-arm64-v8a.apk',
           sha256Hex: hex.toUpperCase(),
         ),
         isTrue,
@@ -159,7 +203,7 @@ void main() {
       expect(
         sha256SumsConfirm(
           sumsText: sums,
-          name: 'Zen.apk',
+          name: 'Zen-arm64-v8a.apk',
           sha256Hex: 'cd' * 32,
         ),
         isFalse,
@@ -178,7 +222,7 @@ void main() {
     test('requests and their redirects stay on GitHub, over HTTPS', () {
       for (final String ok in <String>[
         'https://api.github.com/repos/x/y/releases/latest',
-        'https://github.com/robertostrowskijagoda/Zen/releases/download/v1.0.0/Zen.apk',
+        'https://github.com/robertostrowskijagoda/Zen/releases/download/v1.0.0/Zen-arm64-v8a.apk',
         'https://objects.githubusercontent.com/github-production-release-asset/1',
         'https://release-assets.githubusercontent.com/github-production-release-asset/1',
       ]) {
@@ -457,14 +501,14 @@ void main() {
               required int maxBytes,
               void Function(int received)? onProgress,
             }) async {
-              expect(uri.path, endsWith('/v1.12.0/Zen.apk'));
+              expect(uri.path, endsWith('/v1.12.0/Zen-arm64-v8a.apk'));
               expect(maxBytes, 5);
               await target.writeAsBytes(bytes);
               onProgress?.call(bytes.length);
             },
         fetchSums: (Uri uri) async {
           sumsUri = uri;
-          return '${sha256Hex(bytes)}  Zen.apk\n';
+          return '${sha256Hex(bytes)}  Zen-arm64-v8a.apk\n';
         },
       );
       await s.check();
@@ -487,13 +531,13 @@ void main() {
               required int maxBytes,
               void Function(int received)? onProgress,
             }) => target.writeAsString('evil!'),
-        fetchSums: (Uri uri) async => '${'00' * 32}  Zen.apk\n',
+        fetchSums: (Uri uri) async => '${'00' * 32}  Zen-arm64-v8a.apk\n',
       );
       await s.check();
       await s.update();
       expect(s.installState, GithubInstallState.failed);
       expect(installer.installed, isEmpty);
-      expect(File('${dir.path}/Zen.apk').existsSync(), isFalse);
+      expect(File('${dir.path}/Zen-arm64-v8a.apk').existsSync(), isFalse);
     });
 
     test('without release keys the author signature is not asked for '
@@ -514,7 +558,7 @@ void main() {
     group('with a release key', () {
       final List<int> bytes = utf8.encode('hello');
       const Map<String, int> assets = <String, int>{
-        'Zen.apk': 5,
+        'Zen-arm64-v8a.apk': 5,
         kSignedSumsAssetName: 400,
       };
 
@@ -526,7 +570,7 @@ void main() {
         final SignedSums signed = await SignedSums(
           version: version,
           files: <String, String>{
-            'Zen.apk': sha ?? sha256Hex(bytes),
+            'Zen-arm64-v8a.apk': sha ?? sha256Hex(bytes),
             'LICENSE': 'ab' * 32,
           },
           signatures: const <String, String>{},
@@ -560,7 +604,7 @@ void main() {
             fetched.add(uri);
             return uri.path.endsWith('/$kSignedSumsAssetName')
                 ? signature()
-                : '${sha256Hex(bytes)}  Zen.apk\n';
+                : '${sha256Hex(bytes)}  Zen-arm64-v8a.apk\n';
           },
         );
         await s.check();
@@ -592,7 +636,7 @@ void main() {
           ) = await run(
             trusted: key,
             signature: () => signedSums(key),
-            releaseAssets: const <String, int>{'Zen.apk': 5},
+            releaseAssets: const <String, int>{'Zen-arm64-v8a.apk': 5},
           );
           expect(s.installState, GithubInstallState.failed);
           expect(s.installMessage, contains(kSignedSumsAssetName));
@@ -616,7 +660,7 @@ void main() {
               await run(trusted: key, signature: signature);
           expect(s.installState, GithubInstallState.failed);
           expect(installer.installed, isEmpty);
-          expect(File('${dir.path}/Zen.apk').existsSync(), isFalse);
+          expect(File('${dir.path}/Zen-arm64-v8a.apk').existsSync(), isFalse);
         }
       });
     });

@@ -58,6 +58,12 @@ add_subdirectory("runner")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
+# Plugins built with /await or as C++17 (local_auth_windows,
+# flutter_local_notifications_windows) include <experimental/coroutine>
+# through C++/WinRT, which Visual Studio 2026 refuses unless this is set.
+# Set before the plugins' folders are added, so it reaches all of them.
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 include(flutter/generated_plugins.cmake)
 
 

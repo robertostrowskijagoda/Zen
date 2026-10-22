@@ -690,6 +690,28 @@ void main() {
         throwsFormatException,
       );
 
+      // The APKs of every ABI: one certificate, or the release stops.
+      final File arm32 = File(at('Zen-armeabi-v7a.apk'))
+        ..writeAsBytesSync(
+          _apk(<int, List<int>>{_v2: certificate, _v3: certificate}),
+        );
+      final File other = File(at('Zen-x86_64.apk'))
+        ..writeAsBytesSync(
+          _apk(<int, List<int>>{
+            _v2: utf8.encode('inny'),
+            _v3: utf8.encode('inny'),
+          }),
+        );
+      expect(await tool.sameApkFingerprints(<File>[apk, arm32]), <String>[sha]);
+      await expectLater(
+        tool.sameApkFingerprints(<File>[apk, arm32, other]),
+        throwsFormatException,
+      );
+      await expectLater(
+        tool.sameApkFingerprints(const <File>[]),
+        throwsFormatException,
+      );
+
       final String source = File(tool.kApkSignaturePath).readAsStringSync();
       final String pinned = tool.replaceConstList(
         source,

@@ -1,10 +1,19 @@
 # Zen - Terms of Use
 
-*Version for Zen 1.11.0 - last updated 20 October 2026.*
+*Version for Zen 1.11.0 - last updated 22 October 2026.*
 
 By installing or using Zen you agree to these terms. If you do not agree, do
 not use Zen. Read them together with the [Privacy Policy](PRIVACY.md), the
 [LICENSE](../LICENSE) and the [NOTICE](../NOTICE).
+
+## Use Zen only within the law
+
+**You may use Zen only lawfully. Using Zen to break the law is forbidden.**
+This covers every part of Zen: chats, calls, posts, groups, the pyramid and
+its points, dating, meetings, neighbours and everything else. If you use Zen
+illegally, **you alone are responsible** for it and for its consequences; the
+author does not take part in, allow or answer for such use. Section 4 lists
+the forbidden uses in detail.
 
 ## 1. What Zen is
 
@@ -26,10 +35,11 @@ Zen is free software under the GNU General Public License version 3
 section 7 ([NOTICE](../NOTICE)). In short: anyone may use, study, change and
 share Zen, also commercially, as long as the source code goes along under the
 same licence; copies must keep the author attribution "Zen by Robert
-Ostrowski-Jagoda" and the donation link in the About screen (a modified
-version may replace the link only with a marked note pointing to the original
-author's page); modified versions must be marked as changed, must not be presented as the original and must use
-another name and icon. These terms of use do not restrict the rights the
+Ostrowski-Jagoda" ("Based on Zen by Robert Ostrowski-Jagoda" in a modified
+version) among the legal notices in the About screen; modified versions must
+be marked as modified, must not be presented as the original and must use a
+clearly different name and icon. The donation link is not a condition of the
+licence. These terms of use do not restrict the rights the
 licence gives. LICENSE and NOTICE are binding; this paragraph is only a
 summary.
 
@@ -45,7 +55,7 @@ summary.
 - You must not use Zen where its use is unlawful for you.
 - You are responsible for your device, your password, the recovery circle you
   choose, and for keeping your copy of Zen up to date and obtained from a trusted
-  source (the project's GitHub page or a friend using "Podaj dalej").
+  source (the project's GitHub page or a friend using "Pass it on").
 
 ## 4. Your content and your responsibility
 
@@ -55,8 +65,9 @@ share it. You keep your rights in your content. By sending it to other people
 you give them what they need to receive and view it as the feature works, and
 you accept that they may keep copies.
 
-You promise to respect the law and other people. In particular you must not use
-Zen to:
+You promise to respect the law and other people. Using Zen to break the law is
+forbidden (see "Use Zen only within the law" above). In particular you must
+not use Zen to:
 
 - share or ask for **child sexual abuse material**, or to sexualise, groom or
   exploit minors in any way;
@@ -93,14 +104,14 @@ There is no central moderator. Safety in Zen comes from:
 - **who you choose to connect with**: you decide who is your friend, which
   groups and pyramids you join, and you can remove friends, leave groups, block
   people and hide content;
-- **local tools**: "Zgłoś" (report), "Usuń z mojego urządzenia" (remove from my
-  device) and similar controls affect your device and what you pass on;
+- **local tools**: "Report", "Remove from my device" and similar controls
+  affect your device and what you pass on;
 - **the pyramid**, where members can run their own rules, votes, bans,
   reports and appeals according to the structure's own constitution. These
   decisions are made **by the community members**, apply only inside that
   structure, and are not made or reviewed by the author. The author is not
   responsible for decisions of a pyramid, for its rules, or for any money-like
-  points ("waluta") or balances inside it, which are not legal tender and are
+  points (the pyramid currency) or balances inside it, which are not legal tender and are
   not redeemable by the author.
 
 The author does not guarantee that harmful content will be found or removed.

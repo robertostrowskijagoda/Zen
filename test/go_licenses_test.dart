@@ -75,6 +75,38 @@ void main() {
     expect(File(kNoticePath).readAsStringSync(), contains('section 7'));
   });
 
+  test('every bundled native license text is listed in the index', () {
+    // A text left behind for a removed component (for example a non-free
+    // library) would still ship in the app.
+    final Set<String> listed = <String>{
+      for (final NativeLicenseIndexEntry entry in parseNativeLicenseIndex(
+        File('$kNativeLicensesDir/index.txt').readAsStringSync(),
+      ))
+        entry.file,
+    };
+    final List<String> files = <String>[
+      for (final FileSystemEntity e in Directory(kNativeLicensesDir).listSync())
+        if (e is File) e.uri.pathSegments.last,
+    ]..remove('index.txt');
+    expect(files, isNotEmpty);
+    for (final String file in files) {
+      expect(listed, contains(file), reason: file);
+    }
+  });
+
+  test('NOTICE keeps its additional terms within GPL section 7', () {
+    final String notice = File(kNoticePath).readAsStringSync();
+    expect(notice, contains('SPDX-License-Identifier: GPL-3.0-only'));
+    for (final String kind in <String>['7(b)', '7(c)', '7(e)']) {
+      expect(notice, contains('section $kind'), reason: kind);
+    }
+    expect(notice, contains('Zen by Robert Ostrowski-Jagoda'));
+    // The donation link is not a licence condition (FSF: links are not
+    // author attributions under section 7(b)).
+    expect(notice, contains('The donation line is not a condition'));
+    expect(notice, contains('additional permission'));
+  });
+
   test('every bundled font family is in the font license file', () {
     final String pubspec = File('pubspec.yaml').readAsStringSync();
     final String ofl = File(kFontLicensePath).readAsStringSync();

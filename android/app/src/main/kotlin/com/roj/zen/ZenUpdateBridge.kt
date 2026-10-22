@@ -32,7 +32,7 @@ import java.security.MessageDigest
 /**
  * Network updates on Android:
  *  - `zen/app_update`: the APK this app was installed from (to pass on),
- *    and handing a downloaded update to the system installer (the person
+ *    the ABIs the device supports (which per-ABI APK to fetch), and handing a downloaded update to the system installer (the person
  *    confirms in the system dialog; nothing installs silently);
  *  - `zen/share_app`: a local-only Wi-Fi hotspot, so a friend nearby can
  *    download the app from this phone with no internet at all, and the
@@ -66,6 +66,9 @@ object ZenUpdateBridge {
                         // on as one file.
                         result.success(if (splits == null || splits.isEmpty()) info.sourceDir else null)
                     }
+                    // The ABIs this device runs, best first: which of the
+                    // per-ABI release APKs suits it.
+                    "supportedAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
                     "canInstall" -> result.success(
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
                             activity.packageManager.canRequestPackageInstalls(),

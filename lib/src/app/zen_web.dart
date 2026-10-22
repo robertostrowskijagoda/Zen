@@ -24,6 +24,10 @@ const String kZenGithubPagesBase =
 /// The project's page on GitHub (downloads, instructions, the code).
 const String kZenRepositoryUrl = 'https://github.com/robertostrowskijagoda/Zen';
 
+/// The project's Discord server (questions, news, talking with others who
+/// use Zen). Only a link: the app never talks to Discord itself.
+const String kZenDiscordUrl = 'https://discord.gg/g4vHvpKV37';
+
 /// Where new links point: the own domain once there is one.
 const String kZenPagesBase = kZenOwnDomain == ''
     ? kZenGithubPagesBase
