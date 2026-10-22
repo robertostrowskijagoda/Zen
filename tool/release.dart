@@ -325,8 +325,10 @@ Future<bool> _prepare(List<String> args) async {
     return false;
   }
   stdout.writeln(
-    '\nReady. Check the commit, then push it and the tag:\n'
-    '  git push origin HEAD && git push origin $tag\n'
+    '\nReady. Check the commit, push it and merge it into main through a '
+    'pull request (a merge commit, not squash), then push the tag:\n'
+    '  git push origin HEAD\n'
+    '  git push origin $tag\n'
     'The Release workflow builds a draft release; publish it by hand after '
     '`dart run tool/release.dart verify` (docs/RELEASES.md, section 3).',
   );

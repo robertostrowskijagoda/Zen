@@ -8,6 +8,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
+import 'package:zen/src/features/pyramid/pyramid_root.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
@@ -17,7 +18,11 @@ final class PyramidWorld {
     int seed = 1,
     double dropRate = 0,
     this.recordSegmentEntries = kPyrLogSegmentEntries,
+    this.root,
   }) : net = SimNetwork(seed: seed, dropRate: dropRate);
+
+  /// The pyramid the phones keep (the test one when null).
+  final PyramidRoot? root;
 
   /// Builds S on top, A and B under S and A2 under A, B1 under B.
   static Future<PyramidWorld> six({
@@ -104,6 +109,7 @@ final class PyramidWorld {
     final PyramidService s = PyramidService(
       host: p,
       disk: d,
+      root: root,
       identitySeed: fromAccount ? null : seedOf(d),
       now: () => net.now,
       tallyWait: const Duration(minutes: 30),

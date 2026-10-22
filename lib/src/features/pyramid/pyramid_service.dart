@@ -565,8 +565,8 @@ final class PyramidService extends ChangeNotifier {
   final Future<Uint8List?> Function()? identitySeed;
 
   /// The one pyramid this phone keeps ([zenPyramidRoot] unless given):
-  /// records of any other are never taken nor passed on. Null while the
-  /// original pyramid is not pinned yet.
+  /// records of any other are never taken nor passed on. Null only in a
+  /// build without a pinned genesis.
   final PyramidRoot? root;
 
   /// Addresses of this account's other devices: they share the pyramid key

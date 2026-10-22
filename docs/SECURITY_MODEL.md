@@ -261,7 +261,7 @@ friend vouching for their key, is trust on first use.
 - Flutter packages come exactly from `pubspec.lock` (`--enforce-lockfile`).
 - The prebuilt libwebrtc that `flutter_webrtc` downloads for Windows and
   Linux is checked against pinned SHA-256 sums in `tool/ci/libwebrtc.sha256`
-  (until the pins are filled in, a missing pin only warns).
+  (a release build fails when a pin is missing or differs).
 - Release signing keys live only in a GitHub environment that needs the
   maintainer's approval and works only for version tags
   ([RELEASES.md](RELEASES.md), section 3).

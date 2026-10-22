@@ -3,6 +3,15 @@
 #
 #   <sha256>  <binary_version>/<platform>/<file name>
 #
-# Empty until filled in from a build that was checked by hand: the
-# check then only warns and prints the lines to add here. A file whose
-# hash differs from its line fails the build.
+# Taken from the official webrtc-sdk/libwebrtc release zips. A new
+# libwebrtc (binary_version in flutter_webrtc's libwebrtc_version.ini)
+# needs new lines here; a file whose hash differs from its line fails
+# the build, and the release build fails on a file without a line.
+c85858bbeb696ae532422759ae2995247c87deae49f2e0009be9ebd24f65d389  libwebrtc.m150.7871.03/linux-x64/libwebrtc.so
+0acd09c7ae1bc9e61733337d6a4467010725b78734534124a4370f623c8a16db  libwebrtc.m150.7871.03/linux-x64/libwebrtc-linux-x64-release.zip
+77162b418902476aa99b5add5a7d316aaeb27db75d8906f7be8730f14a5db9dd  libwebrtc.m150.7871.03/linux-arm64/libwebrtc.so
+0938d6011247997ddd6786bec5ca5392ac78ed126751da09ea530c52518fdd12  libwebrtc.m150.7871.03/linux-arm64/libwebrtc-linux-arm64-release.zip
+f3e2a50471e52dd9e0a1c597ba42232086063675621172940d7ce91703ed2273  libwebrtc.m150.7871.03/windows-x64/libwebrtc.dll
+4cd8fce2939b67b034200b124e4559cf343387a047118755925a0551328df84d  libwebrtc.m150.7871.03/windows-x64/libwebrtc-win-x64-release.zip
+5f2ffbce31d406da9241c3c48be54d351263cafc0f13ccb966a70af4ed3754f0  libwebrtc.m150.7871.03/windows-arm64/libwebrtc.dll
+1c745596538a9530ef5e39c77d5c3edf38e1038f6352ddcc44fbacc14141e77d  libwebrtc.m150.7871.03/windows-arm64/libwebrtc-win-arm64-release.zip
