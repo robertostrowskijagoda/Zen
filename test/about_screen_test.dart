@@ -31,6 +31,29 @@ void main() {
     expect(find.text('Wersja ze sklepu'), findsNothing);
   });
 
+  testWidgets('GitHub and Discord are linked side by side', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    final Finder github = find.byKey(const Key('about-github'));
+    final Finder discord = find.byKey(const Key('about-discord'));
+    await tester.scrollUntilVisible(
+      github,
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    expect(github, findsOneWidget);
+    await tester.scrollUntilVisible(
+      discord,
+      60,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    expect(discord, findsOneWidget);
+    expect(find.text('Zen na Discordzie'), findsOneWidget);
+  });
+
   testWidgets('the logo is black on light in the light theme', (
     WidgetTester tester,
   ) async {

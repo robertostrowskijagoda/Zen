@@ -838,6 +838,15 @@ class _SettingsScreen extends ConsumerWidget {
                     onTap: () =>
                         unawaited(openOrCopyLink(context, kZenRepositoryUrl)),
                   ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-discord'),
+                    icon: Icons.forum_rounded,
+                    tone: ZenTone.system,
+                    title: t('Zen na Discordzie'),
+                    subtitle: t('Pytania, nowości i rozmowy o Zen'),
+                    onTap: () =>
+                        unawaited(openOrCopyLink(context, kZenDiscordUrl)),
+                  ),
                 ],
               ),
               // Your profile is edited on the profile tab, not here.

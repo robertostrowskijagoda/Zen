@@ -244,6 +244,15 @@ void main() {
         tester.getTopLeft(find.byKey(const Key('settings-nav-security'))).dy,
       ),
     );
+    // The project's GitHub page and its Discord server, in the top group.
+    final double github = tester
+        .getTopLeft(find.byKey(const Key('settings-nav-github')))
+        .dy;
+    final double discord = tester
+        .getTopLeft(find.byKey(const Key('settings-nav-discord')))
+        .dy;
+    expect(about, lessThan(github));
+    expect(github, lessThan(discord));
     // No experimental features any more.
     expect(find.byKey(const Key('settings-nav-experimental')), findsNothing);
 

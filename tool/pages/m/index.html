@@ -21,7 +21,7 @@
   body {
     margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
     font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; align-items: center; justify-content: center; padding: 16px;
+    display: flex; align-items: flex-start; justify-content: center; padding: 16px;
   }
   main {
     width: 100%; max-width: 440px; background: var(--card);
@@ -46,6 +46,14 @@
     text-decoration: none; cursor: pointer;
   }
   .primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  /* "Open in Zen": the first thing on the page, as big as a thumb wants. */
+  a.btn.open {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 112px; margin: 0 0 22px; padding: 22px 18px;
+    border-radius: 26px; font: 800 30px/1.15 inherit;
+    box-shadow: 0 10px 28px rgba(124, 77, 255, .35);
+  }
+  .other { margin: 6px 0 0; }
   .secondary { background: var(--bg); color: var(--text); border: 1px solid var(--line) !important; }
   .small { font-size: 13.5px; color: var(--muted); margin-top: 18px; }
   .small a { color: var(--accent); }
@@ -54,14 +62,17 @@
 </head>
 <body>
 <main>
+  <a id="open" class="btn primary open" href="#"></a>
   <div class="logo">Z</div>
   <h1 id="title"></h1>
   <p id="lead"></p>
   <div id="flat" class="flat hidden"></div>
   <p id="noapp" class="hidden"></p>
-  <a id="open" class="btn primary" href="#"></a>
   <button id="copy" class="btn secondary hidden" type="button"></button>
-  <a id="android" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen.apk"></a>
+  <a id="android" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"></a>
+  <p id="otherAndroid" class="small other"><span id="otherPhones"></span>
+    <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk">armeabi-v7a</a> ·
+    <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk">x86_64</a></p>
   <a id="windows" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"></a>
   <p id="ios" class="small hidden"></p>
   <p class="small"><a id="project" href="https://github.com/robertostrowskijagoda/Zen"></a></p>
@@ -83,6 +94,7 @@
       copied: "Copied ✓",
       noapp: "It looks like Zen is not installed yet. Install it (buttons below), then come back here and tap “Open in Zen” — or in Zen open Neighbours → Scan a door code and paste the copied code.",
       android: "⬇ Download for Android",
+      otherPhones: "Other phones:",
       windows: "⬇ Download for Windows",
       ios: "iPhone: Zen installs through SideStore — see the project page.",
       project: "How to install, and how to check it is safe: the project page on GitHub"
@@ -97,6 +109,7 @@
       copied: "Skopiowano ✓",
       noapp: "Wygląda na to, że nie masz jeszcze Zen. Zainstaluj go (przyciski niżej), wróć tutaj i stuknij „Otwórz w Zen” — albo w Zen wejdź w Sąsiedzi → Zeskanuj kod z drzwi i wklej skopiowany kod.",
       android: "⬇ Pobierz na Androida",
+      otherPhones: "Inne telefony:",
       windows: "⬇ Pobierz na Windows",
       ios: "iPhone: Zen instaluje się przez SideStore — zobacz stronę projektu.",
       project: "Jak zainstalować i sprawdzić, że to bezpieczne: strona projektu na GitHubie"
@@ -137,6 +150,7 @@
   $("open").textContent = T.open;
   $("copy").textContent = T.copy;
   $("android").textContent = T.android;
+  $("otherPhones").textContent = T.otherPhones;
   $("windows").textContent = T.windows;
   $("ios").textContent = T.ios;
   $("noapp").textContent = T.noapp;
@@ -177,6 +191,7 @@
   if (ios) {
     $("ios").classList.remove("hidden");
     $("android").classList.add("hidden");
+    $("otherAndroid").classList.add("hidden");
     $("windows").classList.add("hidden");
   } else if (android) {
     $("windows").classList.add("hidden");
