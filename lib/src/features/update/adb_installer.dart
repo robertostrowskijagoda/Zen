@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 
 /// A phone connected to this computer over USB.
 @immutable
@@ -98,6 +99,33 @@ final class AdbInstaller {
     return parseAdbDevices('${r.stdout}');
   }
 
+  /// The ABIs [device] supports, best first (empty when it does not say).
+  Future<List<String>> deviceAbis(AdbDevice device) async {
+    final String? adb = executable;
+    if (adb == null || !device.ready) {
+      return const <String>[];
+    }
+    for (final String property in const <String>[
+      'ro.product.cpu.abilist',
+      'ro.product.cpu.abi',
+    ]) {
+      final ProcessResult r = await Process.run(adb, <String>[
+        '-s',
+        device.serial,
+        'shell',
+        'getprop',
+        property,
+      ]);
+      final List<String> abis = r.exitCode == 0
+          ? parseAbiList('${r.stdout}')
+          : const <String>[];
+      if (abis.isNotEmpty) {
+        return abis;
+      }
+    }
+    return const <String>[];
+  }
+
   /// Installs (or updates) [apkPath] on [device]. Returns a message.
   Future<String> install(AdbDevice device, String apkPath) async {
     final String? adb = executable;
@@ -111,6 +139,16 @@ final class AdbInstaller {
               'spróbuj jeszcze raz.',
             )
           : t('Telefon nie jest gotowy ({state}).', {'state': device.state});
+    }
+    // The release has one APK per ABI: one for another kind of phone
+    // would only fail with a cryptic error.
+    final String? mismatch = adbAbiMismatchMessage(
+      apkAbis: await readApkAbis(File(apkPath)),
+      deviceAbis: await deviceAbis(device),
+      deviceLabel: device.label,
+    );
+    if (mismatch != null) {
+      return mismatch;
     }
     final ProcessResult r = await Process.run(adb, <String>[
       '-s',
@@ -151,6 +189,13 @@ String describeAdbInstallResult({
   if (reason.contains('INSTALL_FAILED_VERSION_DOWNGRADE')) {
     return t('Na telefonie jest nowsza wersja Zen.');
   }
+  if (reason.contains('INSTALL_FAILED_NO_MATCHING_ABIS')) {
+    return t(
+      'Ten plik jest dla innego typu telefonu. Pobierz Zen dla {device} ze '
+      'strony instalacji (inne telefony).',
+      {'device': deviceLabel},
+    );
+  }
   return t('Instalacja nie udała się: {reason}', {'reason': reason});
 }
 
@@ -161,3 +206,26 @@ String get kAdbSignatureMismatchMessage => t(
   'obejść. Porównaj odcisk klucza i sumę SHA-256 z README: '
   'github.com/robertostrowskijagoda/Zen.',
 );
+
+/// What to tell the person when the APK (native code for [apkAbis]) cannot
+/// run on the phone (which supports [deviceAbis]); null when it fits or
+/// either is unknown.
+String? adbAbiMismatchMessage({
+  required Set<String>? apkAbis,
+  required List<String> deviceAbis,
+  required String deviceLabel,
+}) {
+  if (apkFitsDevice(apkAbis: apkAbis, deviceAbis: deviceAbis) != false) {
+    return null;
+  }
+  return t(
+    'Ten plik jest dla telefonów typu {apk}, a {device} to {phone}. Pobierz '
+    'dla niego {file} ze strony wydania.',
+    {
+      'apk': androidAbisLabel(apkAbis!),
+      'device': deviceLabel,
+      'phone': deviceAbis.first,
+      'file': androidApkAssetName(preferredAndroidAbi(supported: deviceAbis)),
+    },
+  );
+}

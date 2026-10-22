@@ -201,4 +201,48 @@ void main() {
       'Zainstalowano Zen na Pixel.',
     );
   });
+
+  test('an APK for another kind of phone is not sent to it', () {
+    expect(
+      adbAbiMismatchMessage(
+        apkAbis: <String>{'arm64-v8a'},
+        deviceAbis: const <String>['armeabi-v7a', 'armeabi'],
+        deviceLabel: 'Moto',
+      ),
+      allOf(contains('Moto'), contains('Zen-armeabi-v7a.apk')),
+    );
+    // Fits, or not known: adb decides.
+    expect(
+      adbAbiMismatchMessage(
+        apkAbis: <String>{'armeabi-v7a'},
+        deviceAbis: const <String>['arm64-v8a', 'armeabi-v7a'],
+        deviceLabel: 'Pixel',
+      ),
+      isNull,
+    );
+    expect(
+      adbAbiMismatchMessage(
+        apkAbis: null,
+        deviceAbis: const <String>['x86_64'],
+        deviceLabel: 'Emulator',
+      ),
+      isNull,
+    );
+    expect(
+      adbAbiMismatchMessage(
+        apkAbis: <String>{'x86_64'},
+        deviceAbis: const <String>[],
+        deviceLabel: 'Pixel',
+      ),
+      isNull,
+    );
+    expect(
+      describeAdbInstallResult(
+        exitCode: 1,
+        output: 'Failure [INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract]',
+        deviceLabel: 'Pixel',
+      ),
+      contains('Pixel'),
+    );
+  });
 }

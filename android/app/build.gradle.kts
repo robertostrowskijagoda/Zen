@@ -42,16 +42,21 @@ val zenAbis: List<String> = (project.findProperty("target-platform") as String?)
     ?.distinct()
     ?.takeIf { it.isNotEmpty() }
     ?: zenAbiOfPlatform.values.toList()
-// `flutter build apk --split-per-abi` uses ABI splits, which AGP does not
-// allow together with abiFilters.
+// `flutter build apk --split-per-abi` (the release APKs, one per ABI:
+// Zen-arm64-v8a.apk, Zen-armeabi-v7a.apk, Zen-x86_64.apk) uses ABI
+// splits, which AGP does not allow together with abiFilters. Every split
+// APK keeps the plain version code (force-version-code-ignoring-abi in
+// android/gradle.properties; Flutter would otherwise add 1000, 2000 or
+// 4000 per ABI): all of them are the same release, so any one installs
+// over any other (a 32-bit copy from a friend, then the 64-bit update).
 val zenSplitPerAbi = project.hasProperty("split-per-abi")
 
 // Distribution flavors:
-//   full         - the full app (self-update, "Podaj dalej" with the APK);
+//   full         - the full app (self-update, passing the APK on);
 //   appStoreOnly - Google Play / Galaxy Store ONLY, never to be sideloaded:
 //                  no REQUEST_INSTALL_PACKAGES (src/appStoreOnly/
 //                  AndroidManifest.xml), no icon camouflage, the label "Zen" as
-//                  everywhere (only the About screen names the store build), and Dart
+//                  everywhere, and Dart
 //                  hides self-update and APK sharing (appFlavor ==
 //                  "appStoreOnly", lib/src/features/update/store_build.dart).
 //   flutter build appbundle --release --flavor appStoreOnly   (Play)
@@ -99,6 +104,15 @@ android {
             ndk {
                 abiFilters.clear()
                 abiFilters += zenAbis
+            }
+        }
+    }
+
+    if (zenSplitPerAbi) {
+        splits {
+            abi {
+                // Only the ABIs with a Go bridge (no armeabi or x86 APK).
+                include(*zenAbis.toTypedArray())
             }
         }
     }
@@ -153,9 +167,9 @@ android {
     packaging {
         jniLibs {
             // Native libraries compressed in the APK (extracted on install):
-            // with three ABIs the universal Zen.apk would otherwise grow
-            // about 2.5 times, and it travels over Wi-Fi, hotspots and the
-            // mesh ("Podaj dalej", updates from friends).
+            // the APK travels over Wi-Fi, hotspots and the mesh (passing
+            // Zen on, updates from friends), and stored libraries would
+            // make it about 2.5 times bigger.
             useLegacyPackaging = true
             // Plugins' libraries for ABIs without a Go bridge (and so
             // without a working app).

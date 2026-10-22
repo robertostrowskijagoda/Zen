@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 import 'package:zen/src/features/update/github_redirects.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 
@@ -208,15 +209,21 @@ enum LinuxInstall {
 
 /// The release file that updates this platform ([releasePlatform] as
 /// [currentReleasePlatform] names it), or null where Zen cannot update
-/// itself (iOS: only the prompt is shown).
+/// itself (iOS: only the prompt is shown). Android: the APK of the best
+/// of the device's [androidAbis] (`Build.SUPPORTED_ABIS`), else of the
+/// ABI the app runs as ([abi]); see [preferredAndroidAbi].
 String? githubAssetName({
   required String releasePlatform,
   required Abi abi,
   LinuxInstall linux = LinuxInstall.tarball,
+  List<String> androidAbis = const <String>[],
 }) {
+  if (isAndroidReleasePlatform(releasePlatform)) {
+    return androidApkAssetName(
+      preferredAndroidAbi(supported: androidAbis, running: androidAbiOf(abi)),
+    );
+  }
   switch (releasePlatform) {
-    case 'android':
-      return 'Zen.apk';
     case 'windows':
       return abi == Abi.windowsArm64
           ? 'Zen-Windows-arm64.zip'

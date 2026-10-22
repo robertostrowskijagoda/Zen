@@ -239,20 +239,23 @@ void main() {
     // The APK swapped on the way: its sum does not match.
     final (GithubUpdateService a, _Installer ia) = await update(
       dist,
-      'Zen.apk',
-      tamper: (String name, List<int> b) => name == 'Zen.apk' ? evil(b) : b,
+      'Zen-arm64-v8a.apk',
+      tamper: (String name, List<int> b) =>
+          name == 'Zen-arm64-v8a.apk' ? evil(b) : b,
     );
     expect(a.installState, GithubInstallState.failed);
     expect(ia.installed, isEmpty);
 
     // The APK and SHA256SUMS swapped together: the signature does not
     // cover the new sum.
-    final List<int> fake = evil(File('${dist.path}/Zen.apk').readAsBytesSync());
+    final List<int> fake = evil(
+      File('${dist.path}/Zen-arm64-v8a.apk').readAsBytesSync(),
+    );
     final (GithubUpdateService b, _Installer ib) = await update(
       dist,
-      'Zen.apk',
+      'Zen-arm64-v8a.apk',
       tamper: (String name, List<int> bytes) {
-        if (name == 'Zen.apk') {
+        if (name == 'Zen-arm64-v8a.apk') {
           return fake;
         }
         if (name == kSumsAsset) {
@@ -260,7 +263,10 @@ void main() {
             utf8
                 .decode(bytes)
                 .replaceFirst(
-                  RegExp(r'^[0-9a-f]{64}(?=  Zen\.apk$)', multiLine: true),
+                  RegExp(
+                    r'^[0-9a-f]{64}(?=  Zen-arm64-v8a\.apk$)',
+                    multiLine: true,
+                  ),
                   sha256Hex(fake),
                 ),
           );
@@ -275,17 +281,17 @@ void main() {
     final LedgerKeyPair other = await LedgerKeyPair.generate();
     final (GithubUpdateService c, _Installer ic) = await update(
       dist,
-      'Zen.apk',
+      'Zen-arm64-v8a.apk',
       keys: <String>[other.hybridId],
     );
     expect(c.installState, GithubInstallState.failed);
     expect(ic.installed, isEmpty);
 
     // The folder check of the release tool sees the swapped file too.
-    File('${dist.path}/Zen.apk').writeAsStringSync('changed');
+    File('${dist.path}/Zen-arm64-v8a.apk').writeAsStringSync('changed');
     expect(
       await verifyReleaseFolder(dist, version: '9.9.9'),
-      contains('Zen.apk does not match its sum in $kSumsAsset'),
+      contains('Zen-arm64-v8a.apk does not match its sum in $kSumsAsset'),
     );
   });
 
@@ -323,7 +329,7 @@ void main() {
     );
     final (GithubUpdateService s, _Installer installer) = await update(
       dist,
-      'Zen.apk',
+      'Zen-arm64-v8a.apk',
     );
     expect(s.installState, GithubInstallState.failed);
     expect(installer.installed, isEmpty);

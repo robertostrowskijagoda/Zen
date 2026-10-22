@@ -96,15 +96,24 @@ List<String> _check() {
   final String yml = File('.github/workflows/release.yml').readAsStringSync();
   final String ios = File('.github/workflows/ios.yml').readAsStringSync();
   final Set<String> produced = workflowAssetNames(yml, iosYml: ios);
-  final List<String> out = workflowProblems(produced, kContractAssets);
+  final List<String> out = workflowProblems(produced, kContractAssets)
+    ..addAll(
+      androidBuildProblems(
+        yml,
+        File('android/gradle.properties').readAsStringSync(),
+      ),
+    );
   // The names the app's code asks for are the contract's.
   final String app = <String>[
+    'lib/src/features/update/android_abi.dart',
     'lib/src/features/update/github_release.dart',
     'lib/src/features/update/release.dart',
     'lib/src/features/update/sha256_sums.dart',
   ].map((String p) => File(p).readAsStringSync()).join('\n');
   for (final String name in <String>[
-    'Zen.apk',
+    'Zen-arm64-v8a.apk',
+    'Zen-armeabi-v7a.apk',
+    'Zen-x86_64.apk',
     'Zen-Windows.zip',
     'Zen-Windows-arm64.zip',
     'Zen-macOS.zip',

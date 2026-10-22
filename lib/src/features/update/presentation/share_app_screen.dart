@@ -14,6 +14,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
 import 'package:zen/src/features/update/own_copy.dart';
 import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
@@ -27,7 +28,13 @@ import 'package:zen/src/features/update/update_service.dart';
 /// A file that can be passed on.
 @immutable
 final class _ShareSource {
-  const _ShareSource(this.label, this.file, this.name, {this.own = false});
+  const _ShareSource(
+    this.label,
+    this.file,
+    this.name, {
+    this.own = false,
+    this.abis,
+  });
 
   final String label;
   final File file;
@@ -35,6 +42,10 @@ final class _ShareSource {
 
   /// The APK this app was installed from.
   final bool own;
+
+  /// The ABIs of the APK's native code (the release has one APK per ABI),
+  /// when known.
+  final Set<String>? abis;
 }
 
 /// "Podaj dalej": give the app to someone nearby over Wi-Fi or a
@@ -123,20 +134,30 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     final List<_ShareSource> found = <_ShareSource>[];
     final String? own = await ownApkPath();
     if (own != null && await File(own).exists()) {
+      // The installed APK is the one of this phone's ABI.
+      final String? abi = runningAndroidAbi;
       found.add(
         _ShareSource(
           t('Zen {version} (ta aplikacja)', {'version': kAppVersion}),
           File(own),
-          'zen-$kAppVersion.apk',
+          abi == null ? 'Zen-$kAppVersion.apk' : 'Zen-$kAppVersion-$abi.apk',
           own: true,
+          abis: abi == null ? null : <String>{abi},
         ),
       );
     }
     final UpdateService? service = ref.read(updateServiceProvider);
     final SignedRelease? release = service?.book.candidate;
-    final ReleaseFile? apk = release?.manifest.fileFor('android');
+    // A phone passes on the APK of its own ABI (the one it can check
+    // against itself), a computer the one of most phones.
+    final String androidPlatform = _isAndroid && service != null
+        ? service.platform
+        : androidReleasePlatform(kDefaultAndroidAbi);
+    final ReleaseFile? apk = release?.manifest.fileFor(androidPlatform);
     if (service != null && release != null && apk != null) {
-      final Uint8List? bytes = await service.fileBytes(forPlatform: 'android');
+      final Uint8List? bytes = await service.fileBytes(
+        forPlatform: androidPlatform,
+      );
       if (bytes != null) {
         final Directory dir = await getTemporaryDirectory();
         final File f = File('${dir.path}${Platform.pathSeparator}${apk.name}');
@@ -149,6 +170,9 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
             }),
             f,
             apk.name,
+            abis: apk.platform.startsWith('android-')
+                ? <String>{apk.platform.substring('android-'.length)}
+                : null,
           ),
         );
       }
@@ -272,10 +296,15 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       setState(() => _message = t('Wybierz plik .apk z aplikacją Zen.'));
       return;
     }
+    final Set<String>? abis = await readApkAbis(File(path));
+    if (!mounted) {
+      return;
+    }
     final _ShareSource source = _ShareSource(
       t('Plik: {name}', {'name': path.split(Platform.pathSeparator).last}),
       File(path),
-      'zen.apk',
+      abis == null || abis.length != 1 ? 'zen.apk' : 'zen-${abis.first}.apk',
+      abis: abis,
     );
     setState(() {
       _sources.add(source);
@@ -313,6 +342,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     final ShareAppServer server = ShareAppServer(
       file: source.file,
       fileName: source.name,
+      apkAbis: source.abis,
     );
     try {
       await server.start(addresses: <InternetAddress>[network.address]);
@@ -430,7 +460,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     }
     final _ShareSource? source = _source;
     // Another file than this app's own; the installed APK is found natively
-    // (also when it came in parts).
+    // (also when it came in parts), sent under the name with its ABI.
     final _ShareSource? other = source != null && !source.own ? source : null;
     setState(() {
       _sending = true;
@@ -438,7 +468,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     });
     final ApkShareResult result = await _shareSheet.shareApk(
       path: other?.file.path,
-      fileName: other?.name,
+      fileName: source?.name,
     );
     if (!mounted) {
       return;
@@ -854,6 +884,21 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   unawaited(_checkSignature(s));
                 },
               ),
+          if (_source?.abis case final Set<String> abis when abis.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: ZenInfo(
+                key: const Key('share-app-abi'),
+                icon: Icons.memory_rounded,
+                tone: zen.textMuted,
+                text: t(
+                  'Ten plik jest dla telefonów typu {type}. Telefon innego '
+                  'typu może go nie zainstalować: wtedy znajomy pobiera Zen '
+                  'ze strony instalacji (inne telefony).',
+                  {'type': androidAbisLabel(abis)},
+                ),
+              ),
+            ),
           if (_source != null && !_source!.own) _signatureInfo(zen),
           Align(
             alignment: AlignmentDirectional.centerStart,

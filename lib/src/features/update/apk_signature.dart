@@ -10,7 +10,8 @@ export 'package:zen/src/features/update/apk_signing_block.dart';
 /// releases (docs/RELEASES.md, section 2), as `keytool` prints them or as plain
 /// hex. Empty until the first signed release: a computer then cannot tell
 /// an official APK from another one, and says so. Filled at release time
-/// with `dart run tool/zen_release.dart fingerprint app-release.apk --write`.
+/// with `dart run tool/zen_release.dart fingerprint Zen-arm64-v8a.apk --write`
+/// (the same certificate signs the APK of every ABI).
 const List<String> kOfficialApkCertificatesSha256 = <String>[];
 
 /// What the signature of an APK says.

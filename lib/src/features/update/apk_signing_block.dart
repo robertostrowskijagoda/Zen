@@ -84,6 +84,66 @@ Future<List<List<String>>?> readApkSignerCertificates(File apk) async {
   }
 }
 
+/// The names of the entries of the zip [file] (an APK), read from its
+/// central directory; null when it is not a readable zip.
+Future<List<String>?> readZipEntryNames(File file) async {
+  RandomAccessFile? handle;
+  try {
+    handle = await file.open();
+    final int size = await handle.length();
+    if (size < _eocdBytes) {
+      return null;
+    }
+    final int tailLength = min(size, _eocdBytes + _maxZipCommentBytes);
+    await handle.setPosition(size - tailLength);
+    final Uint8List tail = await handle.read(tailLength);
+    final int? eocd = _findEndOfCentralDirectory(tail);
+    if (eocd == null) {
+      return null;
+    }
+    final ByteData end = ByteData.sublistView(tail, eocd);
+    final int directorySize = end.getUint32(12, Endian.little);
+    final int directoryStart = end.getUint32(16, Endian.little);
+    if (directorySize > _maxCentralDirectoryBytes ||
+        directoryStart + directorySize > size) {
+      return null;
+    }
+    await handle.setPosition(directoryStart);
+    return parseZipCentralDirectory(await handle.read(directorySize));
+  } on Object {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
+const int _maxCentralDirectoryBytes = 16 * 1024 * 1024;
+
+/// The entry names of a zip central directory ([directory], its bytes).
+/// Throws [FormatException] when it is damaged.
+List<String> parseZipCentralDirectory(Uint8List directory) {
+  final ByteData data = ByteData.sublistView(directory);
+  final List<String> names = <String>[];
+  int offset = 0;
+  while (offset + 46 <= directory.length) {
+    if (data.getUint32(offset, Endian.little) != 0x02014b50) {
+      throw const FormatException('Damaged zip central directory.');
+    }
+    final int nameLength = data.getUint16(offset + 28, Endian.little);
+    final int extraLength = data.getUint16(offset + 30, Endian.little);
+    final int commentLength = data.getUint16(offset + 32, Endian.little);
+    final int nameStart = offset + 46;
+    if (nameStart + nameLength > directory.length) {
+      throw const FormatException('Damaged zip central directory.');
+    }
+    names.add(
+      String.fromCharCodes(directory, nameStart, nameStart + nameLength),
+    );
+    offset = nameStart + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
+
 /// The signer certificates of each signature scheme in the ID-value pairs
 /// of an APK Signing Block, newest scheme first.
 List<List<String>> parseApkSigningBlockPairs(Uint8List pairs) {

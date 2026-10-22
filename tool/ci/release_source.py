@@ -23,12 +23,13 @@ AT THE RELEASE TAG stand in; without either the source lists no app.
 The fingerprint shown on the install page is the one the app's code pins
 at the release tag (kOfficialApkCertificatesSha256 in
 lib/src/features/update/apk_signature.dart), not one read from the APK
-(a swapped APK would bring its own). The fingerprint of the release's
-Zen.apk (FILE, from apksigner) is only compared with it.
+(a swapped APK would bring its own). The fingerprints of the release's
+APKs (one per ABI: FILE, one line each, from apksigner) are only compared
+with it: every one must be pinned.
 
 Exit status: 1 when the release contradicts itself (the IPA does not
-match SHA256SUMS, or Zen.apk is signed with a certificate the code at the
-tag does not pin): the deployment stops and the old pages stay. Anything
+match SHA256SUMS, or one of the APKs is signed with a certificate the code
+at the tag does not pin): the deployment stops and the old pages stay. Anything
 else (no release yet, GitHub unreachable) never fails the deployment.
 """
 
@@ -177,15 +178,22 @@ def normalize_fingerprint(value):
     return value if re.fullmatch(r"[0-9a-f]{64}", value) else ""
 
 
-def read_fingerprint(path):
-    """The fingerprint apksigner printed for the release's Zen.apk, or ""."""
+def read_fingerprints(path):
+    """The fingerprints apksigner printed for the release's APKs (one line
+    each, one APK per ABI), without duplicates; [] when there are none."""
     if not path:
-        return ""
+        return []
     try:
         with open(path, encoding="utf-8") as f:
-            return normalize_fingerprint(f.read())
+            lines = f.read().splitlines()
     except OSError:
-        return ""
+        return []
+    found = []
+    for line in lines:
+        value = normalize_fingerprint(line)
+        if value and value not in found:
+            found.append(value)
+    return found
 
 
 def pinned_fingerprints(dart_source):
@@ -228,13 +236,14 @@ def sources(args):
         pinned = pinned_fingerprints(
             api(f"repos/{args.repo}/contents/{APK_SIGNATURE_DART}?ref={tag}", token, raw=True)
         )
-    apk_fingerprint = read_fingerprint(args.fingerprint)
-    if pinned and apk_fingerprint and apk_fingerprint not in pinned:
-        raise IntegrityError(
-            f"Zen.apk of {tag} is signed with {apk_fingerprint}, but the code "
-            f"at {tag} pins {', '.join(pinned)}"
-        )
-    if not pinned and apk_fingerprint:
+    apk_fingerprints = read_fingerprints(args.fingerprint)
+    for apk_fingerprint in apk_fingerprints:
+        if pinned and apk_fingerprint not in pinned:
+            raise IntegrityError(
+                f"An APK of {tag} is signed with {apk_fingerprint}, but the "
+                f"code at {tag} pins {', '.join(pinned)}"
+            )
+    if not pinned and apk_fingerprints:
         print(f"release_source: {tag} pins no APK certificate: no fingerprint "
               "is shown", file=sys.stderr)
 

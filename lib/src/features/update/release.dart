@@ -7,6 +7,7 @@ import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/update/android_abi.dart';
 
 /// Network updates: a new version travels from friend to friend
 /// like any file. The app takes it only when [kReleaseThreshold] of the
@@ -45,13 +46,15 @@ const int kMaxReleaseFiles = 64;
 /// Payload type on the mesh: `{type, rel?, rev?}`.
 const String kReleaseOfferType = 'zen_rel';
 
-/// The platform names used in release files.
+/// The platform names used in release files. Android has one APK per
+/// ABI: `android-<the ABI this app runs as>` ([androidReleasePlatform]),
+/// the file that surely installs over this one.
 String currentReleasePlatform() {
   if (kIsWeb) {
     return 'web';
   }
   if (Platform.isAndroid) {
-    return 'android';
+    return androidReleasePlatform(runningAndroidAbi ?? kDefaultAndroidAbi);
   }
   if (Platform.isWindows) {
     return 'windows';
@@ -76,7 +79,7 @@ final class ReleaseFile {
     required this.sha256,
   });
 
-  /// `android`, `windows`, …
+  /// `android-arm64-v8a` (one per ABI), `windows`, …
   final String platform;
   final String name;
   final int size;

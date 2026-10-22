@@ -9,9 +9,12 @@ import 'package:crypto/crypto.dart' as crypto;
 
 /// The files the app's GitHub updater downloads (githubAssetName in
 /// lib/src/features/update/github_release.dart), one per platform and
-/// kind of installation.
+/// kind of installation; Android one per ABI (kAndroidApkAssets in
+/// lib/src/features/update/android_abi.dart).
 const List<String> kUpdateAssets = <String>[
-  'Zen.apk',
+  'Zen-arm64-v8a.apk',
+  'Zen-armeabi-v7a.apk',
+  'Zen-x86_64.apk',
   'Zen-Windows.zip',
   'Zen-Windows-arm64.zip',
   'Zen-macOS.zip',
@@ -99,6 +102,31 @@ Set<String> workflowAssetNames(String releaseYml, {String iosYml = ''}) {
     names.add(kIpaAsset);
   }
   return names;
+}
+
+/// What is wrong with how the release builds its Android files: one APK
+/// per ABI ([releaseYml] runs `flutter build apk --split-per-abi`), all
+/// with the plain version code ([gradleProperties], android/
+/// gradle.properties, sets `force-version-code-ignoring-abi=true`; with
+/// Flutter's 1000-per-ABI codes the APK of one ABI would be a downgrade
+/// of another's and could not replace it).
+List<String> androidBuildProblems(String releaseYml, String gradleProperties) {
+  final String yml = <String>[
+    for (final String l in const LineSplitter().convert(releaseYml))
+      if (!l.trimLeft().startsWith('#')) l,
+  ].join('\n');
+  return <String>[
+    if (!RegExp(r'flutter build apk [^\n]*--split-per-abi').hasMatch(yml))
+      'release.yml does not build one APK per ABI (--split-per-abi)',
+    if (RegExp(r'flutter build apk(?![^\n]*--split-per-abi)').hasMatch(yml))
+      'release.yml builds a universal APK',
+    if (!RegExp(
+      r'^\s*force-version-code-ignoring-abi\s*=\s*true\s*$',
+      multiLine: true,
+    ).hasMatch(gradleProperties))
+      'android/gradle.properties does not keep one version code for every '
+          'ABI (force-version-code-ignoring-abi=true)',
+  ];
 }
 
 /// What the workflow does not produce of what the app needs ([needed]).
