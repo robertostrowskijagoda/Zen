@@ -352,12 +352,8 @@ jobs:
 
   windows-arm64:
     name: Windows on ARM build
-    # As the macOS job: pushes to main and runs by hand only. Not required
-    # (continue-on-error) until it has passed once; see release.yml.
-    if: github.event_name != 'pull_request'
     runs-on: windows-11-arm
     timeout-minutes: 75
-    continue-on-error: true
     env:
       LLVM_MINGW_VERSION: '20251021'
       LLVM_MINGW_SHA256: d31dd2799c18440acb7cc13b03cadfc3069dff48168cd406a44930e965b09655
@@ -416,11 +412,6 @@ jobs:
 
   macos:
     name: macOS build
-    # macOS runners cost ten times the Linux minutes (on private
-    # repositories) and queue longer, so pull requests skip this job: a
-    # push to main still catches a macOS break at once, and
-    # Actions -> CI -> Run workflow checks any branch by hand.
-    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:

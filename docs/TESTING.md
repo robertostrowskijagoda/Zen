@@ -214,8 +214,8 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
 | Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
-| Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build; not on pull requests; `continue-on-error` until the first green run |
-| macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start; not on pull requests (more expensive minutes) |
+| Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build |
+| macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start |
 
 The *Analyze and test* and *Go bridge* jobs write a short report to the run's
 summary page (Actions → the run → Summary): format, analyzer issues, test
@@ -229,9 +229,7 @@ every release file with its size and checksum the same way.
 
 `release.yml` on a `v*` tag builds all the release files — Android (signed
 APKs, one per ABI), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
-`.deb`, macOS and iPhone (`RELEASES.md` section 3). Linux, macOS and Windows on ARM
-have not yet passed their first run — after pushing, check these jobs; if the
-Xvfb start proves unstable, building and the symbol check remain. The release
+`.deb`, macOS and iPhone (`RELEASES.md` section 3). If the Xvfb start proves unstable, building and the symbol check remain. The release
 job for Linux additionally checks the bridge and GStreamer linkage and runs
 `dpkg-deb --info` on the `.deb`.
 
