@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Sending a GIF from the keyboard no longer crashes the app; GIFs show without a bubble or caption.
+- Unlocking asks for the fingerprint or face at once when biometric unlock is on.
 
 ## 1.12.0 — 23.10.2026
 
