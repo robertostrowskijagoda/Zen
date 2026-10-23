@@ -77,12 +77,10 @@ void main() {
     expect((await security.biometricUnlockStatus()).enabled, isTrue);
     expect(await security.canUnlockWithBiometrics(), isTrue);
 
+    // Locked again: the biometric prompt comes at once and unlocks.
     security.lock();
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('app-unlock-biometric-button')),
-      findsOneWidget,
-    );
+    expect(security.isLocked, isFalse);
   });
 
   testWidgets('"not now" keeps it off', (WidgetTester tester) async {
