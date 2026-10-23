@@ -25,6 +25,12 @@ gboolean zen_media_caps_allowed(const GstCaps* caps);
 // kZenCodecRefused. Call before its URI is set.
 void zen_media_restrict_codecs(GstElement* pipeline);
 
+// For [decodebin] (not inside a player) working on the user's own files,
+// e.g. a film from the gallery before it is sent: it may use every decoder
+// of the system, also those the players' restriction demoted. Call before
+// it is linked.
+void zen_media_allow_all_decoders(GstElement* decodebin);
+
 #endif  // ZEN_HAVE_GSTREAMER
 
 #endif  // RUNNER_ZEN_MEDIA_CODECS_H_

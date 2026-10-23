@@ -248,6 +248,12 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   final StreamSubscription<String> keyConflicts = runtime.sessionKeyConflicts
       .listen(warnKeyMismatch);
   ref.onDispose(keyConflicts.cancel);
+  // Until the ledger knows which devices were unlinked, the account
+  // routing holds what comes and goes.
+  final void Function() ledgerLoaded = ref
+      .read(accountDirectoryHolderProvider)
+      .expectLedger();
+  unawaited(node.settled.then((_) => ledgerLoaded()));
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
   // Files shared in groups travel as blocks of this store.
   final ChatMediaBlocksHolder mediaBlocks = ref.read(

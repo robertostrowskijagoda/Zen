@@ -8,6 +8,7 @@ import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -253,6 +254,41 @@ void main() {
       expect(draft.blocked, <String>{_troll});
       expect(draft.groupMembers, <String>{_member});
       expect(draft.mailboxes, <String>[_mailbox]);
+    });
+
+    test('a friend\'s unlinked phone in a shared group is not let in', () {
+      final SocialHubState state =
+          SocialHubState.empty(
+            lifecycle: const LifecycleSnapshot(
+              visibility: AppVisibilityState.foreground,
+              generation: 1,
+              capturedAtMillis: 0,
+            ),
+          ).copyWith(
+            friends: const <String, FriendProfile>{
+              _ada: FriendProfile(
+                address: _ada,
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+            groups: const <String, GroupProfile>{
+              'g1': GroupProfile(
+                id: 'g1',
+                name: 'G',
+                createdById: _member,
+                createdAtMillis: 1,
+                memberAddresses: <String>[_ada, _member],
+              ),
+            },
+          );
+      final BackgroundCapabilityDraft draft = backgroundCapabilityDraftOf(
+        state,
+        inboxPublicKey: Uint8List(32),
+        directory: _UnlinkedAda(),
+      );
+      expect(draft.friends, isNot(contains(_ada)));
+      expect(draft.groupMembers, <String>{_member});
     });
   });
 
@@ -997,6 +1033,24 @@ void main() {
 }
 
 /// Holds and releases asked of the phone (alarms as plain timers).
+/// Ada unlinked the phone at [_ada]; nothing else is known.
+final class _UnlinkedAda implements AccountDeviceDirectory {
+  @override
+  String get ownAccount => 'ME';
+
+  @override
+  String? accountOf(String address) => null;
+
+  @override
+  List<String> addressesOf(String account) => const <String>[];
+
+  @override
+  String? contactAddressOf(String account) => null;
+
+  @override
+  String? unlinkedAccountOf(String address) => address == _ada ? 'ADA' : null;
+}
+
 final class _WakeCalls implements ZenWakePlatform {
   final List<String> calls = <String>[];
 

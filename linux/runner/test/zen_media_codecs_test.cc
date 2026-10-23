@@ -132,6 +132,38 @@ Outcome Open(const char* player, const std::string& path) {
   return outcome;
 }
 
+// Decodes [path] with a plain decodebin, as the app checks a film from the
+// gallery before sending it (zen_video_bridge.cc), with or without
+// zen_media_allow_all_decoders.
+bool DecodesOwn(const std::string& path, bool allow_all) {
+  gchar* text = g_strdup_printf(
+      "filesrc location=\"%s\" ! decodebin name=dec ! fakesink", path.c_str());
+  GstElement* pipeline = gst_parse_launch(text, nullptr);
+  g_free(text);
+  if (pipeline == nullptr) {
+    return false;
+  }
+  GstElement* decode = gst_bin_get_by_name(GST_BIN(pipeline), "dec");
+  if (allow_all) {
+    zen_media_allow_all_decoders(decode);
+  }
+  gst_object_unref(decode);
+  gst_element_set_state(pipeline, GST_STATE_PAUSED);
+  GstBus* bus = gst_element_get_bus(pipeline);
+  GstMessage* done = gst_bus_timed_pop_filtered(
+      bus, 20 * GST_SECOND,
+      static_cast<GstMessageType>(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR));
+  const bool ok =
+      done != nullptr && GST_MESSAGE_TYPE(done) == GST_MESSAGE_ASYNC_DONE;
+  if (done != nullptr) {
+    gst_message_unref(done);
+  }
+  gst_object_unref(bus);
+  gst_element_set_state(pipeline, GST_STATE_NULL);
+  gst_object_unref(pipeline);
+  return ok;
+}
+
 struct Case {
   const char* name;
   const char* make;
@@ -204,6 +236,14 @@ int main(int argc, char** argv) {
                   std::string::npos,
               what + " never runs " + c.never);
       }
+    }
+    if (!c.plays && HasElements("playbin3")) {
+      // playbin3 has demoted the other decoders by now: the app's own work
+      // on a gallery film still has them, a bare decodebin does not.
+      Check(DecodesOwn(path, true),
+            std::string(c.name) + " from the gallery still decodes");
+      Check(!DecodesOwn(path, false),
+            std::string(c.name) + " not by a bare decodebin");
     }
     g_remove(path.c_str());
   }
