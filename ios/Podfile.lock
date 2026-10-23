@@ -1,0 +1,28 @@
+PODS:
+  - Flutter (1.0.0)
+  - flutter_foreground_task (0.0.1):
+    - Flutter
+  - zstandard_ios (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_foreground_task (from `.symlinks/plugins/flutter_foreground_task/ios`)
+  - zstandard_ios (from `.symlinks/plugins/zstandard_ios/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_foreground_task:
+    :path: ".symlinks/plugins/flutter_foreground_task/ios"
+  zstandard_ios:
+    :path: ".symlinks/plugins/zstandard_ios/ios"
+
+SPEC CHECKSUMS:
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  flutter_foreground_task: a159d2c2173b33699ddb3e6c2a067045d7cebb89
+  zstandard_ios: b20c54862b56c31c7a47074b79fcf181780268b0
+
+PODFILE CHECKSUM: c73f6a8b7fa1eaad2747ae83dd54ded99cf134e2
+
+COCOAPODS: 1.17.0
