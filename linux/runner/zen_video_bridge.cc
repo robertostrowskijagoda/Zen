@@ -26,6 +26,8 @@
 #include <gst/app/gstappsink.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
+
+#include "zen_media_codecs.h"
 #endif
 
 namespace {
@@ -426,6 +428,12 @@ GstElement* Launch(const std::string& description, const std::string& input) {
     g_object_set(src, "location", input.c_str(), nullptr);
     gst_object_unref(src);
   }
+  // The user's own film: not limited to what the player plays.
+  GstElement* decode = gst_bin_get_by_name(GST_BIN(pipeline), "dec");
+  if (decode != nullptr) {
+    zen_media_allow_all_decoders(decode);
+    gst_object_unref(decode);
+  }
   return pipeline;
 }
 
@@ -438,7 +446,7 @@ std::string Flip() {
 bool GstProbe(const std::string& input, int* width, int* height,
               gint64* duration) {
   GstElement* pipeline = Launch(
-      "filesrc name=src ! decodebin ! " + Flip() +
+      "filesrc name=src ! decodebin name=dec ! " + Flip() +
           "videoconvert ! appsink name=sink sync=false "
           "caps=video/x-raw,format=I420",
       input);
@@ -755,6 +763,7 @@ bool GstCompress(const Job& job, Outcome* outcome, std::string* code,
     return false;
   }
   g_object_set(src, "location", job.input.c_str(), nullptr);
+  zen_media_allow_all_decoders(decode);
   GstCaps* stop = gst_caps_from_string(
       "video/x-raw(ANY); audio/x-raw(ANY); audio/mpeg, mpegversion=(int)4");
   g_object_set(decode, "caps", stop, nullptr);
@@ -849,7 +858,7 @@ bool GstCompress(const Job& job, Outcome* outcome, std::string* code,
 std::vector<uint8_t> GstThumbnail(const std::string& input, int64_t at_ms,
                                   int max_side) {
   GstElement* pipeline = Launch(
-      "filesrc name=src ! decodebin ! " + Flip() +
+      "filesrc name=src ! decodebin name=dec ! " + Flip() +
           "videoconvert ! appsink name=sink sync=false "
           "caps=video/x-raw,format=RGB",
       input);

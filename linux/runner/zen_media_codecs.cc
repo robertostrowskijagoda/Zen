@@ -3,6 +3,9 @@
 #ifdef ZEN_HAVE_GSTREAMER
 
 #include <cstring>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 const char kZenCodecRefused[] = "zen-codec-refused";
 
@@ -77,6 +80,66 @@ gint OnSelectStream(GstElement* decodebin, GstStreamCollection* collection,
   return allowed ? -1 : 0;
 }
 
+// The decoders DemoteOtherDecoders took out, with their rank before (for
+// the app's own work on the user's files, see zen_media_allow_all_decoders).
+std::mutex demoted_lock;
+std::vector<std::pair<GstElementFactory*, guint>>& Demoted() {
+  static auto* demoted = new std::vector<std::pair<GstElementFactory*, guint>>;
+  return *demoted;
+}
+
+guint RankBefore(GstPluginFeature* feature) {
+  for (const auto& d : Demoted()) {
+    if (GST_PLUGIN_FEATURE(d.first) == feature) {
+      return d.second;
+    }
+  }
+  return gst_plugin_feature_get_rank(feature);
+}
+
+gint ByRankBefore(gconstpointer a, gconstpointer b) {
+  GstPluginFeature* fa = GST_PLUGIN_FEATURE(const_cast<gpointer>(a));
+  GstPluginFeature* fb = GST_PLUGIN_FEATURE(const_cast<gpointer>(b));
+  const guint ra = RankBefore(fa);
+  const guint rb = RankBefore(fb);
+  if (ra != rb) {
+    return ra > rb ? -1 : 1;
+  }
+  return strcmp(gst_plugin_feature_get_name(fa), gst_plugin_feature_get_name(fb));
+}
+
+// decodebin's own list (decodable, at least marginal rank), with the
+// demoted decoders back at their rank before.
+GValueArray* OnAutoplugFactories(GstElement* bin, GstPad* pad, GstCaps* caps,
+                                 gpointer data) {
+  std::lock_guard<std::mutex> guard(demoted_lock);
+  GList* all = gst_element_factory_list_get_elements(
+      GST_ELEMENT_FACTORY_TYPE_DECODABLE, GST_RANK_MARGINAL);
+  for (const auto& d : Demoted()) {
+    if (d.second >= GST_RANK_MARGINAL &&
+        gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(d.first)) <
+            GST_RANK_MARGINAL) {
+      all = g_list_prepend(all, gst_object_ref(d.first));
+    }
+  }
+  GList* fit = gst_element_factory_list_filter(all, caps, GST_PAD_SINK,
+                                               gst_caps_is_fixed(caps));
+  fit = g_list_sort(fit, ByRankBefore);
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+  GValueArray* result = g_value_array_new(g_list_length(fit));
+  for (GList* l = fit; l != nullptr; l = l->next) {
+    GValue value = G_VALUE_INIT;
+    g_value_init(&value, G_TYPE_OBJECT);
+    g_value_set_object(&value, l->data);
+    g_value_array_append(result, &value);
+    g_value_unset(&value);
+  }
+  G_GNUC_END_IGNORE_DEPRECATIONS
+  gst_plugin_feature_list_free(fit);
+  gst_plugin_feature_list_free(all);
+  return result;
+}
+
 // decodebin3 (playbin3) chooses among all decoders of the registry by
 // rank, and may still select a stream select-stream refused: in a process
 // that plays through playbin3, a decoder for none of Zen's formats is
@@ -105,6 +168,10 @@ gpointer DemoteOtherDecoders(gpointer data) {
       gst_caps_unref(caps);
     }
     if (!ours) {
+      std::lock_guard<std::mutex> guard(demoted_lock);
+      Demoted().emplace_back(
+          GST_ELEMENT_FACTORY(gst_object_ref(factory)),
+          gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(factory)));
       gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(factory), GST_RANK_NONE);
     }
   }
@@ -162,6 +229,11 @@ void zen_media_restrict_codecs(GstElement* pipeline) {
   }
   g_signal_connect(pipeline, "deep-element-added",
                    G_CALLBACK(OnDeepElementAdded), nullptr);
+}
+
+void zen_media_allow_all_decoders(GstElement* decodebin) {
+  g_signal_connect(decodebin, "autoplug-factories",
+                   G_CALLBACK(OnAutoplugFactories), nullptr);
 }
 
 #endif  // ZEN_HAVE_GSTREAMER
