@@ -12,3 +12,4 @@
 # A new WebRTC-SDK (flutter_webrtc's podspec pins its version) needs a new
 # line here; a framework whose hash differs from its line fails the build,
 # and a release build fails on a version without a line.
+297cbe5f8e772cf7b5bb0d013ef93c2fcbb2897c9310732dacddd07a65473b41  150.7871.01/WebRTC.xcframework
