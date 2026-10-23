@@ -64,7 +64,9 @@ class CheckWebrtcSdkTest(unittest.TestCase):
 
     def run_check(self, strict=False):
         lines = []
-        status = check_webrtc_sdk.check(self.pods, self.pins, strict, lines.append)
+        status = check_webrtc_sdk.check(
+            self.pods, self.pins, strict, lines.append,
+            package=os.path.join(self.tmp.name, "no-package"))
         return status, "\n".join(lines)
 
     def pin(self, value):
@@ -121,6 +123,65 @@ class CheckWebrtcSdkTest(unittest.TestCase):
 
     def test_the_pin_file_reads(self):
         check_webrtc_sdk.read_pins(check_webrtc_sdk.PINS)
+
+
+ZIP_SUM = "03815cdf2f6a0ed328c94d74cce8fd1b8d2b6e95e2b37eab66795012fcecfdfa"
+PACKAGE_SWIFT = """let package = Package(
+    targets: [
+        .binaryTarget(
+            name: "WebRTC",
+            url: "https://github.com/webrtc-sdk/Specs/releases/download/%s/WebRTC.xcframework.zip",
+            checksum: "%s"
+        ),
+    ]
+)
+"""
+
+
+class SwiftPackageManagerTest(unittest.TestCase):
+    """No WebRTC-SDK pod: flutter_webrtc's Package.swift must name the
+    pinned zip checksum (Swift Package Manager checks the zip itself)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.pods = os.path.join(self.tmp.name, "app", "macos", "Pods")
+        _write(os.path.join(self.pods, "Manifest.lock"), b"PODS:\n  - FlutterMacOS (1.0.0)\n")
+        self.package = os.path.join(self.tmp.name, "flutter_webrtc")
+        self.pins = os.path.join(self.tmp.name, "pins")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def swift(self, checksum):
+        _write(os.path.join(self.package, "macos", "flutter_webrtc", "Package.swift"),
+               (PACKAGE_SWIFT % (VERSION, checksum)).encode())
+
+    def run_check(self, strict=False):
+        lines = []
+        status = check_webrtc_sdk.check(
+            self.pods, self.pins, strict, lines.append, package=self.package)
+        return status, "\n".join(lines)
+
+    def test_pinned_checksum_passes_another_fails(self):
+        self.swift(ZIP_SUM)
+        with open(self.pins, "w", encoding="utf-8") as f:
+            f.write("%s  %s/WebRTC.xcframework.zip\n" % (ZIP_SUM, VERSION))
+        self.assertEqual(self.run_check(strict=True)[0], 0)
+        self.swift("0" * 64)
+        self.assertEqual(self.run_check()[0], 1)
+
+    def test_unpinned_warns_or_fails_and_no_package_fails(self):
+        self.swift(ZIP_SUM)
+        status, text = self.run_check()
+        self.assertEqual(status, 0)
+        self.assertIn("%s  %s/WebRTC.xcframework.zip" % (ZIP_SUM, VERSION), text)
+        self.assertEqual(self.run_check(strict=True)[0], 1)
+        self.package = os.path.join(self.tmp.name, "missing")
+        self.assertEqual(self.run_check()[0], 1)
+
+    def test_the_repository_pins_the_zip(self):
+        pins = check_webrtc_sdk.read_pins(check_webrtc_sdk.PINS)
+        self.assertEqual(pins.get("%s/WebRTC.xcframework.zip" % VERSION), ZIP_SUM)
 
 
 if __name__ == "__main__":
