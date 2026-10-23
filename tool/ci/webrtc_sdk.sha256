@@ -9,7 +9,12 @@
 #
 #   python3 tool/ci/check_webrtc_sdk.py --hash WebRTC.xcframework
 #
+# With Swift Package Manager (no WebRTC-SDK pod) the pin is the zip's own
+# SHA-256, `<sha256>  <version>/WebRTC.xcframework.zip`, which must be the
+# checksum flutter_webrtc's Package.swift gives (SPM checks the zip).
+#
 # A new WebRTC-SDK (flutter_webrtc's podspec pins its version) needs a new
 # line here; a framework whose hash differs from its line fails the build,
 # and a release build fails on a version without a line.
 297cbe5f8e772cf7b5bb0d013ef93c2fcbb2897c9310732dacddd07a65473b41  150.7871.01/WebRTC.xcframework
+03815cdf2f6a0ed328c94d74cce8fd1b8d2b6e95e2b37eab66795012fcecfdfa  150.7871.01/WebRTC.xcframework.zip

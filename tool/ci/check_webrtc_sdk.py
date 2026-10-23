@@ -31,9 +31,11 @@ Standard library only.
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import sys
+import urllib.parse
 
 PINS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webrtc_sdk.sha256")
 POD = "WebRTC-SDK"
@@ -98,14 +100,82 @@ def pod_version(pods):
     return None
 
 
-def check(pods, pins_path=PINS, strict=False, out=print):
+_SPM_URL = re.compile(r'url:\s*"[^"]*/download/([^/"]+)/WebRTC\.xcframework\.zip"')
+_SPM_CHECKSUM = re.compile(r'checksum:\s*"([0-9a-f]{64})"')
+
+
+def package_dir(root):
+    """flutter_webrtc's folder from the pub package config, or None."""
+    config = os.path.join(root, ".dart_tool", "package_config.json")
+    try:
+        with open(config, encoding="utf-8") as f:
+            packages = json.load(f).get("packages", [])
+    except (OSError, ValueError):
+        return None
+    for package in packages:
+        if package.get("name") != "flutter_webrtc":
+            continue
+        uri = package.get("rootUri", "")
+        parsed = urllib.parse.urlparse(uri)
+        if parsed.scheme == "file":
+            return os.path.normpath(urllib.parse.unquote(parsed.path))
+        return os.path.normpath(
+            os.path.join(os.path.dirname(config), urllib.parse.unquote(uri)))
+    return None
+
+
+def spm_pin(package, platform):
+    """(version, checksum) of the WebRTC binary target in flutter_webrtc's
+    Package.swift for PLATFORM (ios or macos), or None. Swift Package
+    Manager checks the zip against that checksum itself."""
+    if not package:
+        return None
+    path = os.path.join(package, platform, "flutter_webrtc", "Package.swift")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    url = _SPM_URL.search(text)
+    checksum = _SPM_CHECKSUM.search(text)
+    if not url or not checksum:
+        return None
+    return url.group(1), checksum.group(1)
+
+
+def check_spm(pods, pins, strict, out, package):
+    """WebRTC through Swift Package Manager (no WebRTC-SDK pod): the zip
+    checksum Package.swift names must be the pinned zip SHA-256."""
+    platform = os.path.basename(os.path.dirname(os.path.abspath(pods)))
+    found = spm_pin(package, platform)
+    if found is None:
+        out("::error::No %s in %s (Manifest.lock, %s/%s) and no WebRTC binary "
+            "target in flutter_webrtc's Package.swift." % (POD, pods, POD, FRAMEWORK))
+        return 1
+    version, checksum = found
+    key = "%s/%s.zip" % (version, FRAMEWORK)
+    expected = pins.get(key)
+    if expected is None:
+        level = "error" if strict else "warning"
+        out("::%s::No pinned SHA-256 for %s %s (Swift Package Manager). Add to "
+            "the pins after checking the official zip:" % (level, POD, version))
+        out("    %s  %s" % (checksum, key))
+        return 1 if strict else 0
+    if expected != checksum:
+        out("::error::flutter_webrtc's Package.swift names WebRTC %s with "
+            "checksum %s, pinned %s." % (version, checksum, expected))
+        return 1
+    out("WebRTC-SDK OK (Swift Package Manager checks the zip): %s (%s)" % (key, checksum))
+    return 0
+
+
+def check(pods, pins_path=PINS, strict=False, out=print, package=None):
     """Returns the exit status; reports through OUT."""
     pins = read_pins(pins_path)
     version = pod_version(pods)
     framework = os.path.join(pods, POD, FRAMEWORK)
     if version is None or not os.path.isdir(framework):
-        out("::error::No %s in %s (Manifest.lock, %s/%s)." % (POD, pods, POD, FRAMEWORK))
-        return 1
+        return check_spm(pods, pins, strict, out, package or package_dir(os.getcwd()))
     key = "%s/%s" % (version, FRAMEWORK)
     actual = tree_hash(framework)
     expected = pins.get(key)
