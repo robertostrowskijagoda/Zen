@@ -176,7 +176,11 @@ is not sealed (no compatibility with older builds).
   the sender's record) and the sender starts a new session. Sessions
   rotate after 1 hour or 2^24 frames of either kind; a receiver keeps 4 per
   peer and opens at most 16 new ones (sessions and challenges) a minute per
-  peer; KEM work other nodes can cause is capped at 200/s (burst 400).
+  peer; KEM work other nodes can cause is capped at 200/s (burst 400). A
+  receive session opens nothing after 2 hours; a forced pin (or a new key
+  record) drops every session made with the old key, both ways; a frame
+  carries the fingerprint of the key its session was made with
+  (`senderKey`).
 - **Pins:** the device key is pinned per address on first sight; a record
   with another key for a pinned address is refused. New pins come at most
   120 a minute; at 16384 the pin seen longest ago makes room. The app keeps
@@ -778,9 +782,9 @@ A signed, append-only, per-device **log** for each **space**.
 | `lg_heads` | `spaces`: {space: heads (per writer: last seq/id)} - sent for spaces the receiver may be served. |
 | `lg_want` | `space`, `from` (what the sender lacks) |
 | `lg_entries` | `entries`: list of entries (<=100 per message, <=256 KiB) |
-| `lg_revoke` | `items`: list of revocations |
+| `lg_revoke` | `items`: revocations (<= 64 and <= 1 MB per message; taken only for accounts the receiver knows; each with <= 1024 cutoffs) |
 | `lg_cert_want` | `items`: [{`a` account, `d` device}] (<=32) whose certificates the sender lacks for entries it got |
-| `lg_certs` | `items`: device certificates (<=32): taken only for devices whose entries wait at the receiver; served only for devices whose logs the asker may read |
+| `lg_certs` | `items`: device certificates (<=32): taken only for devices whose entries wait at the receiver; served only for devices whose logs the asker may read; `rev`: revocations of those devices (<= 1 MB), taken before the waiting entries |
 | `lg_blob_want` | `id`, `chunks`: list (empty = ask the manifest; <=64 hashes served per message) |
 | `lg_blob_manifest` | `id`, `manifest` |
 | `lg_blob_chunk` | `h` (chunk hash), `d` (base64) |
@@ -793,9 +797,12 @@ against its hash; friends may push, strangers only answer what we asked.
 **Account and device frames** (`ledger_node.dart`): `lg_hello` {`cert`, `p`:
 {`f` address, `k` device key fingerprint, `s` device signature over
 `"zen.hello.v2|" + f + "|" + k`}} introduces an account's device to a friend.
-Only the first hello of a run to a friend carries the whole certificate;
-later ones name it (`cd`: {`a` account, `d` device}) and a friend that does
-not know it asks for it once a minute at most (`nc: 1`). The proof is signed
+A hello names the certificate (`cd`: {`a` account, `d` device}) only to an
+address whose last proven hello said it holds it (`kc`: the device id it
+holds for that address); everyone else gets it whole. A stranger's hello
+without the whole certificate is dropped unanswered. `nc: 1` asks a friend
+for the whole one (at most once a minute); whole hellos sent on request: at
+most 3 a minute per address. The proof is signed
 once per address and session key. The periodic round (every 10 minutes)
 greets only who was heard from in the last 30 minutes, and everyone once an
 hour.

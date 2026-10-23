@@ -101,6 +101,14 @@ computer could break. So Zen does not rely on it for identity:
   identity. Device entries in your log and friends' friend lists carry the
   keys too, so a friend's other devices and friends of friends are pinned
   before the first contact. A mismatch shows a warning in the chat.
+- A device the account cut off (lost or stolen) is cut off at friends too,
+  once the revocation reaches them: its address gets no ledger traffic, no
+  keys and no chat (messages go to the account's other devices, the chat
+  shows a warning), and the audience keys it could read are rotated.
+  Revocations are kept only for accounts the device knows: at most the
+  account's devices + 4 (up to 32), 2 per device and 512 in all.
+- A hello from a stranger that only names a certificate is dropped without
+  an answer, so nobody can probe whom you know.
 
 ### Call media
 
@@ -140,6 +148,7 @@ encryption falls back to DTLS-SRTP inside the relay layer.
 | Card registration inside a cell (LSAG ring signature over Ed25519), for vote and request cards | there is no standard post-quantum linkable ring signature; unaudited lattice schemes were not used; the registrations travel only between cellmates, inside the post-quantum session layer | nothing from recorded traffic; only a cellmate with a quantum computer could tell whose card is whose (in a cell of 2 to 3 anyone can guess anyway) or spoil a list (a member signs no list without its own card, so it fails rather than counts) |
 | The pair secret of local links, until the two devices first reach each other over the mesh (X25519 of their keys) | the post-quantum part is exchanged inside the sealed session, which needs that one contact | until then: recognise the two devices' adverts, or sit in the middle of a *new* link; recorded links stay unreadable |
 | Call frames (AES-128-GCM) | libwebrtc always derives a 128-bit key; changing it needs a fork of WebRTC on five platforms | about 64-bit strength against Grover's algorithm; still inside the 256-bit relay layer |
+| Who sent mailbox mail (the static X25519 term of the envelope) | the hybrid KEM gives secrecy, not sender authentication; a one-way offline message has no cheap post-quantum sender proof (an ML-DSA signature per envelope costs 3.3 KB and battery) | knowing a friend's mailbox X25519 key, forge mailbox mail "from" that friend (chat messages); not read mail, not forge ledger entries or hellos (hybrid signed) |
 | The link to a public peer over `tcp://` or `ws://` | the peer offers nothing better | see which mesh keys you talk to (Zen picks only `tls://`, `quic://`, `wss://` itself; their TLS 1.3 uses X25519MLKEM768) |
 
 First contact with a stranger after a large quantum computer exists, with no
@@ -265,7 +274,13 @@ friend vouching for their key, is trust on first use.
 - Flutter packages come exactly from `pubspec.lock` (`--enforce-lockfile`).
 - The prebuilt libwebrtc that `flutter_webrtc` downloads for Windows and
   Linux is checked against pinned SHA-256 sums in `tool/ci/libwebrtc.sha256`
-  (a release build fails when a pin is missing or differs).
+  (a release build fails when a pin is missing or differs); the WebRTC-SDK
+  framework of iOS and macOS against `tool/ci/webrtc_sdk.sha256`.
+- On Linux the video player decodes only what Zen itself sends (H.264,
+  H.265, VP8, VP9, AAC, MP3, Opus in MP4, WebM, Ogg or WAV) and refuses
+  anything else before a decoder runs (`zen_media_codecs.cc`).
+- On Windows Zen runs from its own `Zen` folder (`zen-app.marker`); the
+  in-place update replaces only a folder that matches the marker.
 - Release signing keys live only in a GitHub environment that needs the
   maintainer's approval and works only for version tags
   ([RELEASES.md](RELEASES.md), section 3).
@@ -320,6 +335,10 @@ friend vouching for their key, is trust on first use.
   pinned in the app; until then it relies on `SHA256SUMS` and, on Android,
   the signing certificate.
 - The recovery circle's waiting time is kept by the helpers' honest apps.
+- Unlinking a device does not change the account's own key: entries in
+  `private/` sealed with it stay readable to the unlinked device if it gets
+  them from somewhere. Friends stop syncing, sending keys and messages to
+  it once the revocation reaches them.
 - A lost device you have not cut off could still send a newer (validly
   signed) circle copy; its data is yours anyway, but it could make the copy
   smaller. Holders also see when and how much your copy changes.

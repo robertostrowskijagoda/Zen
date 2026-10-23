@@ -28,6 +28,13 @@ Future<void> _settle() async {
   }
 }
 
+/// Waits (up to a few seconds, for slow machines) until [done] holds.
+Future<void> _until(bool Function() done) async {
+  for (int i = 0; i < 250 && !done(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 /// A phone with the neighbours section, on a mesh of a few phones: an
 /// offline one takes nothing (its frames are what a locked phone would get).
 final class _Phone implements EventHost {
@@ -291,6 +298,12 @@ void main() {
     // Ania's phone is unlocked and takes the knock; Ola's is locked.
     final int before = ania.sent.length;
     await bartek.service.scanDoor(ania.service.doorCode!);
+    // Ania passes the knock on to her housemates as soon as she has it.
+    await _until(
+      () => ania.sent
+          .skip(before)
+          .any((Map<String, dynamic> m) => m['type'] == FlatTypes.house),
+    );
     final List<Map<String, dynamic>> house = <Map<String, dynamic>>[
       for (final Map<String, dynamic> m in ania.sent.skip(before))
         if (m['type'] == FlatTypes.house) m,

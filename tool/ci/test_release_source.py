@@ -239,6 +239,27 @@ class SourceTest(unittest.TestCase):
         self.assertIn("kOfficialApkCertificatesSha256", source)
         self.assertIsInstance(release_source.pinned_fingerprints(source), list)
 
+    def test_a_commented_out_fingerprint_is_not_pinned(self):
+        # The compiled app holds none of these: neither does the page.
+        name = "kOfficialApkCertificatesSha256"
+        for text in (
+            "const List<String> %s = <String>[\n  // '%s',\n];" % (name, "ab" * 32),
+            "const List<String> %s = <String>[\n  /* '%s', */\n];" % (name, "ab" * 32),
+            "// const List<String> %s = <String>['%s'];\n"
+            "const List<String> %s = <String>[];" % (name, "ab" * 32, name),
+        ):
+            self.assertEqual(release_source.pinned_fingerprints(text), [], text)
+        # Comment markers inside a string are not comments; adjacent
+        # literals join, as in Dart.
+        text = ("const u = 'https://x/*y'; const List<String> %s = <String>[\n"
+                "  '%s'\n  '%s', // old: '%s'\n];" % (name, "AB" * 16, "ab" * 16, "cd" * 32))
+        self.assertEqual(release_source.pinned_fingerprints(text), ["ab" * 32])
+        # Anything but a plain literal stops the deployment instead of a guess.
+        for entry in ("other", "'${x}'", "'$x'"):
+            with self.assertRaises(release_source.IntegrityError):
+                release_source.pinned_fingerprints(
+                    "const List<String> %s = <String>[%s];" % (name, entry))
+
     def test_no_ipa_no_app_but_still_a_valid_source(self):
         names = [n for n in contract_assets() if n != "Zen-unsigned.ipa"]
         source, _, _ = self.run_source(self.fake_release(names))

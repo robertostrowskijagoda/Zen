@@ -196,15 +196,153 @@ def read_fingerprints(path):
     return found
 
 
-def pinned_fingerprints(dart_source):
-    """kOfficialApkCertificatesSha256 of apk_signature.dart (may be empty)."""
-    match = re.search(
-        r"kOfficialApkCertificatesSha256\s*=\s*<String>\[(.*?)\]\s*;",
-        dart_source or "", re.S,
-    )
+def strip_dart_comments(source):
+    """source with every Dart comment (//, /* */, nested) blanked out, line
+    breaks and string literals (with their interpolations) kept, so that a
+    commented-out entry is never read as one."""
+    out = list(source)
+    n = len(source)
+
+    def blank(start, end):
+        for k in range(start, end):
+            if out[k] != "\n":
+                out[k] = " "
+
+    def code(i, interpolation):
+        depth = 0
+        while i < n:
+            c = source[i]
+            if source.startswith("//", i):
+                end = source.find("\n", i)
+                end = n if end < 0 else end
+                blank(i, end)
+                i = end
+            elif source.startswith("/*", i):
+                j, level = i + 2, 1
+                while j < n and level:
+                    if source.startswith("/*", j):
+                        level, j = level + 1, j + 2
+                    elif source.startswith("*/", j):
+                        level, j = level - 1, j + 2
+                    else:
+                        j += 1
+                blank(i, j)
+                i = j
+            elif c in "'\"":
+                i = string(i)
+            elif c == "{":
+                depth, i = depth + 1, i + 1
+            elif c == "}":
+                if interpolation and depth == 0:
+                    return i + 1
+                depth, i = depth - 1, i + 1
+            else:
+                i += 1
+        return i
+
+    def string(i):
+        raw = (i > 0 and source[i - 1] in "rR"
+               and not (i > 1 and (source[i - 2].isalnum() or source[i - 2] in "_$")))
+        quote = source[i] * 3 if source.startswith(source[i] * 3, i) else source[i]
+        i += len(quote)
+        while i < n:
+            if source.startswith(quote, i):
+                return i + len(quote)
+            if len(quote) == 1 and source[i] == "\n":
+                return i
+            if not raw and source[i] == "\\":
+                i += 2
+            elif not raw and source.startswith("${", i):
+                i = code(i + 2, True)
+            else:
+                i += 1
+        return i
+
+    code(0, False)
+    return "".join(out)
+
+
+_DART_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v"}
+
+
+def dart_string_list(source, name):
+    """The entries of `const List<String> name = <String>[...]` in the Dart
+    source as the compiler reads them: comments skipped, adjacent literals
+    joined, entries trimmed, empty ones left out; [] when the list is not
+    there. ValueError when an entry is not a plain string literal (an
+    interpolation, another constant): a check must never guess."""
+    clean = strip_dart_comments(source or "")
+    match = re.search(r"\b" + re.escape(name) + r"\s*=\s*<String>\s*\[", clean)
     if not match:
         return []
-    values = [normalize_fingerprint(v) for v in re.findall(r"'([^']*)'", match.group(1))]
+    n = len(clean)
+    i = match.end()
+
+    def skip(i):
+        while i < n and clean[i].isspace():
+            i += 1
+        return i
+
+    def literal(i):
+        raw = clean[i] in "rR"
+        if raw:
+            i += 1
+        quote = clean[i] * 3 if clean.startswith(clean[i] * 3, i) else clean[i]
+        i += len(quote)
+        value = []
+        while True:
+            if i >= n or (len(quote) == 1 and clean[i] == "\n"):
+                raise ValueError(f"{name}: unterminated string")
+            if clean.startswith(quote, i):
+                return "".join(value), i + len(quote)
+            c = clean[i]
+            if not raw and c == "$":
+                raise ValueError(f"{name}: an entry with an interpolation")
+            if not raw and c == "\\":
+                if i + 1 >= n or clean[i + 1] in "xu":
+                    raise ValueError(f"{name}: an escape this check does not read")
+                value.append(_DART_ESCAPES.get(clean[i + 1], clean[i + 1]))
+                i += 2
+                continue
+            value.append(c)
+            i += 1
+
+    values = []
+    while True:
+        i = skip(i)
+        if i < n and clean[i] == "]":
+            break
+        parts = []
+        while True:
+            i = skip(i)
+            starts = i < n and (clean[i] in "'\"" or (
+                clean[i] in "rR" and i + 1 < n and clean[i + 1] in "'\""))
+            if not starts:
+                break
+            part, i = literal(i)
+            parts.append(part)
+        if not parts:
+            raise ValueError(f"{name}: an entry that is not a string literal")
+        values.append("".join(parts).strip())
+        i = skip(i)
+        if i < n and clean[i] == ",":
+            i += 1
+        elif i < n and clean[i] == "]":
+            break
+        else:
+            raise ValueError(f"{name}: not a list of string literals")
+    return [v for v in values if v]
+
+
+def pinned_fingerprints(dart_source):
+    """kOfficialApkCertificatesSha256 of apk_signature.dart (may be empty),
+    read as the compiler reads it (a commented-out entry does not count).
+    IntegrityError when the list cannot be read."""
+    try:
+        entries = dart_string_list(dart_source, "kOfficialApkCertificatesSha256")
+    except ValueError as error:
+        raise IntegrityError(f"apk_signature.dart: {error}") from error
+    values = [normalize_fingerprint(v) for v in entries]
     return [v for v in values if v]
 
 

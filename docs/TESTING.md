@@ -213,7 +213,7 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 | Analyze and test | Windows | `dart format` (no changes), `flutter analyze`, `flutter test` (including translations) |
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
-| Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), start under Xvfb — the app must still run after 20 s |
+| Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
 | Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build; not on pull requests; `continue-on-error` until the first green run |
 | macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start; not on pull requests (more expensive minutes) |
 
@@ -221,7 +221,8 @@ The *Analyze and test* and *Go bridge* jobs write a short report to the run's
 summary page (Actions → the run → Summary): format, analyzer issues, test
 counts (passed, failed, skipped) with the failed tests and their first error
 lines, and the Go packages and tests. `tool/ci/ci_summary.py` (Python 3,
-standard library only) turns `flutter test --file-reporter json:…`,
+standard library only; tested with the other CI scripts, e.g.
+`tool/ci/test_check_libwebrtc.py`, `tool/ci/test_check_webrtc_sdk.py`) turns `flutter test --file-reporter json:…`,
 `flutter analyze --write=…` and `go test -v` output into that Markdown; it
 never fails the job itself. The release workflow's *SHA256SUMS* job lists
 every release file with its size and checksum the same way.

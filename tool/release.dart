@@ -9,9 +9,13 @@
 //       kOfficialApkCertificatesSha256)? CI runs it for every tag build.
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
 //       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
+//       [--allow-unpinned-native]
 //       Clean tree, the app pins its release keys (kReleaseMaintainers,
 //       kOfficialApkCertificatesSha256; --allow-unpinned-keys only for a
-//       test release), `flutter analyze`, `flutter test` and `go test`
+//       test release), the native builds pin what they download (Gradle's
+//       distributionSha256Sum, ios/ and macos/Podfile.lock,
+//       tool/ci/webrtc_sdk.sha256; --allow-unpinned-native only for a test
+//       release), `flutter analyze`, `flutter test` and `go test`
 //       (unless --skip-checks), the check above, then the version everywhere
 //       (pubspec.yaml, app_version.dart, the Linux AppStream metadata),
 //       CHANGELOG "Unreleased" → "1.12.0 — <date>", a commit and the
@@ -115,7 +119,8 @@ List<String> _check() {
         yml,
         File('android/gradle.properties').readAsStringSync(),
       ),
-    );
+    )
+    ..addAll(desktopArchiveProblems(yml));
   // The names the app's code asks for are the contract's.
   final String app = <String>[
     'lib/src/features/update/android_abi.dart',
@@ -241,6 +246,27 @@ Future<bool> _prepare(List<String> args) async {
       'WARNING: --allow-unpinned-keys: ${keys.join('; ')}. Not for a '
       'release people update from.',
     );
+  }
+
+  // 2b. The native builds pin what they download (a tag build also fails
+  // on an unpinned WebRTC framework).
+  final List<String> native = nativePinProblems(
+    gradleWrapperProperties: File(
+      'android/gradle/wrapper/gradle-wrapper.properties',
+    ).readAsStringSync(),
+    iosPodfileLock: File('ios/Podfile.lock').existsSync(),
+    macosPodfileLock: File('macos/Podfile.lock').existsSync(),
+    webrtcSdkPins: File('tool/ci/webrtc_sdk.sha256').readAsStringSync(),
+  );
+  if (native.isNotEmpty) {
+    if (!_flag(args, 'allow-unpinned-native')) {
+      _report('native dependencies', native);
+      stderr.writeln(
+        'Pin them first (a test release: --allow-unpinned-native).',
+      );
+      return false;
+    }
+    stderr.writeln('WARNING: --allow-unpinned-native: ${native.join('; ')}.');
   }
 
   // 3. The checks CI runs.

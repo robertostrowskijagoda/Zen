@@ -106,8 +106,8 @@ final class LedgerMailPush {
     int pushed = 0;
     for (final String friend in node.friendAccounts.keys) {
       final String address = PeerShareCodec.normalizeAddress(friend);
-      if (isOnline(address)) {
-        continue; // the sync brings it
+      if (isOnline(address) || node.isUnlinkedAddress(address)) {
+        continue; // the sync brings it; an unlinked device gets nothing
       }
       final List<int> recent = (_pushedAt[address] ??= <int>[])
         ..removeWhere(

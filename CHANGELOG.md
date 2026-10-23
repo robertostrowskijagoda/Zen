@@ -30,7 +30,10 @@
 - **Hybrid ML-KEM-768 + X25519** for every signal between devices (no plaintext mode), offline mailbox mail, the locked phone's inbox, Bluetooth hellos, local link handshakes, neighbours' doors, dating boxes, food pickup and Table for six addresses, and private transfers.
 - **Hybrid signatures (Ed25519 + ML-DSA-65)** on account and device records, posts, pyramid records, ballots, voting cards and releases. **Device identity** is post-quantum: device keys are pinned per address, and a key mismatch shows a warning in the chat.
 - **Call recordings** of any length are encrypted into Zen's storage in pieces; the plain file is deleted only after that, "saved" appears only then, and a failed save offers *Retry*. Profile photos from another device or a backup go straight into encrypted storage.
-- **Release checks:** a tag build stops at once while the app pins no release key or APK certificate, and `SHA256SUMS.sig` must be signed by a pinned key.
+- **Release checks:** a tag build stops at once while the app pins no release key or APK certificate, `SHA256SUMS.sig` must be signed by a pinned key and the APKs by the pinned certificate; commented-out pins do not count. The iOS and macOS WebRTC framework is checked against a pinned hash, and JitPack serves only the one library that needs it.
+- **Windows:** Zen comes in its own `Zen` folder with a list of its files; an update replaces only that folder, never a folder Zen was merely unpacked into.
+- **Lost or stolen devices:** once a device is cut off, friends stop sending it anything and their chat shows a warning; revocations are bounded and reach offline friends. A stranger can no longer probe whom you know through ledger hellos.
+- **Linux video player** decodes only the formats Zen itself sends.
 - **Calls:** frame encryption (AES-128-GCM, per-call hybrid keys rotated every 5 minutes and on every join or leave) inside DTLS-SRTP, and every packet sealed again in Zen's relay with a 256-bit ChaCha20-Poly1305 key of the two devices.
 - **Cell votes** with one-time hybrid voting cards; only the card registration stays a ring signature. **Event tickets** are HMAC-based. **Dating lanterns** commit to a one-time hybrid key, and the match test is a sealed offer.
 - **Yggdrasil:** no NodeInfo answers, no admin socket, only encrypted peer links (TLS 1.3 with X25519MLKEM768), strict peer address checks.

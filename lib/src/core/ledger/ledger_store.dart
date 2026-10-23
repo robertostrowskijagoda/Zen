@@ -419,6 +419,25 @@ final class LedgerStore {
     return taken;
   }
 
+  /// Whether entries of any device of [account] wait for a certificate.
+  bool awaitsAccount(String account) =>
+      _awaiting.keys.any((String key) => key.startsWith('$account|'));
+
+  /// Every account with a log held here in a space [inSpace] admits.
+  Set<String> accountsIn({bool Function(String space)? inSpace}) {
+    final Set<String> out = <String>{};
+    for (final MapEntry<String, Map<String, _WriterLog>> space
+        in _logs.entries) {
+      if (inSpace != null && !inSpace(space.key)) {
+        continue;
+      }
+      for (final _WriterLog log in space.value.values) {
+        out.add(log.account);
+      }
+    }
+    return out;
+  }
+
   /// Whether this store holds a log of [device] of [account] in a space
   /// [inSpace] admits (whose certificate it may then hand out).
   bool holdsLogOf(

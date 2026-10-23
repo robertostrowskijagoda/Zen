@@ -350,3 +350,101 @@ func TestPQVouchedPinsGuardFirstContactAndReportConflicts(t *testing.T) {
 		t.Fatal("a conflicting vouch must not move the pin")
 	}
 }
+
+// An impostor with A's node key spoke to B first, so its key was pinned on
+// first sight. When the app pins A's real key over it (a hello signed by
+// A's hybrid device key named another key), the impostor's open session
+// must stop working at once, and frames are always labelled with the key
+// of the session that carried them.
+func TestPQRepinDropsSessionsMadeWithTheOldKey(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	nodeKey, _ := pqTestNode(t, 1)
+	impostor := network.pqImpostor(nodeKey, aIP)
+	// B's answers to A's address reach the impostor.
+	network.endpoints[aIP.String()] = impostor
+	mustSend(t, impostor, bIP, "pierwszy")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 {
+		t.Fatalf("B got %q", got)
+	}
+	if b.pinsSnapshot()[aIP.String()] != impostor.ownFingerprint() {
+		t.Fatal("the first key seen must have been pinned")
+	}
+	// A frame of the impostor's session is labelled with its key.
+	queued := len(network.queue)
+	mustSend(t, impostor, bIP, "drugi")
+	frame := network.queue[queued]
+	network.queue = network.queue[:queued]
+	if plain, key, ok := b.receiveKeyed(aIP, frame.wire); !ok || string(plain) != "drugi" || key != impostor.ownFingerprint() {
+		t.Fatalf("got %q, %q, %v", plain, key, ok)
+	}
+
+	taken, _ := b.importPins(map[string]string{aIP.String(): a.ownFingerprint()}, false)
+	if taken != 1 {
+		t.Fatal("the app's pin must replace the first-sight one")
+	}
+	if len(b.peers[aIP.String()].receive) != 0 {
+		t.Fatal("sessions made with the old key must be gone")
+	}
+	queued = len(network.queue)
+	mustSend(t, impostor, bIP, "nadal ja")
+	if len(network.queue) == queued {
+		t.Fatal("the impostor's session must still send")
+	}
+	stale := network.queue[queued]
+	network.queue = network.queue[:queued]
+	if _, _, ok := b.receiveKeyed(aIP, stale.wire); ok {
+		t.Fatal("a frame of the impostor's old session opened after the repin")
+	}
+
+	// The real A gets through, labelled with its own key.
+	network.endpoints[aIP.String()] = a
+	mustSend(t, a, bIP, "to ja")
+	for len(network.queue) > 0 {
+		next := network.queue[0]
+		network.queue = network.queue[1:]
+		if next.to.Equal(bIP) && next.wire[len(pqMagic)] == pqKindData {
+			plain, key, ok := b.receiveKeyed(next.from, next.wire)
+			if !ok || string(plain) != "to ja" || key != a.ownFingerprint() {
+				t.Fatalf("got %q, %q, %v", plain, key, ok)
+			}
+			continue
+		}
+		network.deliver(next)
+	}
+}
+
+// A receive session opens nothing past its maximum age, however busy it
+// is kept.
+func TestPQReceiveSessionHasAMaximumAge(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "hej")
+	network.pump()
+	network.take(bIP)
+	sealAt := func(text string) []byte {
+		t.Helper()
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		peer := a.peers[bIP.String()]
+		// The sender keeps its session alive past its lifetime (only a
+		// changed sender would).
+		peer.send.created = network.clock
+		sealed, err := a.sealLocked(peer, []byte(text), network.clock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	network.clock = network.clock.Add(pqReceiveSessionMaxAge - time.Minute)
+	if plain, ok := b.receive(aIP, sealAt("jeszcze")); !ok || string(plain) != "jeszcze" {
+		t.Fatal("a session younger than its maximum age must open")
+	}
+	network.clock = network.clock.Add(2 * time.Minute)
+	if _, ok := b.receive(aIP, sealAt("za stary")); ok {
+		t.Fatal("a session older than its maximum age opened")
+	}
+}

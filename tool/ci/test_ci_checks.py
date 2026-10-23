@@ -181,11 +181,20 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("copy_vc_runtime.ps1 -Arch x64", self.release)
         self.assertIn("check_page_alignment.py dist/Zen-arm64-v8a.apk "
                       "dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk", self.release)
-        # One APK per ABI, never a universal one, all with one certificate.
+        # One APK per ABI, never a universal one, all with one certificate,
+        # the one the app of the tag pins.
         self.assertIn("flutter build apk --release --split-per-abi", self.release)
         self.assertNotIn("app-release.apk", self.release)
-        self.assertIn("zen_release.dart fingerprint dist/Zen-arm64-v8a.apk "
+        self.assertIn("zen_release.dart fingerprint --pinned dist/Zen-arm64-v8a.apk "
                       "dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk", self.release)
+        # The iPhone and Mac builds check the WebRTC framework CocoaPods
+        # downloaded, strictly for a tag, and their pods against the lock.
+        with open(os.path.join(ROOT, ".github/workflows/ios.yml"), encoding="utf-8") as f:
+            ios = f.read()
+        for workflow, pods in ((self.release, "macos"), (ios, "ios")):
+            self.assertIn("check_webrtc_sdk.py --strict %s/Pods" % pods, workflow)
+            self.assertIn("git diff --exit-code -I '^COCOAPODS:' -- %s/Podfile.lock" % pods,
+                          workflow)
         self.assertIn("--runtime-repo=", self.release)
         self.assertNotIn("run: flutter pub get\n", self.release)
 

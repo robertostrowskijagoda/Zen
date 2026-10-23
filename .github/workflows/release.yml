@@ -180,10 +180,13 @@ jobs:
           Copy-Item build/app/outputs/flutter-apk/app-x86_64-release.apk dist/Zen-x86_64.apk
 
       # All three signed with one and the same certificate (the app checks
-      # an update against its own certificate; the install page shows one).
-      - name: One signing certificate
+      # an update against its own certificate; the install page shows one),
+      # and it is the one the app of this tag pins
+      # (kOfficialApkCertificatesSha256): another keystore in the
+      # environment would make every phone refuse the update.
+      - name: One signing certificate, the pinned one
         if: steps.key.outputs.ready == 'true'
-        run: dart run tool/zen_release.dart fingerprint dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
+        run: dart run tool/zen_release.dart fingerprint --pinned dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
 
       # 16 KB pages: every 64-bit library's LOAD segments aligned to 0x4000
       # and stored on a 16 KB boundary of the APK (Google Play, Android 15+).
@@ -252,11 +255,23 @@ jobs:
           python tool/ci/check_libwebrtc.py --strict windows-x64 build/windows/x64/runner/Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # The zip holds one folder, Zen\, so "Extract here" never spills
+      # zen.exe and its DLLs into Downloads (where a planted DLL would load
+      # with it). Its zen-app.marker lists everything in the folder: the app
+      # updates itself in place only in a folder that holds exactly that
+      # (isOwnAppFolder in lib/src/features/update/github_update_installer.dart),
+      # never in Downloads or on the Desktop.
       - name: Release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/Zen-Windows.zip
+          $app = Join-Path $env:RUNNER_TEMP 'zip/Zen'
+          if (Test-Path -LiteralPath $app) { Remove-Item -LiteralPath $app -Recurse -Force }
+          New-Item -ItemType Directory -Force (Split-Path $app) | Out-Null
+          Copy-Item -Recurse -LiteralPath build/windows/x64/runner/Release -Destination $app
+          $names = @(Get-ChildItem -LiteralPath $app -Force | ForEach-Object { $_.Name } | Sort-Object)
+          Set-Content -LiteralPath (Join-Path $app 'zen-app.marker') -Encoding ascii -Value (@('zen-app 1') + $names)
+          Compress-Archive -Path $app -DestinationPath dist/Zen-Windows.zip
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -351,7 +366,14 @@ jobs:
             throw 'The ARM64 build has no Go bridge'
           }
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path build/windows/arm64/runner/Release/* -DestinationPath dist/Zen-Windows-arm64.zip
+          # One Zen\ folder with its zen-app.marker, as the x64 zip.
+          $app = Join-Path $env:RUNNER_TEMP 'zip/Zen'
+          if (Test-Path -LiteralPath $app) { Remove-Item -LiteralPath $app -Recurse -Force }
+          New-Item -ItemType Directory -Force (Split-Path $app) | Out-Null
+          Copy-Item -Recurse -LiteralPath build/windows/arm64/runner/Release -Destination $app
+          $names = @(Get-ChildItem -LiteralPath $app -Force | ForEach-Object { $_.Name } | Sort-Object)
+          Set-Content -LiteralPath (Join-Path $app 'zen-app.marker') -Encoding ascii -Value (@('zen-app 1') + $names)
+          Compress-Archive -Path $app -DestinationPath dist/Zen-Windows-arm64.zip
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -437,6 +459,11 @@ jobs:
           # Built with the media player (GStreamer), not without it.
           ldd "$bundle/zen" | grep -q 'libgstreamer-1.0'
           mkdir -p dist
+          # zen-app.marker lists everything in the folder: the app updates
+          # itself in place only in a folder that holds exactly that
+          # (isOwnAppFolder, github_update_installer.dart).
+          { echo 'zen-app 1'; find "$bundle" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort; } > "$RUNNER_TEMP/zen-app.marker"
+          mv "$RUNNER_TEMP/zen-app.marker" "$bundle/zen-app.marker"
           # The same bytes for the same commit: the commit's time on every
           # file, sorted names, no owners, no time in the gzip header.
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
@@ -544,6 +571,38 @@ jobs:
 
       - name: Build (signed ad hoc, not notarized)
         run: flutter build macos --release
+
+      # The WebRTC framework CocoaPods downloaded (a zip from a GitHub
+      # release, which CocoaPods never checks) against the hash pinned in
+      # tool/ci/webrtc_sdk.sha256; a release build fails without a pin.
+      - name: WebRTC framework (pinned SHA-256)
+        run: |
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
+            python3 tool/ci/check_webrtc_sdk.py --strict macos/Pods
+          else
+            python3 tool/ci/check_webrtc_sdk.py macos/Pods
+          fi
+
+      # Once macos/Podfile.lock is committed the build must use exactly its
+      # pods (without it CocoaPods resolves them anew on every build); until
+      # then this build's file is kept as the artifact podfile-lock-macos,
+      # to be committed.
+      - name: Pods as locked (macos/Podfile.lock)
+        run: |
+          if git ls-files --error-unmatch macos/Podfile.lock > /dev/null 2>&1; then
+            if ! git diff --exit-code -I '^COCOAPODS:' -- macos/Podfile.lock; then
+              echo "::error::The build resolved other pods than the committed macos/Podfile.lock."
+              exit 1
+            fi
+          else
+            echo "::warning::macos/Podfile.lock is not committed: the pods are resolved anew on every build. Commit the file of the artifact podfile-lock-macos."
+          fi
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: podfile-lock-macos
+          path: macos/Podfile.lock
+          if-no-files-found: warn
 
       - name: Release files
         run: |

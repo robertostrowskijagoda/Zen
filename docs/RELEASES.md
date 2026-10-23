@@ -88,7 +88,11 @@ in-app way of handing Zen to a friend).
    ```
    or from the keystore (password in the `ZEN_STOREPASS` variable, otherwise
    keytool asks for it): `fingerprint --keystore zen-release.jks --alias zen
-   --write`. Without `--write` it only prints the line ready to paste. (Reading
+   --write`. Without `--write` it only prints the line ready to paste. With
+   `--pinned` it fails unless the APKs are signed with a certificate in
+   `kOfficialApkCertificatesSha256`; the tag build runs it on all three APKs.
+   The pinned lists are read without comments, and an entry that is not a
+   plain string literal is an error. (Reading
    APK certificates is pure Dart, `apk_signing_block.dart`, shared by the app
    and the tool.)
 
@@ -208,17 +212,22 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
      most phones, armeabi-v7a for older 32-bit phones, x86_64 for
      Chromebooks and emulators; no universal APK and no x86 (Flutter has no
      x86 release engine);
-   - `Zen-Windows.zip` — the zipped folder
-     `build/windows/x64/runner/Release`, with the Microsoft Visual C++
+   - `Zen-Windows.zip` — the folder `build/windows/x64/runner/Release`
+     zipped as `Zen\` with a `zen-app.marker` (`zen-app 1`, then the name of
+     every file in the folder; the in-place update swaps a folder only when
+     it matches its marker, otherwise it saves the archive to Downloads),
+     with the Microsoft Visual C++
      runtime (`msvcp140*.dll`, `vcruntime140*.dll`) copied next to
      `zen.exe` by `tool/ci/copy_vc_runtime.ps1` from the Visual Studio
      redistributable folder; `tool/ci/check_windows_bundle.py` reads the
      import tables of every `.exe`/`.dll` and fails when one needs a runtime
      library that is not in the folder;
-   - `Zen-Windows-arm64.zip` — the zipped folder
-     `build/windows/arm64/runner/Release` (experimental, see item 3);
+   - `Zen-Windows-arm64.zip` — the folder
+     `build/windows/arm64/runner/Release` as `Zen\` with its marker
+     (experimental, see item 3);
    - `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz` — the folder
-     `build/linux/<x64|arm64>/release/bundle` as `Zen/` (started with
+     `build/linux/<x64|arm64>/release/bundle` as `Zen/` with its
+     `zen-app.marker` (started with
      `Zen/zen`; includes `install-desktop-entry.sh`, which adds the menu entry
      and `zen://` links for the current user);
    - `Zen-Linux-x64.deb`, `Zen-Linux-arm64.deb` — the same bundle packaged by
@@ -421,6 +430,18 @@ SideStore or AltStore sign it with the user's free Apple ID (README, section
   without pins. After every `flutter_webrtc` bump that changes the
   libwebrtc version, add the new lines (compare the ZIP's sum with one
   downloaded independently from the webrtc-sdk/libwebrtc release). Tests: `tool/ci/test_check_libwebrtc.py`.
+- **WebRTC-SDK (iOS, macOS).** CocoaPods downloads `WebRTC-SDK`
+  (150.7871.01) as a prebuilt `WebRTC.xcframework`.
+  `tool/ci/check_webrtc_sdk.py` hashes the framework tree and compares it
+  with `tool/ci/webrtc_sdk.sha256`; a normal build only warns, a tag build
+  (`--strict`) fails without a pin. The pin is taken from the official zip
+  named in the podspec (`--hash WebRTC.xcframework`). The builds also check
+  that the pods match the committed `ios/Podfile.lock` / `macos/Podfile.lock`
+  and upload the lock they made (artifacts `podfile-lock-ios`,
+  `podfile-lock-macos`). Add a new line after every `flutter_webrtc` bump.
+  `release.dart prepare` refuses while native pins are missing
+  (`--allow-unpinned-native` only for a test release). Tests:
+  `tool/ci/test_check_webrtc_sdk.py`.
 - **Go.** `go.mod` has a `toolchain` line (go1.26.10, the latest 1.26
   security fix); `actions/setup-go` with `go-version-file` takes it, and
   `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by
@@ -593,7 +614,8 @@ GPL-3.0 — so no "NonFreeAssets".
 |---|---|---|
 | Build recipe | a merge request to `fdroiddata` with `metadata/com.roj.zen.yml`: Flutter from the `flutter` srclib at the version in `pubspec.yaml`, Go 1.26 downloaded with a pinned SHA-256 (Debian's is older), the NDK; one build per ABI (`--split-per-abi --target-platform android-arm64`, `android-arm`, `android-x64`, each with its own `VercodeOperation`) | 1–2 days, including a local `fdroid build` run |
 | Self-update | build the store variant: `flutter build apk --release --flavor appStoreOnly` (or `--dart-define=ZEN_STORE=true`). It has no GitHub update check, no APK sharing, no `REQUEST_INSTALL_PACKAGES`, and it skips the "re-signed copy" check, which would otherwise flag F-Droid's signature and block wallet transfers. The app then says it is updated by the store it came from. This is a build option Zen provides, so the build counts as unmodified (NOTICE, section 5) | none (optional: a separate `ZEN_DISTRIBUTION=fdroid` define so About can say "F-Droid build", about half a day) |
-| WebRTC | `flutter_webrtc` pulls the prebuilt `io.github.webrtc-sdk:android` from Maven Central (BSD-3-Clause) and `com.github.davidliu:audioswitch` from JitPack. F-Droid accepts free libraries from trusted Maven repositories, but reviewers may ask for WebRTC to be built from source (F-Droid has discussed hosting its own WebRTC build) | none to days, depending on review; the slowest item |
+| WebRTC | `flutter_webrtc` pulls the prebuilt `io.github.webrtc-sdk:android` from Maven Central (BSD-3-Clause) and `com.github.davidliu:audioswitch` from JitPack (the build takes only
+the `com.github.davidliu` group from JitPack). F-Droid accepts free libraries from trusted Maven repositories, but reviewers may ask for WebRTC to be built from source (F-Droid has discussed hosting its own WebRTC build) | none to days, depending on review; the slowest item |
 | GIF search (KLIPY) | a proprietary network service, on by default (turned off in Settings → GIFs) — expect the `NonFreeNet` anti-feature in the metadata. Optional: a build define that turns GIF search off by default in the F-Droid build | metadata only (define: about 2 hours) |
 | DNS fallback | only when the system resolver fails, the Go bridge asks Quad9, Cloudflare and Google Public DNS over TLS; say so in the description (not an anti-feature by itself) | none |
 | Store listing | `fastlane/metadata/android/en-US/` (title, short and full description, screenshots, changelogs per `versionCode`) — F-Droid and IzzyOnDroid read it | 1–2 hours |

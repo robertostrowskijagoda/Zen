@@ -380,7 +380,11 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
     if (friend.status != FriendRelationshipStatus.accepted) {
       continue;
     }
-    friends.add(address);
+    // A device its owner unlinked (lost or stolen) is no contact; the
+    // account's other devices are.
+    if (directory?.unlinkedAccountOf(friend.address) == null) {
+      friends.add(address);
+    }
     final String? account = directory?.accountOf(friend.address);
     if (directory != null && account != null) {
       friends.addAll(directory.addressesOf(account).map(normal));

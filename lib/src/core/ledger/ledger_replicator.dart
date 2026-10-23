@@ -15,13 +15,17 @@ abstract final class LedgerMessages {
   static const String heads = 'lg_heads';
   static const String want = 'lg_want';
   static const String entries = 'lg_entries';
+
+  /// Device revocations: `items` [DeviceRevocation], at most
+  /// [LedgerReplicator.revocationsPerMessage].
   static const String revoke = 'lg_revoke';
 
   /// "Send me these devices' certificates": `items` [{a: account,
   /// d: device}], for entries that came without one known here.
   static const String certWant = 'lg_cert_want';
 
-  /// The answer: `items` [DeviceCertificate].
+  /// The answer: `items` [DeviceCertificate], and `rev` the revocations of
+  /// those devices (taken before the waiting entries are).
   static const String certs = 'lg_certs';
   static const String blobWant = 'lg_blob_want';
   static const String blobManifest = 'lg_blob_manifest';
@@ -55,6 +59,14 @@ abstract final class LedgerMessages {
 /// for one it lacks (`lg_cert_want` → `lg_certs`); until it comes, such
 /// entries wait unchecked and are never taken.
 ///
+/// Device revocations go only where they matter: a revocation is taken
+/// only for an account this device has a reason to know ([knowsAccount],
+/// or whose certificates or waiting entries are here), and handed only to
+/// peers that may read that account's logs here — in a sync (each one once
+/// in [revocationResendMs]), passed on when new (at most
+/// [revocationsForwardedPerMinute]), and with the certificates of its
+/// device (`lg_certs`). Messages carry at most [revocationsPerMessage].
+///
 /// It never trusts the peer: every entry goes through [LedgerStore]'s
 /// checks, every file piece through its hash.
 final class LedgerReplicator {
@@ -66,6 +78,7 @@ final class LedgerReplicator {
     this.acceptsFrom,
     this.servesTo,
     this.forwardsFrom,
+    this.knowsAccount,
     this.maxEntriesPerMessage = 100,
     this.maxBytesPerMessage = 256 * 1024,
     this.maxMessagesPerMinute = 3000,
@@ -95,6 +108,10 @@ final class LedgerReplicator {
   /// (a space of a kind this build does not know): such a space is
   /// asked for and taken like a subscribed one, though not followed.
   final bool Function(String peer, String space)? forwardsFrom;
+
+  /// Whether this device has a reason to know [account] (this account,
+  /// friends, followed ones): see the class comment on revocations.
+  final bool Function(String account)? knowsAccount;
 
   bool _forwards(String peer, String space) =>
       forwardsFrom?.call(peer, space) ?? false;
@@ -142,6 +159,27 @@ final class LedgerReplicator {
   /// Most certificates asked for or handed out in one message.
   static const int certificatesPerMessage = 32;
 
+  /// Most revocations in one message; a receiver takes that many.
+  static const int revocationsPerMessage = 64;
+
+  /// Most bytes of revocations in one message (a signal may have 2 MB).
+  static const int revocationBytesPerMessage = 1024 * 1024;
+
+  /// New revocations passed on per minute; the rest goes with the next
+  /// sync.
+  static const int revocationsForwardedPerMinute = 64;
+
+  /// A revocation handed to a peer is not handed to it again for this
+  /// long (each sync would otherwise carry every one of them).
+  static const int revocationResendMs = 6 * 3600 * 1000;
+
+  /// `peer|revocation id` → when it was handed to (or came from) [peer].
+  final Map<String, int> _revocationSentAt = <String, int>{};
+  static const int _maxRevocationsSent = 16384;
+
+  /// (minute, revocations passed on in it).
+  (int, int) _forwarded = (0, 0);
+
   /// Called whenever a blob became complete here.
   void Function(String blobId)? onBlobComplete;
 
@@ -174,19 +212,89 @@ final class LedgerReplicator {
     // A new round: certificates still missing may be asked of it again.
     _certAsked.removeWhere((String key, int _) => key.startsWith('$peer|'));
     send(peer, _headsMessage(spaces));
-    if (only != null) {
+    if (only != null || store.directory.revocationCount == 0) {
       return;
     }
-    final List<DeviceRevocation> revocations = store.directory.revocations
-        .toList();
-    if (revocations.isNotEmpty) {
+    final int now = store.clock.wallMillis();
+    _sendRevocations(peer, <DeviceRevocation>[
+      for (final DeviceRevocation r in _revocationsFor(
+        peer,
+        store.directory.revocations,
+      ))
+        if (_revocationDue(peer, r, now)) r,
+    ]);
+  }
+
+  /// Whether a revocation of [account] is taken here.
+  bool _knows(String account) =>
+      store.directory.devicesOf(account).isNotEmpty ||
+      store.awaitsAccount(account) ||
+      (knowsAccount?.call(account) ?? false);
+
+  /// Those of [revocations] that [peer] should have: of accounts whose
+  /// logs it may read here.
+  List<DeviceRevocation> _revocationsFor(
+    String peer,
+    Iterable<DeviceRevocation> revocations,
+  ) {
+    final Set<String> readable = store.accountsIn(
+      inSpace: (String space) => _serves(peer, space),
+    );
+    return <DeviceRevocation>[
+      for (final DeviceRevocation r in revocations)
+        if (readable.contains(r.account)) r,
+    ];
+  }
+
+  bool _revocationDue(String peer, DeviceRevocation r, int now) {
+    final int? at = _revocationSentAt['$peer|${r.id}'];
+    return at == null || now - at >= revocationResendMs;
+  }
+
+  void _noteRevocationSent(String peer, DeviceRevocation r, int now) {
+    if (_revocationSentAt.length >= _maxRevocationsSent) {
+      _revocationSentAt.removeWhere(
+        (String _, int at) => now - at >= revocationResendMs,
+      );
+      if (_revocationSentAt.length >= _maxRevocationsSent) {
+        _revocationSentAt.clear();
+      }
+    }
+    _revocationSentAt['$peer|${r.id}'] = now;
+  }
+
+  /// Sends [revocations] to [peer] in messages of at most
+  /// [revocationsPerMessage] and [revocationBytesPerMessage].
+  void _sendRevocations(String peer, List<DeviceRevocation> revocations) {
+    if (revocations.isEmpty) {
+      return;
+    }
+    final int now = store.clock.wallMillis();
+    final List<Map<String, dynamic>> batch = <Map<String, dynamic>>[];
+    int bytes = 0;
+    void flush() {
+      if (batch.isEmpty) {
+        return;
+      }
       send(peer, <String, dynamic>{
         'type': LedgerMessages.revoke,
-        'items': <Map<String, dynamic>>[
-          for (final DeviceRevocation r in revocations) r.toJson(),
-        ],
+        'items': List<Map<String, dynamic>>.of(batch),
       });
+      batch.clear();
+      bytes = 0;
     }
+
+    for (final DeviceRevocation r in revocations) {
+      if (batch.length >= revocationsPerMessage ||
+          (batch.isNotEmpty &&
+              bytes + r.encodedLength > revocationBytesPerMessage)) {
+        flush();
+      }
+      batch.add(r.toJson());
+      bytes += r.encodedLength;
+      _noteRevocationSent(peer, r, now);
+    }
+    flush();
   }
 
   void _scheduleAnnounce(String space) {
@@ -211,12 +319,8 @@ final class LedgerReplicator {
     if (await store.applyRevocation(revocation) < 0) {
       return false;
     }
-    final Map<String, dynamic> message = <String, dynamic>{
-      'type': LedgerMessages.revoke,
-      'items': <Map<String, dynamic>>[revocation.toJson()],
-    };
     for (final String peer in peers()) {
-      send(peer, message);
+      _sendRevocations(peer, <DeviceRevocation>[revocation]);
     }
     return true;
   }
@@ -248,7 +352,7 @@ final class LedgerReplicator {
         case LedgerMessages.certWant:
           answerCertificates(peer, message['items']);
         case LedgerMessages.certs:
-          await _onCertificates(message['items']);
+          await _onCertificates(message['items'], message['rev']);
         case LedgerMessages.blobWant:
           await _onBlobWant(peer, message['id'], message['chunks']);
         case LedgerMessages.blobManifest:
@@ -440,6 +544,8 @@ final class LedgerReplicator {
       return;
     }
     final List<Map<String, dynamic>> certs = <Map<String, dynamic>>[];
+    final List<Map<String, dynamic>> revocations = <Map<String, dynamic>>[];
+    int revocationBytes = 0;
     for (final Object? item in items.take(certificatesPerMessage)) {
       if (item is! Map || item['a'] is! String || item['d'] is! String) {
         continue;
@@ -458,21 +564,45 @@ final class LedgerReplicator {
                 _serves(peer, space) && (inSpace?.call(space) ?? true),
           )) {
         certs.add(cert.toJson());
+        // A device cut off goes with its cut-off: the asker takes it
+        // before the entries that wait for this certificate.
+        for (final DeviceRevocation r in store.directory.revocationsOf(
+          account,
+          device,
+        )) {
+          // Within what one signal carries (the rest comes with a sync).
+          if (revocationBytes + r.encodedLength <= revocationBytesPerMessage) {
+            revocations.add(r.toJson());
+            revocationBytes += r.encodedLength;
+          }
+        }
       }
     }
     if (certs.isNotEmpty) {
       send(peer, <String, dynamic>{
         'type': LedgerMessages.certs,
         'items': certs,
+        if (revocations.isNotEmpty) 'rev': revocations,
       });
     }
   }
 
   /// Certificates a peer sent: only those of devices whose entries wait
-  /// here are taken (and checked), then those entries.
-  Future<void> _onCertificates(Object? items) async {
+  /// here are taken (and checked), then those entries. The revocations
+  /// that came along ([revocations]) are taken first.
+  Future<void> _onCertificates(Object? items, Object? revocations) async {
     if (items is! List) {
       return;
+    }
+    if (revocations is List) {
+      for (final Object? json in revocations.take(revocationsPerMessage)) {
+        final DeviceRevocation? revocation = DeviceRevocation.fromJson(json);
+        if (revocation != null &&
+            !store.directory.knowsRevocation(revocation) &&
+            _knows(revocation.account)) {
+          await store.applyRevocation(revocation);
+        }
+      }
     }
     for (final Object? json in items.take(certificatesPerMessage)) {
       final DeviceCertificate? cert = DeviceCertificate.fromJson(json);
@@ -482,31 +612,48 @@ final class LedgerReplicator {
     }
   }
 
+  /// Revocations [peer] sent: those of accounts known here are checked
+  /// and kept (within [AccountDirectory]'s limits), and the new ones passed
+  /// on to the peers that read those accounts here.
   Future<void> _onRevoke(String peer, Object? items) async {
     if (items is! List) {
       return;
     }
-    for (final Object? json in items.take(64)) {
+    final int now = store.clock.wallMillis();
+    final List<DeviceRevocation> fresh = <DeviceRevocation>[];
+    for (final Object? json in items.take(revocationsPerMessage)) {
       final DeviceRevocation? revocation = DeviceRevocation.fromJson(json);
-      if (revocation == null) {
-        continue;
-      }
-      final bool known = store.directory.revocations.any(
-        (DeviceRevocation r) => r.signature == revocation.signature,
-      );
-      if (known) {
+      if (revocation == null ||
+          store.directory.knowsRevocation(revocation) ||
+          !_knows(revocation.account)) {
         continue;
       }
       if (await store.applyRevocation(revocation) >= 0) {
-        // Pass it on: a cut-off must reach everyone.
-        for (final String other in peers()) {
-          if (other != peer) {
-            send(other, <String, dynamic>{
-              'type': LedgerMessages.revoke,
-              'items': <Map<String, dynamic>>[revocation.toJson()],
-            });
-          }
-        }
+        fresh.add(revocation);
+        // The sender has it: not handed back in the next sync.
+        _noteRevocationSent(peer, revocation, now);
+      }
+    }
+    _passOn(peer, fresh);
+  }
+
+  /// Passes new revocations on (a cut-off must reach everyone who reads
+  /// the account), at most [revocationsForwardedPerMinute].
+  void _passOn(String from, List<DeviceRevocation> fresh) {
+    if (fresh.isEmpty) {
+      return;
+    }
+    final int minute = store.clock.wallMillis() ~/ 60000;
+    final int used = _forwarded.$1 == minute ? _forwarded.$2 : 0;
+    final int room = revocationsForwardedPerMinute - used;
+    if (room <= 0) {
+      return;
+    }
+    final List<DeviceRevocation> passing = fresh.take(room).toList();
+    _forwarded = (minute, used + passing.length);
+    for (final String other in peers()) {
+      if (other != from) {
+        _sendRevocations(other, _revocationsFor(other, passing));
       }
     }
   }

@@ -126,6 +126,8 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
     return _ref
         .read(socialHubControllerProvider)
         .acceptedFriends
+        // A device its owner unlinked holds no mail and gets no keys.
+        .where((FriendProfile friend) => !levels.isUnlinked(friend.address))
         .map(
           (FriendProfile friend) => RelayFriend(
             address: friend.address,

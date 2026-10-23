@@ -22,6 +22,11 @@ abstract interface class AccountDeviceDirectory {
   /// The address the app knows [account] by (the friend's entry), or
   /// `null` when it is not a contact.
   String? contactAddressOf(String account);
+
+  /// The account whose device at [address] its owner unlinked (a lost or
+  /// stolen phone), or `null`: nothing goes there and nothing from there
+  /// is taken; the account's other devices stand in for it.
+  String? unlinkedAccountOf(String address);
 }
 
 /// Called on this device for something another device of the account sent
@@ -68,7 +73,10 @@ const Set<String> _callCommit = <String>{
 /// * a call belongs to the device that answered it: from then on its
 ///   signals go there only, and the friend's other devices stop ringing;
 /// * text messages sent from here are copied to this account's other
-///   devices, so the conversation is complete on each.
+///   devices, so the conversation is complete on each;
+/// * a device its owner unlinked (a lost or stolen phone) gets nothing and
+///   is not heard, even at the address the app knows the friend by: what
+///   the app sends there goes to the account's other devices.
 final class AccountRoutingTransport implements SignalTransport {
   AccountRoutingTransport({
     required this.delegate,
@@ -99,6 +107,10 @@ final class AccountRoutingTransport implements SignalTransport {
     final AccountDeviceDirectory? dir = _directory();
     if (dir == null || dir.ownAccount.isEmpty) {
       yield frame;
+      return;
+    }
+    if (dir.unlinkedAccountOf(frame.from) != null) {
+      // Whoever holds an unlinked device is not that person any more.
       return;
     }
     final String? acc = dir.accountOf(frame.from);
@@ -188,6 +200,17 @@ final class AccountRoutingTransport implements SignalTransport {
     required Map<String, dynamic> payload,
   }) async {
     final AccountDeviceDirectory? dir = _directory();
+    final String? unlinked = dir?.unlinkedAccountOf(remoteAddress);
+    if (dir != null && unlinked != null) {
+      // Never to the unlinked device: to the account's other devices.
+      for (final String other in dir.addressesOf(unlinked)) {
+        if (!PeerShareCodec.addressesEqual(other, remoteAddress)) {
+          await _sendQuietly(other, payload);
+        }
+      }
+      await _mirror(dir, remoteAddress, payload);
+      return;
+    }
     final String? acc = dir?.accountOf(remoteAddress);
     if (dir != null && acc != null && acc == dir.ownAccount) {
       // Another device of this account (e.g. listed in a group): it gets

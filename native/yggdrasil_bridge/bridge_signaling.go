@@ -77,7 +77,9 @@ func startPacketLoop(node *bridgeNode) {
 					continue
 				}
 				// Only sealed signals carry anything (pq_session.go).
-				message, ok = node.openSignal(source, message)
+				// The key is the one of the session that carried it, not
+				// whatever key the address has by now.
+				message, key, ok := node.openSignal(source, message)
 				if !ok {
 					continue
 				}
@@ -88,7 +90,7 @@ func startPacketLoop(node *bridgeNode) {
 				dropped, queued := node.signalInbox.push(signalMessage{
 					From:    source.String(),
 					Payload: message,
-					Key:     node.signalKeyOf(source),
+					Key:     key,
 				}, network)
 				if dropped > 0 || !queued {
 					fmt.Printf("[ZEN-GO] signal inbox over budget, dropped %d queued signal(s), queued new=%v from=%s len=%d\n",

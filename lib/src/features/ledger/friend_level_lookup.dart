@@ -9,6 +9,14 @@ final class FriendLevelLookup {
 
   /// The level of [address], or `null` while the ledger is not running.
   FriendLevel? of(String address) => levelOf?.call(address);
+
+  /// Set by the running ledger: whether the device at friend [address] was
+  /// unlinked by its owner (a lost or stolen phone).
+  bool Function(String address)? unlinked;
+
+  /// Whether nothing should go to friend [address] any more (its device
+  /// was unlinked by its owner).
+  bool isUnlinked(String address) => unlinked?.call(address) ?? false;
 }
 
 final Provider<FriendLevelLookup> friendLevelLookupProvider =

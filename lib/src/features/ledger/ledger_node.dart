@@ -447,7 +447,15 @@ final class LedgerNode {
         _isSibling(peer) ||
         _forwardsUnknown(peer, space),
     forwardsFrom: _takesUnknownFrom,
+    knowsAccount: _isCoreAccount,
   );
+
+  /// This account, friends' and followed ones: their device revocations are
+  /// always taken and kept ([AccountDirectory.isCoreAccount]).
+  bool _isCoreAccount(String acc) =>
+      acc == account ||
+      _accounts.containsValue(acc) ||
+      _followed.containsValue(acc);
 
   /// Whether unknown-kind [space] may be given to [peer].
   bool _forwardsUnknown(String peer, String space) =>
@@ -485,16 +493,37 @@ final class LedgerNode {
 
   /// Normalised friend address → account key, learnt from hellos.
   final Map<String, String> _accounts = <String, String>{};
+
+  /// Normalised friend address → the device a signed hello proved there.
+  final Map<String, String> _addressDevices = <String, String>{};
+
+  /// Friends' addresses whose device its owner unlinked (a lost or stolen
+  /// phone): normalised address → account. Nothing goes there and nothing
+  /// from there counts as that account, until a device of the account that
+  /// is not cut off proves itself at that address.
+  final Map<String, String> _unlinked = <String, String>{};
+
+  /// A friend's device at [address] was unlinked by its owner: the app
+  /// warns in the conversation with that friend.
+  void Function(String address)? onDeviceUnlinked;
+
   final Map<String, int> _helloSentAt = <String, int>{};
 
-  /// Friends sent this device's whole certificate in this run: they keep
-  /// it, so later hellos only name it (about 10 KB less each).
-  final Set<String> _certificateSentTo = <String>{};
+  /// Addresses that hold this device's whole certificate: their last
+  /// proven hello said so (`kc` naming this device), so hellos to them
+  /// only name it (about 10 KB less each). Anyone else gets it whole.
+  final Set<String> _certificateKnownBy = <String>{};
 
-  /// When each address last asked for the whole certificate, or was asked
-  /// for its own (each at most once a minute).
+  /// When each address was last asked for its whole certificate (at most
+  /// once a minute).
   final Map<String, int> _certificateAskedAt = <String, int>{};
-  final Map<String, int> _certificateResentAt = <String, int>{};
+
+  /// When each cut-off device of this account was last told so.
+  final Map<String, int> _revocationToldAt = <String, int>{};
+
+  /// Address → (minute, whole hellos sent because it asked, `nc`).
+  final Map<String, (int, int)> _certificateResent = <String, (int, int)>{};
+  static const int _certificateResendsPerMinute = 3;
 
   /// The hello's proof: signed once for this address, session key and
   /// device key (what it signs does not change between hellos).
@@ -539,6 +568,15 @@ final class LedgerNode {
   /// Account key of friend [address], once known.
   String? accountOf(String address) =>
       _accounts[PeerShareCodec.normalizeAddress(address)];
+
+  /// The account whose device at [address] its owner unlinked (a lost or
+  /// stolen phone), or null: nothing should go there any more.
+  String? unlinkedAccountOf(String address) =>
+      _unlinked[PeerShareCodec.normalizeAddress(address)];
+
+  /// Whether the device at friend [address] was unlinked by its owner.
+  bool isUnlinkedAddress(String address) =>
+      _unlinked.containsKey(PeerShareCodec.normalizeAddress(address));
 
   /// Account key of [address] if it is a friend or a followed account.
   String? knownAccountOf(String address) {
@@ -629,6 +667,10 @@ final class LedgerNode {
         existing ??
         await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
     await store.directory.addCertificate(loaded.certificate);
+    store.directory.isCoreAccount = (String acc) =>
+        acc == loaded.certificate.account ||
+        _accounts.containsValue(acc) ||
+        _followed.containsValue(acc);
     await archive.open(store, blobs);
     if (existing != null && archive.lostOwnLog(loaded.writer)) {
       // Our own log did not come back whole: entries others hold may be
@@ -898,6 +940,9 @@ final class LedgerNode {
     for (final String address in gone) {
       lost.addAll(audiencesFor(levelOf(address)));
       _levels.remove(address);
+      _addressDevices.remove(address);
+      _unlinked.remove(address);
+      _certificateKnownBy.remove(address);
       final String? acc = _accounts.remove(address);
       if (acc != null && !_accounts.containsValue(acc)) {
         for (final String kind in kFollowedFriendSpaces) {
@@ -945,21 +990,26 @@ final class LedgerNode {
 
   bool _isFriend(String address) {
     final String normalized = PeerShareCodec.normalizeAddress(address);
-    return _liveDevice(normalized) != null ||
-        friendAddresses().any(
-          (String f) => PeerShareCodec.normalizeAddress(f) == normalized,
-        );
+    if (_unlinked.containsKey(normalized)) {
+      // Its owner cut that device off: a stranger now.
+      return false;
+    }
+    return _liveDevice(normalized) != null || _isListedFriend(normalized);
   }
+
+  /// Whether [normalized] is on the app's friend list.
+  bool _isListedFriend(String normalized) => friendAddresses().any(
+    (String f) => PeerShareCodec.normalizeAddress(f) == normalized,
+  );
 
   /// Friends whose account is known, and every live device of this account
   /// and of friends.
   Iterable<String> _knownFriends() => <String>{
     ...friendAddresses()
+        .map(PeerShareCodec.normalizeAddress)
         .where(
-          (String f) =>
-              _accounts.containsKey(PeerShareCodec.normalizeAddress(f)),
-        )
-        .map(PeerShareCodec.normalizeAddress),
+          (String f) => _accounts.containsKey(f) && !_unlinked.containsKey(f),
+        ),
     ..._liveDeviceAddresses(),
   };
 
@@ -1097,6 +1147,9 @@ final class LedgerNode {
   /// device of this account.
   String? accountOfAddress(String address) {
     final String normalized = PeerShareCodec.normalizeAddress(address);
+    if (_unlinked.containsKey(normalized)) {
+      return null;
+    }
     return _accounts[normalized] ?? _liveDevice(normalized)?.account;
   }
 
@@ -1105,7 +1158,7 @@ final class LedgerNode {
   List<String> addressesOfAccount(String acc) {
     final Set<String> out = <String>{
       for (final MapEntry<String, String> e in _accounts.entries)
-        if (e.value == acc) e.key,
+        if (e.value == acc && !_unlinked.containsKey(e.key)) e.key,
       for (final String a in _liveDeviceAddresses())
         if (_devices[a]!.account == acc) a,
     }..remove(_ownAddress);
@@ -1553,7 +1606,10 @@ final class LedgerNode {
 
   /// Cuts [device] of this account off (a lost or stolen phone): what it
   /// wrote so far stays, anything later is refused everywhere, and it
-  /// no longer gets messages. Needs the account key ([LedgerIdentity.unlock]
+  /// no longer gets messages: this account's devices drop it at once, and
+  /// friends whose entry for this account is that device's address stop
+  /// sending there and are warned once the revocation reaches them
+  /// ([onDeviceUnlinked]). Needs the account key ([LedgerIdentity.unlock]
   /// with the account password first, if one is set).
   Future<void> unlinkDevice(String device) async {
     await start();
@@ -1595,6 +1651,20 @@ final class LedgerNode {
       store.directory.isRevoked(account, identity.deviceKey.id);
 
   void _pruneRevoked() {
+    // A friend's device its owner cut off, at the address the friend is
+    // known by.
+    for (final MapEntry<String, String> e in _addressDevices.entries.toList()) {
+      final String? acc = _accounts[e.key] ?? _devices[e.key]?.account;
+      if (acc != null &&
+          acc != account &&
+          !_unlinked.containsKey(e.key) &&
+          store.directory.isRevoked(acc, e.value)) {
+        unawaitedLogged(
+          _cutOff(e.key, acc),
+          context: 'Odłączenie urządzenia znajomego',
+        );
+      }
+    }
     _deviceHints.removeWhere(
       (_, _DeviceHint h) => store.directory.isRevoked(h.account, h.device),
     );
@@ -1612,6 +1682,32 @@ final class LedgerNode {
     if (!_devicesChanged.isClosed) {
       _devicesChanged.add(null);
     }
+  }
+
+  /// The device at friend address [normalized] was cut off by its owner
+  /// [acc] (a lost or stolen phone whose key still works): nothing more
+  /// goes there (keys, sync, messages: the app's routing sends to the
+  /// account's other devices), nothing from there counts as [acc], the
+  /// audiences it could read get new keys, and the app is told.
+  Future<void> _cutOff(String normalized, String acc) async {
+    if (_unlinked[normalized] == acc) {
+      return;
+    }
+    _unlinked[normalized] = acc;
+    _addressDevices.remove(normalized);
+    _certificateKnownBy.remove(normalized);
+    await _savePeers();
+    logZenWarning('Dziennik: właściciel odłączył urządzenie pod $normalized.');
+    final Set<Audience> readable = audiencesFor(levelOf(normalized));
+    if (readable.isNotEmpty) {
+      for (final Audience a in readable) {
+        keyring.rotate(a, _clock.wallMillis());
+      }
+      await _saveKeyring();
+      _sendKeysToAll();
+    }
+    _emitDevices();
+    onDeviceUnlinked?.call(normalized);
   }
 
   Future<void> _saveDevices() => disk.write(
@@ -1747,7 +1843,9 @@ final class LedgerNode {
   }
 
   void _send(String peer, Map<String, dynamic> message) {
-    if (_stopped) {
+    if (_stopped ||
+        _unlinked.containsKey(PeerShareCodec.normalizeAddress(peer))) {
+      // Nothing of the ledger goes to a device its owner cut off.
       return;
     }
     unawaitedLogged(
@@ -1763,6 +1861,10 @@ final class LedgerNode {
     bool askCertificate = false,
   }) {
     final String normalized = PeerShareCodec.normalizeAddress(friend);
+    if (_unlinked.containsKey(normalized)) {
+      // A device its owner cut off: nothing goes there.
+      return;
+    }
     final int now = _clock.wallMillis();
     final int? last = _helloSentAt[normalized];
     // Never more than one unforced hello a second, whatever the interval:
@@ -1777,9 +1879,12 @@ final class LedgerNode {
     _helloSentAt[normalized] = now;
     final String me = _ownAddress;
     final bool friendly = _isFriend(friend);
-    // A friend keeps the certificate from the first hello of this run: the
-    // later ones only name it (it asks for the whole one when it lacks it).
-    final bool named = friendly && !_certificateSentTo.add(normalized);
+    // Only a friend that said it holds this device's certificate gets a
+    // hello that merely names it (it asks for the whole one when it lacks
+    // it); anyone else gets it whole.
+    final bool named = friendly && _certificateKnownBy.contains(normalized);
+    // Tells the friend that its certificate is here (so it can name it).
+    final String? held = friendly ? _certificateHeldFor(normalized) : null;
     unawaitedLogged(() async {
       final DeviceCertificate cert = identity.certificate;
       // Proves the device key holder is at this address (the certificate
@@ -1800,6 +1905,7 @@ final class LedgerNode {
           if (key.isNotEmpty) 'k': key,
           's': proof,
         },
+        'kc': ?held,
         if (reply) 'r': 1,
         if (askCertificate) 'nc': 1,
       });
@@ -1859,31 +1965,58 @@ final class LedgerNode {
     return known;
   }
 
-  bool _namesKnownAccount(Map<String, dynamic> payload) {
-    final Object? named = payload['cd'];
-    final Object? a = named is Map ? named['a'] : null;
-    return a is String && (a == account || _accounts.containsValue(a));
+  /// The device whose certificate this node holds for the device proven
+  /// at [normalized] (a friend's or one of this account's), or null.
+  String? _certificateHeldFor(String normalized) {
+    final _DeviceRef? live = _liveDevice(normalized);
+    final String? acc = live?.account ?? _accounts[normalized];
+    final String? device = live?.device ?? _addressDevices[normalized];
+    if (acc == null ||
+        device == null ||
+        _unlinked.containsKey(normalized) ||
+        store.directory.certificateOf(acc, device) == null) {
+      return null;
+    }
+    return device;
+  }
+
+  /// A proven hello from [normalized] says whether it holds this device's
+  /// certificate (`kc` naming this device): later hellos to it only name
+  /// the certificate, or carry it whole again.
+  void _noteCertificateKnown(String normalized, Map<String, dynamic> payload) {
+    if (payload['kc'] == identity.deviceKey.id) {
+      _certificateKnownBy.add(normalized);
+    } else {
+      _certificateKnownBy.remove(normalized);
+    }
   }
 
   /// A friend's hello asked for this device's whole certificate: the next
-  /// hello carries it (at most once a minute).
+  /// hello carries it.
   ///
-  /// Counted per address and asking device ([payload] names it): a phone
-  /// set up again at the same address is a new device and gets it at once.
-  void _resendCertificateTo(String from, Map<String, dynamic> payload) {
-    final Object? cert = payload['cert'];
-    final Object? named = payload['cd'];
-    final Object? device = cert is Map
-        ? cert['device']
-        : named is Map
-        ? named['d']
-        : null;
-    final String asker = device is String && device.length <= 200 ? device : '';
+  /// Counted per address only (what the hello names is not checked yet):
+  /// at most [_certificateResendsPerMinute] whole hellos a minute, so a
+  /// phone set up again at the same address gets it at once, and nobody
+  /// can make this device send them without end.
+  void _resendCertificateTo(String from) {
     final String normalized = PeerShareCodec.normalizeAddress(from);
-    if (_onceAMinute(_certificateResentAt, '$normalized|$asker')) {
-      _certificateSentTo.remove(normalized);
-      _hello(from, force: true);
+    final int minute = _clock.wallMillis() ~/ 60000;
+    final (int, int)? had = _certificateResent[normalized];
+    final int used = had == null || had.$1 != minute ? 0 : had.$2;
+    if (used >= _certificateResendsPerMinute) {
+      return;
     }
+    if (had == null && _certificateResent.length >= 1000) {
+      _certificateResent.removeWhere(
+        (String _, (int, int) count) => count.$1 != minute,
+      );
+      if (_certificateResent.length >= 1000) {
+        return;
+      }
+    }
+    _certificateResent[normalized] = (minute, used + 1);
+    _certificateKnownBy.remove(normalized);
+    _hello(from, force: true);
   }
 
   /// Whether [key] was not let through within the last minute (and notes
@@ -1979,7 +2112,8 @@ final class LedgerNode {
     // carried the hello is someone else's.
     final _DeviceRef? device = _liveDevice(address);
     final bool known =
-        _accounts[address] == cert.account ||
+        (_accounts[address] == cert.account &&
+            !_unlinked.containsKey(address)) ||
         (device != null && device.device == cert.device) ||
         cert.account == account;
     if (known) {
@@ -2084,18 +2218,54 @@ final class LedgerNode {
       return;
     }
     if (type == kLedgerHelloType) {
-      // A stranger is asked for its certificate only when it names this
-      // account or a friend's (a device of theirs not known yet), never
-      // for anyone else's.
+      // A stranger's hello must carry its whole certificate. One that only
+      // names it is dropped unanswered, whatever it names: an answer that
+      // depends on the account named would tell a stranger who this
+      // device's friends are. (Devices name their certificate only to
+      // those whose hellos said they hold it.)
+      if (frame.payload['cert'] == null) {
+        return;
+      }
       final DeviceCertificate? cert = _helloCertificate(
         from,
         frame.payload,
-        ask: _namesKnownAccount(frame.payload),
+        ask: false,
       );
       if (cert == null || !await _checkStrangerCertificate(cert)) {
         return;
       }
       final bool proven = await _proven(frame, cert);
+      if (proven &&
+          cert.account == account &&
+          store.directory.isRevoked(account, cert.device) &&
+          _onceAMinute(_revocationToldAt, from)) {
+        // A device of this account that was cut off while away: it is
+        // told, so it stops.
+        _send(from, <String, dynamic>{
+          'type': LedgerMessages.revoke,
+          'items': <Map<String, dynamic>>[
+            for (final DeviceRevocation r in store.directory.revocationsOf(
+              account,
+              cert.device,
+            ))
+              r.toJson(),
+          ],
+        });
+        return;
+      }
+      // The friend's account set up a device again at the address whose
+      // device it cut off: the friend is back there.
+      if (proven &&
+          _unlinked[from] == cert.account &&
+          !store.directory.isRevoked(cert.account, cert.device)) {
+        _unlinked.remove(from);
+        await _savePeers();
+        if (frame.payload['r'] != 1) {
+          _hello(from, force: true, reply: true);
+        }
+        await _onHello(from, frame);
+        return;
+      }
       // Another device of a friend or of this account (its certificate,
       // signed by the account key, and the device key's proof for this
       // address): from now on a friend.
@@ -2267,7 +2437,7 @@ final class LedgerNode {
         ..._accounts.entries,
         ..._followed.entries,
       ])
-        if (m.value == e.account) m.key,
+        if (m.value == e.account && !_unlinked.containsKey(m.key)) m.key,
       ..._knownFriends(),
     ];
     for (final String id in ids) {
@@ -2345,7 +2515,7 @@ final class LedgerNode {
 
   Future<void> _onHello(String from, SignalTransportFrame frame) async {
     if (frame.payload['nc'] == 1) {
-      _resendCertificateTo(from, frame.payload);
+      _resendCertificateTo(from);
     }
     final DeviceCertificate? cert = _helloCertificate(
       from,
@@ -2363,18 +2533,41 @@ final class LedgerNode {
       return;
     }
     final String normalized = PeerShareCodec.normalizeAddress(from);
+    if (store.directory.isRevoked(cert.account, cert.device)) {
+      // Its owner cut this device off (a lost or stolen phone): whoever
+      // holds it is not that account any more, here or to the app.
+      if (cert.account != account &&
+          (_accounts[normalized] == cert.account ||
+              _isListedFriend(normalized))) {
+        await _cutOff(normalized, cert.account);
+      }
+      return;
+    }
+    _noteCertificateKnown(normalized, frame.payload);
     final _DeviceRef? device = _liveDevice(normalized);
     if (device != null) {
       // Another device of a friend, or of this account: its account is
-      // what its certificate says, nothing to remember per address.
+      // what its certificate says.
       if (device.account != cert.account) {
         return;
       }
+      // The address a friend is known by: which device is there matters
+      // when its owner cuts it off.
+      if (cert.account != account &&
+          _isListedFriend(normalized) &&
+          _addressDevices[normalized] != cert.device) {
+        _addressDevices[normalized] = cert.device;
+        await _savePeers();
+      }
     } else {
       final bool isNew = _accounts[normalized] != cert.account;
+      final bool moved = _addressDevices[normalized] != cert.device;
       _accounts[normalized] = cert.account;
-      if (isNew) {
+      _addressDevices[normalized] = cert.device;
+      if (isNew || moved) {
         await _savePeers();
+      }
+      if (isNew) {
         // Make sure they learn about us too, then catch up both ways.
         _hello(from, force: true);
       }
@@ -2731,14 +2924,22 @@ final class LedgerNode {
     if (raw == null) {
       return;
     }
-    try {
-      final Object? json = jsonDecode(utf8.decode(raw));
+    void into(Map<String, String> target, Object? json) {
       if (json is Map) {
         json.forEach((Object? k, Object? v) {
           if (k is String && v is String) {
-            _accounts[k] = v;
+            target[k] = v;
           }
         });
+      }
+    }
+
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is Map) {
+        into(_accounts, json['a']);
+        into(_addressDevices, json['d']);
+        into(_unlinked, json['x']);
       }
     } on FormatException {
       logZenWarning('Lista kont znajomych w dzienniku jest uszkodzona.');
@@ -2769,9 +2970,19 @@ final class LedgerNode {
     Uint8List.fromList(utf8.encode(jsonEncode(_followed))),
   );
 
+  /// Friends' accounts by address (`a`), the device proven at each (`d`)
+  /// and the addresses whose device was cut off (`x`).
   Future<void> _savePeers() => disk.write(
     _peersKey,
-    Uint8List.fromList(utf8.encode(jsonEncode(_accounts))),
+    Uint8List.fromList(
+      utf8.encode(
+        jsonEncode(<String, dynamic>{
+          'a': _accounts,
+          'd': _addressDevices,
+          'x': _unlinked,
+        }),
+      ),
+    ),
   );
 
   /// Stops for good; a second call waits for the first (the background

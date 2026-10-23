@@ -1,0 +1,14 @@
+# Tree SHA-256 of the WebRTC.xcframework that CocoaPods downloads for iOS
+# and macOS (the WebRTC-SDK pod of flutter_webrtc), checked by
+# tool/ci/check_webrtc_sdk.py after the build:
+#
+#   <sha256>  <WebRTC-SDK version>/WebRTC.xcframework
+#
+# Taken from the official zip the WebRTC-SDK podspec names (its `source`,
+# a release of github.com/webrtc-sdk/Specs): unpack it and run
+#
+#   python3 tool/ci/check_webrtc_sdk.py --hash WebRTC.xcframework
+#
+# A new WebRTC-SDK (flutter_webrtc's podspec pins its version) needs a new
+# line here; a framework whose hash differs from its line fails the build,
+# and a release build fails on a version without a line.

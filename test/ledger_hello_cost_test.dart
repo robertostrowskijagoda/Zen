@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -57,7 +58,11 @@ Future<_Linked> _transport(String address) async {
   return t;
 }
 
-LedgerNode _node(_Linked t, {List<String> friends = const <String>[]}) {
+LedgerNode _node(
+  _Linked t, {
+  List<String> friends = const <String>[],
+  HlcClock? clock,
+}) {
   final LedgerNode n = LedgerNode(
     transport: t,
     disk: MemoryLedgerDisk(),
@@ -66,6 +71,7 @@ LedgerNode _node(_Linked t, {List<String> friends = const <String>[]}) {
     localAddress: () => t.address,
     helloInterval: Duration.zero,
     syncInterval: Duration.zero,
+    clock: clock,
   );
   addTearDown(n.stop);
   return n;
@@ -140,6 +146,50 @@ void main() {
       isTrue,
     );
     expect(bob2.accountOfAddress(a), ania.account);
+  });
+
+  test('a friend naming a new device each time cannot make this device '
+      'send its whole certificate more than a few times a minute', () async {
+    final String a = _a('200::a');
+    final String b = _a('200::b');
+    final _Linked ta = await _transport(a);
+    final _Linked tb = await _transport(b);
+    // One minute that never ends: per-minute limits cannot roll over.
+    HlcClock still() => HlcClock(wallClock: () => 1790000000000);
+    final LedgerNode ania = _node(ta, friends: <String>[b], clock: still());
+    final LedgerNode bob = _node(tb, friends: <String>[a], clock: still());
+    await ania.start();
+    await bob.start();
+    await _settle();
+    expect(ania.accountOfAddress(b), bob.account);
+    final int before = ta
+        .hellosTo(b)
+        .where((Map<String, dynamic> h) => h.containsKey('cert'))
+        .length;
+
+    // A changed app at Bob's address asks again and again, each time
+    // "from" another device.
+    for (int i = 0; i < 20; i++) {
+      await ta.injectIncoming(
+        from: b,
+        payload: <String, dynamic>{
+          'type': kLedgerHelloType,
+          'cd': <String, dynamic>{'a': bob.account, 'd': 'urzadzenie$i'},
+          'p': <String, dynamic>{'f': b, 's': 'x'},
+          'nc': 1,
+        },
+      );
+    }
+    await _settle();
+    final int whole =
+        ta
+            .hellosTo(b)
+            .where((Map<String, dynamic> h) => h.containsKey('cert'))
+            .length -
+        before;
+    // Three asked for, and at most one asking for a certificate named
+    // that is not known here.
+    expect(whole, inInclusiveRange(1, 4));
   });
 
   test('the periodic round greets only who was heard from lately', () async {
