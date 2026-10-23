@@ -549,6 +549,17 @@ final class LedgerNode {
   /// True once the identity is loaded and the archive is open.
   bool get isReady => _ready;
 
+  /// Completes once [isReady] (or the start failed, or the node stopped):
+  /// until then nobody can tell which devices were unlinked.
+  Future<void> get settled => _settled.future;
+  final Completer<void> _settled = Completer<void>();
+
+  void _settle() {
+    if (!_settled.isCompleted) {
+      _settled.complete();
+    }
+  }
+
   String get account => identity.account;
 
   /// Friends whose accounts are known: normalised address → account key.
@@ -650,7 +661,7 @@ final class LedgerNode {
     return sealBody(body, keyring.current(audience), account: account);
   }
 
-  Future<void> start() => _started ??= _start();
+  Future<void> start() => _started ??= _start().whenComplete(_settle);
 
   Future<void> _start() async {
     // Started suspended: the disk belongs to someone else until [resume].
@@ -746,6 +757,7 @@ final class LedgerNode {
     await _open(_sealedEntries());
     _loaded = true;
     _ready = true;
+    _settle();
     if (_suspended) {
       // Handed over while loading: stay quiet until [resume].
       await archive.pause();
@@ -2992,6 +3004,7 @@ final class LedgerNode {
 
   Future<void> _stop() async {
     _stopped = true;
+    _settle();
     _syncTimer?.cancel();
     await _storeChanged?.cancel();
     await _devicesChanged.close();

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -82,14 +83,21 @@ final class AccountRoutingTransport implements SignalTransport {
     required this.delegate,
     required AccountDeviceDirectory? Function() directory,
     MirroredSend? onMirrored,
+    Future<void>? Function()? loading,
   }) : _directory = directory,
-       _onMirrored = onMirrored;
+       _onMirrored = onMirrored,
+       _loading = loading;
 
   /// The transport underneath (the ledger and account linking use it
   /// directly).
   final SignalTransport delegate;
   final AccountDeviceDirectory? Function() _directory;
   MirroredSend? _onMirrored;
+
+  /// While the directory is still loading (the unlinked devices are not
+  /// known yet): what comes waits for it, in order; what goes waits once
+  /// the directory is there.
+  final Future<void>? Function()? _loading;
 
   set onMirrored(MirroredSend? value) => _onMirrored = value;
 
@@ -104,6 +112,7 @@ final class AccountRoutingTransport implements SignalTransport {
   Stream<SignalTransportFrame> get frames => _frames;
 
   Stream<SignalTransportFrame> _route(SignalTransportFrame frame) async* {
+    await _loading?.call();
     final AccountDeviceDirectory? dir = _directory();
     if (dir == null || dir.ownAccount.isEmpty) {
       yield frame;
@@ -199,6 +208,12 @@ final class AccountRoutingTransport implements SignalTransport {
     required String remoteAddress,
     required Map<String, dynamic> payload,
   }) async {
+    if (_directory() != null) {
+      // The ledger is loading: wait until it knows the unlinked devices.
+      // (Not before it exists: the transport's own start sends, and the
+      // ledger starts only after it.)
+      await _loading?.call();
+    }
     final AccountDeviceDirectory? dir = _directory();
     final String? unlinked = dir?.unlinkedAccountOf(remoteAddress);
     if (dir != null && unlinked != null) {
@@ -292,6 +307,26 @@ final class AccountRoutingTransport implements SignalTransport {
 final class AccountDirectoryHolder {
   AccountDeviceDirectory? directory;
 
+  Completer<void>? _loading;
+
+  /// Completes once the ledger knows the unlinked devices; `null` when no
+  /// ledger is on its way.
+  Future<void>? get loading => _loading?.future;
+
+  /// A ledger is coming (the app, before the transport starts): traffic
+  /// waits until the returned function is called (loaded, or given up).
+  void Function() expectLedger() {
+    final Completer<void> loading = _loading ??= Completer<void>();
+    return () {
+      if (identical(_loading, loading)) {
+        _loading = null;
+      }
+      if (!loading.isCompleted) {
+        loading.complete();
+      }
+    };
+  }
+
   /// Where copies from the account's other devices go (the social hub).
   MirroredSend? mirrored;
 
@@ -309,9 +344,15 @@ AccountRoutingTransport withAccountRouting(Ref ref, SignalTransport base) {
   final AccountDirectoryHolder holder = ref.read(
     accountDirectoryHolderProvider,
   );
+  if (ref.read(ledgerNodeEnabledProvider)) {
+    // The transport starts before the ledger: nothing passes until the
+    // ledger knows the unlinked devices (it lets go, see ledgerNodeProvider).
+    holder.expectLedger();
+  }
   return AccountRoutingTransport(
     delegate: base,
     directory: () => holder.directory,
+    loading: () => holder.loading,
     onMirrored: (String peer, Map<String, dynamic> payload) async =>
         holder.mirrored?.call(peer, payload),
   );
