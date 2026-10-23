@@ -7,7 +7,7 @@ toolchain go1.26.10
 require (
 	github.com/Arceliar/ironwood v0.0.0-20260613025018-d50055b11f5e
 	github.com/gologme/log v1.3.0
-	github.com/klauspost/compress v1.18.5
+	github.com/klauspost/compress v1.18.7
 	github.com/quic-go/quic-go v0.60.0
 	github.com/wlynxg/anet v0.0.5
 	github.com/yggdrasil-network/yggdrasil-go v0.5.14
