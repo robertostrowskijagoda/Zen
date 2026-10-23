@@ -64,13 +64,12 @@ endif()
 # OpenH264 (BSD-2-Clause), built from source with the app so compressing
 # works on every Linux; no system package is needed. Plain C/C++ (no NASM,
 # USE_ASM=No), a static library linked into the app. Pinned to a release
-# tag; its tarball's SHA-256 is checked when ZEN_OPENH264_SHA256 (or the
-# environment variable of that name, as `flutter build` passes no CMake
-# options) holds it — record it there once (docs/DEPENDENCIES.md).
+# tag; its tarball's SHA-256 is pinned below (ZEN_OPENH264_SHA256): a new
+# version needs a new sum (docs/DEPENDENCIES.md).
 include(ExternalProject)
 find_package(Threads REQUIRED)
 set(ZEN_OPENH264_VERSION "2.4.1" CACHE STRING "OpenH264 release built into Zen")
-set(ZEN_OPENH264_SHA256 "$ENV{ZEN_OPENH264_SHA256}" CACHE STRING
+set(ZEN_OPENH264_SHA256 "8ffbe944e74043d0d3fb53d4a2a14c94de71f58dbea6a06d0dc92369542958ea" CACHE STRING
   "SHA-256 of the OpenH264 release tarball (checked when set)")
 set(ZEN_OPENH264_URL
   "https://github.com/cisco/openh264/archive/refs/tags/v${ZEN_OPENH264_VERSION}.tar.gz")
@@ -102,9 +101,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE
 # vo-aacenc (Apache-2.0), built from its release tarball the same way
 # (static, position-independent), so a film's sound and the recorder's
 # microphone never depend on the system having an AAC encoder. Its SHA-256
-# is checked when ZEN_VOAAC_SHA256 (cache entry or environment) holds it.
+# is pinned below (ZEN_VOAAC_SHA256).
 set(ZEN_VOAAC_VERSION "0.1.3" CACHE STRING "vo-aacenc release built into Zen")
-set(ZEN_VOAAC_SHA256 "$ENV{ZEN_VOAAC_SHA256}" CACHE STRING
+set(ZEN_VOAAC_SHA256 "e51a7477a359f18df7c4f82d195dab4e14e7414cbd48cf79cc195fc446850f36" CACHE STRING
   "SHA-256 of the vo-aacenc release tarball (checked when set)")
 if(ZEN_VOAAC_SHA256)
   set(ZEN_VOAAC_HASH URL_HASH "SHA256=${ZEN_VOAAC_SHA256}")
