@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.12.0 — 23.10.2026
+
 ### Installing and releasing
 - **Install page** on GitHub Pages (`/install/`, English and Polish): recognises the visitor's system and shows only its steps: Android (APK, signing certificate fingerprint, one-tap Obtainium), iPhone (SideStore in 8 short steps with a one-tap "Add Zen source"), Windows, macOS and Linux.
 - **SideStore / AltStore source** (`apps.json`), rebuilt from the latest published release by the Pages workflow (version, date, size, `Zen-unsigned.ipa`, permissions from `Info.plist`). The release run fails without the iPhone file.
