@@ -12,7 +12,9 @@ export 'package:zen/src/features/update/apk_signing_block.dart';
 /// an official APK from another one, and says so. Filled at release time
 /// with `dart run tool/zen_release.dart fingerprint Zen-arm64-v8a.apk --write`
 /// (the same certificate signs the APK of every ABI).
-const List<String> kOfficialApkCertificatesSha256 = <String>[];
+const List<String> kOfficialApkCertificatesSha256 = <String>[
+  '5cf84ba525ac804c842fb5b92f35c549f6c07a84fbe0c28049139191c1eef514',
+];
 
 /// What the signature of an APK says.
 enum ApkSignatureVerdict {

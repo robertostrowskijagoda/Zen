@@ -36,7 +36,9 @@ const Duration kReleaseEmbargo = Duration(days: 7);
 /// RELEASES.md, section 8.6): once this list is not empty, the self-update from
 /// GitHub installs only a file one of them signed. One key is enough for
 /// that; network updates still need [kReleaseThreshold] of them.
-const List<String> kReleaseMaintainers = <String>[];
+const List<String> kReleaseMaintainers = <String>[
+  'QUiwGQh42Cea69lDpvgKCnOOk7aPpWRf7-ez8cKONUM=.UrlEj3eS6wepS2cQFvUTyJYb_kFpNvr4cIUsKxnveXI=',
+];
 
 const String kReleaseApp = 'zen';
 
