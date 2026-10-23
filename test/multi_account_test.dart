@@ -42,8 +42,14 @@ void main() {
   tearDown(() async {
     ZenAccounts.activate(ZenAccountScope.defaultAccount);
     ZenInstance.debugSetBaseDirectory(null);
-    if (await base.exists()) {
-      await base.delete(recursive: true);
+    // Windows may still hold a file for a moment: try again, then leave
+    // the temporary folder to the system.
+    for (int i = 0; i < 10 && await base.exists(); i++) {
+      try {
+        await base.delete(recursive: true);
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
     }
   });
 
