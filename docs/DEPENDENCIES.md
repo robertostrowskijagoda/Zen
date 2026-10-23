@@ -98,10 +98,9 @@ GStreamer and libsecret; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 OpenH264 (BSD-2-Clause) and vo-aacenc (Apache-2.0) are the native libraries
 Zen builds from source for Linux (`linux/runner/CMakeLists.txt`): the release
 tarballs of `ZEN_OPENH264_VERSION` and `ZEN_VOAAC_VERSION`, compiled without
-assembly and linked statically. Their SHA-256 is checked when
-`ZEN_OPENH264_SHA256` / `ZEN_VOAAC_SHA256` are set (CMake cache entries, or
-environment variables of those names for `flutter build`); record them once
-with `curl -sL <url> | sha256sum` (the URLs are in the CMake file).
+assembly and linked statically. Their SHA-256 is pinned in the CMake file
+(`ZEN_OPENH264_SHA256`, `ZEN_VOAAC_SHA256`); a different tarball fails the
+build. A new version needs a new sum (`curl -sL <url> | sha256sum`).
 Films on Linux are written by Zen's own MP4 writer (`zen_film_codec.cc`);
 sound is copied when it is AAC and otherwise encoded by vo-aacenc (ffmpeg's
 own encoder on the ffmpeg path), so it is lost only when it cannot even be
