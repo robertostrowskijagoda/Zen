@@ -424,7 +424,10 @@ class _MessageBubble extends StatelessWidget {
 
     final BoxDecoration? themed = look.bubble(zen, outgoing: outgoing);
     final BoxDecoration decoration;
-    if (themed != null) {
+    if (isGifMessage(message)) {
+      // A GIF stands on its own: no bubble behind it.
+      decoration = const BoxDecoration();
+    } else if (themed != null) {
       decoration = themed;
     } else if (onGradient) {
       decoration = BoxDecoration(
@@ -598,6 +601,17 @@ ImageProvider<Object> _chatImageProvider(ImageProvider<Object> image) {
   );
 }
 
+/// Whether [message] is a GIF: shown on its own, with no frame or caption.
+bool isGifMessage(ChatMessage message) {
+  final Uint8List? held = message.attachmentBytes;
+  return message.type == ChatMessageType.image &&
+      message.hasAttachment &&
+      !message.isDeleted &&
+      ((message.mimeType?.toLowerCase() == 'image/gif') ||
+          (message.fileName?.toLowerCase().endsWith('.gif') ?? false) ||
+          (held != null && looksLikeGif(held)));
+}
+
 class _ImageAttachmentContent extends StatelessWidget {
   const _ImageAttachmentContent({required this.message});
 
@@ -648,6 +662,9 @@ class _ImageAttachmentContent extends StatelessWidget {
             errorBuilder: _buildImageError,
           )
         : _buildImageError(context, StateError('missing attachment'), null);
+    if (isGifFile) {
+      return ClipRRect(borderRadius: context.zenRadius(16), child: image);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
