@@ -404,9 +404,11 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
       group.createdById,
     ]) {
       final String address = normal(member);
+      // A friend's unlinked phone in a shared group is no member either.
       if (address.isNotEmpty &&
           !friends.contains(address) &&
-          !blocked.contains(address)) {
+          !blocked.contains(address) &&
+          directory?.unlinkedAccountOf(member) == null) {
         members.add(address);
       }
     }
