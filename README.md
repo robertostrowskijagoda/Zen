@@ -350,7 +350,7 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
    the real Zen. The key fingerprint (SHA-256):
 
    ```
-   (published here and in every release description once release signing is set up)
+   5C:F8:4B:A5:25:AC:80:4C:84:2F:B5:B9:2F:35:C5:49:F6:C0:7A:84:FB:E0:C2:80:49:13:91:91:C1:EE:F5:14
    ```
 
 ## Why Zen is not on Google Play or the App Store
