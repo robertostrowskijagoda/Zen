@@ -469,7 +469,15 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       return;
     }
     setState(() => _canUseBiometrics = isAvailable);
+    // Set up: the fingerprint / face prompt comes at once, the password
+    // stays as the fallback.
+    if (isAvailable && !_biometricsAsked) {
+      _biometricsAsked = true;
+      unawaited(_unlockWithBiometrics());
+    }
   }
+
+  bool _biometricsAsked = false;
 
   Future<void> _unlock() async {
     // Enter in the field submits too: one attempt at a time, or attempts

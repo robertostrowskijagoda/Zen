@@ -337,6 +337,11 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage>
       info = await codec.getNextFrame();
     } finally {
       _decoding = false;
+      // Stopped while this frame was decoding: the codec is freed only now
+      // (freeing it under a running decode crashes the engine).
+      if (!identical(codec, _codec)) {
+        codec.dispose();
+      }
     }
     if (!mounted || generation != _generation) {
       info.image.dispose();
@@ -369,8 +374,12 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage>
     _generation++;
     _timer?.cancel();
     _timer = null;
-    _codec?.dispose();
+    final ui.Codec? codec = _codec;
     _codec = null;
+    // A frame still decoding frees it when it is done (_showNextFrame).
+    if (!_decoding) {
+      codec?.dispose();
+    }
     _error = null;
   }
 

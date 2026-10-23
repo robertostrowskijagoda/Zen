@@ -612,14 +612,7 @@ void main() {
     await _lockFromRail(tester);
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('app-unlock-biometric-button')),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byKey(const Key('app-unlock-biometric-button')));
-    await tester.pumpAndSettle();
-
+    // Set up: the biometric prompt comes by itself, no tap needed.
     expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
     expect(security.isLocked, isFalse);
   });
