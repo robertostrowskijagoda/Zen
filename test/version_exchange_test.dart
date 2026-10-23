@@ -21,6 +21,11 @@ import 'package:zen/src/features/update/presentation/friends_version_banner.dart
 const String _ada = '200:1111:2222:3333:4444:5555:6666:7777';
 const String _bob = '200:aaaa:bbbb:cccc:dddd:eeee:ffff:1111';
 
+/// Versions newer than this build's, whatever it is.
+final List<int> _own = kAppVersion.split('.').map(int.parse).toList();
+final String _next = '${_own[0]}.${_own[1] + 1}.0';
+final String _after = '${_own[0]}.${_own[1] + 2}.0';
+
 SocialHubState _seed() => SocialHubState.empty().copyWith(
   friends: <String, FriendProfile>{
     _ada: const FriendProfile(
@@ -114,14 +119,14 @@ void main() {
       final SocialHubController hub = container.read(
         socialHubControllerProvider.notifier,
       );
-      await hub.notePeerAppVersion(peerAddress: _ada, version: '1.12.0');
-      await hub.notePeerAppVersion(peerAddress: _bob, version: '1.13.0');
+      await hub.notePeerAppVersion(peerAddress: _ada, version: _next);
+      await hub.notePeerAppVersion(peerAddress: _bob, version: _after);
       await hub.notePeerAppVersion(peerAddress: _ada, version: 'nonsense');
       await hub.notePeerAppVersion(peerAddress: '200::1', version: '9.0.0');
       final SocialHubState state = container.read(socialHubControllerProvider);
-      expect(state.peerAppVersions, <String, String>{_ada: '1.12.0'});
-      expect(newestFriendVersion(state), '1.12.0');
-      expect(container.read(friendsNewerVersionProvider), '1.12.0');
+      expect(state.peerAppVersions, <String, String>{_ada: _next});
+      expect(newestFriendVersion(state), _next);
+      expect(container.read(friendsNewerVersionProvider), _next);
     });
 
     test('an older or equal version gives no hint', () {
@@ -150,7 +155,7 @@ void main() {
           peerAppVersions: <String, String>{
             _ada: '1.11.0',
             // Someone no longer a friend is not kept.
-            '200::dead': '1.12.0',
+            '200::dead': _next,
           },
         ),
       );
@@ -232,19 +237,19 @@ void main() {
     await pump(null);
     expect(find.byKey(const Key('friends-newer-version-banner')), findsNothing);
 
-    await pump('1.12.0');
+    await pump(_next);
     expect(
       find.byKey(const Key('friends-newer-version-banner')),
       findsOneWidget,
     );
-    expect(find.textContaining('1.12.0'), findsOneWidget);
+    expect(find.textContaining(_next), findsOneWidget);
     expect(find.textContaining('podpisana'), findsNothing);
 
     // A signature that verified here says so; a friend's claim does not.
-    await pump('1.12.0', signed: '1.13.0');
-    expect(find.textContaining('1.13.0'), findsOneWidget);
+    await pump(_next, signed: _after);
+    expect(find.textContaining(_after), findsOneWidget);
     expect(find.textContaining('podpisana'), findsOneWidget);
-    expect(find.textContaining('1.12.0'), findsNothing);
+    expect(find.textContaining(_next), findsNothing);
   });
 }
 
