@@ -78,6 +78,20 @@ if ($goTool) {
   }
 }
 
+# SHA-256 of a file, upper-case hex as Get-FileHash gives it. Plain .NET:
+# Windows PowerShell started from pwsh (Gradle on the CI runner) may not
+# load the module Get-FileHash comes from.
+function Get-ZenFileSha256([string]$Path) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
+  } finally {
+    $stream.Dispose()
+    $sha.Dispose()
+  }
+}
+
 function Get-ZenSourceHash([string]$Salt) {
   $files = @(Get-ChildItem -Path $root -Filter '*.go' -File |
       Where-Object { $_.Name -notlike '*_test.go' } |
@@ -88,7 +102,7 @@ function Get-ZenSourceHash([string]$Salt) {
       Sort-Object FullName)
   $files += @(Get-Item -LiteralPath (Join-Path $root 'go.mod'), (Join-Path $root 'go.sum'), $buildScript)
   $lines = @(foreach ($file in $files) {
-      "$($file.Name) $((Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash)"
+      "$($file.Name) $(Get-ZenFileSha256 $file.FullName)"
     })
   $text = (($lines + $Salt + "go=$goVersion") -join "`n")
   $sha = [System.Security.Cryptography.SHA256]::Create()
