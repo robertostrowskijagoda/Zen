@@ -45,8 +45,9 @@ IconData messageDeliveryIcon(MessageDeliveryStage stage) {
     MessageDeliveryStage.waitingHere => Icons.outbox_rounded,
     MessageDeliveryStage.inMailboxes => Icons.markunread_mailbox_outlined,
     MessageDeliveryStage.waitingForBoth => Icons.sync_alt_rounded,
-    MessageDeliveryStage.sent => Icons.done_rounded,
-    MessageDeliveryStage.delivered => Icons.done_all_rounded,
+    // One tick: it reached the friend's phone; two: they read it.
+    MessageDeliveryStage.sent => Icons.arrow_upward_rounded,
+    MessageDeliveryStage.delivered => Icons.done_rounded,
     MessageDeliveryStage.read => Icons.done_all_rounded,
     MessageDeliveryStage.failed => Icons.error_outline_rounded,
   };
