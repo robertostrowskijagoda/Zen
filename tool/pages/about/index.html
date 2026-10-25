@@ -47,6 +47,16 @@
   .grid div { background: var(--soft); border-radius: 12px; padding: 12px 14px; }
   .grid b { display: block; margin-bottom: 4px; }
   ul { margin: 6px 0; padding-left: 20px; }
+  nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; font-size: 15px; margin: 0 0 8px; }
+  .shots { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x mandatory; }
+  .shots figure { margin: 0; flex: 0 0 170px; scroll-snap-align: start; text-align: center; font-size: 14px; color: var(--muted); }
+  .shots img { width: 170px; height: auto; border-radius: 14px; border: 1px solid var(--line); display: block; margin-bottom: 4px; }
+  .fp { font: 12px/1.4 ui-monospace, Consolas, monospace; word-break: break-all; background: var(--soft); padding: 8px 10px; border-radius: 8px; }
+  .support { text-align: center; }
+  .btn2 { display: inline-block; padding: 10px 20px; border-radius: 999px; border: 2px solid var(--accent); font-weight: 700; text-decoration: none; margin: 6px 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+  td:first-child { white-space: nowrap; padding-right: 12px; }
   footer { text-align: center; color: var(--muted); font-size: 14px; margin: 26px 0 12px; }
 </style>
 </head>
@@ -61,18 +71,28 @@
       <a href="https://github.com/robertostrowskijagoda/Zen">Source code</a>
       <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest">Latest release</a>
       <a href="https://discord.gg/g4vHvpKV37">Discord</a>
+      <a href="https://buycoffee.to/zen">Support Zen</a>
     </div>
   </header>
 
-  <section>
+  <nav>
+    <a href="#what">What it is</a><a href="#features">Features</a><a href="#screens">Screenshots</a>
+    <a href="#security">Security</a><a href="#safe">Is it safe?</a><a href="#docs">Docs</a>
+    <a href="#community">Community</a><a href="#support">Support</a><a href="#author">Author</a>
+  </nav>
+
+  <section id="what">
     <h2>What it is</h2>
     <p>Zen connects you only with people you have met: you add a friend by scanning their
       QR code or with an invitation link. Every phone and computer is a node of a mesh
       network (Yggdrasil), so messages, calls and files go straight between your devices
       and your friends' — there is no company server that stores, reads or sells them.</p>
+    <p>Zen also tries a new way of deciding shared matters: the <b>pyramid</b>, built from small
+      cells of people who know each other in person, where votes, trust and a common purse flow
+      from the bottom up — with no headquarters that could be bribed or shut down.</p>
   </section>
 
-  <section>
+  <section id="features">
     <h2>What you can do</h2>
     <div class="grid">
       <div><b>Chats and calls</b>Private and group chats, voice and video calls, photos, videos, files, GIFs.</div>
@@ -84,7 +104,21 @@
     </div>
   </section>
 
-  <section>
+  <section id="screens">
+    <h2>Screenshots</h2>
+    <div class="shots">
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/chat-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/chat-light.png" alt="Chats" loading="lazy" width="170" height="368"></picture>Chats</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/feed-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/feed-light.png" alt="Feed" loading="lazy" width="170" height="368"></picture>Feed</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/films-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/films-light.png" alt="Videos" loading="lazy" width="170" height="368"></picture>Videos</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/neighbours-door-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/neighbours-door-light.png" alt="Neighbours" loading="lazy" width="170" height="368"></picture>Neighbours</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/meet-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/meet-light.png" alt="Meeting people" loading="lazy" width="170" height="368"></picture>Meeting people</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/graph-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/graph-light.png" alt="Friends graph" loading="lazy" width="170" height="368"></picture>Friends graph</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/pyramid-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/pyramid-light.png" alt="Pyramid" loading="lazy" width="170" height="368"></picture>Pyramid</figure>
+      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/themes-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/themes-light.png" alt="Themes" loading="lazy" width="170" height="368"></picture>Themes</figure>
+    </div>
+  </section>
+
+  <section id="security">
     <h2>Privacy and security</h2>
     <ul>
       <li>End-to-end encryption with post-quantum algorithms (ML-KEM-768 and ML-DSA-65, combined with X25519 and Ed25519).</li>
@@ -98,6 +132,29 @@
       <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md">terms of use</a>.</p>
   </section>
 
+  <section id="safe">
+    <h2>Isn't it a virus? How to check</h2>
+    <ul>
+      <li>Download Zen only from <a href="../install/">the install page</a> or the
+        <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest">GitHub releases</a> (the address must start with
+        <code>github.com/robertostrowskijagoda/</code>), or get it from a friend who has Zen.</li>
+      <li>Before installing, you can upload the file to <a href="https://www.virustotal.com">virustotal.com</a>:
+        dozens of antivirus programs check it at once.</li>
+      <li>The code is open — anyone can review what Zen does.</li>
+      <li>Every official Android release is signed with the same key, so a phone will not install a fake
+        "over" the real Zen. The key fingerprint (SHA-256):</li>
+    </ul>
+    <p class="fp">5C:F8:4B:A5:25:AC:80:4C:84:2F:B5:B9:2F:35:C5:49:F6:C0:7A:84:FB:E0:C2:80:49:13:91:91:C1:EE:F5:14</p>
+  </section>
+
+  <section id="stores">
+    <h2>Why not on Google Play or the App Store?</h2>
+    <p>A store can remove an app or demand changes at any time, takes fees, and knows who installed what.
+      Zen is meant to be independent — of big companies and of politics — and nobody, not even a store,
+      needs to know you have it. So Zen is installed straight from GitHub; Android and desktop builds
+      update themselves and check the signature first.</p>
+  </section>
+
   <section>
     <h2>Get started</h2>
     <ul>
@@ -108,8 +165,51 @@
     </ul>
   </section>
 
+  <section id="docs">
+    <h2>Documentation</h2>
+    <table>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/guide/README.md">User guide</a></td><td>how every part of Zen works, with pictures</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen#readme">README</a></td><td>the whole project on one page</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/SECURITY_MODEL.md">Security model</a></td><td>threats, encryption, hardening, limits</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PROTOCOL.md">Protocol</a></td><td>frames and records on the wire</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/RELEASES.md">Releases</a></td><td>signing, publishing, distribution</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/DEPENDENCIES.md">Dependencies</a></td><td>libraries, platform APIs and their licences</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TESTING.md">Testing</a></td><td>the simulator, visual tours, CI</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/CHANGELOG.md">Changelog</a></td><td>what changed in each version</td></tr>
+      <tr><td><a href="https://github.com/robertostrowskijagoda/Zen/blob/main/SECURITY.md">Report a vulnerability</a></td><td>privately, not in public issues</td></tr>
+    </table>
+  </section>
+
+  <section id="community">
+    <h2>Community</h2>
+    <p>Questions, help with installing, ideas, or just talk with other people who use Zen:
+      <b><a href="https://discord.gg/g4vHvpKV37">Zen on Discord</a></b>.
+      Bugs and feature requests go to <a href="https://github.com/robertostrowskijagoda/Zen/issues">GitHub Issues</a>;
+      the code, pull requests and stars are welcome on <a href="https://github.com/robertostrowskijagoda/Zen">GitHub</a>.</p>
+  </section>
+
+  <section id="support" class="support">
+    <h2>Support Zen</h2>
+    <p>Zen is free and ad-free and is kept going only by voluntary donations.
+      It is made by one person, with no company and no investors.</p>
+    <a class="cta" href="https://buycoffee.to/zen">☕ Buy me a coffee</a>
+    <p style="font-size:14px;color:var(--muted)">buycoffee.to/zen is the only official Zen fundraiser; the same link
+      is in the app (About → Support Zen). Donations are voluntary gifts and buy no rights or features.</p>
+  </section>
+
+  <section id="author">
+    <h2>About the author</h2>
+    <p>My name is Robert Ostrowski-Jagoda and I'm a programmer. As I write this, I work as a taxi driver,
+      because there was no work for me. I made Zen for free, but I also want to have a house and a
+      Lamborghini — please, <a href="https://buycoffee.to/zen">throw me at least $5</a>. There are no ads
+      in the app and I don't earn anything from it directly. If you have a job for me, let me know —
+      on <a href="https://discord.gg/g4vHvpKV37">Discord</a> or <a href="https://github.com/robertostrowskijagoda">GitHub</a>.</p>
+  </section>
+
   <footer>
-    Zen is free and open source (GPL-3.0). Use it only within the law.<br>
+    Zen is free software under the <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/LICENSE">GPL-3.0</a> with additional terms in
+    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/NOTICE">NOTICE</a>. © 2026 Robert Ostrowski-Jagoda.<br>
+    Using Zen to break the law is forbidden by the <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md">terms of use</a>.<br>
     <a href="https://github.com/robertostrowskijagoda/Zen">github.com/robertostrowskijagoda/Zen</a>
   </footer>
 </main>
