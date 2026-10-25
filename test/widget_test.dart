@@ -1553,7 +1553,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Wchodze za minute.'), findsOneWidget);
-    expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.done_rounded), findsOneWidget);
 
     await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
