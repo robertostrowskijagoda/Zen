@@ -262,6 +262,13 @@ final class ZenBootstrapper {
   /// to in this process); `null`: the account open now (the default one
   /// at the app's start).
   final ZenAccountOpening? opening;
+
+  /// The settings as soon as they are read (the first step of [bootstrap]),
+  /// before the rest of the start-up is done: the splash shows the colours
+  /// of the chosen theme from then on, not the default ones. `null` until
+  /// then.
+  final ValueNotifier<AppSettings?> loadedSettings =
+      ValueNotifier<AppSettings?>(null);
   final SupportDirectoryLoader _supportDirectoryLoader;
   final AppSecurityServiceBuilder _appSecurityServiceBuilder;
   final AppSettingsStoreBuilder _appSettingsStoreBuilder;
@@ -344,6 +351,7 @@ final class ZenBootstrapper {
     );
     final AppSettings settings =
         await appSettingsStore.load() ?? const AppSettings();
+    loadedSettings.value = settings;
     return ZenBootstrapSettingsState(
       supportDirectory: supportDirectory,
       appSettingsStore: appSettingsStore,

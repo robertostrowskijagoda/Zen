@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -20,6 +21,7 @@ import 'package:zen/src/features/about/go_licenses.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/media/linux_video_player.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 
 void main(List<String> args) {
   ZenInstance.init(args);
@@ -151,6 +153,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
                 final _BootstrapFailurePresentation failure =
                     _presentBootstrapFailure(snapshot.error);
                 return _BootstrapSurface(
+                  settings: _bootstrapper.loadedSettings,
                   title: 'Zen',
                   message: failure.message,
                   errorDetails: failure.details,
@@ -164,6 +167,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
                 );
               }
               return _BootstrapSurface(
+                settings: _bootstrapper.loadedSettings,
                 title: 'Zen',
                 message: t('Ładowanie danych i uruchamianie sieci…'),
                 showProgressIndicator: true,
@@ -214,6 +218,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
 
 class _BootstrapSurface extends StatelessWidget {
   const _BootstrapSurface({
+    required this.settings,
     required this.title,
     required this.message,
     required this.showProgressIndicator,
@@ -222,6 +227,9 @@ class _BootstrapSurface extends StatelessWidget {
     this.onPressed,
   });
 
+  /// The person's settings once read (see [ZenBootstrapper.loadedSettings]):
+  /// the splash is drawn in the theme they chose.
+  final ValueListenable<AppSettings?> settings;
   final String title;
   final String message;
   final bool showProgressIndicator;
@@ -231,11 +239,26 @@ class _BootstrapSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<AppSettings?>(
+      valueListenable: settings,
+      builder: (BuildContext context, AppSettings? chosen, Widget? _) {
+        if (chosen == null && showProgressIndicator && Platform.isAndroid) {
+          // The chosen theme is not known yet: stay as black as the system
+          // launch screen instead of flashing a theme that is not theirs.
+          return const ColoredBox(color: Color(0xFF000000));
+        }
+        return _buildThemed(chosen ?? const AppSettings());
+      },
+    );
+  }
+
+  Widget _buildThemed(AppSettings chosen) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Zen',
-      theme: ZenTheme.light(),
-      darkTheme: ZenTheme.dark(),
+      theme: ZenTheme.light(chosen.accentTheme, chosen.palette),
+      darkTheme: ZenTheme.dark(chosen.accentTheme, chosen.palette),
+      themeMode: chosen.themeMode.materialThemeMode,
       // The language loadZenLanguage() picked before runApp.
       locale: zenLocaleOf(ZenI18n.code),
       supportedLocales: zenSupportedLocales,

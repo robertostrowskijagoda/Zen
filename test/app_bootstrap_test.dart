@@ -38,6 +38,30 @@ void main() {
     },
   );
 
+  test('the chosen theme is known as soon as the settings are read, so the '
+      'splash can already be drawn in it', () async {
+    final Directory supportDirectory = await Directory.systemTemp.createTemp(
+      'zen-bootstrap-theme-',
+    );
+    addTearDown(() => supportDirectory.delete(recursive: true));
+    final ZenBootstrapper bootstrapper = ZenBootstrapper(
+      supportDirectoryLoader: () async => supportDirectory,
+      appSettingsStoreBuilder: (_) => MemoryAppSettingsStore(
+        const AppSettings(
+          palette: AppPalette.blueprint,
+          themeMode: AppThemeMode.dark,
+        ),
+      ),
+    );
+    // Nothing is known before the first step: no theme is guessed.
+    expect(bootstrapper.loadedSettings.value, isNull);
+
+    await bootstrapper.initSettings();
+
+    expect(bootstrapper.loadedSettings.value?.palette, AppPalette.blueprint);
+    expect(bootstrapper.loadedSettings.value?.themeMode, AppThemeMode.dark);
+  });
+
   test('initRuntime uses the fixed signal wait timeout', () async {
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
     addTearDown(runtime.dispose);
