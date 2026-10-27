@@ -4,6 +4,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/launcher_disguise.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final Provider<AppSettings> appSettingsInitialStateProvider =
     Provider<AppSettings>((Ref ref) {
@@ -130,6 +131,27 @@ final class AppSettingsController extends Notifier<AppSettings> {
   /// its own.
   Future<void> setNotificationPrivacy(NotificationPrivacy value) async {
     await _save(state.copyWith(notificationPrivacy: value));
+  }
+
+  /// "Powiadomienia o nowych postach" on or off.
+  Future<void> setPostNotifications(bool value) async {
+    await _save(state.copyWith(postNotifications: value));
+  }
+
+  /// "Wycisz posty tej osoby": new posts of the friend at [address] are
+  /// not announced while [muted].
+  Future<void> setPostAuthorMuted(String address, {required bool muted}) async {
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    if (normal.isEmpty || state.mutedPostAuthors.contains(normal) == muted) {
+      return;
+    }
+    await _save(
+      state.copyWith(
+        mutedPostAuthors: muted
+            ? <String>{...state.mutedPostAuthors, normal}
+            : (Set<String>.of(state.mutedPostAuthors)..remove(normal)),
+      ),
+    );
   }
 
   Future<void> setInAppSounds(bool value) async {

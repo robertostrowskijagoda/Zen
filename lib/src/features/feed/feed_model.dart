@@ -789,6 +789,34 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
   );
 }
 
+/// The posts of direct friends only, with edits applied and removed ones
+/// left out: no own posts, no followed accounts, no reshares and nothing
+/// passed on from further away. [nameOf] as in [buildFeed]. Unordered.
+/// What the notifications about new posts look at (`post_notifier.dart`).
+List<FeedPost> friendPosts(
+  LedgerNode node, {
+  required String Function(String address) nameOf,
+}) {
+  final Set<String> deleted = <String>{};
+  final Set<String> accounts = <String>{};
+  final List<FeedPost> posts = <FeedPost>[];
+  node.friendAccounts.forEach((String address, String account) {
+    if (account == node.account || !accounts.add(account)) {
+      return;
+    }
+    posts.addAll(
+      _postsOf(
+        node.entriesOf(ofAccount: account),
+        isOwn: false,
+        authorLabel: nameOf(address),
+        deleted: deleted,
+        bodyOf: node.bodyOf,
+      ),
+    );
+  });
+  return posts;
+}
+
 /// Public posts friends' notices brought from two or three steps away
 /// whose content [held] has, unless already [shown] or [deleted]; labelled
 /// with the friends who passed them on. How far the reader looks is

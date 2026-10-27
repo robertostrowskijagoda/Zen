@@ -144,6 +144,26 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     });
   }
 
+  /// Puts [entry] at the top of the inbox, in place of an entry with the
+  /// same id (an update of the same news: "3 nowe posty" after "2 nowe
+  /// posty"). For news that does not come as a signal: friends' new posts.
+  Future<void> putInboxEntry(InboxEntry entry) async {
+    await _enqueueStateWork(() async {
+      state = _withTrimmedInbox(
+        state.copyWith(
+          inbox: _prependInbox(
+            state.inbox
+                .where((InboxEntry e) => e.id != entry.id)
+                .toList(growable: false),
+            entry,
+          ),
+        ),
+        _appSettings,
+      );
+      await _persistState();
+    });
+  }
+
   /// Accepts the invitation from [peerAddress]; they keep the name from
   /// their profile.
   Future<void> acceptFriendRequest({

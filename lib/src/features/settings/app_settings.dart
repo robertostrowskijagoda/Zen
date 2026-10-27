@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum AppLockMode {
   never,
@@ -414,6 +415,8 @@ final class AppSettings {
     this.autoDownloadMedia = true,
     this.mediaOnlyOnWifi = false,
     this.notificationPrivacy = defaultNotificationPrivacy,
+    this.postNotifications = true,
+    this.mutedPostAuthors = const <String>{},
     this.inAppSounds = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
@@ -494,6 +497,20 @@ final class AppSettings {
   /// conversation may have its own level
   /// (`SocialHubState.notificationPrivacy`).
   final NotificationPrivacy notificationPrivacy;
+
+  /// "Powiadomienia o nowych postach": a friend's new post is announced
+  /// (as told by [notificationPrivacy]) and goes to the in-app list. On by
+  /// default; posts from friends of friends never are.
+  final bool postNotifications;
+
+  /// Friends whose new posts are not announced ("Wycisz posty tej osoby"),
+  /// by normalized address.
+  final Set<String> mutedPostAuthors;
+
+  /// Whether new posts of the friend at [address] are announced.
+  bool announcesPostsOf(String address) =>
+      postNotifications &&
+      !mutedPostAuthors.contains(PeerShareCodec.normalizeAddress(address));
 
   /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
   /// connects or ends; on Windows and Linux also the notification sounds
@@ -627,6 +644,8 @@ final class AppSettings {
     bool? autoDownloadMedia,
     bool? mediaOnlyOnWifi,
     NotificationPrivacy? notificationPrivacy,
+    bool? postNotifications,
+    Set<String>? mutedPostAuthors,
     bool? inAppSounds,
     bool? secureScreens,
     bool? allowNoAppPassword,
@@ -666,6 +685,8 @@ final class AppSettings {
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
       mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
+      postNotifications: postNotifications ?? this.postNotifications,
+      mutedPostAuthors: mutedPostAuthors ?? this.mutedPostAuthors,
       inAppSounds: inAppSounds ?? this.inAppSounds,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
@@ -708,6 +729,9 @@ final class AppSettings {
     'autoDownloadMedia': autoDownloadMedia,
     'mediaOnlyOnWifi': mediaOnlyOnWifi,
     'notificationPrivacy': notificationPrivacy.name,
+    'postNotifications': postNotifications,
+    if (mutedPostAuthors.isNotEmpty)
+      'mutedPostAuthors': mutedPostAuthors.toList(growable: false),
     'inAppSounds': inAppSounds,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
@@ -764,6 +788,15 @@ final class AppSettings {
         NotificationPrivacy.values,
         'notificationPrivacy',
       ),
+      postNotifications: pick<bool>('postNotifications'),
+      mutedPostAuthors: switch (json['mutedPostAuthors']) {
+        final List<dynamic> addresses =>
+          addresses
+              .whereType<String>()
+              .map(PeerShareCodec.normalizeAddress)
+              .toSet(),
+        _ => null,
+      },
       inAppSounds: pick<bool>('inAppSounds'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),

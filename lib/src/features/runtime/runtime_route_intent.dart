@@ -18,7 +18,7 @@ enum RuntimeRouteTarget {
   flatDoor,
 
   /// The Tablica with a filter (`zen://feed?f=pyramid`); [rawInput] holds
-  /// the filter's name.
+  /// the filter's name, [postId] the post to show (`&p=<id>`), if any.
   feed,
 
   /// The knocks waiting at the flat's door (`zen://knocks`): the
@@ -41,6 +41,7 @@ final class RuntimeRouteIntent {
     this.autoAcceptCall = false,
     this.acceptToken,
     this.callId,
+    this.postId,
   });
 
   factory RuntimeRouteIntent.inbox({required String id}) {
@@ -126,15 +127,18 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.updates);
   }
 
-  /// The Tablica, filtered by [filter] (a name of the feed's filters).
+  /// The Tablica, filtered by [filter] (a name of the feed's filters), at
+  /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
     required String id,
     required String filter,
+    String? postId,
   }) {
     return RuntimeRouteIntent(
       id: id,
       target: RuntimeRouteTarget.feed,
       rawInput: filter,
+      postId: postId == null || postId.isEmpty ? null : postId,
     );
   }
 
@@ -163,6 +167,10 @@ final class RuntimeRouteIntent {
   /// later one from the same person. Never persisted.
   final String? callId;
 
+  /// The post a feed route shows (a new post's notification). Never
+  /// persisted.
+  final String? postId;
+
   /// Whether this route may answer [ringingCallId]: a route that names a
   /// call answers only that call; one without a call id (older routes)
   /// only by its token, as before.
@@ -182,6 +190,7 @@ final class RuntimeRouteIntent {
       autoAcceptCall: true,
       acceptToken: acceptToken,
       callId: callId,
+      postId: postId,
     );
   }
 
@@ -209,11 +218,15 @@ String buildUpdatesRouteKey() => 'zen://updates';
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
 
-/// The Tablica on [filter] (`zen://feed?f=pyramid`).
-String buildFeedRouteKey(String filter) => Uri(
+/// The Tablica on [filter] (`zen://feed?f=pyramid`), at the post [postId]
+/// when given (`zen://feed?f=all&p=<id>`).
+String buildFeedRouteKey(String filter, {String? postId}) => Uri(
   scheme: 'zen',
   host: 'feed',
-  queryParameters: <String, String>{'f': filter},
+  queryParameters: <String, String>{
+    'f': filter,
+    if (postId != null && postId.isNotEmpty) 'p': postId,
+  },
 ).toString();
 
 String buildConversationRouteKey({required String peerAddress, String? title}) {
@@ -322,6 +335,7 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
     return RuntimeRouteIntent.feed(
       id: id,
       filter: uri.queryParameters['f'] ?? '',
+      postId: uri.queryParameters['p'],
     );
   }
   if (uri.host == 'call' && uri.pathSegments.isNotEmpty) {

@@ -187,8 +187,11 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         );
         break;
       case RuntimeRouteTarget.feed:
-        // The pyramid's posts' notification: the Tablica on that filter.
-        openFeed(FeedFilter.parse(intent.rawInput));
+        // The pyramid's posts' notification: the Tablica on that filter;
+        // a new post's notification: the Tablica at that post. Whatever
+        // screen the app was left on would otherwise cover it.
+        Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+        openFeed(FeedFilter.parse(intent.rawInput), postId: intent.postId);
         break;
       case RuntimeRouteTarget.flatDoor:
         // A door sticker's link: the neighbours section, then the knock

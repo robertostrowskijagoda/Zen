@@ -10,6 +10,7 @@ enum _ConversationMenuAction {
   retentionSettings,
   disappearingMessages,
   notificationPrivacy,
+  postNotifications,
   blockFriend,
   removeFriend,
   unblockFriend,
@@ -147,6 +148,7 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
   required bool hasMessages,
   required int messageCount,
   int disappearSeconds = 0,
+  bool postsMuted = false,
 }) {
   final List<PopupMenuEntry<_ConversationMenuAction>> items =
       <PopupMenuEntry<_ConversationMenuAction>>[];
@@ -227,6 +229,15 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
           key: const Key('conversation-notification-privacy-menu'),
           value: _ConversationMenuAction.notificationPrivacy,
           child: Text(t('Powiadomienia')),
+        ),
+        PopupMenuItem<_ConversationMenuAction>(
+          key: const Key('conversation-post-notifications-menu'),
+          value: _ConversationMenuAction.postNotifications,
+          child: Text(
+            postsMuted
+                ? t('Powiadamiaj o postach tej osoby')
+                : t('Wycisz posty tej osoby'),
+          ),
         ),
         PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.blockFriend,

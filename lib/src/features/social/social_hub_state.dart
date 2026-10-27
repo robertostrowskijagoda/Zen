@@ -22,6 +22,9 @@ enum InboxEntryType {
   friendRejected,
   friendCancelled,
   groupInvite,
+
+  /// New posts of friends on the Tablica (`post_notifier.dart`).
+  post,
 }
 
 @immutable

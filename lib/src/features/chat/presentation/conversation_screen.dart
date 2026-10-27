@@ -53,6 +53,8 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
@@ -303,12 +305,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         friend?.status == FriendRelationshipStatus.accepted &&
         isRoutablePeerAddress(widget.peerAddress) &&
         !hasAnyActiveCall;
+    final bool postsMuted = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) =>
+            !s.announcesPostsOf(friend?.address ?? widget.peerAddress),
+      ),
+    );
     final List<PopupMenuEntry<_ConversationMenuAction>> menuItems =
         _conversationMenuItems(
           friend: friend,
           hasMessages: hasMessages,
           messageCount: messageCount,
           disappearSeconds: disappearSeconds,
+          postsMuted: postsMuted,
         );
 
     return Scaffold(
@@ -557,6 +566,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   await showConversationNotificationPrivacyDialog(
                     context,
                     conversationKey: friend?.address ?? widget.peerAddress,
+                  );
+                  return;
+                case _ConversationMenuAction.postNotifications:
+                  // The global switch off leaves nothing to mute here.
+                  final AppSettingsController settings = ref.read(
+                    appSettingsControllerProvider.notifier,
+                  );
+                  if (!ref
+                      .read(appSettingsControllerProvider)
+                      .postNotifications) {
+                    await settings.setPostNotifications(true);
+                    await settings.setPostAuthorMuted(
+                      friend?.address ?? widget.peerAddress,
+                      muted: false,
+                    );
+                    return;
+                  }
+                  await settings.setPostAuthorMuted(
+                    friend?.address ?? widget.peerAddress,
+                    muted: !postsMuted,
                   );
                   return;
                 case _ConversationMenuAction.blockFriend:

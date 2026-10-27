@@ -49,12 +49,20 @@ final ValueNotifier<FeedFilter?> feedFilterRequest = ValueNotifier<FeedFilter?>(
   null,
 );
 
+/// A post another part of the app asked the Tablica to show (a tap on a
+/// new post's notification): the screen scrolls to it and sets this back to
+/// null.
+final ValueNotifier<String?> feedPostRequest = ValueNotifier<String?>(null);
+
 /// Bumped with every [openFeed]: the shell switches to the Tablica.
 final ValueNotifier<int> feedOpenRequest = ValueNotifier<int>(0);
 
 /// Shows the Tablica with [filter] on (the Pyramid's „Otwórz na Tablicy”,
-/// a tap on the pyramid's notification).
-void openFeed(FeedFilter filter) {
+/// a tap on the pyramid's notification), at the post [postId] when given.
+void openFeed(FeedFilter filter, {String? postId}) {
   feedFilterRequest.value = filter;
+  if (postId != null && postId.isNotEmpty) {
+    feedPostRequest.value = postId;
+  }
   feedOpenRequest.value++;
 }

@@ -56,6 +56,9 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart'
     show PyramidService;
 import 'package:zen/src/features/pyramid/pyramid_state.dart'
     show PyrMember, PyramidState;
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -110,6 +113,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   /// A filter was picked (or asked for) before the stored one was read.
   bool _filterPicked = false;
 
+  /// The post a notification asked to show ([feedPostRequest]), until its
+  /// card is on screen; the card wears [_revealKey] meanwhile.
+  String? _revealId;
+  final GlobalKey _revealKey = GlobalKey(debugLabel: 'feed-reveal');
+  final ScrollController _scroll = ScrollController();
+
+  /// The ids of what the wall shows, as last built.
+  List<String> _shownIds = const <String>[];
+
   static const String _filterKey = 'ui/feed_filter';
 
   @override
@@ -126,6 +138,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       _lookAsFar(asked);
     }
     feedFilterRequest.addListener(_onFilterRequest);
+    // Asked for before this screen was first built, too.
+    _onPostRequest(initial: true);
+    feedPostRequest.addListener(_onPostRequest);
     unawaited(
       ref
           .read(ledgerDiskProvider)
@@ -184,6 +199,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   @override
   void dispose() {
     feedFilterRequest.removeListener(_onFilterRequest);
+    feedPostRequest.removeListener(_onPostRequest);
+    _scroll.dispose();
     _pyramid?.removeListener(_onPyramid);
     unawaited(_updates?.cancel());
     unawaited(_storeChanges?.cancel());
@@ -207,6 +224,117 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     }
     feedFilterRequest.value = null;
     _pick(asked);
+  }
+
+  /// A new post's notification asked for a post ([openFeed]): a chip under
+  /// which friends' posts show, then the post itself.
+  void _onPostRequest({bool initial = false}) {
+    final String? id = feedPostRequest.value;
+    if (id == null) {
+      return;
+    }
+    feedPostRequest.value = null;
+    if (_filter == FeedFilter.pyramid ||
+        _filter == FeedFilter.national ||
+        _filter == FeedFilter.close) {
+      if (initial) {
+        _filterPicked = true;
+        _filter = FeedFilter.all;
+      } else {
+        _pick(FeedFilter.all);
+      }
+    }
+    _revealId = id;
+    if (!initial && mounted) {
+      setState(() {});
+    }
+    WidgetsBinding.instance
+      ..addPostFrameCallback((_) => unawaited(_reveal(id)))
+      ..ensureVisualUpdate();
+  }
+
+  /// Scrolls the wall until the card of post [id] is built, then brings it
+  /// into view. Cards are built lazily, so it steps down a screen at a time
+  /// from the top (a new post is near it); it gives up after a while.
+  Future<void> _reveal(String id) async {
+    for (int step = 0; step < 80 && mounted && _revealId == id; step++) {
+      final BuildContext? card = _revealKey.currentContext;
+      if (card != null && card.mounted) {
+        _revealId = null;
+        await Scrollable.ensureVisible(
+          card,
+          alignment: 0.05,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+      if (_scroll.hasClients && _shownIds.contains(id)) {
+        final ScrollPosition position = _scroll.position;
+        final double next = step == 0
+            ? 0
+            : math.min(
+                position.pixels + position.viewportDimension * 0.8,
+                position.maxScrollExtent,
+              );
+        if (step > 0 && next <= position.pixels) {
+          break;
+        }
+        position.jumpTo(next);
+      }
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (_revealId == id) {
+      _revealId = null;
+    }
+  }
+
+  /// The device addresses of the friend who wrote [post], when it is a
+  /// friend's own post (not one's own, not a reshare, not from further
+  /// away): their new posts can be muted.
+  List<String> _friendAddressesOf(FeedPost post) {
+    final LedgerNode? node = _node;
+    if (node == null ||
+        post.isOwn ||
+        post.resharedBy.isNotEmpty ||
+        post.degree != 1) {
+      return const <String>[];
+    }
+    return <String>[
+      for (final MapEntry<String, String> e in node.friendAccounts.entries)
+        if (e.value == post.account) e.key,
+    ];
+  }
+
+  /// "Wycisz posty tej osoby" and back.
+  Future<void> _setPostsMuted(
+    FeedPost post,
+    List<String> addresses, {
+    required bool muted,
+  }) async {
+    final AppSettingsController settings = ref.read(
+      appSettingsControllerProvider.notifier,
+    );
+    for (final String address in addresses) {
+      await settings.setPostAuthorMuted(address, muted: muted);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            muted
+                ? t(
+                    'Bez powiadomień o nowych postach: {name}. Posty nadal są '
+                    'na Tablicy.',
+                    {'name': post.authorLabel},
+                  )
+                : t('Znów powiadomimy o nowych postach: {name}.', {
+                    'name': post.authorLabel,
+                  }),
+          ),
+        ),
+      );
+    }
   }
 
   void _pick(FeedFilter filter) {
@@ -832,6 +960,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           node.levelOf(p.authorAddress) == FriendLevel.close,
       depth: _reach?.depth ?? kDefaultFeedDepth,
     );
+    _shownIds = <String>[for (final FeedItem i in items) i.id];
+    final Set<String> mutedAuthors = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) => s.mutedPostAuthors,
+      ),
+    );
     final List<Widget> header = <Widget>[
       _ComposerPrompt(
         onWrite: () => unawaited(_compose()),
@@ -899,7 +1033,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           },
         );
       }
-      return _PostCard(
+      final List<String> friend = _friendAddressesOf(post);
+      final bool muted = friend.any(
+        (String a) => mutedAuthors.contains(PeerShareCodec.normalizeAddress(a)),
+      );
+      final Widget card = _PostCard(
         post: post,
         node: node,
         avatarPath: social.peerProfileOf(post.authorAddress)?.avatarPath,
@@ -927,7 +1065,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             ? null
             : () => unawaited(_reshare(post)),
         onReport: post.isOwn ? null : () => unawaited(_reportPost(post)),
+        postsMuted: muted,
+        onMutePosts: friend.isEmpty
+            ? null
+            : () => unawaited(_setPostsMuted(post, friend, muted: !muted)),
       );
+      return post.id == _revealId
+          ? KeyedSubtree(key: _revealKey, child: card)
+          : card;
     }
 
     Widget card(LedgerNode node, FeedItem entry) => switch (entry) {
@@ -1047,6 +1192,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               )
             : ListView.builder(
                 key: const Key('feed-list'),
+                controller: _scroll,
                 padding: readableInsets(context, top: 12, bottom: 28),
                 // Lazy: only the posts on screen are built.
                 itemCount: header.length + items.length + 1,
@@ -1469,6 +1615,8 @@ class _PostCard extends StatelessWidget {
     this.onAuthor,
     this.onFollow,
     this.onReport,
+    this.onMutePosts,
+    this.postsMuted = false,
   });
 
   final FeedPost post;
@@ -1487,6 +1635,11 @@ class _PostCard extends StatelessWidget {
 
   /// Someone else's post: "Zgłoś".
   final VoidCallback? onReport;
+
+  /// A friend's post: "Wycisz posty tej osoby" (no notifications about
+  /// their new posts), or back when [postsMuted].
+  final VoidCallback? onMutePosts;
+  final bool postsMuted;
 
   @override
   Widget build(BuildContext context) {
@@ -1588,7 +1741,10 @@ class _PostCard extends StatelessWidget {
                     label: Text(t('Obserwuj')),
                   ),
                 ),
-              if (onEdit != null || onDelete != null || onReport != null)
+              if (onEdit != null ||
+                  onDelete != null ||
+                  onReport != null ||
+                  onMutePosts != null)
                 PopupMenuButton<String>(
                   key: Key('feed-menu-${post.id}'),
                   tooltip: onEdit != null || onDelete != null
@@ -1601,6 +1757,7 @@ class _PostCard extends StatelessWidget {
                   onSelected: (String v) => (switch (v) {
                     'edit' => onEdit,
                     'delete' => onDelete,
+                    'mute' => onMutePosts,
                     _ => onReport,
                   })?.call(),
                   itemBuilder: (BuildContext context) =>
@@ -1619,6 +1776,23 @@ class _PostCard extends StatelessWidget {
                             child: ListTile(
                               leading: const Icon(Icons.delete_outline_rounded),
                               title: Text(t('Usuń')),
+                            ),
+                          ),
+                        if (onMutePosts != null)
+                          PopupMenuItem<String>(
+                            key: Key('feed-mute-posts-${post.id}'),
+                            value: 'mute',
+                            child: ListTile(
+                              leading: Icon(
+                                postsMuted
+                                    ? Icons.notifications_active_outlined
+                                    : Icons.notifications_off_outlined,
+                              ),
+                              title: Text(
+                                postsMuted
+                                    ? t('Powiadamiaj o postach tej osoby')
+                                    : t('Wycisz posty tej osoby'),
+                              ),
                             ),
                           ),
                         if (onReport != null)

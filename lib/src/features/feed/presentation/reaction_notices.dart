@@ -10,6 +10,8 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -121,7 +123,8 @@ final Provider<ReactionNoticesFeed?> reactionNoticesProvider =
 
 /// The bell on the wall: new likes and comments under your own posts,
 /// gathered per post ("Bob i 3 inne osoby polubili…") instead of one
-/// notification per like. Opening it marks everything as seen.
+/// notification per like. Opening it marks everything as seen. Its sheet
+/// also holds the switch of the notifications about friends' new posts.
 class ReactionNoticesButton extends ConsumerWidget {
   const ReactionNoticesButton({super.key});
 
@@ -164,14 +167,19 @@ class ReactionNoticesButton extends ConsumerWidget {
   }
 }
 
-class _NoticesSheet extends StatelessWidget {
+class _NoticesSheet extends ConsumerWidget {
   const _NoticesSheet({required this.notices});
 
   final List<ReactionNotice> notices;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
+    final bool posts = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) => s.postNotifications,
+      ),
+    );
     return SafeArea(
       child: ListView(
         key: const Key('feed-notices-sheet'),
@@ -209,6 +217,25 @@ class _NoticesSheet extends StatelessWidget {
                 title: Text(noticeCommentsText(n)),
               ),
           ],
+          const Divider(height: 24),
+          SwitchListTile(
+            key: const Key('feed-post-notifications'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            secondary: Icon(Icons.article_outlined, color: zen.accent),
+            title: Text(t('Powiadomienia o nowych postach znajomych')),
+            subtitle: Text(
+              t(
+                'Jedną osobę wyciszysz w menu jej posta albo rozmowy. Posty '
+                'znajomych znajomych nie powiadamiają.',
+              ),
+            ),
+            value: posts,
+            onChanged: (bool on) => unawaited(
+              ref
+                  .read(appSettingsControllerProvider.notifier)
+                  .setPostNotifications(on),
+            ),
+          ),
         ],
       ),
     );
