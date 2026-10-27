@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
-import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -47,7 +47,7 @@ String iosLastCheckText(
   final String result = switch (status.lastRunResult) {
     'done' => t('skrzynki sprawdzone'),
     'expired' => t('zabrakło czasu'),
-    _ => t('Zen był zablokowany albo zamknięty'),
+    _ => t('Zen nie mógł sprawdzić skrzynek'),
   };
   final String last =
       t('Ostatnio iOS obudził Zen w tle: {when} ({result}).', <String, Object?>{
@@ -63,30 +63,73 @@ String iosLastCheckText(
   return '$last $count';
 }
 
-/// Whether the app lock ends the background work soon after Zen leaves the
-/// screen ("Po wyjściu z aplikacji" with a password).
-bool iosLockEndsBackground(AppSecurityService security) =>
-    security.hasPassword && security.lockMode == AppLockMode.background;
-
-/// "Praca w tle" on an iPhone: what iOS allows, when it last woke Zen, and
-/// the opt-in keep-alive. The settings page puts it in a panel.
-class IosBackgroundSection extends ConsumerStatefulWidget {
-  const IosBackgroundSection({super.key});
-
-  @override
-  ConsumerState<IosBackgroundSection> createState() =>
-      _IosBackgroundSectionState();
+/// The line about the last run of "Sprawdź wiadomości Zen" from Shortcuts.
+String iosShortcutRunText(
+  IosBackgroundStatus status, {
+  String Function(DateTime at) at = ZenFormat.dayMonthTime,
+}) {
+  if (status.shortcutRuns <= 0 || status.lastShortcutAtMillis <= 0) {
+    return t('Skróty jeszcze nie uruchomiły Zen.');
+  }
+  final String last = t(
+    'Ostatnio Skróty uruchomiły Zen: {when}.',
+    <String, Object?>{
+      'when': at(
+        DateTime.fromMillisecondsSinceEpoch(status.lastShortcutAtMillis),
+      ),
+    },
+  );
+  final String count = tn(
+    status.shortcutRuns,
+    one: 'Od instalacji: {n} raz.',
+    few: 'Od instalacji: {n} razy.',
+    many: 'Od instalacji: {n} razy.',
+  );
+  return '$last $count';
 }
 
-class _IosBackgroundSectionState extends ConsumerState<IosBackgroundSection>
+/// The line about notifications on this iPhone.
+String iosNotificationsText(IosNotifications notifications) =>
+    switch (notifications) {
+      IosNotifications.allowed => t('Powiadomienia są włączone.'),
+      IosNotifications.denied => t(
+        'Powiadomienia są wyłączone: Zen odbierze w tle, ale nic nie pokaże. '
+        'Włącz je w Ustawieniach Zen.',
+      ),
+      IosNotifications.notDetermined => t(
+        'Zen jeszcze nie pytał o powiadomienia; zapyta przy następnym '
+        'otwarciu.',
+      ),
+      IosNotifications.unknown => t(
+        'Nie wiadomo, czy Zen może pokazywać powiadomienia.',
+      ),
+    };
+
+/// What happens in the Shortcuts app, step by step, for the hourly check.
+List<String> iosShortcutSteps() => <String>[
+  t('Otwórz aplikację Skróty i kartę Automatyzacja.'),
+  t('Nowa automatyzacja → Pora dnia: wybierz godzinę i „Codziennie”.'),
+  t('Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.'),
+  t('Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.'),
+  t(
+    'Powtórz dla kolejnych godzin (na przykład co godzinę od 7 do 23): '
+    'każda godzina to osobna automatyzacja.',
+  ),
+];
+
+/// Follows the iPhone's background status: read at once and again
+/// whenever Zen comes back (from the iPhone's settings, the Shortcuts app
+/// or the background).
+abstract class _IosStatusState<W extends ConsumerStatefulWidget>
+    extends ConsumerState<W>
     with WidgetsBindingObserver {
-  IosBackgroundStatus? _status;
+  IosBackgroundStatus? status;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_refresh());
+    unawaited(refreshStatus());
   }
 
   @override
@@ -97,21 +140,64 @@ class _IosBackgroundSectionState extends ConsumerState<IosBackgroundSection>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Back from the iPhone's settings, or from the background.
     if (state == AppLifecycleState.resumed) {
-      unawaited(_refresh());
+      unawaited(refreshStatus());
     }
   }
 
-  Future<void> _refresh() async {
-    final IosBackgroundStatus? status = await ref.read(
+  Future<void> refreshStatus() async {
+    final IosBackgroundStatus? next = await ref.read(
       iosBackgroundStatusReaderProvider,
     )();
     if (!mounted) {
       return;
     }
-    setState(() => _status = status);
+    setState(() => status = next);
   }
+}
+
+TextStyle _titleStyle(ZenColors zen) => TextStyle(
+  color: zen.textPrimary,
+  fontSize: 15.5,
+  fontWeight: FontWeight.w700,
+);
+
+TextStyle _bodyStyle(ZenColors zen) =>
+    TextStyle(color: zen.textSecondary, fontSize: 13.5, height: 1.4);
+
+Widget _line(
+  ZenColors zen,
+  IconData icon,
+  Color color,
+  String text, {
+  Key? key,
+}) => Padding(
+  padding: const EdgeInsets.only(top: 8),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Icon(icon, size: 18, color: color),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(text, key: key, style: _bodyStyle(zen)),
+      ),
+    ],
+  ),
+);
+
+/// The ways an iPhone wakes Zen, each to choose on its own: iOS's own
+/// background refresh (always on unless iOS says no), an hourly Shortcuts
+/// automation, and the silent sound that keeps Zen running. Each says how
+/// often it wakes Zen and what it costs.
+class IosWakeOptions extends ConsumerStatefulWidget {
+  const IosWakeOptions({super.key});
+
+  @override
+  ConsumerState<IosWakeOptions> createState() => _IosWakeOptionsState();
+}
+
+class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
+  bool _stepsOpen = false;
 
   Future<void> _setKeepAlive(bool value) async {
     if (value && !await _confirmKeepAlive()) {
@@ -158,101 +244,378 @@ class _IosBackgroundSectionState extends ConsumerState<IosBackgroundSection>
     return confirmed ?? false;
   }
 
+  Widget _option(
+    ZenColors zen, {
+    required Key key,
+    required IconData icon,
+    required String title,
+    required String text,
+    required bool on,
+    List<Widget> children = const <Widget>[],
+    Widget? trailing,
+  }) {
+    return ZenCard(
+      key: key,
+      tone: on ? zen.success : null,
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 12, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              ZenIconBadge(
+                icon: icon,
+                tone: on ? zen.success : zen.accent,
+                size: 40,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(title, style: _titleStyle(zen)),
+                    const SizedBox(height: 3),
+                    Text(text, style: _bodyStyle(zen)),
+                  ],
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final AppSettings settings = ref.watch(appSettingsControllerProvider);
-    final AppSecurityService security = ref.read(appSecurityServiceProvider);
-    final IosBackgroundStatus? status = _status;
-    final TextStyle titleStyle = TextStyle(
-      color: zen.textPrimary,
-      fontSize: 15.5,
-      fontWeight: FontWeight.w700,
+    final bool keepAlive = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings settings) => settings.keepReceivingInBackground,
+      ),
     );
-    final TextStyle bodyStyle = TextStyle(
-      color: zen.textSecondary,
-      fontSize: 13.5,
-      height: 1.4,
+    final IosBackgroundStatus? s = status;
+    final ButtonStyle buttonStyle = FilledButton.styleFrom(
+      minimumSize: const Size(0, 38),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
     );
-    Widget line(IconData icon, Color color, String text, Key key) => Padding(
-      padding: const EdgeInsets.only(top: 10),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _option(
+          zen,
+          key: const Key('ios-wake-refresh'),
+          icon: Icons.autorenew_rounded,
+          title: t('Automatyczne budzenie przez iOS'),
+          text: t(
+            'Kilka razy dziennie, kiedy iOS uzna za stosowne (częściej, gdy '
+            'często używasz Zen). Prawie nie zużywa baterii. Zawsze włączone, '
+            'jeśli iOS na to pozwala.',
+          ),
+          on: s?.canRefresh ?? false,
+          children: <Widget>[
+            if (s != null) ...<Widget>[
+              _line(
+                zen,
+                s.canRefresh
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.error_outline_rounded,
+                s.canRefresh ? zen.success : zen.warning,
+                iosBackgroundRefreshText(s),
+                key: const Key('ios-background-refresh-status'),
+              ),
+              _line(
+                zen,
+                Icons.schedule_rounded,
+                zen.textMuted,
+                iosLastCheckText(s),
+                key: const Key('ios-background-last-check'),
+              ),
+              if (!s.canRefresh)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: FilledButton.tonal(
+                      key: const Key('ios-wake-open-settings'),
+                      style: buttonStyle,
+                      onPressed: () =>
+                          unawaited(ref.read(iosOpenZenSettingsProvider)()),
+                      child: Text(t('Ustawienia Zen w iOS')),
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+        _option(
+          zen,
+          key: const Key('ios-wake-shortcut'),
+          icon: Icons.alarm_rounded,
+          title: t('Automatyzacja w Skrótach co godzinę'),
+          text: t(
+            'O stałych porach, które ustawisz w aplikacji Skróty — dużo '
+            'pewniej niż samo iOS. Każde uruchomienie to około 20 sekund '
+            'pracy: niewielkie zużycie baterii. iOS może przy tym pokazać '
+            'krótki baner.',
+          ),
+          on: (s?.shortcutRuns ?? 0) > 0,
+          children: <Widget>[
+            if (s != null)
+              _line(
+                zen,
+                Icons.history_rounded,
+                zen.textMuted,
+                iosShortcutRunText(s),
+                key: const Key('ios-wake-shortcut-last'),
+              ),
+            if (_stepsOpen)
+              Padding(
+                key: const Key('ios-wake-shortcut-steps'),
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    for (final (int i, String step)
+                        in iosShortcutSteps().indexed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('${i + 1}. $step', style: _bodyStyle(zen)),
+                      ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (!_stepsOpen)
+                    TextButton(
+                      key: const Key('ios-wake-shortcut-how'),
+                      onPressed: () => setState(() => _stepsOpen = true),
+                      child: Text(t('Jak to ustawić?')),
+                    ),
+                  FilledButton.tonal(
+                    key: const Key('ios-wake-open-shortcuts'),
+                    style: buttonStyle,
+                    onPressed: () =>
+                        unawaited(ref.read(iosOpenShortcutsProvider)()),
+                    child: Text(t('Otwórz Skróty')),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        _option(
+          zen,
+          key: const Key('ios-wake-keep-alive'),
+          icon: Icons.graphic_eq_rounded,
+          title: t('Cichy dźwięk — odbiór na bieżąco'),
+          text: t(
+            'Zen odtwarza cichy dźwięk, żeby iOS go nie usypiał: wiadomości i '
+            'połączenia przychodzą od razu, także gdy Zen jest zablokowany. '
+            'Wyraźnie szybciej wyczerpuje baterię.',
+          ),
+          on: keepAlive,
+          trailing: Switch.adaptive(
+            key: const Key('settings-ios-keep-alive-switch'),
+            value: keepAlive,
+            onChanged: (bool value) => unawaited(_setKeepAlive(value)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What has to be set in the iPhone's own Settings for Zen to be woken at
+/// all, each with what iOS says now: background refresh, Low Power Mode,
+/// notifications, and not swiping Zen away.
+class IosSettingsChecklist extends ConsumerStatefulWidget {
+  const IosSettingsChecklist({super.key});
+
+  @override
+  ConsumerState<IosSettingsChecklist> createState() =>
+      _IosSettingsChecklistState();
+}
+
+class _IosSettingsChecklistState extends _IosStatusState<IosSettingsChecklist> {
+  Widget _row(
+    ZenColors zen, {
+    required Key key,
+    required IconData icon,
+    required String title,
+    required String text,
+    required bool? ok,
+  }) {
+    final Color tone = switch (ok) {
+      true => zen.success,
+      false => zen.warning,
+      null => zen.textMuted,
+    };
+    return Padding(
+      key: key,
+      padding: const EdgeInsets.only(top: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
+          ZenIconBadge(icon: icon, tone: tone, size: 36),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(text, key: key, style: bodyStyle),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(child: Text(title, style: _titleStyle(zen))),
+                    if (ok != null)
+                      ZenPill(
+                        text: ok ? t('Gotowe') : t('Do zmiany'),
+                        tone: tone,
+                        icon: ok ? Icons.check_rounded : Icons.priority_high,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(text, style: _bodyStyle(zen)),
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final IosBackgroundStatus? s = status;
     return Column(
+      key: const Key('ios-settings-checklist'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(t('Praca w tle na iPhonie'), style: titleStyle),
+        Text(t('Ustawienia iPhone’a dla Zen'), style: _titleStyle(zen)),
+        const SizedBox(height: 4),
+        Text(
+          t(
+            'Żeby iOS budził Zen jak najczęściej. Co da się sprawdzić, Zen '
+            'sprawdza sam.',
+          ),
+          style: _bodyStyle(zen),
+        ),
+        _row(
+          zen,
+          key: const Key('ios-check-refresh'),
+          icon: Icons.autorenew_rounded,
+          title: t('Odświeżanie w tle'),
+          text: s == null
+              ? t('Sprawdzam…')
+              : s.refresh == IosBackgroundRefresh.available
+              ? t('Włączone dla Zen.')
+              : iosBackgroundRefreshText(
+                  IosBackgroundStatus(refresh: s.refresh),
+                ),
+          ok: s == null || s.refresh == IosBackgroundRefresh.unknown
+              ? null
+              : s.refresh == IosBackgroundRefresh.available,
+        ),
+        _row(
+          zen,
+          key: const Key('ios-check-low-power'),
+          icon: Icons.battery_saver_rounded,
+          title: t('Tryb niskiego zużycia energii wyłączony'),
+          text: s != null && s.lowPower
+              ? t(
+                  'Jest włączony: iOS nie budzi wtedy żadnej aplikacji w tle. '
+                  'Wyłączysz go w Centrum sterowania albo w Ustawieniach → '
+                  'Bateria.',
+                )
+              : t('iOS nie budzi aplikacji w tle, gdy ten tryb jest włączony.'),
+          ok: s == null ? null : !s.lowPower,
+        ),
+        _row(
+          zen,
+          key: const Key('ios-check-notifications'),
+          icon: Icons.notifications_active_outlined,
+          title: t('Powiadomienia'),
+          text: s == null
+              ? t('Sprawdzam…')
+              : iosNotificationsText(s.notifications),
+          ok: s == null
+              ? null
+              : switch (s.notifications) {
+                  IosNotifications.allowed => true,
+                  IosNotifications.denied => false,
+                  _ => null,
+                },
+        ),
+        _row(
+          zen,
+          key: const Key('ios-check-app-switcher'),
+          icon: Icons.swipe_up_alt_rounded,
+          title: t('Nie zamykaj Zen w przełączniku aplikacji'),
+          text: t(
+            'Zen zamknięty przesunięciem w górę nie jest budzony, dopóki go '
+            'nie otworzysz. Wystarczy wyjść z aplikacji.',
+          ),
+          ok: null,
+        ),
+        const SizedBox(height: 12),
+        FilledButton.tonal(
+          key: const Key('ios-check-open-settings'),
+          onPressed: () => unawaited(ref.read(iosOpenZenSettingsProvider)()),
+          child: Text(t('Otwórz ustawienia Zen w iOS')),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Praca w tle" on an iPhone: the ways to wake Zen, what the iPhone's
+/// settings say, and that a locked Zen receives too. The settings page puts
+/// it in a panel.
+class IosBackgroundSection extends StatelessWidget {
+  const IosBackgroundSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(t('Praca w tle na iPhonie'), style: _titleStyle(zen)),
         const SizedBox(height: 4),
         Text(
           t(
             'iOS usypia Zen kilka sekund po wyjściu z aplikacji, a Zen nie '
-            'korzysta z żadnego serwera, który mógłby go budzić. Co jakiś czas '
-            'iOS sam budzi Zen na kilkanaście sekund — wtedy Zen pyta '
-            'skrzynki u Twoich znajomych o wiadomości i pokazuje '
-            'powiadomienia. Kiedy i jak często, decyduje system: zwykle kilka '
-            'razy dziennie, częściej, gdy często używasz Zen, nigdy po '
-            'zamknięciu Zen w przełączniku aplikacji.',
+            'korzysta z żadnego serwera, który mógłby go budzić. Kiedy Zen '
+            'się obudzi, pyta skrzynki u Twoich znajomych o wiadomości i '
+            'pokazuje powiadomienia. Wybierz, jak ma być budzony — możesz '
+            'łączyć sposoby.',
           ),
-          style: bodyStyle,
+          style: _bodyStyle(zen),
         ),
-        if (status != null) ...<Widget>[
-          line(
-            status.canRefresh
-                ? Icons.check_circle_outline_rounded
-                : Icons.error_outline_rounded,
-            status.canRefresh ? zen.success : zen.warning,
-            iosBackgroundRefreshText(status),
-            const Key('ios-background-refresh-status'),
+        const SizedBox(height: 6),
+        const IosWakeOptions(),
+        _line(
+          zen,
+          Icons.lock_outline_rounded,
+          zen.textMuted,
+          t(
+            'Zablokowany Zen też odbiera: wiadomości czekają zaszyfrowane do '
+            'odblokowania, a powiadomienie pokazuje najwyżej początek '
+            'wiadomości.',
           ),
-          line(
-            Icons.schedule_rounded,
-            zen.textMuted,
-            iosLastCheckText(status),
-            const Key('ios-background-last-check'),
-          ),
-        ],
-        ListenableBuilder(
-          listenable: security,
-          builder: (BuildContext context, Widget? child) =>
-              iosLockEndsBackground(security)
-              ? line(
-                  Icons.lock_clock_outlined,
-                  zen.warning,
-                  t(
-                    'Zablokowany Zen nie odbiera w tle. Przy blokadzie „Po '
-                    'wyjściu z aplikacji” odbieranie w tle kończy się razem z '
-                    'blokadą. Żeby odbierać dłużej, wybierz w zabezpieczeniach '
-                    '„Przy zamknięciu aplikacji”.',
-                  ),
-                  const Key('ios-background-lock-note'),
-                )
-              : const SizedBox.shrink(),
+          key: const Key('ios-background-locked-note'),
         ),
-        const SizedBox(height: 4),
-        SwitchListTile.adaptive(
-          key: const Key('settings-ios-keep-alive-switch'),
-          contentPadding: EdgeInsets.zero,
-          value: settings.keepReceivingInBackground,
-          onChanged: (bool value) => unawaited(_setKeepAlive(value)),
-          title: Text(t('Odbieraj w tle cały czas'), style: titleStyle),
-          subtitle: Text(
-            t(
-              'Zen odtwarza cichy dźwięk, żeby iOS go nie usypiał: wiadomości '
-              'i połączenia przychodzą na bieżąco także poza aplikacją. '
-              'Zużywa wyraźnie więcej baterii.',
-            ),
-            style: bodyStyle,
-          ),
-        ),
+        const SizedBox(height: 16),
+        const IosSettingsChecklist(),
       ],
     );
   }

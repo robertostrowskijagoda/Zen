@@ -11,6 +11,8 @@ import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
@@ -123,11 +125,11 @@ class FirstRunSetupScreen extends StatelessWidget {
   );
 }
 
-enum _SetupStep { lock, notifications, gates, animations, permissions }
+enum _SetupStep { lock, notifications, iphone, gates, animations, permissions }
 
-/// The steps one by one: when Zen locks, what notifications say, the
-/// gates, the animations and (from Ustawienia; on the first start the gate
-/// shows it next) the permissions. Every answer is saved at once, so
+/// The steps one by one: when Zen locks, what notifications say, on an
+/// iPhone how iOS is to wake Zen, the gates, the animations and (from
+/// Ustawienia; on the first start the gate shows it next) the permissions. Every answer is saved at once, so
 /// skipping keeps what is set (the defaults on the first start).
 class FirstRunSetupFlow extends ConsumerStatefulWidget {
   const FirstRunSetupFlow({this.firstStart = false, super.key});
@@ -147,9 +149,11 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
   /// start the permissions step follows as a stage of its own).
   (List<_SetupStep>, int) _steps() {
     final bool permissions = ref.watch(permissionsPlatformProvider).hasAnything;
+    final bool iphone = ref.watch(iosBackgroundBridgeEnabledProvider);
     final List<_SetupStep> here = <_SetupStep>[
       _SetupStep.lock,
       _SetupStep.notifications,
+      if (iphone) _SetupStep.iphone,
       _SetupStep.gates,
       _SetupStep.animations,
       if (permissions && !widget.firstStart) _SetupStep.permissions,
@@ -287,6 +291,19 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
         ),
       ),
       const ZenCard(child: NotificationPrivacySettingChoice()),
+    ],
+    _SetupStep.iphone => <Widget>[
+      ZenHero(
+        title: t('Jak iPhone ma budzić Zen?'),
+        icon: Icons.phone_iphone_rounded,
+        text: t(
+          'iOS usypia Zen zaraz po wyjściu z aplikacji. Wiadomości czekają '
+          'wtedy u znajomych, a Zen odbiera je, gdy się obudzi. Wybierz '
+          'sposoby budzenia — możesz łączyć kilka.',
+        ),
+      ),
+      const IosWakeOptions(),
+      const ZenCard(child: IosSettingsChecklist()),
     ],
     _SetupStep.gates => <Widget>[
       ZenHero(

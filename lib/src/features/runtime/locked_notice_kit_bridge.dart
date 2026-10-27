@@ -7,6 +7,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -32,10 +33,10 @@ String lockedNoticeKitSignature(SocialHubState state) {
   return parts.join('|');
 }
 
-/// Keeps the [LockedNoticeKit] in step on Android while the app is
-/// unlocked: the notification privacy level, the conversations' own levels
-/// and the names the locked background receiver may show in a message's
-/// notice. Written again whenever any of it changes; only once the friends
+/// Keeps the [LockedNoticeKit] in step on Android and on an iPhone while
+/// the app is unlocked: the notification privacy level, the conversations'
+/// own levels and the names the locked background receiver may show in a
+/// message's notice. Written again whenever any of it changes; only once the friends
 /// were read, so a kit without them never replaces the stored one.
 class LockedNoticeKitBridge extends ConsumerStatefulWidget {
   const LockedNoticeKitBridge({required this.child, super.key});
@@ -53,7 +54,8 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
 
   @override
   Widget build(BuildContext context) {
-    if (!ref.watch(androidBackgroundRuntimeBridgeEnabledProvider)) {
+    if (!ref.watch(androidBackgroundRuntimeBridgeEnabledProvider) &&
+        !ref.watch(iosBackgroundBridgeEnabledProvider)) {
       return widget.child;
     }
     ref.watch(

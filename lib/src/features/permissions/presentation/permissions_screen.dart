@@ -12,6 +12,8 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/vendor_battery_help.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// "Uprawnienia i Bluetooth" from the settings.
@@ -228,6 +230,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final PermissionsSnapshot? s = _snapshot;
+    // An iPhone: what its own Settings must allow for Zen to be woken.
+    final bool iphone = ref.watch(iosBackgroundBridgeEnabledProvider);
     final List<Widget> children = <Widget>[
       if (widget.firstStart && widget.welcome) _welcome(zen),
       ZenHero(
@@ -251,6 +255,13 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         const Padding(
           padding: EdgeInsets.all(24),
           child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    } else if (s.applicable.isEmpty && iphone) {
+      children.add(
+        const ZenCard(
+          key: Key('permissions-row-iphone'),
+          child: IosSettingsChecklist(),
         ),
       );
     } else if (s.applicable.isEmpty) {

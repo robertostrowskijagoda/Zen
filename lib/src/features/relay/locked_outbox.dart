@@ -260,6 +260,14 @@ final class LockedOutbox {
     _schedule();
   }
 
+  /// A round now, outside the schedule (an iPhone's background wake, which
+  /// may end before the next scheduled round).
+  Future<void> sendNow() async {
+    if (_running) {
+      await runRound();
+    }
+  }
+
   /// One round: every payload to its recipient and to the mailboxes that
   /// did not confirm it.
   @visibleForTesting

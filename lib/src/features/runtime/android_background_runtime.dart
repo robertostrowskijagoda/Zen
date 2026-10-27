@@ -44,6 +44,7 @@ import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
+import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
@@ -53,14 +54,12 @@ import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
-import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
-import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/background_update_check.dart';
@@ -887,13 +886,9 @@ final class _AndroidBackgroundRuntimeBridgeState
 
   AppSecurityService? _security;
 
-  /// The public part of the inbox key (not a secret): kept, so the
+  /// Keeps the public part of the inbox key (not a secret), so the
   /// capability can still be published once a lock erased the master key.
-  Uint8List? _inboxPublicKey;
-
-  /// Fingerprint of the master key [_inboxPublicKey] belongs to.
-  String? _inboxKeyOwner;
-  String? _publishedSignature;
+  BackgroundCapabilityPublisher? _capabilityPublisher;
   Future<void> _publishing = Future<void>.value();
 
   bool _draining = false;
@@ -1688,44 +1683,16 @@ final class _AndroidBackgroundRuntimeBridgeState
           if (!hub.isHydrated || state.snapshotUnreadable) {
             return;
           }
-          // Derived again whenever the master key is another one (a wipe
-          // makes a new one): an inbox sealed for the old key would never
-          // open.
-          final Uint8List? masterKey = await security.currentEncryptionKey();
-          Uint8List? publicKey = _inboxPublicKey;
-          if (masterKey != null) {
-            final String owner = securityHexFromBytes(
-              securityMasterFingerprint(masterKey),
-            );
-            if (publicKey == null || owner != _inboxKeyOwner) {
-              publicKey = await inboxPublicKeyFor(masterKey);
-              _inboxPublicKey = publicKey;
-              _inboxKeyOwner = owner;
-            }
-          }
-          if (publicKey == null) {
-            return;
-          }
-          final BackgroundCapabilityDraft draft = backgroundCapabilityDraftOf(
-            state,
-            inboxPublicKey: publicKey,
+          // The inbox key is derived again whenever the master key is
+          // another one (a wipe makes a new one).
+          await (_capabilityPublisher ??= BackgroundCapabilityPublisher(
+            vault,
+          )).publish(
+            masterKey: await security.currentEncryptionKey(),
+            state: state,
             directory: directories.directory,
             mailboxes: mailboxes,
           );
-          String sorted(Iterable<String> values) =>
-              (values.toList()..sort()).join(',');
-          final String signature = <String>[
-            base64Url.encode(publicKey),
-            sorted(draft.friends),
-            sorted(draft.groupMembers),
-            sorted(draft.blocked),
-            draft.mailboxes.join(','),
-          ].join('|');
-          if (signature == _publishedSignature) {
-            return;
-          }
-          await vault.publish(draft);
-          _publishedSignature = signature;
         })
         .catchError((Object error, StackTrace stackTrace) {
           logZenError(
@@ -1797,30 +1764,15 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       // "Mijani" seen by the locked service goes to the log, not to the
       // frame handlers; only this device's own records count.
-      final EncounterLog encounters = ref.read(encounterLogProvider);
-      final String self = runtime.snapshot.localAddress;
-      final int delivered = await vault.drain(
+      final int delivered = await drainLockedInbox(
+        vault: vault,
         masterKey: masterKey,
-        deliver: (Uint8List record) async {
-          final SignalTransportFrame? frame = decodeInboxFrame(record);
-          if (frame == null) {
-            return;
-          }
-          if (frame.payload['type'] == kKeptEncountersType) {
-            if (!frame.door &&
-                self.isNotEmpty &&
-                PeerShareCodec.addressesEqual(frame.from, self)) {
-              await encounters.takeKept(frame.payload);
-            }
-            return;
-          }
-          runtime.replayReceived(frame);
-        },
+        runtime: runtime,
+        notices: notices,
+        encounters: ref.read(encounterLogProvider),
+        self: runtime.snapshot.localAddress,
       );
       _inboxDrained = true;
-      for (final String slot in kLockedReceiverSlots) {
-        await notices.dismissSlot(slot);
-      }
       logZenMessage(
         'Drained $delivered frame(s) kept while the app was locked.',
       );
@@ -1907,8 +1859,10 @@ String? lockedLocalLinksJson(NearbyKit? kit, {required bool lan}) {
 /// The service's node while the app is locked or gone: the mesh
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
-final class _LockedReceiverSession {
-  _LockedReceiverSession._(
+/// An iPhone runs the same for its locked Zen ([openDefault],
+/// ios_locked_receiver.dart).
+final class LockedReceiverSession {
+  LockedReceiverSession._(
     RuntimeNodeRuntime this._runtime,
     LockedReceiver this._receiver,
     this._nearby, {
@@ -1917,7 +1871,7 @@ final class _LockedReceiverSession {
 
   /// No node of the default account ("Odbieraj w tle" off for it): only
   /// the other accounts' ([_also]), if any.
-  _LockedReceiverSession._without()
+  LockedReceiverSession._without()
     : _runtime = null,
       _receiver = null,
       _nearby = null,
@@ -1941,7 +1895,7 @@ final class _LockedReceiverSession {
   /// those of the additional accounts that have it on. `null` when the
   /// default account should receive but the app never published a
   /// capability (not unlocked since it was installed or wiped).
-  static Future<_LockedReceiverSession?> open(
+  static Future<LockedReceiverSession?> open(
     AndroidBackgroundBootstrapPayload payload, {
     required RuntimeSystemNotificationService notices,
   }) async {
@@ -1951,9 +1905,9 @@ final class _LockedReceiverSession {
     } on Object catch (error, stackTrace) {
       logZenError('Reading the background accounts failed', error, stackTrace);
     }
-    final _LockedReceiverSession? session = accounts.defaultOn
+    final LockedReceiverSession? session = accounts.defaultOn
         ? await _openDefault(payload, notices: notices)
-        : _LockedReceiverSession._without();
+        : LockedReceiverSession._without();
     if (session == null || accounts.additional.isEmpty) {
       return session;
     }
@@ -1972,8 +1926,29 @@ final class _LockedReceiverSession {
     return session;
   }
 
+  /// The default account's node alone (an iPhone: one account receives
+  /// while locked); `null` before the app published a capability.
+  static Future<LockedReceiverSession?> openDefault({
+    required AppSettings settings,
+    required RuntimeSystemNotificationService notices,
+  }) => _openDefault(
+    AndroidBackgroundBootstrapPayload(settings: settings),
+    notices: notices,
+  );
+
+  /// What the node receives (`null`: no node of the default account).
+  Stream<SignalTransportFrame>? get frames => _runtime?.frames;
+
+  /// Asks the mailboxes for held mail and sends what waits in the outbox
+  /// now, without waiting for the beat: an iPhone's background wake may be
+  /// the only moment for either.
+  Future<void> catchUp() async {
+    await _receiver?.pollMailboxes();
+    await _outbox?.sendNow();
+  }
+
   /// The default account's node, as before there were other accounts.
-  static Future<_LockedReceiverSession?> _openDefault(
+  static Future<LockedReceiverSession?> _openDefault(
     AndroidBackgroundBootstrapPayload payload, {
     required RuntimeSystemNotificationService notices,
   }) async {
@@ -2085,7 +2060,7 @@ final class _LockedReceiverSession {
             alarmKeys: radio.setAlarmKeys,
             place: lastKnownEncounterPlace,
           );
-    return _LockedReceiverSession._(
+    return LockedReceiverSession._(
       runtime,
       LockedReceiver(
         transport: runtime,
@@ -2236,7 +2211,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       Completer<AndroidBackgroundBootstrapPayload>();
 
   /// The receive-only node while the app is locked or gone.
-  _LockedReceiverSession? _session;
+  LockedReceiverSession? _session;
 
   /// Latest state the app asked for. Every queued reconcile converges to this,
   /// so out-of-order or duplicated messages cannot leave the node half-owned.
@@ -2565,7 +2540,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// for the next activation.
   Future<void> _servePowerShortcut() async {
     final DateTime? at = _pendingPowerAlarmAt;
-    final _LockedReceiverSession? session = _session;
+    final LockedReceiverSession? session = _session;
     if (at == null || session == null || _destroyed) {
       return;
     }
@@ -2610,11 +2585,11 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       '(node ${_session == null ? 'down' : 'up'}).',
     );
     if (mode == AndroidBackgroundRuntimeMode.active && _session == null) {
-      _LockedReceiverSession? session;
+      LockedReceiverSession? session;
       try {
         final RuntimeSystemNotificationService notices =
             await _readyNotices() ?? MemoryRuntimeSystemNotificationService();
-        session = await _LockedReceiverSession.open(payload, notices: notices);
+        session = await LockedReceiverSession.open(payload, notices: notices);
         if (session == null) {
           // The app never told what it may receive with (not unlocked since
           // it was installed or wiped): stand by rather than run a node
@@ -2657,7 +2632,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       }
     }
     if (mode == AndroidBackgroundRuntimeMode.standby) {
-      final _LockedReceiverSession? session = _session;
+      final LockedReceiverSession? session = _session;
       _session = null;
       if (session != null) {
         await session.dispose();

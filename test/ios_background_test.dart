@@ -1,14 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/ios_locked_receiver.dart';
 import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
-import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// A catch-up on a clock that moves only when it waits; [onTime] runs at
 /// each second (frames "arrive" there).
@@ -36,6 +37,8 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('IosBackgroundStatus', () {
     test('reads what the iPhone reports', () {
       final IosBackgroundStatus status =
@@ -46,8 +49,14 @@ void main() {
             'lastRunAt': 1700000000000,
             'lastRunResult': 'done',
             'runs': 4,
+            'notifications': 'denied',
+            'lastShortcutAt': 1700000100000,
+            'shortcutRuns': 2,
           });
       expect(status.refresh, IosBackgroundRefresh.available);
+      expect(status.notifications, IosNotifications.denied);
+      expect(status.lastShortcutAtMillis, 1700000100000);
+      expect(status.shortcutRuns, 2);
       expect(status.keepAlive, isTrue);
       expect(status.lastRunAtMillis, 1700000000000);
       expect(status.lastRunResult, 'done');
@@ -61,6 +70,7 @@ void main() {
       );
       expect(status.refresh, IosBackgroundRefresh.unknown);
       expect(status.runs, 0);
+      expect(status.notifications, IosNotifications.unknown);
       expect(status.canRefresh, isFalse);
       expect(
         IosBackgroundStatus.fromMap(null).refresh,
@@ -86,6 +96,22 @@ void main() {
   });
 
   group('IosCatchUp', () {
+    test('ends at the next step once cancelled', () async {
+      bool cancelled = false;
+      Duration now = Duration.zero;
+      final IosCatchUp catchUp = IosCatchUp(
+        poll: () async {},
+        arrivals: const Stream<bool>.empty(),
+        cancelled: () => cancelled,
+        wait: (Duration step) async {
+          now += step;
+          cancelled = now >= const Duration(seconds: 2);
+        },
+      );
+      await catchUp.run(const Duration(seconds: 25));
+      expect(now, const Duration(seconds: 2));
+    });
+
     test('asks the mailboxes and ends once mail stopped coming', () async {
       final c = _catchUp(
         onTime: (Duration now, StreamController<bool> arrivals) {
@@ -190,30 +216,36 @@ void main() {
           ),
           at: (DateTime at) => 'TIME',
         ),
-        contains('zablokowany albo zamknięty'),
+        contains('nie mógł sprawdzić'),
       );
     });
 
-    test('the lock note shows only for the lock after leaving the app', () {
+    test('the last Shortcuts run, and how many there were', () {
       expect(
-        iosLockEndsBackground(
-          MemoryAppSecurityService(
-            hasPassword: true,
-            settings: const AppSettings(lockMode: AppLockMode.background),
-          ),
+        iosShortcutRunText(const IosBackgroundStatus()),
+        'Skróty jeszcze nie uruchomiły Zen.',
+      );
+      final String text = iosShortcutRunText(
+        const IosBackgroundStatus(
+          lastShortcutAtMillis: 1700000000000,
+          shortcutRuns: 5,
         ),
-        isTrue,
+        at: (DateTime at) => 'TIME',
+      );
+      expect(text, contains('TIME'));
+      expect(text, contains('Od instalacji: 5 razy.'));
+      expect(iosShortcutSteps().join(' '), contains('Sprawdź wiadomości Zen'));
+    });
+
+    test('notifications', () {
+      expect(
+        iosNotificationsText(IosNotifications.denied),
+        contains('wyłączone'),
       );
       expect(
-        iosLockEndsBackground(
-          MemoryAppSecurityService(
-            hasPassword: true,
-            settings: const AppSettings(lockMode: AppLockMode.appClose),
-          ),
-        ),
-        isFalse,
+        iosNotificationsText(IosNotifications.allowed),
+        contains('włączone'),
       );
-      expect(iosLockEndsBackground(MemoryAppSecurityService()), isFalse);
     });
   });
 
@@ -225,7 +257,7 @@ void main() {
     expect(restored.keepReceivingInBackground, isTrue);
   });
 
-  group('IosBackgroundBridge', () {
+  group('IosBackgroundHost', () {
     const MethodChannel channel = MethodChannel('zen/background');
     late List<MethodCall> calls;
 
@@ -241,109 +273,215 @@ void main() {
     tearDown(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null);
+      IosNodeGate.release();
     });
 
-    Future<ProviderContainer> pump(
-      WidgetTester tester,
-      AppSecurityService security,
-    ) async {
-      final ProviderContainer container = ProviderContainer(
-        overrides: [
-          iosBackgroundBridgeEnabledProvider.overrideWithValue(true),
-          appSecurityServiceProvider.overrideWithValue(security),
-        ],
+    ({IosBackgroundHost host, List<String> log, List<_FakeSession> sessions})
+    make(_Security security, {bool capability = true, bool keepAlive = false}) {
+      final List<String> log = <String>[];
+      final List<_FakeSession> sessions = <_FakeSession>[];
+      final IosBackgroundHost host = IosBackgroundHost(
+        security: security,
+        keepAlive: () => keepAlive,
+        stopAppNode: () async => log.add('app node stopped'),
+        openSession: () async {
+          log.add('open');
+          if (!capability) {
+            return null;
+          }
+          final _FakeSession session = _FakeSession(log);
+          sessions.add(session);
+          return session;
+        },
       );
-      addTearDown(container.dispose);
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const IosBackgroundBridge(child: SizedBox()),
-        ),
-      );
-      await tester.pump();
-      return container;
+      addTearDown(host.dispose);
+      host.start();
+      return (host: host, log: log, sessions: sessions);
     }
 
-    Future<Object?> callFromNative(WidgetTester tester, MethodCall call) async {
+    Map<Object?, Object?> lastConfigure() =>
+        calls.lastWhere((MethodCall c) => c.method == 'configure').arguments
+            as Map<Object?, Object?>;
+
+    test(
+      'unlocked, the app checks; locked, the locked receiver does',
+      () async {
+        final _Security security = _Security();
+        final h = make(security);
+        expect(lastConfigure(), <String, Object?>{
+          'ready': false,
+          'keepAlive': false,
+        });
+        // Not running yet: nothing to check with.
+        expect(await h.host.check(const Duration(seconds: 1)), isFalse);
+
+        h.host.attachApp((Duration budget) async => true);
+        expect(lastConfigure()['ready'], isTrue);
+        expect(await h.host.check(const Duration(seconds: 1)), isTrue);
+        expect(h.log, isEmpty);
+
+        // Zen locks: the app's node goes down first, then the receiver runs
+        // and holds the node.
+        security.lock();
+        await h.host.appLocked(kitsWritten: Future<void>.value());
+        expect(h.log, <String>['app node stopped', 'open', 'start']);
+        expect(h.host.receiving, isTrue);
+        expect(IosNodeGate.isHeld, isTrue);
+        expect(lastConfigure()['ready'], isTrue);
+
+        expect(await h.host.check(const Duration(seconds: 1)), isTrue);
+        expect(h.sessions.single.catchUps, greaterThan(0));
+
+        // Unlocked: the receiver stops and the app's node may start again.
+        security.open();
+        await h.host.idle;
+        expect(h.log.last, 'dispose');
+        expect(h.host.receiving, isFalse);
+        expect(IosNodeGate.isHeld, isFalse);
+        expect(lastConfigure()['ready'], isFalse);
+      },
+    );
+
+    test('a check while locked starts the receiver itself', () async {
+      final _Security security = _Security(locked: true);
+      final h = make(security, keepAlive: true);
+      expect(lastConfigure(), <String, Object?>{
+        'ready': false,
+        'keepAlive': true,
+      });
+      expect(await h.host.check(const Duration(seconds: 1)), isTrue);
+      expect(h.log.take(3), <String>['app node stopped', 'open', 'start']);
+      expect(lastConfigure()['ready'], isTrue);
+    });
+
+    test('without a capability nothing runs and the node stays free', () async {
+      final _Security security = _Security(locked: true);
+      final h = make(security, capability: false);
+      expect(await h.host.check(const Duration(seconds: 1)), isFalse);
+      expect(h.host.receiving, isFalse);
+      expect(IosNodeGate.isHeld, isFalse);
+      expect(lastConfigure()['ready'], isFalse);
+    });
+
+    test('a check asked for by the iPhone reaches the host', () async {
+      final _Security security = _Security();
+      final h = make(security);
+      h.host.attachApp((Duration budget) async => budget.inSeconds == 7);
       ByteData? reply;
-      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
-        channel.name,
-        const StandardMethodCodec().encodeMethodCall(call),
-        (ByteData? data) => reply = data,
-      );
-      return const StandardMethodCodec().decodeEnvelope(reply!);
-    }
-
-    testWidgets('tells the iPhone when Zen may run and the keep-alive', (
-      WidgetTester tester,
-    ) async {
-      final MemoryAppSecurityService security = MemoryAppSecurityService(
-        hasPassword: true,
-      );
-      final ProviderContainer container = await pump(tester, security);
-      expect(calls.single.method, 'configure');
-      expect(calls.single.arguments, <String, Object?>{
-        'ready': true,
-        'keepAlive': false,
-      });
-
-      await container
-          .read(appSettingsControllerProvider.notifier)
-          .setKeepReceivingInBackground(true);
-      await tester.pump();
-      expect(calls.last.arguments, <String, Object?>{
-        'ready': true,
-        'keepAlive': true,
-      });
-
-      // Locked (in the background no frame comes): nothing runs any more.
-      security.lock();
-      await tester.pump();
-      expect(calls.last.arguments, <String, Object?>{
-        'ready': false,
-        'keepAlive': true,
-      });
-      expect(calls, hasLength(3));
-
-      await tester.pumpWidget(const SizedBox());
-      expect(calls.last.arguments, <String, Object?>{
-        'ready': false,
-        'keepAlive': false,
-      });
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+            channel.name,
+            const StandardMethodCodec().encodeMethodCall(
+              const MethodCall('catchUp', <String, Object?>{'seconds': 7}),
+            ),
+            (ByteData? data) => reply = data,
+          );
+      expect(const StandardMethodCodec().decodeEnvelope(reply!), isTrue);
     });
 
-    testWidgets('a background check is refused while locked', (
-      WidgetTester tester,
-    ) async {
-      final MemoryAppSecurityService security = MemoryAppSecurityService(
-        hasPassword: true,
-        locked: true,
-      );
-      await pump(tester, security);
-      expect(calls.single.arguments, <String, Object?>{
-        'ready': false,
-        'keepAlive': false,
-      });
-      expect(
-        await callFromNative(
-          tester,
-          const MethodCall('catchUp', <String, Object?>{'seconds': 5}),
-        ),
-        isFalse,
-      );
-    });
-
-    testWidgets('without a running node there is nothing to check', (
-      WidgetTester tester,
-    ) async {
-      await pump(tester, MemoryAppSecurityService());
-      expect(
-        await callFromNative(
-          tester,
-          const MethodCall('catchUp', <String, Object?>{'seconds': 5}),
-        ),
-        isFalse,
-      );
-    });
+    test(
+      'the app\'s node config opens only once the receiver let go',
+      () async {
+        final KeyedBinaryPayloadProtector gated = IosNodeGate.protector(
+          const _PlainProtector(),
+        );
+        IosNodeGate.hold();
+        bool opened = false;
+        final Future<void> open = gated
+            .unsealFor('node', Uint8List.fromList(<int>[1]))
+            .then((_) => opened = true);
+        await Future<void>.delayed(Duration.zero);
+        expect(opened, isFalse);
+        IosNodeGate.release();
+        await open;
+        expect(opened, isTrue);
+      },
+    );
   });
+}
+
+/// A security service whose lock the test turns.
+final class _Security extends ChangeNotifier implements AppSecurityService {
+  _Security({bool locked = false}) : _locked = locked;
+
+  bool _locked;
+
+  @override
+  bool get isReady => true;
+
+  @override
+  bool get encryptionEnabled => true;
+
+  @override
+  bool get hasPassword => true;
+
+  @override
+  bool get isLocked => _locked;
+
+  @override
+  void lock() {
+    _locked = true;
+    notifyListeners();
+  }
+
+  void open() {
+    _locked = false;
+    notifyListeners();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A locked receiver that only says what was done with it; a mailbox
+/// answers each ask.
+final class _FakeSession implements IosLockedSession {
+  _FakeSession(this._log);
+
+  final List<String> _log;
+  final StreamController<SignalTransportFrame> _frames =
+      StreamController<SignalTransportFrame>.broadcast(sync: true);
+  int catchUps = 0;
+
+  @override
+  Stream<SignalTransportFrame> get frames => _frames.stream;
+
+  @override
+  Future<void> start() async => _log.add('start');
+
+  @override
+  Future<void> catchUp() async {
+    catchUps += 1;
+    _frames.add(
+      const SignalTransportFrame(
+        from: 'mailbox',
+        payload: <String, dynamic>{'type': 'rly_mail'},
+        receivedAtMillis: 0,
+      ),
+    );
+  }
+
+  @override
+  Future<void> dispose() async => _log.add('dispose');
+}
+
+final class _PlainProtector implements KeyedBinaryPayloadProtector {
+  const _PlainProtector();
+
+  @override
+  bool isSealed(Uint8List payload) => true;
+
+  @override
+  Future<Uint8List> seal(Uint8List payload) async => payload;
+
+  @override
+  Future<Uint8List> unseal(Uint8List payload) async => payload;
+
+  @override
+  Future<Uint8List> sealFor(String storageKey, Uint8List payload) async =>
+      payload;
+
+  @override
+  Future<Uint8List> unsealFor(String storageKey, Uint8List payload) async =>
+      payload;
 }

@@ -466,7 +466,8 @@ String backgroundContactsSignature(SocialHubState state) {
   return parts.join('|');
 }
 
-/// The Android background service while the app is locked or gone:
+/// The Android background service while the app is locked or gone, and an
+/// iPhone's locked Zen while iOS lets it run (ios_locked_receiver.dart):
 /// it holds no master key, only the [BackgroundCapability].
 ///
 /// * Frames from contacts (and, within a small budget, what a stranger
@@ -500,9 +501,11 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   need the master key. (Outgoing retries go from the outbox kit,
 ///   `LockedOutbox`.)
 /// * Notifications say what kind of thing came (a message, an alarm, a
-///   call); a chat message also who wrote it and what, as far as the
-///   notification privacy level of its conversation allows and the
-///   [LockedNoticeKit] knows the name. Nothing else is readable here.
+///   call); a chat message also who wrote it and the start of what
+///   ([kLockedNoticePreviewChars]), as far as the notification privacy
+///   level of its conversation allows and the [LockedNoticeKit] knows the
+///   name. A message is read here only in memory, for that; it is kept
+///   only sealed. Nothing else is readable here.
 final class LockedReceiver {
   LockedReceiver({
     required SignalTransport transport,
@@ -803,6 +806,10 @@ final class LockedReceiver {
       await Future<void>.delayed(pollAnswerGrace);
     }
   }
+
+  /// Asks every mailbox for what it holds now, outside the beat (an
+  /// iPhone's background wake, which may be the only moment for it).
+  Future<void> pollMailboxes() => _pollMailboxes();
 
   Future<void> _pollMailboxes() async {
     for (final String mailbox in _capability.mailboxes) {

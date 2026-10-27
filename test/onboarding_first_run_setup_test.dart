@@ -8,6 +8,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -390,6 +391,74 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+  });
+
+  testWidgets('an iPhone: a step with the ways to wake Zen, each to choose', (
+    WidgetTester tester,
+  ) async {
+    _tallScreen(tester);
+    int shortcuts = 0;
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        appSettingsInitialStateProvider.overrideWithValue(const AppSettings()),
+        appSettingsHydrationEnabledProvider.overrideWithValue(false),
+        permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+        gateDefaultsProvider.overrideWithValue(_Gates()),
+        iosBackgroundBridgeEnabledProvider.overrideWithValue(true),
+        iosBackgroundStatusReaderProvider.overrideWithValue(
+          () async => const IosBackgroundStatus(
+            refresh: IosBackgroundRefresh.available,
+            notifications: IosNotifications.allowed,
+          ),
+        ),
+        iosOpenShortcutsProvider.overrideWithValue(() async => shortcuts++),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: const FirstRunSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Krok 1 z 5'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-step-iphone')), findsOneWidget);
+    expect(find.text('Krok 3 z 5'), findsOneWidget);
+    for (final String option in <String>[
+      'ios-wake-refresh',
+      'ios-wake-shortcut',
+      'ios-wake-keep-alive',
+      'ios-settings-checklist',
+    ]) {
+      expect(find.byKey(Key(option)), findsOneWidget, reason: option);
+    }
+
+    // Shortcuts: the steps on request, and the app one tap away.
+    await tester.tap(find.byKey(const Key('ios-wake-shortcut-how')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ios-wake-shortcut-steps')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ios-wake-open-shortcuts')));
+    await tester.pump();
+    expect(shortcuts, 1);
+
+    // The silent sound only after the battery warning.
+    await tester.tap(find.byKey(const Key('settings-ios-keep-alive-switch')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ios-keep-alive-confirm')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ios-keep-alive-confirm-ok')));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(appSettingsControllerProvider).keepReceivingInBackground,
+      isTrue,
     );
   });
 }
