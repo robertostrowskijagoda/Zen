@@ -89,8 +89,13 @@ const (
 	// (yggdrasil core/types.go): traffic, or the core's own protocol
 	// (nodeinfo and debug queries), which the doors never answer.
 	doorSessionTraffic = 1
-	// Public peers the door host dials at once.
-	doorHostPeerCount = 2
+	// Public peers the door host dials at once. One: a Yggdrasil node with
+	// two or more peers may be picked as the next hop between them
+	// (ironwood routes greedily over every peer, weighted by link latency),
+	// so a host with two public peers could carry strangers' traffic
+	// through the phone. With one it is a leaf; watch moves it to another
+	// peer when that one stays down.
+	doorHostPeerCount = 1
 	// How often the door host checks that it is on the mesh, and how many
 	// failed checks in a row make it try other peers.
 	doorHostCheckInterval = 30 * time.Second
