@@ -202,6 +202,21 @@ main.prose { max-width: 780px; }
 @media (max-width: 480px) { .cta-row .btn { width: 100%; } }
 .hint { text-align: center; color: var(--muted); font-size: 14.5px; margin: 12px 0 0; }
 .hint .chip { margin: 2px 2px; }
+/* "Other system": a native list, drawn as a pill under the main download button. */
+.ospick {
+  position: relative; display: inline-flex; align-items: center; max-width: 100%;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--link);
+}
+.ospick:hover { background: var(--soft); border-color: var(--link); }
+.ospick:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+.ospick select {
+  appearance: none; -webkit-appearance: none; min-height: 44px; margin: 0; max-width: 100%;
+  padding: 0 38px 0 18px; border: 0; border-radius: 999px; background: transparent;
+  color: inherit; font: 700 15px/1.2 var(--font); cursor: pointer; text-align: center;
+}
+.ospick select option { color: var(--text); background: var(--card); }
+.ospick .chev { position: absolute; inset-inline-end: 14px; width: 14px; height: 14px; pointer-events: none; }
+[dir="rtl"] .ospick select { padding: 0 18px 0 38px; }
 
 /* Cards, sections, notes. */
 .card {

@@ -52,12 +52,15 @@
       <a id="iphone" class="btn primary block" href="../install/iphone/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="instIphone">Install on iPhone</span></a>
       <a id="macos" class="btn primary block" href="../install/macos/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="instMac">Install on Mac</span></a>
     </div>
-    <p id="others" class="hint"><span data-i="otherSystems">Other systems:</span>
-      <a class="chip" data-os="android" href="../install/android/">Android</a>
-      <a class="chip" data-os="iphone" href="../install/iphone/">iPhone</a>
-      <a class="chip" data-os="windows" href="../install/windows/">Windows</a>
-      <a class="chip" data-os="macos" href="../install/macos/">Mac</a>
-      <a class="chip" data-os="linux" href="../install/linux/">Linux</a></p>
+    <p id="others" class="hint">
+      <label class="ospick"><select id="osPick" data-ial="otherSystem">
+        <option value="" data-i="otherSystem">Other system</option>
+        <option value="android">Android</option>
+        <option value="iphone">iPhone</option>
+        <option value="windows">Windows</option>
+        <option value="macos">macOS</option>
+        <option value="linux">Linux</option>
+      </select><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></label></p>
     <p class="hint">
       <a class="chip" href="../install/"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span data-i="moreInstall">All install options and help</span></a>
       <a class="chip" href="../features/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="whatIsZen">What is Zen?</span></a></p>
@@ -147,16 +150,7 @@
     }
   }
   if (noApp) { $("noapp").classList.remove("hidden"); }
-  ["android", "windows", "linux", "iphone", "macos"].forEach(function (id) {
-    var b = $(id);
-    if (os && id !== os) { b.classList.add("hidden"); }
-    if (!os) { b.classList.remove("primary"); b.classList.add("secondary"); }
-  });
-  if (os !== "android" && os) { $("otherAndroid").classList.add("hidden"); }
-  Array.prototype.forEach.call(document.querySelectorAll("#others .chip"), function (c) {
-    if (!os || c.getAttribute("data-os") === os) { c.classList.add("hidden"); }
-  });
-  if (!os) { $("others").classList.add("hidden"); }
+  Zen.systemButtons();
 })();
 </script>
 </body>
