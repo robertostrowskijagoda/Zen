@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
-  <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/release.yml?label=release%20build&logo=githubactions&logoColor=white" alt="Release build status"></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/release.yml?label=release%20build&event=push&logo=githubactions&logoColor=white" alt="Release build status"></a>
   <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest"><img src="https://img.shields.io/github/v/release/robertostrowskijagoda/Zen?include_prereleases&sort=semver&label=latest%20release" alt="Latest release"></a>
   <a href="https://github.com/robertostrowskijagoda/Zen/commits/main"><img src="https://img.shields.io/github/last-commit/robertostrowskijagoda/Zen?label=last%20commit" alt="Last commit"></a>
   <br>
