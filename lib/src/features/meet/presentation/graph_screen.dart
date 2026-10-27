@@ -142,6 +142,8 @@ Map<String, PyramidMark> pyramidMarks(PyramidService? pyr) {
     return const <String, PyramidMark>{};
   }
   final String? mine = s.pathOf(me);
+  final Set<String> mates = s.cellmates(me).toSet();
+  final int now = pyr.now;
   final Map<String, PyramidMark> out = <String, PyramidMark>{};
   for (final PyrMember m in s.members.values) {
     if (!m.active || m.addr.isEmpty || m.key == me) {
@@ -154,6 +156,8 @@ Map<String, PyramidMark> pyramidMarks(PyramidService? pyr) {
     out[PeerShareCodec.normalizeAddress(m.addr)] = PyramidMark(
       level: p.length,
       line: mine != null && (p.startsWith(mine) || mine.startsWith(p)),
+      cellmate: mates.contains(m.key),
+      met: s.metWith(me, m.key, now),
     );
   }
   return out;
@@ -330,6 +334,8 @@ GraphLook graphLook({
         color = m == null
             ? zen.outline.withValues(alpha: 0.18)
             : (m.line ? zen.accent : pyr.withValues(alpha: 0.7));
+        // In a cell together, not yet confirmed as known: dashed.
+        dashed = spoke && (m?.unmetCellmate ?? false);
       case GraphMode.gates:
         final GatePrice? g = spoke
             ? prices.gateOf(to.address)
