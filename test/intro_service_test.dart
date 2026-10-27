@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -146,7 +147,9 @@ void _befriend(_Phone a, _Phone b) {
   }
 }
 
-/// Ania knows Bartek, Bartek knows Celina, Darek and Ewa.
+/// Ania knows Bartek, Bartek knows Celina, Darek and Ewa. Bartek approves
+/// each request himself unless [bartekTerms] say otherwise (what nobody has
+/// set is [GateTerms.standard]: open for free, his app passes it on).
 Future<
   ({
     _Net net,
@@ -157,7 +160,10 @@ Future<
     _Phone ewa,
   })
 >
-_world({bool aniaInBackground = false}) async {
+_world({
+  bool aniaInBackground = false,
+  GateTerms bartekTerms = GateTerms.freeWithConsent,
+}) async {
   final _Net net = _Net();
   final _Phone ania = _Phone(net, 'Ania', 'a1', background: aniaInBackground);
   final _Phone bartek = _Phone(net, 'Bartek', 'b2');
@@ -171,6 +177,9 @@ _world({bool aniaInBackground = false}) async {
   // Everything that travels through a middle friend is signed.
   for (final _Phone p in <_Phone>[ania, bartek, celina, darek, ewa]) {
     await LedgerIdentity.loadOrCreate(p.disk);
+  }
+  for (final GateTier tier in GateTier.values) {
+    await bartek.intro.setGateTier(tier, bartekTerms);
   }
   return (
     net: net,
@@ -310,6 +319,26 @@ void main() {
     expect(celina.intro.needsMe, isEmpty);
     // Kept in this phone's store.
     expect(ania.disk.files.containsKey('meet/intros'), isTrue);
+  });
+
+  test('a middle friend who set nothing opens the gate by himself: the '
+      'request goes on to the other at once', () async {
+    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world(
+      bartekTerms: GateTerms.standard,
+    );
+    expect(bartek.intro.gateTermsFor(ania.address), GateTerms.standard);
+    final IntroCase? c = await ania.intro.askIntro(
+      middle: bartek.address,
+      target: celina.address,
+      targetName: 'Celina',
+    );
+    expect(c, isNotNull);
+    expect(bartek.intro.needsMe, isEmpty);
+    expect(ania.intro.caseOf(c!.id)!.status, IntroStatus.forwarded);
+    final IntroCase atCelina = celina.intro.needsMe.single;
+    expect(atCelina.role, IntroRole.target);
+    expect(atCelina.asker, ania.address);
+    expect(atCelina.middle, bartek.address);
   });
 
   test('declined by the middle friend: the asker learns, the other never '
