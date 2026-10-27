@@ -146,6 +146,28 @@ void main() {
     expect(platform.live, isEmpty);
   });
 
+  test('a clock set back does not stop the works', () async {
+    final List<String> ran = <String>[];
+    ZenWake.beat(
+      'mailbox-poll',
+      const Duration(minutes: 5),
+      () async => ran.add('poll'),
+    );
+    now = 5 * 60 * 1000;
+    await platform.live.single.ring();
+    expect(ran, <String>['poll']);
+    // The clock goes back a day: the next wake still comes a period on,
+    // and runs the poll then.
+    now -= const Duration(days: 1).inMilliseconds;
+    now += 60 * 1000;
+    await platform.live.single.ring();
+    final _Alarm next = platform.live.single;
+    expect(next.delay, const Duration(minutes: 5));
+    now += 5 * 60 * 1000;
+    await next.ring();
+    expect(ran, <String>['poll', 'poll']);
+  });
+
   test('the look alone waits for Doze\'s own window', () {
     ZenWake.beat(
       'nearby-look',

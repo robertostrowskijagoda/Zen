@@ -500,6 +500,18 @@ final class _Beat {
     return at == null ? null : math.max(now, at);
   }
 
+  /// No work due later than a period from [now]: a clock set back (by hand,
+  /// or by the network's time) would otherwise leave every work waiting
+  /// for the old time to come again, and nothing would run meanwhile.
+  void _clampDue(int now) {
+    for (final _BeatWork w in _works) {
+      final int latest = now + w.every.inMilliseconds;
+      if (w.dueAt > latest) {
+        w.dueAt = latest;
+      }
+    }
+  }
+
   void _cancelAlarms() {
     _alarm?.cancel();
     _alarm = null;
@@ -512,6 +524,7 @@ final class _Beat {
       return;
     }
     _cancelAlarms();
+    _clampDue(ZenWake.nowMillis());
     final int? at = _nextAt(_works);
     if (at == null) {
       return;
@@ -559,6 +572,7 @@ final class _Beat {
     // How long each work took, for the technical log.
     final Map<String, int> took = <String, int>{};
     final Stopwatch wake = Stopwatch()..start();
+    _clampDue(now);
     _firing = true;
     try {
       for (final _BeatWork w in _dueBy(now)) {
