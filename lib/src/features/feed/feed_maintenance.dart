@@ -5,28 +5,32 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/feed/post_mentions.dart';
 import 'package:zen/src/features/feed/post_notifier.dart';
 import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// What the wall does in the background: notifications about reactions to
-/// your posts and about friends' new posts, posts passed on beyond friends
-/// and the storage limits.
+/// your posts, about friends' new posts and about mentions, posts passed on
+/// beyond friends and the storage limits.
 final class FeedMaintenance {
   FeedMaintenance({
     required this.node,
     required this.notifier,
     this.posts,
     this.reach,
+    this.mentions,
   });
 
   final LedgerNode node;
@@ -37,6 +41,10 @@ final class FeedMaintenance {
 
   /// Passes posts on beyond friends and fetches those passed on to us.
   final PostReachService? reach;
+
+  /// Tells people of their mentions in this account's posts and comments,
+  /// and this person of theirs.
+  final PostMentionService? mentions;
 
   Timer? _first;
 
@@ -51,6 +59,7 @@ final class FeedMaintenance {
   void start() {
     notifier.start();
     posts?.start();
+    mentions?.start();
     unawaitedLogged(
       reach?.start() ?? Future<void>.value(),
       context: 'Posty dalszych znajomych',
@@ -102,6 +111,7 @@ final class FeedMaintenance {
     _first?.cancel();
     notifier.dispose();
     posts?.dispose();
+    mentions?.dispose();
   }
 }
 
@@ -131,9 +141,43 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       ? level.atLeast(NotificationPrivacy.senderOnly)
       : level;
 
+  NotificationPrivacy friendPrivacy(String address) => shared(
+    ref
+        .read(socialHubControllerProvider)
+        .notificationPrivacyFor(
+          address,
+          global: ref.read(appSettingsControllerProvider).notificationPrivacy,
+        ),
+  );
+  final PostReachService? reach = ref.watch(postReachProvider);
+
   final FeedMaintenance maintenance = FeedMaintenance(
     node: node,
-    reach: ref.watch(postReachProvider),
+    reach: reach,
+    mentions: PostMentionService(
+      node: node,
+      nameOf: nameOf,
+      notify: notify,
+      addToInbox: (InboxEntry entry) =>
+          ref.read(socialHubControllerProvider.notifier).putInboxEntry(entry),
+      shouldNotify: () => !focused(),
+      privacyOf: friendPrivacy,
+      privacy: () =>
+          shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
+      // On a friend list shared with this phone: a friend of a friend.
+      friendOfFriend: (String address) {
+        final String a = PeerShareCodec.normalizeAddress(address);
+        for (final Map<String, String> list
+            in ref.read(meetServiceProvider).book.friendLists.values) {
+          final String? name = list[a];
+          if (name != null) {
+            return name;
+          }
+        }
+        return null;
+      },
+      held: reach,
+    ),
     notifier: ReactionSystemNotifier(
       node: node,
       nameOf: nameOf,
@@ -155,16 +199,7 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       },
       announces: (String address) =>
           ref.read(appSettingsControllerProvider).announcesPostsOf(address),
-      privacyOf: (String address) => shared(
-        ref
-            .read(socialHubControllerProvider)
-            .notificationPrivacyFor(
-              address,
-              global: ref
-                  .read(appSettingsControllerProvider)
-                  .notificationPrivacy,
-            ),
-      ),
+      privacyOf: friendPrivacy,
       privacy: () =>
           shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
     ),

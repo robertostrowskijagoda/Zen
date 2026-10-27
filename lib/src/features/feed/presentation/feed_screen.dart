@@ -23,6 +23,7 @@ import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/post_mentions.dart';
 import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/presentation/comment_composer.dart';
@@ -42,6 +43,7 @@ import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_stream_server.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/local_delete.dart';
@@ -58,6 +60,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart'
     show PyrMember, PyramidState;
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -415,9 +418,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     if (_node == null) {
       return;
     }
+    final LedgerNode node = _node!;
     final bool published = await PostEditorScreen.open(
       context,
       onSubmit: _publish,
+      // A new post may mention friends and their friends.
+      mentionCandidates: () => postMentionCandidatesFor(ref, node),
       initialAudience: _audience,
       pickPhotos: widget.pickPhotos,
       pickOnOpen: withPhotos,
@@ -453,7 +459,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   Future<void> _editPost(FeedPost post) async {
     final LedgerNode? node = _node;
     if (node != null) {
-      await editOwnPost(context, node, post);
+      await editOwnPost(
+        context,
+        node,
+        post,
+        mentionCandidates: () =>
+            postMentionCandidatesFor(ref, node, post: post),
+      );
     }
   }
 
@@ -775,6 +787,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                               if (c.text.trim().isNotEmpty)
                                                 CopyableText(
                                                   c.text,
+                                                  mentions: c.mentions,
                                                   style: TextStyle(
                                                     fontSize: 14,
                                                     height: 1.35,
@@ -787,7 +800,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                                       // The comment's author.
                                                       authorAddress:
                                                           c.authorAddress,
-                                                      text: c.text,
+                                                      text: mentionsAsPlainText(
+                                                        c.text,
+                                                        c.mentions,
+                                                      ),
                                                       header: t(
                                                         'Komentarz — {name}',
                                                         {'name': c.authorLabel},
@@ -854,10 +870,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         child: CommentComposer(
                           fieldKey: const Key('feed-comment-field'),
                           sendKey: const Key('feed-comment-send'),
-                          onSend:
+                          // "@": the post's author, those who reacted, the
+                          // writer's friends and theirs.
+                          mentionCandidates: _node == null
+                              ? null
+                              : () => postMentionCandidatesFor(
+                                  ref,
+                                  _node!,
+                                  post: post,
+                                ),
+                          onSendMentioning:
                               (
                                 String text,
                                 List<CommentPicture> pictures,
+                                List<Mention> mentions,
                               ) async {
                                 final LedgerNode? node = _node;
                                 final NavigatorState nav = Navigator.of(sheet);
@@ -868,6 +894,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                       post.id,
                                       text,
                                       pictures: pictures,
+                                      mentions: mentions,
                                     );
                                   }
                                   nav.pop();
@@ -1231,8 +1258,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 Future<bool> editOwnPost(
   BuildContext context,
   LedgerNode node,
-  FeedPost post,
-) async {
+  FeedPost post, {
+  List<MentionCandidate> Function()? mentionCandidates,
+}) async {
   // The post's own files are on this device: show them in the editor.
   final List<DraftMedia> media = <DraftMedia>[];
   for (final MediaRef ref in post.images) {
@@ -1268,6 +1296,8 @@ Future<bool> editOwnPost(
     context,
     editing: true,
     initialText: post.text,
+    initialMentions: post.mentions,
+    mentionCandidates: mentionCandidates,
     initialMedia: media,
     initialAudience: post.audience,
     onSubmit: (PostDraft draft) async {
@@ -1283,15 +1313,23 @@ Future<bool> editOwnPost(
                   stripMetadata: true,
                 ),
         ];
+        final ({String text, List<Mention> mentions}) said =
+            mentionsForAudience(
+              node,
+              draft.text,
+              draft.mentions,
+              post.audience,
+            );
         await node.publish(
           kPostEditKind,
           await node.seal(
             post.audience,
             editPostBody(
               post.id,
-              draft.text,
+              said.text,
               audience: post.audience,
               images: refs,
+              mentions: said.mentions,
             ),
           ),
           blobs: mediaIds(refs),
@@ -1367,10 +1405,17 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
           stripMetadata: true,
         ),
     ];
-    final Map<String, dynamic> body = newPostBody(
+    final ({String text, List<Mention> mentions}) said = mentionsForAudience(
+      node,
       text,
+      draft.mentions,
+      draft.audience,
+    );
+    final Map<String, dynamic> body = newPostBody(
+      said.text,
       audience: draft.audience,
       images: media,
+      mentions: said.mentions,
     );
     await node.publish(
       kPostKind,
@@ -1383,6 +1428,25 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
   } on Object catch (e) {
     return t('Nie udało się opublikować: {error}', {'error': e});
   }
+}
+
+/// Who this account may mention in [post] or under it (a new post of its
+/// own when `null`), see [postMentionCandidates].
+List<MentionCandidate> postMentionCandidatesFor(
+  WidgetRef ref,
+  LedgerNode node, {
+  FeedPost? post,
+}) {
+  final SocialHubState social = ref.read(socialHubControllerProvider);
+  return postMentionCandidates(
+    node,
+    post: post,
+    nameOf: (String address) {
+      final FriendProfile? friend = social.friendByAddress(address);
+      return friend == null ? '' : social.nameFor(friend);
+    },
+    friendLists: ref.read(meetServiceProvider).book.friendLists,
+  );
 }
 
 /// Side padding that keeps a column of posts readable on wide windows.
@@ -2164,6 +2228,7 @@ class PostContent extends StatelessWidget {
         if (post.text.trim().isNotEmpty)
           RichPostBody(
             source: post.text,
+            mentions: post.mentions,
             mediaCount: media.length,
             mediaBuilder: (BuildContext context, int i) =>
                 isAudioMime(media[i].mime)

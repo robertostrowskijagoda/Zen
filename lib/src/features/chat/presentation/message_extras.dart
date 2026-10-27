@@ -8,6 +8,8 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -295,9 +297,16 @@ Future<String?> pickReaction(BuildContext context) {
   );
 }
 
-/// The new text of an edited message; `null` when cancelled.
-Future<String?> showEditMessageDialog(BuildContext context, String current) {
-  final TextEditingController controller = TextEditingController(text: current);
+/// The new text of an edited message; `null` when cancelled. The tokens of
+/// [mentions] in [current] are edited as "@name" and come back as tokens
+/// pointing into the same list (an edit adds nobody).
+Future<String?> showEditMessageDialog(
+  BuildContext context,
+  String current, {
+  List<Mention> mentions = const <Mention>[],
+}) {
+  final MentionTextController controller = MentionTextController()
+    ..setStoredText(current, mentions);
   return showDialog<String>(
     context: context,
     builder: (BuildContext dialogContext) => AlertDialog(
@@ -319,7 +328,9 @@ Future<String?> showEditMessageDialog(BuildContext context, String current) {
         ),
         FilledButton(
           key: const Key('edit-message-save'),
-          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          onPressed: () => Navigator.of(
+            dialogContext,
+          ).pop(controller.storedText(keep: mentions).text),
           child: Text(t('Zapisz')),
         ),
       ],
@@ -466,6 +477,7 @@ List<ChatMenuItem> chatMessageActions(
           final String? text = await showEditMessageDialog(
             context,
             message.text,
+            mentions: message.mentions,
           );
           if (text != null) {
             await hub.editMessage(

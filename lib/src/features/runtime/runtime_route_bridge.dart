@@ -181,8 +181,12 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         }
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (BuildContext context) =>
-                GroupConversationScreen(groupId: groupId, groupName: title),
+            builder: (BuildContext context) => GroupConversationScreen(
+              groupId: groupId,
+              groupName: title,
+              // A mention's notification: at the message.
+              initialMessageId: intent.messageId,
+            ),
           ),
         );
         break;

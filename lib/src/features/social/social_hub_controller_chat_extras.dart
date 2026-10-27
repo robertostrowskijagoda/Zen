@@ -23,7 +23,7 @@ const int _maxEditChars = 64 * 1024;
 /// [kChatEditWindow].
 const Duration _editClockSkew = Duration(hours: 1);
 
-/// [message] with the reply and forwarding [signal] carries.
+/// [message] with the reply, forwarding and mentions [signal] carries.
 ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
   final Map<String, dynamic>? extras = signal.chatExtras;
   if (extras == null) {
@@ -32,14 +32,18 @@ ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
   return message.copyWith(
     reply: ChatReply.fromJson(extras['re']),
     forwarded: extras['fwd'] == true,
+    mentions: usedMentions(message.text, signalMentions(signal)),
   );
 }
 
-/// The reply and forwarding fields of an outgoing message's payload.
+/// The reply, forwarding and mention fields of an outgoing message's
+/// payload.
 Map<String, dynamic> _outgoingChatExtras(ChatMessage message) =>
     <String, dynamic>{
       if (message.reply != null) 're': message.reply!.toJson(),
       if (message.forwarded) 'fwd': true,
+      if (message.mentions.isNotEmpty)
+        kMentionsKey: mentionsToJson(message.mentions),
     };
 
 /// Reactions, replies, editing, deleting for everyone and forwarding, in
@@ -57,7 +61,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
   /// the original.
   ChatReply replyTo(ChatMessage original) {
     final String label = original.type == ChatMessageType.text
-        ? original.text
+        ? original.plainText
         : chatMessageLabelForType(
             original.type,
             fileName: original.fileName,
@@ -248,13 +252,15 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       if (groupId != null) {
         await sendGroupMessage(
           groupId: groupId,
-          text: message.text,
+          // Mentions go as plain names: they meant the old chat's people.
+          text: message.plainText,
           forwarded: true,
         );
       } else {
         await sendLocalMessage(
           peerAddress: toKey,
-          text: message.text,
+          // Mentions go as plain names: they meant the old chat's people.
+          text: message.plainText,
           forwarded: true,
         );
       }

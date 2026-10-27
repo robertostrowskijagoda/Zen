@@ -31,10 +31,13 @@ import 'package:zen/src/features/groups/presentation/group_board_view.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -50,10 +53,14 @@ class GroupConversationScreen extends ConsumerStatefulWidget {
     super.key,
     required this.groupId,
     required this.groupName,
+    this.initialMessageId,
   });
 
   final String groupId;
   final String groupName;
+
+  /// The message to show first (a mention's notification was tapped).
+  final String? initialMessageId;
 
   @override
   ConsumerState<GroupConversationScreen> createState() =>
@@ -66,7 +73,12 @@ class _GroupConversationScreenState
   /// scrolling and stream updates must not replay the tween.
   static const int _entranceStaggerLimit = 10;
 
-  final TextEditingController _composerController = TextEditingController();
+  /// The field: "@" in it offers the group's members to mention.
+  final MentionTextController _composerController = MentionTextController();
+
+  /// The message to scroll to once the chat is loaded
+  /// ([GroupConversationScreen.initialMessageId]).
+  late String? _pendingJump = widget.initialMessageId;
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
@@ -400,11 +412,29 @@ class _GroupConversationScreenState
     }
   }
 
+  /// Who a message may mention: the group's members, nobody else.
+  List<MentionCandidate> _mentionCandidates() {
+    final GroupProfile? group = ref
+        .read(socialHubControllerProvider)
+        .groupById(widget.groupId);
+    if (group == null) {
+      return const <MentionCandidate>[];
+    }
+    return groupMentionCandidates(
+      group,
+      selfAddress: ref.read(runtimeNodeSnapshotProvider).localAddress,
+      nameOf: _nameOf,
+    );
+  }
+
   Future<void> _sendMessage() async {
     final String text = _composerController.text.trim();
     if (text.isEmpty || !_canWrite) {
       return;
     }
+    // The chat keeps mentions as tokens; the board takes the text as it is.
+    final ({String text, List<Mention> mentions}) stored = _composerController
+        .storedText();
     if (_boardTab && text.length > kMaxBoardPostChars) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -435,8 +465,9 @@ class _GroupConversationScreenState
           .read(socialHubControllerProvider.notifier)
           .sendGroupMessage(
             groupId: widget.groupId,
-            text: text,
+            text: stored.text,
             replyTo: replyTo,
+            mentions: stored.mentions,
           );
     } catch (error) {
       if (mounted) {
@@ -893,6 +924,18 @@ class _GroupConversationScreenState
                               <String, ChatMessage>{
                                 for (final ChatMessage m in messages) m.id: m,
                               };
+                          final String? jump = _pendingJump;
+                          if (jump != null) {
+                            // Opened from a mention's notification: at the
+                            // message that mentioned this person.
+                            _pendingJump = null;
+                            _scrollMemoryUsed = true;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) {
+                                unawaited(_jumpToMessage(jump, messages));
+                              }
+                            });
+                          }
                           if (!_scrollMemoryUsed) {
                             _scrollMemoryUsed = true;
                             if (_scrollMemory.hasAnchor) {
@@ -1149,6 +1192,10 @@ class _GroupConversationScreenState
                                       else
                                         CopyableText(
                                           msg.text,
+                                          mentions: msg.mentions,
+                                          mentionColor: onGradient
+                                              ? zen.onAccent
+                                              : null,
                                           actions: actions,
                                           style: TextStyle(
                                             color: onGradient
@@ -1166,7 +1213,7 @@ class _GroupConversationScreenState
                                                     context,
                                                     ref,
                                                     authorAddress: msg.sender,
-                                                    text: msg.text,
+                                                    text: msg.plainText,
                                                     header: t(
                                                       'Wiadomość w grupie {group} — {name}',
                                                       {
@@ -1296,6 +1343,12 @@ class _GroupConversationScreenState
                           reply: _replyTo!,
                           senderLabel: _nameOf(_replyTo!.sender),
                           onCancel: () => setState(() => _replyTo = null),
+                        ),
+                      if (!_boardTab)
+                        MentionSuggestions(
+                          controller: _composerController,
+                          candidates: _mentionCandidates,
+                          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
                         ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),

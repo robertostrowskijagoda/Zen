@@ -139,6 +139,7 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               sentAtMillis: sentAt,
               direction: ChatMessageDirection.outgoing,
               deliveryState: ChatMessageDeliveryState.delivered,
+              mentions: mentionsFromJson(payload[kMentionsKey]),
             ),
       );
     });

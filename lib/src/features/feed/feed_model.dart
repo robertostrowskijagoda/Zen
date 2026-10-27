@@ -13,6 +13,7 @@ import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 /// Longest post text accepted (longer ones from others are cut).
 const int kMaxPostChars = 5000;
@@ -40,11 +41,13 @@ Map<String, dynamic> editPostBody(
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>>? images,
+  List<Mention> mentions = const <Mention>[],
 }) => <String, dynamic>{
   ...newPostBody(
     text,
     audience: audience,
     images: images ?? const <Map<String, dynamic>>[],
+    mentions: mentions,
   ),
   'img': ?images,
   'post': postId,
@@ -284,16 +287,18 @@ FeedComment? feedCommentFrom(
   if (said.trim().isEmpty && images.isEmpty) {
     return null;
   }
+  final String kept = said.length > kMaxCommentChars
+      ? said.substring(0, kMaxCommentChars)
+      : said;
   return FeedComment(
     id: e.id,
     authorLabel: authorLabel,
-    text: said.length > kMaxCommentChars
-        ? said.substring(0, kMaxCommentChars)
-        : said,
+    text: kept,
     millis: e.hlc.millis,
     authorAddress: authorAddress,
     account: account,
     images: images,
+    mentions: mentionsFromJson(e.body[kMentionsKey]),
   );
 }
 
@@ -309,12 +314,16 @@ final class FeedComment {
     this.hiddenByAuthor = false,
     this.avatar,
     this.images = const <MediaRef>[],
+    this.mentions = const <Mention>[],
   });
 
   final String id;
   final String authorLabel;
   final String text;
   final int millis;
+
+  /// The people [text] mentions (its `<@N>` tokens point into this list).
+  final List<Mention> mentions;
 
   /// The author's device address when they are a friend ('' otherwise):
   /// a report of the comment names its author.
@@ -344,6 +353,7 @@ final class FeedComment {
     hiddenByAuthor: true,
     avatar: avatar,
     images: images,
+    mentions: mentions,
   );
 }
 
@@ -434,12 +444,15 @@ String? likeSummary(FeedPost post) {
 /// Body of a comment on [postId] (validated, trimmed). With [mini] the
 /// writer's mini-profile goes along, signed with the comment. [images]
 /// are references of stored pictures (`storeMedia`), at most
-/// [kMaxCommentImages]; a comment may be pictures alone.
+/// [kMaxCommentImages]; a comment may be pictures alone. The `<@N>`
+/// tokens of [text] name [mentions] (`mentions.dart`); only those the
+/// text names are kept.
 Map<String, dynamic> commentBody(
   String postId,
   String text, {
   MiniProfileTag? mini,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
+  List<Mention> mentions = const <Mention>[],
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -469,7 +482,25 @@ Map<String, dynamic> commentBody(
     'post': postId,
     'text': trimmed,
     if (images.isNotEmpty) 'img': images,
+    ..._mentionsOf(trimmed, mentions),
   }, mini);
+}
+
+/// The `men` of a body whose text is [text]: the mentions it really names
+/// (nothing when none).
+Map<String, dynamic> _mentionsOf(String text, List<Mention> mentions) {
+  if (mentions.isEmpty) {
+    return const <String, dynamic>{};
+  }
+  // Tokens keep their indices: the list goes as far as the last one used.
+  final List<Mention> used = usedMentions(text, mentions);
+  if (used.isEmpty) {
+    return const <String, dynamic>{};
+  }
+  final int last = mentions.lastIndexWhere(used.contains);
+  return <String, dynamic>{
+    kMentionsKey: mentionsToJson(mentions.sublist(0, last + 1)),
+  };
 }
 
 @immutable
@@ -493,6 +524,7 @@ final class FeedPost {
     this.likes = const <FeedLiker>[],
     this.degree = 1,
     this.via = const <String>[],
+    this.mentions = const <Mention>[],
     int? likeTotal,
     int? commentTotal,
     int? sortMillis,
@@ -556,6 +588,9 @@ final class FeedPost {
   /// Shown with "edytowano": the text is a later version.
   final bool edited;
 
+  /// The people [text] mentions (its `<@N>` tokens point into this list).
+  final List<Mention> mentions;
+
   /// The signed post itself (what a reshare carries).
   final LogEntry? entry;
 
@@ -589,6 +624,7 @@ final class FeedPost {
     likes: likes,
     degree: degree,
     via: via,
+    mentions: mentions,
     likeTotal: likeTotal,
     commentTotal: commentTotal,
   );
@@ -637,6 +673,7 @@ Map<String, dynamic> newPostBody(
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
+  List<Mention> mentions = const <Mention>[],
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -666,6 +703,7 @@ Map<String, dynamic> newPostBody(
     'text': trimmed,
     'aud': audience.name,
     if (images.isNotEmpty) 'img': images,
+    ..._mentionsOf(trimmed, mentions),
   };
 }
 
@@ -704,6 +742,7 @@ FeedPost? _postFrom(
     entry: entry,
     audience: audienceByName(b['aud']) ?? Audience.public,
     images: images,
+    mentions: mentionsFromJson(b[kMentionsKey]),
   );
 }
 
@@ -786,6 +825,7 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
     via: post.via,
     authorAddress: post.authorAddress,
     sortMillis: post.sortMillis,
+    mentions: mentionsFromJson(edit[kMentionsKey]),
   );
 }
 
@@ -871,6 +911,7 @@ List<FeedPost> _announced(
           entry: entry,
           authorAddress: profile?.address ?? a.authorAddress,
           images: post.images,
+          mentions: post.mentions,
           degree: a.hops,
           via: <String>[
             for (final String friend in a.via)
@@ -991,6 +1032,7 @@ List<FeedPost> buildFeed(
             entry: b.$1,
             authorAddress: profile?.address ?? '',
             images: post.images,
+            mentions: post.mentions,
             sortMillis: b.$3,
           ),
         );
@@ -1129,6 +1171,7 @@ List<FeedPost> buildFeed(
             account: c.account,
             avatar: c.avatar,
             images: c.images,
+            mentions: c.mentions,
           ),
         );
       }

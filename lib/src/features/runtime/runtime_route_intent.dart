@@ -42,6 +42,7 @@ final class RuntimeRouteIntent {
     this.acceptToken,
     this.callId,
     this.postId,
+    this.messageId,
   });
 
   factory RuntimeRouteIntent.inbox({required String id}) {
@@ -65,12 +66,14 @@ final class RuntimeRouteIntent {
     required String id,
     required String groupId,
     String? title,
+    String? messageId,
   }) {
     return RuntimeRouteIntent(
       id: id,
       target: RuntimeRouteTarget.groupConversation,
       peerAddress: groupId,
       title: title,
+      messageId: messageId == null || messageId.isEmpty ? null : messageId,
     );
   }
 
@@ -171,6 +174,10 @@ final class RuntimeRouteIntent {
   /// persisted.
   final String? postId;
 
+  /// The message a group route shows (a mention's notification). Never
+  /// persisted.
+  final String? messageId;
+
   /// Whether this route may answer [ringingCallId]: a route that names a
   /// call answers only that call; one without a call id (older routes)
   /// only by its token, as before.
@@ -191,6 +198,7 @@ final class RuntimeRouteIntent {
       acceptToken: acceptToken,
       callId: callId,
       postId: postId,
+      messageId: messageId,
     );
   }
 
@@ -241,15 +249,23 @@ String buildConversationRouteKey({required String peerAddress, String? title}) {
   ).toString();
 }
 
-String buildGroupRouteKey({required String groupId, String? title}) {
+/// The group chat [groupId]; at the message [messageId] when given
+/// (`&m=<id>`: a mention's notification).
+String buildGroupRouteKey({
+  required String groupId,
+  String? title,
+  String? messageId,
+}) {
   final String? trimmedTitle = title?.trim();
+  final Map<String, String> query = <String, String>{
+    if (trimmedTitle != null && trimmedTitle.isNotEmpty) 'title': trimmedTitle,
+    if (messageId != null && messageId.isNotEmpty) 'm': messageId,
+  };
   return Uri(
     scheme: 'zen',
     host: 'group',
     pathSegments: <String>[groupId],
-    queryParameters: trimmedTitle == null || trimmedTitle.isEmpty
-        ? null
-        : <String, String>{'title': trimmedTitle},
+    queryParameters: query.isEmpty ? null : query,
   ).toString();
 }
 
@@ -369,6 +385,7 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
       id: id,
       groupId: uri.pathSegments.first,
       title: uri.queryParameters['title'],
+      messageId: uri.queryParameters['m'],
     );
   }
   // `zen://m/CODE`: a flat's door code (the sticker page's "Otwórz w Zen").

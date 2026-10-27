@@ -68,8 +68,13 @@ final class LedgerMesh {
   }
 
   /// Starts the ledger of phone [name] (friends as set so far, and any
-  /// set later).
-  Future<LedgerNode> add(String name, {bool autoDownload = true}) async {
+  /// set later). With [knowsOwnAddress] the node knows its own mesh
+  /// address, as in the app.
+  Future<LedgerNode> add(
+    String name, {
+    bool autoDownload = true,
+    bool knowsOwnAddress = false,
+  }) async {
     final String me = address(name);
     final LedgerMeshLink link = _links[me] = LedgerMeshLink._(this, name, me);
     await link.start();
@@ -83,6 +88,7 @@ final class LedgerMesh {
       autoDownloadMedia: () => autoDownload,
       helloInterval: Duration.zero,
       syncInterval: Duration.zero,
+      localAddress: knowsOwnAddress ? () => me : null,
     );
     addTearDown(node.stop);
     await node.start();

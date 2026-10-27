@@ -1469,6 +1469,7 @@ IconData _inboxIcon(InboxEntryType type) {
     InboxEntryType.friendCancelled => Icons.event_busy_outlined,
     InboxEntryType.groupInvite => Icons.group_add_outlined,
     InboxEntryType.post => Icons.article_outlined,
+    InboxEntryType.mention => Icons.alternate_email_rounded,
   };
 }
 
@@ -1484,6 +1485,7 @@ Color _inboxTone(ZenColors zen, InboxEntryType type) {
     InboxEntryType.friendCancelled => zen.textMuted,
     InboxEntryType.groupInvite => zen.tone(ZenTone.people),
     InboxEntryType.post => zen.tone(ZenTone.people),
+    InboxEntryType.mention => zen.tone(ZenTone.communication),
   };
 }
 

@@ -710,6 +710,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         )) {
       return;
     }
+    // A group message that mentions this person says so (within limits).
+    signal = _withMentionOfSelf(signal, timestamp);
     // Both flags are captured before anything mutates the call state.
     //
     // A repeated invite, offer, or ringing signal for the call already on file is just the

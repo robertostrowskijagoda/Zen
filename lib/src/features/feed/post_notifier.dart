@@ -14,6 +14,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 // Notifications about friends' new posts: one system notification for
@@ -80,7 +81,10 @@ final class NewPostNotice {
 /// What a notification says of [post]: its beginning, or for a post with
 /// photos or films only the label of the first one ("📷 Zdjęcie").
 String postNoticePreview(FeedPost post) {
-  final String text = post.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  final String text = mentionsAsPlainText(
+    post.text,
+    post.mentions,
+  ).replaceAll(RegExp(r'\s+'), ' ').trim();
   if (text.isNotEmpty) {
     return text.length > 80 ? '${text.substring(0, 80)}…' : text;
   }

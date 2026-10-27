@@ -48,6 +48,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_price_list.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -899,7 +900,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                             context,
                                             ref,
                                             authorAddress: other,
-                                            text: p.text,
+                                            text: mentionsAsPlainText(
+                                              p.text,
+                                              p.mentions,
+                                            ),
                                             header: t(
                                               'Post na profilu — {name}',
                                               {'name': name},
@@ -970,7 +974,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _editPost(LedgerNode node, FeedPost post) async {
-    final bool saved = await editOwnPost(context, node, post);
+    final bool saved = await editOwnPost(
+      context,
+      node,
+      post,
+      mentionCandidates: () => postMentionCandidatesFor(ref, node, post: post),
+    );
     if (saved && mounted) {
       setState(() {});
       ScaffoldMessenger.of(
@@ -1690,7 +1699,7 @@ class _ProfilePost extends StatelessWidget {
             child: n != null
                 ? PostContent(post: post, node: n)
                 : Text(
-                    plainText(post.text),
+                    plainText(post.text, mentions: post.mentions),
                     style: TextStyle(
                       fontSize: 15,
                       height: 1.45,

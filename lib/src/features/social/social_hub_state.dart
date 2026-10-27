@@ -25,6 +25,10 @@ enum InboxEntryType {
 
   /// New posts of friends on the Tablica (`post_notifier.dart`).
   post,
+
+  /// Someone mentioned this person in a group chat, a post or a comment
+  /// (`mentions.dart`).
+  mention,
 }
 
 @immutable

@@ -2012,13 +2012,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }
 
   /// Sends [text] to a group; as a reply to [replyTo], or marked as
-  /// [forwarded] from another chat.
+  /// [forwarded] from another chat. Its `<@N>` tokens name [mentions]
+  /// (`mentions.dart`): only members of the group are kept, and only those
+  /// the text really names.
   @override
   Future<void> sendGroupMessage({
     required String groupId,
     required String text,
     ChatReply? replyTo,
     bool forwarded = false,
+    List<Mention> mentions = const <Mention>[],
   }) async {
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
@@ -2027,9 +2030,18 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final String trimmed = text.trim();
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
     final String messageId = 'grp-msg-$timestamp-$groupId';
+    // Someone outside the group is never mentioned: such a text goes with
+    // plain names.
+    final bool members = usedMentions(
+      text,
+      mentions,
+    ).every((Mention m) => groupHasMember(group, m.address));
+    final String trimmed =
+        (members ? text : mentionsAsPlainText(text, mentions)).trim();
+    final List<Mention> named = members ? mentions : const <Mention>[];
+    final String said = mentionsAsPlainText(trimmed, named);
 
     await _messageTimelineStore.append(
       'group:$groupId',
@@ -2044,6 +2056,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         deliveryState: ChatMessageDeliveryState.sending,
         reply: replyTo,
         forwarded: forwarded,
+        mentions: named,
       ),
     );
     _bumpTimelineRevision();
@@ -2052,7 +2065,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       state.groups,
     );
     groups[groupId] = group.copyWith(
-      lastMessagePreview: trimmed,
+      lastMessagePreview: said,
       lastActivityLabel: t('Teraz'),
     );
     state = state.copyWith(groups: groups);
@@ -2067,6 +2080,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       extra: <String, dynamic>{
         if (replyTo != null) 're': replyTo.toJson(),
         if (forwarded) 'fwd': true,
+        if (named.isNotEmpty) kMentionsKey: mentionsToJson(named),
       },
     );
   }

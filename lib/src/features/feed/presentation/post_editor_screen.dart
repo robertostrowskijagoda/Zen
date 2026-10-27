@@ -21,6 +21,8 @@ import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 
 /// A photo, video or recording ready to go into a post.
 @immutable
@@ -50,18 +52,21 @@ final class DraftMedia {
 }
 
 /// What the editor hands over for publishing: [text] with `{{media:N}}`
-/// lines where the N-th of [media] goes.
+/// lines where the N-th of [media] goes, and `<@N>` tokens where the N-th
+/// of [mentions] is mentioned.
 @immutable
 final class PostDraft {
   const PostDraft({
     required this.text,
     required this.audience,
     this.media = const <DraftMedia>[],
+    this.mentions = const <Mention>[],
   });
 
   final String text;
   final Audience audience;
   final List<DraftMedia> media;
+  final List<Mention> mentions;
 }
 
 /// Publishes a draft; returns an error message ('' = stay quietly), or null
@@ -311,8 +316,8 @@ String sizeLabel(int bytes) => bytes >= 1024 * 1024
 sealed class _Block {}
 
 final class _TextBlock extends _Block {
-  _TextBlock(String text)
-    : controller = RichTextController(text: text),
+  _TextBlock(String text, [List<MentionSpan> mentions = const <MentionSpan>[]])
+    : controller = (RichTextController(text: text)..mentionSpans = mentions),
       focus = FocusNode();
 
   final RichTextController controller;
@@ -334,11 +339,14 @@ final class _MediaBlock extends _Block {
 /// videos placed exactly where the cursor is. A preview shows the post as
 /// friends will see it. Also edits an existing post ([editing]): its text,
 /// photos and videos ([initialMedia], placed by the `{{media:N}}` lines of
-/// [initialText]); who sees it stays as it was.
+/// [initialText]); who sees it stays as it was. "@" offers
+/// [mentionCandidates] to mention.
 class PostEditorScreen extends StatefulWidget {
   const PostEditorScreen({
     required this.onSubmit,
     this.initialText = '',
+    this.initialMentions = const <Mention>[],
+    this.mentionCandidates,
     this.initialMedia = const <DraftMedia>[],
     this.initialAudience = Audience.public,
     this.editing = false,
@@ -352,6 +360,13 @@ class PostEditorScreen extends StatefulWidget {
 
   final PostSubmit onSubmit;
   final String initialText;
+
+  /// The people [initialText]'s tokens mention (an edited post).
+  final List<Mention> initialMentions;
+
+  /// Who the post may mention (`post_mentions.dart`); no suggestions when
+  /// `null`.
+  final List<MentionCandidate> Function()? mentionCandidates;
   final List<DraftMedia> initialMedia;
   final Audience initialAudience;
   final bool editing;
@@ -372,6 +387,8 @@ class PostEditorScreen extends StatefulWidget {
     BuildContext context, {
     required PostSubmit onSubmit,
     String initialText = '',
+    List<Mention> initialMentions = const <Mention>[],
+    List<MentionCandidate> Function()? mentionCandidates,
     List<DraftMedia> initialMedia = const <DraftMedia>[],
     Audience initialAudience = Audience.public,
     bool editing = false,
@@ -387,6 +404,8 @@ class PostEditorScreen extends StatefulWidget {
           builder: (BuildContext context) => PostEditorScreen(
             onSubmit: onSubmit,
             initialText: initialText,
+            initialMentions: initialMentions,
+            mentionCandidates: mentionCandidates,
             initialMedia: initialMedia,
             initialAudience: initialAudience,
             editing: editing,
@@ -419,12 +438,31 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final List<_Block> out = <_Block>[];
     final List<String> lines = <String>[];
     final Set<int> used = <int>{};
+    // Mentions are edited as "@name"; each block takes those of its lines.
+    final ({String text, List<MentionSpan> spans}) shown = decodeMentions(
+      widget.initialText,
+      widget.initialMentions,
+    );
+    int at = 0;
+    int blockStart = 0;
     void text() {
-      out.add(_TextBlock(lines.join('\n')));
+      final String joined = lines.join('\n');
+      out.add(
+        _TextBlock(joined, <MentionSpan>[
+          for (final MentionSpan s in shown.spans)
+            if (s.start >= blockStart && s.end <= blockStart + joined.length)
+              s.shifted(-blockStart),
+        ]),
+      );
       lines.clear();
     }
 
-    for (final String line in widget.initialText.split('\n')) {
+    for (final String line in shown.text.split('\n')) {
+      final int lineStart = at;
+      at += line.length + 1;
+      if (lines.isEmpty) {
+        blockStart = lineStart;
+      }
       final List<int> ref = referencedMedia(line);
       final int? i = ref.isEmpty ? null : ref.first;
       if (i != null &&
@@ -516,21 +554,43 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   int get _room => kMaxPostImages - _media.length - _processing;
 
   /// The post as text, media as `{{media:N}}` lines.
-  String get _source {
-    final List<String> parts = <String>[];
+  String get _source => _written.text;
+
+  /// The post as written ("@name" for mentions) and where its mentions are.
+  ({String text, List<MentionSpan> spans}) get _written {
+    final StringBuffer out = StringBuffer();
+    final List<MentionSpan> spans = <MentionSpan>[];
     int n = 0;
     for (final _Block b in _blocks) {
+      final String piece;
+      List<MentionSpan> own = const <MentionSpan>[];
       switch (b) {
         case _TextBlock(:final RichTextController controller):
-          final String t = controller.text.trimRight();
-          if (t.trim().isNotEmpty) {
-            parts.add(t);
+          piece = controller.text.trimRight();
+          if (piece.trim().isEmpty) {
+            continue;
           }
+          own = controller.mentionSpans;
         case _MediaBlock():
-          parts.add(mediaToken(n++));
+          piece = mediaToken(n++);
       }
+      if (out.isNotEmpty) {
+        out.write('\n');
+      }
+      final int start = out.length;
+      out.write(piece);
+      spans.addAll(<MentionSpan>[
+        for (final MentionSpan s in own)
+          if (s.end <= piece.length) s.shifted(start),
+      ]);
     }
-    return parts.join('\n');
+    return (text: out.toString(), spans: spans);
+  }
+
+  /// What is published: tokens in place of the mentions, and the list.
+  ({String text, List<Mention> mentions}) get _stored {
+    final ({String text, List<MentionSpan> spans}) w = _written;
+    return encodeMentions(w.text, w.spans, keep: widget.initialMentions);
   }
 
   bool get _mediaChanged {
@@ -570,11 +630,17 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final String after = text
         .substring(cut)
         .replaceFirst(RegExp(r'^\s*\n'), '');
+    // The mentions after the cut go along with their text.
+    final int afterStart = text.length - after.length;
+    final List<MentionSpan> moved = <MentionSpan>[
+      for (final MentionSpan s in _active.controller.mentionSpans)
+        if (s.start >= afterStart) s.shifted(-afterStart),
+    ];
     _active.controller.value = TextEditingValue(
       text: before,
       selection: TextSelection.collapsed(offset: before.length),
     );
-    final _TextBlock next = _TextBlock(after);
+    final _TextBlock next = _TextBlock(after, moved);
     _watch(next);
     setState(() {
       _blocks.insertAll(at + 1, <_Block>[_MediaBlock(media), next]);
@@ -598,11 +664,20 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           _blocks[at] is _TextBlock) {
         final _TextBlock a = _blocks[at - 1] as _TextBlock;
         final _TextBlock b = _blocks.removeAt(at) as _TextBlock;
+        final String head = a.controller.text.trimRight();
         final String joined = <String>[
-          a.controller.text.trimRight(),
+          head,
           b.controller.text,
         ].where((String s) => s.isNotEmpty).join('\n');
+        final int bStart = joined.length - b.controller.text.length;
+        final List<MentionSpan> spans = <MentionSpan>[
+          for (final MentionSpan s in a.controller.mentionSpans)
+            if (s.end <= head.length) s,
+          for (final MentionSpan s in b.controller.mentionSpans)
+            s.shifted(bStart),
+        ];
         a.controller.text = joined;
+        a.controller.mentionSpans = spans;
         if (identical(_active, b)) {
           _active = a;
         }
@@ -1056,11 +1131,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       _submitting = true;
       _error = null;
     });
+    final ({String text, List<Mention> mentions}) stored = _stored;
     final String? error = await widget.onSubmit(
       PostDraft(
-        text: _source,
+        text: stored.text,
         audience: _audience,
         media: List<DraftMedia>.unmodifiable(_media),
+        mentions: stored.mentions,
       ),
     );
     if (!mounted) {
@@ -1180,44 +1257,59 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       children: <Widget>[
         for (final _Block b in _blocks)
           switch (b) {
-            _TextBlock() => TextField(
-              key: identical(b, _blocks.first) ? const Key('post-text') : null,
-              controller: b.controller,
-              focusNode: b.focus,
-              enableIMEPersonalizedLearning: false,
-              // GIFs and stickers from the keyboard (Android) go in like
-              // pasted pictures; iPhone keyboards copy them to the
-              // clipboard ("Wklej obrazek" in the field's menu).
-              contentInsertionConfiguration: ContentInsertionConfiguration(
-                onContentInserted: (KeyboardInsertedContent content) {
-                  final Uint8List? data = content.data;
-                  if (data != null && data.isNotEmpty) {
-                    unawaited(
-                      _addTransferred(<TransferItem>[
-                        TransferItem(name: 'klawiatura', bytes: data),
-                      ]),
-                    );
-                  }
-                },
-              ),
-              contextMenuBuilder: picturePasteMenu(_addTransferred),
-              keyboardType: TextInputType.multiline,
-              textCapitalization: TextCapitalization.sentences,
-              minLines: onlyOne ? 6 : 1,
-              maxLines: null,
-              style: style,
-              decoration: InputDecoration(
-                hintText: widget.editing || !identical(b, _blocks.first)
-                    ? null
-                    : t('Co słychać? Podziel się czymś ze znajomymi…'),
-                hintStyle: style.copyWith(color: zen.textMuted),
-                filled: false,
-                isDense: true,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              ),
+            _TextBlock() => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                TextField(
+                  key: identical(b, _blocks.first)
+                      ? const Key('post-text')
+                      : null,
+                  controller: b.controller,
+                  focusNode: b.focus,
+                  enableIMEPersonalizedLearning: false,
+                  // GIFs and stickers from the keyboard (Android) go in like
+                  // pasted pictures; iPhone keyboards copy them to the
+                  // clipboard ("Wklej obrazek" in the field's menu).
+                  contentInsertionConfiguration: ContentInsertionConfiguration(
+                    onContentInserted: (KeyboardInsertedContent content) {
+                      final Uint8List? data = content.data;
+                      if (data != null && data.isNotEmpty) {
+                        unawaited(
+                          _addTransferred(<TransferItem>[
+                            TransferItem(name: 'klawiatura', bytes: data),
+                          ]),
+                        );
+                      }
+                    },
+                  ),
+                  contextMenuBuilder: picturePasteMenu(_addTransferred),
+                  keyboardType: TextInputType.multiline,
+                  textCapitalization: TextCapitalization.sentences,
+                  minLines: onlyOne ? 6 : 1,
+                  maxLines: null,
+                  style: style,
+                  decoration: InputDecoration(
+                    hintText: widget.editing || !identical(b, _blocks.first)
+                        ? null
+                        : t('Co słychać? Podziel się czymś ze znajomymi…'),
+                    hintStyle: style.copyWith(color: zen.textMuted),
+                    filled: false,
+                    isDense: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+                // "@" in the block being written offers whom to mention.
+                if (identical(b, _active) && widget.mentionCandidates != null)
+                  MentionSuggestions(
+                    controller: b.controller,
+                    candidates: widget.mentionCandidates!,
+                    padding: const EdgeInsets.only(bottom: 6),
+                  ),
+              ],
             ),
             _MediaBlock(:final DraftMedia media) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1522,7 +1614,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                         style: TextStyle(color: zen.textMuted),
                                       )
                                     : RichPostBody(
-                                        source: source,
+                                        source: _stored.text,
+                                        mentions: _stored.mentions,
                                         mediaCount: media.length,
                                         fontSize: 16,
                                         mediaBuilder: (BuildContext c, int i) =>

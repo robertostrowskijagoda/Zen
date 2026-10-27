@@ -17,11 +17,21 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 
 /// Sends a comment: [text] and [pictures]; returns an error to show, or
 /// null when it went (the field is cleared then).
 typedef CommentSend =
     Future<String?> Function(String text, List<CommentPicture> pictures);
+
+/// The same with mentions: [text] holds `<@N>` tokens of [mentions].
+typedef CommentMentionSend =
+    Future<String?> Function(
+      String text,
+      List<CommentPicture> pictures,
+      List<Mention> mentions,
+    );
 
 /// Where a picture for a comment comes from.
 enum CommentPictureSource { camera, gallery, file, gif, paste }
@@ -36,14 +46,22 @@ bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 /// stays animated (`commentPicture`).
 class CommentComposer extends ConsumerStatefulWidget {
   const CommentComposer({
-    required this.onSend,
+    this.onSend,
+    this.onSendMentioning,
+    this.mentionCandidates,
     this.fieldKey,
     this.sendKey,
     this.prefixIcon,
     super.key,
-  });
+  }) : assert(onSend != null || onSendMentioning != null);
 
-  final CommentSend onSend;
+  final CommentSend? onSend;
+
+  /// Sends with mentions (used instead of [onSend] when given).
+  final CommentMentionSend? onSendMentioning;
+
+  /// Who "@" offers to mention; no suggestions when `null`.
+  final List<MentionCandidate> Function()? mentionCandidates;
   final Key? fieldKey;
   final Key? sendKey;
   final Widget? prefixIcon;
@@ -53,7 +71,7 @@ class CommentComposer extends ConsumerStatefulWidget {
 }
 
 class _CommentComposerState extends ConsumerState<CommentComposer> {
-  final TextEditingController _field = TextEditingController();
+  final MentionTextController _field = MentionTextController();
   final List<CommentPicture> _pictures = <CommentPicture>[];
   String? _error;
 
@@ -294,10 +312,15 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
       return;
     }
     setState(() => _sending = true);
-    final String? error = await widget.onSend(
-      _field.text,
-      List<CommentPicture>.of(_pictures),
-    );
+    final CommentMentionSend? mentioning = widget.onSendMentioning;
+    final ({String text, List<Mention> mentions}) stored = _field.storedText();
+    final String? error = mentioning != null
+        ? await mentioning(
+            stored.text,
+            List<CommentPicture>.of(_pictures),
+            stored.mentions,
+          )
+        : await widget.onSend!(_field.text, List<CommentPicture>.of(_pictures));
     if (!mounted) {
       return;
     }
@@ -320,6 +343,12 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (widget.mentionCandidates != null)
+            MentionSuggestions(
+              controller: _field,
+              candidates: widget.mentionCandidates!,
+              padding: const EdgeInsets.only(bottom: 8),
+            ),
           if (_pictures.isNotEmpty || _preparing > 0)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),

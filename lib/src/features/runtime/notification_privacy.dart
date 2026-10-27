@@ -12,6 +12,7 @@ import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -62,11 +63,71 @@ NoticeText messageNoticeText({
   );
 }
 
+/// What the notification about a mention says at [level]: [sender]
+/// mentioned this person in the group chat [group] when that is not `null`
+/// ('' for a group without a name), else in a post or a comment;
+/// [preview] is what they wrote.
+///
+/// * [NotificationPrivacy.senderAndContent]: who and what ("Ada
+///   wspomniał(a) o Tobie" / "Hej @Bob!"; in a group "Ekipa" / "Ada
+///   wspomniał(a) o Tobie: Hej @Bob!").
+/// * [NotificationPrivacy.senderOnly]: who, never what.
+/// * [NotificationPrivacy.generic]: in a group what any message says ("Nowa
+///   wiadomość"), elsewhere only "Ktoś wspomniał o Tobie", and
+///   [genericBody].
+NoticeText mentionNoticeText({
+  required NotificationPrivacy level,
+  required String sender,
+  String? group,
+  String? preview,
+  String? genericBody,
+}) {
+  final String body = genericBody ?? t('Otwórz Zen, aby zobaczyć szczegóły.');
+  if (level == NotificationPrivacy.generic) {
+    return group == null
+        ? (title: t('Ktoś wspomniał o Tobie'), body: body)
+        : messageNoticeText(
+            level: level,
+            sender: sender,
+            genericBody: genericBody,
+          );
+  }
+  final String? text = level == NotificationPrivacy.senderAndContent
+      ? preview?.trim()
+      : null;
+  final bool hasText = text != null && text.isNotEmpty;
+  final String said = t('{name} wspomniał(a) o Tobie', {'name': sender});
+  if (group == null) {
+    return (title: said, body: hasText ? text : body);
+  }
+  return (
+    title: group.trim().isNotEmpty ? group.trim() : t('Wiadomość grupowa'),
+    body: hasText ? '$said: $text' : said,
+  );
+}
+
+/// The key of the mark a group message gets on this device when it
+/// mentions this person and may say so ([signalMentionsYou]). Set only
+/// here, after the checks (never read from what came over the wire).
+const String kMentionsYouKey = 'mentionsYou';
+
+/// Whether [signal] was found to mention this person (see
+/// [kMentionsYouKey]).
+bool signalMentionsYou(ZenSignal signal) =>
+    signal.chatExtras?[kMentionsYouKey] == true;
+
+/// The people a chat or group message [signal] mentions.
+List<Mention> signalMentions(ZenSignal signal) =>
+    mentionsFromJson(signal.chatExtras?[kMentionsKey]);
+
 /// What [signal] says in a notice or an inbox entry: for a message with an
 /// attachment only the label of its type (never the caption or file name),
-/// otherwise its text.
+/// otherwise its text (mentions as "@name").
 String? signalNoticePreview(ZenSignal signal) {
-  final String? content = signal.content;
+  final String? raw = signal.content;
+  final String? content = raw == null
+      ? null
+      : mentionsAsPlainText(raw, signalMentions(signal));
   final ChatMessageType? type = signal.messageType;
   if (content == null && (type == null || type == ChatMessageType.text)) {
     return null;

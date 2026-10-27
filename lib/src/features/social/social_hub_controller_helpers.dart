@@ -298,7 +298,10 @@ SocialHubState _applySignal(
         groups[groupId] = existing.copyWith(
           lastMessagePreview: _clipText(
             chatPreviewLine(
-              signal.content ?? t('Nowa wiadomość grupowa'),
+              mentionsAsPlainText(
+                signal.content ?? t('Nowa wiadomość grupowa'),
+                signalMentions(signal),
+              ),
               type: signal.messageType,
               fileName: signal.fileName,
               mimeType: signal.mimeType,
@@ -850,6 +853,26 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
+    // A mention of this person: its own entry, at the message.
+    ZenSignalType.groupMessage when signalMentionsYou(signal) =>
+      InboxEntry.fromEvents(
+        id: 'group-mention-$receivedAtMillis-${signal.sender}',
+        type: InboxEntryType.mention,
+        title: SocialEventText('inbox.mention', <String, String>{
+          'name': label,
+        }),
+        body: SocialEventText('inbox.groupMention.body', <String, String>{
+          'group': signal.groupName ?? '',
+        }),
+        bodyText: _signalPreviewText(signal),
+        createdAtMillis: receivedAtMillis,
+        routeKey: buildGroupRouteKey(
+          groupId: signal.groupId ?? 'grp-${signal.sender}',
+          title: signal.groupName,
+          messageId: signal.messageId,
+        ),
+        peerAddress: signal.sender,
+      ),
     ZenSignalType.groupMessage => InboxEntry.fromEvents(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
@@ -1076,6 +1099,18 @@ NoticeText? _chatNoticeText({
       signal.type != ZenSignalType.groupMessage) {
     return null;
   }
+  if (signalMentionsYou(signal)) {
+    return mentionNoticeText(
+      level: privacy,
+      sender: _resolvedPeerLabel(
+        address: signal.sender,
+        displayName: signal.displayName,
+        knownName: friends?[signal.sender]?.displayLabel,
+      ),
+      group: signal.groupName ?? '',
+      preview: _signalPreviewText(signal),
+    );
+  }
   return messageNoticeText(
     level: privacy,
     sender: _resolvedPeerLabel(
@@ -1270,6 +1305,9 @@ String? _notificationDedupKeyForSignal(ZenSignal signal) {
     ZenSignalType.groupLeave ||
     ZenSignalType.groupInviteAck => 'group:${signal.groupId ?? sender}',
     ZenSignalType.message => 'message:$sender',
+    // A mention stands apart from the group's other messages.
+    ZenSignalType.groupMessage when signalMentionsYou(signal) =>
+      'group-mention:${signal.groupId ?? sender}',
     ZenSignalType.groupMessage => 'group-message:${signal.groupId ?? sender}',
     ZenSignalType.callInvite ||
     ZenSignalType.callOffer ||

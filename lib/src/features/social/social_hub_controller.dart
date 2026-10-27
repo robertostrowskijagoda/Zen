@@ -60,6 +60,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -229,6 +230,13 @@ const int _maxStrangerAlertSendersPerWindow = 10;
 
 const int _maxTrackedStrangerIdentities = 4096;
 
+/// Window of the limit on mention notifications from one person.
+const Duration _mentionAlertWindow = Duration(minutes: 10);
+
+/// Group messages of one sender per window that may say they mention this
+/// person; past it they notify like any other message.
+const int kMaxMentionAlertsPerSender = 5;
+
 /// Delays of the extra call-teardown attempts, relative to the first one.
 const List<Duration> _callTeardownRetryDelays = <Duration>[
   Duration(milliseconds: 400),
@@ -380,6 +388,49 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     _strangerAlertSenders[key] = nowMillis;
     return true;
+  }
+
+  /// When each sender's recent mentions of this person were announced.
+  final Map<String, List<int>> _mentionAlertTimes = <String, List<int>>{};
+
+  /// [signal] marked as mentioning this person ([kMentionsYouKey]) when it
+  /// is a group message whose text names this device, from a member of a
+  /// group this device is in, and its sender is still within
+  /// [kMaxMentionAlertsPerSender]. Anything else comes back unchanged.
+  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) {
+    if (signal.type != ZenSignalType.groupMessage) {
+      return signal;
+    }
+    final GroupProfile? group = state.groups[signal.groupId ?? ''];
+    final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    if (group == null ||
+        group.isInvitePending ||
+        self.isEmpty ||
+        PeerShareCodec.addressesEqual(signal.sender, self) ||
+        !(groupHasMember(group, signal.sender) ||
+            PeerShareCodec.addressesEqual(group.createdById, signal.sender)) ||
+        !mentionsAnyOf(
+          signal.content ?? '',
+          signalMentions(signal),
+          addresses: <String>[self],
+        )) {
+      return signal;
+    }
+    final int windowStart = nowMillis - _mentionAlertWindow.inMilliseconds;
+    final String key = PeerShareCodec.identityKeyForAddress(signal.sender);
+    final List<int> times = _mentionAlertTimes[key] ??= <int>[];
+    times.removeWhere((int at) => at < windowStart);
+    if (times.length >= kMaxMentionAlertsPerSender) {
+      return signal;
+    }
+    times.add(nowMillis);
+    while (_mentionAlertTimes.length > _maxTrackedStrangerIdentities) {
+      _mentionAlertTimes.remove(_mentionAlertTimes.keys.first);
+    }
+    return signal.withChatExtras(<String, dynamic>{
+      ...?signal.chatExtras,
+      kMentionsYouKey: true,
+    });
   }
 
   /// When each (group, peer) invite was last re-sent from here.
@@ -1242,6 +1293,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String text,
     ChatReply? replyTo,
     bool forwarded = false,
+    List<Mention> mentions = const <Mention>[],
   });
 
   /// Reactions, edits, deletions, files in groups

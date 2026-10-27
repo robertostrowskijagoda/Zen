@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 
 /// A text field controller that shows Discord-style formatting live: bold
-/// looks bold, markers stay visible but faint, headings are bigger.
-class RichTextController extends TextEditingController {
+/// looks bold, markers stay visible but faint, headings are bigger. It
+/// keeps track of the mentions in the text ([MentionEditing]), shown in the
+/// accent colour.
+class RichTextController extends TextEditingController with MentionEditing {
   RichTextController({super.text});
 
   static final RegExp _heading = RegExp(r'^(#{1,3} )');
@@ -85,7 +88,15 @@ class RichTextController extends TextEditingController {
         out.add(TextSpan(text: '\n', style: base));
       }
     }
-    return TextSpan(style: base, children: out);
+    final TextSpan built = TextSpan(style: base, children: out);
+    if (mentionSpans.isEmpty) {
+      return built;
+    }
+    return withMentionLook(
+      built,
+      (TextStyle s) =>
+          s.copyWith(color: zen.accent, fontWeight: FontWeight.w700),
+    );
   }
 
   /// Wraps the selection in [marker] (or removes it if already wrapped);

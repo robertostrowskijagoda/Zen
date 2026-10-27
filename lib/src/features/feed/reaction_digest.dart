@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 // Collective notifications about reactions to your posts: not one
 // per like, but "Bob i 3 inne osoby polubiły Twój post „…”". What was
@@ -160,7 +161,10 @@ final class ReactionsSeen {
       if (newLikes.isEmpty && newComments.isEmpty) {
         continue;
       }
-      final String text = p.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      final String text = mentionsAsPlainText(
+        p.text,
+        p.mentions,
+      ).replaceAll(RegExp(r'\s+'), ' ').trim();
       out.add(
         ReactionNotice(
           postId: p.id,

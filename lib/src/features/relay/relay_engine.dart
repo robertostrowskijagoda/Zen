@@ -304,6 +304,9 @@ const Set<String> kReliablePayloadTypes = <String>{
   // Posts, comments and likes for friends who are offline
   // (ledger_mail_push.dart).
   'lg_push',
+  // A mention in a post or a comment, to the person mentioned
+  // (post_mentions.dart).
+  'lg_mention',
   'profile_update',
   'disappear_timer',
   // Meeting features: a friend offline now still gets them.

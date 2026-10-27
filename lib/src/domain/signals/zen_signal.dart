@@ -153,9 +153,17 @@ final class ZenSignal {
     if (sender == this.sender) {
       return this;
     }
+    return _copy(sender: sender);
+  }
+
+  /// This signal carrying [chatExtras] instead.
+  ZenSignal withChatExtras(Map<String, dynamic>? chatExtras) =>
+      _copy(chatExtras: chatExtras);
+
+  ZenSignal _copy({String? sender, Object? chatExtras = _unset}) {
     return ZenSignal(
       type: type,
-      sender: sender,
+      sender: sender ?? this.sender,
       callId: callId,
       messageId: messageId,
       routeKey: routeKey,
@@ -185,7 +193,11 @@ final class ZenSignal {
       cameraOn: cameraOn,
       disappearSeconds: disappearSeconds,
       miniProfile: miniProfile,
-      chatExtras: chatExtras,
+      chatExtras: identical(chatExtras, _unset)
+          ? this.chatExtras
+          : chatExtras as Map<String, dynamic>?,
     );
   }
 }
+
+const Object _unset = Object();
