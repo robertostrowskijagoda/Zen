@@ -206,6 +206,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 		relay.mu.Lock()
 		pendingPackets := relay.pendingPackets
 		relay.pendingPackets = nil
+		relay.pendingBytes = 0
 		var targets []*net.UDPAddr
 		for _, target := range relay.localTargets {
 			targets = append(targets, cloneUDPAddr(target))
@@ -231,7 +232,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 			debugf("[ZEN-GO] relay %s: packet not sealed: %v\n", relay.callID, err)
 			continue
 		}
-		if _, err := node.iprwc.Write(packet); err != nil {
+		if err := node.writeMesh(packet, true); err != nil {
 			fmt.Printf("[ZEN-GO] relay %s: send to ygg failed: %v\n", relay.callID, err)
 		}
 		if outboundPacketOrdinal <= 2 {
@@ -245,7 +246,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 					75 * time.Millisecond,
 				} {
 					time.Sleep(delay)
-					if _, err := node.iprwc.Write(packet); err != nil {
+					if err := node.writeMesh(packet, true); err != nil {
 						debugf("[ZEN-GO] relay %s: warm resend failed: %v\n", callID, err)
 					}
 				}
@@ -261,8 +262,7 @@ func sendRelay(node *bridgeNode, remoteIP net.IP, callID string, payload []byte)
 	if err != nil {
 		return err
 	}
-	_, err = node.iprwc.Write(packet)
-	return err
+	return node.writeMesh(packet, true)
 }
 
 // buildRelayPacket is the mesh packet that carries payload to the call's
@@ -351,8 +351,9 @@ func (node *bridgeNode) handleRelayPacket(source net.IP, payload []byte) {
 	}
 	if len(targets) == 0 {
 		queued := len(relay.pendingPackets)
-		if queued < maxRelayBacklog {
-			relay.pendingPackets = append(relay.pendingPackets, append([]byte(nil), framePayload...))
+		if queued < maxRelayBacklog && relay.pendingBytes+len(framePayload) <= maxRelayBacklogBytes {
+			relay.pendingPackets = append(relay.pendingPackets, framePayload)
+			relay.pendingBytes += len(framePayload)
 		}
 		relay.mu.Unlock()
 		debugf("[ZEN-GO] relay %s: ygg→local %d bytes QUEUED (no targets yet, queue=%d)\n", callID, len(framePayload), queued+1)

@@ -118,7 +118,7 @@ func (node *bridgeNode) writeSignalWire(destination net.IP, wire []byte) error {
 		if err != nil {
 			return err
 		}
-		if _, err := node.iprwc.Write(packet); err != nil {
+		if err := node.writeMesh(packet, false); err != nil {
 			fmt.Printf("[ZEN-GO] sendSignal write error: %v\n", err)
 			return err
 		}

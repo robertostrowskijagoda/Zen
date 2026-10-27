@@ -22,8 +22,10 @@ const (
 	// signals; when the total is over, whoever holds the most bytes loses
 	// its oldest, and when every slot is taken, whoever holds the most
 	// signals does. One source always has room for a signal of the largest
-	// size (2 MiB) with a few small ones next to it.
+	// size (2 MiB) with a few small ones next to it. A phone keeps half
+	// the total, under its Go memory limit (memory_tuning.go).
 	maxSignalInboxBytes          = 32 * 1024 * 1024
+	maxPhoneSignalInboxBytes     = 16 * 1024 * 1024
 	maxSignalInboxBytesPerSource = maxSignalPayloadBytes + 64*1024
 	// Signal datagrams one /64 may send: a token bucket refilled at this
 	// rate and holding up to the burst. The burst covers the ~2150 fragments
@@ -37,6 +39,17 @@ const (
 	// then the least busy ones.
 	maxSignalRateSources = 4096
 )
+
+// signalInboxBytes is the total inbox budget on this device.
+var signalInboxBytes = phoneOr(maxPhoneSignalInboxBytes, maxSignalInboxBytes)
+
+// phoneOr is phone on a phone and other elsewhere.
+func phoneOr(phone, other int) int {
+	if isPhoneOS() {
+		return phone
+	}
+	return other
+}
 
 // signalSourceNet is the /64 a signal came from: the unit the inbox budget
 // and the rate limit are kept per.
@@ -75,7 +88,7 @@ type signalQueue struct {
 }
 
 // push queues message from network, first dropping older signals as
-// described at maxSignalInboxBytes. It returns how many were dropped, and
+// described at maxSignalInboxBytes (signalInboxBytes on this device). It returns how many were dropped, and
 // queued=false when message alone exceeds a source's share (never for a
 // signal within maxSignalPayloadBytes).
 func (q *signalQueue) push(message signalMessage, network signalSourceNet) (dropped int, queued bool) {
@@ -94,7 +107,7 @@ func (q *signalQueue) push(message signalMessage, network signalSourceNet) (drop
 		}
 		dropped++
 	}
-	for q.bytes+cost > maxSignalInboxBytes && q.entries.Len() > 0 {
+	for q.bytes+cost > signalInboxBytes && q.entries.Len() > 0 {
 		if !q.dropOldestLocked(q.heaviestLocked(false)) {
 			break
 		}

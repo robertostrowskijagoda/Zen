@@ -292,3 +292,47 @@ func TestOnlyNodeAddressesAreSignalSources(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialLimitsOfADoorAreTighter(t *testing.T) {
+	door := &bridgeNode{
+		signalPartials: make(map[string]*signalReassembly),
+		partialLimits:  signalPartialLimits{total: maxDoorPartialBytes, perSignal: maxDoorEncodedBytes},
+	}
+	half := strings.Repeat("A", maxDoorEncodedBytes/2+4)
+	door.reassembleSignal("200:4444::4", partialEnvelope(t, "big", 0, 3, half))
+	door.reassembleSignal("200:4444::4", partialEnvelope(t, "big", 1, 3, half))
+	if len(door.signalPartials) != 0 || door.signalPartialBytes != 0 {
+		t.Fatal("a door keeps no signal larger than its largest frame")
+	}
+	main := newTestBridgeNode()
+	main.reassembleSignal("200:4444::4", partialEnvelope(t, "big", 0, 3, half))
+	main.reassembleSignal("200:4444::4", partialEnvelope(t, "big", 1, 3, half))
+	if len(main.signalPartials) != 1 {
+		t.Fatal("the main node keeps it")
+	}
+
+	chunk := strings.Repeat("B", maxDoorEncodedBytes/2)
+	for index := range 2 * maxDoorPartialBytes / len(chunk) {
+		source := fmt.Sprintf("200:%x::1", index+1)
+		door.reassembleSignal(source, partialEnvelope(t, "p", 0, 2, chunk))
+	}
+	if door.signalPartialBytes > maxDoorPartialBytes {
+		t.Fatalf("a door buffers %d bytes, over %d", door.signalPartialBytes, maxDoorPartialBytes)
+	}
+}
+
+func TestPhonesBufferLessForOthers(t *testing.T) {
+	if isPhoneOS() {
+		if signalPartialBudget != maxPhoneSignalPartialBytesTotal || signalInboxBytes != maxPhoneSignalInboxBytes {
+			t.Fatal("a phone takes the phone budgets")
+		}
+	} else if signalPartialBudget != maxSignalPartialBytesTotal || signalInboxBytes != maxSignalInboxBytes {
+		t.Fatal("a computer takes the full budgets")
+	}
+	if maxSignalInboxBytesPerSource >= maxPhoneSignalInboxBytes || maxSignalEncodedBytes >= maxPhoneSignalPartialBytesTotal {
+		t.Fatal("a phone still has room for a signal of the largest size")
+	}
+	if maxDoorEncodedBytes >= maxDoorPartialBytes || maxDoorEncodedBytes >= maxSignalEncodedBytes {
+		t.Fatal("a door has room for its largest frame, and less than the main node")
+	}
+}

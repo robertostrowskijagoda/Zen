@@ -25,14 +25,41 @@ const (
 	// so one sender cannot crowd out everyone else's signals.
 	maxSignalPartials          = 1024
 	maxSignalPartialsPerSource = 32
-	// Bytes buffered for all half-received signals together.
-	maxSignalPartialBytesTotal = 64 * 1024 * 1024
-	maxSignalIDLength          = 128
+	// Bytes buffered for all half-received signals together; a phone keeps
+	// a quarter of it, under its Go memory limit (memory_tuning.go).
+	maxSignalPartialBytesTotal      = 64 * 1024 * 1024
+	maxPhoneSignalPartialBytesTotal = 16 * 1024 * 1024
+	maxSignalIDLength               = 128
 	// Yggdrasil node addresses start with 0x02. A node may also send from
 	// any address in its own /64 subnet (0x03 prefix), which would give it
 	// 2^64 identities; Zen only ever sends from node addresses.
 	yggNodeAddressPrefix = 0x02
 )
+
+// signalPartialLimits bound a node's half-received signals: bytes for all
+// of them together and for one signal's base64 text. The zero value means
+// the main node's (signalPartialBudget on this device, maxSignalEncodedBytes).
+type signalPartialLimits struct {
+	total     int
+	perSignal int
+}
+
+// signalPartialBudget is the main node's budget on this device.
+var signalPartialBudget = phoneOr(maxPhoneSignalPartialBytesTotal, maxSignalPartialBytesTotal)
+
+func (limits signalPartialLimits) totalBytes() int {
+	if limits.total > 0 {
+		return limits.total
+	}
+	return signalPartialBudget
+}
+
+func (limits signalPartialLimits) signalBytes() int {
+	if limits.perSignal > 0 {
+		return limits.perSignal
+	}
+	return maxSignalEncodedBytes
+}
 
 type signalReassembly struct {
 	source    string
@@ -126,12 +153,12 @@ func (node *bridgeNode) addSignalFragment(source string, envelope signalEnvelope
 	node.signalPartialBytes += len(envelope.Payload)
 	partial.updatedAt = now
 
-	if partial.bytes > maxSignalEncodedBytes {
+	if partial.bytes > node.partialLimits.signalBytes() {
 		fmt.Printf("[ZEN-GO] dropping oversized signal (%d bytes so far) from %s\n", partial.bytes, source)
 		node.dropSignalPartial(key)
 		return "", false
 	}
-	for node.signalPartialBytes > maxSignalPartialBytesTotal && len(node.signalPartials) > 0 {
+	for node.signalPartialBytes > node.partialLimits.totalBytes() && len(node.signalPartials) > 0 {
 		node.dropOldestSignalPartial(node.busiestSignalSource(true))
 	}
 	if node.signalPartials[key] != partial || partial.received != partial.total {

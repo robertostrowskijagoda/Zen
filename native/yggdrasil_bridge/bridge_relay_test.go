@@ -139,3 +139,31 @@ func TestIsOwnHostAddress(t *testing.T) {
 		t.Fatal("a documentation address is not assigned to this device")
 	}
 }
+
+func TestRelayBacklogIsBoundedInBytes(t *testing.T) {
+	remote := net.ParseIP("200:1111::1")
+	node := &bridgeNode{relays: make(map[string]*relayState), pqPlain: true}
+	relay := &relayState{callID: "call-backlog", remoteIP: remote, localTargets: make(map[string]*net.UDPAddr)}
+	node.relays[relay.callID] = relay
+	datagram := make([]byte, 60*1024)
+	for range 20 {
+		frame, err := buildRelayFrame(relay.callID, datagram)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.handleRelayPacket(remote, frame)
+	}
+	if relay.pendingBytes > maxRelayBacklogBytes {
+		t.Fatalf("the relay holds %d bytes, over %d", relay.pendingBytes, maxRelayBacklogBytes)
+	}
+	if want := maxRelayBacklogBytes / len(datagram); len(relay.pendingPackets) != want {
+		t.Fatalf("held %d datagrams, want %d", len(relay.pendingPackets), want)
+	}
+	held := 0
+	for _, packet := range relay.pendingPackets {
+		held += len(packet)
+	}
+	if held != relay.pendingBytes {
+		t.Fatalf("pendingBytes %d, held %d", relay.pendingBytes, held)
+	}
+}
