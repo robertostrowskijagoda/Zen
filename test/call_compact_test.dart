@@ -9,6 +9,10 @@ import 'package:zen/src/features/calls/noop_call_media_session.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
+// The call's length is read from this fixed moment, not the wall clock, so a
+// slow machine cannot tick it over to the next second mid-test.
+final DateTime _now = DateTime(2026, 1, 1, 12);
+
 CallSession _call(CallSessionStatus status, {bool incoming = false}) =>
     CallSession(
       id: 'c1',
@@ -16,7 +20,7 @@ CallSession _call(CallSessionStatus status, {bool incoming = false}) =>
       displayName: 'Ania',
       kind: CallInviteKind.audio,
       status: status,
-      startedAtMillis: DateTime.now().millisecondsSinceEpoch - 65 * 1000,
+      startedAtMillis: _now.millisecondsSinceEpoch - 65 * 1000,
       isIncoming: incoming,
     );
 
@@ -77,6 +81,7 @@ void main() {
           home: CallCompactView(
             session: session ?? _call(CallSessionStatus.active),
             interactive: interactive,
+            now: () => _now,
           ),
         ),
       ),
