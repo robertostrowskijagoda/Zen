@@ -265,11 +265,14 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         return Scaffold(
           key: const Key('alarm-screen'),
           appBar: ZenSectionBar(title: t('Alarm')),
-          body: !service.hasAlarmPin
-              ? _PinSetup(service: service)
-              : own != null
-              ? _activeView(context, service, own)
-              : _armView(context, service),
+          body: SafeArea(
+            top: false,
+            child: !service.hasAlarmPin
+                ? _PinSetup(service: service)
+                : own != null
+                ? _activeView(context, service, own)
+                : _armView(context, service),
+          ),
         );
       },
     );
