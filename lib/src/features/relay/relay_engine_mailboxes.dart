@@ -324,6 +324,14 @@ extension _RelayEngineMailboxes on RelayEngine {
         ),
         heardAtMillis: state.reach[device]?.heardAtMillis ?? 0,
         quietSinceMillis: judge.quietSince(device),
+        deviceClasses: <RelayDeviceClass>[
+          for (final RelayDeviceClass kind in RelayDeviceClass.values)
+            if (kind != RelayDeviceClass.unknown &&
+                friend.allAddresses.any(
+                  (String a) => state.peers[a]?.deviceClass == kind,
+                ))
+              kind,
+        ],
       );
     }
     final List<RelayQuietMailbox> quiet = <RelayQuietMailbox>[];

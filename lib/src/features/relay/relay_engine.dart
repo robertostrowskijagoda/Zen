@@ -359,6 +359,7 @@ final class RelayMailboxCandidate {
     this.answeredShare,
     this.heardAtMillis = 0,
     this.quietSinceMillis = 0,
+    this.deviceClasses = const <RelayDeviceClass>[],
   });
 
   /// The friend, as the app knows them.
@@ -381,6 +382,10 @@ final class RelayMailboxCandidate {
 
   /// Since when it has gone quiet (0: it answers, or was not asked).
   final int quietSinceMillis;
+
+  /// The kinds of all of the friend's devices that announced one (each
+  /// kind once), for showing what the friend uses.
+  final List<RelayDeviceClass> deviceClasses;
 }
 
 /// One of this device's mailboxes that stopped answering (see

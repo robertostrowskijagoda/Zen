@@ -22,6 +22,7 @@ import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
+import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -244,6 +245,11 @@ class _MiniProfileSheetState extends ConsumerState<MiniProfileSheet> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            ],
+            // What the friend uses, as their devices announced it.
+            if (isFriend) ...<Widget>[
+              const SizedBox(height: 6),
+              Center(child: FriendDeviceKinds(address: address)),
             ],
             if (badges.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
