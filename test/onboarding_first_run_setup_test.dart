@@ -87,12 +87,122 @@ void main() {
     expect(GateDefault.of(fresh), isNull, reason: 'terms of one\'s own');
   });
 
-  test('the setup is remembered in the settings', () {
-    expect(const AppSettings().firstRunSetupDone, isFalse);
+  test('the setup is remembered in the settings, by revision', () {
+    expect(const AppSettings().setupRevision, 0);
+    expect(const AppSettings().setupPending, isTrue);
     final AppSettings done = const AppSettings().copyWith(
-      firstRunSetupDone: true,
+      setupRevision: kSetupRevision,
     );
-    expect(AppSettings.fromJson(done.toJson()).firstRunSetupDone, isTrue);
+    expect(AppSettings.fromJson(done.toJson()).setupRevision, kSetupRevision);
+    expect(done.setupPending, isFalse);
+    // A release that bumps the revision asks again.
+    expect(
+      const AppSettings()
+          .copyWith(setupRevision: kSetupRevision - 1)
+          .setupPending,
+      isTrue,
+    );
+  });
+
+  testWidgets('every step can be skipped, and Back (the button and the '
+      "system's) goes to the previous step", (WidgetTester tester) async {
+    _tallScreen(tester);
+    const AppSettings none = AppSettings();
+    await tester.pumpWidget(
+      _gatedApp(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(none),
+          ),
+          appSettingsInitialStateProvider.overrideWithValue(none),
+          appSettingsHydrationEnabledProvider.overrideWithValue(false),
+          firstRunSetupRequiredProvider.overrideWithValue(true),
+          permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+          gateDefaultsProvider.overrideWithValue(_Gates()),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-progress')), findsOneWidget);
+    expect(find.byKey(const Key('first-run-back')), findsNothing);
+    expect(find.text('Pomiń konfigurację'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('first-run-step-notifications')),
+      findsOneWidget,
+    );
+    // Skipping is on every step, not only the first.
+    expect(find.byKey(const Key('first-run-skip')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('first-run-back')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-step-lock')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('first-run-step-notifications')),
+      findsOneWidget,
+    );
+    // The system's Back: one step back, the setup stays.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-step-lock')), findsOneWidget);
+    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+
+    // Skipping from a later step ends the setup too.
+    await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('first-run-skip')));
+    await tester.pumpAndSettle();
+    expect(find.text('aplikacja'), findsOneWidget);
+  });
+
+  testWidgets('an older revision shows the setup again, filled in, with the '
+      'note about the update; the first start has no note', (
+    WidgetTester tester,
+  ) async {
+    _tallScreen(tester);
+    List overrides(MemoryAppSettingsStore store, AppSettings initial) => [
+      appSettingsStoreProvider.overrideWithValue(store),
+      appSettingsInitialStateProvider.overrideWithValue(initial),
+      appSettingsHydrationEnabledProvider.overrideWithValue(false),
+      firstRunSetupRequiredProvider.overrideWithValue(true),
+      permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+      gateDefaultsProvider.overrideWithValue(_Gates()),
+    ];
+    // A first start: the welcome, no note.
+    const AppSettings none = AppSettings();
+    await tester.pumpWidget(
+      _gatedApp(overrides: overrides(MemoryAppSettingsStore(none), none)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-welcome')), findsOneWidget);
+    expect(find.byKey(const Key('first-run-update-note')), findsNothing);
+
+    // An account from before the revisions, with its answers: the setup
+    // comes back with the note, those answers kept.
+    await tester.pumpWidget(const SizedBox.shrink());
+    const AppSettings existing = AppSettings(
+      permissionsSetupDone: true,
+      lockMode: AppLockMode.appClose,
+    );
+    final MemoryAppSettingsStore older = MemoryAppSettingsStore(existing);
+    await tester.pumpWidget(_gatedApp(overrides: overrides(older, existing)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+    expect(find.byKey(const Key('first-run-welcome')), findsNothing);
+    expect(find.byKey(const Key('first-run-update-note')), findsOneWidget);
+
+    // Done once: the current revision is stored and the app opens.
+    await tester.tap(find.byKey(const Key('first-run-skip')));
+    await tester.pumpAndSettle();
+    expect(find.text('aplikacja'), findsOneWidget);
+    final AppSettings saved = (await older.load())!;
+    expect(saved.setupRevision, kSetupRevision);
+    expect(saved.lockMode, AppLockMode.appClose);
   });
 
   testWidgets('first start: shown once after the password, every answer '
@@ -170,7 +280,7 @@ void main() {
     expect(find.text('aplikacja'), findsOneWidget);
     expect(find.byKey(const Key('first-run-setup')), findsNothing);
     final AppSettings saved = (await store.load())!;
-    expect(saved.firstRunSetupDone, isTrue);
+    expect(saved.setupRevision, kSetupRevision);
     expect(saved.lockMode, AppLockMode.never);
     expect(saved.notificationPrivacy, NotificationPrivacy.senderOnly);
     expect(saved.animations, AppAnimations.off);
@@ -267,7 +377,7 @@ void main() {
     expect(find.text('aplikacja'), findsOneWidget);
     final AppSettings saved = (await store.load())!;
     expect(saved.lockMode, AppLockMode.never);
-    expect(saved.firstRunSetupDone, isTrue);
+    expect(saved.setupRevision, kSetupRevision);
 
     // A start from scratch: no password asked.
     await tester.pumpWidget(const SizedBox.shrink());
@@ -302,7 +412,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('aplikacja'), findsOneWidget);
     final AppSettings saved = (await store.load())!;
-    expect(saved.firstRunSetupDone, isTrue);
+    expect(saved.setupRevision, kSetupRevision);
     expect(saved.notificationPrivacy, NotificationPrivacy.senderAndContent);
     expect(saved.animations, AppAnimations.always);
     expect(saved.lockMode, AppSettings.defaultLockMode);
