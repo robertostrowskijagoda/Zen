@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gologme/log"
@@ -66,9 +67,13 @@ type localLink struct {
 	since  time.Time
 	// The node's peering for it (no query), as GetPeers lists it.
 	peerURI string
-	conn    io.Closer
-	once    sync.Once
-	closed  chan struct{}
+	// The other device's Yggdrasil key, and when the two last exchanged a
+	// frame over the link (local_link_traffic.go).
+	key    ed25519.PublicKey
+	talked atomic.Int64
+	conn   io.Closer
+	once   sync.Once
+	closed chan struct{}
 }
 
 func (link *localLink) close() {
@@ -102,9 +107,14 @@ type localLinkManager struct {
 	lanError  string
 	stopped   bool
 	// A phone holding back strangers' traffic (transit_guard.go) links
-	// with no device but holdKeep ("" none) until it is released.
+	// with no device but holdKeep ("" none) and the ones it talks with
+	// until it is released.
 	held     bool
 	holdKeep string
+	holdTalk map[string]bool
+	// Where the links count the traffic they carry for the devices at
+	// their other ends (the node's ownTraffic; nil: not counted).
+	forwarded *atomic.Uint64
 }
 
 func newLocalLinkManager(c localLinkCore, logger *log.Logger) *localLinkManager {
@@ -252,14 +262,23 @@ func (m *localLinkManager) stop() {
 }
 
 // hold closes every link but the one to keep (a mesh address, "" none) and
-// takes no new ones until release: a phone that passed strangers' traffic
-// keeps a single peering for a while (transit_guard.go).
+// the ones to devices this node talks with now, and takes no new ones
+// until release: a phone that passed strangers' traffic keeps a single
+// peering for a while (transit_guard.go). A friend it talks with keeps
+// its link: the conversation may have no other way, and the friend's own
+// traffic is no transit.
 func (m *localLinkManager) hold(keep string) {
+	now := time.Now()
 	m.mu.Lock()
 	m.held = true
 	m.holdKeep = keep
+	m.holdTalk = map[string]bool{}
 	var gone []*localLink
 	for id, link := range m.links {
+		if talkingSince(link.talked.Load(), now) {
+			m.holdTalk[link.address] = true
+			continue
+		}
 		if link.address != keep {
 			gone = append(gone, link)
 			delete(m.links, id)
@@ -297,6 +316,7 @@ func (m *localLinkManager) release() {
 	m.mu.Lock()
 	m.held = false
 	m.holdKeep = ""
+	m.holdTalk = nil
 	m.mu.Unlock()
 }
 
@@ -304,7 +324,7 @@ func (m *localLinkManager) release() {
 func (m *localLinkManager) mayLink(address string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return !m.held || address == m.holdKeep
+	return !m.held || address == m.holdKeep || m.holdTalk[address]
 }
 
 // hasLink tells whether a link to address is up.
@@ -351,6 +371,7 @@ func (m *localLinkManager) attach(session *localLinkSession, transport, remote s
 		own:       session.peer.own,
 		since:     time.Now(),
 		peerURI:   fmt.Sprintf("tcp://127.0.0.1:%d", port),
+		key:       session.remoteKey,
 		conn:      session.conn,
 		closed:    make(chan struct{}),
 	}
@@ -358,7 +379,7 @@ func (m *localLinkManager) attach(session *localLinkSession, transport, remote s
 	switch {
 	case m.stopped:
 		err = errors.New("local links stopped")
-	case m.held && link.address != m.holdKeep:
+	case m.held && link.address != m.holdKeep && !m.holdTalk[link.address]:
 		err = errors.New("local links: on hold")
 	case len(m.links) >= localLinkMaxLinks:
 		err = errors.New("local links: too many links")
@@ -418,13 +439,21 @@ func (m *localLinkManager) serveLink(link *localLink, listener net.Listener, str
 		_ = listener.Close()
 		return
 	}
+	// What the link carries for the device at its other end, and whether
+	// the two talk (local_link_traffic.go).
+	self := m.core.PublicKey()
+	m.mu.Lock()
+	forwarded := m.forwarded
+	m.mu.Unlock()
+	fromOther := newLinkFrameScanner(self, link.key, false, forwarded, &link.talked)
+	toOther := newLinkFrameScanner(self, link.key, true, forwarded, &link.talked)
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(node, stream)
+		_, _ = io.Copy(node, io.TeeReader(stream, fromOther))
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(stream, node)
+		_, _ = io.Copy(stream, io.TeeReader(node, toOther))
 		done <- struct{}{}
 	}()
 	select {

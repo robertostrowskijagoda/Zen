@@ -47,6 +47,9 @@ type ownTraffic struct {
 	otherRx   atomic.Uint64
 	packetsRx atomic.Uint64
 	packetsTx atomic.Uint64
+	// Traffic of the devices at the other end of local links (a friend's
+	// own packets) that the node passed on (local_link_traffic.go).
+	friendForwarded atomic.Uint64
 }
 
 // received counts a packet of size bytes the node read, sent to port.
@@ -98,6 +101,8 @@ type trafficTotals struct {
 	peerRx, peerTx             uint64
 	ownRx, ownTx               uint64
 	ownPacketsRx, ownPacketsTx uint64
+	// A friend's own traffic over a local link, passed on.
+	friend uint64
 }
 
 // peerTrafficMeter adds up what the node's peerings carried, also of
@@ -169,6 +174,7 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 		ownTx:        ownTx,
 		ownPacketsRx: ownPacketsRx,
 		ownPacketsTx: ownPacketsTx,
+		friend:       own.friendForwarded.Load(),
 	}
 	if meter.windowStart.IsZero() {
 		meter.windowStart = now
@@ -190,14 +196,17 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 }
 
 // estimateTransit is the traffic that went both in and out over the
-// peerings between before and after, beyond the node's own packets and the
-// upkeep of links peerings over elapsed.
+// peerings between before and after, beyond the node's own packets, the
+// upkeep of links peerings over elapsed and what friends nearby sent or
+// got through the node themselves (each such packet came in on one
+// peering and went out on another, so it is taken from both).
 func estimateTransit(before, after trafficTotals, links int, elapsed time.Duration) uint64 {
 	upkeep := uint64(links) * trafficLinkUpkeep * uint64(elapsed/time.Second)
+	friend := after.friend - before.friend
 	in := remainder(after.peerRx-before.peerRx,
-		after.ownRx-before.ownRx+(after.ownPacketsRx-before.ownPacketsRx)*trafficPacketOverhead+upkeep)
+		after.ownRx-before.ownRx+(after.ownPacketsRx-before.ownPacketsRx)*trafficPacketOverhead+upkeep+friend)
 	out := remainder(after.peerTx-before.peerTx,
-		after.ownTx-before.ownTx+(after.ownPacketsTx-before.ownPacketsTx)*trafficPacketOverhead+upkeep)
+		after.ownTx-before.ownTx+(after.ownPacketsTx-before.ownPacketsTx)*trafficPacketOverhead+upkeep+friend)
 	return min(in, out)
 }
 
@@ -270,6 +279,7 @@ func (node *bridgeNode) trafficState() map[string]any {
 	state["ownRelayRxBytes"] = own.relayRx.Load()
 	state["ownRelayTxBytes"] = own.relayTx.Load()
 	state["ownOtherRxBytes"] = own.otherRx.Load()
+	state["friendForwardedBytes"] = own.friendForwarded.Load()
 	if node.transitGuard != nil {
 		state["transitGuard"] = node.transitGuardState(time.Now())
 	}

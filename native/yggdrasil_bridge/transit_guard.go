@@ -22,7 +22,9 @@ import (
 // while: a node with one peering is nobody's shortcut. It keeps one public
 // peer (or, with none up, one device nearby), sets aside its other public
 // peers, friends' bridges and links nearby, and takes them back when the
-// hold ends. Holds grow (transitHoldBase, doubled for every hold within
+// hold ends. What a friend nearby sends or gets through the phone itself
+// is no transit (local_link_traffic.go), and the link to a friend the
+// phone talks with stays through a hold. Holds grow (transitHoldBase, doubled for every hold within
 // transitHoldMemory, at most transitHoldMax), so a home that keeps routing
 // through the phone costs at most a window or two of transit per hold.
 const (

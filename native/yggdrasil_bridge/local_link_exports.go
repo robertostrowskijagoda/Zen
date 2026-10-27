@@ -20,6 +20,8 @@ func (node *bridgeNode) localLinkManager() *localLinkManager {
 	defer node.localLinksMu.Unlock()
 	if node.localLinks == nil {
 		node.localLinks = newLocalLinkManager(node.core, node.logger)
+		// The transit meter leaves out what links carry for friends.
+		node.localLinks.forwarded = &node.traffic.friendForwarded
 		if keep, held := node.transitHoldLink(); held {
 			node.localLinks.hold(keep)
 		}
