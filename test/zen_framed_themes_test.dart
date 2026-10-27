@@ -160,6 +160,44 @@ void main() {
     }
   });
 
+  test('the light framed themes read muted text and status colours at 4.5:1 '
+      'and their strong outline at 3:1 on every surface', () {
+    for (final AppPalette p in const <AppPalette>[
+      AppPalette.herbarium,
+      AppPalette.sweets,
+      AppPalette.cinema,
+      AppPalette.leather,
+    ]) {
+      final ZenColors c = _colors(p, Brightness.light);
+      final Map<String, Color> surfaces = <String, Color>{
+        'background': c.background,
+        'surface': c.surface,
+        'surfaceRaised': c.surfaceRaised,
+        'surfaceMuted': c.surfaceMuted,
+        'surfaceSunk': c.surfaceSunk,
+      };
+      for (final MapEntry<String, Color> s in surfaces.entries) {
+        for (final (String, Color) text in <(String, Color)>[
+          ('muted text', c.textMuted),
+          ('success', c.success),
+          ('warning', c.warning),
+          ('danger', c.danger),
+        ]) {
+          expect(
+            _contrast(text.$2, s.value),
+            greaterThanOrEqualTo(4.5),
+            reason: '$p ${text.$1} on ${s.key}',
+          );
+        }
+        expect(
+          _contrast(c.outlineStrong, s.value),
+          greaterThanOrEqualTo(3.0),
+          reason: '$p strong outline on ${s.key}',
+        );
+      }
+    }
+  });
+
   test('every new theme keeps its text readable in both modes', () {
     for (final AppPalette p in _framed) {
       final ZenLook look = ZenLook.forPalette(p);
