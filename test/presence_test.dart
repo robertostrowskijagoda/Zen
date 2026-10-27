@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -451,7 +452,21 @@ void main() {
         payload: const <String, dynamic>{'type': 'ping'},
       );
       await tester.pumpAndSettle();
-      expect(last(transport, 'pong').containsKey('state'), isFalse);
+      // Exactly what a locked phone answers: nothing tells them Zen is open.
+      expect(last(transport, 'pong').keys.toSet(), <String>{
+        'type',
+        ...versionHello().keys,
+      });
+      // And as rarely: a second ping soon after gets no answer.
+      await transport.injectIncoming(
+        from: _ada,
+        payload: const <String, dynamic>{'type': 'ping'},
+      );
+      await tester.pumpAndSettle();
+      expect(
+        transport.sentSignals.where((e) => e.payload['type'] == 'pong'),
+        hasLength(1),
+      );
       leave(tester);
       await tester.pump();
       await tester.pump();
@@ -459,6 +474,65 @@ void main() {
         transport.sentSignals.where((e) => e.payload['type'] == 'away'),
         isEmpty,
       );
+    });
+
+    testWidgets('switching apps often sends "away" at most every few '
+        'minutes; one held back is dropped when Zen comes back first', (
+      WidgetTester tester,
+    ) async {
+      final MemorySignalTransport transport = await pumpApp(tester);
+      int aways() => transport.sentSignals
+          .where((e) => e.payload['type'] == 'away')
+          .length;
+      void comeBack() {
+        for (final AppLifecycleState state in <AppLifecycleState>[
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+      }
+
+      leave(tester);
+      await tester.pump();
+      await tester.pump();
+      expect(aways(), 1);
+
+      // Back after a ping interval (friends are pinged), and off again: the
+      // next "away" waits for the rest of kPresenceAwayEvery.
+      await tester.pump(const Duration(minutes: 3));
+      comeBack();
+      await tester.pump();
+      await tester.pump();
+      leave(tester);
+      await tester.pump();
+      await tester.pump();
+      expect(aways(), 1);
+      await tester.pump(kPresenceAwayEvery);
+      expect(aways(), 2);
+      expect(last(transport, 'away')['state'], 'background');
+
+      // Held back again, but Zen is back before it goes: none goes, and
+      // the next time Zen leaves one is owed again.
+      await tester.pump(const Duration(minutes: 3));
+      comeBack();
+      await tester.pump();
+      await tester.pump();
+      leave(tester);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(minutes: 1));
+      comeBack();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(kPresenceAwayEvery);
+      expect(aways(), 2);
+      leave(tester);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(kPresenceAwayEvery);
+      expect(aways(), 3);
     });
   });
 

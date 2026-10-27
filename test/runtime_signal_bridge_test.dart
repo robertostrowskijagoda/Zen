@@ -205,6 +205,10 @@ void main() {
     leave();
     await tester.pump();
     await tester.pump();
+    // Owed again after the round, but an "away" went out lately: this one
+    // goes when kPresenceAwayEvery is over.
+    expect(sent('away'), 1);
+    await tester.pump(kPresenceAwayEvery);
     expect(sent('away'), 2);
   });
 

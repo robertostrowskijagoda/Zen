@@ -58,6 +58,14 @@ const Duration kPresenceForegroundFor = Duration(minutes: 6);
 /// may take before friends who did not answer count as offline.
 const Duration kPresenceSettleAfterResume = Duration(seconds: 20);
 
+/// "Away" goes to friends at most this often: each one wakes every friend's
+/// phone, and switching between apps would send one every few minutes. One
+/// held back goes out when the time is over, unless Zen is back on the
+/// screen by then (friends then rightly still see it "online"). Shorter
+/// than [kPresenceForegroundFor], so a friend never sees this phone
+/// offline meanwhile.
+const Duration kPresenceAwayEvery = Duration(minutes: 5);
+
 final class RuntimePresenceConfig {
   const RuntimePresenceConfig({
     this.pingInterval = kPresencePingInterval,
@@ -159,6 +167,17 @@ final class RuntimeSignalModule extends ZenModule {
   /// was not on the screen yet (a computer starting in the tray).
   DateTime? _leftScreenAt;
 
+  /// The last "away" (wall time) and a timer that runs out
+  /// [kPresenceAwayEvery] after it; while both say it was lately, the next
+  /// one waits ([_awayLater]) for the rest of that time.
+  DateTime? _awayAt;
+  Timer? _awayLately;
+  Timer? _awayLater;
+
+  /// When each weak acquaintance last got an answer to a ping (see
+  /// [_answersWeak]).
+  final Map<String, int> _weakPongedAt = <String, int>{};
+
   @override
   String get id => 'signal';
 
@@ -199,6 +218,10 @@ final class RuntimeSignalModule extends ZenModule {
     _settleTimer = null;
     _pingedLately?.cancel();
     _pingedLately = null;
+    _awayLately?.cancel();
+    _awayLately = null;
+    _awayLater?.cancel();
+    _awayLater = null;
     final StreamSubscription<SignalTransportFrame>? subscription =
         _subscription;
     _subscription = null;
@@ -242,20 +265,21 @@ final class RuntimeSignalModule extends ZenModule {
       if (_wasInteractive && _awayOwed) {
         _wasInteractive = false;
         _awayOwed = false;
-        // "Leaving the screen": friends see it at once, without pinging.
-        scheduleMicrotask(() {
-          if (_running) {
-            unawaitedLogged(
-              _sendAway(),
-              context: 'Runtime presence "away" failed',
-            );
-          }
-        });
+        // "Leaving the screen": friends see it at once, without pinging
+        // (or a little later after another "away" lately).
+        _scheduleAway();
       }
       _wasInteractive = false;
       return;
     }
     _wasInteractive = true;
+    if (_awayLater != null) {
+      // Back before the "away" held back went out: friends still see Zen
+      // on the screen, which it is; leaving again owes them one.
+      _awayLater?.cancel();
+      _awayLater = null;
+      _awayOwed = true;
+    }
     // Back within a ping interval of the last round (a glance at another
     // app): friends are not pinged again at once; the next round comes on
     // time. Each ping wakes every friend's phone.
@@ -332,15 +356,22 @@ final class RuntimeSignalModule extends ZenModule {
         // that this device is online at this address.
         return;
       }
-      await transport.send(
-        remoteAddress: from,
-        payload: <String, dynamic>{
-          'type': 'pong',
-          if (isAcceptedFriend) ..._presenceFor(from),
-          if (isAcceptedFriend) ...versionHello(),
-          if (isAcceptedFriend) ..._hello(from),
-        },
-      );
+      final bool seesPresence =
+          isAcceptedFriend &&
+          presenceVisibleTo(_ref.read(friendLevelLookupProvider).of(from));
+      if (!isAcceptedFriend || seesPresence || _answersWeak(from)) {
+        await transport.send(
+          remoteAddress: from,
+          payload: <String, dynamic>{
+            'type': 'pong',
+            if (isAcceptedFriend) ..._presenceFor(from),
+            if (isAcceptedFriend) ...versionHello(),
+            // To a weak acquaintance exactly what a locked phone answers
+            // (locked_receiver.dart), so they cannot tell the two apart.
+            if (seesPresence) ..._hello(from),
+          },
+        );
+      }
       if (isAcceptedFriend) {
         // A ping is a friend's "I am here": Zen is on their screen (as far
         // as they show it).
@@ -469,6 +500,53 @@ final class RuntimeSignalModule extends ZenModule {
         },
       );
     }
+  }
+
+  /// Whether a ping of the weak acquaintance [friend] gets an answer now: at
+  /// most one every kLockedPongEvery, as from a locked phone, so how often
+  /// answers come does not tell them whether Zen is open.
+  bool _answersWeak(String friend) {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final int? last = _weakPongedAt[friend];
+    if (last != null &&
+        now >= last &&
+        now - last < kLockedPongEvery.inMilliseconds) {
+      return false;
+    }
+    if (_weakPongedAt.length >= 500) {
+      _weakPongedAt.clear();
+    }
+    _weakPongedAt[friend] = now;
+    return true;
+  }
+
+  /// Sends "away" now, or once [kPresenceAwayEvery] after the last one.
+  void _scheduleAway() {
+    _awayLater?.cancel();
+    _awayLater = null;
+    final DateTime? at = _awayAt;
+    Duration since = at == null || _awayLately == null
+        ? kPresenceAwayEvery
+        : DateTime.now().difference(at);
+    if (since.isNegative) {
+      since = Duration.zero;
+    }
+    if (since >= kPresenceAwayEvery) {
+      scheduleMicrotask(_awayNow);
+      return;
+    }
+    _awayLater = Timer(kPresenceAwayEvery - since, _awayNow);
+  }
+
+  void _awayNow() {
+    _awayLater = null;
+    if (!_running || _wasInteractive) {
+      return;
+    }
+    _awayAt = DateTime.now();
+    _awayLately?.cancel();
+    _awayLately = Timer(kPresenceAwayEvery, () => _awayLately = null);
+    unawaitedLogged(_sendAway(), context: 'Runtime presence "away" failed');
   }
 
   /// What this phone gave [friend] (friend list, nearby key, status), as
