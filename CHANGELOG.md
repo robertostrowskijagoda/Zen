@@ -10,6 +10,48 @@
 - [pl] Widzisz, czy znajomy ma Zen otwarty, w tle czy offline, a powiadomienia czekają na liście pod dzwonkiem.
 - [pl] Zen mówi o nowej wersji w ciągu kilku godzin, z krótką notką taką jak ta.
 
+### Messages and delivery
+- **Phones are mailboxes again**, also while locked: a locked Android phone keeps mail for its trusted friends and hands it over once, with a confirmation, instead of again at every poll.
+- **A locked phone hands its node to the background service reliably**; two nodes with the same identity can no longer run at once (that dropped messages to locked phones).
+- **One notification per message**, also when it arrives both directly and from a mailbox; a new message no longer revives a notification you already dismissed.
+- **Tapping a notification opens the right chat, group or post**, also when another screen is open.
+- **Mailboxes are chosen by who is actually online**: each device says whether it is a computer, an Android phone or an iPhone, Zen counts how often it answers, changes at most one mailbox a day, and tells you when a mailbox has been quiet for days. A friend's devices count as one person, so a friend's dead old phone stops being your mailbox.
+- Recovered history lands in time order; a file that will not come says "Plik niedostępny" and is no longer asked for forever.
+- One tick means delivered, two mean read.
+
+### Notifications and presence
+- **Three privacy levels** for notifications (sender and start of the message, sender only, nothing), globally and per conversation; a locked phone shows at most the first 80 characters, and only known group members by name.
+- **Notification list behind a bell** in the top bar (messages, invitations, reactions, posts, mentions), with undo.
+- **Notifications about friends' new posts**, grouped, with a switch for everyone and a list of muted people.
+- **@mentions** in group chats, posts and comments, with checks and limits.
+- **Presence in three states**: open, in the background, offline, plus when a friend last opened Zen; weak acquaintances see none of it.
+- **New versions are noticed within hours** (every hour in the app, every few hours in the background), with a system notification once per version and a short "what's new" note.
+
+### Feed, people and the pyramid
+- Posts are public by default; **you choose how far you look** (friends, friends of friends, third degree), posts from further away show who passed them on, and only post notices travel — the post itself is fetched from those who hold it.
+- Pyramid: an empty head place is filled automatically after 7 days by the longer-serving member; a vote in a cell counts once members have met (or after 14 days).
+- See which system a friend uses; jump to the latest message; the app comes back to the screen and place you left.
+
+### Setup, look and backups
+- **First-run setup** (lock, notifications, gates — open for free by default —, animations, permissions; on iPhone how Zen is woken), shown again after an update that changes something important.
+- "Never" lock opens Zen without the password even after a restart (the key waits in the system's secure store); "Lock now" in the top bar locks it until the next unlock.
+- Five themes with their own frames, an Animations setting, the splash in your theme, more contrast in light themes.
+- Account backups go to Downloads by default, or to a folder you pick.
+
+### Battery, network and stability
+- Fewer wakes: background jobs share one wake and back off when nothing happens; Nearby looks less often when nobody is around; the parked service no longer wakes the phone every minute.
+- Android: wake handling, Bluetooth and the integrity check run off the main thread (the cause of "app not responding"); every bridge lets go of the screen when it closes (the leak of one screen per start).
+- Go: a memory limit on phones; a phone that starts carrying strangers' Yggdrasil traffic keeps a single link for a while (the cause of 2.4 GB in one night).
+- Nearby: full scans while the screen is open, retries after failures, people on the same Wi-Fi.
+- A technical log with numbers only (wakes, modes, memory, traffic) to diagnose problems, saved from Settings → Diagnostyka.
+
+### iPhone
+- A locked Zen keeps receiving: messages wait sealed until you unlock; background refresh, an hourly Shortcuts action and an optional silent keep-alive can wake it.
+- Installation through **Scarlet** in four steps.
+
+### Website
+- A new website in 21 languages: a short invitation page, one install page per system with direct links to the latest files, a guide, features, support, and why Zen is not in the app stores.
+
 ## 1.12.1 — 24.10.2026
 - Sending a GIF from the keyboard no longer crashes the app; GIFs show without a bubble or caption.
 - Unlocking asks for the fingerprint or face at once when biometric unlock is on.
