@@ -187,6 +187,36 @@ void main() {
       );
     });
 
+    test(
+      'copies Android wrote for Zen are deleted through the system',
+      () async {
+        final Future<bool> Function(String uri) original =
+            ExportedFilesIndex.deleteDocument;
+        addTearDown(() => ExportedFilesIndex.deleteDocument = original);
+        final List<String> asked = <String>[];
+        ExportedFilesIndex.deleteDocument = (String uri) async {
+          asked.add(uri);
+          return uri.endsWith('41');
+        };
+        final File a = File('${base.path}/d.txt')..writeAsBytesSync(<int>[1]);
+        final ExportedFilesIndex index = ExportedFilesIndex(
+          MemorySecurityCredentialsStore(),
+          null,
+        );
+        await index.remember('content://media/external/downloads/41');
+        await index.remember('content://tree/x/document/gone');
+        await index.remember(a.path);
+        // The one already gone is not counted.
+        expect(await index.deleteAll(), 2);
+        expect(asked, <String>[
+          'content://media/external/downloads/41',
+          'content://tree/x/document/gone',
+        ]);
+        expect(a.existsSync(), isFalse);
+        expect(await index.paths(), isEmpty);
+      },
+    );
+
     test('an index without the device list still works', () async {
       final File a = File('${base.path}/c.txt')..writeAsBytesSync(<int>[1]);
       final ExportedFilesIndex index = ExportedFilesIndex(

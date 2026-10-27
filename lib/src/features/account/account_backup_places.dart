@@ -302,10 +302,7 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
         if (names.isEmpty) {
           throw StateError('The backup did not reach Downloads');
         }
-        // The panic password deletes what it still finds at these paths.
-        for (final String path in _strings(out?['paths'])) {
-          await _remember(path);
-        }
+        await _rememberCopies(out);
         return AccountBackupSaved(
           folder: folder,
           shown: <String>[for (final String n in names) '${folder.label}/$n'],
@@ -325,11 +322,20 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
         if (names.isEmpty) {
           throw StateError('The backup did not reach the chosen folder');
         }
+        await _rememberCopies(out);
         return AccountBackupSaved(
           folder: folder,
           shown: <String>[for (final String n in names) '${folder.label}/$n'],
           canOpen: true,
         );
+    }
+  }
+
+  /// The panic password deletes the copies the system made (their content
+  /// addresses, which the system deletes them by) with the other exports.
+  Future<void> _rememberCopies(Map<Object?, Object?>? out) async {
+    for (final String uri in _strings(out?['uris'])) {
+      await _remember(uri);
     }
   }
 

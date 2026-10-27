@@ -207,7 +207,7 @@ void main() {
           }
           return <String, Object>{
             'names': <String>['${args['name']}'],
-            'paths': <String>['/storage/emulated/0/Download/${args['name']}'],
+            'uris': <String>['content://media/external/downloads/41'],
           };
         };
         final PlatformAccountBackupPlaces p = places(
@@ -228,10 +228,9 @@ void main() {
           'Pobrane/zen-konto.$kAccountBackupExtension',
         ]);
         expect(saved.canOpen, isTrue);
-        // Only the file that stays is remembered for the panic password.
-        expect(remembered, <String>[
-          '/storage/emulated/0/Download/zen-konto.$kAccountBackupExtension',
-        ]);
+        // Only the file that stays is remembered for the panic password, by
+        // the address the system deletes it by.
+        expect(remembered, <String>['content://media/external/downloads/41']);
         expect(temp.listSync(), isEmpty);
       },
     );
@@ -239,6 +238,7 @@ void main() {
     test('a folder the person picked on Android', () async {
       answer = (MethodCall call) => <String, Object>{
         'names': <String>['zen-konto (1).$kAccountBackupExtension'],
+        'uris': <String>['content://tree/x/document/y'],
       };
       final AccountBackupFolder folder = AccountBackupFolder.picked(
         tree: 'content://tree/x',
@@ -260,7 +260,8 @@ void main() {
       expect(saved.shown, <String>[
         'Kopie/zen-konto (1).$kAccountBackupExtension',
       ]);
-      expect(remembered, isEmpty);
+      // The copy in the picked folder is deleted by the panic password too.
+      expect(remembered, <String>['content://tree/x/document/y']);
       expect(temp.listSync(), isEmpty);
     });
 

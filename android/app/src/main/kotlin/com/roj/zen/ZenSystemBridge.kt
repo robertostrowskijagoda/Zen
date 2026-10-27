@@ -23,6 +23,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -44,11 +46,14 @@ import java.io.IOException
  * Account backup files (account_backup_places.dart): `exportToDownloads`
  * {paths, name} copies the written parts into the Downloads folder through
  * the media store (Android 10+, no storage permission) and answers
- * {names, paths} (null before Android 10); `pickFolder` opens the system's
- * folder chooser and answers {tree, label} (null when cancelled);
- * `exportToFolder` {tree, paths, name} copies the parts into that folder;
+ * {names, uris} (null before Android 10); `pickFolder` opens the system's
+ * folder chooser and answers {tree, label} (null when cancelled, or when
+ * the screen went away meanwhile); `exportToFolder` {tree, paths, name}
+ * copies the parts into that folder and answers {names, uris};
  * `openDownloads` and `openFolder` {tree} show them. The first part is
  * named [name], part n `<first>.n` (after any rename the system did).
+ * `deleteDocument` {uri} deletes such a copy again (exported_files.dart,
+ * the panic password): true when it went.
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -129,14 +134,22 @@ object ZenSystemBridge {
                         "exportToDownloads" -> {
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
                             val name = call.argument<String>("name") ?: ""
-                            inBackground(result) { exportToDownloads(activity, paths, name) }
+                            // The work outlives the screen; the Activity stays out of it.
+                            val context = activity.applicationContext
+                            inBackground(result) { exportToDownloads(context, paths, name) }
                         }
                         "pickFolder" -> pickFolder(activity, result)
                         "exportToFolder" -> {
                             val tree = call.argument<String>("tree") ?: ""
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
                             val name = call.argument<String>("name") ?: ""
-                            inBackground(result) { exportToFolder(activity, tree, paths, name) }
+                            val context = activity.applicationContext
+                            inBackground(result) { exportToFolder(context, tree, paths, name) }
+                        }
+                        "deleteDocument" -> {
+                            val uri = call.argument<String>("uri") ?: ""
+                            val context = activity.applicationContext
+                            inBackground(result) { deleteDocument(context, uri) }
                         }
                         "openDownloads" -> result.success(
                             showFolder(activity, Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)),
@@ -178,7 +191,7 @@ object ZenSystemBridge {
             val answer = try {
                 work()
             } catch (error: Exception) {
-                Log.w(TAG, "Exporting a backup failed", error)
+                Log.w(TAG, "A backup file action failed", error)
                 null
             }
             Handler(Looper.getMainLooper()).post { result.success(answer) }
@@ -193,9 +206,26 @@ object ZenSystemBridge {
             false
         }
 
-    /** The system's folder chooser: {tree, label}, or null when cancelled. */
+    /**
+     * The system's folder chooser: {tree, label}, or null when cancelled.
+     * The access to the folder is kept, so the panic password can still
+     * delete the copies there after a restart. Should the Activity go away
+     * while the chooser is open (a configuration change, the system
+     * reclaiming it), the answer is null at once rather than never.
+     */
     private fun pickFolder(activity: FragmentActivity, result: MethodChannel.Result) {
         var launcher: ActivityResultLauncher<Uri?>? = null
+        var observer: LifecycleEventObserver? = null
+        var answered = false
+        fun answer(value: Map<String, Any>?) {
+            if (answered) {
+                return
+            }
+            answered = true
+            observer?.let { activity.lifecycle.removeObserver(it) }
+            launcher?.unregister()
+            result.success(value)
+        }
         val registered = activity.activityResultRegistry.register(
             "zen_backup_folder_${folderPickSerial++}",
             object : ActivityResultContracts.OpenDocumentTree() {
@@ -203,24 +233,61 @@ object ZenSystemBridge {
                     super.createIntent(context, input).addFlags(
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or
                             Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+                            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
                     )
             },
         ) { uri ->
-            launcher?.unregister()
-            result.success(
-                if (uri == null) {
-                    null
-                } else {
-                    mapOf(
-                        "tree" to uri.toString(),
-                        "label" to (displayName(activity, treeDocument(uri)) ?: ""),
-                    )
-                },
+            if (uri == null) {
+                answer(null)
+                return@register
+            }
+            try {
+                activity.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (error: SecurityException) {
+                Log.w(TAG, "The chosen folder's access is not kept", error)
+            }
+            answer(
+                mapOf(
+                    "tree" to uri.toString(),
+                    "label" to (displayName(activity, treeDocument(uri)) ?: ""),
+                ),
             )
         }
         launcher = registered
+        val watcher = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                answer(null)
+            }
+        }
+        observer = watcher
+        activity.lifecycle.addObserver(watcher)
         registered.launch(null)
+    }
+
+    /** Deletes a backup copy at the content address [uri]; true when it went. */
+    private fun deleteDocument(context: Context, uri: String): Map<String, Any> {
+        val target = Uri.parse(uri)
+        if (target.scheme != "content") {
+            return mapOf("deleted" to false)
+        }
+        val resolver = context.contentResolver
+        val deleted = try {
+            if (DocumentsContract.isDocumentUri(context, target)) {
+                // A folder the person picked.
+                DocumentsContract.deleteDocument(resolver, target)
+            } else {
+                // Downloads, through the media store.
+                resolver.delete(target, null, null) > 0
+            }
+        } catch (_: java.io.FileNotFoundException) {
+            // Deleted by the person already.
+            false
+        }
+        return mapOf("deleted" to deleted)
     }
 
     private fun treeDocument(tree: Uri): Uri =
@@ -272,10 +339,6 @@ object ZenSystemBridge {
         name: String,
     ): Map<String, Any> {
         val resolver = context.contentResolver
-        @Suppress("DEPRECATION")
-        val downloads = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS,
-        )
         val made = ArrayList<Uri>()
         val names = ArrayList<String>()
         try {
@@ -305,10 +368,7 @@ object ZenSystemBridge {
             made.forEach { runCatching { resolver.delete(it, null, null) } }
             throw error
         }
-        return mapOf(
-            "names" to names,
-            "paths" to names.map { File(downloads, it).path },
-        )
+        return mapOf("names" to names, "uris" to made.map { it.toString() })
     }
 
     /** Copies the backup [paths] into the folder behind [tree]. */
@@ -339,7 +399,7 @@ object ZenSystemBridge {
             }
             throw error
         }
-        return mapOf("names" to names)
+        return mapOf("names" to names, "uris" to made.map { it.toString() })
     }
 
     private fun alias(activity: FragmentActivity, name: String) =
