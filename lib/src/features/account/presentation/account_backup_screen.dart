@@ -9,6 +9,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
+import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
@@ -62,12 +63,60 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   int _done = 0;
   int _total = 0;
   String? _message;
-  List<String>? _written;
+  AccountBackupSaved? _saved;
+
+  /// Where the backup goes: [_default] until the person chooses another.
+  AccountBackupFolder? _default;
+  AccountBackupFolder? _chosen;
+  bool _choosing = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(_measure());
+    unawaited(_loadDefaultFolder());
+  }
+
+  Future<void> _loadDefaultFolder() async {
+    try {
+      final AccountBackupFolder folder = await ref
+          .read(accountBackupPlacesProvider)
+          .defaultFolder();
+      if (mounted) {
+        setState(() => _default = folder);
+      }
+    } on Object catch (error) {
+      logZenWarning('Finding the default backup folder failed: $error');
+    }
+  }
+
+  /// "Wybierz folder": a cancelled chooser keeps what was there.
+  Future<void> _chooseFolder() async {
+    setState(() => _choosing = true);
+    try {
+      final AccountBackupFolder? folder = await ref
+          .read(accountBackupPlacesProvider)
+          .chooseFolder();
+      if (folder != null && mounted) {
+        setState(() => _chosen = folder);
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Choosing the backup folder failed', error, stackTrace);
+      if (mounted) {
+        setState(() => _message = t('Nie udało się wybrać folderu.'));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _choosing = false);
+      }
+    }
+  }
+
+  Future<void> _openFolder(AccountBackupSaved saved) async {
+    final bool opened = await ref.read(accountBackupPlacesProvider).open(saved);
+    if (!opened && mounted) {
+      setState(() => _message = t('Nie udało się otworzyć folderu.'));
+    }
   }
 
   @override
@@ -147,16 +196,26 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     )) {
       return;
     }
-    final String? first = await ref
-        .read(accountBackupPlacesProvider)
-        .target(accountBackupFileName(DateTime.now()));
-    if (first == null || !mounted) {
+    final AccountBackupPlaces places = ref.read(accountBackupPlacesProvider);
+    final AccountBackupFolder folder;
+    try {
+      folder = _chosen ?? _default ?? await places.defaultFolder();
+    } on Object catch (error, stackTrace) {
+      logZenError('Finding the backup folder failed', error, stackTrace);
+      node.identity.lock();
+      if (mounted) {
+        setState(() => _message = t('Nie udało się znaleźć folderu na kopię.'));
+      }
+      return;
+    }
+    if (!mounted) {
       node.identity.lock();
       return;
     }
     setState(() {
       _busy = true;
       _message = null;
+      _saved = null;
       _done = 0;
       _total = 0;
     });
@@ -165,10 +224,12 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
         ..._scope,
         AccountScope.keys,
       });
-      final List<String> paths = await writeAccountBackup(
+      _saved = await saveAccountBackup(
+        places: places,
+        folder: folder,
+        name: accountBackupFileName(DateTime.now()),
         build: build,
         password: password,
-        first: first,
         cost: ref.read(accountBackupCostProvider),
         progress: (int done, int total) {
           if (mounted) {
@@ -179,7 +240,6 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
           }
         },
       );
-      _written = paths;
     } on Object catch (error, stackTrace) {
       logZenError('Writing the account backup failed', error, stackTrace);
       _message = t('Nie udało się zapisać kopii. Sprawdź miejsce na dysku.');
@@ -194,7 +254,8 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final List<String>? written = _written;
+    final AccountBackupSaved? saved = _saved;
+    final AccountBackupFolder? folder = _chosen ?? _default;
     return Scaffold(
       key: const Key('account-backup-screen'),
       appBar: AppBar(title: Text(t('Kopia całego konta (plik)'))),
@@ -242,6 +303,45 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                       }),
                 key: const Key('account-backup-size'),
                 style: TextStyle(color: zen.textMuted, fontSize: 13),
+              ),
+              ZenSection(t('Gdzie zapisać')),
+              ZenCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      folder == null
+                          ? t('Szukam folderu…')
+                          : _chosen == null
+                          ? t('{folder} (domyślnie)', <String, Object?>{
+                              'folder': folder.label,
+                            })
+                          : folder.label,
+                      key: const Key('account-backup-folder'),
+                      style: const TextStyle(height: 1.4),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      key: const Key('account-backup-folder-choose'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      onPressed: _busy || _choosing
+                          ? null
+                          : () => unawaited(_chooseFolder()),
+                      icon: const Icon(Icons.folder_open_rounded),
+                      label: Text(t('Wybierz folder')),
+                    ),
+                    if (_chosen != null)
+                      TextButton(
+                        key: const Key('account-backup-folder-default'),
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _chosen = null),
+                        child: Text(t('Użyj domyślnego folderu')),
+                      ),
+                  ],
+                ),
               ),
               ZenSection(t('Hasło kopii')),
               TextField(
@@ -301,26 +401,37 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                   style: TextStyle(color: zen.danger),
                 ),
               ],
-              if (written != null) ...<Widget>[
+              if (saved != null) ...<Widget>[
                 const SizedBox(height: 12),
                 ZenInfo(
                   key: const Key('account-backup-done'),
                   icon: Icons.check_circle_outline_rounded,
                   tone: zen.success,
                   title: t('Kopia gotowa'),
-                  text: written.length == 1
+                  text: saved.shown.length == 1
                       ? t(
-                          'Zapisana w: {path}. Przenieś ją w bezpieczne miejsce '
-                          '(komputer, pendrive) — usunięcie aplikacji może '
-                          'usunąć jej folder.',
-                          <String, Object?>{'path': written.single},
+                          'Zapisana w: {path}. Skopiuj ją w bezpieczne miejsce '
+                          '(komputer, pendrive).',
+                          <String, Object?>{'path': saved.shown.single},
                         )
                       : t(
                           'Zapisana w częściach: {paths}. Trzymaj je razem — '
                           'do przywrócenia potrzebne są wszystkie.',
-                          <String, Object?>{'paths': written.join(', ')},
+                          <String, Object?>{'paths': saved.shown.join(', ')},
                         ),
                 ),
+                if (saved.canOpen) ...<Widget>[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    key: const Key('account-backup-open-folder'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: () => unawaited(_openFolder(saved)),
+                    icon: const Icon(Icons.folder_open_rounded),
+                    label: Text(t('Otwórz folder')),
+                  ),
+                ],
               ],
             ],
           ),

@@ -2,10 +2,6 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/security/exported_files.dart';
@@ -179,52 +175,3 @@ Future<AccountBackupRestore> restoreAccountBackup({
   }
   return (error: null, outcome: await importer.take(archive));
 }
-
-/// Where backup files are written and found (replaced in tests).
-abstract interface class AccountBackupPlaces {
-  /// Where to write a backup named [name]: the system save dialog on a
-  /// computer, the app's `Zen` folder on a phone; null when cancelled.
-  Future<String?> target(String name);
-
-  /// A backup file the person picks (any of its parts); null when
-  /// cancelled.
-  Future<String?> pick();
-}
-
-final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
-  const PlatformAccountBackupPlaces();
-
-  @override
-  Future<String?> target(String name) async {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      final String? path = await FilePicker.platform.saveFile(
-        dialogTitle: t('Zapisz kopię całego konta'),
-        fileName: name,
-      );
-      return path == null || path.isEmpty ? null : path;
-    }
-    final Directory? dir = Platform.isAndroid
-        ? await getExternalStorageDirectory()
-        : await getApplicationDocumentsDirectory();
-    if (dir == null) {
-      return null;
-    }
-    final Directory zen = Directory('${dir.path}/Zen');
-    await zen.create(recursive: true);
-    return '${zen.path}/$name';
-  }
-
-  @override
-  Future<String?> pick() async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    return picked?.files.firstOrNull?.path;
-  }
-}
-
-final Provider<AccountBackupPlaces> accountBackupPlacesProvider =
-    Provider<AccountBackupPlaces>(
-      (Ref ref) => const PlatformAccountBackupPlaces(),
-    );
