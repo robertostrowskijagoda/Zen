@@ -81,8 +81,12 @@ final class GateTerms {
   const GateTerms({this.price = 0, bool? consent})
     : consent = consent ?? price <= 0;
 
-  /// What nobody has set: free, the gatekeeper decides.
-  static const GateTerms standard = GateTerms();
+  /// What nobody has set: open for free, the gatekeeper's app lets people
+  /// through by itself ("Otwarte za darmo", the first-start default).
+  static const GateTerms standard = GateTerms(consent: false);
+
+  /// Free, and the gatekeeper approves each request ("Za moją zgodą").
+  static const GateTerms freeWithConsent = GateTerms();
 
   final int price;
 
@@ -159,6 +163,14 @@ final class GateSettings {
   bool relay = false;
 
   GateTerms of(GateTier tier) => tiers[tier] ?? GateTerms.standard;
+
+  /// The terms when every tier has the same ones, else `null`.
+  GateTerms? get sameForAll {
+    final Set<GateTerms> all = <GateTerms>{
+      for (final GateTier tier in GateTier.values) of(tier),
+    };
+    return all.length == 1 ? all.single : null;
+  }
 
   /// Whether the gate is open for free for [address].
   bool isFreeFor(String address) =>

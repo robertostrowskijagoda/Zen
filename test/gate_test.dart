@@ -315,7 +315,7 @@ void main() {
               onPressed: () async {
                 got = await editGateTerms(
                   context,
-                  initial: GateTerms.standard,
+                  initial: GateTerms.freeWithConsent,
                   title: 'Brama',
                   member: false,
                 );
@@ -425,8 +425,9 @@ void main() {
   });
 
   group('opening a gate', () {
-    test('a free gate needs the friend\'s consent by default', () async {
+    test('a free gate with the friend\'s consent waits for them', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
+      await _all(bartek, GateTerms.freeWithConsent);
       final IntroCase? c = await ania.intro.askIntro(
         middle: bartek.address,
         target: celina.address,
@@ -442,7 +443,7 @@ void main() {
       expect(ania.strangers.passTo(celina.address), isNotNull);
     });
 
-    test('a free gate without consent opens at once', () async {
+    test('a free gate without consent (the default) opens at once', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
       await _all(bartek, _freeAtOnce);
       final IntroCase? c = await ania.intro.askIntro(
