@@ -1,5 +1,13 @@
 # Changelog
 
+<!--
+Before every release, fill in "What's new" under "## Unreleased". That's the
+short note people see in the app next to "New version available", so write it
+for them, not for developers: one to three lines about what they will notice,
+English first, then Polish. Plain text, no links. The release script won't go
+ahead without it. More in docs/RELEASES.md, section 3.5.
+-->
+
 ## Unreleased
 
 ### What's new

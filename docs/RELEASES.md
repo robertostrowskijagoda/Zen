@@ -101,6 +101,13 @@ key, so every release must be signed with this key.
 
 ## 3. Release step by step
 
+> **Don't forget "What's new".** Before you cut a release, open
+> `CHANGELOG.md` and write the `### What's new` block under
+> `## Unreleased`: one to three short lines in English and the same in
+> Polish, saying what people will notice in this version. The app shows
+> them with the update notice. If the block is missing, `release.dart
+> prepare` stops and tells you. Section 3.5 has the details.
+
 **In short** (the details follow in items 1–7):
 
 1. Make sure `main` is green in CI and the "Unreleased" part of
