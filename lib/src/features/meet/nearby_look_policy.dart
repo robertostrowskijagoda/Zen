@@ -1,11 +1,49 @@
 import 'package:flutter/foundation.dart';
 
-/// How often the look around runs without the "W pobliżu" screen.
+/// How often the look around runs without the "W pobliżu" screen, at the
+/// most (in the locked service: at first, and again once a look finds
+/// someone new, [nextNearbyLookWait]).
 const Duration kNearbyLookEvery = Duration(minutes: 5);
 
-/// How long one such look around lasts: a few seconds, so the
-/// low-power scan opens one or two of its listening windows.
+/// How long one such look around lasts: a few seconds, so every phone
+/// shown nearby (an advert about once a second) is heard several times.
 const Duration kNearbyLookFor = Duration(seconds: 8);
+
+/// The longest wait between looks in the locked service, whatever was
+/// chosen.
+const Duration kNearbyLookMaxWait = Duration(minutes: 30);
+
+/// The longest wait between looks in the locked service for looks chosen
+/// [every]: three times it, at most [kNearbyLookMaxWait], never shorter
+/// than [every] (5 min: up to 15; 2 min: up to 6; 10: up to 30; 30: 30).
+Duration nearbyLookMaxWait(Duration every) {
+  final Duration tripled = every * 3;
+  final Duration capped = tripled > kNearbyLookMaxWait
+      ? kNearbyLookMaxWait
+      : tripled;
+  return capped < every ? every : capped;
+}
+
+/// The wait before the next look in the locked service, after one that
+/// waited [last]: [base] (the chosen period) when the look found someone
+/// new or the screen was on (the phone is in use, maybe on the move);
+/// otherwise twice [last], at most [max] ([nearbyLookMaxWait]). With 5
+/// minutes chosen and nobody new around: 5, 10, 15, 15… minutes, all
+/// multiples of the chosen period, so the looks keep sharing their wakes
+/// with the mailbox polls.
+Duration nextNearbyLookWait({
+  required Duration last,
+  required bool fresh,
+  required Duration base,
+  Duration? max,
+}) {
+  final Duration longest = max ?? nearbyLookMaxWait(base);
+  if (fresh || last < base) {
+    return base;
+  }
+  final Duration doubled = last * 2;
+  return doubled > longest ? longest : doubled;
+}
 
 /// What the person may choose: minutes between looks ("Wyłączone" is the
 /// switch, [MeetBook.nearbyBackgroundScan]) and seconds one look lasts.
@@ -30,17 +68,13 @@ const int kTypicalBatteryMah = 3000;
 /// Below this battery level (per cent, not charging) no look runs.
 const int kNearbyLookMinBattery = 15;
 
-/// What `SCAN_MODE_LOW_POWER` does on Android: the radio listens
-/// [kLowPowerScanListen] out of every [kLowPowerScanInterval].
-const Duration kLowPowerScanListen = Duration(milliseconds: 512);
-const Duration kLowPowerScanInterval = Duration(milliseconds: 5120);
-
 /// Typical current of a phone's Bluetooth LE radio while it listens.
 const double kBleListenMilliamps = 10;
 
 /// The share of time the radio listens for the background look around:
-/// [window] of every [every], and within it the low-power scan's own
-/// listening share. With the defaults: 8 s / 300 s × 512 / 5120 ≈ 0.27 %.
+/// [window] of every [every] (the look's scan listens all the time it
+/// runs: `SCAN_MODE_LOW_LATENCY`, ZenNearbyBridge.kt). With the defaults:
+/// 8 s / 300 s ≈ 2.7 %.
 double nearbyLookDutyCycle({
   Duration every = kNearbyLookEvery,
   Duration window = kNearbyLookFor,
@@ -48,23 +82,20 @@ double nearbyLookDutyCycle({
   if (every <= Duration.zero) {
     return 0;
   }
-  final double share = (window.inMilliseconds / every.inMilliseconds)
+  return (window.inMilliseconds / every.inMilliseconds)
       .clamp(0.0, 1.0)
       .toDouble();
-  return share *
-      kLowPowerScanListen.inMilliseconds /
-      kLowPowerScanInterval.inMilliseconds;
 }
 
 /// What a phone draws while a look around keeps it awake with the screen
 /// off (processor, memory, radio driver): tens of milliamps on most phones.
 const double kAwakeMilliamps = 40;
 
-/// How long a look keeps the phone awake besides its own window: the
-/// results the low-power scan batches ([kLookBatchGrace]), and waking up,
-/// reading the radio's state and letting go ([kLookWakeOverhead]: the
-/// wake's hold ends a second after the look is done, `LockedNearby`).
-const Duration kLookBatchGrace = Duration(seconds: 3);
+/// How long a look keeps the phone awake besides its own window: the last
+/// results on their way from the radio ([kLookLateResults]: they are never
+/// batched, so a moment is enough), and waking up, reading the radio's
+/// state and letting go ([kLookWakeOverhead]).
+const Duration kLookLateResults = Duration(seconds: 1);
 const Duration kLookWakeOverhead = Duration(seconds: 2);
 
 /// What showing this phone nearby costs ("W pobliżu": a low-power,
@@ -73,18 +104,17 @@ const Duration kLookWakeOverhead = Duration(seconds: 2);
 const double kBleAdvertMilliamps = 0.1;
 
 /// Roughly what the background look around costs a day, in mAh: each look
-/// wakes the sleeping phone for its window plus [kLookBatchGrace] and
-/// [kLookWakeOverhead] at [kAwakeMilliamps], and the radio listens for its
-/// share of the window. The awake phone is by far the larger part (the
-/// radio alone would be well under 1 mAh). An estimate for a typical
-/// phone, not a measurement: phones differ.
+/// wakes the sleeping phone for its window plus [kLookLateResults] and
+/// [kLookWakeOverhead] at [kAwakeMilliamps], and the radio listens through
+/// the window. The awake phone is the larger part. An estimate for a
+/// typical phone, not a measurement: phones differ.
 ///
-/// An upper bound: the look shares its wake with the mailbox polls (every
-/// 5 min, `LockedReceiver`), which wake the phone anyway; with them the
-/// look adds only its window and the batched results. In deep sleep (Doze)
-/// its alarm waits for Doze's own window and the look is skipped then
-/// (only the mailbox poll's wake still comes, and it ends at once for the
-/// look). With Bluetooth off or no permission no look is planned at all.
+/// An upper bound: with nobody new around, the locked service looks up to
+/// three times less often ([nextNearbyLookWait]); the look shares its wake
+/// with the mailbox polls (`LockedReceiver`), which wake the phone anyway,
+/// and then adds only its window. In deep sleep (Doze) its alarm waits for
+/// Doze's own window and the look is skipped then. With Bluetooth off or no
+/// permission no look is planned at all.
 double nearbyLookMilliampHoursPerDay({
   Duration every = kNearbyLookEvery,
   Duration window = kNearbyLookFor,
@@ -95,12 +125,8 @@ double nearbyLookMilliampHoursPerDay({
   final double looksPerDay =
       const Duration(days: 1).inMilliseconds / every.inMilliseconds;
   final double awakeSeconds =
-      (window + kLookBatchGrace + kLookWakeOverhead).inMilliseconds / 1000;
-  final double listenSeconds =
-      window.inMilliseconds /
-      1000 *
-      kLowPowerScanListen.inMilliseconds /
-      kLowPowerScanInterval.inMilliseconds;
+      (window + kLookLateResults + kLookWakeOverhead).inMilliseconds / 1000;
+  final double listenSeconds = window.inMilliseconds / 1000;
   final double milliampSeconds =
       awakeSeconds * kAwakeMilliamps + listenSeconds * kBleListenMilliamps;
   return looksPerDay * milliampSeconds / 3600;
@@ -112,7 +138,7 @@ double nearbyAdvertMilliampHoursPerDay() => kBleAdvertMilliamps * 24;
 
 /// The phone's power as the radio side reports it with `state`
 /// (`battery` in per cent, `charging`, `powerSave` for battery saver,
-/// `idle` for Doze).
+/// `idle` for Doze, `interactive` for the screen on).
 @immutable
 final class NearbyPower {
   const NearbyPower({
@@ -120,6 +146,7 @@ final class NearbyPower {
     this.charging = false,
     this.powerSave = false,
     this.idle = false,
+    this.screenOn = false,
   });
 
   /// Per cent; `null` when unknown (a desktop, an old radio side).
@@ -127,6 +154,7 @@ final class NearbyPower {
   final bool charging;
   final bool powerSave;
   final bool idle;
+  final bool screenOn;
 
   static NearbyPower fromState(Map<Object?, Object?> state) {
     final Object? battery = state['battery'];
@@ -137,9 +165,15 @@ final class NearbyPower {
       charging: state['charging'] == true,
       powerSave: state['powerSave'] == true,
       idle: state['idle'] == true,
+      screenOn: state['interactive'] == true,
     );
   }
 }
+
+/// Whether the radio's [state] says a scan hears nobody because location
+/// is switched off (Android 11 and older need it on for Bluetooth scans).
+bool nearbyNeedsLocationOn(Map<Object?, Object?> state) =>
+    state['needsLocation'] == true && state['locationOn'] == false;
 
 /// Why a look around did not run.
 enum NearbyLookSkip {
@@ -154,6 +188,9 @@ enum NearbyLookSkip {
   noPermission,
   bluetoothOff,
 
+  /// Location is off where scans need it ([nearbyNeedsLocationOn]).
+  locationOff,
+
   /// Below [NearbyLookPolicy.minBattery] and not charging.
   lowBattery,
 
@@ -167,10 +204,11 @@ enum NearbyLookSkip {
   busy,
 }
 
-/// When the cheap background look around runs: every [every] for
-/// [window], in the radio's low-power mode, never on low battery, in
-/// battery saver or while the phone sleeps (unless it charges — then
-/// battery and saver do not matter, Doze never comes while charging).
+/// When the short background look around runs: every [every] for
+/// [window] (in the locked service up to [longest] apart while nobody new
+/// is around), never on low battery, in battery saver, while the phone
+/// sleeps (unless it charges — then battery and saver do not matter, Doze
+/// never comes while charging) or with location off where scans need it.
 @immutable
 final class NearbyLookPolicy {
   const NearbyLookPolicy({
@@ -182,6 +220,10 @@ final class NearbyLookPolicy {
   final Duration every;
   final Duration window;
   final int minBattery;
+
+  /// The longest wait between looks while nobody new is around
+  /// ([nextNearbyLookWait]).
+  Duration get longest => nearbyLookMaxWait(every);
 
   /// Whether a look is due at [now] after the last one at [lastLookAt].
   bool due(int now, int lastLookAt) => now - lastLookAt >= every.inMilliseconds;
@@ -196,6 +238,9 @@ final class NearbyLookPolicy {
     }
     if (state['enabled'] != true) {
       return NearbyLookSkip.bluetoothOff;
+    }
+    if (nearbyNeedsLocationOn(state)) {
+      return NearbyLookSkip.locationOff;
     }
     final NearbyPower power = NearbyPower.fromState(state);
     if (power.idle) {

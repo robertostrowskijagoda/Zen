@@ -12,7 +12,7 @@ export 'package:zen/src/features/meet/nearby_look_policy.dart';
 /// the app is unlocked — on screen or in the background (its isolate keeps
 /// the node then, so it keeps this too):
 ///  - when the person allows it ([MeetBook.nearbyBackgroundScan], on by
-///    default), a short low-power look around every [lookEvery], only when
+///    default), a short look around every [lookEvery], only when
 ///    the [policy] lets it (battery, battery saver, Doze); friends in range
 ///    (and how many others) go to "Mijani" ([NearbyService.encounters]);
 ///  - friends' alarms heard only over Bluetooth end after
@@ -122,7 +122,7 @@ final class NearbyKeeper {
       () => nearby.scanWindow(lookFor),
       tag: 'nearby-look-app',
       limit: lookFor + const Duration(seconds: 5),
-      linger: kLookBatchGrace,
+      linger: kLookLateResults,
     );
     if (!ran) {
       return _skip(NearbyLookSkip.busy);

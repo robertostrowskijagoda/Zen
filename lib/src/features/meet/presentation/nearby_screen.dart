@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/meet/presentation/encounters_section.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
@@ -97,10 +98,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       _loaded = true;
     });
     if (scan) {
-      // A full scan, only while this screen is on screen: a low-power one
-      // lets Android batch what it hears, and a batched low-power scan
-      // listens only a second or two every few minutes, so the list would
-      // stay empty. The shared network is looked at too, also with
+      // A full scan, for as long as this screen is on screen (a look in
+      // the background lasts a few seconds every few minutes, so the list
+      // would stay empty). The shared network is looked at too, also with
       // Bluetooth off or not allowed.
       await _nearby.startScanning();
       final MeetService meet = ref.read(meetServiceProvider);
@@ -362,6 +362,20 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                           ),
                         ],
                       ),
+                    )
+                  else if (nearbyNeedsLocationOn(_state))
+                    // Android 11 and older: Bluetooth scans hear nobody while
+                    // location is off (the network still works).
+                    ZenInfo(
+                      key: const Key('nearby-location-off'),
+                      icon: Icons.location_off_rounded,
+                      tone: zen.warning,
+                      title: t('Włącz lokalizację'),
+                      text: t(
+                        'Na tym telefonie Bluetooth nie znajdzie nikogo, gdy '
+                        'lokalizacja jest wyłączona. Zen nie sprawdza przez '
+                        'nią, gdzie jesteś.',
+                      ),
                     ),
                   const SizedBox(height: 4),
                   ZenGroup(
@@ -377,7 +391,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                             'Telefon nadaje oszczędnie cały czas, także przy '
                             'zamkniętym albo zablokowanym Zen — do tygodnia od '
                             'ostatniego odblokowania. W tej samej sieci Wi-Fi '
-                            'widać Cię też, dopóki Zen jest odblokowany.',
+                            'też Cię widać.',
                             {'name': _nearby.myPseudonym},
                           ),
                         ),

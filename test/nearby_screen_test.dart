@@ -17,9 +17,12 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
 final class _Radio implements NearbyRadio {
-  _Radio({required this.on});
+  _Radio({required this.on, this.locationOff = false});
 
   final bool on;
+
+  /// An Android 11 phone with location switched off.
+  final bool locationOff;
   final List<bool> scans = <bool>[];
   bool scanning = false;
   Uint8List? advertised;
@@ -33,6 +36,10 @@ final class _Radio implements NearbyRadio {
     'supported': true,
     'enabled': on,
     'permitted': true,
+    if (locationOff) ...<Object?, Object?>{
+      'needsLocation': true,
+      'locationOn': false,
+    },
   };
 
   @override
@@ -117,12 +124,13 @@ final class _Host implements MeetHost {
 Future<(NearbyService, _Radio, _Net)> _open(
   WidgetTester tester, {
   required bool bluetooth,
+  bool locationOff = false,
 }) async {
   final MeetService meet = MeetService(
     host: _Host(),
     store: MeetStore(MemoryLedgerDisk()),
   );
-  final _Radio radio = _Radio(on: bluetooth);
+  final _Radio radio = _Radio(on: bluetooth, locationOff: locationOff);
   final _Net net = _Net();
   final NearbyService nearby = NearbyService(
     radio: radio,
@@ -174,10 +182,24 @@ void main() {
     expect(net.looking, isTrue);
     expect(net.adverts, isNotNull);
     expect(find.text('Szukam'), findsOneWidget);
+    expect(find.byKey(const Key('nearby-location-off')), findsNothing);
 
     await _close(tester, nearby);
     expect(radio.scanning, isFalse);
     expect(net.looking, isFalse);
+  });
+
+  testWidgets('where scans need location and it is off, the screen says so', (
+    WidgetTester tester,
+  ) async {
+    final (NearbyService nearby, _, _) = await _open(
+      tester,
+      bluetooth: true,
+      locationOff: true,
+    );
+    expect(find.byKey(const Key('nearby-location-off')), findsOneWidget);
+    expect(find.text('Włącz lokalizację'), findsOneWidget);
+    await _close(tester, nearby);
   });
 
   testWidgets('with Bluetooth off it still looks on the same Wi-Fi', (
