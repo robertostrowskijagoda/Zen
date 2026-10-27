@@ -65,11 +65,17 @@ Contact: see section 13.
   days and can be cleared at any time.
 - **Settings, the lock password hash parameters, the panic password** and
   similar.
-- **Diagnostic log:** a rolling text file (`zen-diagnostics.log`, trimmed to
-  about 128 KB) with technical messages. Folder paths are shortened in it.
-  You can read it in Settings. It is **never sent anywhere automatically**. If
-  you copy or send it to someone (for example when reporting a bug), that is
-  your choice - check it first.
+- **Diagnostic log:** rolling text files (`zen-diagnostics-ui.log` and, on
+  Android, `zen-diagnostics-svc.log` for the background service; each kept
+  to at most about 1 MB) with technical messages, and technical numbers:
+  when the background work woke the phone and for how long, how the app was
+  ended, how much memory the network node used, how many peers it had and
+  how much data passed. Those numbers are counts and sizes only, never a
+  message, a name, an address or a file name. Folder paths are shortened in
+  the messages. You can read the log, and save it as a file, in Settings. It
+  is **never sent anywhere automatically**. If you copy or send it to
+  someone (for example when reporting a bug), that is your choice - check it
+  first.
 
 Almost everything above is stored encrypted (AES-256-GCM, with a master key
 protected by a key derived from your password with Argon2id and, where

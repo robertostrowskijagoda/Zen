@@ -70,8 +70,9 @@ default key runs out.
 Text on these pages can be selected and copied. *Why isn't it working?*
 checks the network, background work, notifications, battery, the clock and
 free space; on an iPhone it also says that Zen receives at once only while
-it is open. **Diagnostics** keeps an event log (without message content) to
-attach to a bug report.
+it is open. **Diagnostics** keeps a technical log (without message content,
+names or addresses) to attach to a bug report: it shows the latest entries,
+and the save button writes the whole log to a file.
 
 ## Public peers
 
