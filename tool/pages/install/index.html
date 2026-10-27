@@ -9,106 +9,346 @@
 <link rel="icon" type="image/png" href="../zen-icon.png">
 <link rel="apple-touch-icon" href="../zen-icon.png">
 <style>
+  /* Shared look of all the Zen pages (the same block is inlined in each page). */
   :root {
+    color-scheme: light dark;
     --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
-    --accent: #7c4dff; --accent2: #c026d3; --line: #e4e0ef; --soft: #efeaff;
-    --warn: #9a5b00;
+    --line: #e4e0ef; --soft: #efeaff; --link: #6234d8; --focus: #6234d8;
+    --btn1: #6d3df5; --btn2: #b01fc4; --bar: rgba(246, 244, 251, .88);
+    --glow: rgba(124, 77, 255, .20); --warn: #9a5b00;
+    --shadow: 0 1px 2px rgba(23, 21, 31, .05), 0 10px 28px rgba(70, 40, 140, .08);
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0b0a10; --card: #16141f; --text: #f3f1fa; --muted: #a6a1ba;
-      --accent: #9d7bff; --accent2: #e15ee8; --line: #2a2738; --soft: #221d36;
+      --line: #2a2738; --soft: #221d36; --link: #b9a2ff; --focus: #c4b0ff;
+      --bar: rgba(11, 10, 16, .88); --glow: rgba(157, 123, 255, .22);
       --warn: #f0b45a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
     }
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 16px;
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 16px/1.55 var(--font);
   }
-  main { max-width: 640px; margin: 0 auto; }
-  header { text-align: center; margin: 8px 0 18px; }
-  .logo {
-    width: 64px; height: 64px; margin: 0 auto 10px; border-radius: 20px;
-    display: block; object-fit: cover; box-shadow: 0 0 0 1px var(--line);
+  img { max-width: 100%; }
+  h1, h2, h3 { line-height: 1.2; }
+  p { margin: 8px 0 14px; }
+  a { color: var(--link); text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+  code {
+    font: 13.5px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 2px 6px; word-break: break-all;
   }
-  h1 { font-size: 24px; margin: 4px 0; }
-  h2 { font-size: 19px; margin: 0 0 4px; }
-  p { margin: 6px 0 12px; }
+  .hidden { display: none !important; }
   .muted { color: var(--muted); }
-  .lang { position: absolute; top: 12px; right: 16px; }
-  .lang button {
-    border: 1px solid var(--line); background: var(--card); color: var(--text);
-    border-radius: 10px; padding: 4px 10px; font: 600 13px/1.4 inherit; cursor: pointer;
+
+  /* Icons: one sprite per page, drawn with the text colour. */
+  .ico {
+    width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
   }
-  .lang button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
-  nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 0 0 16px; }
-  nav button {
-    border: 1px solid var(--line); background: var(--card); color: var(--text);
-    border-radius: 999px; padding: 9px 16px; font: 600 15px/1.2 inherit; cursor: pointer;
+  .ico.fill { fill: currentColor; stroke: none; }
+
+  /* Top bar: brand, links, language. */
+  .top { position: relative; z-index: 20; background: var(--bar); border-bottom: 1px solid var(--line); }
+  @media (min-width: 720px) {
+    .top { position: sticky; top: 0; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
   }
-  nav button[aria-selected="true"] {
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff; border-color: transparent;
+  .top-in {
+    max-width: 1040px; margin: 0 auto; padding: 10px 16px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
   }
-  section {
-    background: var(--card); border: 1px solid var(--line); border-radius: 24px;
-    padding: 20px 18px; margin-bottom: 16px;
+  .brand {
+    order: 1; margin-inline-end: auto; display: inline-flex; align-items: center; gap: 10px;
+    color: var(--text); font-weight: 800; font-size: 19px; text-decoration: none;
   }
-  ol { list-style: none; padding: 0; margin: 12px 0 0; counter-reset: step; }
-  ol > li {
-    counter-increment: step; position: relative; padding: 0 0 16px 46px;
-    min-height: 40px;
+  .brand img { width: 32px; height: 32px; border-radius: 9px; display: block; box-shadow: 0 0 0 1px var(--line); }
+  .topnav { order: 3; width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+  .topnav a {
+    display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px;
+    border-radius: 999px; color: var(--text); font-weight: 600; font-size: 15px;
+    text-decoration: none; white-space: nowrap;
   }
+  .topnav a:hover { background: var(--soft); }
+  .topnav a[aria-current="page"] { background: var(--soft); color: var(--link); }
+  .topnav .ico { width: 18px; height: 18px; display: none; }
+  @media (max-width: 419px) { .topnav a { padding: 0 8px; font-size: 14.5px; } }
+  @media (min-width: 520px) { .topnav .ico { display: block; } .topnav a { padding: 0 14px; } }
+  @media (min-width: 720px) {
+    .top-in { flex-wrap: nowrap; }
+    .topnav { order: 2; width: auto; flex-wrap: nowrap; margin-inline-start: auto; }
+    .langpick { order: 3; }
+  }
+
+  /* Language picker: a visible pill; the real select lies invisible on top. */
+  .langpick {
+    order: 2; position: relative; display: inline-flex; align-items: center; gap: 7px;
+    min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--card); color: var(--text); font-weight: 700; font-size: 14.5px;
+  }
+  .langpick:hover { border-color: var(--link); background: var(--soft); }
+  .langpick:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+  .langpick .ico { width: 18px; height: 18px; }
+  .langpick .chev { width: 14px; height: 14px; opacity: .7; }
+  .langpick .lc { letter-spacing: .04em; }
+  .langpick .ln { display: none; }
+  @media (min-width: 420px) { .langpick .ln { display: inline; } }
+  .langpick select {
+    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0;
+    cursor: pointer; font: inherit; color: var(--text); background: var(--card);
+  }
+
+  /* Hero: the app icon, the name and one line about Zen. */
+  .hero {
+    position: relative; isolation: isolate; overflow: hidden; text-align: center;
+    padding: 34px 16px 12px;
+  }
+  .hero::before {
+    content: ""; position: absolute; z-index: -1; left: 50%; top: -120px;
+    width: min(900px, 140%); height: 440px; transform: translateX(-50%);
+    background: radial-gradient(closest-side, var(--glow), transparent);
+  }
+  .hero-icon {
+    width: 96px; height: 96px; display: block; margin: 0 auto 16px; border-radius: 26px;
+    box-shadow: 0 14px 34px rgba(109, 61, 245, .35), 0 0 0 1px var(--line);
+  }
+  .hero h1 { font-size: clamp(30px, 7vw, 46px); margin: 0 0 10px; letter-spacing: -.02em; }
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .hero h1 {
+      background: linear-gradient(90deg, var(--btn1), var(--btn2));
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+    }
+    @media (prefers-color-scheme: dark) {
+      .hero h1 { background-image: linear-gradient(90deg, #b9a2ff, #f08af5); }
+    }
+  }
+  .hero .lead {
+    max-width: 34em; margin: 0 auto; color: var(--muted);
+    font-size: clamp(17px, 3.6vw, 20px);
+  }
+
+  main { display: block; max-width: 1040px; margin: 0 auto; padding: 18px 16px 24px; }
+
+  /* Buttons and link chips. */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    min-height: 48px; padding: 12px 20px; border-radius: 14px; border: 1px solid transparent;
+    font: 700 16px/1.2 var(--font); text-align: center; text-decoration: none; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .btn, .chip, .doc, .topnav a, .langpick {
+      transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease,
+        border-color .15s ease, filter .15s ease;
+    }
+    .btn:hover, .doc:hover { transform: translateY(-2px); }
+  }
+  .btn:active, .doc:active { transform: translateY(1px) scale(.985); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff;
+    box-shadow: 0 8px 22px rgba(109, 61, 245, .32);
+  }
+  .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(109, 61, 245, .42); }
+  .btn.secondary { background: var(--card); color: var(--text); border-color: var(--line); }
+  .btn.secondary:hover { background: var(--soft); border-color: var(--link); }
+  .btn.discord { background: #5865f2; color: #fff; box-shadow: 0 8px 22px rgba(88, 101, 242, .32); }
+  .btn.discord:hover { filter: brightness(1.1); }
+  .btn.block { display: flex; width: 100%; }
+  .btn .ico { width: 22px; height: 22px; }
+  /* "Open in Zen": the first thing in the page, as big as a thumb wants. */
+  a.btn.open {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    width: 100%; max-width: 560px; min-height: 112px; margin: 6px auto 20px; padding: 20px 22px;
+    border-radius: 26px; font: 800 30px/1.15 var(--font);
+    box-shadow: 0 14px 34px rgba(109, 61, 245, .4);
+  }
+  a.btn.open .ico { width: 34px; height: 34px; stroke-width: 2.4; }
+  @media (max-width: 380px) { a.btn.open { font-size: 24px; padding: 18px 14px; gap: 10px; } }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 5px 13px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
+    color: var(--link); font: 700 14.5px/1.2 var(--font); text-decoration: none;
+  }
+  .chip:hover { background: var(--soft); border-color: var(--link); }
+  .chip.wrap { border-radius: 16px; text-align: center; }
+  .chip .ico { width: 16px; height: 16px; }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+  /* Cards and sections. */
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+    padding: 20px 18px; box-shadow: var(--shadow);
+  }
+  .card h2, .card h3 { margin: 0 0 6px; }
+  .narrow { max-width: 560px; margin-inline: auto; }
+  .sec { margin: 46px 0 0; }
+  .sec > h2 { font-size: clamp(22px, 4.6vw, 30px); text-align: center; margin: 0 0 8px; }
+  .sec > .sub { text-align: center; color: var(--muted); max-width: 36em; margin: 0 auto 22px; }
+  .small { font-size: 14px; color: var(--muted); }
+  .hint { text-align: center; color: var(--muted); font-size: 14.5px; margin: 12px 0 0; }
+  .hint .chip { margin: 2px 2px; }
+
+  /* Footer. */
+  .foot {
+    max-width: 1040px; margin: 36px auto 0; padding: 26px 16px 40px; text-align: center;
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
+  }
+  .foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; margin: 0 0 14px; }
+  .foot-links a { display: inline-flex; align-items: center; min-height: 32px; font-weight: 600; font-size: 15px; }
+  .foot p { margin: 6px 0; }
+
+  /* Blocks used by several pages. */
+  .get h2 { font-size: 21px; }
+  .get > p.muted { margin-top: 0; }
+  .stack { display: grid; gap: 10px; margin-top: 14px; }
+  .get .hint { margin-top: 10px; }
+  .iosnote { background: var(--soft); border-radius: 14px; padding: 12px 14px; margin: 0; text-align: start; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; }
+  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); }
+  .feat .fi {
+    width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+    background: var(--soft); color: var(--link); margin-bottom: 12px;
+  }
+  .feat .fi .ico { width: 24px; height: 24px; }
+  .feat h3 { font-size: 18px; margin: 0 0 6px; }
+  .feat p { margin: 0; color: var(--muted); font-size: 15px; }
+  .shots {
+    display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
+    padding: 6px 4px 16px; margin: 0; list-style: none; justify-content: safe center;
+  }
+  .shots figure { margin: 0; flex: 0 0 190px; scroll-snap-align: center; text-align: center; font-size: 14.5px; font-weight: 600; color: var(--muted); }
+  .shots img {
+    display: block; width: 190px; height: auto; margin: 0 auto 8px; border-radius: 22px;
+    border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--card);
+  }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  .steps li { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; counter-increment: s; }
+  .steps li::before {
+    content: counter(s); display: grid; place-items: center; width: 34px; height: 34px;
+    margin-bottom: 10px; border-radius: 50%; color: #fff; font-weight: 800;
+    background: linear-gradient(135deg, var(--btn1), var(--btn2));
+  }
+  .steps h3 { font-size: 17px; margin: 0 0 4px; }
+  .steps p { margin: 0; color: var(--muted); font-size: 15px; }
+  .cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .cta-row .btn { flex: 0 1 auto; }
+  @media (max-width: 480px) { .cta-row .btn { width: 100%; } }
+
+  /* Install page. */
+  main.inst { max-width: 760px; }
+  .verpill {
+    display: inline-block; margin: 14px 0 0; padding: 4px 14px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--card); color: var(--muted); font-size: 13.5px;
+  }
+  .verpill:empty { display: none; }
+  #systems { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 4px 0 18px; }
+  #systems button {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
+    color: var(--text); font: 600 15px/1.2 var(--font); cursor: pointer;
+  }
+  #systems button .ico { width: 18px; height: 18px; }
+  #systems button:hover { background: var(--soft); border-color: var(--link); }
+  #systems button[aria-selected="true"] {
+    background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff; border-color: transparent;
+    box-shadow: 0 6px 16px rgba(109, 61, 245, .3);
+  }
+  section.card { margin-bottom: 18px; padding: 22px 20px; }
+  section.card h2 { display: flex; align-items: center; gap: 10px; font-size: 22px; margin: 0 0 4px; }
+  section.card h2 .ico { width: 26px; height: 26px; color: var(--link); }
+  ol { list-style: none; padding: 0; margin: 14px 0 0; counter-reset: step; }
+  ol > li { counter-increment: step; position: relative; padding: 0 0 18px 46px; min-height: 40px; }
   ol > li::before {
-    content: counter(step); position: absolute; left: 0; top: 0;
-    width: 32px; height: 32px; border-radius: 50%; background: var(--soft);
-    color: var(--accent); font-weight: 800; text-align: center; line-height: 32px;
+    content: counter(step); position: absolute; left: 0; top: 0; width: 32px; height: 32px;
+    border-radius: 50%; color: #fff; font-weight: 800; text-align: center; line-height: 32px;
+    background: linear-gradient(135deg, var(--btn1), var(--btn2));
   }
+  [dir="rtl"] ol > li { padding: 0 46px 18px 0; }
+  [dir="rtl"] ol > li::before { left: auto; right: 0; }
   .step { display: flex; gap: 12px; align-items: flex-start; }
   .step .txt { flex: 1; }
-  .pic { flex: 0 0 72px; width: 72px; height: 96px; color: var(--accent); }
+  .pic { flex: 0 0 72px; width: 72px; height: 96px; color: var(--link); }
   .pic svg { width: 72px; height: 96px; display: block; }
-  a { color: var(--accent); }
-  a.btn {
-    display: inline-block; margin: 8px 8px 0 0; padding: 11px 16px; border-radius: 14px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
-    text-decoration: none; font-weight: 700;
-  }
-  a.btn.alt { background: var(--soft); color: var(--text); border: 1px solid var(--line); }
-  code {
-    font: 13.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
-    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-    padding: 2px 6px; word-break: break-all;
-  }
+  li .btn, .note .btn { display: flex; width: fit-content; max-width: 100%; margin: 8px 0 6px; min-height: 44px; }
   .note {
-    background: var(--bg); border-radius: 16px; padding: 12px 14px; margin-top: 10px;
-    font-size: 14.5px; color: var(--muted);
+    background: var(--soft); border-radius: 14px; padding: 12px 14px; margin-top: 12px;
+    font-size: 14.5px; color: var(--muted); border-inline-start: 4px solid var(--link);
   }
   .note b { color: var(--text); }
-  .warn { color: var(--warn); }
   .other { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
-  footer { text-align: center; font-size: 13.5px; color: var(--muted); margin: 18px 0 30px; }
-  .hidden { display: none; }
+  .help-cta { text-align: center; }
+  .help-cta h2 { justify-content: center; }
+  .help-cta .cta-row { margin-top: 14px; }
+  .foot a { font-weight: 600; }
 </style>
 </head>
 <body>
-<div class="lang" role="group" aria-label="Language">
-  <button type="button" data-lang="en">EN</button>
-  <button type="button" data-lang="pl">PL</button>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+<symbol id="i-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol>
+<symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+<symbol id="i-laptop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+</svg>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="../about/"><img src="../zen-icon.png" width="32" height="32" alt=""><span>Zen</span></a>
+    <nav class="topnav" aria-label="Main">
+      <a href="../about/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="navAbout">About</span></a>
+      <a href="./" aria-current="page"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="navInstall">Install</span></a>
+      <a href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg><span>Discord</span></a>
+      <a href="https://github.com/robertostrowskijagoda/Zen" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+    </nav>
+    <div class="langpick">
+      <svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg>
+      <span class="lc" id="langCode" aria-hidden="true">EN</span>
+      <span class="ln" id="langName" aria-hidden="true">English</span>
+      <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+      <select id="langSel" aria-label="Language"></select>
+    </div>
+  </div>
+</header>
+<div class="hero">
+  <img class="hero-icon" src="../zen-icon.png" width="96" height="96" alt="Zen">
+  <h1 id="title"></h1>
+  <p id="lead" class="lead"></p>
+  <span id="version" class="verpill"></span>
 </div>
-<main>
-  <header>
-    <img class="logo" src="../zen-icon.png" width="64" height="64" alt="Zen">
-    <h1 id="title"></h1>
-    <p id="lead" class="muted"></p>
-    <p id="version" class="muted"></p>
-  </header>
+<main class="inst">
   <nav id="systems" role="tablist"></nav>
   <div id="guides"></div>
-  <footer id="footer"></footer>
+  <section class="card help-cta" aria-labelledby="helpTitle">
+    <h2 id="helpTitle" data-i="helpTitle">Stuck?</h2>
+    <p class="muted" data-i="helpText">Ask the community — someone will help you install Zen.</p>
+    <div class="cta-row">
+      <a class="btn discord" href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg>Discord</a>
+      <a class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/issues" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </div>
+  </section>
 </main>
+<footer class="foot">
+  <p id="footer"></p>
+  <div class="foot-links">
+    <a href="../about/"><span data-i="navAbout">About</span></a>
+    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md" rel="noopener" data-i="footPrivacy">Privacy policy</a>
+    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md" rel="noopener" data-i="footTerms">Terms of use</a>
+    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/LICENSE" rel="noopener" data-i="footLicense">License</a>
+  </div>
+  <p data-i="footNote">Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda.</p>
+</footer>
 <script>
 (function () {
   "use strict";
@@ -223,7 +463,15 @@
         ]
       },
       footer: "Is it really Zen? Download only from [GitHub|releases] or from a friend, and compare the file with [SHA256SUMS|sums]. Source code: [github.com/robertostrowskijagoda/Zen|repo]. Questions and news: [Discord|discord].",
-      unknown: "shown with each release on GitHub"
+      unknown: "shown with each release on GitHub",
+      navAbout: "About",
+      navInstall: "Install",
+      helpTitle: "Stuck?",
+      helpText: "Ask the community — someone will help you install Zen.",
+      footPrivacy: "Privacy policy",
+      footTerms: "Terms of use",
+      footLicense: "License",
+      footNote: "Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."
     },
     pl: {
       title: "Zainstaluj Zen",
@@ -299,7 +547,15 @@
         ]
       },
       footer: "Czy to na pewno Zen? Pobieraj tylko z [GitHuba|releases] albo od znajomego i porównaj plik z [SHA256SUMS|sums]. Kod źródłowy: [github.com/robertostrowskijagoda/Zen|repo]. Pytania i nowości: [Discord|discord].",
-      unknown: "podany przy każdym wydaniu na GitHubie"
+      unknown: "podany przy każdym wydaniu na GitHubie",
+      navAbout: "O Zen",
+      navInstall: "Instalacja",
+      helpTitle: "Coś nie działa?",
+      helpText: "Zapytaj społeczność — ktoś pomoże zainstalować Zen.",
+      footPrivacy: "Polityka prywatności",
+      footTerms: "Regulamin",
+      footLicense: "Licencja",
+      footNote: "Zen to wolne oprogramowanie (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."
     }
   };
 
@@ -322,6 +578,14 @@
       (GLYPHS[i] || "") + "</svg></div>";
   }
 
+  // Names of the languages in the picker, each in its own language.
+  var NAMES = { en: "English", pl: "Polski" };
+  // Icons of the sprite at the top of the page.
+  function icon(name) {
+    return '<svg class="ico" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  }
+  var SYSTEM_ICONS = { android: "phone", iphone: "phone", windows: "monitor", macos: "laptop", linux: "terminal" };
+
   var lang = "en";
   var system = "android";
   var release = null;
@@ -340,8 +604,10 @@
     html = html.replace(/\*([^*]+)\*/g, "<i>$1</i>");
     html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
     html = html.replace(/\{([^|{}]+)\|(\w+)\}/g, function (_, label, key) {
-      var cls = /^⬇/.test(label) ? "btn" : "btn alt";
-      return '<a class="' + cls + '" href="' + esc(LINKS[key] || "#") + '">' + label + "</a>";
+      var down = /^⬇/.test(label);
+      return '<a class="btn ' + (down ? "primary" : "secondary") + '" href="' +
+        esc(LINKS[key] || "#") + '">' + (down ? icon("download") : "") +
+        "<span>" + label.replace(/^⬇\s*/, "") + "</span></a>";
     });
     html = html.replace(/\[([^|\]]+)\|(\w+)\]/g, function (_, label, key) {
       return '<a href="' + esc(LINKS[key] || "#") + '">' + label + "</a>";
@@ -366,7 +632,10 @@
       b.type = "button";
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", s === system ? "true" : "false");
-      b.textContent = T.names[s];
+      b.innerHTML = icon(SYSTEM_ICONS[s]);
+      var name = document.createElement("span");
+      name.textContent = T.names[s];
+      b.appendChild(name);
       b.addEventListener("click", function () {
         system = s;
         history.replaceState(null, "", "#" + s);
@@ -375,8 +644,8 @@
       nav.appendChild(b);
     });
     var g = T[system];
-    var html = '<section id="' + system + '"><h2>' + esc(T.names[system]) +
-      '</h2><p class="muted">' + render(g.intro) + "</p><ol>";
+    var html = '<section class="card" id="' + system + '"><h2>' + icon(SYSTEM_ICONS[system]) +
+      esc(T.names[system]) + '</h2><p class="muted">' + render(g.intro) + "</p><ol>";
     g.steps.forEach(function (step, i) {
       html += "<li>" + (system === "iphone"
         ? '<div class="step"><div class="txt">' + render(step) + "</div>" + picture(i) + "</div>"
@@ -389,9 +658,12 @@
     html += "</section>";
     document.getElementById("guides").innerHTML = html;
     document.getElementById("footer").innerHTML = render(T.footer);
-    Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
-      b.setAttribute("aria-pressed", b.getAttribute("data-lang") === lang ? "true" : "false");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i]"), function (el) {
+      el.textContent = T[el.getAttribute("data-i")] || TEXTS.en[el.getAttribute("data-i")] || "";
     });
+    document.getElementById("langCode").textContent = lang.toUpperCase();
+    document.getElementById("langName").textContent = NAMES[lang] || lang;
+    document.getElementById("langSel").value = lang;
   }
 
   function detectSystem() {
@@ -426,12 +698,18 @@
     return "en";
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
-    b.addEventListener("click", function () {
-      lang = b.getAttribute("data-lang");
-      try { localStorage.setItem("zen-lang", lang); } catch (e) { /* not remembered */ }
-      draw();
-    });
+  var picker = document.getElementById("langSel");
+  Object.keys(TEXTS).forEach(function (k) {
+    var o = document.createElement("option");
+    o.value = k;
+    o.textContent = NAMES[k] || k;
+    picker.appendChild(o);
+  });
+  picker.addEventListener("change", function () {
+    if (!Object.prototype.hasOwnProperty.call(TEXTS, picker.value)) { return; }
+    lang = picker.value;
+    try { localStorage.setItem("zen-lang", lang); } catch (e) { /* not remembered */ }
+    draw();
   });
   window.addEventListener("hashchange", function () { system = detectSystem(); draw(); });
   system = detectSystem();
