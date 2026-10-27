@@ -803,23 +803,30 @@ A signed, append-only, per-device **log** for each **space**.
   author counts) and `film_pass` (a public film passed on to friends of
   friends: the signed film with its certificate, like a reshare); in
   `acts` also `post_ann` (notices of posts passed on beyond friends, below).
-- **Post reach** [P]: a public post's body has `reach` (1 friends, 2 friends
-  of friends, 3 one step further); any other audience never goes past
-  friends. A friend of the author writes a `post_ann` entry {`items`: [{`p`
-  post id, `a` author account, `t` post time, `r` reach, `h` steps from the
-  author of the entry's readers (2 or 3, <= `r`), `aa`? author address from
-  their public profile, `e`? newest edit time, `x`? 1 when removed}]} (<= 100
-  items; each post once, again when `e`/`x` change; <= 10 posts per author
-  and 300 items per day). A reader fetches the post with `lg_post_want`
-  {`id`, `a`} from the friends who passed it on or from the author, and gets
-  `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?} (each part a
-  signed entry with its certificate; `del` the author's tombstone instead of
-  the post). The post is taken only if asked for, signed by `a`, public and
-  with `reach` >= the steps it came. A reader two steps away passes it on (as
-  `h` 3) only for `reach` 3 and once it holds the post. Friends are served
-  any held post that may go one step further; anyone else only the asked
-  device's own posts with `reach` >= 2 (10 asks a minute per address, 200
-  in all). Notices only about posts from the last 30 days.
+- **Post reach** [P]: a public post (`aud` `public`, not sealed) may be
+  passed on up to 3 steps of friendship from its author; the post carries no
+  reach of its own, and any other audience never goes past friends. Each
+  reader picks how far it looks (1, 2 or 3 steps, 2 by default, kept on the
+  device) and fetches only posts that near. A friend of the author writes a
+  `post_ann` entry whose body {`items`: [{`p` post id, `a` author account,
+  `t` post time, `h` steps from the author of the entry's readers (2 or 3),
+  `aa`? author address from their public profile, `e`? newest edit time,
+  `x`? 1 when removed}]} is sealed (Audience encryption, below) for the
+  audience that matches the writer's friend-list setting: everyone → `all`,
+  friends at level "Znajomy" and up → `mid`, close friends → `close`; with
+  the list shown on request only or to nobody no `post_ann` is written
+  (<= 100 items; each post once per audience, again when `e`/`x` change; <=
+  10 posts per author and 300 items per day). A reader fetches the post with
+  `lg_post_want` {`id`, `a`} from the friends who passed it on or from the
+  author, and gets `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?}
+  (each part a signed entry with its certificate; `del` the author's
+  tombstone instead of the post). The post is taken only if asked for,
+  signed by `a` and public. A reader two steps away that looks at least two
+  steps far passes it on (as `h` 3) once it holds the post; nothing goes
+  past `h` 3. Friends are served any held public post held fewer than 3
+  steps from its author; anyone else only the asked device's own public
+  posts (10 asks a minute per address, 200 in all). Notices only about
+  posts from the last 30 days.
 - **Audience encryption**: bodies for non-public audiences are
   `{aud, kid, n, c}` sealed with ChaCha20-Poly1305 under a 32-byte audience key,
   AAD `"<account>|<kid>"`; keys are handed to friends in `lg_keys` according to
