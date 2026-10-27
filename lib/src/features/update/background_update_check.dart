@@ -3,13 +3,17 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/release.dart';
+import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_notice.dart';
+import 'package:zen/src/features/update/whats_new.dart';
 
 /// The look at GitHub from the Android background service, so a new
 /// version is announced also while the app is closed or its process gone.
@@ -20,27 +24,40 @@ import 'package:zen/src/features/update/update_notice.dart';
 /// [beatEvery] at most, and Doze puts it off to its next window. Each run
 /// only reads a small file; it asks GitHub when GitHub last
 /// answered [every] ago or longer, whoever asked (the app keeps the same
-/// file, [UpdateNoticeStore]). Once when the service starts, too (after
-/// [firstAfter]), so a service that is restarted often still checks.
+/// file, [UpdateNoticeStore], and asks every [kGithubCheckEvery] while it
+/// runs). Once when the service starts, too (after [firstAfter]), so a
+/// service that is restarted often still checks. A version still to be
+/// announced comes with the release's short note (whats_new.dart) in the
+/// app's language, when the release has one that holds up.
 final class BackgroundUpdateCheck {
   BackgroundUpdateCheck({
     required Future<RuntimeSystemNotificationService?> Function() notices,
     UpdateNoticeStore? store,
     GithubJsonFetcher? fetchJson,
+    Sha256SumsFetcher? fetchText,
     int Function()? now,
+    String Function()? language,
     this.currentVersion = kAppVersion,
-    this.every = kGithubCheckEvery,
+    this.releaseKeys = kReleaseMaintainers,
+    this.every = kBackgroundGithubCheckEvery,
     this.firstAfter = const Duration(minutes: 2),
   }) : _notices = notices,
        store = store ?? FileUpdateNoticeStore(),
        _fetchJson = fetchJson ?? GithubJsonCache().call,
-       _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
+       _fetchText = fetchText ?? fetchSha256Sums,
+       _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
+       _language = language ?? (() => ZenI18n.code);
 
   final Future<RuntimeSystemNotificationService?> Function() _notices;
   final UpdateNoticeStore store;
   final GithubJsonFetcher _fetchJson;
+  final Sha256SumsFetcher _fetchText;
   final int Function() _now;
+  final String Function() _language;
   final String currentVersion;
+
+  /// The keys a release's note must be signed with (as its files).
+  final List<String> releaseKeys;
 
   /// How old GitHub's last answer must be before it is asked again.
   final Duration every;
@@ -109,10 +126,10 @@ final class BackgroundUpdateCheck {
     final String? newer = release != null && release.isNewerThan(currentVersion)
         ? release.version
         : null;
-    await store.update(
+    final UpdateNoticeState answered = await store.update(
       (UpdateNoticeState s) => s.answered(at: now, newest: newer),
     );
-    if (newer == null) {
+    if (release == null || newer == null || !updateNoticeDue(answered, newer)) {
       return;
     }
     final RuntimeSystemNotificationService? notices = await _notices();
@@ -124,7 +141,24 @@ final class BackgroundUpdateCheck {
       notices: notices,
       version: newer,
       nowMillis: now,
+      whatsNew: await _whatsNew(release),
     );
+  }
+
+  /// The note of [release] in the app's language; none when it has none
+  /// or it does not hold up.
+  Future<List<String>> _whatsNew(GithubRelease release) async {
+    try {
+      final WhatsNew? note = await fetchWhatsNew(
+        release,
+        fetchText: _fetchText,
+        maintainers: releaseKeys,
+      );
+      return note?.linesFor(_language()) ?? const <String>[];
+    } on Object catch (e) {
+      logZenWarning('What\'s new of ${release.version}: $e');
+      return const <String>[];
+    }
   }
 }
 

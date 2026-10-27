@@ -420,7 +420,7 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
   services) and goes only where a feature says (an alarm, a date-safety
   request).
 - **Updates:** Zen asks GitHub for the newest release 20 seconds after start
-  and every 12 hours (GitHub sees your IP address; when GitHub limits
+  and then at most once an hour (GitHub sees your IP address; when GitHub limits
   requests, Zen waits as long as it asks), and checks a download
   against `SHA256SUMS` and, on Android, Zen's signing certificate
   ([details](docs/guide/updates.md)).

@@ -212,8 +212,16 @@ void main() {
 
     test('a check is due after the interval, or with a clock set back', () {
       expect(updateCheckDue(null, nowMillis: 0), isTrue);
-      expect(updateCheckDue(0, nowMillis: 12 * _hour - 1), isFalse);
-      expect(updateCheckDue(0, nowMillis: 12 * _hour), isTrue);
+      expect(updateCheckDue(0, nowMillis: _hour - 1), isFalse);
+      expect(updateCheckDue(0, nowMillis: _hour), isTrue);
+      expect(
+        updateCheckDue(
+          0,
+          nowMillis: 4 * _hour - 1,
+          every: kBackgroundGithubCheckEvery,
+        ),
+        isFalse,
+      );
       expect(updateCheckDue(10 * _hour, nowMillis: 0), isTrue);
     });
   });
@@ -318,7 +326,7 @@ void main() {
       final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
         UpdateNoticeState(
           checkedAtMillis: now
-              .subtract(const Duration(hours: 2))
+              .subtract(const Duration(minutes: 40))
               .millisecondsSinceEpoch,
         ),
       );
@@ -332,23 +340,94 @@ void main() {
           return _releaseJson('v1.11.0');
         },
       );
+      expect(s.checkEvery, const Duration(hours: 1));
       await s.checkIfDue();
-      expect(asked, 0, reason: 'the background asked two hours ago');
+      expect(asked, 0, reason: 'the background asked 40 minutes ago');
 
-      now = now.add(const Duration(hours: 10));
+      // Back in the app 20 minutes later: the last answer is an hour old.
+      now = now.add(const Duration(minutes: 20));
       await s.checkIfDue();
       expect(asked, 1);
       await s.checkIfDue();
       expect(asked, 1, reason: 'just asked');
+      now = now.add(const Duration(minutes: 59));
+      await s.checkIfDue();
+      expect(asked, 1, reason: 'not an hour yet');
+      now = now.add(const Duration(minutes: 1));
+      await s.checkIfDue();
+      expect(asked, 2);
 
       // The background service found a version in the meantime.
-      now = now.add(const Duration(hours: 1));
+      now = now.add(const Duration(minutes: 10));
       store.state = store.state.answered(
         at: now.millisecondsSinceEpoch,
         newest: '1.12.0',
       );
       await s.checkIfDue();
+      expect(asked, 3);
+    });
+
+    test('a friend running a newer Zen makes it ask GitHub at once, once '
+        'per version', () async {
+      DateTime now = DateTime(2026, 10, 27, 12);
+      final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+      final _Notices notices = _Notices();
+      String tag = 'v1.11.0';
+      int asked = 0;
+      final GithubUpdateService s = service(
+        store: store,
+        notices: notices,
+        now: () => now,
+        fetchJson: (Uri uri) async {
+          asked++;
+          return _releaseJson(tag);
+        },
+      );
+      await s.checkIfDue();
+      expect(asked, 1);
+
+      // Not newer than this build: nothing.
+      await s.hintNewer('1.11.0');
+      expect(asked, 1);
+
+      // Published while this app was open; a friend already runs it.
+      tag = 'v1.12.0';
+      now = now.add(const Duration(minutes: 5));
+      await s.hintNewer('1.12.0');
+      expect(asked, 2, reason: 'asked at once, not an hour later');
+      expect(s.newer?.version, '1.12.0');
+      expect(notices.shown.single.body, contains('1.12.0'));
+
+      // The same claim again, or one GitHub does not confirm: asked once.
+      now = now.add(const Duration(minutes: 5));
+      await s.hintNewer('1.12.0');
       expect(asked, 2);
+      await s.hintNewer('1.13.0');
+      expect(asked, 3);
+      await s.hintNewer('1.13.0');
+      expect(asked, 3);
+      expect(s.newer?.version, '1.12.0');
+      expect(notices.shown, hasLength(1));
+
+      // A newer claim right after an attempt waits for the next check.
+      await s.hintNewer('1.14.0');
+      expect(asked, 3);
+    });
+
+    test('a release the maintainers signed, from friends, is announced at '
+        'once', () async {
+      final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+      final _Notices notices = _Notices();
+      final GithubUpdateService s = service(
+        store: store,
+        notices: notices,
+        fetchJson: (Uri uri) async => _releaseJson('v1.11.0'),
+      );
+      await s.hintNewer('1.12.0', signed: true);
+      expect(notices.shown.single.body, contains('1.12.0'));
+      expect(store.state.notifiedVersion, '1.12.0');
+      await s.hintNewer('1.12.0', signed: true);
+      expect(notices.shown, hasLength(1));
     });
 
     test('an unanswered check is not repeated on every return', () async {
@@ -390,7 +469,7 @@ void main() {
     });
 
     test('rides the shared beat without waking the phone in Doze, and asks '
-        'GitHub at most every 12 hours', () async {
+        'GitHub at most every 4 hours', () async {
       final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
         UpdateNoticeState(checkedAtMillis: now),
       );
@@ -409,28 +488,28 @@ void main() {
       )..start();
       addTearDown(check.stop);
 
-      expect(check.every, const Duration(hours: 12));
-      expect(check.beatEvery, const Duration(hours: 3));
+      expect(check.every, const Duration(hours: 4));
+      expect(check.beatEvery, const Duration(hours: 1));
       final _Alarm wake = platform.live.single;
       expect(wake.whileIdle, isFalse);
-      expect(wake.delay, const Duration(hours: 3));
+      expect(wake.delay, const Duration(hours: 1));
 
-      // On the beat, before the 12 hours are up: nothing is asked.
-      for (int h = 3; h < 12; h += 3) {
-        now += 3 * _hour;
+      // On the beat, before the 4 hours are up: nothing is asked.
+      for (int h = 1; h < 4; h++) {
+        now += _hour;
         await check.checkIfDue();
       }
       expect(asked, 0);
 
-      now += 3 * _hour;
+      now += _hour;
       await check.checkIfDue();
       expect(asked, 1);
       expect(notices.shown, hasLength(1));
       expect(notices.shown.single.routeKey, buildUpdatesRouteKey());
       expect(store.state.checkedAtMillis, now);
 
-      // Twelve hours later the same version: asked again, not announced.
-      now += 12 * _hour;
+      // Four hours later the same version: asked again, not announced.
+      now += 4 * _hour;
       await check.checkIfDue();
       expect(asked, 2);
       expect(notices.shown, hasLength(1));
@@ -443,7 +522,7 @@ void main() {
         'the app already announced', () async {
       final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
         UpdateNoticeState(
-          checkedAtMillis: now - 13 * _hour,
+          checkedAtMillis: now - 5 * _hour,
           notifiedVersion: '1.12.0',
         ),
       );
