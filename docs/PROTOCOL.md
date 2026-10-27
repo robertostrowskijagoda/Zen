@@ -486,7 +486,8 @@ relay engine and never reaches the app layer.
 
 See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 `lg_sibling`, `lg_heads`, `lg_want`, `lg_entries`, `lg_revoke`, `lg_cert_want`,
-`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`.
+`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`,
+`lg_post_want`, `lg_post`.
 
 `lg_push` {`entries`} is the only reliable ledger frame: a device's new
 entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
@@ -781,7 +782,25 @@ A signed, append-only, per-device **log** for each **space**.
   section `film` (in `feed`, removed by `post_del`), and in `acts`
   `film_react` (the latest per film wins), `film_seen` (`posts`: film ids the
   author counts) and `film_pass` (a public film passed on to friends of
-  friends: the signed film with its certificate, like a reshare).
+  friends: the signed film with its certificate, like a reshare); in
+  `acts` also `post_ann` (notices of posts passed on beyond friends, below).
+- **Post reach** [P]: a public post's body has `reach` (1 friends, 2 friends
+  of friends, 3 one step further); any other audience never goes past
+  friends. A friend of the author writes a `post_ann` entry {`items`: [{`p`
+  post id, `a` author account, `t` post time, `r` reach, `h` steps from the
+  author of the entry's readers (2 or 3, <= `r`), `aa`? author address from
+  their public profile, `e`? newest edit time, `x`? 1 when removed}]} (<= 100
+  items; each post once, again when `e`/`x` change; <= 10 posts per author
+  and 300 items per day). A reader fetches the post with `lg_post_want`
+  {`id`, `a`} from the friends who passed it on or from the author, and gets
+  `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?} (each part a
+  signed entry with its certificate; `del` the author's tombstone instead of
+  the post). The post is taken only if asked for, signed by `a`, public and
+  with `reach` >= the steps it came. A reader two steps away passes it on (as
+  `h` 3) only for `reach` 3 and once it holds the post. Friends are served
+  any held post that may go one step further; anyone else only the asked
+  device's own posts with `reach` >= 2 (10 asks a minute per address, 200
+  in all). Notices only about posts from the last 30 days.
 - **Audience encryption**: bodies for non-public audiences are
   `{aud, kid, n, c}` sealed with ChaCha20-Poly1305 under a 32-byte audience key,
   AAD `"<account>|<kid>"`; keys are handed to friends in `lg_keys` according to
