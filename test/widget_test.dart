@@ -2365,22 +2365,21 @@ void main() {
         );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('background-alert-banner')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('background-alert-banner')),
-        matching: find.text('Ada zaakceptował(a) zaproszenie'),
-      ),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byKey(const Key('background-alert-clear-button')));
+    expect(find.byKey(const Key('status-notices-count')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('status-notices')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('background-alert-banner')), findsNothing);
+    expect(find.byKey(const Key('notifications-screen')), findsOneWidget);
+    expect(find.text('Ada zaakceptował(a) zaproszenie'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('notifications-clear-all')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ada zaakceptował(a) zaproszenie'), findsNothing);
+    expect(find.text('Brak powiadomień'), findsOneWidget);
   });
 
-  testWidgets('background alert action can open the matching conversation', (
+  testWidgets('a notification can open the matching conversation', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -2435,14 +2434,14 @@ void main() {
         );
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('background-alert-open-button')),
-      findsOneWidget,
-    );
+    await tester.tap(find.byKey(const Key('status-notices')));
+    await tester.pumpAndSettle();
+    expect(find.text('Wpadnij na czat.'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('background-alert-open-button')));
+    await tester.tap(find.text('Wpadnij na czat.'));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('notifications-screen')), findsNothing);
     expect(
       find.byKey(const Key('conversation-composer-field')),
       findsOneWidget,
@@ -2450,7 +2449,7 @@ void main() {
     expect(find.text('Ada'), findsWidgets);
   });
 
-  testWidgets('background alerts banner can collapse and clear', (
+  testWidgets('the notification list folds a day and removes one entry', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -2505,28 +2504,37 @@ void main() {
         );
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('background-alert-open-button')),
-      findsOneWidget,
+    await tester.tap(find.byKey(const Key('status-notices')));
+    await tester.pumpAndSettle();
+    final Finder dayHeader = find.byWidgetPredicate(
+      (Widget w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('notice-day-'),
     );
+    expect(dayHeader, findsOneWidget);
+    expect(find.text('Wiadomość do zwijania.'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('background-alert-collapse-button')));
+    await tester.tap(dayHeader);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('background-alert-open-button')), findsNothing);
+    expect(find.text('Wiadomość do zwijania.'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('background-alert-collapse-button')));
+    await tester.tap(dayHeader);
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('background-alert-open-button')),
-      findsOneWidget,
+    expect(find.text('Wiadomość do zwijania.'), findsOneWidget);
+
+    await tester.tap(
+      find.byWidgetPredicate(
+        (Widget w) =>
+            w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('notice-dismiss-'),
+      ),
     );
-
-    await tester.tap(find.byKey(const Key('background-alert-clear-button')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('background-alert-banner')), findsNothing);
+    expect(find.text('Wiadomość do zwijania.'), findsNothing);
+    expect(find.text('Brak powiadomień'), findsOneWidget);
   });
 
-  testWidgets('inbox is the only in-app notification surface', (
+  testWidgets('the notification list is the only in-app notification surface', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -2560,9 +2568,15 @@ void main() {
     );
 
     expect(find.byKey(const Key('runtime-notification-banner')), findsNothing);
+    // Not on the chats list: the bell counts it, the list shows it.
+    expect(find.byKey(const Key('inbox-card-accept-ada')), findsNothing);
+    expect(find.text('Ada zaakceptował(a) zaproszenie'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('status-notices')));
+    await tester.pumpAndSettle();
     expect(find.text('Ada zaakceptował(a) zaproszenie'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('inbox-card-accept-ada')));
+    await tester.tap(find.byKey(const Key('notice-row-accept-ada')));
     await tester.pumpAndSettle();
 
     expect(
@@ -2631,14 +2645,10 @@ void main() {
       AppVisibilityState.foregroundFocused,
     );
     expect(container.read(socialHubControllerProvider).pendingSignalCount, 0);
-    expect(find.byKey(const Key('background-alert-banner')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('background-alert-banner')),
-        matching: find.text('Nowa wiadomość od Ada'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('status-notices-count')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('status-notices')));
+    await tester.pumpAndSettle();
+    expect(find.text('Nowa wiadomość od Ada'), findsOneWidget);
   });
 
   testWidgets(
@@ -2749,7 +2759,7 @@ void main() {
         AppVisibilityState.foregroundFocused,
       );
       expect(container.read(socialHubControllerProvider).pendingSignalCount, 0);
-      expect(find.byKey(const Key('background-alert-banner')), findsOneWidget);
+      expect(find.byKey(const Key('status-notices-count')), findsOneWidget);
     },
   );
 

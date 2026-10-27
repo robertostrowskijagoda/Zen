@@ -116,7 +116,11 @@ class _StatusBar extends ConsumerWidget {
                               ),
                       ),
                     ),
-                    if (unreadCount > 0) ...<Widget>[
+                    // Left out on a narrow phone: the bell next to it counts
+                    // the unread chats as well and the status label needs
+                    // the room.
+                    if (unreadCount > 0 &&
+                        MediaQuery.sizeOf(context).width >= 400) ...<Widget>[
                       ZenNeonFlicker(
                         color: zen.textPrimary,
                         glowRadius: 0,
@@ -159,6 +163,8 @@ class _StatusBar extends ConsumerWidget {
                       ),
                       const SizedBox(width: 4),
                     ],
+                    // Messages, invitations and reactions, newest first.
+                    const _NoticesBell(),
                     // Your own code (QR and invite code), one tap away.
                     IconButton(
                       key: const Key('status-my-code'),
@@ -311,11 +317,6 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final AppShellState shellState = ref.watch(appShellControllerProvider);
-    final List<InboxEntry> backgroundAlerts = ref.watch(
-      socialHubControllerProvider.select(
-        (SocialHubState state) => state.backgroundAlerts,
-      ),
-    );
     final List<InboxEntry> inbox = ref.watch(
       socialHubControllerProvider.select((SocialHubState state) => state.inbox),
     );
@@ -384,25 +385,13 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
               (_selectedFilter != _ChatFilter.unread || g.unreadCount > 0),
         )
         .toList(growable: false);
-    final Set<String> backgroundAlertIds = backgroundAlerts
-        .map((InboxEntry entry) => entry.id)
-        .toSet();
-    final Set<String> backgroundAlertKeys = backgroundAlerts
-        .map((InboxEntry entry) => '${entry.type.name}:${entry.peerAddress}')
-        .toSet();
+    // Only what waits for an answer: invitations keep their card (with
+    // Dołącz / Odrzuć). Everything else is in the notification list (bell).
     final List<InboxEntry> actionableInbox = inbox
         .where(
           (InboxEntry item) =>
-              item.type != InboxEntryType.message &&
-              item.type != InboxEntryType.callInvite &&
-              // Invitations keep their card (with Dołącz / Odrzuć) even when
-              // they also arrived as a background alert.
-              (item.type == InboxEntryType.groupInvite ||
-                  item.type == InboxEntryType.friendRequest ||
-                  (!backgroundAlertIds.contains(item.id) &&
-                      !backgroundAlertKeys.contains(
-                        '${item.type.name}:${item.peerAddress}',
-                      ))),
+              item.type == InboxEntryType.groupInvite ||
+              item.type == InboxEntryType.friendRequest,
         )
         .toList(growable: false);
     return Scaffold(
@@ -511,11 +500,6 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                         'Spróbuj uruchomić aplikację ponownie.',
                       ),
                     ),
-                  ),
-                if (backgroundAlerts.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                    child: _BackgroundAlertsBanner(alerts: backgroundAlerts),
                   ),
                 // A sideloaded iPhone build: its signature runs out soon.
                 const SigningExpiryBanner(
@@ -2499,126 +2483,6 @@ class _TechInfoSection extends StatelessWidget {
             _ServiceActions(state: state),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _BackgroundAlertsBanner extends ConsumerStatefulWidget {
-  const _BackgroundAlertsBanner({required this.alerts});
-
-  final List<InboxEntry> alerts;
-
-  @override
-  ConsumerState<_BackgroundAlertsBanner> createState() =>
-      _BackgroundAlertsBannerState();
-}
-
-class _BackgroundAlertsBannerState
-    extends ConsumerState<_BackgroundAlertsBanner> {
-  bool _collapsed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    final List<InboxEntry> alerts = widget.alerts;
-    final InboxEntry latest = alerts.first;
-    final RuntimeRouteIntent? launchIntent = runtimeRouteIntentFromRouteKey(
-      id: latest.id,
-      routeKey: latest.routeKey,
-    );
-    return _Panel(
-      key: const Key('background-alert-banner'),
-      accentTone: zen.warning,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              ZenIconBadge(
-                icon: Icons.notifications_active_outlined,
-                tone: zen.warning,
-                size: 36,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  t('Powiadomienia ({count})', {'count': alerts.length}),
-                  style: TextStyle(
-                    color: zen.textPrimary,
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              IconButton(
-                key: const Key('background-alert-collapse-button'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  setState(() {
-                    _collapsed = !_collapsed;
-                  });
-                },
-                icon: Icon(
-                  _collapsed
-                      ? Icons.expand_more_rounded
-                      : Icons.expand_less_rounded,
-                ),
-                tooltip: _collapsed ? t('Rozwiń') : t('Zwiń'),
-              ),
-              IconButton(
-                key: const Key('background-alert-clear-button'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  ref
-                      .read(socialHubControllerProvider.notifier)
-                      .clearBackgroundAlerts();
-                },
-                icon: const Icon(Icons.close_rounded),
-                tooltip: t('Wyczyść powiadomienia'),
-              ),
-            ],
-          ),
-          if (!_collapsed) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(
-              latest.displayTitle,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 14.5,
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              latest.displayBody,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: zen.textSecondary,
-                fontSize: 13.5,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              key: const Key('background-alert-open-button'),
-              onPressed: () {
-                ref
-                    .read(socialHubControllerProvider.notifier)
-                    .requestLaunchFromRouteKey(latest.routeKey);
-              },
-              icon: Icon(
-                launchIntent?.target == RuntimeRouteTarget.conversation
-                    ? Icons.chat_bubble_outline_rounded
-                    : Icons.notifications_none_rounded,
-                size: 18,
-              ),
-              label: Text(launchIntent?.actionLabel ?? t('Otwórz')),
-            ),
-          ],
-        ],
       ),
     );
   }

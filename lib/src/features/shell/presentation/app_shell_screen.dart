@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/feature_flags.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -45,6 +46,8 @@ import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
+import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
+import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/films/presentation/films_screen.dart';
 import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
@@ -105,6 +108,7 @@ import 'package:zen/src/features/update/presentation/signing_expiry_banner.dart'
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
+part 'app_shell_screen_notifications.dart';
 part 'app_shell_screen_views.dart';
 part 'app_shell_screen_settings_security.dart';
 part 'app_shell_screen_widgets.dart';
