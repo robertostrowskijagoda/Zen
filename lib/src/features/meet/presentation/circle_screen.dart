@@ -274,123 +274,127 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
         icon: const Icon(Icons.add_rounded),
         label: Text(t('Nowe kółko')),
       ),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: Listenable.merge(<Listenable>[circles, food]),
-          builder: (BuildContext context, Widget? _) {
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-              children: <Widget>[
-                ZenHero(
-                  title: t('Gotujecie na zmianę'),
-                  icon: Icons.soup_kitchen_rounded,
-                  tone: zenTone(zen, 3),
-                  text: t(
-                    'Kółko to kilka osób, które na zmianę gotują dla siebie — '
-                    'np. „Obiady czwartkowe”. Zen układa kolejkę, przypomina, '
-                    'kto gotuje, zbiera alergie i listę, kto co przynosi.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: Listenable.merge(<Listenable>[circles, food]),
+            builder: (BuildContext context, Widget? _) {
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                children: <Widget>[
+                  ZenHero(
+                    title: t('Gotujecie na zmianę'),
+                    icon: Icons.soup_kitchen_rounded,
+                    tone: zenTone(zen, 3),
+                    text: t(
+                      'Kółko to kilka osób, które na zmianę gotują dla siebie — '
+                      'np. „Obiady czwartkowe”. Zen układa kolejkę, przypomina, '
+                      'kto gotuje, zbiera alergie i listę, kto co przynosi.',
+                    ),
                   ),
-                ),
-                if (circles.invitations.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Zaproszenia')),
-                  for (final DinnerCircle c in circles.invitations)
-                    CircleInviteCard(
-                      circle: c,
-                      service: circles,
-                      me: PeerShareCodec.normalizeAddress(
-                        ref.read(eventServiceProvider).host.ownAddress(),
+                  if (circles.invitations.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Zaproszenia')),
+                    for (final DinnerCircle c in circles.invitations)
+                      CircleInviteCard(
+                        circle: c,
+                        service: circles,
+                        me: PeerShareCodec.normalizeAddress(
+                          ref.read(eventServiceProvider).host.ownAddress(),
+                        ),
+                        onJoined: () {
+                          if (context.mounted) {
+                            unawaited(CircleScreen.open(context, c.id));
+                          }
+                        },
                       ),
-                      onJoined: () {
-                        if (context.mounted) {
-                          unawaited(CircleScreen.open(context, c.id));
-                        }
-                      },
-                    ),
-                ],
-                if (circles.circles.isEmpty)
-                  ZenEmpty(
-                    icon: Icons.ramen_dining_rounded,
-                    tone: zenTone(zen, 3),
-                    title: t('Nie masz jeszcze kółka'),
-                    text: enoughFriends
-                        ? t(
-                            'Zaproś 3–7 znajomych (razem z Tobą 4–8 osób) '
-                            'i ustalcie dzień tygodnia.',
-                          )
-                        : t(
-                            'Kółko to 4–8 osób razem z Tobą, więc potrzebujesz '
-                            'co najmniej {min} znajomych. Masz {n}.',
-                            <String, Object?>{
-                              'min': kCircleMinMembers - 1,
-                              'n': friends,
-                            },
-                          ),
-                    action: FilledButton.icon(
-                      key: const Key('circles-empty-create'),
-                      onPressed: enoughFriends
-                          ? () => unawaited(_create())
-                          : null,
-                      icon: const Icon(Icons.add_rounded),
-                      label: Text(t('Załóż kółko')),
-                    ),
-                  )
-                else ...<Widget>[
-                  ZenSection(t('Twoje kółka')),
-                  for (final DinnerCircle c in circles.circles)
-                    ZenTile(
-                      icon: Icons.soup_kitchen_rounded,
+                  ],
+                  if (circles.circles.isEmpty)
+                    ZenEmpty(
+                      icon: Icons.ramen_dining_rounded,
                       tone: zenTone(zen, 3),
-                      title: c.name,
-                      subtitle: () {
-                        final List<(DateTime, CircleMember)> s = c.schedule(
-                          circles.now,
-                          count: 1,
-                        );
-                        return s.isEmpty
-                            ? ''
-                            : t('{date} · gotuje {name}', {
-                                'date': eventDate(
-                                  s.first.$1.millisecondsSinceEpoch,
-                                ),
-                                'name':
-                                    PeerShareCodec.addressesEqual(
-                                      s.first.$2.address,
-                                      ref
-                                          .read(eventServiceProvider)
-                                          .host
-                                          .ownAddress(),
-                                    )
-                                    ? t('Ty')
-                                    : s.first.$2.name,
-                              });
-                      }(),
-                      badge: circles.swapRequests[c.id] != null
-                          ? t('zamiana')
-                          : null,
-                      onTap: () => unawaited(CircleScreen.open(context, c.id)),
+                      title: t('Nie masz jeszcze kółka'),
+                      text: enoughFriends
+                          ? t(
+                              'Zaproś 3–7 znajomych (razem z Tobą 4–8 osób) '
+                              'i ustalcie dzień tygodnia.',
+                            )
+                          : t(
+                              'Kółko to 4–8 osób razem z Tobą, więc potrzebujesz '
+                              'co najmniej {min} znajomych. Masz {n}.',
+                              <String, Object?>{
+                                'min': kCircleMinMembers - 1,
+                                'n': friends,
+                              },
+                            ),
+                      action: FilledButton.icon(
+                        key: const Key('circles-empty-create'),
+                        onPressed: enoughFriends
+                            ? () => unawaited(_create())
+                            : null,
+                        icon: const Icon(Icons.add_rounded),
+                        label: Text(t('Załóż kółko')),
+                      ),
+                    )
+                  else ...<Widget>[
+                    ZenSection(t('Twoje kółka')),
+                    for (final DinnerCircle c in circles.circles)
+                      ZenTile(
+                        icon: Icons.soup_kitchen_rounded,
+                        tone: zenTone(zen, 3),
+                        title: c.name,
+                        subtitle: () {
+                          final List<(DateTime, CircleMember)> s = c.schedule(
+                            circles.now,
+                            count: 1,
+                          );
+                          return s.isEmpty
+                              ? ''
+                              : t('{date} · gotuje {name}', {
+                                  'date': eventDate(
+                                    s.first.$1.millisecondsSinceEpoch,
+                                  ),
+                                  'name':
+                                      PeerShareCodec.addressesEqual(
+                                        s.first.$2.address,
+                                        ref
+                                            .read(eventServiceProvider)
+                                            .host
+                                            .ownAddress(),
+                                      )
+                                      ? t('Ty')
+                                      : s.first.$2.name,
+                                });
+                        }(),
+                        badge: circles.swapRequests[c.id] != null
+                            ? t('zamiana')
+                            : null,
+                        onTap: () =>
+                            unawaited(CircleScreen.open(context, c.id)),
+                      ),
+                  ],
+                  // Food shared within reach (also by friends from outside these
+                  // circles, who have no circle screen here).
+                  if (food.openCount() > 0) ...<Widget>[
+                    ZenSection(t('Jedzenie do wzięcia')),
+                    ZenTile(
+                      key: const Key('circles-food'),
+                      icon: Icons.takeout_dining_rounded,
+                      tone: zenTone(zen, 3),
+                      title: t('Podziel się jedzeniem'),
+                      subtitle: tn(
+                        food.openCount(),
+                        one: '{n} oferta teraz',
+                        few: '{n} oferty teraz',
+                        many: '{n} ofert teraz',
+                      ),
+                      onTap: () => unawaited(FoodScreen.open(context)),
                     ),
+                  ],
                 ],
-                // Food shared within reach (also by friends from outside these
-                // circles, who have no circle screen here).
-                if (food.openCount() > 0) ...<Widget>[
-                  ZenSection(t('Jedzenie do wzięcia')),
-                  ZenTile(
-                    key: const Key('circles-food'),
-                    icon: Icons.takeout_dining_rounded,
-                    tone: zenTone(zen, 3),
-                    title: t('Podziel się jedzeniem'),
-                    subtitle: tn(
-                      food.openCount(),
-                      one: '{n} oferta teraz',
-                      few: '{n} oferty teraz',
-                      many: '{n} ofert teraz',
-                    ),
-                    onTap: () => unawaited(FoodScreen.open(context)),
-                  ),
-                ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -713,12 +717,15 @@ class CircleScreen extends ConsumerWidget {
           // Invited: what it is, and the answer.
           return Scaffold(
             appBar: AppBar(title: Text(c.name)),
-            body: SelectionArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                children: <Widget>[
-                  CircleInviteCard(circle: c, service: circles, me: me),
-                ],
+            body: SafeArea(
+              top: false,
+              child: SelectionArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  children: <Widget>[
+                    CircleInviteCard(circle: c, service: circles, me: me),
+                  ],
+                ),
               ),
             ),
           );
@@ -784,408 +791,420 @@ class CircleScreen extends ConsumerWidget {
               ),
             ],
           ),
-          body: SelectionArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                if (circles.swapRequests[c.id] != null)
-                  ZenCard(
-                    tone: zen.warning,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
+          body: SafeArea(
+            top: false,
+            child: SelectionArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  if (circles.swapRequests[c.id] != null)
+                    ZenCard(
+                      tone: zen.warning,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Icon(
+                                Icons.swap_horiz_rounded,
+                                color: zen.warning,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  t('{name} chce zamienić się kolejką', {
+                                    'name': nameOf(circles.swapRequests[c.id]!),
+                                  }),
+                                  style: TextStyle(
+                                    color: zen.textPrimary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: <Widget>[
+                              FilledButton(
+                                onPressed: () =>
+                                    unawaited(circles.acceptSwap(c.id)),
+                                child: Text(t('Zgoda')),
+                              ),
+                              OutlinedButton(
+                                onPressed: () => circles.declineSwap(c.id),
+                                child: Text(t('Nie')),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (c.small)
+                    ZenInfo(
+                      key: const Key('circle-small'),
+                      icon: Icons.group_add_rounded,
+                      tone: zen.warning,
+                      text: c.invited.isEmpty
+                          ? t(
+                              'W kółku jest mniej niż 4 osoby. Zaproś kogoś — '
+                              'menu u góry, „Zaproś do kółka”.',
+                            )
+                          : tn(
+                              c.invited.length,
+                              one: 'Czekamy na odpowiedź {n} osoby.',
+                              few: 'Czekamy na odpowiedź {n} osób.',
+                              many: 'Czekamy na odpowiedź {n} osób.',
+                            ),
+                    ),
+                  if (metDay != null && newPeople.isNotEmpty)
+                    CircleNewPeopleCard(
+                      people: newPeople,
+                      onMet: (String address, String name) =>
+                          _met(context, ref, c, address, name),
+                    ),
+                  if (how != null)
+                    CircleHowCard(circle: c, service: circles, day: how)
+                  else if (howDone.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        t('Ostatnio: {summary}', {'summary': howDone}),
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  if (schedule.isNotEmpty)
+                    CircleNextDinnerCard(
+                      circle: c,
+                      service: circles,
+                      at: schedule.first.$1,
+                      cook: schedule.first.$2,
+                      me: me,
+                    ),
+                  ZenSection(t('Kolejka')),
+                  if (schedule.isEmpty)
+                    ZenCard(
+                      child: Text(
+                        t('Brak zaplanowanych obiadów.'),
+                        style: TextStyle(color: zen.textSecondary),
+                      ),
+                    )
+                  else
+                    ZenCard(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        children: <Widget>[
+                          for (int i = 0; i < schedule.length; i++) ...<Widget>[
+                            if (i > 0)
+                              Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                                color: zen.outlineSoft,
+                              ),
+                            _ScheduleRow(
+                              at: schedule[i].$1,
+                              cook: schedule[i].$2.address == me
+                                  ? t('Ty')
+                                  : schedule[i].$2.name,
+                              mine: schedule[i].$2.address == me,
+                              first: i == 0,
+                              tone: tone,
+                              onSwap: schedule[i].$2.address != me
+                                  ? () => unawaited(
+                                      circles.askSwap(
+                                        c.id,
+                                        schedule[i].$2.address,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  _FoodEntry(circleId: c.id, tone: tone),
+                  if (next != null) ...<Widget>[
+                    ZenSection(
+                      t('Kto co przynosi · {date}', {
+                        'date': eventDate(next.millisecondsSinceEpoch),
+                      }),
+                      action: t('Dodaj'),
+                      onAction: () async {
+                        final String? item = await _ask(
+                          context,
+                          t('Co trzeba przynieść?'),
+                        );
+                        if (item != null) {
+                          await circles.addItem(c.id, next, item);
+                        }
+                      },
+                    ),
+                    if (items.isEmpty)
+                      ZenInfo(
+                        icon: Icons.shopping_basket_rounded,
+                        tone: tone,
+                        text: t(
+                          'Lista jest pusta. Dodaj, co trzeba przynieść — '
+                          'np. deser, wino, chleb.',
+                        ),
+                      )
+                    else
+                      ZenGroup(
+                        children: <Widget>[
+                          for (final MapEntry<String, String> i
+                              in items.entries)
+                            CheckboxListTile(
+                              value: i.value.isNotEmpty,
+                              title: Text(i.key),
+                              subtitle: Text(
+                                i.value.isEmpty
+                                    ? t('nikt jeszcze')
+                                    : i.value == me
+                                    ? t('Ty')
+                                    : nameOf(i.value),
+                              ),
+                              onChanged: i.value.isEmpty || i.value == me
+                                  ? (_) => unawaited(
+                                      circles.claimItem(c.id, next, i.key),
+                                    )
+                                  : null,
+                            ),
+                        ],
+                      ),
+                  ],
+                  if (settleDay != null)
+                    CircleSettleUp(
+                      circle: c,
+                      service: circles,
+                      day: settleDay,
+                      me: me,
+                      format: formatKitty,
+                      parse: parseKittyCents,
+                    ),
+                  ZenSection(t('Kółko otwarte')),
+                  ZenGroup(
+                    children: <Widget>[
+                      SwitchListTile(
+                        key: const Key('circle-open'),
+                        value: c.open,
+                        title: Text(t('Raz w miesiącu +1')),
+                        subtitle: Text(
+                          t(
+                            'Każdy może raz w miesiącu przyprowadzić jedną osobę '
+                            'spoza kółka — tak poznajecie nowych ludzi.',
+                          ),
+                        ),
+                        onChanged: (bool v) =>
+                            unawaited(circles.setOpen(c.id, v)),
+                      ),
+                    ],
+                  ),
+                  if (c.open && next != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    for (final (String by, CircleGuest g) in guestsNext)
+                      ZenTile(
+                        icon: Icons.person_add_alt_1_rounded,
+                        tone: tone,
+                        title: g.name,
+                        subtitle: t('Gość na {date} · ręczy {name}', {
+                          'date': eventDate(next.millisecondsSinceEpoch),
+                          'name': by == me ? t('Ty') : nameOf(by),
+                        }),
+                      ),
+                    if (myGuest != null)
+                      ZenCard(
+                        tone: tone,
+                        child: Row(
                           children: <Widget>[
-                            Icon(Icons.swap_horiz_rounded, color: zen.warning),
-                            const SizedBox(width: 10),
+                            ZenIconBadge(
+                              icon: Icons.event_seat_rounded,
+                              tone: tone,
+                              size: 38,
+                            ),
+                            const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                t('{name} chce zamienić się kolejką', {
-                                  'name': nameOf(circles.swapRequests[c.id]!),
-                                }),
+                                t(
+                                  'W tym miesiącu przyprowadzasz: {name} ({date})',
+                                  {
+                                    'name': myGuest.name,
+                                    'date': _dayKeyDate(myGuest.day),
+                                  },
+                                ),
                                 style: TextStyle(
                                   color: zen.textPrimary,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14.5,
+                                  fontSize: 14,
+                                  height: 1.35,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            FilledButton(
+                            TextButton(
                               onPressed: () =>
-                                  unawaited(circles.acceptSwap(c.id)),
-                              child: Text(t('Zgoda')),
-                            ),
-                            OutlinedButton(
-                              onPressed: () => circles.declineSwap(c.id),
-                              child: Text(t('Nie')),
+                                  unawaited(circles.cancelGuest(c.id, next)),
+                              child: Text(t('Odwołaj')),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                if (c.small)
-                  ZenInfo(
-                    key: const Key('circle-small'),
-                    icon: Icons.group_add_rounded,
-                    tone: zen.warning,
-                    text: c.invited.isEmpty
-                        ? t(
-                            'W kółku jest mniej niż 4 osoby. Zaproś kogoś — '
-                            'menu u góry, „Zaproś do kółka”.',
-                          )
-                        : tn(
-                            c.invited.length,
-                            one: 'Czekamy na odpowiedź {n} osoby.',
-                            few: 'Czekamy na odpowiedź {n} osób.',
-                            many: 'Czekamy na odpowiedź {n} osób.',
-                          ),
-                  ),
-                if (metDay != null && newPeople.isNotEmpty)
-                  CircleNewPeopleCard(
-                    people: newPeople,
-                    onMet: (String address, String name) =>
-                        _met(context, ref, c, address, name),
-                  ),
-                if (how != null)
-                  CircleHowCard(circle: c, service: circles, day: how)
-                else if (howDone.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      t('Ostatnio: {summary}', {'summary': howDone}),
-                      style: TextStyle(color: zen.textSecondary, fontSize: 13),
-                    ),
-                  ),
-                if (schedule.isNotEmpty)
-                  CircleNextDinnerCard(
-                    circle: c,
-                    service: circles,
-                    at: schedule.first.$1,
-                    cook: schedule.first.$2,
-                    me: me,
-                  ),
-                ZenSection(t('Kolejka')),
-                if (schedule.isEmpty)
-                  ZenCard(
-                    child: Text(
-                      t('Brak zaplanowanych obiadów.'),
-                      style: TextStyle(color: zen.textSecondary),
-                    ),
-                  )
-                else
-                  ZenCard(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Column(
-                      children: <Widget>[
-                        for (int i = 0; i < schedule.length; i++) ...<Widget>[
-                          if (i > 0)
-                            Divider(
-                              height: 1,
-                              indent: 16,
-                              endIndent: 16,
-                              color: zen.outlineSoft,
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: FilledButton.tonalIcon(
+                            key: const Key('circle-bring-guest'),
+                            onPressed: () =>
+                                unawaited(_bringGuest(context, ref, c, next)),
+                            icon: const Icon(Icons.person_add_alt_1_rounded),
+                            label: Text(
+                              t('Przyprowadzę kogoś · {date}', {
+                                'date': eventDate(next.millisecondsSinceEpoch),
+                              }),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          _ScheduleRow(
-                            at: schedule[i].$1,
-                            cook: schedule[i].$2.address == me
-                                ? t('Ty')
-                                : schedule[i].$2.name,
-                            mine: schedule[i].$2.address == me,
-                            first: i == 0,
-                            tone: tone,
-                            onSwap: schedule[i].$2.address != me
-                                ? () => unawaited(
-                                    circles.askSwap(
-                                      c.id,
-                                      schedule[i].$2.address,
-                                    ),
-                                  )
-                                : null,
                           ),
-                        ],
-                      ],
-                    ),
-                  ),
-                _FoodEntry(circleId: c.id, tone: tone),
-                if (next != null) ...<Widget>[
+                        ),
+                      ),
+                  ],
                   ZenSection(
-                    t('Kto co przynosi · {date}', {
-                      'date': eventDate(next.millisecondsSinceEpoch),
-                    }),
-                    action: t('Dodaj'),
+                    t('Wspólna kasa'),
+                    action: t('Dorzuć'),
                     onAction: () async {
-                      final String? item = await _ask(
+                      final String? v = await _ask(
                         context,
-                        t('Co trzeba przynieść?'),
+                        t('Ile dorzucasz do kasy (zł)?'),
                       );
-                      if (item != null) {
-                        await circles.addItem(c.id, next, item);
+                      final int? cents = parseKittyCents(v);
+                      if (cents == null) {
+                        return;
                       }
+                      await circles.addToKitty(c.id, cents);
                     },
                   ),
-                  if (items.isEmpty)
+                  if (c.kitty.isEmpty)
                     ZenInfo(
-                      icon: Icons.shopping_basket_rounded,
+                      icon: Icons.savings_rounded,
                       tone: tone,
                       text: t(
-                        'Lista jest pusta. Dodaj, co trzeba przynieść — '
-                        'np. deser, wino, chleb.',
+                        'Kasa na składniki jest pusta. Wpisz, ile dorzuciłeś '
+                        'na zakupy — wszyscy widzą, kto ile.',
                       ),
                     )
-                  else
+                  else ...<Widget>[
+                    ZenCard(
+                      key: const Key('circle-kitty'),
+                      tone: tone,
+                      child: Text(
+                        t('Razem {total} zł · po {share} zł na osobę', {
+                          'total': formatKitty(c.kittyTotal),
+                          'share': formatKitty(c.kittyShare),
+                        }),
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                    ),
                     ZenGroup(
                       children: <Widget>[
-                        for (final MapEntry<String, String> i in items.entries)
-                          CheckboxListTile(
-                            value: i.value.isNotEmpty,
-                            title: Text(i.key),
-                            subtitle: Text(
-                              i.value.isEmpty
-                                  ? t('nikt jeszcze')
-                                  : i.value == me
-                                  ? t('Ty')
-                                  : nameOf(i.value),
+                        for (final CircleMember m in c.members)
+                          ListTile(
+                            title: Text(
+                              m.address == me ? t('Ty') : m.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            onChanged: i.value.isEmpty || i.value == me
-                                ? (_) => unawaited(
-                                    circles.claimItem(c.id, next, i.key),
-                                  )
-                                : null,
+                            trailing: Text(
+                              t('{n} zł', {
+                                'n': formatKitty(c.paidBy(m.address)),
+                              }),
+                            ),
                           ),
                       ],
                     ),
-                ],
-                if (settleDay != null)
-                  CircleSettleUp(
-                    circle: c,
-                    service: circles,
-                    day: settleDay,
-                    me: me,
-                    format: formatKitty,
-                    parse: parseKittyCents,
-                  ),
-                ZenSection(t('Kółko otwarte')),
-                ZenGroup(
-                  children: <Widget>[
-                    SwitchListTile(
-                      key: const Key('circle-open'),
-                      value: c.open,
-                      title: Text(t('Raz w miesiącu +1')),
-                      subtitle: Text(
-                        t(
-                          'Każdy może raz w miesiącu przyprowadzić jedną osobę '
-                          'spoza kółka — tak poznajecie nowych ludzi.',
-                        ),
-                      ),
-                      onChanged: (bool v) =>
-                          unawaited(circles.setOpen(c.id, v)),
-                    ),
                   ],
-                ),
-                if (c.open && next != null) ...<Widget>[
-                  const SizedBox(height: 6),
-                  for (final (String by, CircleGuest g) in guestsNext)
-                    ZenTile(
-                      icon: Icons.person_add_alt_1_rounded,
-                      tone: tone,
-                      title: g.name,
-                      subtitle: t('Gość na {date} · ręczy {name}', {
-                        'date': eventDate(next.millisecondsSinceEpoch),
-                        'name': by == me ? t('Ty') : nameOf(by),
-                      }),
-                    ),
-                  if (myGuest != null)
-                    ZenCard(
-                      tone: tone,
-                      child: Row(
-                        children: <Widget>[
-                          ZenIconBadge(
-                            icon: Icons.event_seat_rounded,
-                            tone: tone,
-                            size: 38,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              t(
-                                'W tym miesiącu przyprowadzasz: {name} ({date})',
-                                {
-                                  'name': myGuest.name,
-                                  'date': _dayKeyDate(myGuest.day),
-                                },
-                              ),
-                              style: TextStyle(
-                                color: zen.textPrimary,
-                                fontSize: 14,
-                                height: 1.35,
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () =>
-                                unawaited(circles.cancelGuest(c.id, next)),
-                            child: Text(t('Odwołaj')),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: FilledButton.tonalIcon(
-                          key: const Key('circle-bring-guest'),
-                          onPressed: () =>
-                              unawaited(_bringGuest(context, ref, c, next)),
-                          icon: const Icon(Icons.person_add_alt_1_rounded),
-                          label: Text(
-                            t('Przyprowadzę kogoś · {date}', {
-                              'date': eventDate(next.millisecondsSinceEpoch),
-                            }),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-                ZenSection(
-                  t('Wspólna kasa'),
-                  action: t('Dorzuć'),
-                  onAction: () async {
-                    final String? v = await _ask(
-                      context,
-                      t('Ile dorzucasz do kasy (zł)?'),
-                    );
-                    final int? cents = parseKittyCents(v);
-                    if (cents == null) {
-                      return;
-                    }
-                    await circles.addToKitty(c.id, cents);
-                  },
-                ),
-                if (c.kitty.isEmpty)
-                  ZenInfo(
-                    icon: Icons.savings_rounded,
-                    tone: tone,
-                    text: t(
-                      'Kasa na składniki jest pusta. Wpisz, ile dorzuciłeś '
-                      'na zakupy — wszyscy widzą, kto ile.',
-                    ),
-                  )
-                else ...<Widget>[
-                  ZenCard(
-                    key: const Key('circle-kitty'),
-                    tone: tone,
-                    child: Text(
-                      t('Razem {total} zł · po {share} zł na osobę', {
-                        'total': formatKitty(c.kittyTotal),
-                        'share': formatKitty(c.kittyShare),
-                      }),
-                      style: TextStyle(
-                        color: zen.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
-                      ),
-                    ),
-                  ),
+                  ZenSection(t('Preferencje i alergie')),
                   ZenGroup(
                     children: <Widget>[
                       for (final CircleMember m in c.members)
                         ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: tone.withValues(alpha: 0.18),
+                            foregroundColor: tone,
+                            child: Text(
+                              _initial(m.address == me ? t('Ty') : m.name),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                           title: Text(
                             m.address == me ? t('Ty') : m.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          trailing: Text(
-                            t('{n} zł', {
-                              'n': formatKitty(c.paidBy(m.address)),
-                            }),
+                          subtitle: Text(
+                            <String>[
+                              for (final CircleDiet d
+                                  in c.diets[m.address] ?? const <CircleDiet>{})
+                                d.label,
+                              if ((c.prefs[m.address] ?? '').isNotEmpty)
+                                c.prefs[m.address]!,
+                            ].join(' · ').ifEmpty('—'),
                           ),
+                          trailing: m.address == me
+                              ? IconButton(
+                                  key: const Key('circle-prefs-edit'),
+                                  tooltip: t('Edytuj'),
+                                  icon: const Icon(Icons.edit_rounded),
+                                  onPressed: () async {
+                                    final Set<CircleDiet>? diets =
+                                        await showCircleDietsDialog(
+                                          context,
+                                          c.diets[me] ?? const <CircleDiet>{},
+                                        );
+                                    if (diets != null) {
+                                      await circles.setMyDiets(c.id, diets);
+                                    }
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    final String? prefs = await _ask(
+                                      context,
+                                      t('Twoje preferencje i alergie'),
+                                      initial: c.prefs[me] ?? '',
+                                    );
+                                    if (prefs != null) {
+                                      await circles.setMyPrefs(c.id, prefs);
+                                    }
+                                  },
+                                )
+                              : null,
+                        ),
+                      for (final MapEntry<String, CircleInvite> i
+                          in c.invited.entries)
+                        ListTile(
+                          leading: const Icon(Icons.hourglass_top_rounded),
+                          title: Text(
+                            i.value.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(t('zaproszenie bez odpowiedzi')),
                         ),
                     ],
                   ),
                 ],
-                ZenSection(t('Preferencje i alergie')),
-                ZenGroup(
-                  children: <Widget>[
-                    for (final CircleMember m in c.members)
-                      ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: tone.withValues(alpha: 0.18),
-                          foregroundColor: tone,
-                          child: Text(
-                            _initial(m.address == me ? t('Ty') : m.name),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        title: Text(
-                          m.address == me ? t('Ty') : m.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          <String>[
-                            for (final CircleDiet d
-                                in c.diets[m.address] ?? const <CircleDiet>{})
-                              d.label,
-                            if ((c.prefs[m.address] ?? '').isNotEmpty)
-                              c.prefs[m.address]!,
-                          ].join(' · ').ifEmpty('—'),
-                        ),
-                        trailing: m.address == me
-                            ? IconButton(
-                                key: const Key('circle-prefs-edit'),
-                                tooltip: t('Edytuj'),
-                                icon: const Icon(Icons.edit_rounded),
-                                onPressed: () async {
-                                  final Set<CircleDiet>? diets =
-                                      await showCircleDietsDialog(
-                                        context,
-                                        c.diets[me] ?? const <CircleDiet>{},
-                                      );
-                                  if (diets != null) {
-                                    await circles.setMyDiets(c.id, diets);
-                                  }
-                                  if (!context.mounted) {
-                                    return;
-                                  }
-                                  final String? prefs = await _ask(
-                                    context,
-                                    t('Twoje preferencje i alergie'),
-                                    initial: c.prefs[me] ?? '',
-                                  );
-                                  if (prefs != null) {
-                                    await circles.setMyPrefs(c.id, prefs);
-                                  }
-                                },
-                              )
-                            : null,
-                      ),
-                    for (final MapEntry<String, CircleInvite> i
-                        in c.invited.entries)
-                      ListTile(
-                        leading: const Icon(Icons.hourglass_top_rounded),
-                        title: Text(
-                          i.value.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(t('zaproszenie bez odpowiedzi')),
-                      ),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
         );

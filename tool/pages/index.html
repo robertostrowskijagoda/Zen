@@ -6,6 +6,8 @@
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <title>Zen — invitation</title>
+<link rel="icon" type="image/png" href="zen-icon.png">
+<link rel="apple-touch-icon" href="zen-icon.png">
 <style>
   :root {
     --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
@@ -30,8 +32,7 @@
   }
   .logo {
     width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff; font-weight: 800; font-size: 32px; line-height: 64px;
+    display: block; object-fit: cover; box-shadow: 0 0 0 1px var(--line);
   }
   h1 { font-size: 22px; margin: 4px 0 6px; }
   p { color: var(--muted); margin: 6px 0 14px; }
@@ -59,12 +60,17 @@
   .small a { color: var(--accent); }
   .other { margin: 6px 0 0; }
   .hidden { display: none; }
+  .langpick { margin-top: 18px; }
+  .langpick select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px 10px; font-size: 14px; font-family: inherit;
+  }
 </style>
 </head>
 <body>
 <main>
   <a id="open" class="btn primary open" href="#">Open in Zen</a>
-  <div class="logo">Z</div>
+  <img class="logo" src="zen-icon.png" width="64" height="64" alt="Zen">
   <h1 id="title">Zen</h1>
   <p id="lead">A network of people who know each other — no servers, ads or algorithm.</p>
   <div id="code" class="code hidden"></div>
@@ -75,11 +81,13 @@
     <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk">armeabi-v7a</a> ·
     <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk">x86_64</a></p>
   <a id="windows" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip">⬇ Download for Windows</a>
+  <p id="desktop" class="small other"><a href="install/#macos">macOS</a> &middot; <a href="install/#linux">Linux</a></p>
   <p id="ios" class="small hidden"></p>
   <p id="help" class="small"></p>
   <p id="support" class="small"></p>
   <p id="community" class="small"><a href="https://discord.gg/g4vHvpKV37">💬 Discord</a></p>
   <p class="small"><a href="about/">What is Zen?</a></p>
+  <p class="langpick"><select id="langSel" aria-label="Language"></select></p>
 </main>
 <script>
 (function () {
@@ -124,12 +132,33 @@
   var RTL = { ar: true };
   var ALIASES = { "in": "id", "iw": "he", "nb": "en", "no": "en" };
 
+  // Names of the languages in the picker, each in its own language.
+  var NAMES = {
+    en: "English", pl: "Polski", id: "Bahasa Indonesia", cs: "Čeština",
+    de: "Deutsch", es: "Español", fr: "Français", it: "Italiano",
+    hu: "Magyar", nl: "Nederlands", pt: "Português", ro: "Română",
+    vi: "Tiếng Việt", tr: "Türkçe", ru: "Русский", uk: "Українська",
+    ar: "العربية", hi: "हिन्दी", zh: "中文", ja: "日本語", ko: "한국어"
+  };
+  var STORE_KEY = "zen-lang";
+
   var $ = function (id) { return document.getElementById(id); };
+
+  // The visitor's manual choice (the storage may be blocked: then it is
+  // simply not remembered).
+  function readSaved() {
+    try { return localStorage.getItem(STORE_KEY) || ""; } catch (e) { return ""; }
+  }
+  function saveLang(l) {
+    try { localStorage.setItem(STORE_KEY, l); } catch (e) { /* not remembered */ }
+  }
 
   function pickLanguage() {
     var wanted = [];
     var m = /(?:^|[?&])lang=([A-Za-z-]+)/.exec(location.search);
     if (m) { wanted.push(m[1]); }
+    var saved = readSaved();
+    if (saved) { wanted.push(saved); }
     var list = navigator.languages && navigator.languages.length
       ? navigator.languages : [navigator.language || "en"];
     for (var i = 0; i < list.length; i++) { wanted.push(list[i]); }
@@ -142,9 +171,6 @@
   }
   var lang = pickLanguage();
   var tx = TEXTS[lang];
-  document.documentElement.lang = lang;
-  document.documentElement.dir = RTL[lang] ? "rtl" : "ltr";
-  document.title = tx.title;
 
   // Plain text with an optional [link] part; built from nodes, never HTML.
   function setLinked(el, text, href) {
@@ -181,16 +207,39 @@
   if (!/^[0-9A-HJKMNP-TV-Z]{25}$/.test(code)) { code = ""; }
   var noApp = /(^|[?&])noapp=1(&|$)/.test(location.search);
 
-  $("lead").textContent = tx.lead;
-  $("open").textContent = tx.open;
-  $("copy").textContent = tx.copy;
-  $("android").textContent = tx.android;
-  $("otherPhones").textContent = tx.otherPhones || TEXTS.en.otherPhones;
-  $("windows").textContent = tx.windows;
-  setLinked($("ios"), tx.ios, LINKS.ios);
-  setLinked($("help"), tx.help, LINKS.help);
-  setLinked($("support"), tx.support, LINKS.support);
-  setNoApp($("noapp"));
+  // All translated texts; run again when the visitor picks another language.
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = RTL[lang] ? "rtl" : "ltr";
+    document.title = tx.title;
+    $("lead").textContent = code ? tx.invLead : tx.lead;
+    if (code) { $("title").textContent = tx.invTitle; }
+    $("open").textContent = tx.open;
+    $("copy").textContent = tx.copy;
+    $("android").textContent = tx.android;
+    $("otherPhones").textContent = tx.otherPhones || TEXTS.en.otherPhones;
+    $("windows").textContent = tx.windows;
+    setLinked($("ios"), tx.ios, LINKS.ios);
+    setLinked($("help"), tx.help, LINKS.help);
+    setLinked($("support"), tx.support, LINKS.support);
+    setNoApp($("noapp"));
+    $("langSel").value = lang;
+  }
+
+  var picker = $("langSel");
+  Object.keys(TEXTS).forEach(function (k) {
+    var o = document.createElement("option");
+    o.value = k;
+    o.textContent = NAMES[k] || k;
+    picker.appendChild(o);
+  });
+  picker.addEventListener("change", function () {
+    if (!Object.prototype.hasOwnProperty.call(TEXTS, picker.value)) { return; }
+    lang = picker.value;
+    tx = TEXTS[lang];
+    saveLang(lang);
+    applyLanguage();
+  });
 
   var target = code ? "c/" + code : "inbox";
   var openUrl;
@@ -203,9 +252,9 @@
   }
   $("open").href = openUrl;
 
+  applyLanguage();
+
   if (code) {
-    $("title").textContent = tx.invTitle;
-    $("lead").textContent = tx.invLead;
     $("code").textContent = code.match(/.{1,5}/g).join("-");
     $("code").classList.remove("hidden");
     $("copy").classList.remove("hidden");
@@ -223,8 +272,10 @@
     $("android").classList.add("hidden");
     $("otherAndroid").classList.add("hidden");
     $("windows").classList.add("hidden");
+    $("desktop").classList.add("hidden");
   } else if (android) {
     $("windows").classList.add("hidden");
+    $("desktop").classList.add("hidden");
   }
   // Straight into the app when it is there (Android: otherwise back here
   // with "noapp", where the downloads are).

@@ -160,7 +160,12 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     final ChatMessage? lastMessage = thread.isEmpty ? null : thread.last;
     final String nextPreview = lastMessage == null
         ? ''
-        : chatMessageText(lastMessage);
+        : chatPreviewLine(
+            chatMessageText(lastMessage),
+            type: lastMessage.type,
+            fileName: lastMessage.fileName,
+            mimeType: lastMessage.mimeType,
+          );
     final String nextLabel = lastMessage == null
         ? ''
         : _activityLabelForMillis(lastMessage.sentAtMillis);

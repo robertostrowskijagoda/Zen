@@ -131,127 +131,134 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     return Scaffold(
       key: const Key('updates-screen'),
       appBar: AppBar(title: Text(t('Aktualizacje i Podaj dalej'))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          _versionCard(zen),
-          // The newest release on GitHub (not in the store build).
-          if (!isStoreBuild) const GithubUpdateCard(),
-          ZenSection(t('Aktualizacje'), top: 16),
-          // A store build is updated by its store.
-          if (isStoreBuild)
-            ZenInfo(
-              key: const Key('updates-store'),
-              icon: Icons.storefront_rounded,
-              title: t('Aktualizacje ze sklepu'),
-              text: t('Tę wersję Zen aktualizuje sklep, z którego ją masz.'),
-            )
-          else if (service == null)
-            ZenCard(
-              child: Row(
-                children: <Widget>[
-                  SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            _versionCard(zen),
+            // The newest release on GitHub (not in the store build).
+            if (!isStoreBuild) const GithubUpdateCard(),
+            ZenSection(t('Aktualizacje'), top: 16),
+            // A store build is updated by its store.
+            if (isStoreBuild)
+              ZenInfo(
+                key: const Key('updates-store'),
+                icon: Icons.storefront_rounded,
+                title: t('Aktualizacje ze sklepu'),
+                text: t('Tę wersję Zen aktualizuje sklep, z którego ją masz.'),
+              )
+            else if (service == null)
+              ZenCard(
+                child: Row(
+                  children: <Widget>[
+                    SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: zen.accent,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        t('Konto się uruchamia…'),
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ListenableBuilder(
+                listenable: service,
+                builder: (BuildContext context, Widget? _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _statusCard(context, service),
+                    ..._integrity(context, service),
+                  ],
+                ),
+              ),
+            if (_message != null)
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: BoxDecoration(
+                  color: zen.accent.withValues(alpha: 0.09),
+                  borderRadius: context.zenRadius(18),
+                  border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Icon(
+                      Icons.info_outline_rounded,
                       color: zen.accent,
+                      size: 20,
                     ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      t('Konto się uruchamia…'),
-                      style: TextStyle(
-                        color: zen.textSecondary,
-                        fontSize: 14.5,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _message!,
+                        key: const Key('updates-message'),
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            )
-          else
-            ListenableBuilder(
-              listenable: service,
-              builder: (BuildContext context, Widget? _) => Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  _statusCard(context, service),
-                  ..._integrity(context, service),
-                ],
-              ),
-            ),
-          if (_message != null)
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 6),
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: zen.accent.withValues(alpha: 0.09),
-                borderRadius: context.zenRadius(18),
-                border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Icon(Icons.info_outline_rounded, color: zen.accent, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _message!,
-                      key: const Key('updates-message'),
-                      style: TextStyle(
-                        color: zen.textPrimary,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (service != null) ...<Widget>[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              key: const Key('updates-import'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              onPressed: _busy ? null : () => unawaited(_importFile(service)),
-              icon: const Icon(Icons.file_open_rounded),
-              label: Text(t('Wczytaj aktualizację z pliku')),
-            ),
-          ],
-          const SizedBox(height: 8),
-          if (!isStoreBuild)
-            ZenInfo(
-              icon: Icons.verified_user_outlined,
-              title: t('Bez sklepu'),
-              text: t(
-                'Nowe wersje przychodzą z GitHuba albo od znajomych, bez '
-                'sklepu. Zen nie instaluje niczego bez Twojej zgody.',
-              ),
-            ),
-          ZenSection(t('Podaj dalej'), top: 24),
-          ZenHero(
-            title: t('Daj Zen komuś obok'),
-            icon: Icons.volunteer_activism_rounded,
-            tone: zen.tone(ZenTone.people),
-            text: isStoreBuild
-                ? t('Wyślij znajomemu link do Zen.')
-                : t(
-                    'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
-                    'hotspot, z komputera także kablem USB.',
-                  ),
-            actions: <Widget>[
-              FilledButton.icon(
-                key: const Key('updates-share-app'),
-                onPressed: () => unawaited(ShareAppScreen.open(context)),
-                icon: const Icon(Icons.share_rounded),
-                label: Text(t('Podaj dalej')),
+            if (service != null) ...<Widget>[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                key: const Key('updates-import'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: _busy ? null : () => unawaited(_importFile(service)),
+                icon: const Icon(Icons.file_open_rounded),
+                label: Text(t('Wczytaj aktualizację z pliku')),
               ),
             ],
-          ),
-        ],
+            const SizedBox(height: 8),
+            if (!isStoreBuild)
+              ZenInfo(
+                icon: Icons.verified_user_outlined,
+                title: t('Bez sklepu'),
+                text: t(
+                  'Nowe wersje przychodzą z GitHuba albo od znajomych, bez '
+                  'sklepu. Zen nie instaluje niczego bez Twojej zgody.',
+                ),
+              ),
+            ZenSection(t('Podaj dalej'), top: 24),
+            ZenHero(
+              title: t('Daj Zen komuś obok'),
+              icon: Icons.volunteer_activism_rounded,
+              tone: zen.tone(ZenTone.people),
+              text: isStoreBuild
+                  ? t('Wyślij znajomemu link do Zen.')
+                  : t(
+                      'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
+                      'hotspot, z komputera także kablem USB.',
+                    ),
+              actions: <Widget>[
+                FilledButton.icon(
+                  key: const Key('updates-share-app'),
+                  onPressed: () => unawaited(ShareAppScreen.open(context)),
+                  icon: const Icon(Icons.share_rounded),
+                  label: Text(t('Podaj dalej')),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

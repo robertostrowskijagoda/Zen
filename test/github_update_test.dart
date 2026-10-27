@@ -4,6 +4,7 @@ import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -15,6 +16,7 @@ import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
 import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/release.dart';
+import 'package:zen/src/features/update/update_service.dart';
 
 Map<String, Object?> _releaseJson(
   String tag, {
@@ -267,11 +269,13 @@ void main() {
       bool internet = true,
       Future<String> Function(Uri uri)? fetchSums,
       GithubDownloader? download,
+      Future<String?> Function()? beforeDownload,
       _FakeInstaller? installer,
       List<String> releaseKeys = const <String>[],
     }) {
       final GithubUpdateService s = GithubUpdateService(
         installer: installer ?? _FakeInstaller(dir),
+        beforeDownload: beforeDownload,
         releaseKeys: releaseKeys,
         fetchJson: fetchJson,
         fetchSums: fetchSums ?? (Uri uri) async => '',
@@ -540,6 +544,73 @@ void main() {
       expect(File('${dir.path}/Zen-arm64-v8a.apk').existsSync(), isFalse);
     });
 
+    test('update: the install permission is asked for before the download, '
+        'and granted it goes on', () async {
+      final List<int> bytes = utf8.encode('hello');
+      final List<String> order = <String>[];
+      final _FakeInstaller installer = _FakeInstaller(dir);
+      final GithubUpdateService s = service(
+        installer: installer,
+        fetchJson: (Uri uri) async => _releaseJson('v1.12.0'),
+        beforeDownload: () async {
+          order.add('permission');
+          return null;
+        },
+        download:
+            (
+              Uri uri,
+              File target, {
+              required int maxBytes,
+              void Function(int received)? onProgress,
+            }) async {
+              order.add('download');
+              await target.writeAsBytes(bytes);
+            },
+        fetchSums: (Uri uri) async =>
+            '${sha256Hex(bytes)}  Zen-arm64-v8a.apk\n',
+      );
+      await s.check();
+      await s.update();
+      expect(order, <String>['permission', 'download']);
+      expect(s.installState, GithubInstallState.done);
+      expect(installer.installed, hasLength(1));
+    });
+
+    test('update: without the install permission nothing is downloaded '
+        'and the person is told', () async {
+      int downloads = 0;
+      int asked = 0;
+      final _FakeInstaller installer = _FakeInstaller(dir);
+      final GithubUpdateService s = service(
+        installer: installer,
+        fetchJson: (Uri uri) async => _releaseJson('v1.12.0'),
+        beforeDownload: () async {
+          asked++;
+          return 'Zezwól Zen na instalowanie aplikacji';
+        },
+        download:
+            (
+              Uri uri,
+              File target, {
+              required int maxBytes,
+              void Function(int received)? onProgress,
+            }) async {
+              downloads++;
+            },
+      );
+      await s.check();
+      await s.update();
+      expect(asked, 1);
+      expect(downloads, 0);
+      expect(installer.installed, isEmpty);
+      expect(s.installState, GithubInstallState.failed);
+      expect(s.installMessage, 'Zezwól Zen na instalowanie aplikacji');
+      expect(s.installing, isFalse);
+      // Allowed later: the next press downloads.
+      await s.update();
+      expect(asked, 2);
+    });
+
     test('without release keys the author signature is not asked for '
         '(and the build says so)', () {
       final GithubUpdateService s = service(
@@ -693,6 +764,47 @@ void main() {
       await s.check();
       expect(s.showNewerBanner, isTrue);
       expect(s.canInstall, isFalse);
+    });
+  });
+
+  group('the install permission (Android channel)', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const MethodChannel channel = MethodChannel('zen/app_update');
+    final List<String> calls = <String>[];
+
+    void answer(bool allowed) {
+      calls.clear();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall call) async {
+            calls.add(call.method);
+            return call.method == 'canInstall' ? allowed : null;
+          });
+    }
+
+    tearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+
+    test('allowed: nothing is opened and nothing is said', () async {
+      answer(true);
+      expect(await requestInstallPermission(), isNull);
+      expect(calls, <String>['canInstall']);
+    });
+
+    test('not allowed: the settings open and the person is told', () async {
+      answer(false);
+      expect(await requestInstallPermission(), contains('Zezwól Zen'));
+      expect(calls, <String>['canInstall', 'openInstallSettings']);
+    });
+
+    test('no plugin: said, so nothing would be downloaded', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      expect(
+        await requestInstallPermission(),
+        'Instalowanie nie działa na tym urządzeniu.',
+      );
     });
   });
 

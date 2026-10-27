@@ -6,7 +6,8 @@
 <meta name="referrer" content="no-referrer">
 <title>Install Zen</title>
 <meta name="description" content="Install Zen on Android, iPhone, Windows, macOS or Linux.">
-<link rel="icon" href="../zen-icon.png">
+<link rel="icon" type="image/png" href="../zen-icon.png">
+<link rel="apple-touch-icon" href="../zen-icon.png">
 <style>
   :root {
     --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
@@ -30,8 +31,7 @@
   header { text-align: center; margin: 8px 0 18px; }
   .logo {
     width: 64px; height: 64px; margin: 0 auto 10px; border-radius: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff; font-weight: 800; font-size: 32px; line-height: 64px;
+    display: block; object-fit: cover; box-shadow: 0 0 0 1px var(--line);
   }
   h1 { font-size: 24px; margin: 4px 0; }
   h2 { font-size: 19px; margin: 0 0 4px; }
@@ -100,7 +100,7 @@
 </div>
 <main>
   <header>
-    <div class="logo">Z</div>
+    <img class="logo" src="../zen-icon.png" width="64" height="64" alt="Zen">
     <h1 id="title"></h1>
     <p id="lead" class="muted"></p>
     <p id="version" class="muted"></p>
@@ -407,18 +407,31 @@
     return "android";
   }
   function detectLang() {
-    var asked = new URLSearchParams(location.search).get("lang");
-    if (asked && TEXTS[asked]) { return asked; }
-    var langs = navigator.languages || [navigator.language || "en"];
+    var has = function (l) { return Object.prototype.hasOwnProperty.call(TEXTS, l); };
+    // "?lang=xx", then the visitor's earlier choice (the storage may be
+    // blocked), then the browser's languages; English otherwise.
+    var asked = String(new URLSearchParams(location.search).get("lang") || "")
+      .slice(0, 2).toLowerCase();
+    if (has(asked)) { return asked; }
+    try {
+      var saved = localStorage.getItem("zen-lang");
+      if (saved && has(saved)) { return saved; }
+    } catch (e) { /* not remembered */ }
+    var langs = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language || "en"];
     for (var i = 0; i < langs.length; i++) {
       var code = String(langs[i]).slice(0, 2).toLowerCase();
-      if (TEXTS[code]) { return code; }
+      if (has(code)) { return code; }
     }
     return "en";
   }
 
   Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
-    b.addEventListener("click", function () { lang = b.getAttribute("data-lang"); draw(); });
+    b.addEventListener("click", function () {
+      lang = b.getAttribute("data-lang");
+      try { localStorage.setItem("zen-lang", lang); } catch (e) { /* not remembered */ }
+      draw();
+    });
   });
   window.addEventListener("hashchange", function () { system = detectSystem(); draw(); });
   system = detectSystem();

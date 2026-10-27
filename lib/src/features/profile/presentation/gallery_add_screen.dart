@@ -214,143 +214,146 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
             ),
           ],
         ),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            ZenHero(
-              title: t('Twoja galeria'),
-              icon: Icons.photo_library_rounded,
-              tone: zenTone(zen, 2),
-              text: t(
-                'Zdjęcia i filmy w galerii profilu. Nie trafiają na '
-                'tablicę jako post. Widoczność możesz potem zmienić, '
-                'przytrzymując zdjęcie.',
-              ),
-            ),
-            ZenSection(t('Kto zobaczy')),
-            Wrap(
-              key: const Key('gallery-audience'),
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final Audience a in Audience.values)
-                  ChoiceChip(
-                    key: Key('gallery-audience-${a.name}'),
-                    showCheckmark: false,
-                    avatar: Icon(kAudienceIcons[a], size: 18),
-                    label: Text(kGalleryAudienceLabels[a]!),
-                    selected: _audience == a,
-                    onSelected: _saving
-                        ? null
-                        : (bool _) => setState(() => _audience = a),
-                  ),
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-              child: Text(
-                kGalleryAudienceHints[_audience]!,
-                key: const Key('gallery-audience-hint'),
-                style: TextStyle(color: zen.textSecondary, fontSize: 13),
-              ),
-            ),
-            ZenSection(t('Co dodać')),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                FilledButton.tonalIcon(
-                  key: const Key('gallery-pick-photos'),
-                  onPressed: _saving ? null : () => unawaited(_addPhotos()),
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(t('Zdjęcia')),
-                ),
-                FilledButton.tonalIcon(
-                  key: const Key('gallery-pick-video'),
-                  onPressed: _saving ? null : () => unawaited(_addVideo()),
-                  icon: const Icon(Icons.video_library_outlined),
-                  label: Text(t('Film')),
-                ),
-              ],
-            ),
-            if (_error != null)
-              ZenInfo(
-                icon: Icons.error_outline_rounded,
-                tone: zen.danger,
-                text: _error!,
-              ),
-            const SizedBox(height: 16),
-            if (_media.isEmpty && _processing == 0)
-              ZenEmpty(
-                icon: Icons.add_photo_alternate_outlined,
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              ZenHero(
+                title: t('Twoja galeria'),
+                icon: Icons.photo_library_rounded,
                 tone: zenTone(zen, 2),
-                title: t('Nic jeszcze nie wybrano'),
                 text: t(
-                  'Wybierz zdjęcia albo film — zobaczysz je tutaj, '
-                  'zanim je dodasz.',
+                  'Zdjęcia i filmy w galerii profilu. Nie trafiają na '
+                  'tablicę jako post. Widoczność możesz potem zmienić, '
+                  'przytrzymując zdjęcie.',
                 ),
-              )
-            else
-              GridView.count(
-                crossAxisCount: 3,
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
+              ),
+              ZenSection(t('Kto zobaczy')),
+              Wrap(
+                key: const Key('gallery-audience'),
+                spacing: 8,
+                runSpacing: 8,
                 children: <Widget>[
-                  for (int i = 0; i < _media.length; i++)
-                    Stack(
-                      fit: StackFit.expand,
-                      children: <Widget>[
-                        ClipRRect(
-                          borderRadius: context.zenRadius(16),
-                          child: _media[i].isVideo
-                              ? ColoredBox(
-                                  color: zen.surfaceSunk,
-                                  child: Icon(
-                                    Icons.play_circle_outline_rounded,
-                                    size: 40,
-                                    color: zen.textSecondary,
-                                  ),
-                                )
-                              : _media[i].mime == 'image/gif'
-                              ? ZenAnimatedImage(bytes: _media[i].bytes)
-                              : Image.memory(
-                                  _media[i].bytes,
-                                  fit: BoxFit.cover,
-                                ),
-                        ),
-                        PositionedDirectional(
-                          top: 2,
-                          end: 2,
-                          child: IconButton.filledTonal(
-                            key: Key('gallery-remove-$i'),
-                            visualDensity: VisualDensity.compact,
-                            tooltip: t('Usuń'),
-                            onPressed: _saving
-                                ? null
-                                : () => setState(() => _media.removeAt(i)),
-                            icon: const Icon(Icons.close_rounded, size: 16),
-                          ),
-                        ),
-                      ],
-                    ),
-                  for (int i = 0; i < _processing; i++)
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: zen.surfaceSunk,
-                        borderRadius: context.zenRadius(16),
-                      ),
-                      child: const Center(
-                        child: SizedBox.square(
-                          dimension: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
+                  for (final Audience a in Audience.values)
+                    ChoiceChip(
+                      key: Key('gallery-audience-${a.name}'),
+                      showCheckmark: false,
+                      avatar: Icon(kAudienceIcons[a], size: 18),
+                      label: Text(kGalleryAudienceLabels[a]!),
+                      selected: _audience == a,
+                      onSelected: _saving
+                          ? null
+                          : (bool _) => setState(() => _audience = a),
                     ),
                 ],
               ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Text(
+                  kGalleryAudienceHints[_audience]!,
+                  key: const Key('gallery-audience-hint'),
+                  style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                ),
+              ),
+              ZenSection(t('Co dodać')),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonalIcon(
+                    key: const Key('gallery-pick-photos'),
+                    onPressed: _saving ? null : () => unawaited(_addPhotos()),
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(t('Zdjęcia')),
+                  ),
+                  FilledButton.tonalIcon(
+                    key: const Key('gallery-pick-video'),
+                    onPressed: _saving ? null : () => unawaited(_addVideo()),
+                    icon: const Icon(Icons.video_library_outlined),
+                    label: Text(t('Film')),
+                  ),
+                ],
+              ),
+              if (_error != null)
+                ZenInfo(
+                  icon: Icons.error_outline_rounded,
+                  tone: zen.danger,
+                  text: _error!,
+                ),
+              const SizedBox(height: 16),
+              if (_media.isEmpty && _processing == 0)
+                ZenEmpty(
+                  icon: Icons.add_photo_alternate_outlined,
+                  tone: zenTone(zen, 2),
+                  title: t('Nic jeszcze nie wybrano'),
+                  text: t(
+                    'Wybierz zdjęcia albo film — zobaczysz je tutaj, '
+                    'zanim je dodasz.',
+                  ),
+                )
+              else
+                GridView.count(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: <Widget>[
+                    for (int i = 0; i < _media.length; i++)
+                      Stack(
+                        fit: StackFit.expand,
+                        children: <Widget>[
+                          ClipRRect(
+                            borderRadius: context.zenRadius(16),
+                            child: _media[i].isVideo
+                                ? ColoredBox(
+                                    color: zen.surfaceSunk,
+                                    child: Icon(
+                                      Icons.play_circle_outline_rounded,
+                                      size: 40,
+                                      color: zen.textSecondary,
+                                    ),
+                                  )
+                                : _media[i].mime == 'image/gif'
+                                ? ZenAnimatedImage(bytes: _media[i].bytes)
+                                : Image.memory(
+                                    _media[i].bytes,
+                                    fit: BoxFit.cover,
+                                  ),
+                          ),
+                          PositionedDirectional(
+                            top: 2,
+                            end: 2,
+                            child: IconButton.filledTonal(
+                              key: Key('gallery-remove-$i'),
+                              visualDensity: VisualDensity.compact,
+                              tooltip: t('Usuń'),
+                              onPressed: _saving
+                                  ? null
+                                  : () => setState(() => _media.removeAt(i)),
+                              icon: const Icon(Icons.close_rounded, size: 16),
+                            ),
+                          ),
+                        ],
+                      ),
+                    for (int i = 0; i < _processing; i++)
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: zen.surfaceSunk,
+                          borderRadius: context.zenRadius(16),
+                        ),
+                        child: const Center(
+                          child: SizedBox.square(
+                            dimension: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );

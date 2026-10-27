@@ -142,149 +142,152 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
     return Scaffold(
       key: const Key('account-copy-send'),
       appBar: AppBar(title: Text(t('Drugie urządzenie'))),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            ZenInfo(
-              key: const Key('account-copy-stays'),
-              icon: Icons.devices_rounded,
-              text: t(
-                'To urządzenie zostaje na koncie. Po skopiowaniu masz Zen na '
-                'obu i oba dostają wiadomości.',
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              t(
-                'Na drugim urządzeniu wybierz „Odzyskaj z innego urządzenia” '
-                'i zeskanuj ten kod. Przejdzie całe konto, także zdjęcia i '
-                'pliki. Najszybciej, gdy oba są w tej samej sieci Wi-Fi.',
-              ),
-              style: TextStyle(color: zen.textSecondary, height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            if (ticket != null && state == AccountCopySendState.waiting)
-              ZenCard(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-                child: Column(
-                  children: <Widget>[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: ZenFixed.qrPaper,
-                        borderRadius: context.zenRadius(20),
-                      ),
-                      child: QrImageView(
-                        key: const Key('account-copy-qr'),
-                        data: ticket.encode(),
-                        size: 200,
-                        backgroundColor: ZenFixed.qrPaper,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextButton.icon(
-                      key: const Key('account-copy-code-copy'),
-                      // A secret: it expires from the clipboard.
-                      onPressed: () =>
-                          unawaited(copyWithExpiry(ticket.encode())),
-                      icon: const Icon(Icons.copy_rounded),
-                      label: Text(t('Kopiuj kod')),
-                    ),
-                  ],
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              ZenInfo(
+                key: const Key('account-copy-stays'),
+                icon: Icons.devices_rounded,
+                text: t(
+                  'To urządzenie zostaje na koncie. Po skopiowaniu masz Zen na '
+                  'obu i oba dostają wiadomości.',
                 ),
               ),
-            if (request != null &&
-                state == AccountCopySendState.asked) ...<Widget>[
-              Text(
-                t('„{name}” chce pobrać Twoje konto.', <String, Object?>{
-                  'name': request.name,
-                }),
-                style: TextStyle(
-                  color: zen.textPrimary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              AccountCopyDigits(request.digits),
+              const SizedBox(height: 8),
               Text(
                 t(
-                  'Pozwól tylko, jeśli drugie urządzenie pokazuje te same '
-                  'cyfry i jest Twoje.',
+                  'Na drugim urządzeniu wybierz „Odzyskaj z innego urządzenia” '
+                  'i zeskanuj ten kod. Przejdzie całe konto, także zdjęcia i '
+                  'pliki. Najszybciej, gdy oba są w tej samej sieci Wi-Fi.',
                 ),
                 style: TextStyle(color: zen.textSecondary, height: 1.4),
               ),
               const SizedBox(height: 12),
-              FilledButton(
-                key: const Key('account-copy-allow'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
+              if (ticket != null && state == AccountCopySendState.waiting)
+                ZenCard(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                  child: Column(
+                    children: <Widget>[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: ZenFixed.qrPaper,
+                          borderRadius: context.zenRadius(20),
+                        ),
+                        child: QrImageView(
+                          key: const Key('account-copy-qr'),
+                          data: ticket.encode(),
+                          size: 200,
+                          backgroundColor: ZenFixed.qrPaper,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton.icon(
+                        key: const Key('account-copy-code-copy'),
+                        // A secret: it expires from the clipboard.
+                        onPressed: () =>
+                            unawaited(copyWithExpiry(ticket.encode())),
+                        icon: const Icon(Icons.copy_rounded),
+                        label: Text(t('Kopiuj kod')),
+                      ),
+                    ],
+                  ),
                 ),
-                onPressed: () => unawaited(_allow()),
-                child: Text(t('Pozwól')),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                key: const Key('account-copy-deny'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
+              if (request != null &&
+                  state == AccountCopySendState.asked) ...<Widget>[
+                Text(
+                  t('„{name}” chce pobrać Twoje konto.', <String, Object?>{
+                    'name': request.name,
+                  }),
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                onPressed: () => unawaited(source!.deny()),
-                child: Text(t('To nie ja')),
-              ),
+                AccountCopyDigits(request.digits),
+                Text(
+                  t(
+                    'Pozwól tylko, jeśli drugie urządzenie pokazuje te same '
+                    'cyfry i jest Twoje.',
+                  ),
+                  style: TextStyle(color: zen.textSecondary, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  key: const Key('account-copy-allow'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: () => unawaited(_allow()),
+                  child: Text(t('Pozwól')),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  key: const Key('account-copy-deny'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  onPressed: () => unawaited(source!.deny()),
+                  child: Text(t('To nie ja')),
+                ),
+              ],
+              if (state == AccountCopySendState.sending)
+                AccountCopyProgress(
+                  done: source!.sent,
+                  total: source.total,
+                  label: source.total == 0
+                      ? t('Przygotowuję kopię…')
+                      : t('Wysyłam konto…'),
+                ),
+              if (state == AccountCopySendState.done)
+                ZenInfo(
+                  key: const Key('account-copy-sent'),
+                  icon: Icons.check_circle_outline_rounded,
+                  tone: zen.success,
+                  text: t(
+                    'Gotowe: drugie urządzenie ma całe konto. To urządzenie '
+                    'działa dalej jak dotąd.',
+                  ),
+                ),
+              if (state == AccountCopySendState.done) ...<Widget>[
+                ZenInfo(
+                  key: const Key('account-copy-old-phone'),
+                  icon: Icons.phonelink_erase_rounded,
+                  tone: zen.warning,
+                  title: t('Oddajesz albo sprzedajesz to urządzenie?'),
+                  text: t(
+                    'Usuń z niego konto (Ustawienia → Usuń to konto z tego '
+                    'urządzenia) albo odłącz je na nowym w „Urządzenia”. '
+                    'Inaczej dalej będzie odbierać Twoje wiadomości.',
+                  ),
+                ),
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: TextButton.icon(
+                    key: const Key('account-copy-open-devices'),
+                    onPressed: () =>
+                        unawaited(AccountDevicesScreen.open(context)),
+                    icon: const Icon(Icons.devices_other_rounded),
+                    label: Text(t('Urządzenia')),
+                  ),
+                ),
+              ],
+              if (state == AccountCopySendState.failed)
+                ZenInfo(
+                  icon: Icons.block_rounded,
+                  tone: zen.danger,
+                  text: t('Przenoszenie przerwane.'),
+                ),
+              if (_message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(_message!, style: TextStyle(color: zen.danger)),
+                ),
             ],
-            if (state == AccountCopySendState.sending)
-              AccountCopyProgress(
-                done: source!.sent,
-                total: source.total,
-                label: source.total == 0
-                    ? t('Przygotowuję kopię…')
-                    : t('Wysyłam konto…'),
-              ),
-            if (state == AccountCopySendState.done)
-              ZenInfo(
-                key: const Key('account-copy-sent'),
-                icon: Icons.check_circle_outline_rounded,
-                tone: zen.success,
-                text: t(
-                  'Gotowe: drugie urządzenie ma całe konto. To urządzenie '
-                  'działa dalej jak dotąd.',
-                ),
-              ),
-            if (state == AccountCopySendState.done) ...<Widget>[
-              ZenInfo(
-                key: const Key('account-copy-old-phone'),
-                icon: Icons.phonelink_erase_rounded,
-                tone: zen.warning,
-                title: t('Oddajesz albo sprzedajesz to urządzenie?'),
-                text: t(
-                  'Usuń z niego konto (Ustawienia → Usuń to konto z tego '
-                  'urządzenia) albo odłącz je na nowym w „Urządzenia”. '
-                  'Inaczej dalej będzie odbierać Twoje wiadomości.',
-                ),
-              ),
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: TextButton.icon(
-                  key: const Key('account-copy-open-devices'),
-                  onPressed: () =>
-                      unawaited(AccountDevicesScreen.open(context)),
-                  icon: const Icon(Icons.devices_other_rounded),
-                  label: Text(t('Urządzenia')),
-                ),
-              ),
-            ],
-            if (state == AccountCopySendState.failed)
-              ZenInfo(
-                icon: Icons.block_rounded,
-                tone: zen.danger,
-                text: t('Przenoszenie przerwane.'),
-              ),
-            if (_message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(_message!, style: TextStyle(color: zen.danger)),
-              ),
-          ],
+          ),
         ),
       ),
     );
@@ -459,89 +462,92 @@ class _AccountCopyReceiveScreenState
     return Scaffold(
       key: const Key('account-copy-receive'),
       appBar: AppBar(title: Text(t('Odzyskaj z innego urządzenia'))),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            Text(
-              t(
-                'Na urządzeniu, które ma konto: Konto i odzyskiwanie → '
-                'Dodaj drugie urządzenie lub przenieś konto. Zeskanuj kod, '
-                'który pokaże, '
-                'albo go wklej.',
-              ),
-              style: TextStyle(color: zen.textSecondary, height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            if (canScan)
-              FilledButton.icon(
-                key: const Key('account-copy-scan'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                ),
-                onPressed: _busy ? null : () => unawaited(_scan()),
-                icon: const Icon(Icons.qr_code_scanner_rounded),
-                label: Text(t('Zeskanuj kod')),
-              ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('account-copy-code'),
-              controller: _code,
-              enabled: !_busy,
-              enableIMEPersonalizedLearning: false,
-              decoration: InputDecoration(
-                labelText: t('Kod z drugiego urządzenia'),
-                prefixIcon: const Icon(Icons.link_rounded),
-              ),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              key: const Key('account-copy-connect'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              onPressed: _busy ? null : () => unawaited(_connect()),
-              child: Text(t('Połącz')),
-            ),
-            if (_digits != null && !_downloading) ...<Widget>[
-              const SizedBox(height: 12),
-              AccountCopyDigits(_digits!),
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
               Text(
                 t(
-                  'Sprawdź, czy drugie urządzenie pokazuje te same cyfry, i '
-                  'pozwól tam.',
+                  'Na urządzeniu, które ma konto: Konto i odzyskiwanie → '
+                  'Dodaj drugie urządzenie lub przenieś konto. Zeskanuj kod, '
+                  'który pokaże, '
+                  'albo go wklej.',
                 ),
                 style: TextStyle(color: zen.textSecondary, height: 1.4),
               ),
-            ],
-            if (_downloading) ...<Widget>[
-              const SizedBox(height: 16),
-              AccountCopyProgress(
-                done: _done,
-                total: _total,
-                label: t('Pobieram konto…'),
-              ),
-            ],
-            if (_message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  _message!,
-                  key: const Key('account-copy-message'),
-                  style: TextStyle(
-                    color: _good ? zen.success : zen.danger,
-                    height: 1.4,
+              const SizedBox(height: 12),
+              if (canScan)
+                FilledButton.icon(
+                  key: const Key('account-copy-scan'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
                   ),
+                  onPressed: _busy ? null : () => unawaited(_scan()),
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: Text(t('Zeskanuj kod')),
+                ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const Key('account-copy-code'),
+                controller: _code,
+                enabled: !_busy,
+                enableIMEPersonalizedLearning: false,
+                decoration: InputDecoration(
+                  labelText: t('Kod z drugiego urządzenia'),
+                  prefixIcon: const Icon(Icons.link_rounded),
                 ),
               ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: () =>
-                  unawaited(AccountRestoreInfoScreen.open(context)),
-              icon: const Icon(Icons.help_outline_rounded),
-              label: Text(t('Co da się odzyskać i jak')),
-            ),
-          ],
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('account-copy-connect'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: _busy ? null : () => unawaited(_connect()),
+                child: Text(t('Połącz')),
+              ),
+              if (_digits != null && !_downloading) ...<Widget>[
+                const SizedBox(height: 12),
+                AccountCopyDigits(_digits!),
+                Text(
+                  t(
+                    'Sprawdź, czy drugie urządzenie pokazuje te same cyfry, i '
+                    'pozwól tam.',
+                  ),
+                  style: TextStyle(color: zen.textSecondary, height: 1.4),
+                ),
+              ],
+              if (_downloading) ...<Widget>[
+                const SizedBox(height: 16),
+                AccountCopyProgress(
+                  done: _done,
+                  total: _total,
+                  label: t('Pobieram konto…'),
+                ),
+              ],
+              if (_message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    _message!,
+                    key: const Key('account-copy-message'),
+                    style: TextStyle(
+                      color: _good ? zen.success : zen.danger,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () =>
+                    unawaited(AccountRestoreInfoScreen.open(context)),
+                icon: const Icon(Icons.help_outline_rounded),
+                label: Text(t('Co da się odzyskać i jak')),
+              ),
+            ],
+          ),
         ),
       ),
     );

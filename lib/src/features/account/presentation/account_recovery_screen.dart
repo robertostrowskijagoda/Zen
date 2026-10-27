@@ -1076,616 +1076,628 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     return Scaffold(
       key: const Key('account-recovery-screen'),
       appBar: AppBar(title: Text(t('Konto i odzyskiwanie'))),
-      body: !ready
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SizedBox.square(
-                    dimension: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      color: zen.accent,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    t('Konto się uruchamia…'),
-                    style: TextStyle(color: zen.textSecondary, fontSize: 14.5),
-                  ),
-                ],
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                if (_message != null)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    decoration: BoxDecoration(
-                      color: zen.accent.withValues(alpha: 0.09),
-                      borderRadius: context.zenRadius(18),
-                      border: Border.all(
-                        color: zen.accent.withValues(alpha: 0.24),
+      body: SafeArea(
+        top: false,
+        child: !ready
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SizedBox.square(
+                      dimension: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: zen.accent,
                       ),
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Icon(
-                          Icons.info_outline_rounded,
-                          color: zen.accent,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _message!,
-                            key: const Key('recovery-message'),
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 14,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 14),
+                    Text(
+                      t('Konto się uruchamia…'),
+                      style: TextStyle(
+                        color: zen.textSecondary,
+                        fontSize: 14.5,
+                      ),
                     ),
-                  ),
-                for (final RecoveryAlarm a in service.alarms)
-                  ZenCard(
-                    tone: zen.danger,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Icon(
-                              Icons.warning_amber_rounded,
-                              color: zen.danger,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    t(
-                                      '{name} wyda klucz Twojego konta {time}',
-                                      <String, Object?>{
-                                        'name': nameOf(a.helper),
-                                        'time': _when(a.due),
-                                      },
-                                    ),
-                                    style: TextStyle(
-                                      color: zen.textPrimary,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    t('Dla urządzenia: {address}', {
-                                      'address':
-                                          PeerShareCodec.inviteCodeForAddress(
-                                            a.to,
-                                          ) ??
-                                          a.to,
-                                    }),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: zen.textSecondary,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        Align(
-                          alignment: AlignmentDirectional.centerEnd,
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              foregroundColor: zen.danger,
-                            ),
-                            onPressed: () => unawaited(service.cancelAlarm(a)),
-                            child: Text(t('To nie ja – zatrzymaj')),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ZenCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _cardHeader(
-                        zen,
-                        icon: Icons.lock_rounded,
-                        tone: tone,
-                        title: t('Hasło konta'),
-                        status: hasPassword
-                            ? ZenPill(
-                                text: t('ustawione'),
-                                tone: zen.success,
-                                icon: Icons.check_rounded,
-                              )
-                            : ZenPill(text: t('brak'), tone: zen.warning),
-                      ),
-                      _paragraph(
-                        zen,
-                        hasPassword
-                            ? tn(
-                                service.acks.length,
-                                one:
-                                    'Hasło jest ustawione. Klucze odzyskiwania '
-                                    'przechowuje {n} osoba.',
-                                few:
-                                    'Hasło jest ustawione. Klucze odzyskiwania '
-                                    'przechowują {n} osoby.',
-                                many:
-                                    'Hasło jest ustawione. Klucze odzyskiwania '
-                                    'przechowuje {n} osób.',
-                              )
-                            : t(
-                                'Hasło chroni klucz konta: bez niego złodziej '
-                                'telefonu nie przejmie konta. Przy okazji '
-                                'znajomi z kręgu dostaną klucze odzyskiwania.',
-                              ),
-                      ),
-                      const SizedBox(height: 8),
-                      ZenInfo(
-                        key: const Key('recovery-password-explained'),
-                        icon: Icons.help_outline_rounded,
-                        text: t(
-                          'Hasło konta to nie hasło aplikacji. Hasło aplikacji '
-                          'odblokowuje Zen na tym urządzeniu. Hasło konta '
-                          'chroni klucz konta i wpiszesz je na nowym '
-                          'telefonie przy odzyskiwaniu przez krąg. Może być '
-                          'takie samo jak hasło aplikacji — łatwiej je '
-                          'zapamiętać.',
-                        ),
-                      ),
-                      if (hasPassword) ...<Widget>[
-                        const SizedBox(height: 8),
-                        const RecoveryCircleMembersView(),
-                      ],
-                      const SizedBox(height: 12),
-                      _circlePicker(zen, social),
-                      const SizedBox(height: 8),
-                      Text(
-                        t('Odcisk Twojego konta: {fingerprint}', {
-                          'fingerprint': accountFingerprint(
-                            node.identity.account,
-                          ),
-                        }),
-                        key: const Key('recovery-own-fingerprint'),
-                        style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('recovery-password'),
-                        controller: _password,
-                        obscureText: true,
-                        enableIMEPersonalizedLearning: false,
-                        decoration: InputDecoration(
-                          labelText: hasPassword
-                              ? t('Obecne hasło')
-                              : t('Nowe hasło'),
-                          prefixIcon: const Icon(Icons.password_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        key: const Key('recovery-password-repeat'),
-                        controller: _repeat,
-                        obscureText: true,
-                        enableIMEPersonalizedLearning: false,
-                        decoration: InputDecoration(
-                          labelText: t('Powtórz hasło'),
-                          prefixIcon: const Icon(Icons.password_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton(
-                        key: const Key('recovery-set-password'),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                        ),
-                        onPressed:
-                            _busy ||
-                                social.acceptedFriends.length <
-                                    kEmergencyThreshold
-                            ? null
-                            : () => unawaited(_run(_setPassword)),
-                        child: Text(
-                          hasPassword
-                              ? t('Rozdaj klucze odzyskiwania ponownie')
-                              : t('Ustaw hasło i rozdaj klucze'),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-                // The copy of the data the circle keeps.
-                const CircleBackupCard(),
-                ZenSection(t('Przechowujesz klucze dla')),
-                if (service.heldFor.isNotEmpty)
-                  for (final RecoveryHelpRequest r in service.helpRequests)
-                    ZenCard(
-                      key: Key('recovery-request-${r.from}'),
-                      tone: zen.warning,
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  if (_message != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      decoration: BoxDecoration(
+                        color: zen.accent.withValues(alpha: 0.09),
+                        borderRadius: context.zenRadius(18),
+                        border: Border.all(
+                          color: zen.accent.withValues(alpha: 0.24),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          ZenInfo(
-                            icon: Icons.support_rounded,
-                            tone: zen.warning,
-                            title: t('Ktoś prosi o pomoc w odzyskaniu konta'),
-                            text: t(
-                              'Nowe urządzenie podało Cię jako osobę z kręgu '
-                              '({time}). Pomóż tylko, jeśli wiesz na pewno, '
-                              'kto to jest — najlepiej porozmawiaj na żywo '
-                              'albo przez telefon i porównajcie odcisk konta.',
-                              <String, Object?>{'time': _when(r.at)},
-                            ),
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: zen.accent,
+                            size: 20,
                           ),
-                          Wrap(
-                            alignment: WrapAlignment.end,
-                            spacing: 8,
-                            children: <Widget>[
-                              TextButton(
-                                key: Key('recovery-request-dismiss-${r.from}'),
-                                onPressed: () => unawaited(
-                                  service.dismissHelpRequest(r.from),
-                                ),
-                                child: Text(t('Odrzuć')),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _message!,
+                              key: const Key('recovery-message'),
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 14,
+                                height: 1.4,
                               ),
-                              FilledButton(
-                                key: Key('recovery-request-help-${r.from}'),
-                                onPressed: _busy
-                                    ? null
-                                    : () => unawaited(
-                                        _answerRequest(service, r, nameOf),
-                                      ),
-                                child: Text(t('Pomóż')),
-                              ),
-                            ],
+                            ),
                           ),
                         ],
                       ),
                     ),
-                if (service.heldFor.isEmpty)
-                  ZenInfo(
-                    icon: Icons.key_off_rounded,
-                    tone: zen.textMuted,
-                    text: t('Nikt jeszcze nie powierzył Ci klucza.'),
-                  ),
-                for (final String owner in service.heldFor)
-                  ZenTile(
-                    icon: Icons.key_rounded,
-                    tone: tone,
-                    title: nameOf(owner),
-                    // Read it to the person: their new device shows the
-                    // same one before it takes the account.
-                    subtitle: switch (_heldFingerprint(service, owner)) {
-                      final String fingerprint => t(
-                        'Odcisk konta: {fingerprint}',
-                        {'fingerprint': fingerprint},
-                      ),
-                      null => null,
-                    },
-                    trailing: TextButton(
-                      key: Key('recovery-help-$owner'),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 36),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      onPressed: () => unawaited(_help(owner, nameOf(owner))),
-                      child: Text(t('Pomóż odzyskać')),
-                    ),
-                  ),
-                for (final PendingRelease p in service.pending)
-                  ZenTile(
-                    icon: Icons.schedule_send_rounded,
-                    tone: zen.warning,
-                    title: t('Klucz dla: {name}', {'name': nameOf(p.owner)}),
-                    subtitle: t(
-                      'Wyślesz klucz {name} → {address} {time}',
-                      <String, Object?>{
-                        'name': nameOf(p.owner),
-                        'address':
-                            PeerShareCodec.inviteCodeForAddress(p.to) ?? p.to,
-                        'time': _when(p.due),
-                      },
-                    ),
-                  ),
-                ZenSection(t('Odzyskaj konto na tym urządzeniu')),
-                ZenCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _cardHeader(
-                        zen,
-                        icon: Icons.restore_rounded,
-                        tone: zen.tone(ZenTone.network),
-                        title: t('Nowy telefon? Odzyskaj konto'),
-                        status: collectingUntil == null
-                            ? null
-                            : ZenPill(
-                                text: t('trwa'),
-                                tone: zen.accent,
-                                icon: Icons.hourglass_top_rounded,
+                  for (final RecoveryAlarm a in service.alarms)
+                    ZenCard(
+                      tone: zen.danger,
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Icon(
+                                Icons.warning_amber_rounded,
+                                color: zen.danger,
                               ),
-                      ),
-                      _paragraph(
-                        zen,
-                        t(
-                          'Poproś dwie osoby z kręgu, żeby pomogły odzyskać '
-                          'Twoje konto (ich lista jest przy kopii klucza albo '
-                          'na starym telefonie). Wpisz tu ich kody — dostaną '
-                          'prośbę o pomoc. Po 24 h wpisz hasło konta. Bez '
-                          'hasła potrzeba czterech osób i 7 dni.',
-                        ),
-                      ),
-                      _recoverScope(zen, const Key('recovery-scope-before')),
-                      if (collectingUntil == null) ...<Widget>[
-                        const SizedBox(height: 8),
-                        _paragraph(
-                          zen,
-                          t(
-                            'Najpierw zacznij odzyskiwanie: dopiero wtedy to '
-                            'urządzenie przyjmuje klucze od osób z kręgu.',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          key: const Key('recovery-start'),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                          ),
-                          onPressed: _busy
-                              ? null
-                              : () => unawaited(_run(_beginRecovery)),
-                          icon: const Icon(Icons.restore_rounded),
-                          label: Text(t('Zacznij odzyskiwanie')),
-                        ),
-                      ] else ...<Widget>[
-                        const SizedBox(height: 12),
-                        _deviceCodePanel(zen, myAddress),
-                        const SizedBox(height: 8),
-                        Text(
-                          t('To urządzenie przyjmuje klucze do {time}.', {
-                            'time': _when(collectingUntil),
-                          }),
-                          key: const Key('recovery-collecting'),
-                          style: TextStyle(
-                            color: zen.textMuted,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _paragraph(
-                          zen,
-                          t(
-                            'Kto Ci pomaga? Wpisz kody tych osób: klucze od '
-                            'innych nie są przyjmowane.',
-                          ),
-                        ),
-                        for (final String helper in service.allowedHelpers)
-                          ZenTile(
-                            key: Key('recovery-helper-$helper'),
-                            icon: Icons.person_rounded,
-                            tone: zen.accent,
-                            title:
-                                PeerShareCodec.inviteCodeForAddress(helper) ??
-                                helper,
-                            trailing: IconButton(
-                              tooltip: t('Usuń'),
-                              icon: const Icon(Icons.close_rounded),
-                              onPressed: () =>
-                                  unawaited(service.removeHelper(helper)),
-                            ),
-                          ),
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                key: const Key('recovery-helper-code'),
-                                controller: _helperCode,
-                                autocorrect: false,
-                                enableSuggestions: false,
-                                decoration: InputDecoration(
-                                  labelText: t('Kod osoby z kręgu'),
-                                  hintText: t('Kod, link albo QR tej osoby'),
-                                  prefixIcon: const Icon(
-                                    Icons.person_add_alt_1_rounded,
-                                  ),
-                                  suffixIcon:
-                                      ref
-                                          .read(peerQrScannerProvider)
-                                          .isSupported
-                                      ? IconButton(
-                                          key: const Key(
-                                            'recovery-helper-scan',
-                                          ),
-                                          tooltip: t('Zeskanuj QR'),
-                                          icon: const Icon(
-                                            Icons.qr_code_scanner_rounded,
-                                          ),
-                                          onPressed: () =>
-                                              unawaited(_scanHelper()),
-                                        )
-                                      : null,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      t(
+                                        '{name} wyda klucz Twojego konta {time}',
+                                        <String, Object?>{
+                                          'name': nameOf(a.helper),
+                                          'time': _when(a.due),
+                                        },
+                                      ),
+                                      style: TextStyle(
+                                        color: zen.textPrimary,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      t('Dla urządzenia: {address}', {
+                                        'address':
+                                            PeerShareCodec.inviteCodeForAddress(
+                                              a.to,
+                                            ) ??
+                                            a.to,
+                                      }),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: zen.textSecondary,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
+                            ],
+                          ),
+                          Align(
+                            alignment: AlignmentDirectional.centerEnd,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: zen.danger,
+                              ),
+                              onPressed: () =>
+                                  unawaited(service.cancelAlarm(a)),
+                              child: Text(t('To nie ja – zatrzymaj')),
                             ),
-                            const SizedBox(width: 8),
-                            IconButton.filledTonal(
-                              key: const Key('recovery-helper-add'),
-                              tooltip: t('Dodaj'),
-                              onPressed: _busy
-                                  ? null
-                                  : () => unawaited(_run(_addHelper)),
-                              icon: const Icon(Icons.add_rounded),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        _progress(
+                          ),
+                        ],
+                      ),
+                    ),
+                  ZenCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _cardHeader(
                           zen,
-                          t('Klucze z hasłem'),
-                          service.receivedCount(RecoveryKind.normal),
-                          kNormalThreshold,
+                          icon: Icons.lock_rounded,
+                          tone: tone,
+                          title: t('Hasło konta'),
+                          status: hasPassword
+                              ? ZenPill(
+                                  text: t('ustawione'),
+                                  tone: zen.success,
+                                  icon: Icons.check_rounded,
+                                )
+                              : ZenPill(text: t('brak'), tone: zen.warning),
                         ),
-                        _progress(
+                        _paragraph(
                           zen,
-                          t('Klucze bez hasła'),
-                          service.receivedCount(RecoveryKind.emergency),
-                          kEmergencyThreshold,
+                          hasPassword
+                              ? tn(
+                                  service.acks.length,
+                                  one:
+                                      'Hasło jest ustawione. Klucze odzyskiwania '
+                                      'przechowuje {n} osoba.',
+                                  few:
+                                      'Hasło jest ustawione. Klucze odzyskiwania '
+                                      'przechowują {n} osoby.',
+                                  many:
+                                      'Hasło jest ustawione. Klucze odzyskiwania '
+                                      'przechowuje {n} osób.',
+                                )
+                              : t(
+                                  'Hasło chroni klucz konta: bez niego złodziej '
+                                  'telefonu nie przejmie konta. Przy okazji '
+                                  'znajomi z kręgu dostaną klucze odzyskiwania.',
+                                ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          t(
-                            'Otrzymane klucze: {normal}/{normalNeeded} '
-                            '(z hasłem), {emergency}/{emergencyNeeded} '
-                            '(bez hasła)',
-                            <String, Object?>{
-                              'normal': service.receivedCount(
-                                RecoveryKind.normal,
-                              ),
-                              'normalNeeded': kNormalThreshold,
-                              'emergency': service.receivedCount(
-                                RecoveryKind.emergency,
-                              ),
-                              'emergencyNeeded': kEmergencyThreshold,
-                            },
+                        ZenInfo(
+                          key: const Key('recovery-password-explained'),
+                          icon: Icons.help_outline_rounded,
+                          text: t(
+                            'Hasło konta to nie hasło aplikacji. Hasło aplikacji '
+                            'odblokowuje Zen na tym urządzeniu. Hasło konta '
+                            'chroni klucz konta i wpiszesz je na nowym '
+                            'telefonie przy odzyskiwaniu przez krąg. Może być '
+                            'takie samo jak hasło aplikacji — łatwiej je '
+                            'zapamiętać.',
                           ),
-                          key: const Key('recovery-received'),
+                        ),
+                        if (hasPassword) ...<Widget>[
+                          const SizedBox(height: 8),
+                          const RecoveryCircleMembersView(),
+                        ],
+                        const SizedBox(height: 12),
+                        _circlePicker(zen, social),
+                        const SizedBox(height: 8),
+                        Text(
+                          t('Odcisk Twojego konta: {fingerprint}', {
+                            'fingerprint': accountFingerprint(
+                              node.identity.account,
+                            ),
+                          }),
+                          key: const Key('recovery-own-fingerprint'),
                           style: TextStyle(
                             color: zen.textMuted,
                             fontSize: 12.5,
                           ),
                         ),
-                        if (mixed && candidates == null)
-                          _mixedAccountsWarning(zen),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
                         TextField(
-                          key: const Key('recovery-old-password'),
-                          controller: _recoverPassword,
+                          key: const Key('recovery-password'),
+                          controller: _password,
                           obscureText: true,
                           enableIMEPersonalizedLearning: false,
                           decoration: InputDecoration(
-                            labelText: t('Hasło odzyskiwanego konta'),
-                            prefixIcon: const Icon(Icons.lock_open_rounded),
+                            labelText: hasPassword
+                                ? t('Obecne hasło')
+                                : t('Nowe hasło'),
+                            prefixIcon: const Icon(Icons.password_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          key: const Key('recovery-password-repeat'),
+                          controller: _repeat,
+                          obscureText: true,
+                          enableIMEPersonalizedLearning: false,
+                          decoration: InputDecoration(
+                            labelText: t('Powtórz hasło'),
+                            prefixIcon: const Icon(Icons.password_rounded),
                           ),
                         ),
                         const SizedBox(height: 12),
-                        FilledButton.icon(
-                          key: const Key('recovery-recover'),
+                        FilledButton(
+                          key: const Key('recovery-set-password'),
                           style: FilledButton.styleFrom(
                             minimumSize: const Size.fromHeight(52),
                           ),
                           onPressed:
                               _busy ||
-                                  service.receivedCount(RecoveryKind.normal) <
-                                      kNormalThreshold
+                                  social.acceptedFriends.length <
+                                      kEmergencyThreshold
                               ? null
-                              : () => unawaited(
-                                  _run(() => _recover(emergency: false)),
+                              : () => unawaited(_run(_setPassword)),
+                          child: Text(
+                            hasPassword
+                                ? t('Rozdaj klucze odzyskiwania ponownie')
+                                : t('Ustaw hasło i rozdaj klucze'),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // The copy of the data the circle keeps.
+                  const CircleBackupCard(),
+                  ZenSection(t('Przechowujesz klucze dla')),
+                  if (service.heldFor.isNotEmpty)
+                    for (final RecoveryHelpRequest r in service.helpRequests)
+                      ZenCard(
+                        key: Key('recovery-request-${r.from}'),
+                        tone: zen.warning,
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            ZenInfo(
+                              icon: Icons.support_rounded,
+                              tone: zen.warning,
+                              title: t('Ktoś prosi o pomoc w odzyskaniu konta'),
+                              text: t(
+                                'Nowe urządzenie podało Cię jako osobę z kręgu '
+                                '({time}). Pomóż tylko, jeśli wiesz na pewno, '
+                                'kto to jest — najlepiej porozmawiaj na żywo '
+                                'albo przez telefon i porównajcie odcisk konta.',
+                                <String, Object?>{'time': _when(r.at)},
+                              ),
+                            ),
+                            Wrap(
+                              alignment: WrapAlignment.end,
+                              spacing: 8,
+                              children: <Widget>[
+                                TextButton(
+                                  key: Key(
+                                    'recovery-request-dismiss-${r.from}',
+                                  ),
+                                  onPressed: () => unawaited(
+                                    service.dismissHelpRequest(r.from),
+                                  ),
+                                  child: Text(t('Odrzuć')),
                                 ),
-                          icon: const Icon(Icons.restore_rounded),
-                          label: Text(t('Odzyskaj z hasłem')),
+                                FilledButton(
+                                  key: Key('recovery-request-help-${r.from}'),
+                                  onPressed: _busy
+                                      ? null
+                                      : () => unawaited(
+                                          _answerRequest(service, r, nameOf),
+                                        ),
+                                  child: Text(t('Pomóż')),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  if (service.heldFor.isEmpty)
+                    ZenInfo(
+                      icon: Icons.key_off_rounded,
+                      tone: zen.textMuted,
+                      text: t('Nikt jeszcze nie powierzył Ci klucza.'),
+                    ),
+                  for (final String owner in service.heldFor)
+                    ZenTile(
+                      icon: Icons.key_rounded,
+                      tone: tone,
+                      title: nameOf(owner),
+                      // Read it to the person: their new device shows the
+                      // same one before it takes the account.
+                      subtitle: switch (_heldFingerprint(service, owner)) {
+                        final String fingerprint => t(
+                          'Odcisk konta: {fingerprint}',
+                          {'fingerprint': fingerprint},
+                        ),
+                        null => null,
+                      },
+                      trailing: TextButton(
+                        key: Key('recovery-help-$owner'),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        onPressed: () => unawaited(_help(owner, nameOf(owner))),
+                        child: Text(t('Pomóż odzyskać')),
+                      ),
+                    ),
+                  for (final PendingRelease p in service.pending)
+                    ZenTile(
+                      icon: Icons.schedule_send_rounded,
+                      tone: zen.warning,
+                      title: t('Klucz dla: {name}', {'name': nameOf(p.owner)}),
+                      subtitle: t(
+                        'Wyślesz klucz {name} → {address} {time}',
+                        <String, Object?>{
+                          'name': nameOf(p.owner),
+                          'address':
+                              PeerShareCodec.inviteCodeForAddress(p.to) ?? p.to,
+                          'time': _when(p.due),
+                        },
+                      ),
+                    ),
+                  ZenSection(t('Odzyskaj konto na tym urządzeniu')),
+                  ZenCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _cardHeader(
+                          zen,
+                          icon: Icons.restore_rounded,
+                          tone: zen.tone(ZenTone.network),
+                          title: t('Nowy telefon? Odzyskaj konto'),
+                          status: collectingUntil == null
+                              ? null
+                              : ZenPill(
+                                  text: t('trwa'),
+                                  tone: zen.accent,
+                                  icon: Icons.hourglass_top_rounded,
+                                ),
+                        ),
+                        _paragraph(
+                          zen,
+                          t(
+                            'Poproś dwie osoby z kręgu, żeby pomogły odzyskać '
+                            'Twoje konto (ich lista jest przy kopii klucza albo '
+                            'na starym telefonie). Wpisz tu ich kody — dostaną '
+                            'prośbę o pomoc. Po 24 h wpisz hasło konta. Bez '
+                            'hasła potrzeba czterech osób i 7 dni.',
+                          ),
+                        ),
+                        _recoverScope(zen, const Key('recovery-scope-before')),
+                        if (collectingUntil == null) ...<Widget>[
+                          const SizedBox(height: 8),
+                          _paragraph(
+                            zen,
+                            t(
+                              'Najpierw zacznij odzyskiwanie: dopiero wtedy to '
+                              'urządzenie przyjmuje klucze od osób z kręgu.',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            key: const Key('recovery-start'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52),
+                            ),
+                            onPressed: _busy
+                                ? null
+                                : () => unawaited(_run(_beginRecovery)),
+                            icon: const Icon(Icons.restore_rounded),
+                            label: Text(t('Zacznij odzyskiwanie')),
+                          ),
+                        ] else ...<Widget>[
+                          const SizedBox(height: 12),
+                          _deviceCodePanel(zen, myAddress),
+                          const SizedBox(height: 8),
+                          Text(
+                            t('To urządzenie przyjmuje klucze do {time}.', {
+                              'time': _when(collectingUntil),
+                            }),
+                            key: const Key('recovery-collecting'),
+                            style: TextStyle(
+                              color: zen.textMuted,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _paragraph(
+                            zen,
+                            t(
+                              'Kto Ci pomaga? Wpisz kody tych osób: klucze od '
+                              'innych nie są przyjmowane.',
+                            ),
+                          ),
+                          for (final String helper in service.allowedHelpers)
+                            ZenTile(
+                              key: Key('recovery-helper-$helper'),
+                              icon: Icons.person_rounded,
+                              tone: zen.accent,
+                              title:
+                                  PeerShareCodec.inviteCodeForAddress(helper) ??
+                                  helper,
+                              trailing: IconButton(
+                                tooltip: t('Usuń'),
+                                icon: const Icon(Icons.close_rounded),
+                                onPressed: () =>
+                                    unawaited(service.removeHelper(helper)),
+                              ),
+                            ),
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: TextField(
+                                  key: const Key('recovery-helper-code'),
+                                  controller: _helperCode,
+                                  autocorrect: false,
+                                  enableSuggestions: false,
+                                  decoration: InputDecoration(
+                                    labelText: t('Kod osoby z kręgu'),
+                                    hintText: t('Kod, link albo QR tej osoby'),
+                                    prefixIcon: const Icon(
+                                      Icons.person_add_alt_1_rounded,
+                                    ),
+                                    suffixIcon:
+                                        ref
+                                            .read(peerQrScannerProvider)
+                                            .isSupported
+                                        ? IconButton(
+                                            key: const Key(
+                                              'recovery-helper-scan',
+                                            ),
+                                            tooltip: t('Zeskanuj QR'),
+                                            icon: const Icon(
+                                              Icons.qr_code_scanner_rounded,
+                                            ),
+                                            onPressed: () =>
+                                                unawaited(_scanHelper()),
+                                          )
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton.filledTonal(
+                                key: const Key('recovery-helper-add'),
+                                tooltip: t('Dodaj'),
+                                onPressed: _busy
+                                    ? null
+                                    : () => unawaited(_run(_addHelper)),
+                                icon: const Icon(Icons.add_rounded),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          _progress(
+                            zen,
+                            t('Klucze z hasłem'),
+                            service.receivedCount(RecoveryKind.normal),
+                            kNormalThreshold,
+                          ),
+                          _progress(
+                            zen,
+                            t('Klucze bez hasła'),
+                            service.receivedCount(RecoveryKind.emergency),
+                            kEmergencyThreshold,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            t(
+                              'Otrzymane klucze: {normal}/{normalNeeded} '
+                              '(z hasłem), {emergency}/{emergencyNeeded} '
+                              '(bez hasła)',
+                              <String, Object?>{
+                                'normal': service.receivedCount(
+                                  RecoveryKind.normal,
+                                ),
+                                'normalNeeded': kNormalThreshold,
+                                'emergency': service.receivedCount(
+                                  RecoveryKind.emergency,
+                                ),
+                                'emergencyNeeded': kEmergencyThreshold,
+                              },
+                            ),
+                            key: const Key('recovery-received'),
+                            style: TextStyle(
+                              color: zen.textMuted,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                          if (mixed && candidates == null)
+                            _mixedAccountsWarning(zen),
+                          const SizedBox(height: 14),
+                          TextField(
+                            key: const Key('recovery-old-password'),
+                            controller: _recoverPassword,
+                            obscureText: true,
+                            enableIMEPersonalizedLearning: false,
+                            decoration: InputDecoration(
+                              labelText: t('Hasło odzyskiwanego konta'),
+                              prefixIcon: const Icon(Icons.lock_open_rounded),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            key: const Key('recovery-recover'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(52),
+                            ),
+                            onPressed:
+                                _busy ||
+                                    service.receivedCount(RecoveryKind.normal) <
+                                        kNormalThreshold
+                                ? null
+                                : () => unawaited(
+                                    _run(() => _recover(emergency: false)),
+                                  ),
+                            icon: const Icon(Icons.restore_rounded),
+                            label: Text(t('Odzyskaj z hasłem')),
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            key: const Key('recovery-recover-emergency'),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                            ),
+                            onPressed:
+                                _busy ||
+                                    service.receivedCount(
+                                          RecoveryKind.emergency,
+                                        ) <
+                                        kEmergencyThreshold
+                                ? null
+                                : () => unawaited(
+                                    _run(() => _recover(emergency: true)),
+                                  ),
+                            child: Text(t('Odzyskaj bez hasła')),
+                          ),
+                          const SizedBox(height: 4),
+                          TextButton(
+                            key: const Key('recovery-stop'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: zen.danger,
+                            ),
+                            onPressed: _busy
+                                ? null
+                                : () => unawaited(_endRecovery()),
+                            child: Text(t('Przerwij odzyskiwanie')),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  // The whole account: a backup file, another device.
+                  ZenSection(t('Kopia i przenoszenie')),
+                  const AccountCopyActions(),
+                  ZenSection(t('Kopia klucza (kartka lub plik)')),
+                  ZenCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _paragraph(
+                          zen,
+                          t(
+                            'Kopia klucza (kartka z kodem albo plik z hasłem) '
+                            'przywraca konto na nowym telefonie, nawet gdy nikt '
+                            'z kręgu nie pomoże. Znajomi, grupy i teksty rozmów '
+                            'wracają potem z kopii u znajomych, jeśli ją masz. '
+                            'To nie jest kopia całego konta: zdjęć i plików z '
+                            'rozmów nie przywróci. Kto ma kartkę albo plik '
+                            'z hasłem, ma konto.',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          key: const Key('key-backup-open'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                          onPressed: () =>
+                              unawaited(KeyBackupScreen.open(context)),
+                          icon: const Icon(Icons.history_edu_rounded),
+                          label: Text(t('Zrób kopię klucza')),
                         ),
                         const SizedBox(height: 8),
-                        OutlinedButton(
-                          key: const Key('recovery-recover-emergency'),
+                        OutlinedButton.icon(
+                          key: const Key('key-restore-open-screen'),
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size.fromHeight(48),
                           ),
-                          onPressed:
-                              _busy ||
-                                  service.receivedCount(
-                                        RecoveryKind.emergency,
-                                      ) <
-                                      kEmergencyThreshold
-                              ? null
-                              : () => unawaited(
-                                  _run(() => _recover(emergency: true)),
-                                ),
-                          child: Text(t('Odzyskaj bez hasła')),
-                        ),
-                        const SizedBox(height: 4),
-                        TextButton(
-                          key: const Key('recovery-stop'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: zen.danger,
-                          ),
-                          onPressed: _busy
-                              ? null
-                              : () => unawaited(_endRecovery()),
-                          child: Text(t('Przerwij odzyskiwanie')),
+                          onPressed: () =>
+                              unawaited(KeyRestoreScreen.open(context)),
+                          icon: const Icon(Icons.restore_page_outlined),
+                          label: Text(t('Przywróć klucz')),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                // The whole account: a backup file, another device.
-                ZenSection(t('Kopia i przenoszenie')),
-                const AccountCopyActions(),
-                ZenSection(t('Kopia klucza (kartka lub plik)')),
-                ZenCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _paragraph(
-                        zen,
-                        t(
-                          'Kopia klucza (kartka z kodem albo plik z hasłem) '
-                          'przywraca konto na nowym telefonie, nawet gdy nikt '
-                          'z kręgu nie pomoże. Znajomi, grupy i teksty rozmów '
-                          'wracają potem z kopii u znajomych, jeśli ją masz. '
-                          'To nie jest kopia całego konta: zdjęć i plików z '
-                          'rozmów nie przywróci. Kto ma kartkę albo plik '
-                          'z hasłem, ma konto.',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      FilledButton.icon(
-                        key: const Key('key-backup-open'),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
-                        onPressed: () =>
-                            unawaited(KeyBackupScreen.open(context)),
-                        icon: const Icon(Icons.history_edu_rounded),
-                        label: Text(t('Zrób kopię klucza')),
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        key: const Key('key-restore-open-screen'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
-                        onPressed: () =>
-                            unawaited(KeyRestoreScreen.open(context)),
-                        icon: const Icon(Icons.restore_page_outlined),
-                        label: Text(t('Przywróć klucz')),
-                      ),
-                    ],
-                  ),
-                ),
-                if (candidates != null && candidates.isNotEmpty)
-                  _candidatesCard(zen, candidates, mixed: mixed),
-              ],
-            ),
+                  if (candidates != null && candidates.isNotEmpty)
+                    _candidatesCard(zen, candidates, mixed: mixed),
+                ],
+              ),
+      ),
     );
   }
 }

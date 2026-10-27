@@ -6,6 +6,8 @@
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <title>Zen — neighbours</title>
+<link rel="icon" type="image/png" href="../zen-icon.png">
+<link rel="apple-touch-icon" href="../zen-icon.png">
 <style>
   :root {
     --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
@@ -30,8 +32,7 @@
   }
   .logo {
     width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff; font-weight: 800; font-size: 32px; line-height: 64px;
+    display: block; object-fit: cover; box-shadow: 0 0 0 1px var(--line);
   }
   h1 { font-size: 22px; margin: 4px 0 6px; }
   p { color: var(--muted); margin: 6px 0 14px; }
@@ -58,12 +59,23 @@
   .small { font-size: 13.5px; color: var(--muted); margin-top: 18px; }
   .small a { color: var(--accent); }
   .hidden { display: none; }
+  .lang { position: absolute; top: 12px; right: 16px; }
+  .lang button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 4px 10px; cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4;
+  }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
 </style>
 </head>
 <body>
+<div class="lang" role="group" aria-label="Language">
+  <button type="button" data-lang="en">EN</button>
+  <button type="button" data-lang="pl">PL</button>
+</div>
 <main>
   <a id="open" class="btn primary open" href="#"></a>
-  <div class="logo">Z</div>
+  <img class="logo" src="../zen-icon.png" width="64" height="64" alt="Zen">
   <h1 id="title"></h1>
   <p id="lead"></p>
   <div id="flat" class="flat hidden"></div>
@@ -115,10 +127,32 @@
       project: "Jak zainstalować i sprawdzić, że to bezpieczne: strona projektu na GitHubie"
     }
   };
-  var lang = String((navigator.language || "en")).toLowerCase().slice(0, 2);
-  var T = TEXTS[lang] || TEXTS.en;
+  var STORE_KEY = "zen-lang";
   var $ = function (id) { return document.getElementById(id); };
-  document.documentElement.lang = TEXTS[lang] ? lang : "en";
+  var hasText = function (l) {
+    return Object.prototype.hasOwnProperty.call(TEXTS, l);
+  };
+  // Language: "?lang=xx", then the visitor's earlier choice (the storage
+  // may be blocked), then the browser's languages; English otherwise.
+  function pickLanguage() {
+    var wanted = [];
+    var m = /(?:^|[?&])lang=([A-Za-z-]+)/.exec(location.search);
+    if (m) { wanted.push(m[1]); }
+    try {
+      var saved = localStorage.getItem(STORE_KEY);
+      if (saved) { wanted.push(saved); }
+    } catch (e) { /* not remembered */ }
+    var list = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language || "en"];
+    for (var i = 0; i < list.length; i++) { wanted.push(list[i]); }
+    for (var j = 0; j < wanted.length; j++) {
+      var base = String(wanted[j]).toLowerCase().split(/[-_]/)[0];
+      if (hasText(base)) { return base; }
+    }
+    return "en";
+  }
+  var lang = pickLanguage();
+  var T = TEXTS[lang];
 
   var ua = navigator.userAgent || "";
   var android = /Android/i.test(ua);
@@ -145,23 +179,42 @@
     } catch (e) { code = ""; }
   } else { code = ""; }
 
-  $("title").textContent = T.title;
-  $("lead").textContent = code ? T.lead : T.leadBad;
-  $("open").textContent = T.open;
-  $("copy").textContent = T.copy;
-  $("android").textContent = T.android;
-  $("otherPhones").textContent = T.otherPhones;
-  $("windows").textContent = T.windows;
-  $("ios").textContent = T.ios;
-  $("noapp").textContent = T.noapp;
-  $("project").textContent = T.project;
+  // All translated texts; run again when the visitor picks another language.
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    document.title = T.title;
+    $("title").textContent = T.title;
+    $("lead").textContent = code ? T.lead : T.leadBad;
+    $("open").textContent = T.open;
+    $("copy").textContent = T.copy;
+    $("android").textContent = T.android;
+    $("otherPhones").textContent = T.otherPhones;
+    $("windows").textContent = T.windows;
+    $("ios").textContent = T.ios;
+    $("noapp").textContent = T.noapp;
+    $("project").textContent = T.project;
+    if (code && name) { $("flat").textContent = T.flat + name; }
+    Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-lang") === lang ? "true" : "false");
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
+    b.addEventListener("click", function () {
+      var l = b.getAttribute("data-lang");
+      if (!hasText(l)) { return; }
+      lang = l;
+      T = TEXTS[lang];
+      try { localStorage.setItem(STORE_KEY, lang); } catch (e) { /* not remembered */ }
+      applyLanguage();
+    });
+  });
+  applyLanguage();
 
   if (!code) {
     $("open").classList.add("hidden");
     $("copy").classList.add("hidden");
   } else {
     if (name) {
-      $("flat").textContent = T.flat + name;
       $("flat").classList.remove("hidden");
     }
     var target = "m/" + code;

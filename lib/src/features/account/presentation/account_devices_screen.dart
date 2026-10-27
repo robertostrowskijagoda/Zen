@@ -190,111 +190,114 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     return Scaffold(
       key: const Key('account-devices-screen'),
       appBar: AppBar(title: Text(t('Urządzenia'))),
-      body: !ready
-          ? const _Starting()
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                if (_message != null)
-                  _MessageBox(
-                    text: _message!,
-                    textKey: const Key('devices-message'),
-                  ),
-                if (node.isRevoked)
-                  ZenInfo(
-                    icon: Icons.warning_amber_rounded,
-                    tone: zen.danger,
-                    title: t('To urządzenie zostało odłączone od konta'),
-                    text: t(
-                      'Zrobiło to inne urządzenie tego konta. Nic, co '
-                      'tu napiszesz, nie zostanie przyjęte.',
+      body: SafeArea(
+        top: false,
+        child: !ready
+            ? const _Starting()
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  if (_message != null)
+                    _MessageBox(
+                      text: _message!,
+                      textKey: const Key('devices-message'),
                     ),
-                  ),
-                ZenHero(
-                  title: t('Jedno konto, wiele urządzeń'),
-                  icon: Icons.devices_rounded,
-                  tone: zen.tone(ZenTone.network),
-                  text: t(
-                    'Twoje konto może działać na kilku urządzeniach naraz. '
-                    'Znajomi widzą je jako jedną osobę: wiadomości i '
-                    'połączenia trafiają na każde, a znajomi i grupy są '
-                    'wszędzie takie same.',
-                  ),
-                ),
-                ZenSection(t('Twoje urządzenia'), top: 12),
-                for (final AccountDevice d in node.ownDevices)
-                  ZenTile(
-                    key: Key('device-${d.device}'),
-                    icon: d.name.contains('Telefon') || d.name == 'iPhone'
-                        ? Icons.smartphone_rounded
-                        : Icons.computer_rounded,
-                    tone: d.isThis ? zen.accent : zen.tone(ZenTone.network),
-                    title: d.name,
-                    subtitle: d.isThis
-                        ? t('To urządzenie')
-                        : d.address == null
-                        ? t('Jeszcze się nie odezwało')
-                        : t('Podłączone'),
-                    trailing: d.isThis
-                        ? const SizedBox.shrink()
-                        : TextButton(
-                            key: Key('device-unlink-${d.device}'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: zen.danger,
-                              minimumSize: const Size(0, 36),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                            ),
-                            onPressed: _busy
-                                ? null
-                                : () => unawaited(_unlink(d)),
-                            child: Text(t('Odłącz')),
-                          ),
-                  ),
-                if (!node.isRevoked) ...<Widget>[
-                  const SizedBox(height: 12),
-                  FlatTakeoverCard(runsOn: _flatRunsOn(node)),
-                ],
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  key: const Key('devices-link-new'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: node.isRevoked
-                      ? null
-                      : () => unawaited(
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const _LinkSendScreen(),
-                            ),
-                          ),
-                        ),
-                  icon: const Icon(Icons.add_link_rounded),
-                  label: Text(t('Podłącz nowe urządzenie')),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  key: const Key('devices-join-account'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () => unawaited(
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const _LinkReceiveScreen(),
+                  if (node.isRevoked)
+                    ZenInfo(
+                      icon: Icons.warning_amber_rounded,
+                      tone: zen.danger,
+                      title: t('To urządzenie zostało odłączone od konta'),
+                      text: t(
+                        'Zrobiło to inne urządzenie tego konta. Nic, co '
+                        'tu napiszesz, nie zostanie przyjęte.',
                       ),
                     ),
+                  ZenHero(
+                    title: t('Jedno konto, wiele urządzeń'),
+                    icon: Icons.devices_rounded,
+                    tone: zen.tone(ZenTone.network),
+                    text: t(
+                      'Twoje konto może działać na kilku urządzeniach naraz. '
+                      'Znajomi widzą je jako jedną osobę: wiadomości i '
+                      'połączenia trafiają na każde, a znajomi i grupy są '
+                      'wszędzie takie same.',
+                    ),
                   ),
-                  icon: const Icon(Icons.login_rounded),
-                  label: Text(
-                    t('To nowe urządzenie: dołącz do konta'),
-                    textAlign: TextAlign.center,
+                  ZenSection(t('Twoje urządzenia'), top: 12),
+                  for (final AccountDevice d in node.ownDevices)
+                    ZenTile(
+                      key: Key('device-${d.device}'),
+                      icon: d.name.contains('Telefon') || d.name == 'iPhone'
+                          ? Icons.smartphone_rounded
+                          : Icons.computer_rounded,
+                      tone: d.isThis ? zen.accent : zen.tone(ZenTone.network),
+                      title: d.name,
+                      subtitle: d.isThis
+                          ? t('To urządzenie')
+                          : d.address == null
+                          ? t('Jeszcze się nie odezwało')
+                          : t('Podłączone'),
+                      trailing: d.isThis
+                          ? const SizedBox.shrink()
+                          : TextButton(
+                              key: Key('device-unlink-${d.device}'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: zen.danger,
+                                minimumSize: const Size(0, 36),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              onPressed: _busy
+                                  ? null
+                                  : () => unawaited(_unlink(d)),
+                              child: Text(t('Odłącz')),
+                            ),
+                    ),
+                  if (!node.isRevoked) ...<Widget>[
+                    const SizedBox(height: 12),
+                    FlatTakeoverCard(runsOn: _flatRunsOn(node)),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    key: const Key('devices-link-new'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: node.isRevoked
+                        ? null
+                        : () => unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const _LinkSendScreen(),
+                              ),
+                            ),
+                          ),
+                    icon: const Icon(Icons.add_link_rounded),
+                    label: Text(t('Podłącz nowe urządzenie')),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    key: const Key('devices-join-account'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () => unawaited(
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const _LinkReceiveScreen(),
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text(
+                      t('To nowe urządzenie: dołącz do konta'),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }
@@ -607,96 +610,99 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(t('Podłącz nowe urządzenie'))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          ZenHero(
-            title: t('Przenieś konto na nowe urządzenie'),
-            icon: Icons.add_link_rounded,
-            tone: zen.tone(ZenTone.network),
-            text: t(
-              'Na nowym urządzeniu otwórz Ustawienia → Urządzenia → „To nowe '
-              'urządzenie: dołącz do konta”. Pokaże kod. Zeskanuj go albo '
-              'przepisz tutaj.',
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('link-code'),
-            controller: _code,
-            enabled: !_done,
-            decoration: InputDecoration(
-              labelText: t('Kod nowego urządzenia'),
-              hintText: t('Zeskanuj albo wpisz kod'),
-              prefixIcon: const Icon(Icons.key_rounded),
-              suffixIcon: IconButton(
-                tooltip: t('Zeskanuj kod QR'),
-                onPressed: _done ? null : () => unawaited(_scan()),
-                icon: const Icon(Icons.qr_code_scanner_rounded),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            ZenHero(
+              title: t('Przenieś konto na nowe urządzenie'),
+              icon: Icons.add_link_rounded,
+              tone: zen.tone(ZenTone.network),
+              text: t(
+                'Na nowym urządzeniu otwórz Ustawienia → Urządzenia → „To nowe '
+                'urządzenie: dołącz do konta”. Pokaże kod. Zeskanuj go albo '
+                'przepisz tutaj.',
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (_digits == null)
-            FilledButton.icon(
-              key: const Key('link-connect'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('link-code'),
+              controller: _code,
+              enabled: !_done,
+              decoration: InputDecoration(
+                labelText: t('Kod nowego urządzenia'),
+                hintText: t('Zeskanuj albo wpisz kod'),
+                prefixIcon: const Icon(Icons.key_rounded),
+                suffixIcon: IconButton(
+                  tooltip: t('Zeskanuj kod QR'),
+                  onPressed: _done ? null : () => unawaited(_scan()),
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                ),
               ),
-              onPressed: _busy ? null : () => unawaited(_connect()),
-              icon: const Icon(Icons.link_rounded),
-              label: Text(t('Połącz')),
             ),
-          if (_digits != null && !_done) ...<Widget>[
             const SizedBox(height: 12),
-            Text(
-              t('Czy na nowym urządzeniu widać dokładnie te cyfry?'),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 15.5,
-                fontWeight: FontWeight.w700,
+            if (_digits == null)
+              FilledButton.icon(
+                key: const Key('link-connect'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed: _busy ? null : () => unawaited(_connect()),
+                icon: const Icon(Icons.link_rounded),
+                label: Text(t('Połącz')),
               ),
-            ),
-            _digitsBox(context, _digits!),
-            FilledButton.icon(
-              key: const Key('link-digits-match'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-              ),
-              onPressed: _busy ? null : () => unawaited(_send()),
-              icon: const Icon(Icons.check_rounded),
-              label: Text(
-                t('Tak, te same — wyślij konto'),
+            if (_digits != null && !_done) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(
+                t('Czy na nowym urządzeniu widać dokładnie te cyfry?'),
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: zen.textPrimary,
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            TextButton(
-              key: const Key('link-digits-differ'),
-              style: TextButton.styleFrom(foregroundColor: zen.danger),
-              onPressed: _busy
-                  ? null
-                  : () => setState(() {
-                      _digits = null;
-                      _message = t(
-                        'Cyfry się różniły — nic nie zostało wysłane. '
-                        'Spróbuj jeszcze raz.',
-                      );
-                    }),
-              child: Text(t('Nie, są inne')),
-            ),
+              _digitsBox(context, _digits!),
+              FilledButton.icon(
+                key: const Key('link-digits-match'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed: _busy ? null : () => unawaited(_send()),
+                icon: const Icon(Icons.check_rounded),
+                label: Text(
+                  t('Tak, te same — wyślij konto'),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextButton(
+                key: const Key('link-digits-differ'),
+                style: TextButton.styleFrom(foregroundColor: zen.danger),
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                        _digits = null;
+                        _message = t(
+                          'Cyfry się różniły — nic nie zostało wysłane. '
+                          'Spróbuj jeszcze raz.',
+                        );
+                      }),
+                child: Text(t('Nie, są inne')),
+              ),
+            ],
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: _MessageBox(
+                  text: _message!,
+                  textKey: const Key('link-message'),
+                  tone: _done ? zen.success : null,
+                ),
+              ),
           ],
-          if (_message != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: _MessageBox(
-                text: _message!,
-                textKey: const Key('link-message'),
-                tone: _done ? zen.success : null,
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
@@ -777,127 +783,130 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(t('Dołącz do konta'))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          ZenHero(
-            title: t('Dołącz to urządzenie'),
-            icon: Icons.login_rounded,
-            tone: zen.tone(ZenTone.network),
-            text: t(
-              'Na urządzeniu, które już ma Twoje konto, otwórz Ustawienia → '
-              'Urządzenia → „Podłącz nowe urządzenie” i zeskanuj ten kod '
-              '(albo go przepisz).',
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            ZenHero(
+              title: t('Dołącz to urządzenie'),
+              icon: Icons.login_rounded,
+              tone: zen.tone(ZenTone.network),
+              text: t(
+                'Na urządzeniu, które już ma Twoje konto, otwórz Ustawienia → '
+                'Urządzenia → „Podłącz nowe urządzenie” i zeskanuj ten kod '
+                '(albo go przepisz).',
+              ),
             ),
-          ),
-          ZenInfo(
-            icon: Icons.warning_amber_rounded,
-            tone: zen.warning,
-            text: t(
-              'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
-              'konto z drugiego urządzenia, a dotychczasowe przestanie być '
-              'używane.',
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (_receiver.versionMismatch case final String other)
             ZenInfo(
-              icon: Icons.system_update_outlined,
+              icon: Icons.warning_amber_rounded,
               tone: zen.warning,
-              text: accountLinkVersionText(other == '?' ? null : other),
-            ),
-          if (profile == null)
-            _Waiting(t('Czekam na połączenie z siecią…'))
-          else
-            ZenCard(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-              child: Column(
-                children: <Widget>[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: ZenFixed.qrPaper,
-                      borderRadius: context.zenRadius(20),
-                    ),
-                    child: QrImageView(
-                      data: profile.qrData,
-                      size: 180,
-                      backgroundColor: ZenFixed.qrPaper,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    t('KOD TEGO URZĄDZENIA'),
-                    style: zen.label(color: zen.textMuted),
-                  ),
-                  const SizedBox(height: 4),
-                  SelectableText(
-                    profile.inviteCode,
-                    key: const Key('link-my-code'),
-                    textAlign: TextAlign.center,
-                    style: zen.mono(
-                      color: zen.textPrimary,
-                      size: 16,
-                      weight: FontWeight.w700,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ],
+              text: t(
+                'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
+                'konto z drugiego urządzenia, a dotychczasowe przestanie być '
+                'używane.',
               ),
             ),
-          const SizedBox(height: 16),
-          if (offers.isEmpty)
-            _Waiting(t('Czekam na drugie urządzenie…'))
-          else if (!_done) ...<Widget>[
-            Text(
-              t('Sprawdź, czy drugie urządzenie pokazuje te same cyfry:'),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 15.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (offers.length > 1)
+            const SizedBox(height: 12),
+            if (_receiver.versionMismatch case final String other)
               ZenInfo(
-                key: const Key('link-several'),
-                icon: Icons.warning_amber_rounded,
+                icon: Icons.system_update_outlined,
                 tone: zen.warning,
-                text: t(
-                  'Łączy się więcej niż jedno urządzenie. Dołącz tylko '
-                  'tam, gdzie cyfry są takie same jak na Twoim drugim '
-                  'urządzeniu.',
+                text: accountLinkVersionText(other == '?' ? null : other),
+              ),
+            if (profile == null)
+              _Waiting(t('Czekam na połączenie z siecią…'))
+            else
+              ZenCard(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                child: Column(
+                  children: <Widget>[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: ZenFixed.qrPaper,
+                        borderRadius: context.zenRadius(20),
+                      ),
+                      child: QrImageView(
+                        data: profile.qrData,
+                        size: 180,
+                        backgroundColor: ZenFixed.qrPaper,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      t('KOD TEGO URZĄDZENIA'),
+                      style: zen.label(color: zen.textMuted),
+                    ),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      profile.inviteCode,
+                      key: const Key('link-my-code'),
+                      textAlign: TextAlign.center,
+                      style: zen.mono(
+                        color: zen.textPrimary,
+                        size: 16,
+                        weight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            for (int i = 0; i < offers.length; i++) ...<Widget>[
-              _digitsBox(context, offers[i].digits),
-              if (offers[i].account == null)
-                _Waiting(t('Potwierdź je na drugim urządzeniu.'))
-              else
-                FilledButton.icon(
-                  key: Key(i == 0 ? 'link-take' : 'link-take-$i'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () => unawaited(_take(offers[i].account!)),
-                  icon: const Icon(Icons.check_rounded),
-                  label: Text(
-                    t('Cyfry były te same — dołącz do konta'),
-                    textAlign: TextAlign.center,
+            const SizedBox(height: 16),
+            if (offers.isEmpty)
+              _Waiting(t('Czekam na drugie urządzenie…'))
+            else if (!_done) ...<Widget>[
+              Text(
+                t('Sprawdź, czy drugie urządzenie pokazuje te same cyfry:'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: zen.textPrimary,
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (offers.length > 1)
+                ZenInfo(
+                  key: const Key('link-several'),
+                  icon: Icons.warning_amber_rounded,
+                  tone: zen.warning,
+                  text: t(
+                    'Łączy się więcej niż jedno urządzenie. Dołącz tylko '
+                    'tam, gdzie cyfry są takie same jak na Twoim drugim '
+                    'urządzeniu.',
                   ),
                 ),
+              for (int i = 0; i < offers.length; i++) ...<Widget>[
+                _digitsBox(context, offers[i].digits),
+                if (offers[i].account == null)
+                  _Waiting(t('Potwierdź je na drugim urządzeniu.'))
+                else
+                  FilledButton.icon(
+                    key: Key(i == 0 ? 'link-take' : 'link-take-$i'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () => unawaited(_take(offers[i].account!)),
+                    icon: const Icon(Icons.check_rounded),
+                    label: Text(
+                      t('Cyfry były te same — dołącz do konta'),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+              ],
             ],
-          ],
-          if (_message != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: _MessageBox(
-                text: _message!,
-                textKey: const Key('link-message'),
-                tone: _done ? zen.success : null,
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: _MessageBox(
+                  text: _message!,
+                  textKey: const Key('link-message'),
+                  tone: _done ? zen.success : null,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

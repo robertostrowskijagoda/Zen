@@ -100,35 +100,38 @@ class FoodScreen extends ConsumerWidget {
                   icon: const Icon(Icons.add_rounded),
                   label: Text(t('Podziel się jedzeniem')),
                 ),
-          body: SelectionArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-              children: <Widget>[
-                ZenInfo(
-                  icon: Icons.health_and_safety_rounded,
-                  tone: tone,
-                  text: t(
-                    'Jedzenie od znajomych — Zen go nie sprawdza. Przy alergii '
-                    'zapytaj, zanim zjesz. Coś nie tak? Zgłoś ofertę.',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final (FoodOffer o, String who, String name)
-                    in food.toVouch)
-                  _VouchCard(food: food, offer: o, who: who, name: name),
-                if (offers.isEmpty)
-                  ZenEmpty(
-                    icon: Icons.takeout_dining_rounded,
+          body: SafeArea(
+            top: false,
+            child: SelectionArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                children: <Widget>[
+                  ZenInfo(
+                    icon: Icons.health_and_safety_rounded,
                     tone: tone,
-                    title: t('Nikt teraz niczym się nie dzieli'),
-                    text: circle == null
-                        ? null
-                        : t('Zostało Ci jedzenie? Poczęstuj kółko.'),
-                  )
-                else
-                  for (final FoodOffer o in offers)
-                    FoodOfferCard(key: Key('food-offer-${o.id}'), offer: o),
-              ],
+                    text: t(
+                      'Jedzenie od znajomych — Zen go nie sprawdza. Przy alergii '
+                      'zapytaj, zanim zjesz. Coś nie tak? Zgłoś ofertę.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final (FoodOffer o, String who, String name)
+                      in food.toVouch)
+                    _VouchCard(food: food, offer: o, who: who, name: name),
+                  if (offers.isEmpty)
+                    ZenEmpty(
+                      icon: Icons.takeout_dining_rounded,
+                      tone: tone,
+                      title: t('Nikt teraz niczym się nie dzieli'),
+                      text: circle == null
+                          ? null
+                          : t('Zostało Ci jedzenie? Poczęstuj kółko.'),
+                    )
+                  else
+                    for (final FoodOffer o in offers)
+                      FoodOfferCard(key: Key('food-offer-${o.id}'), offer: o),
+                ],
+              ),
             ),
           ),
         );
@@ -1135,305 +1138,314 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
           seats ? t('Gotuję dziś — dosiądź się') : t('Podziel się jedzeniem'),
         ),
       ),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            TextField(
-              key: const Key('food-title'),
-              controller: _title,
-              maxLength: kFoodMaxTitle,
-              textCapitalization: TextCapitalization.sentences,
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: seats ? t('Co gotujesz') : t('Co'),
-                hintText: t('np. Pierogi ruskie, zupa dyniowa'),
-                prefixIcon: const Icon(Icons.restaurant_rounded),
-              ),
-            ),
-            TextField(
-              controller: _note,
-              maxLength: kFoodMaxNote,
-              maxLines: 2,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: t('Kilka słów (opcjonalnie)'),
-              ),
-            ),
-            Row(
-              children: <Widget>[
-                if (_photo != null) ...<Widget>[
-                  ClipRRect(
-                    borderRadius: context.zenRadius(12),
-                    child: SizedBox(
-                      width: 56,
-                      height: 56,
-                      child: SafePhoto(data: _photo!),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => setState(() => _photo = null),
-                    child: Text(t('Usuń zdjęcie')),
-                  ),
-                ] else
-                  TextButton.icon(
-                    onPressed: () => unawaited(_pickPhoto()),
-                    icon: const Icon(Icons.add_a_photo_rounded),
-                    label: Text(t('Dodaj zdjęcie (opcjonalnie)')),
-                  ),
-              ],
-            ),
-            if (seats)
-              ZenInfo(
-                icon: Icons.event_seat_rounded,
-                tone: tone,
-                text: t(
-                  'Wolne miejsca przy Twoim stole dziś. Pierwsze prośby '
-                  'przyjmujesz Ty, adres dostaje tylko przyjęty gość. Znajomi '
-                  'znajomych proszą przez kogoś, kto za nich ręczy.',
-                ),
-              ),
-            ZenSection(
-              seats ? t('Ile wolnych miejsc') : t('Ile porcji'),
-              top: 12,
-            ),
-            Row(
-              children: <Widget>[
-                IconButton(
-                  tooltip: t('Mniej'),
-                  onPressed: _portions > 1
-                      ? () => setState(() => _portions--)
-                      : null,
-                  icon: const Icon(Icons.remove_rounded),
-                ),
-                Text(
-                  seats
-                      ? tn(
-                          _portions,
-                          one: '{n} miejsce',
-                          few: '{n} miejsca',
-                          many: '{n} miejsc',
-                        )
-                      : tn(
-                          _portions,
-                          one: '{n} porcja',
-                          few: '{n} porcje',
-                          many: '{n} porcji',
-                        ),
-                  key: const Key('food-portions'),
-                  style: TextStyle(
-                    color: zen.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                IconButton(
-                  tooltip: t('Więcej'),
-                  onPressed: _portions < (seats ? 8 : kFoodMaxPortions)
-                      ? () => setState(() => _portions++)
-                      : null,
-                  icon: const Icon(Icons.add_rounded),
-                ),
-              ],
-            ),
-            ZenSection(t('Kiedy'), top: 12),
-            ZenGroup(
-              children: <Widget>[
-                ListTile(
-                  leading: const Icon(Icons.schedule_rounded),
-                  title: Text(seats ? t('Kolacja o') : t('Gotowe od')),
-                  trailing: Text(foodWhen(_from.millisecondsSinceEpoch, now)),
-                  onTap: () async {
-                    final DateTime? d = await _pick(_from);
-                    if (d != null) {
-                      setState(() {
-                        _from = d;
-                        if (!_until.isAfter(d)) {
-                          _until = d.add(const Duration(hours: 4));
-                        }
-                      });
-                    }
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.timer_off_rounded),
-                  title: Text(t('Do')),
-                  subtitle: Text(t('Potem oferta zamyka się sama.')),
-                  trailing: Text(foodWhen(_until.millisecondsSinceEpoch, now)),
-                  onTap: () async {
-                    final DateTime? d = await _pick(_until);
-                    if (d != null) {
-                      setState(() => _until = d);
-                    }
-                  },
-                ),
-              ],
-            ),
-            if (!_timeOk)
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(4, 6, 0, 0),
-                child: Text(
-                  t(
-                    '„Do” musi być później niż teraz i „od”, najwyżej 48 godzin.',
-                  ),
-                  style: TextStyle(color: zen.warning, fontSize: 12.5),
-                ),
-              ),
-            ZenSection(seats ? t('Gdzie') : t('Jak'), top: 16),
-            if (!seats)
-              _chips<FoodMode>(
-                FoodMode.values,
-                (FoodMode m) => m.label,
-                _modes.contains,
-                (FoodMode m, bool on) => on ? _modes.add(m) : _modes.remove(m),
-              ),
-            if (_modes.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 8),
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
               TextField(
-                controller: _place,
-                maxLength: kFoodMaxPlace,
-                decoration: InputDecoration(
-                  labelText: t('Gdzie (adres, piętro)'),
-                  helperText: t('Zobaczą to tylko osoby, które przyjmiesz.'),
-                  prefixIcon: const Icon(Icons.place_rounded),
-                ),
-              ),
-            ],
-            ZenSection(t('W zamian'), top: 16),
-            _chips<FoodExchange>(
-              <FoodExchange>[
-                for (final FoodExchange x in FoodExchange.values)
-                  if (x != FoodExchange.points || canPoints) x,
-              ],
-              (FoodExchange x) => x.label,
-              _exchanges.contains,
-              (FoodExchange x, bool on) =>
-                  on ? _exchanges.add(x) : _exchanges.remove(x),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              t(
-                'Możesz zaznaczyć kilka — biorący wybiera. „Dziś Ty, jutro ja”: '
-                'Zen liczy tylko u Was, kto kogo częstował.',
-              ),
-              style: hint,
-            ),
-            if (_exchanges.contains(FoodExchange.points))
-              TextField(
-                key: const Key('food-points'),
-                controller: _points,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                key: const Key('food-title'),
+                controller: _title,
+                maxLength: kFoodMaxTitle,
+                textCapitalization: TextCapitalization.sentences,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  labelText: t('Punkty za porcję'),
-                  helperText: t('Tylko dla osób z Twojej piramidy.'),
+                  labelText: seats ? t('Co gotujesz') : t('Co'),
+                  hintText: t('np. Pierogi ruskie, zupa dyniowa'),
+                  prefixIcon: const Icon(Icons.restaurant_rounded),
                 ),
               ),
-            if (_exchanges.contains(FoodExchange.money)) ...<Widget>[
               TextField(
-                controller: _money,
-                maxLength: kFoodMaxMoneyLabel,
+                controller: _note,
+                maxLength: kFoodMaxNote,
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
-                  labelText: t('Kwota (np. 10 zł za porcję)'),
+                  labelText: t('Kilka słów (opcjonalnie)'),
                 ),
               ),
-              ZenInfo(
-                icon: Icons.payments_outlined,
-                tone: zen.warning,
-                text: kFoodMoneyNote,
-              ),
-            ],
-            ZenSection(t('Dieta i alergeny'), top: 16),
-            _chips<FoodDiet>(
-              FoodDiet.values,
-              (FoodDiet d) => d.label,
-              _diet.contains,
-              (FoodDiet d, bool on) => on ? _diet.add(d) : _diet.remove(d),
-            ),
-            const SizedBox(height: 10),
-            Text(t('Alergeny — wybierz jedno:'), style: hint),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: <Widget>[
-                ChoiceChip(
-                  key: const Key('food-allergens-listed'),
-                  label: Text(t('Zawiera…')),
-                  selected: _allergenInfo == FoodAllergenInfo.listed,
-                  onSelected: (_) =>
-                      setState(() => _allergenInfo = FoodAllergenInfo.listed),
-                ),
-                ChoiceChip(
-                  key: const Key('food-allergens-none'),
-                  label: Text(t('Bez głównych alergenów')),
-                  selected: _allergenInfo == FoodAllergenInfo.none,
-                  onSelected: (_) =>
-                      setState(() => _allergenInfo = FoodAllergenInfo.none),
-                ),
-                ChoiceChip(
-                  key: const Key('food-allergens-unknown'),
-                  label: Text(t('Brak informacji')),
-                  selected: _allergenInfo == FoodAllergenInfo.unknown,
-                  onSelected: (_) =>
-                      setState(() => _allergenInfo = FoodAllergenInfo.unknown),
-                ),
-              ],
-            ),
-            if (_allergenInfo == FoodAllergenInfo.listed) ...<Widget>[
-              const SizedBox(height: 8),
-              _chips<FoodAllergen>(
-                FoodAllergen.values,
-                (FoodAllergen a) => a.label,
-                _allergens.contains,
-                (FoodAllergen a, bool on) =>
-                    on ? _allergens.add(a) : _allergens.remove(a),
-              ),
-            ],
-            ZenSection(t('Kto widzi'), top: 16),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: <Widget>[
-                for (final FoodReach r in FoodReach.values)
-                  if (circle != null || r != FoodReach.circle)
-                    ChoiceChip(
-                      key: Key('food-reach-${r.code}'),
-                      label: Text(circle == null ? r.seatsLabel : r.label),
-                      selected: _reach == r,
-                      onSelected: (_) => setState(() => _reach = r),
+              Row(
+                children: <Widget>[
+                  if (_photo != null) ...<Widget>[
+                    ClipRRect(
+                      borderRadius: context.zenRadius(12),
+                      child: SizedBox(
+                        width: 56,
+                        height: 56,
+                        child: SafePhoto(data: _photo!),
+                      ),
                     ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => setState(() => _photo = null),
+                      child: Text(t('Usuń zdjęcie')),
+                    ),
+                  ] else
+                    TextButton.icon(
+                      onPressed: () => unawaited(_pickPhoto()),
+                      icon: const Icon(Icons.add_a_photo_rounded),
+                      label: Text(t('Dodaj zdjęcie (opcjonalnie)')),
+                    ),
+                ],
+              ),
+              if (seats)
+                ZenInfo(
+                  icon: Icons.event_seat_rounded,
+                  tone: tone,
+                  text: t(
+                    'Wolne miejsca przy Twoim stole dziś. Pierwsze prośby '
+                    'przyjmujesz Ty, adres dostaje tylko przyjęty gość. Znajomi '
+                    'znajomych proszą przez kogoś, kto za nich ręczy.',
+                  ),
+                ),
+              ZenSection(
+                seats ? t('Ile wolnych miejsc') : t('Ile porcji'),
+                top: 12,
+              ),
+              Row(
+                children: <Widget>[
+                  IconButton(
+                    tooltip: t('Mniej'),
+                    onPressed: _portions > 1
+                        ? () => setState(() => _portions--)
+                        : null,
+                    icon: const Icon(Icons.remove_rounded),
+                  ),
+                  Text(
+                    seats
+                        ? tn(
+                            _portions,
+                            one: '{n} miejsce',
+                            few: '{n} miejsca',
+                            many: '{n} miejsc',
+                          )
+                        : tn(
+                            _portions,
+                            one: '{n} porcja',
+                            few: '{n} porcje',
+                            many: '{n} porcji',
+                          ),
+                    key: const Key('food-portions'),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: t('Więcej'),
+                    onPressed: _portions < (seats ? 8 : kFoodMaxPortions)
+                        ? () => setState(() => _portions++)
+                        : null,
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+                ],
+              ),
+              ZenSection(t('Kiedy'), top: 12),
+              ZenGroup(
+                children: <Widget>[
+                  ListTile(
+                    leading: const Icon(Icons.schedule_rounded),
+                    title: Text(seats ? t('Kolacja o') : t('Gotowe od')),
+                    trailing: Text(foodWhen(_from.millisecondsSinceEpoch, now)),
+                    onTap: () async {
+                      final DateTime? d = await _pick(_from);
+                      if (d != null) {
+                        setState(() {
+                          _from = d;
+                          if (!_until.isAfter(d)) {
+                            _until = d.add(const Duration(hours: 4));
+                          }
+                        });
+                      }
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.timer_off_rounded),
+                    title: Text(t('Do')),
+                    subtitle: Text(t('Potem oferta zamyka się sama.')),
+                    trailing: Text(
+                      foodWhen(_until.millisecondsSinceEpoch, now),
+                    ),
+                    onTap: () async {
+                      final DateTime? d = await _pick(_until);
+                      if (d != null) {
+                        setState(() => _until = d);
+                      }
+                    },
+                  ),
+                ],
+              ),
+              if (!_timeOk)
+                Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(4, 6, 0, 0),
+                  child: Text(
+                    t(
+                      '„Do” musi być później niż teraz i „od”, najwyżej 48 godzin.',
+                    ),
+                    style: TextStyle(color: zen.warning, fontSize: 12.5),
+                  ),
+                ),
+              ZenSection(seats ? t('Gdzie') : t('Jak'), top: 16),
+              if (!seats)
+                _chips<FoodMode>(
+                  FoodMode.values,
+                  (FoodMode m) => m.label,
+                  _modes.contains,
+                  (FoodMode m, bool on) =>
+                      on ? _modes.add(m) : _modes.remove(m),
+                ),
+              if (_modes.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _place,
+                  maxLength: kFoodMaxPlace,
+                  decoration: InputDecoration(
+                    labelText: t('Gdzie (adres, piętro)'),
+                    helperText: t('Zobaczą to tylko osoby, które przyjmiesz.'),
+                    prefixIcon: const Icon(Icons.place_rounded),
+                  ),
+                ),
               ],
-            ),
-            if (circle != null) ...<Widget>[
+              ZenSection(t('W zamian'), top: 16),
+              _chips<FoodExchange>(
+                <FoodExchange>[
+                  for (final FoodExchange x in FoodExchange.values)
+                    if (x != FoodExchange.points || canPoints) x,
+                ],
+                (FoodExchange x) => x.label,
+                _exchanges.contains,
+                (FoodExchange x, bool on) =>
+                    on ? _exchanges.add(x) : _exchanges.remove(x),
+              ),
               const SizedBox(height: 6),
-              Text(t('Kółko: {name}', {'name': circle.name}), style: hint),
+              Text(
+                t(
+                  'Możesz zaznaczyć kilka — biorący wybiera. „Dziś Ty, jutro ja”: '
+                  'Zen liczy tylko u Was, kto kogo częstował.',
+                ),
+                style: hint,
+              ),
+              if (_exchanges.contains(FoodExchange.points))
+                TextField(
+                  key: const Key('food-points'),
+                  controller: _points,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: t('Punkty za porcję'),
+                    helperText: t('Tylko dla osób z Twojej piramidy.'),
+                  ),
+                ),
+              if (_exchanges.contains(FoodExchange.money)) ...<Widget>[
+                TextField(
+                  controller: _money,
+                  maxLength: kFoodMaxMoneyLabel,
+                  decoration: InputDecoration(
+                    labelText: t('Kwota (np. 10 zł za porcję)'),
+                  ),
+                ),
+                ZenInfo(
+                  icon: Icons.payments_outlined,
+                  tone: zen.warning,
+                  text: kFoodMoneyNote,
+                ),
+              ],
+              ZenSection(t('Dieta i alergeny'), top: 16),
+              _chips<FoodDiet>(
+                FoodDiet.values,
+                (FoodDiet d) => d.label,
+                _diet.contains,
+                (FoodDiet d, bool on) => on ? _diet.add(d) : _diet.remove(d),
+              ),
+              const SizedBox(height: 10),
+              Text(t('Alergeny — wybierz jedno:'), style: hint),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  ChoiceChip(
+                    key: const Key('food-allergens-listed'),
+                    label: Text(t('Zawiera…')),
+                    selected: _allergenInfo == FoodAllergenInfo.listed,
+                    onSelected: (_) =>
+                        setState(() => _allergenInfo = FoodAllergenInfo.listed),
+                  ),
+                  ChoiceChip(
+                    key: const Key('food-allergens-none'),
+                    label: Text(t('Bez głównych alergenów')),
+                    selected: _allergenInfo == FoodAllergenInfo.none,
+                    onSelected: (_) =>
+                        setState(() => _allergenInfo = FoodAllergenInfo.none),
+                  ),
+                  ChoiceChip(
+                    key: const Key('food-allergens-unknown'),
+                    label: Text(t('Brak informacji')),
+                    selected: _allergenInfo == FoodAllergenInfo.unknown,
+                    onSelected: (_) => setState(
+                      () => _allergenInfo = FoodAllergenInfo.unknown,
+                    ),
+                  ),
+                ],
+              ),
+              if (_allergenInfo == FoodAllergenInfo.listed) ...<Widget>[
+                const SizedBox(height: 8),
+                _chips<FoodAllergen>(
+                  FoodAllergen.values,
+                  (FoodAllergen a) => a.label,
+                  _allergens.contains,
+                  (FoodAllergen a, bool on) =>
+                      on ? _allergens.add(a) : _allergens.remove(a),
+                ),
+              ],
+              ZenSection(t('Kto widzi'), top: 16),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  for (final FoodReach r in FoodReach.values)
+                    if (circle != null || r != FoodReach.circle)
+                      ChoiceChip(
+                        key: Key('food-reach-${r.code}'),
+                        label: Text(circle == null ? r.seatsLabel : r.label),
+                        selected: _reach == r,
+                        onSelected: (_) => setState(() => _reach = r),
+                      ),
+                ],
+              ),
+              if (circle != null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(t('Kółko: {name}', {'name': circle.name}), style: hint),
+              ],
+              const SizedBox(height: 16),
+              ZenInfo(
+                icon: Icons.health_and_safety_rounded,
+                tone: tone,
+                text: t(
+                  'Dziel się tylko świeżym jedzeniem, trzymanym w lodówce albo '
+                  'ciepłym prosto z garnka. Opisz alergeny. Po godzinie „do” '
+                  'oferta zamyka się sama.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                key: const Key('food-submit'),
+                onPressed: _ready && !_sending
+                    ? () => unawaited(_submit())
+                    : null,
+                icon: Icon(
+                  seats
+                      ? Icons.event_seat_rounded
+                      : Icons.takeout_dining_rounded,
+                ),
+                label: Text(seats ? t('Zaproś do stołu') : t('Udostępnij')),
+              ),
             ],
-            const SizedBox(height: 16),
-            ZenInfo(
-              icon: Icons.health_and_safety_rounded,
-              tone: tone,
-              text: t(
-                'Dziel się tylko świeżym jedzeniem, trzymanym w lodówce albo '
-                'ciepłym prosto z garnka. Opisz alergeny. Po godzinie „do” '
-                'oferta zamyka się sama.',
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              key: const Key('food-submit'),
-              onPressed: _ready && !_sending
-                  ? () => unawaited(_submit())
-                  : null,
-              icon: Icon(
-                seats ? Icons.event_seat_rounded : Icons.takeout_dining_rounded,
-              ),
-              label: Text(seats ? t('Zaproś do stołu') : t('Udostępnij')),
-            ),
-          ],
+          ),
         ),
       ),
     );

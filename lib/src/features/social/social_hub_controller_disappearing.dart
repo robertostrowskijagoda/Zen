@@ -274,7 +274,14 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     if (friend == null) {
       return;
     }
-    final String preview = thread.isEmpty ? '' : thread.last.text;
+    final String preview = thread.isEmpty
+        ? ''
+        : chatPreviewLine(
+            thread.last.text,
+            type: thread.last.type,
+            fileName: thread.last.fileName,
+            mimeType: thread.last.mimeType,
+          );
     if (friend.lastMessagePreview == preview) {
       return;
     }

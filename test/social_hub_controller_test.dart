@@ -1011,6 +1011,7 @@ void main() {
             sentAtMillis: nowMillis - const Duration(hours: 1).inMilliseconds,
             direction: ChatMessageDirection.outgoing,
             type: ChatMessageType.file,
+            fileName: 'drugi.pdf',
             attachmentSizeBytes: 700000,
           ),
         ],
@@ -1067,7 +1068,10 @@ void main() {
       ]);
       expect(await transferStore.loadOutgoing('ada.ygg', 'first-big'), isNull);
       expect(state.friends['ada.ygg']!.inboxLimitMb, 1);
-      expect(state.friends['ada.ygg']!.lastMessagePreview, 'Drugi plik');
+      expect(
+        state.friends['ada.ygg']!.lastMessagePreview,
+        chatMessageLabelForType(ChatMessageType.file, fileName: 'drugi.pdf'),
+      );
     },
   );
 

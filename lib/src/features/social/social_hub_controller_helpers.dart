@@ -176,7 +176,12 @@ SocialHubState _applySignal(
             isTyping: false,
             lastPresenceAtMillis: receivedAtMillis,
             lastMessagePreview: _clipText(
-              signal.content ?? t('Nowa wiadomość'),
+              chatPreviewLine(
+                signal.content ?? t('Nowa wiadomość'),
+                type: signal.messageType,
+                fileName: signal.fileName,
+                mimeType: signal.mimeType,
+              ),
               kMaxStoredPreviewChars,
             ),
             lastActivityLabel: t('Teraz'),
@@ -292,7 +297,12 @@ SocialHubState _applySignal(
         final String? senderName = signal.displayName?.trim();
         groups[groupId] = existing.copyWith(
           lastMessagePreview: _clipText(
-            signal.content ?? t('Nowa wiadomość grupowa'),
+            chatPreviewLine(
+              signal.content ?? t('Nowa wiadomość grupowa'),
+              type: signal.messageType,
+              fileName: signal.fileName,
+              mimeType: signal.mimeType,
+            ),
             kMaxStoredPreviewChars,
           ),
           lastActivityLabel: t('Teraz'),
@@ -619,6 +629,23 @@ int _estimateInboxEntryBytes(InboxEntry entry) {
       .length;
 }
 
+/// What [signal] says in a notice or an inbox entry: for a message with an
+/// attachment only the label of its type (never the caption or file name),
+/// otherwise its text.
+String? _signalPreviewText(ZenSignal signal) {
+  final String? content = signal.content;
+  final ChatMessageType? type = signal.messageType;
+  if (content == null && (type == null || type == ChatMessageType.text)) {
+    return null;
+  }
+  return chatPreviewLine(
+    content ?? '',
+    type: type,
+    fileName: signal.fileName,
+    mimeType: signal.mimeType,
+  );
+}
+
 InboxEntry _buildInboxEntry({
   required ZenSignal signal,
   required int receivedAtMillis,
@@ -703,7 +730,7 @@ InboxEntry _buildInboxEntry({
       type: InboxEntryType.message,
       title: SocialEventText('inbox.message', <String, String>{'name': label}),
       body: const SocialEventText('inbox.message.body'),
-      bodyText: signal.content,
+      bodyText: _signalPreviewText(signal),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -835,7 +862,7 @@ InboxEntry _buildInboxEntry({
         'name': label,
       }),
       body: const SocialEventText('inbox.groupMessage.body'),
-      bodyText: signal.content,
+      bodyText: _signalPreviewText(signal),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -889,7 +916,7 @@ InboxEntry _buildInboxEntry({
       body: SocialEventText('inbox.event.body', <String, String>{
         'name': label,
       }),
-      bodyText: signal.content,
+      bodyText: _signalPreviewText(signal),
       createdAtMillis: receivedAtMillis,
       routeKey: null,
       peerAddress: signal.sender,
@@ -1049,25 +1076,20 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   );
   final String title;
   final String body;
+  final String? preview = _signalPreviewText(signal)?.trim();
 
   switch (signal.type) {
     case ZenSignalType.message:
       title = senderLabel;
-      body =
-          !hideContent &&
-              signal.content != null &&
-              signal.content!.trim().isNotEmpty
-          ? signal.content!.trim()
+      body = !hideContent && (preview?.isNotEmpty ?? false)
+          ? preview!
           : t('Nowa wiadomość');
     case ZenSignalType.groupMessage:
       title = (signal.groupName != null && signal.groupName!.trim().isNotEmpty)
           ? signal.groupName!.trim()
           : t('Wiadomość grupowa');
-      body =
-          !hideContent &&
-              signal.content != null &&
-              signal.content!.trim().isNotEmpty
-          ? '$senderLabel: ${signal.content!.trim()}'
+      body = !hideContent && (preview?.isNotEmpty ?? false)
+          ? '$senderLabel: $preview'
           : t('{name} wysłał(a) wiadomość', {'name': senderLabel});
     case ZenSignalType.callInvite:
     case ZenSignalType.callOffer:

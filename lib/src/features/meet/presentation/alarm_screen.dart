@@ -1261,163 +1261,171 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
             backgroundColor: a.isActive ? alarmRed : null,
             foregroundColor: a.isActive ? onAlarm : null,
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
-              ZenCard(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        ZenIconBadge(
-                          icon: a.isActive
-                              ? Icons.campaign_rounded
-                              : expired
-                              ? Icons.timer_off_rounded
-                              : a.duress
-                              ? Icons.warning_amber_rounded
-                              : Icons.verified_user_rounded,
-                          tone: headTone,
-                          size: 48,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            a.isActive
-                                ? t('{name} potrzebuje pomocy', {'name': name})
+          body: SafeArea(
+            top: false,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: <Widget>[
+                ZenCard(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          ZenIconBadge(
+                            icon: a.isActive
+                                ? Icons.campaign_rounded
                                 : expired
-                                ? t(
-                                    'Alarm od {name} przyszedł tylko przez '
-                                    'Bluetooth i wygasł. Nie wiadomo, czy '
-                                    'jest bezpieczny(-a) — zadzwoń.',
-                                    {'name': name},
-                                  )
+                                ? Icons.timer_off_rounded
                                 : a.duress
-                                ? t(
-                                    '{name} odwołał(a) alarm PIN-em przymusu '
-                                    '— może być do tego zmuszony(-a)',
-                                    {'name': name},
-                                  )
-                                : t('{name} jest bezpieczny(-a)', {
-                                    'name': name,
-                                  }),
-                            style: zen.display(
+                                ? Icons.warning_amber_rounded
+                                : Icons.verified_user_rounded,
+                            tone: headTone,
+                            size: 48,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              a.isActive
+                                  ? t('{name} potrzebuje pomocy', {
+                                      'name': name,
+                                    })
+                                  : expired
+                                  ? t(
+                                      'Alarm od {name} przyszedł tylko przez '
+                                      'Bluetooth i wygasł. Nie wiadomo, czy '
+                                      'jest bezpieczny(-a) — zadzwoń.',
+                                      {'name': name},
+                                    )
+                                  : a.duress
+                                  ? t(
+                                      '{name} odwołał(a) alarm PIN-em przymusu '
+                                      '— może być do tego zmuszony(-a)',
+                                      {'name': name},
+                                    )
+                                  : t('{name} jest bezpieczny(-a)', {
+                                      'name': name,
+                                    }),
+                              style: zen.display(
+                                color: zen.textPrimary,
+                                size: 21,
+                                weight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      ZenPill(
+                        text: t('Od {time}', {'time': _clock(a.at)}),
+                        tone: headTone,
+                        icon: Icons.schedule_rounded,
+                      ),
+                      if (a.note.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: zen.surfaceRaised,
+                            borderRadius: context.zenRadius(14),
+                          ),
+                          child: Text(
+                            '„${a.note}”',
+                            style: TextStyle(
                               color: zen.textPrimary,
-                              size: 21,
-                              weight: FontWeight.w600,
+                              fontSize: 15,
+                              height: 1.35,
                             ),
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                if (a.hasLocation)
+                  ZenTile(
+                    key: const Key('friend-alarm-map'),
+                    icon: Icons.place_rounded,
+                    tone: zenTone(zen, 4),
+                    title: t('Pokaż na mapie'),
+                    subtitle:
+                        '${a.lat!.toStringAsFixed(5)}, ${a.lon!.toStringAsFixed(5)}'
+                        '${_accuracy(a.accuracy)}'
+                        ' · ${_clock(a.locatedAt ?? a.at)}',
+                    onTap: () =>
+                        unawaited(openMap(a.lat!, a.lon!, label: name)),
+                  )
+                else
+                  ZenTile(
+                    icon: Icons.location_disabled_rounded,
+                    tone: zen.textMuted,
+                    title: t('Bez położenia'),
+                  ),
+                if (a.nearby && a.isActive)
+                  ZenTile(
+                    icon: Icons.bluetooth_rounded,
+                    tone: zenTone(zen, 2),
+                    title: t('Jest blisko Ciebie'),
+                    subtitle: t(
+                      'Alarm przyszedł przez Bluetooth — położenie dojdzie '
+                      'przez sieć.',
                     ),
-                    const SizedBox(height: 10),
-                    ZenPill(
-                      text: t('Od {time}', {'time': _clock(a.at)}),
-                      tone: headTone,
-                      icon: Icons.schedule_rounded,
-                    ),
-                    if (a.note.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: zen.surfaceRaised,
-                          borderRadius: context.zenRadius(14),
-                        ),
-                        child: Text(
-                          '„${a.note}”',
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontSize: 15,
-                            height: 1.35,
+                  ),
+                for (final AlarmClip c in a.clips)
+                  AlarmClipTile(service: service, alarmId: a.id, clip: c),
+                if (a.responses.isNotEmpty)
+                  ZenGroup(
+                    children: <Widget>[
+                      for (final MapEntry<String, AlarmResponse> r
+                          in a.responses.entries)
+                        ListTile(
+                          title: Text(
+                            r.key == 'self'
+                                ? t('Ty')
+                                : service.host.nameOf(r.key),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: ZenPill(
+                            text: r.value.label,
+                            tone: r.value == AlarmResponse.cant
+                                ? zen.textMuted
+                                : zen.success,
                           ),
                         ),
-                      ),
                     ],
-                  ],
-                ),
-              ),
-              if (a.hasLocation)
-                ZenTile(
-                  key: const Key('friend-alarm-map'),
-                  icon: Icons.place_rounded,
-                  tone: zenTone(zen, 4),
-                  title: t('Pokaż na mapie'),
-                  subtitle:
-                      '${a.lat!.toStringAsFixed(5)}, ${a.lon!.toStringAsFixed(5)}'
-                      '${_accuracy(a.accuracy)}'
-                      ' · ${_clock(a.locatedAt ?? a.at)}',
-                  onTap: () => unawaited(openMap(a.lat!, a.lon!, label: name)),
-                )
-              else
-                ZenTile(
-                  icon: Icons.location_disabled_rounded,
-                  tone: zen.textMuted,
-                  title: t('Bez położenia'),
-                ),
-              if (a.nearby && a.isActive)
-                ZenTile(
-                  icon: Icons.bluetooth_rounded,
-                  tone: zenTone(zen, 2),
-                  title: t('Jest blisko Ciebie'),
-                  subtitle: t(
-                    'Alarm przyszedł przez Bluetooth — położenie dojdzie '
-                    'przez sieć.',
                   ),
-                ),
-              for (final AlarmClip c in a.clips)
-                AlarmClipTile(service: service, alarmId: a.id, clip: c),
-              if (a.responses.isNotEmpty)
-                ZenGroup(
-                  children: <Widget>[
-                    for (final MapEntry<String, AlarmResponse> r
-                        in a.responses.entries)
-                      ListTile(
-                        title: Text(
-                          r.key == 'self'
-                              ? t('Ty')
-                              : service.host.nameOf(r.key),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                if (a.isActive) ...<Widget>[
+                  const SizedBox(height: 16),
+                  for (final AlarmResponse r in AlarmResponse.values)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: FilledButton(
+                        key: Key('alarm-respond-${r.name}'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          backgroundColor: mine == r
+                              ? onAlarm
+                              : onAlarm.withValues(alpha: 0.16),
+                          foregroundColor: mine == r ? alarmRed : onAlarm,
+                          side: BorderSide(
+                            color: onAlarm.withValues(
+                              alpha: mine == r ? 1 : 0.5,
+                            ),
+                          ),
                         ),
-                        trailing: ZenPill(
-                          text: r.value.label,
-                          tone: r.value == AlarmResponse.cant
-                              ? zen.textMuted
-                              : zen.success,
-                        ),
+                        onPressed: () => unawaited(service.respond(a.id, r)),
+                        child: Text(r.label),
                       ),
-                  ],
-                ),
-              if (a.isActive) ...<Widget>[
-                const SizedBox(height: 16),
-                for (final AlarmResponse r in AlarmResponse.values)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: FilledButton(
-                      key: Key('alarm-respond-${r.name}'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        backgroundColor: mine == r
-                            ? onAlarm
-                            : onAlarm.withValues(alpha: 0.16),
-                        foregroundColor: mine == r ? alarmRed : onAlarm,
-                        side: BorderSide(
-                          color: onAlarm.withValues(alpha: mine == r ? 1 : 0.5),
-                        ),
-                      ),
-                      onPressed: () => unawaited(service.respond(a.id, r)),
-                      child: Text(r.label),
                     ),
-                  ),
-                const SizedBox(height: 4),
-                _call112Button(context, onRed: true),
+                  const SizedBox(height: 4),
+                  _call112Button(context, onRed: true),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },

@@ -38,10 +38,13 @@ class WalletScreen extends ConsumerWidget {
           key: const Key('wallet-screen'),
           appBar: ZenSectionBar(title: t('Portfel')),
           // The wallet is a scrolling list of its own.
-          body: SelectionArea(
-            child: member
-                ? PyramidWallet(pyr: pyr, s: s, me: me)
-                : _EmptyWallet(zen: zen, state: s),
+          body: SafeArea(
+            top: false,
+            child: SelectionArea(
+              child: member
+                  ? PyramidWallet(pyr: pyr, s: s, me: me)
+                  : _EmptyWallet(zen: zen, state: s),
+            ),
           ),
         );
       },

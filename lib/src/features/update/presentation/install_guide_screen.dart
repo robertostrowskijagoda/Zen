@@ -308,106 +308,109 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
     return Scaffold(
       key: const Key('install-guide-screen'),
       appBar: AppBar(title: Text(t('Jak zainstalować Zen'))),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            ZenHero(
-              title: t('Zen na innym telefonie albo komputerze'),
-              icon: Icons.install_mobile_rounded,
-              tone: tone,
-              text: t(
-                'Znajomy skanuje ten kod aparatem: otworzy się strona z '
-                'instrukcją dla jego systemu i plikami do pobrania. Możesz '
-                'też przeprowadzić go krok po kroku niżej.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              ZenHero(
+                title: t('Zen na innym telefonie albo komputerze'),
+                icon: Icons.install_mobile_rounded,
+                tone: tone,
+                text: t(
+                  'Znajomy skanuje ten kod aparatem: otworzy się strona z '
+                  'instrukcją dla jego systemu i plikami do pobrania. Możesz '
+                  'też przeprowadzić go krok po kroku niżej.',
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            ZenCard(
-              child: Column(
-                children: <Widget>[
-                  Center(
-                    // QR codes stay black on white, so every camera reads
-                    // them.
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: ZenFixed.qrPaper,
-                        borderRadius: context.zenRadius(20),
-                      ),
-                      child: QrImageView(
-                        key: const Key('install-page-qr'),
-                        data: kInstallPageUrl,
-                        size: 180,
-                        backgroundColor: ZenFixed.qrPaper,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _link(zen, kInstallPageUrl, const Key('install-copy-page')),
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton.icon(
-                      key: const Key('install-open-page'),
-                      onPressed: () => unawaited(_openPage()),
-                      icon: const Icon(Icons.open_in_new_rounded),
-                      label: Text(t('Otwórz stronę instalacji')),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ZenSection(t('Na jakim systemie?'), top: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final InstallSystem s in InstallSystem.values)
-                  ChoiceChip(
-                    key: Key('install-system-${s.name}'),
-                    avatar: Icon(s.icon, size: 18),
-                    label: Text(s.label),
-                    selected: s == _system,
-                    onSelected: (_) => setState(() => _system = s),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ZenCard(
-              key: Key('install-steps-${_system.name}'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  for (int i = 0; i < steps.length; i++)
-                    _step(zen, i + 1, steps[i]),
-                ],
-              ),
-            ),
-            if (_system == InstallSystem.iphone) ...<Widget>[
-              ZenSection(t('Źródło Zen dla SideStore'), top: 16),
+              const SizedBox(height: 12),
               ZenCard(
-                child: _link(
-                  zen,
-                  kSideStoreSourceUrl,
-                  const Key('install-copy-source'),
+                child: Column(
+                  children: <Widget>[
+                    Center(
+                      // QR codes stay black on white, so every camera reads
+                      // them.
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: ZenFixed.qrPaper,
+                          borderRadius: context.zenRadius(20),
+                        ),
+                        child: QrImageView(
+                          key: const Key('install-page-qr'),
+                          data: kInstallPageUrl,
+                          size: 180,
+                          backgroundColor: ZenFixed.qrPaper,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _link(zen, kInstallPageUrl, const Key('install-copy-page')),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        key: const Key('install-open-page'),
+                        onPressed: () => unawaited(_openPage()),
+                        icon: const Icon(Icons.open_in_new_rounded),
+                        label: Text(t('Otwórz stronę instalacji')),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              ZenSection(t('Na jakim systemie?'), top: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final InstallSystem s in InstallSystem.values)
+                    ChoiceChip(
+                      key: Key('install-system-${s.name}'),
+                      avatar: Icon(s.icon, size: 18),
+                      label: Text(s.label),
+                      selected: s == _system,
+                      onSelected: (_) => setState(() => _system = s),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ZenCard(
+                key: Key('install-steps-${_system.name}'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (int i = 0; i < steps.length; i++)
+                      _step(zen, i + 1, steps[i]),
+                  ],
+                ),
+              ),
+              if (_system == InstallSystem.iphone) ...<Widget>[
+                ZenSection(t('Źródło Zen dla SideStore'), top: 16),
+                ZenCard(
+                  child: _link(
+                    zen,
+                    kSideStoreSourceUrl,
+                    const Key('install-copy-source'),
+                  ),
+                ),
+              ],
+              for (final String note in installNotesFor(_system))
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: ZenInfo(tone: tone, text: note),
+                ),
+              if (_message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    _message!,
+                    key: const Key('install-message'),
+                    style: TextStyle(color: zen.textSecondary),
+                  ),
+                ),
             ],
-            for (final String note in installNotesFor(_system))
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: ZenInfo(tone: tone, text: note),
-              ),
-            if (_message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  _message!,
-                  key: const Key('install-message'),
-                  style: TextStyle(color: zen.textSecondary),
-                ),
-              ),
-          ],
+          ),
         ),
       ),
     );

@@ -211,244 +211,256 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     return Scaffold(
       key: const Key('ask-screen'),
       appBar: AppBar(title: Text(t('Zapytaj sieć'))),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: Listenable.merge(<Listenable>[ask, pyr]),
-          builder: (BuildContext context, Widget? _) {
-            final List<Question> mine = ask.mine;
-            final List<Question> others = ask.fromOthers;
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                ZenHero(
-                  title: t('Pytaj ludzi, nie bazę'),
-                  icon: Icons.help_center_rounded,
-                  tone: zenTone(zen, 6),
-                  text: t(
-                    '„Znacie dobrego dentystę w Gdańsku?”, „Kto pożyczy '
-                    'przyczepkę?”. Odpowiedzi wracają tą samą drogą, z '
-                    'informacją, przez kogo — wiesz, komu ufasz.',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  key: const Key('ask-text'),
-                  controller: _text,
-                  minLines: 2,
-                  maxLines: 4,
-                  maxLength: 500,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: t('Twoje pytanie'),
-                    hintText: t('np. Kto zna dobrego hydraulika?'),
-                  ),
-                ),
-                ZenGroup(
-                  children: <Widget>[
-                    SwitchListTile(
-                      value: _twoSteps,
-                      title: Text(t('Znajomi mogą przekazać dalej')),
-                      subtitle: Text(
-                        t('Pytanie dotrze też do znajomych Twoich znajomych.'),
-                      ),
-                      onChanged: (bool v) => setState(() => _twoSteps = v),
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: Listenable.merge(<Listenable>[ask, pyr]),
+            builder: (BuildContext context, Widget? _) {
+              final List<Question> mine = ask.mine;
+              final List<Question> others = ask.fromOthers;
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  ZenHero(
+                    title: t('Pytaj ludzi, nie bazę'),
+                    icon: Icons.help_center_rounded,
+                    tone: zenTone(zen, 6),
+                    text: t(
+                      '„Znacie dobrego dentystę w Gdańsku?”, „Kto pożyczy '
+                      'przyczepkę?”. Odpowiedzi wracają tą samą drogą, z '
+                      'informacją, przez kogo — wiesz, komu ufasz.',
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  key: const Key('ask-send'),
-                  onPressed: () => unawaited(_ask(ask)),
-                  icon: const Icon(Icons.send_rounded),
-                  label: Text(t('Zapytaj')),
-                ),
-                if (mine.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Twoje pytania')),
-                  for (final Question q in mine)
-                    ZenCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            q.text,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 15.5,
-                              fontWeight: FontWeight.w700,
-                            ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('ask-text'),
+                    controller: _text,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 500,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: t('Twoje pytanie'),
+                      hintText: t('np. Kto zna dobrego hydraulika?'),
+                    ),
+                  ),
+                  ZenGroup(
+                    children: <Widget>[
+                      SwitchListTile(
+                        value: _twoSteps,
+                        title: Text(t('Znajomi mogą przekazać dalej')),
+                        subtitle: Text(
+                          t(
+                            'Pytanie dotrze też do znajomych Twoich znajomych.',
                           ),
-                          const SizedBox(height: 6),
-                          if (q.answers.isEmpty)
-                            ZenPill(
-                              text: t('Czeka na odpowiedzi'),
-                              tone: zen.textMuted,
-                              icon: Icons.hourglass_empty_rounded,
-                            )
-                          else
-                            ZenPill(
-                              text: t('Odpowiedzi: {count}', {
-                                'count': q.answers.length,
-                              }),
-                              tone: zen.success,
-                              icon: Icons.forum_rounded,
-                            ),
-                          AskPathView(question: q, nameOf: ask.host.nameOf),
-                          for (final (int i, AskAnswer a) in q.answers.indexed)
-                            Container(
-                              margin: const EdgeInsets.only(top: 8),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: zen.surfaceRaised,
-                                borderRadius: context.zenRadius(14),
+                        ),
+                        onChanged: (bool v) => setState(() => _twoSteps = v),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: const Key('ask-send'),
+                    onPressed: () => unawaited(_ask(ask)),
+                    icon: const Icon(Icons.send_rounded),
+                    label: Text(t('Zapytaj')),
+                  ),
+                  if (mine.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Twoje pytania')),
+                    for (final Question q in mine)
+                      ZenCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              q.text,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w700,
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    answerSource(a.path),
-                                    style: TextStyle(
-                                      color: zen.accent,
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
+                            ),
+                            const SizedBox(height: 6),
+                            if (q.answers.isEmpty)
+                              ZenPill(
+                                text: t('Czeka na odpowiedzi'),
+                                tone: zen.textMuted,
+                                icon: Icons.hourglass_empty_rounded,
+                              )
+                            else
+                              ZenPill(
+                                text: t('Odpowiedzi: {count}', {
+                                  'count': q.answers.length,
+                                }),
+                                tone: zen.success,
+                                icon: Icons.forum_rounded,
+                              ),
+                            AskPathView(question: q, nameOf: ask.host.nameOf),
+                            for (final (int i, AskAnswer a)
+                                in q.answers.indexed)
+                              Container(
+                                margin: const EdgeInsets.only(top: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: zen.surfaceRaised,
+                                  borderRadius: context.zenRadius(14),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      answerSource(a.path),
+                                      style: TextStyle(
+                                        color: zen.accent,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    a.text,
-                                    style: TextStyle(
-                                      color: zen.textPrimary,
-                                      fontSize: 14.5,
-                                      height: 1.35,
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      a.text,
+                                      style: TextStyle(
+                                        color: zen.textPrimary,
+                                        fontSize: 14.5,
+                                        height: 1.35,
+                                      ),
                                     ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 6),
-                                    child: Row(
-                                      children: <Widget>[
-                                        Icon(
-                                          Icons.verified_rounded,
-                                          size: 15,
-                                          color: zen.success,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Flexible(
-                                          child: Text(
-                                            t('Podpisana przez autora'),
-                                            style: TextStyle(
-                                              color: zen.textMuted,
-                                              fontSize: 12,
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Row(
+                                        children: <Widget>[
+                                          Icon(
+                                            Icons.verified_rounded,
+                                            size: 15,
+                                            color: zen.success,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Flexible(
+                                            child: Text(
+                                              t('Podpisana przez autora'),
+                                              style: TextStyle(
+                                                color: zen.textMuted,
+                                                fontSize: 12,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  if (a.tipped > 0 ||
-                                      pyr.canTip(
-                                        a.pyramidKey,
-                                        pyramid: a.pyramid,
-                                      )) ...<Widget>[
-                                    const SizedBox(height: 8),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: <Widget>[
-                                        if (a.tipped > 0)
-                                          ZenPill(
-                                            text: t('Napiwek: {amount}', {
-                                              'amount': formatMoney(a.tipped),
-                                            }),
-                                            tone: zen.success,
-                                            icon: Icons
-                                                .volunteer_activism_rounded,
-                                          ),
-                                        if (pyr.canTip(
+                                    if (a.tipped > 0 ||
+                                        pyr.canTip(
                                           a.pyramidKey,
                                           pyramid: a.pyramid,
-                                        ))
-                                          TextButton.icon(
-                                            key: Key('ask-tip-${q.id}-$i'),
-                                            onPressed: () =>
-                                                unawaited(_tip(ask, pyr, q, i)),
-                                            icon: const Icon(
-                                              Icons.volunteer_activism_rounded,
-                                              size: 18,
+                                        )) ...<Widget>[
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: <Widget>[
+                                          if (a.tipped > 0)
+                                            ZenPill(
+                                              text: t('Napiwek: {amount}', {
+                                                'amount': formatMoney(a.tipped),
+                                              }),
+                                              tone: zen.success,
+                                              icon: Icons
+                                                  .volunteer_activism_rounded,
                                             ),
-                                            label: Text(t('Daj napiwek')),
-                                          ),
-                                      ],
-                                    ),
+                                          if (pyr.canTip(
+                                            a.pyramidKey,
+                                            pyramid: a.pyramid,
+                                          ))
+                                            TextButton.icon(
+                                              key: Key('ask-tip-${q.id}-$i'),
+                                              onPressed: () => unawaited(
+                                                _tip(ask, pyr, q, i),
+                                              ),
+                                              icon: const Icon(
+                                                Icons
+                                                    .volunteer_activism_rounded,
+                                                size: 18,
+                                              ),
+                                              label: Text(t('Daj napiwek')),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
                                   ],
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
-                if (others.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Pytają Cię')),
-                  for (final Question q in others)
-                    ZenCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            q.via.isEmpty
-                                ? q.askerName
-                                : t('{name} · przez {via}', {
-                                    'name': q.askerName,
-                                    'via': q.via.join(', '),
-                                  }),
-                            style: TextStyle(
-                              color: zen.accent,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            q.text,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 15.5,
-                              height: 1.35,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: <Widget>[
-                              FilledButton.tonalIcon(
-                                onPressed: () => unawaited(_answer(ask, q)),
-                                icon: const Icon(Icons.reply_rounded, size: 18),
-                                label: Text(
-                                  q.answeredByMe
-                                      ? t('Odpowiedz jeszcze raz')
-                                      : t('Odpowiedz'),
                                 ),
                               ),
-                              if (q.hops > 0 && !q.forwarded)
-                                OutlinedButton.icon(
-                                  onPressed: () => unawaited(_forward(ask, q)),
+                          ],
+                        ),
+                      ),
+                  ],
+                  if (others.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Pytają Cię')),
+                    for (final Question q in others)
+                      ZenCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              q.via.isEmpty
+                                  ? q.askerName
+                                  : t('{name} · przez {via}', {
+                                      'name': q.askerName,
+                                      'via': q.via.join(', '),
+                                    }),
+                              style: TextStyle(
+                                color: zen.accent,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              q.text,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 15.5,
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: <Widget>[
+                                FilledButton.tonalIcon(
+                                  onPressed: () => unawaited(_answer(ask, q)),
                                   icon: const Icon(
-                                    Icons.forward_rounded,
+                                    Icons.reply_rounded,
                                     size: 18,
                                   ),
-                                  label: Text(t('Przekaż dalej')),
+                                  label: Text(
+                                    q.answeredByMe
+                                        ? t('Odpowiedz jeszcze raz')
+                                        : t('Odpowiedz'),
+                                  ),
                                 ),
-                            ],
-                          ),
-                        ],
+                                if (q.hops > 0 && !q.forwarded)
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        unawaited(_forward(ask, q)),
+                                    icon: const Icon(
+                                      Icons.forward_rounded,
+                                      size: 18,
+                                    ),
+                                    label: Text(t('Przekaż dalej')),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                  ],
                 ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

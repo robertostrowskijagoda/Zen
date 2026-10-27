@@ -13,6 +13,7 @@ import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/share_app_server.dart';
 import 'package:zen/src/features/update/store_build.dart';
+import 'package:zen/src/features/update/update_service.dart';
 
 /// What the last look at GitHub's newest release found.
 enum GithubCheckState {
@@ -85,6 +86,7 @@ final class GithubUpdateService extends ChangeNotifier {
     GithubJsonFetcher? fetchJson,
     Sha256SumsFetcher? fetchSums,
     GithubDownloader? download,
+    this.beforeDownload,
     bool Function()? internetWorks,
     DateTime Function()? now,
     this.currentVersion = kAppVersion,
@@ -118,6 +120,11 @@ final class GithubUpdateService extends ChangeNotifier {
   /// say how long to wait); doubled after each further error.
   final Duration retryFirst;
 
+  /// Asked before anything is downloaded (Android: whether Zen may install
+  /// apps, which opens the system settings when it may not). Null: go
+  /// ahead; a text: nothing is downloaded and the person is told it.
+  final Future<String?> Function()? beforeDownload;
+
   final GithubJsonFetcher _fetchJson;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
@@ -136,6 +143,7 @@ final class GithubUpdateService extends ChangeNotifier {
   bool _unreachableDismissed = false;
   String? _dismissedVersion;
   Future<void>? _checking;
+  bool _asking = false;
 
   GithubInstallState _install = GithubInstallState.idle;
   int _received = 0;
@@ -324,7 +332,7 @@ final class GithubUpdateService extends ChangeNotifier {
   Future<void> update() async {
     final GithubRelease? release = newer;
     final String? name = installer.assetName;
-    if (release == null || name == null || installing) {
+    if (release == null || name == null || installing || _asking) {
       return;
     }
     final int? size = release.assets[name];
@@ -349,6 +357,24 @@ final class GithubUpdateService extends ChangeNotifier {
         ),
       );
       return;
+    }
+    final Future<String?> Function()? ask = beforeDownload;
+    if (ask != null) {
+      // Before the download, not after it: a refusal costs nothing.
+      _asking = true;
+      String? refusal;
+      try {
+        refusal = await ask();
+      } on Object catch (e, stack) {
+        logZenError('Aktualizacja z GitHuba', e, stack);
+        refusal = t('Aktualizacja nie udała się: {error}', {'error': e});
+      } finally {
+        _asking = false;
+      }
+      if (refusal != null) {
+        _finish(GithubInstallState.failed, refusal);
+        return;
+      }
     }
     _install = GithubInstallState.downloading;
     _received = 0;
@@ -505,6 +531,9 @@ final Provider<GithubUpdateService?> githubUpdateServiceProvider =
       }
       final GithubUpdateService service = GithubUpdateService(
         installer: SystemGithubInstaller(),
+        beforeDownload: !kIsWeb && Platform.isAndroid
+            ? requestInstallPermission
+            : null,
         // The mesh node has peers: the internet works, only GitHub not.
         internetWorks: () {
           try {
