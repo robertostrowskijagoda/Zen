@@ -375,11 +375,7 @@ final class RuntimeSignalModule extends ZenModule {
       if (isAcceptedFriend) {
         // A ping is a friend's "I am here": Zen is on their screen (as far
         // as they show it).
-        await hub.updatePeerPresence(
-          peerAddress: from,
-          report: PresenceReport.fromPayload(frame.payload),
-          observedAtMillis: frame.receivedAtMillis,
-        );
+        await _notePresence(hub, from, frame);
         await _notePeerVersion(hub, from, frame.payload);
       }
       return;
@@ -389,11 +385,7 @@ final class RuntimeSignalModule extends ZenModule {
         // Off their screen: still reachable ("w tle") until no answer comes
         // for kPresenceOfflineAfter, or offline at once when their device
         // stops receiving (an iPhone).
-        await hub.updatePeerPresence(
-          peerAddress: from,
-          report: PresenceReport.fromPayload(frame.payload),
-          observedAtMillis: frame.receivedAtMillis,
-        );
+        await _notePresence(hub, from, frame);
       }
       return;
     }
@@ -402,11 +394,7 @@ final class RuntimeSignalModule extends ZenModule {
         // Not taken, and not answered either (see the ping above).
         return;
       }
-      await hub.updatePeerPresence(
-        peerAddress: from,
-        report: PresenceReport.fromPayload(frame.payload),
-        observedAtMillis: frame.receivedAtMillis,
-      );
+      await _notePresence(hub, from, frame);
       if (isAcceptedFriend) {
         await _notePeerVersion(hub, from, frame.payload);
       }
@@ -429,6 +417,31 @@ final class RuntimeSignalModule extends ZenModule {
       linger: const Duration(seconds: 2),
     );
   }
+
+  /// What a ping, pong or way from [from] says of their presence.
+  /// A weak acquaintance's status is not shown here, as this person's is not
+  /// sent to them ([presenceVisibleTo]): only whether they can be reached.
+  Future<void> _notePresence(
+    SocialHubController hub,
+    String from,
+    SignalTransportFrame frame,
+  ) {
+    final PresenceReport report = PresenceReport.fromPayload(frame.payload);
+    return hub.updatePeerPresence(
+      peerAddress: from,
+      report: _isWeakFriend(from)
+          ? const PresenceReport(presence: PeerPresence.hidden)
+          : report,
+      reachable: report.reachable,
+      observedAtMillis: frame.receivedAtMillis,
+    );
+  }
+
+  /// Whether [address] is an accepted friend kept as a weak acquaintance
+  /// ("Słaby znajomy"): no presence either way.
+  bool _isWeakFriend(String address) =>
+      _isAcceptedFriendAddress(address) &&
+      !presenceVisibleTo(_ref.read(friendLevelLookupProvider).of(address));
 
   /// What app version a friend named: only for the "newer Zen" hint.
   Future<void> _notePeerVersion(
@@ -477,6 +490,9 @@ final class RuntimeSignalModule extends ZenModule {
     final String localAddr = _ref
         .read(runtimeNodeSnapshotProvider)
         .localAddress;
+    final SocialHubController hub = _ref.read(
+      socialHubControllerProvider.notifier,
+    );
     final Set<String> peersToPing = presencePingTargets(hubState);
     _notePingRound();
     for (final String address in peersToPing) {
@@ -485,6 +501,12 @@ final class RuntimeSignalModule extends ZenModule {
         continue;
       }
       if (!isRoutablePeerAddress(address)) {
+        continue;
+      }
+      if (_isWeakFriend(address)) {
+        // A ping is "I am here": a weak acquaintance hears nothing of it,
+        // and what they showed before is not shown any more.
+        await hub.hidePeerPresence(address);
         continue;
       }
       await transport.send(

@@ -319,6 +319,13 @@ void main() {
       AppSettings settings = const AppSettings(),
       FriendLevel? Function(String address)? levelOf,
       bool asleepOffScreen = false,
+      Map<String, FriendProfile> friends = const <String, FriendProfile>{
+        _ada: FriendProfile(
+          address: _ada,
+          displayName: 'Ada',
+          status: FriendRelationshipStatus.accepted,
+        ),
+      },
     }) async {
       final MemorySignalTransport transport = MemorySignalTransport();
       await tester.pumpWidget(
@@ -334,15 +341,7 @@ void main() {
                 FriendLevelLookup()..levelOf = levelOf,
               ),
             socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  _ada: FriendProfile(
-                    address: _ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
-              ),
+              SocialHubState.empty().copyWith(friends: friends),
             ),
           ],
           child: const ZenRewriteApp(),
@@ -444,9 +443,11 @@ void main() {
         tester,
         levelOf: (String address) => FriendLevel.weak,
       );
-      final Map<String, dynamic> ping = last(transport, 'ping');
-      expect(ping.containsKey('state'), isFalse);
-      expect(ping.containsKey('lo'), isFalse);
+      // Not pinged at all while Zen is open: a ping is "I am here".
+      expect(
+        transport.sentSignals.where((e) => e.payload['type'] == 'ping'),
+        isEmpty,
+      );
       await transport.injectIncoming(
         from: _ada,
         payload: const <String, dynamic>{'type': 'ping'},
@@ -474,6 +475,61 @@ void main() {
         transport.sentSignals.where((e) => e.payload['type'] == 'away'),
         isEmpty,
       );
+    });
+
+    testWidgets('only friends who may see presence are pinged; a weak '
+        "acquaintance's own presence is not shown", (
+      WidgetTester tester,
+    ) async {
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        levelOf: (String address) => address == _ada ? FriendLevel.weak : null,
+        friends: <String, FriendProfile>{
+          _ada: const FriendProfile(
+            address: _ada,
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.accepted,
+          ).copyWith(presence: PeerPresence.online, lastOpenedAtMillis: _day),
+          _bob: const FriendProfile(
+            address: _bob,
+            displayName: 'Bob',
+            status: FriendRelationshipStatus.accepted,
+          ),
+        },
+      );
+      Set<String> pinged() => <String>{
+        for (final e in transport.sentSignals)
+          if (e.payload['type'] == 'ping') e.remoteAddress,
+      };
+      expect(pinged(), <String>{_bob});
+      // A round later: still only Bob.
+      await tester.pump(kPresencePingInterval);
+      await tester.pump();
+      expect(pinged(), <String>{_bob});
+
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(ZenRewriteApp)),
+      );
+      FriendProfile friend(String address) =>
+          container.read(socialHubControllerProvider).friends[address]!;
+      // What Ada showed before she was a weak acquaintance is gone.
+      expect(friend(_ada).presence, PeerPresence.hidden);
+      expect(friend(_ada).lastOpenedAtMillis, 0);
+
+      // Her ping still says she can be reached, nothing of her state.
+      await transport.injectIncoming(
+        from: _ada,
+        payload: const <String, dynamic>{'type': 'ping', 'state': 'foreground'},
+      );
+      await tester.pumpAndSettle();
+      expect(friend(_ada).presence, PeerPresence.hidden);
+      expect(friend(_ada).isOnline, isTrue);
+      await transport.injectIncoming(
+        from: _bob,
+        payload: const <String, dynamic>{'type': 'ping', 'state': 'foreground'},
+      );
+      await tester.pumpAndSettle();
+      expect(friend(_bob).presence, PeerPresence.online);
     });
 
     testWidgets('switching apps often sends "away" at most every few '

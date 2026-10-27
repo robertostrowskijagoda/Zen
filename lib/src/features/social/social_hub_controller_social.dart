@@ -1514,6 +1514,28 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     _persistSoon();
   }
 
+  /// Shows nothing more of [peerAddress]'s presence (a weak acquaintance:
+  /// no statuses either way), whatever they showed before.
+  Future<void> hidePeerPresence(String peerAddress) {
+    return _enqueueStateWork(() async {
+      final FriendProfile? friend = state.friendByAddress(peerAddress);
+      if (friend == null ||
+          (friend.presence == PeerPresence.hidden &&
+              friend.lastOpenedAtMillis == 0)) {
+        return;
+      }
+      _openedAt.remove(PeerShareCodec.normalizeAddress(friend.address));
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      _putFriend(
+        friends,
+        friend.copyWith(presence: PeerPresence.hidden, lastOpenedAtMillis: 0),
+      );
+      state = state.copyWith(friends: friends);
+      _persistSoon();
+    });
+  }
+
   /// Remembers the Zen version an accepted friend named in a ping or pong.
   /// Self-reported: it only feeds the "friends have a newer Zen"
   /// hint, nothing else may depend on it.
