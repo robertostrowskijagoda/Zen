@@ -191,9 +191,9 @@ doing anything: conversations with their photos, videos, files and voice
 messages; friends and groups; your profile with its photos; posts, the
 gallery and the films you published, with all their files (not only the
 ones opened on that device); the account's settings; your dating profile;
-meetings, plans, events and circles; the pyramid; and a copy of your
-household (the household itself runs on one phone — its door — and the
-copy is there for a recovery). Changes travel sealed for the account's
+meetings, plans, events and circles; the pyramid; the offline mailboxes
+you chose by hand; and a copy of your household (the household itself runs
+on one phone — its door — and the copy is there for a recovery). Changes travel sealed for the account's
 devices only. When two devices change the same thing, the later change
 wins on both (each change carries a counter, so the order of arrival does
 not matter); different changes are merged. Files travel on Wi-Fi or a

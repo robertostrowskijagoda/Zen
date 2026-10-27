@@ -113,16 +113,51 @@ of waiting messages; when it is full, a new message is marked not sent and
 you can try again once friends have picked up what waits.
 
 **Which friends keep your mail.** A mailbox is only useful when it is
-online while you are not. Each device tells its friends whether it
-usually stays online (a computer with Zen in the tray; a phone does not:
-a locked phone takes only its own mail, to save the battery). Zen then picks, in this
-order: friends (not casual friends) with such a device seen in the last few
-days, close friends before friends, then whoever was seen most recently. A
-chosen mailbox stays, unless it has been silent for 3 days while someone
-fresher is around, or a friend with an always-online device appears (then
-the mailbox seen longest ago is swapped). One computer with Zen in the tray
-can be the mailbox for a whole group of friends;
-*Invite* says so too.
+online while you are not. Each device tells its friends what kind of device
+it is: a computer with Zen in the tray (online whenever it is on), an
+Android phone (its background service keeps friends' mail even while Zen is
+locked), an iPhone with *receive in the background* on, or an iPhone
+without it (online only while Zen is open). Zen also notices how often each
+friend's device actually answers when it is asked for mail or handed mail
+for someone else, counted by the hour, so a phone that is off for a night
+loses little. It then picks, in this order: devices that have not gone
+quiet, friends before casual friends, the devices most likely to be online
+(computers and Android phones before iPhones, corrected by how they really
+answered), close friends before friends, then whoever was seen most
+recently. One device per friend: if a friend has a computer and an iPhone,
+their computer keeps your mail.
+
+Zen changes your mailboxes rarely, because every change makes your friends
+leave your mail somewhere else. A free place (a mailbox that is no longer
+your friend) is filled at once. Otherwise at most one mailbox changes per
+day, and never all of them at once: one that has not answered for 3 days
+while your device kept asking makes way for a friend whose device answers,
+and one that is online only now and then makes way for a much better one (an
+iPhone for a computer or an Android phone). One computer with Zen in the
+tray can be the mailbox for a whole group of friends; *Invite* says so too.
+
+**When a mailbox stops answering.** If a mailbox has not answered for 3 days
+and none of your other friends' devices is good enough to take its place
+(say all of them are iPhones), or you chose your mailboxes by hand, Zen
+tells you: a card on the chats list and an entry in the notifications say
+*Mailbox {name} has not answered for {time} — choose another*. Tapping it
+opens **Settings → Offline mailboxes**, where each friend shows the kind of
+device and how much of the time it was available, and an iPhone without
+*receive in the background* is marked as a weak mailbox.
+
+**Friends with several devices, or a new phone.** Each of your devices has
+its own mailboxes and its own key, and a message to a friend goes to every
+device of theirs, each copy sealed for that device and waiting in that
+device's own mailboxes. Your chat counts the friend once: the message is
+delivered as soon as any of their devices has it, and a group's *delivered d
+of n* counts people. When a friend moves to a new phone, the new phone tells
+your device its mailboxes and your messages wait there from then on; their
+old phone, once silent for 3 days, stops being your mailbox and their new
+phone takes its place. Mailboxes you chose by hand name friends, not
+devices, so they follow a friend to their new phone, and they are the same
+on all your own devices (a new phone starts with your choice). Unlinking a
+lost phone (**Settings → Privacy and security → Devices**) stops everything
+going there at once.
 
 ### iPhone
 
@@ -148,7 +183,8 @@ iOS lets Zen run in the background only briefly. On an iPhone:
   needs: Background App Refresh, Low Power Mode off, notifications, and not
   swiping Zen away ([details](../IOS_BACKGROUND.md));
 - friends pick an iPhone as their mailbox only after devices that stay
-  online.
+  online, and their picker marks it as a weak mailbox; with *receive in the
+  background* on, an iPhone tells them so and counts as a better one.
 
 Chats show this once on an iPhone (**Got it** closes it), and *Why isn't it
 working?* lists it. It works best when someone in your group of friends
