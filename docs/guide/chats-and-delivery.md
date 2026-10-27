@@ -171,8 +171,8 @@ video and shared screen are protected three times:
 The call screen says which protection a call has. In a group call every
 participant has a separate connection to every other.
 
-When you share your screen, notifications are shown without content and a
-red bar reminds you that everything is visible. When a call is recorded,
+When you share your screen, notifications show at most who wrote, never
+what, and a red bar reminds you that everything is visible. When a call is recorded,
 everyone hears a signal.
 
 **Recording** works on every system and only takes the call and your

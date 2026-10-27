@@ -112,8 +112,8 @@ When iOS wakes Zen for one of them and Zen is unlocked, the Dart side:
    catch-up).
 
 What comes in is handled exactly as it is whenever Zen is in the
-background: stored, and shown as a notification (with the content hidden if
-"hide notification content" is on).
+background: stored, and shown as a notification that tells as much as the
+notification content level of its chat allows.
 
 If iOS starts Zen from scratch for a task (Zen had been terminated, or the
 phone restarted and Zen was not opened since), Zen is not "ready" when the
