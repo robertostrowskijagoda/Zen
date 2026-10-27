@@ -6,7 +6,7 @@
 ## Install
 
 The easiest way is the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**:
-it recognises your system and shows only its few steps (English and Polish).
+it recognises your system and links one page per system with the few steps, pictures and the download (21 languages).
 Zen is not in the app stores; everything comes from
 [GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest)
 or from a friend.
@@ -14,7 +14,7 @@ or from a friend.
 | System | How | Steps |
 |---|---|---|
 | Android | `Zen-arm64-v8a.apk` for most phones (`Zen-armeabi-v7a.apk` for older 32-bit phones, `Zen-x86_64.apk` for Chromebooks and emulators), straight from the page | download, open, **Install** |
-| iPhone (iOS 15+) | **SideStore**, with the "Add Zen source" link | 8 short steps, a computer once |
+| iPhone (iOS 15+) | **Scarlet**, an on-device installer, with `Zen-unsigned.ipa` | 4 short steps, no computer |
 | Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack (a folder `Zen`), run `Zen\zen.exe` (the Visual C++ runtime is inside) |
 | macOS 12+ | `Zen-macOS.zip` | drag to Applications; first launch: **Privacy & Security → Open Anyway** |
 | Linux x64 / arm64 | `.deb`, Flatpak (x64), `.tar.gz` | one command; Ubuntu 22.04, Debian 12, Mint 21 or newer (glibc 2.35+), elsewhere the Flatpak |
@@ -26,19 +26,19 @@ Smart App Control settings → Off), which lowers protection for the whole
 computer.
 
 **iPhone in short.** An iPhone app cannot install other apps, so Zen goes
-through SideStore. Once, with a computer and a cable: install
-**LocalDevVPN** from the App Store, run **iloader** on the computer to put
-SideStore on the phone, turn on **Developer Mode** and trust your Apple ID.
-Then, on the phone, add the Zen source
-(`https://robertostrowskijagoda.github.io/Zen/apps.json`, one tap on the
-install page) and tap **Install**. With a free Apple ID the signature
-**expires after 7 days**: once a week turn on LocalDevVPN, open SideStore
-and tap **Refresh** (your data stays). Zen reminds you in Chats 2 days
-before. A free Apple ID allows 3 such apps at a time (SideStore counts).
-On iPhone Zen receives and sends at once only while it is open (see
-[Chats](chats-and-delivery.md#iphone)).
-AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
-Zen yet.
+through a signing app on the phone, **Scarlet**: install Scarlet from its
+own website, trust its certificate (**Settings → General → VPN & Device
+Management**), download `Zen-unsigned.ipa` from the install page and install
+it with Scarlet (hold the download arrow, **Sideload IPA**). Scarlet signs
+Zen with a certificate it provides; Apple can revoke such certificates, and
+then Zen stops opening until you install it again the same way: make a full
+account copy first, since keeping the data is not verified. Zen's own
+encryption does not depend on that certificate. **SideStore** and **AltStore
+Classic** (add the Zen source, with a free Apple ID: the signature expires
+after 7 days) and Sideloadly (from a computer) still work. On iPhone Zen
+receives and sends at once only while it is open (see
+[Chats](chats-and-delivery.md#iphone)). AltStore PAL (EU) takes only apps
+notarized by Apple, so it can't install Zen yet.
 
 **Helping a friend.** In Zen: **Settings** (tap the top bar) **→ Invite →
 Friend doesn't have Zen?** On

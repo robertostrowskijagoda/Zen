@@ -410,8 +410,9 @@ bridge → `flutter build ios --release --no-codesign` → `Zen-unsigned.ipa`
 (a `Payload/Runner.app` folder in a ZIP). It runs manually (Actions → iOS →
 Run workflow; the file is in the run's artifacts) or as part of `release.yml`
 for a `v*` tag, which attaches it to the release. The package is unsigned —
-SideStore or AltStore sign it with the user's free Apple ID (README, section
-"iPhone"). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
+Scarlet, SideStore or AltStore sign it on the phone (README, section
+"iPhone"; the install page links `releases/latest/download/Zen-unsigned.ipa`,
+which follows every release). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
 `build_ios.sh`, then `flutter build ios --release --no-codesign`.
 
 ### 3.4. Build checks, pins and reproducibility
@@ -626,7 +627,7 @@ legal nor tax advice; uncertain places are marked.
 | Huawei AppGallery | optional | Huawei phones without Google (Google verification does not apply); Zen uses no Google services — check on one phone |
 | Accrescent | not now | console for invited developers only, no self-update, package ID must match the author's domain (uncertain — the page may be outdated) |
 | Amazon, Aptoide, RuStore, Chinese stores | no | Amazon Appstore on Android closed since 20.08.2025; Aptoide — annual fee and a "piracy store" reputation; RuStore requires a VK ID, and VK is on the EU sanctions list (07.2026); China — ICP registration and a Chinese entity |
-| iPhone: SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
+| iPhone: Scarlet (install page), SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
 | iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | section 6.3 |
 | Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (section 5) |
 | Linux | `tar.gz` and `.deb`, x64 and ARM64 (Ubuntu 22.04+, Debian 12+, Mint 21+; glibc 2.35+); Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional; Flathub and Fedora would refuse the from-source OpenH264 (section 6.1.1) |
@@ -787,7 +788,10 @@ changes are planned.
 
 ### 6.3 iPhone and Mac
 
-- **No account** — as today: SideStore / AltStore with a free Apple ID.
+- **No account** — as today: Scarlet (the install page's one recommended way:
+  the install page links the stable `releases/latest/download/Zen-unsigned.ipa`,
+  so it follows every release without editing the site), or SideStore /
+  AltStore with a free Apple ID.
   `pages.yml` publishes the source `https://robertostrowskijagoda.github.io/Zen/apps.json`
   (`tool/ci/release_source.py`) for the latest published release's
   `Zen-unsigned.ipa`, and the install page `/install/`; publishing a release

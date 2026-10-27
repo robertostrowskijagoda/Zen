@@ -30,7 +30,9 @@
   &nbsp;·&nbsp;
   <a href="#iphone"><b>📱 iPhone</b></a>
   &nbsp;·&nbsp;
-  <a href="#mac-linux"><b>💻 Mac, Linux</b></a>
+  <a href="#mac"><b>💻 Mac</b></a>
+  &nbsp;·&nbsp;
+  <a href="#linux"><b>🐧 Linux</b></a>
   &nbsp;·&nbsp;
   <a href="docs/guide/README.md"><b>📖 User guide</b></a>
   &nbsp;·&nbsp;
@@ -186,32 +188,26 @@ flag or turn them off.
 
 ## How to install
 
-**The simplest way: [the install page](https://robertostrowskijagoda.github.io/Zen/install/)**
-picks your system by itself and shows the few steps for it (English and
-Polish). In Zen: **Settings → Invite → Friend doesn't have Zen? → How to install Zen
-on another phone / computer** shows the same steps and a QR code to that page.
+One recommended way for each system, with its own page that has numbered
+steps, pictures, the download and what to do when something goes wrong (in 21
+languages): **[the install page](https://robertostrowskijagoda.github.io/Zen/install/)** picks your system by itself.
+In Zen: **Settings → Invite → Friend doesn't have Zen? → How to install Zen
+on another phone / computer** shows a QR code to that page. Every download
+link uses `releases/latest/download/<file>`, so it follows each new release.
 
 ### Android
 
-1. On your phone open this page and tap **⬇ Android** at the top (the file
-   for almost every phone; the other files are below).
-2. When the file has downloaded, tap it (or open **Downloads**).
-3. The phone will ask whether to allow the browser to install apps — tap
-   **Settings**, turn on **Allow from this source** and go back.
-4. Tap **Install**. If a warning about an unknown app appears,
-   choose **More details → Install anyway** (this is normal outside a store).
-5. Open Zen and set a password.
+**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/android/)**: download
+[Zen-arm64-v8a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk) (the file for almost every phone),
+open it, allow your browser to install apps once (**Allow from this source**)
+and tap **Install**; if Play Protect warns about an unknown app, choose **More
+details → Install anyway**. Zen then updates itself.
 
-There is one APK per processor type: almost every phone needs
-[Zen-arm64-v8a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk);
-older 32-bit phones need
-[Zen-armeabi-v7a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk),
-and Chromebooks and emulators
-[Zen-x86_64.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk).
-If installing the first file fails on an older phone, take the 32-bit one. Zen updates
-itself from GitHub with the right file; if you use [Obtainium](https://obtainium.imranr.dev/),
-you can add `https://github.com/robertostrowskijagoda/Zen` there instead (one
-tap on the install page).
+Other ways: [Zen-armeabi-v7a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk) for older 32-bit
+phones (also the one to try when the first file says "App not installed"),
+[Zen-x86_64.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk) for Chromebooks and emulators, or
+[Obtainium](https://obtainium.imranr.dev/) (add
+`https://github.com/robertostrowskijagoda/Zen`; one tap on the install page).
 
 **From 2027** Google requires apps from outside the store to come from verified
 developers. If your phone says the developer is not verified:
@@ -226,13 +222,54 @@ developers. If your phone says the developer is not verified:
 
 Option names may differ a little depending on the phone. You do this once.
 
+### iPhone
+
+**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/iphone/)**, four steps on the phone, no computer:
+
+1. Get **Scarlet**, an installer that signs apps on the iPhone, from its own
+   website (the install page links it; beware of look-alike sites).
+2. If iOS asks, trust its certificate: **Settings → General → VPN & Device
+   Management**.
+3. Download [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa) in Safari.
+4. In Scarlet hold the download arrow, choose **Sideload IPA**, pick the file
+   and tap **Install**.
+
+**Honestly:** Scarlet signs Zen with a certificate it provides. Apple can
+revoke such certificates; then Zen stops opening until you install it again the
+same way. Whether that keeps your data is not verified, so make a full
+account copy first (**Settings → Account and recovery**). Zen's own encryption
+does not depend on that certificate. A new release means a new file from the
+install page, installed the same way.
+
+Other ways, one line: **SideStore** or **AltStore Classic** (add the Zen
+source `https://robertostrowskijagoda.github.io/Zen/apps.json`; with a free Apple ID the signature expires after 7
+days and SideStore refreshes it, one tap on the install page) and Sideloadly
+(from a computer). The source always points to the latest release's
+[Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa).
+
+**What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
+the background for long. Messages and calls arrive while Zen is open, and
+otherwise only when iOS wakes Zen for a short check now and then (no push
+notifications); until then they wait with the sender or in the mailboxes
+your friends' devices keep for you. Settings → Praca w tle can keep Zen
+receiving all the time, at a clear battery cost; see
+[iPhone: receiving in the background](docs/IOS_BACKGROUND.md). It works best when one friend has Zen on a computer (in
+the tray) or on Android: that device keeps the mail for the whole group of
+friends while the iPhones sleep. There is no Nearby (offline links with
+friends use Apple's Multipeer while Zen is open).
+
+**Won't work:** AltStore PAL (EU) installs only apps notarized by Apple
+(Zen isn't there yet); TrollStore works only up to iOS 17.0; "signers" with
+enterprise certificates get revoked and hand your app to strangers —
+**don't use them** (use only the install page's link).
+
 ### Windows
 
-Download **Zen-Windows.zip**, unpack the whole ZIP (it holds a folder
-`Zen`) and run `Zen\zen.exe`. Keep that folder whole and put nothing else in
-it: Zen updates itself in place only there. Nothing else needs installing:
-the Microsoft Visual C++ runtime Zen needs is in the folder, next to
-`zen.exe`. If Windows shows "Windows protected your PC", click
+**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/windows/)**: download [Zen-Windows.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip),
+unpack the whole ZIP (it holds a folder `Zen`) and run `Zen\zen.exe`. Keep that
+folder whole and put nothing else in it: Zen updates itself in place only
+there. Nothing else needs installing: the Microsoft Visual C++ runtime Zen
+needs is in the folder. If Windows shows "Windows protected your PC", click
 **More info → Run anyway**.
 
 If Windows 11 says *Smart App Control blocked an app that may be unsafe*,
@@ -251,69 +288,31 @@ experimental native build
 [Zen-Windows-arm64.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows-arm64.zip);
 the x64 build runs there too, under emulation.
 
-### iPhone
+### Mac
 
-Apps from outside the App Store go through **SideStore**: once you need a
-computer (Windows, Mac or Linux), a USB cable and your Apple ID; after that
-SideStore installs Zen's updates on the phone. Step by step, with
-pictures: **[install page → iPhone](https://robertostrowskijagoda.github.io/Zen/install/#iphone)**.
+**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/macos/)**: macOS 12 or newer, Apple Silicon and
+Intel. Download [Zen-macOS.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-macOS.zip), unpack it and move `Zen.app`
+to Applications. On first launch macOS will say it can't verify the developer:
+choose **Done**, then **System Settings → Privacy & Security → Open Anyway**,
+your password, **Open Anyway** (right-click → Open no longer works since macOS
+15; or in Terminal `xattr -dr com.apple.quarantine /Applications/Zen.app`).
+After an update macOS may ask for keychain access — choose **Always Allow**.
 
-1. On the iPhone install the free **LocalDevVPN** app from the App Store.
-2. On the computer get **iloader** ([SideStore guide](https://docs.sidestore.io/docs/installation/install)), connect the iPhone by cable, sign in with your Apple ID and choose **Install SideStore**.
-3. On the iPhone: **Settings → Privacy & Security → Developer Mode** on, and **Settings → General → VPN & Device Management** → trust your Apple ID.
-4. Connect LocalDevVPN, open SideStore and sign in.
-5. Add the Zen source — one tap on the install page, or **Sources → +** and
-   `https://robertostrowskijagoda.github.io/Zen/apps.json` — then **Install** Zen.
+### Linux
 
-**Once a week:** with a free Apple ID the signature of Zen **expires after 7
-days**, and then the iPhone won't open Zen until it is refreshed. Once a
-week turn on LocalDevVPN, open SideStore and tap **Refresh** next to Zen (or
-*Refresh All*); your data stays. Zen shows a reminder in Chats 2 days
-before the date. A free Apple ID allows 3
-such apps at a time (SideStore counts) and 10 installs a week. The source
-always points to the latest release's
-[Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa),
-which SideStore signs with your own Apple ID; AltStore Classic and other
-signers take the same file.
+**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/linux/)**: on Debian, Ubuntu and Mint download
+[Zen-Linux-x64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb) and run
+`sudo apt install ./Zen-Linux-x64.deb` (ARM:
+[Zen-Linux-arm64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.deb)).
 
-**What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
-the background for long. Messages and calls arrive while Zen is open, and
-otherwise only when iOS wakes Zen for a short check now and then (no push
-notifications); until then they wait with the sender or in the mailboxes
-your friends' devices keep for you. Settings → Praca w tle can keep Zen
-receiving all the time, at a clear battery cost; see
-[iPhone: receiving in the background](docs/IOS_BACKGROUND.md). It works best when one friend has Zen on a computer (in
-the tray) or on Android: that device keeps the mail for the whole group of
-friends while the iPhones sleep. There is no Nearby (offline links with
-friends use Apple's Multipeer while Zen is open).
-
-**Won't work:** AltStore PAL (EU) installs only apps notarized by Apple
-(Zen isn't there yet); TrollStore works only up to iOS 17.0; "signers" with
-enterprise certificates get revoked and hand your app to strangers —
-**don't use them**.
-
-### Mac, Linux
-
-The same steps, in short, with the download buttons:
-**[install page → Mac](https://robertostrowskijagoda.github.io/Zen/install/#macos)** and
-**[install page → Linux](https://robertostrowskijagoda.github.io/Zen/install/#linux)**.
-
-The Linux and Mac builds are made by GitHub Actions together with the
-other release files; they are not signed and have not yet been checked on many
-real computers, so they may have bugs.
-
-**Linux:** download [Zen-Linux-x64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.tar.gz)
-(or [Zen-Linux-arm64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.tar.gz)
-for Raspberry Pi 4/5 and other ARM computers with a 64-bit system), unpack it
-and run `Zen/zen`; `Zen/install-desktop-entry.sh` adds Zen to the menu
-and makes it open `zen://` links. On Debian, Ubuntu and Mint it is simpler:
-[Zen-Linux-x64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb)
-(or `Zen-Linux-arm64.deb`) and `sudo apt install ./Zen-Linux-x64.deb`. For x64
-there is also a Flatpak,
+Other ways: for x64 a Flatpak,
 [Zen-Linux-x64.flatpak](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.flatpak)
-(`flatpak install --user ./Zen-Linux-x64.flatpak`; not on Flathub). The
-Flatpak does not update itself: install the new file from the release page
-the same way (Zen tells you when there is one).
+(`flatpak install --user ./Zen-Linux-x64.flatpak`; not on Flathub; it does not
+update itself: install the new file the same way when Zen tells you), or
+[Zen-Linux-x64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.tar.gz)
+([arm64](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.tar.gz), for Raspberry Pi 4/5 and other 64-bit ARM
+computers): unpack it and run `Zen/zen`; `Zen/install-desktop-entry.sh` adds
+Zen to the menu and makes it open `zen://` links.
 **Which systems:** the `.tar.gz` and `.deb` run on Ubuntu 22.04, Debian 12,
 Linux Mint 21 or newer, and on other distributions with glibc 2.35 or newer
 (the builds are made on Ubuntu 22.04 and checked for that); on older
@@ -322,14 +321,9 @@ Needed: GNOME Keyring or KWallet (the encryption key lives there), for the tray
 icon `libayatana-appindicator3-1`, and for voice notes and videos GStreamer
 with plugins (`gstreamer1.0-plugins-good`, `gstreamer1.0-libav`).
 
-**Mac** (macOS 12 or newer, Apple Silicon and Intel): download
-[Zen-macOS.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-macOS.zip),
-unpack it and move `Zen.app` to Applications. On first launch macOS will say it
-can't verify the developer: choose **Done**, then **System Settings → Privacy
-& Security → Open Anyway**, your password, **Open Anyway** (right-click →
-Open no longer works since macOS 15; or in Terminal
-`xattr -dr com.apple.quarantine /Applications/Zen.app`). After an update macOS
-may ask for keychain access — choose **Always Allow**.
+The Linux and Mac builds are made by GitHub Actions together with the
+other release files; they are not signed and have not yet been checked on many
+real computers, so they may have bugs.
 
 On a computer the camera works (videos and QR codes), and so does Nearby when
 the computer has Bluetooth LE (a Mac only looks around, it cannot be seen).
@@ -363,16 +357,35 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 
 ## Why Zen is not on Google Play or the App Store
 
-- **Independence.** A store can remove an app or demand changes at any time.
-  Zen is meant to be independent — also of big companies and of politics.
-- **No fees, no rework.** Stores demand fees (the App Store — every year) and
-  agreement to their rules, while Zen is made by one person, for free.
-- **A store build exists anyway.** The `appStoreOnly` flavor for Google Play
-  and Galaxy Store can already be built. It is the same app with three
-  differences the stores force: it does not update itself, does not hand
-  its APK to others (it shares a link instead) and has no launcher disguise.
-  It is not published yet ([docs/RELEASES.md](docs/RELEASES.md), point 6).
-- **Privacy.** Nobody, not even a store, knows you have Zen.
+The main reason is the stores' legal rules and policies, which Zen by design
+does not meet:
+
+- **Moderation.** Stores require the developer to review reports and remove
+  content and accounts (Apple guideline 1.2, Google Play's user-generated
+  content policy). Zen has no server and nobody in the middle who could.
+- **The pyramid's currency and wallet.** Financial and crypto rules call for a
+  company and financial licences.
+- **Paid gates.** In-app payments for digital services must go through the
+  store's billing, with a 15–30% commission.
+- **Dating.** Stores require age verification and a moderation team.
+- **Self-updating and background work.** Google Play forbids apps that update
+  themselves outside the store, and the App Store heavily restricts
+  background execution.
+- **Developer identity and paperwork.** Stores publish the developer's
+  details and require formalities such as encryption export declarations.
+
+**The cost:** the App Store charges 99 USD a year, Google Play 25 USD once,
+and the licences and legal work run into thousands. Zen is made by one person,
+for free.
+
+A store can also remove an app or demand changes at any time (independence),
+and nobody, not even a store, needs to know you have Zen (privacy).
+
+A store build exists anyway: the `appStoreOnly` flavor for Google Play and
+Galaxy Store can already be built. It is the same app with three differences
+the stores force: it does not update itself, does not hand its APK to others
+(it shares a link instead) and has no launcher disguise. It is not published
+yet ([docs/RELEASES.md](docs/RELEASES.md), point 6).
 
 ## Privacy and security
 
@@ -542,6 +555,12 @@ I'm working as a taxi driver, because there was no work for me. I made this app
 for free, but I also want to have a house and a Lamborghini — please, throw me at least
 $5. There are no ads in the app, it's free, and I don't earn anything from it directly.
 If you have a job for me, let me know — you can find me on LinkedIn, among other places.
+
+## Thanks
+
+Thanks to **[Yggdrasil](https://yggdrasil-network.github.io/)**, the open,
+encrypted mesh network Zen runs on, and **[Scarlet](https://usescarlet.com/)**,
+which makes installing Zen on an iPhone simple.
 
 ## License
 

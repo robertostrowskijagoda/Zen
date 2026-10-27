@@ -41,8 +41,9 @@ aligned for phones with 16 KB memory pages. Details:
   installed app. Then the system installer asks (Android), or a helper
   swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
   Zen's folder is not writable (Program Files, `/opt`) the file is saved to
-  Downloads. On iPhone there is only the bar; SideStore installs the update
-  from the Zen source (below).
+  Downloads. On iPhone there is only the bar; install the update the way you
+  installed Zen (Scarlet: download the new `Zen-unsigned.ipa` from the install
+  page; SideStore: the Zen source, below).
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
@@ -70,7 +71,7 @@ aligned for phones with 16 KB memory pages. Details:
 
 GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 (steps for every system, the downloads, the Android signing certificate
-fingerprint) and **`apps.json`**, a SideStore / AltStore source. Both are
+fingerprint; one recommended way and its own page for each system) and **`apps.json`**, a SideStore / AltStore source. Both are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
 version, date, size and checksum, and the permissions read from that very
@@ -110,7 +111,8 @@ already.
   on only as a link (never as an APK) and has no launcher disguise. Because
   the store signs it, it also skips the check of its own signing
   certificate.
-- On iPhone Zen updates through SideStore (the source above), not by itself.
+- On iPhone Zen updates through the signer you installed it with (Scarlet: a new
+  file from the install page; SideStore: the source above), not by itself.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it
