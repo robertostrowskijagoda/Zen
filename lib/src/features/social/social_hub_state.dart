@@ -7,6 +7,7 @@ import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 
@@ -130,6 +131,7 @@ final class SocialHubState {
     this.peerProfiles = const <String, PeerPublicProfile>{},
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
+    this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.snapshotUnreadable = false,
     this.peerAppVersions = const <String, String>{},
   });
@@ -258,6 +260,12 @@ final class SocialHubState {
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
+  /// Conversations whose notifications tell more or less than the setting
+  /// says (`AppSettings.notificationPrivacy`): conversation key (a
+  /// friend's address or `group:<id>`) → its own level. Absent = "Jak
+  /// globalnie". Only on this device.
+  final Map<String, NotificationPrivacy> notificationPrivacy;
+
   /// True while the stored snapshot (friends, groups, inbox) could not be
   /// read back - neither the file nor its backup - although the app is
   /// unlocked: this state is a stand-in, not the user's data.
@@ -288,6 +296,31 @@ final class SocialHubState {
     }
     return 0;
   }
+
+  /// The level conversation [key] has of its own, `null` when it follows
+  /// the setting.
+  NotificationPrivacy? ownNotificationPrivacyOf(String key) {
+    final NotificationPrivacy? direct = notificationPrivacy[key];
+    if (direct != null || key.startsWith('group:')) {
+      return direct;
+    }
+    final String canonical = PeerShareCodec.normalizeAddress(key);
+    for (final MapEntry<String, NotificationPrivacy> e
+        in notificationPrivacy.entries) {
+      if (!e.key.startsWith('group:') &&
+          PeerShareCodec.addressesEqual(e.key, canonical)) {
+        return e.value;
+      }
+    }
+    return null;
+  }
+
+  /// How much a notification about conversation [key] tells: its own
+  /// level, else [global].
+  NotificationPrivacy notificationPrivacyFor(
+    String key, {
+    required NotificationPrivacy global,
+  }) => ownNotificationPrivacyOf(key) ?? global;
 
   PeerPublicProfile? peerProfileOf(String address) =>
       peerProfiles[PeerShareCodec.normalizeAddress(address)];
@@ -350,6 +383,7 @@ final class SocialHubState {
     Map<String, PeerPublicProfile>? peerProfiles,
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
+    Map<String, NotificationPrivacy>? notificationPrivacy,
     bool? snapshotUnreadable,
     Map<String, String>? peerAppVersions,
   }) {
@@ -376,6 +410,7 @@ final class SocialHubState {
       peerProfiles: peerProfiles ?? this.peerProfiles,
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
+      notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
       peerAppVersions: peerAppVersions ?? this.peerAppVersions,
     );

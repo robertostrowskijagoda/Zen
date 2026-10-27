@@ -1,8 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 
-/// With "Powiadomienia bez treści" on, the features whose title
-/// alone tells too much get a generic title as well.
+/// At "Tylko nadawca" the features whose title alone tells too much get a
+/// generic title as well; at "Tylko informacja" every title goes.
 void main() {
   RuntimeSystemNotification post(
     String id,
@@ -22,12 +23,12 @@ void main() {
 
   Future<Map<String, RuntimeSystemNotification>> shown(
     List<RuntimeSystemNotification> posts, {
-    bool hide = true,
+    NotificationPrivacy level = NotificationPrivacy.senderOnly,
   }) async {
     final MemoryRuntimeSystemNotificationService shade =
         MemoryRuntimeSystemNotificationService();
     final PrivacyRedactingNotificationService service =
-        PrivacyRedactingNotificationService(shade, hideContent: () => hide);
+        PrivacyRedactingNotificationService(shade, privacy: () => level);
     for (final RuntimeSystemNotification notification in posts) {
       await service.show(notification);
     }
@@ -100,14 +101,74 @@ void main() {
     expect(byId['friend-request-1']!.body, isNot(contains('Tajna')));
   });
 
-  test('with the setting off nothing changes', () async {
+  test('at "Nadawca i treść" nothing changes', () async {
     final Map<String, RuntimeSystemNotification> byId =
         await shown(<RuntimeSystemNotification>[
           post('date-safe-7', 'Kasia idzie na randkę'),
           post('react-p1', 'Cela polubiła Twój post'),
-        ], hide: false);
+        ], level: NotificationPrivacy.senderAndContent);
     expect(byId['react-p1']!.title, 'Cela polubiła Twój post');
     expect(byId['date-safe-7']!.title, 'Kasia idzie na randkę');
     expect(byId['date-safe-7']!.body, 'Tajna treść');
+  });
+
+  test('at "Tylko informacja" no title says who, except calls and alarms; '
+      'what a chat already composed for its own level stays', () async {
+    final Map<String, RuntimeSystemNotification> byId = await shown(
+      <RuntimeSystemNotification>[
+        post('friend-request-1', 'Kasia'),
+        post(
+          'dm-1',
+          'Tomek',
+          category: RuntimeSystemNotificationCategory.message,
+        ),
+        post(
+          'call-invite-1',
+          'Kasia',
+          category: RuntimeSystemNotificationCategory.call,
+        ),
+        post(
+          'alarm-1',
+          'Kasia potrzebuje pomocy',
+          category: RuntimeSystemNotificationCategory.alarm,
+        ),
+        // A conversation with a level of its own ("Nadawca i treść").
+        post(
+          'own-level-1',
+          'Ola',
+          category: RuntimeSystemNotificationCategory.message,
+          redacted: true,
+        ),
+      ],
+      level: NotificationPrivacy.generic,
+    );
+    expect(
+      byId['friend-request-1']!.title,
+      PrivacyRedactingNotificationService.genericTitle,
+    );
+    expect(byId['friend-request-1']!.body, isNot(contains('Tajna')));
+    expect(
+      byId['dm-1']!.title,
+      PrivacyRedactingNotificationService.genericTitle,
+    );
+    expect(byId['dm-1']!.body, 'Nowa wiadomość');
+    expect(byId['call-invite-1']!.title, 'Kasia');
+    expect(byId['alarm-1']!.title, 'Kasia potrzebuje pomocy');
+    expect(byId['own-level-1']!.title, 'Ola');
+    expect(byId['own-level-1']!.body, 'Tajna treść');
+  });
+
+  test('settings that cannot be read say the least', () async {
+    final MemoryRuntimeSystemNotificationService shade =
+        MemoryRuntimeSystemNotificationService();
+    final PrivacyRedactingNotificationService service =
+        PrivacyRedactingNotificationService(
+          shade,
+          privacy: () => throw StateError('not yet'),
+        );
+    final RuntimeSystemNotification shownPost = service.redact(
+      post('friend-request-1', 'Kasia'),
+    );
+    expect(shownPost.title, PrivacyRedactingNotificationService.genericTitle);
   });
 }

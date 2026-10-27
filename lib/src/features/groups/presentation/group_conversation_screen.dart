@@ -32,6 +32,7 @@ import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
@@ -710,6 +711,13 @@ class _GroupConversationScreenState
                   unawaited(_confirmLeave());
                 } else if (action == 'disappear') {
                   unawaited(_pickDisappearingTimer());
+                } else if (action == 'notifications') {
+                  unawaited(
+                    showConversationNotificationPrivacyDialog(
+                      context,
+                      conversationKey: 'group:${widget.groupId}',
+                    ),
+                  );
                 }
               },
               itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
@@ -743,6 +751,17 @@ class _GroupConversationScreenState
                           }),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  key: const Key('group-notification-privacy-menu'),
+                  value: 'notifications',
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.notifications_none_rounded, size: 18),
+                      const SizedBox(width: 8),
+                      Text(t('Powiadomienia')),
                     ],
                   ),
                 ),

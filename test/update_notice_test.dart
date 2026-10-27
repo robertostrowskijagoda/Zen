@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/update/background_update_check.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
@@ -132,7 +133,7 @@ void main() {
       final RuntimeSystemNotification redacted =
           PrivacyRedactingNotificationService(
             _Notices(),
-            hideContent: () => true,
+            privacy: () => NotificationPrivacy.senderOnly,
           ).redact(n);
       expect(redacted.body, contains('1.12.0'));
       expect(redacted.title, n.title);

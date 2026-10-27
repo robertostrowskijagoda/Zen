@@ -114,6 +114,36 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Notifications about conversation [key] (a friend's address or
+  /// `group:<id>`) tell as much as [level]; `null` goes back to the setting
+  /// ("Jak globalnie"). Only on this device.
+  Future<void> setConversationNotificationPrivacy(
+    String key,
+    NotificationPrivacy? level,
+  ) async {
+    final bool group = key.startsWith('group:');
+    final String canonical = group
+        ? key
+        : state.friendByAddress(key)?.address ??
+              PeerShareCodec.normalizeAddress(key);
+    await _enqueueStateWork(() async {
+      final Map<String, NotificationPrivacy> levels =
+          Map<String, NotificationPrivacy>.of(state.notificationPrivacy)
+            ..removeWhere(
+              (String k, NotificationPrivacy _) =>
+                  k == canonical ||
+                  (!group &&
+                      !k.startsWith('group:') &&
+                      PeerShareCodec.addressesEqual(k, canonical)),
+            );
+      if (level != null) {
+        levels[canonical] = level;
+      }
+      state = state.copyWith(notificationPrivacy: levels);
+      await _persistState();
+    });
+  }
+
   /// Accepts the invitation from [peerAddress]; they keep the name from
   /// their profile.
   Future<void> acceptFriendRequest({

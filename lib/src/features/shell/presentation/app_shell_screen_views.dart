@@ -880,21 +880,24 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('Bezpieczeństwo'),
                     pageChildren: const <Widget>[_SettingsSecuritySection()],
                   ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-hide-notification-content'),
+                  _SettingsNavTile(
+                    key: const Key('settings-notification-privacy'),
                     icon: Icons.notifications_off_outlined,
                     tone: ZenTone.privacy,
-                    title: t('Powiadomienia bez treści'),
-                    subtitle: t(
-                      'Tylko „Nowa wiadomość” — treść nie trafia do historii '
-                      'powiadomień systemu.',
-                    ),
-                    value: settings.hideNotificationContent,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setHideNotificationContent(value),
-                    ),
+                    title: t('Treść powiadomień'),
+                    subtitle: settings.notificationPrivacy.label,
+                    pageChildren: <Widget>[
+                      _SectionIntro(
+                        title: t('Co mówi powiadomienie'),
+                        caption: t(
+                          'Na ekranie blokady, w zasłonce i w historii '
+                          'powiadomień systemu. Rozmowa może mieć własny '
+                          'poziom (menu rozmowy → Powiadomienia).',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const NotificationPrivacySettingChoice(),
+                    ],
                   ),
                   if (ref.watch(ledgerNodeEnabledProvider))
                     _SettingsNavTile(
@@ -1233,6 +1236,18 @@ class _SettingsScreen extends ConsumerWidget {
                     pageChildren: const <Widget>[_ResetDataPanel()],
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              // The first-start setup again, every step, with what is set
+              // now.
+              FilledButton.tonalIcon(
+                key: const Key('settings-rerun-setup'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: () => unawaited(FirstRunSetupScreen.open(context)),
+                icon: const Icon(Icons.checklist_rounded),
+                label: Text(t('Ponownie przeprowadź konfigurację')),
               ),
               const SizedBox(height: 16),
               Center(

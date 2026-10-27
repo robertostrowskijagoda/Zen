@@ -10,6 +10,7 @@ import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final class _Linked extends MemorySignalTransport {
@@ -139,7 +140,10 @@ void main() {
     final MemoryRuntimeSystemNotificationService shade =
         MemoryRuntimeSystemNotificationService();
     final PrivacyRedactingNotificationService service =
-        PrivacyRedactingNotificationService(shade, hideContent: () => true);
+        PrivacyRedactingNotificationService(
+          shade,
+          privacy: () => NotificationPrivacy.senderOnly,
+        );
     final RuntimeSystemNotification hidden = service.redact(note);
     expect(hidden.title, PrivacyRedactingNotificationService.genericTitle);
     expect(hidden.body, isNot(contains('Cela')));

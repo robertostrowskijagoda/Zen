@@ -13,6 +13,7 @@ import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -42,6 +43,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'profileSentVersion',
     'callAcceptToken',
     'disappear',
+    'notifyPrivacy',
     'inboxText',
     'peerVersions',
     'groups',
@@ -228,6 +230,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, NotificationPrivacy> notificationPrivacy =
+        <String, NotificationPrivacy>{};
     final Map<String, String> peerAppVersions = <String, String>{};
     final int extensionCount = reader.readUint32();
     for (int i = 0; i < extensionCount; i++) {
@@ -323,6 +327,16 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      final Object? levels = decoded['notifyPrivacy'];
+      if (levels is Map) {
+        for (final MapEntry<dynamic, dynamic> e in levels.entries) {
+          for (final NotificationPrivacy level in NotificationPrivacy.values) {
+            if (e.key is String && level.name == e.value) {
+              notificationPrivacy[e.key as String] = level;
+            }
+          }
+        }
+      }
       final Object? versions = decoded['peerVersions'];
       if (versions is Map) {
         for (final MapEntry<dynamic, dynamic> e in versions.entries) {
@@ -393,6 +407,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      notificationPrivacy: notificationPrivacy,
       peerAppVersions: peerAppVersions,
     );
   }
@@ -561,6 +576,11 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        'notifyPrivacy': <String, String>{
+          for (final MapEntry<String, NotificationPrivacy> e
+              in state.notificationPrivacy.entries)
+            e.key: e.value.name,
+        },
         'inboxText': <String, Object?>{
           for (final InboxEntry e in <InboxEntry>[
             ...state.inbox,
@@ -665,6 +685,9 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      notificationPrivacy: Map<String, NotificationPrivacy>.from(
+        state.notificationPrivacy,
+      ),
       peerAppVersions: Map<String, String>.from(state.peerAppVersions),
     );
   }

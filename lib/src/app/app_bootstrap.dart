@@ -29,6 +29,7 @@ import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -153,6 +154,14 @@ final class ZenBootstrapResult {
       // test profile (--zen-profile), which a script drives from outside.
       // Debug only: a profile build is a real install too.
       appPasswordRequiredProvider.overrideWithValue(
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
+      ),
+      // The first-start setup once after the password; skipped the same
+      // way where a script drives the app.
+      firstRunSetupRequiredProvider.overrideWithValue(
         zenStartupGatesRequired(
           environment: Platform.environment,
           hasTestProfile: ZenInstance.profile != null,

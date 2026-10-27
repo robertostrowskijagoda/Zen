@@ -43,6 +43,7 @@ import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -1974,6 +1975,13 @@ final class _LockedReceiverSession {
         credentials: credentials,
       ).read(),
     );
+    // Who wrote (and what) a message's notice may say.
+    final LockedNoticeKit? noticeKit = LockedNoticeKit.fromJson(
+      await lockedNoticeKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
     // What this device still had to send, sealed for each recipient.
     final LockedOutboxKit? outboxKit = LockedOutboxKit.fromJson(
       await lockedOutboxKitFile(
@@ -2039,6 +2047,7 @@ final class _LockedReceiverSession {
         notices: notices,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
+        noticeKit: noticeKit,
         mailbox: mailboxKit == null || mailboxKit.isEmpty
             ? null
             : LockedMailbox(

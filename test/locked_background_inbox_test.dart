@@ -12,6 +12,7 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -453,6 +454,8 @@ void main() {
     Future<void> startReceiver(
       BackgroundCapability capability, {
       Duration ringTimeout = const Duration(seconds: 6),
+      LockedNoticeKit? noticeKit,
+      Duration noticeThrottle = const Duration(minutes: 1),
     }) async {
       transport = MemorySignalTransport();
       notices = MemoryRuntimeSystemNotificationService();
@@ -466,6 +469,8 @@ void main() {
         notices: notices,
         ringTimeout: ringTimeout,
         mailboxPollInterval: Duration.zero,
+        noticeKit: noticeKit,
+        noticeThrottle: noticeThrottle,
       );
       await receiver.start();
     }
@@ -636,6 +641,136 @@ void main() {
         expect(onDisk, isNot(contains(_ada)));
       },
     );
+
+    group('a message\'s notice follows the notification privacy level', () {
+      const LockedNoticeKit names = LockedNoticeKit(
+        names: <String, String>{
+          _ada: 'Ada',
+          _member: 'Marek',
+          'group:g1': 'Ekipa',
+        },
+      );
+      LockedNoticeKit kit({
+        NotificationPrivacy privacy = NotificationPrivacy.senderAndContent,
+        Map<String, NotificationPrivacy> overrides =
+            const <String, NotificationPrivacy>{},
+      }) => LockedNoticeKit(
+        privacy: privacy,
+        overrides: overrides,
+        names: names.names,
+      );
+
+      Future<RuntimeSystemNotification> noticeFor(
+        LockedNoticeKit? noticeKit,
+        String from,
+        Map<String, dynamic> payload,
+      ) async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: noticeKit,
+        );
+        await receive(from, payload);
+        return notices.activeNotifications.single;
+      }
+
+      const Map<String, dynamic> direct = <String, dynamic>{
+        'type': 'message',
+        '_rid': 'p1',
+        'text': 'Spotkajmy się o 18',
+        'senderName': 'Ada',
+      };
+      const Map<String, dynamic> inGroup = <String, dynamic>{
+        'type': 'group_message',
+        '_rid': 'p2',
+        'groupId': 'g1',
+        'groupName': 'Ekipa',
+        'text': 'Kto idzie?',
+        'senderName': 'Marek',
+      };
+
+      test('"Nadawca i treść": who and what, in a group too', () async {
+        RuntimeSystemNotification notice = await noticeFor(kit(), _ada, direct);
+        expect(notice.title, 'Ada');
+        expect(notice.body, 'Spotkajmy się o 18');
+        await receiver.stop();
+        notice = await noticeFor(kit(), _member, inGroup);
+        expect(notice.title, 'Ekipa');
+        expect(notice.body, 'Marek: Kto idzie?');
+      });
+
+      test('"Tylko nadawca": who, never what', () async {
+        final RuntimeSystemNotification notice = await noticeFor(
+          kit(privacy: NotificationPrivacy.senderOnly),
+          _ada,
+          direct,
+        );
+        expect(notice.title, 'Ada');
+        expect(notice.body, 'Nowa wiadomość');
+      });
+
+      test(
+        '"Tylko informacja", no kit, or no name: only that it came',
+        () async {
+          for (final (LockedNoticeKit?, String) run
+              in <(LockedNoticeKit?, String)>[
+                (kit(privacy: NotificationPrivacy.generic), _ada),
+                (null, _ada),
+                // A friend the kit has no name for.
+                (kit(), _bob),
+              ]) {
+            final RuntimeSystemNotification notice = await noticeFor(
+              run.$1,
+              run.$2,
+              direct,
+            );
+            expect(notice.title, 'Nowa wiadomość');
+            expect('${notice.title} ${notice.body}', isNot(contains('Ada')));
+            expect('${notice.title} ${notice.body}', isNot(contains('18')));
+            await receiver.stop();
+          }
+        },
+      );
+
+      test('a conversation\'s own level beats the global one', () async {
+        RuntimeSystemNotification notice = await noticeFor(
+          kit(
+            privacy: NotificationPrivacy.generic,
+            overrides: const <String, NotificationPrivacy>{
+              _ada: NotificationPrivacy.senderAndContent,
+            },
+          ),
+          _ada,
+          direct,
+        );
+        expect(notice.title, 'Ada');
+        expect(notice.body, 'Spotkajmy się o 18');
+        await receiver.stop();
+        notice = await noticeFor(
+          kit(
+            overrides: const <String, NotificationPrivacy>{
+              'group:g1': NotificationPrivacy.generic,
+            },
+          ),
+          _member,
+          inGroup,
+        );
+        expect(notice.title, 'Nowa wiadomość');
+        expect(notice.body, isNot(contains('Kto idzie')));
+      });
+
+      test('a call rings whatever the level', () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: kit(privacy: NotificationPrivacy.generic),
+        );
+        await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        final RuntimeSystemNotification ring =
+            notices.activeNotifications.single;
+        expect(ring.category, RuntimeSystemNotificationCategory.call);
+        expect(ring.isRingingCall, isTrue);
+        expect(ring.title, 'Połączenie przychodzące');
+      });
+    });
 
     test('a repeat is kept once and acknowledged again', () async {
       await startReceiver(await publishFor(_masterKey()));

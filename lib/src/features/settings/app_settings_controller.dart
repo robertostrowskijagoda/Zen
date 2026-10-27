@@ -126,8 +126,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(gifSearch: value));
   }
 
-  Future<void> setHideNotificationContent(bool value) async {
-    await _save(state.copyWith(hideNotificationContent: value));
+  /// How much notifications tell, where a conversation has no level of
+  /// its own.
+  Future<void> setNotificationPrivacy(NotificationPrivacy value) async {
+    await _save(state.copyWith(notificationPrivacy: value));
   }
 
   Future<void> setInAppSounds(bool value) async {
@@ -181,6 +183,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
   /// "Odbieraj w tle cały czas" (iPhone).
   Future<void> setKeepReceivingInBackground(bool value) async {
     await _save(state.copyWith(keepReceivingInBackground: value));
+  }
+
+  /// The first-start setup was gone through or skipped.
+  Future<void> setFirstRunSetupDone(bool value) async {
+    await _save(state.copyWith(firstRunSetupDone: value));
   }
 
   /// The first-start permissions step is done.

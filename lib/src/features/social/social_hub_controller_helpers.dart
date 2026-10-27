@@ -632,19 +632,7 @@ int _estimateInboxEntryBytes(InboxEntry entry) {
 /// What [signal] says in a notice or an inbox entry: for a message with an
 /// attachment only the label of its type (never the caption or file name),
 /// otherwise its text.
-String? _signalPreviewText(ZenSignal signal) {
-  final String? content = signal.content;
-  final ChatMessageType? type = signal.messageType;
-  if (content == null && (type == null || type == ChatMessageType.text)) {
-    return null;
-  }
-  return chatPreviewLine(
-    content ?? '',
-    type: type,
-    fileName: signal.fileName,
-    mimeType: signal.mimeType,
-  );
-}
+String? _signalPreviewText(ZenSignal signal) => signalNoticePreview(signal);
 
 InboxEntry _buildInboxEntry({
   required ZenSignal signal,
@@ -1031,6 +1019,7 @@ RuntimeNotification? _foregroundNotificationForSignal({
   required ZenSignal signal,
   required int receivedAtMillis,
   Map<String, FriendProfile>? friends,
+  required NotificationPrivacy privacy,
 }) {
   if (!_isUserFacingSignal(signal.type)) {
     // Receipts, typing, presence and membership bookkeeping would only
@@ -1053,13 +1042,43 @@ RuntimeNotification? _foregroundNotificationForSignal({
     receivedAtMillis: receivedAtMillis,
     friends: friends,
   );
+  // A chat message's banner tells no more than its notification would
+  // (at "Nadawca i treść" it stays as the inbox entry has it).
+  final NoticeText? chat = privacy == NotificationPrivacy.senderAndContent
+      ? null
+      : _chatNoticeText(signal: signal, friends: friends, privacy: privacy);
   return RuntimeNotification(
     id: entry.id,
-    title: entry.title,
-    body: entry.body,
+    title: chat?.title ?? entry.title,
+    body: chat?.body ?? entry.body,
     createdAtMillis: entry.createdAtMillis,
     routeKey: entry.routeKey,
     dedupKey: _notificationDedupKeyForSignal(signal),
+  );
+}
+
+/// What the notification about the chat message [signal] says at
+/// [privacy]; `null` for anything that is not a chat message.
+NoticeText? _chatNoticeText({
+  required ZenSignal signal,
+  required NotificationPrivacy privacy,
+  Map<String, FriendProfile>? friends,
+}) {
+  if (signal.type != ZenSignalType.message &&
+      signal.type != ZenSignalType.groupMessage) {
+    return null;
+  }
+  return messageNoticeText(
+    level: privacy,
+    sender: _resolvedPeerLabel(
+      address: signal.sender,
+      displayName: signal.displayName,
+      knownName: friends?[signal.sender]?.displayLabel,
+    ),
+    group: signal.type == ZenSignalType.groupMessage
+        ? (signal.groupName ?? '')
+        : null,
+    preview: _signalPreviewText(signal),
   );
 }
 
@@ -1067,7 +1086,7 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   required InboxEntry entry,
   required ZenSignal signal,
   Map<String, FriendProfile>? friends,
-  bool hideContent = false,
+  required NotificationPrivacy privacy,
 }) {
   final String senderLabel = _resolvedPeerLabel(
     address: signal.sender,
@@ -1076,21 +1095,17 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   );
   final String title;
   final String body;
-  final String? preview = _signalPreviewText(signal)?.trim();
+  final NoticeText? chat = _chatNoticeText(
+    signal: signal,
+    friends: friends,
+    privacy: privacy,
+  );
 
   switch (signal.type) {
     case ZenSignalType.message:
-      title = senderLabel;
-      body = !hideContent && (preview?.isNotEmpty ?? false)
-          ? preview!
-          : t('Nowa wiadomość');
     case ZenSignalType.groupMessage:
-      title = (signal.groupName != null && signal.groupName!.trim().isNotEmpty)
-          ? signal.groupName!.trim()
-          : t('Wiadomość grupowa');
-      body = !hideContent && (preview?.isNotEmpty ?? false)
-          ? '$senderLabel: $preview'
-          : t('{name} wysłał(a) wiadomość', {'name': senderLabel});
+      title = chat!.title;
+      body = chat.body;
     case ZenSignalType.callInvite:
     case ZenSignalType.callOffer:
       title = senderLabel;
@@ -1127,12 +1142,9 @@ RuntimeSystemNotification _systemNotificationFromEntry({
         signal.type == ZenSignalType.callInvite ||
         signal.type == ZenSignalType.callOffer ||
         signal.type == ZenSignalType.groupCallInvite,
-    // Messages already got their content-free form above (keeping who
-    // wrote); everything else is left to the central redaction.
-    contentRedacted:
-        hideContent &&
-        (signal.type == ZenSignalType.message ||
-            signal.type == ZenSignalType.groupMessage),
+    // Messages already got the form their conversation's level asks for
+    // above; everything else is left to the central redaction.
+    contentRedacted: chat != null,
     category: switch (signal.type) {
       ZenSignalType.friendRequest ||
       ZenSignalType.friendAccept ||

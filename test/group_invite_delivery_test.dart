@@ -62,11 +62,15 @@ final class _Harness {
     container = ProviderContainer(
       overrides: [
         ...extraOverrides,
-        // These tests check what notifications say; hiding the text (on by
-        // default) has its own test.
+        // These tests check what notifications say; hiding the text has
+        // its own test.
         ...buildAppSettingsProviderOverrides(
           store: MemoryAppSettingsStore(),
-          initialState: AppSettings(hideNotificationContent: hideContent),
+          initialState: AppSettings(
+            notificationPrivacy: hideContent
+                ? NotificationPrivacy.senderOnly
+                : NotificationPrivacy.senderAndContent,
+          ),
           hydrationEnabled: false,
         ),
         signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),

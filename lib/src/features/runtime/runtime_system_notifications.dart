@@ -10,6 +10,7 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -31,11 +32,17 @@ List buildRuntimeSystemNotificationProviderOverrides({
             FlutterLocalRuntimeSystemNotificationService(
               soundEffects: ref.read(zenSoundEffectsProvider),
             ),
-        // Read on every post, so flipping the setting applies at once.
-        // Also while this device shares its screen in a call.
-        hideContent: () =>
-            ref.read(appSettingsControllerProvider).hideNotificationContent ||
-            screenShareHidesNotifications.value,
+        // Read on every post, so changing the setting applies at once.
+        // While this device shares its screen in a call, never more than
+        // who wrote.
+        privacy: () {
+          final NotificationPrivacy level = ref
+              .read(appSettingsControllerProvider)
+              .notificationPrivacy;
+          return screenShareHidesNotifications.value
+              ? level.atLeast(NotificationPrivacy.senderOnly)
+              : level;
+        },
       ),
     ),
   ];
@@ -116,8 +123,9 @@ final class RuntimeSystemNotification {
   /// How many events this notification stands for.
   final int stackCount;
 
-  /// True when the poster already applied the "no content" setting itself
-  /// (and kept what it deliberately shows, such as who wrote).
+  /// True when the poster already applied the notification privacy level
+  /// itself (a chat message: the level of its own conversation), so the
+  /// central redaction leaves its text alone.
   final bool contentRedacted;
 
   /// This notification with its text replaced by [body] (and no stacked
@@ -215,29 +223,31 @@ abstract interface class RuntimeSystemNotificationService {
   Future<void> clear();
 }
 
-/// Applies the "Powiadomienia bez treści" setting to every notification the
-/// app posts, whoever posts it.
+/// Applies the notification privacy level ([NotificationPrivacy]) to every
+/// notification the app posts, whoever posts it.
 ///
 /// Features post straight to the notification service (dating, the meet
-/// services, the pyramid...), and only the chat used to honour the setting,
-/// so their text still reached the shade and the lock screen. Here, with
-/// the setting on (the default), the body of every message, social and
-/// transfer notification is replaced by a generic line; the title (who or
-/// what it is about) stays, as it always did for chat messages — except
-/// where the title itself tells too much ("X idzie na randkę", "Odpowiedź:
-/// {pytanie}", "Zaproszenie: {wydarzenie}"): dating, questions, events,
-/// introductions and the pyramid get a generic title too. Calls and
-/// alarms are left alone: the ringing UI must say who calls, and an alarm
-/// has to be readable at a glance.
+/// services, the pyramid...), so the level is applied here, not by each of
+/// them. At "Nadawca i treść" (the default) everything shows as posted. At
+/// "Tylko nadawca" the body of every message, social and transfer
+/// notification is replaced by a generic line; the title (who or what it
+/// is about) stays — except where the title itself tells too much ("X idzie
+/// na randkę", "Odpowiedź: {pytanie}", "Zaproszenie: {wydarzenie}"):
+/// dating, questions, events, introductions and the pyramid get a generic
+/// title too. At "Tylko informacja" every title goes as well. Chat messages
+/// come already in the form their conversation's level asks for
+/// ([RuntimeSystemNotification.contentRedacted]). Calls and alarms are left
+/// alone: the ringing UI must say who calls, and an alarm has to be
+/// readable at a glance.
 final class PrivacyRedactingNotificationService
     implements RuntimeSystemNotificationService {
   PrivacyRedactingNotificationService(
     this.delegate, {
-    required bool Function() hideContent,
-  }) : _hideContent = hideContent;
+    required NotificationPrivacy Function() privacy,
+  }) : _privacy = privacy;
 
   final RuntimeSystemNotificationService delegate;
-  final bool Function() _hideContent;
+  final NotificationPrivacy Function() _privacy;
 
   /// Ids (see the features' `notify` calls) of the posts whose title alone
   /// gives away what they are about: dating (`date-`), questions (`ask-`),
@@ -270,7 +280,7 @@ final class PrivacyRedactingNotificationService
   /// Title shown instead of one that tells too much (see [hidesTitle]).
   static String get genericTitle => t('Nowe powiadomienie');
 
-  /// Whether, with the setting on, [notification] loses its title too.
+  /// Whether, at "Tylko nadawca", [notification] loses its title too.
   static bool hidesTitle(RuntimeSystemNotification notification) {
     final String id = notification.id;
     return _revealingTitleIdPrefixes.any(
@@ -282,26 +292,31 @@ final class PrivacyRedactingNotificationService
   /// [notification] as the shade may show it right now.
   RuntimeSystemNotification redact(RuntimeSystemNotification notification) {
     if (notification.category == RuntimeSystemNotificationCategory.call ||
-        notification.category == RuntimeSystemNotificationCategory.alarm ||
-        !_shouldHide()) {
+        notification.category == RuntimeSystemNotificationCategory.alarm) {
       return notification;
     }
-    final bool hideTitle = hidesTitle(notification);
-    if (notification.contentRedacted && !hideTitle) {
+    final NotificationPrivacy level = _level();
+    if (level == NotificationPrivacy.senderAndContent) {
+      return notification;
+    }
+    final bool revealingTitle = hidesTitle(notification);
+    if (notification.contentRedacted && !revealingTitle) {
       return notification;
     }
     return notification.withRedactedBody(
       genericBodyFor(notification.category),
-      title: hideTitle ? genericTitle : null,
+      title: revealingTitle || level == NotificationPrivacy.generic
+          ? genericTitle
+          : null,
     );
   }
 
-  bool _shouldHide() {
+  NotificationPrivacy _level() {
     try {
-      return _hideContent();
+      return _privacy();
     } catch (_) {
       // Settings not readable (yet): err on the private side.
-      return true;
+      return NotificationPrivacy.generic;
     }
   }
 

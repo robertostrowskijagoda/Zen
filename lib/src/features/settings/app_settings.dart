@@ -67,6 +67,46 @@ enum AppAnimations {
   };
 }
 
+/// How much a notification about a conversation tells: on the lock screen,
+/// in the shade and in the system's notification history (Ustawienia →
+/// Prywatność, and per conversation). Calls and alarms always say who it
+/// is: without that they could not be answered.
+enum NotificationPrivacy {
+  /// Who wrote and a short preview of what (the default).
+  senderAndContent,
+
+  /// Who wrote, never what.
+  senderOnly,
+
+  /// Only that something came ("Nowa wiadomość").
+  generic;
+
+  String get label => switch (this) {
+    NotificationPrivacy.senderAndContent => t('Nadawca i treść'),
+    NotificationPrivacy.senderOnly => t('Tylko nadawca'),
+    NotificationPrivacy.generic => t('Tylko informacja'),
+  };
+
+  /// One line under the choice: what a notification shows.
+  String get description => switch (this) {
+    NotificationPrivacy.senderAndContent => t(
+      'Kto napisał i początek wiadomości.',
+    ),
+    NotificationPrivacy.senderOnly => t(
+      'Kto napisał, bez treści — treść nie trafia do historii powiadomień '
+      'systemu.',
+    ),
+    NotificationPrivacy.generic => t(
+      'Tylko „Nowa wiadomość”, bez nadawcy i treści. Połączenia i alarmy '
+      'nadal mówią, kto dzwoni.',
+    ),
+  };
+
+  /// The more private of this and [other].
+  NotificationPrivacy atLeast(NotificationPrivacy other) =>
+      other.index > index ? other : this;
+}
+
 /// Groups the accent themes into the sections the picker lists them under.
 enum AppThemeFamily {
   neutral,
@@ -373,12 +413,13 @@ final class AppSettings {
     this.gifSearch = true,
     this.autoDownloadMedia = true,
     this.mediaOnlyOnWifi = false,
-    this.hideNotificationContent = true,
+    this.notificationPrivacy = defaultNotificationPrivacy,
     this.inAppSounds = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
+    this.firstRunSetupDone = false,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
     this.paperBackupDone = false,
@@ -407,6 +448,8 @@ final class AppSettings {
   static const AppAccentTheme defaultAccentTheme = AppAccentTheme.graphite;
   static const AppPalette defaultPalette = AppPalette.classic;
   static const AppAnimations defaultAnimations = AppAnimations.always;
+  static const NotificationPrivacy defaultNotificationPrivacy =
+      NotificationPrivacy.senderAndContent;
 
   final int inboxLimitMb;
   final int autoCleanupDays;
@@ -445,9 +488,10 @@ final class AppSettings {
   bool allowsAutoDownload({required bool onUnmetered}) =>
       autoDownloadMedia && (!mediaOnlyOnWifi || onUnmetered);
 
-  /// Notifications say only "Nowa wiadomość", so message text never lands
-  /// in the system's notification history. On by default.
-  final bool hideNotificationContent;
+  /// How much notifications tell (who wrote and what, by default). A
+  /// conversation may have its own level
+  /// (`SocialHubState.notificationPrivacy`).
+  final NotificationPrivacy notificationPrivacy;
 
   /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
   /// connects or ends; on Windows and Linux also the notification sounds
@@ -472,6 +516,11 @@ final class AppSettings {
   /// and not advertised; it can be switched off at the bottom of the
   /// settings (Sieć i usługa).
   final bool bridgeEnabled;
+
+  /// The first-start setup (the lock, notifications, gates, animations)
+  /// was gone through or skipped: it is not shown again (Ustawienia opens
+  /// it again).
+  final bool firstRunSetupDone;
 
   /// The first-start step "Uprawnienia i Bluetooth" was gone
   /// through: it is not shown again (it stays under Ustawienia).
@@ -567,12 +616,13 @@ final class AppSettings {
     bool? gifSearch,
     bool? autoDownloadMedia,
     bool? mediaOnlyOnWifi,
-    bool? hideNotificationContent,
+    NotificationPrivacy? notificationPrivacy,
     bool? inAppSounds,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
     bool? bridgeEnabled,
+    bool? firstRunSetupDone,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
     bool? paperBackupDone,
@@ -603,13 +653,13 @@ final class AppSettings {
       gifSearch: gifSearch ?? this.gifSearch,
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
       mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
-      hideNotificationContent:
-          hideNotificationContent ?? this.hideNotificationContent,
+      notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       inAppSounds: inAppSounds ?? this.inAppSounds,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
+      firstRunSetupDone: firstRunSetupDone ?? this.firstRunSetupDone,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
@@ -642,12 +692,13 @@ final class AppSettings {
     'gifSearch': gifSearch,
     'autoDownloadMedia': autoDownloadMedia,
     'mediaOnlyOnWifi': mediaOnlyOnWifi,
-    'hideNotificationContent': hideNotificationContent,
+    'notificationPrivacy': notificationPrivacy.name,
     'inAppSounds': inAppSounds,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
+    'firstRunSetupDone': firstRunSetupDone,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
     'paperBackupDone': paperBackupDone,
@@ -691,12 +742,16 @@ final class AppSettings {
       gifSearch: pick<bool>('gifSearch'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
       mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi'),
-      hideNotificationContent: pick<bool>('hideNotificationContent'),
+      notificationPrivacy: byName(
+        NotificationPrivacy.values,
+        'notificationPrivacy',
+      ),
       inAppSounds: pick<bool>('inAppSounds'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
+      firstRunSetupDone: pick<bool>('firstRunSetupDone'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
       paperBackupDone: pick<bool>('paperBackupDone'),

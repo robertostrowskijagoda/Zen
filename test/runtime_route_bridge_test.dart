@@ -46,7 +46,7 @@ List _overrides({
 }) => [
   ...buildAppSettingsProviderOverrides(
     store: MemoryAppSettingsStore(),
-    initialState: const AppSettings(hideNotificationContent: false),
+    initialState: const AppSettings(),
     hydrationEnabled: false,
   ),
   signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),

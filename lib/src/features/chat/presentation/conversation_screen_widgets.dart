@@ -9,6 +9,7 @@ enum _ConversationMenuAction {
   setNickname,
   retentionSettings,
   disappearingMessages,
+  notificationPrivacy,
   blockFriend,
   removeFriend,
   unblockFriend,
@@ -217,6 +218,11 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
               'label': disappearLabel(disappearSeconds),
             }),
           ),
+        ),
+        PopupMenuItem<_ConversationMenuAction>(
+          key: const Key('conversation-notification-privacy-menu'),
+          value: _ConversationMenuAction.notificationPrivacy,
+          child: Text(t('Powiadomienia')),
         ),
         PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.blockFriend,

@@ -10,10 +10,10 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 /// This keeps what protects the user out of reach of whoever can write
 /// that file:
 ///
-/// * the lock mode and its delay, screenshot blocking, hidden notification
-///   content and the "no password" consent are also kept in secure storage
-///   (Android Keystore / Windows credential storage) and that copy wins
-///   over the file;
+/// * the lock mode and its delay, screenshot blocking, the notification
+///   privacy level and the "no password" consent are also kept in secure
+///   storage (Android Keystore / Windows credential storage) and that copy
+///   wins over the file;
 /// * the user's own GIF API key lives only in secure storage.
 ///
 /// Secure storage failing never stops the app: the file is used as before.
@@ -34,7 +34,7 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
     'lock': settings.lockMode.name,
     'delay': settings.backgroundLockDelaySeconds,
     'secure': settings.secureScreens,
-    'hide': settings.hideNotificationContent,
+    'notify': settings.notificationPrivacy.name,
     'noPassword': settings.allowNoAppPassword,
   });
 
@@ -61,13 +61,18 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
     }
     final Object? delay = json['delay'];
     final Object? secure = json['secure'];
-    final Object? hide = json['hide'];
+    NotificationPrivacy? notify;
+    for (final NotificationPrivacy level in NotificationPrivacy.values) {
+      if (level.name == json['notify']) {
+        notify = level;
+      }
+    }
     final Object? noPassword = json['noPassword'];
     return settings.copyWith(
       lockMode: lockMode,
       backgroundLockDelaySeconds: delay is int ? delay : null,
       secureScreens: secure is bool ? secure : null,
-      hideNotificationContent: hide is bool ? hide : null,
+      notificationPrivacy: notify,
       allowNoAppPassword: noPassword is bool ? noPassword : null,
     );
   }

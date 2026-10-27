@@ -19,6 +19,7 @@ import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/locked_notice_kit_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_route_bridge.dart';
@@ -165,8 +166,13 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                     child: TestHarnessBridge(
                       child: AlarmWatcher(
                         child: RuntimeRouteBridge(
-                          // After a restore: its progress and what came back.
-                          child: AccountImportLayer(child: AppShellScreen()),
+                          // Android: what the locked service's message
+                          // notices may say.
+                          child: LockedNoticeKitBridge(
+                            // After a restore: its progress and what came
+                            // back.
+                            child: AccountImportLayer(child: AppShellScreen()),
+                          ),
                         ),
                       ),
                     ),

@@ -15,6 +15,7 @@ import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -496,8 +497,10 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   and photos for friends, its sync), dating and pyramid duties — they
 ///   need the master key. (Outgoing retries go from the outbox kit,
 ///   `LockedOutbox`.)
-/// * Notifications say only what kind of thing came (a message, an alarm, a
-///   call), never from whom or what: nothing else is readable here.
+/// * Notifications say what kind of thing came (a message, an alarm, a
+///   call); a chat message also who wrote it and what, as far as the
+///   notification privacy level of its conversation allows and the
+///   [LockedNoticeKit] knows the name. Nothing else is readable here.
 final class LockedReceiver {
   LockedReceiver({
     required SignalTransport transport,
@@ -508,6 +511,7 @@ final class LockedReceiver {
     Stream<SignalTransportFrame>? doorFrames,
     LockedKnockWatch? knocks,
     LockedMailbox? mailbox,
+    LockedNoticeKit? noticeKit,
     Set<String> taken = const <String>{},
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
@@ -524,6 +528,7 @@ final class LockedReceiver {
        _doorFrames = doorFrames,
        _knocks = knocks,
        _mailbox = mailbox,
+       _noticeKit = noticeKit ?? const LockedNoticeKit(),
        _taken = taken,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -545,6 +550,9 @@ final class LockedReceiver {
 
   /// This phone as a mailbox for friends (`null`: no mailbox kit).
   final LockedMailbox? _mailbox;
+
+  /// What a message's notice may say (without a kit: only that it came).
+  final LockedNoticeKit _noticeKit;
 
   /// [LockedMailboxKit.takenTag]s of what the app already took before it
   /// locked: a copy of one is confirmed, never kept or told about again.
@@ -965,7 +973,7 @@ final class LockedReceiver {
         await _ringKnock(frame)) {
       return;
     }
-    await _announce(type, frame.payload, kind);
+    await _announce(type, frame.payload, kind, from: from);
   }
 
   /// Something from friends was kept: more may be on its way, so the
@@ -1086,8 +1094,9 @@ final class LockedReceiver {
   Future<void> _announce(
     String type,
     Map<String, dynamic> payload,
-    BackgroundContactKind kind,
-  ) async {
+    BackgroundContactKind kind, {
+    String from = '',
+  }) async {
     if (type == 'alarm') {
       if (payload['end'] != null || kind != BackgroundContactKind.friend) {
         // Over (the app tells about it after unlock), or from someone whose
@@ -1109,11 +1118,16 @@ final class LockedReceiver {
       return;
     }
     if (_messageTypes.contains(type)) {
+      final NoticeText text = _noticeKit.messageNotice(
+        from: from,
+        payload: payload,
+        genericBody: t('Odblokuj Zen, żeby przeczytać.'),
+      );
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedMessageSlot-${_now()}',
-          title: t('Nowa wiadomość'),
-          body: t('Odblokuj Zen, żeby przeczytać.'),
+          title: text.title,
+          body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
           routeKey: buildInboxRouteKey(),

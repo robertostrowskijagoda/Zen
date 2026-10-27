@@ -52,6 +52,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
@@ -542,6 +543,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       ),
                     );
                   }
+                  return;
+                case _ConversationMenuAction.notificationPrivacy:
+                  await showConversationNotificationPrivacyDialog(
+                    context,
+                    conversationKey: friend?.address ?? widget.peerAddress,
+                  );
                   return;
                 case _ConversationMenuAction.blockFriend:
                   await _handleConversationAction(

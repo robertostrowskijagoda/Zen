@@ -123,7 +123,11 @@ ProviderContainer _boot(
     overrides: [
       ...buildAppSettingsProviderOverrides(
         store: MemoryAppSettingsStore(),
-        initialState: AppSettings(hideNotificationContent: hideContent),
+        initialState: AppSettings(
+          notificationPrivacy: hideContent
+              ? NotificationPrivacy.senderOnly
+              : NotificationPrivacy.senderAndContent,
+        ),
         hydrationEnabled: false,
       ),
       signalQueueStoreProvider.overrideWithValue(storage.queue),
@@ -431,7 +435,7 @@ void main() {
         final PrivacyRedactingNotificationService service =
             PrivacyRedactingNotificationService(
               memory,
-              hideContent: () => true,
+              privacy: () => NotificationPrivacy.senderOnly,
             );
         final ProviderContainer container = _boot(
           storage,

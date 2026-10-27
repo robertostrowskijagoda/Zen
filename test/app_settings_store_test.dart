@@ -36,7 +36,8 @@ void main() {
         animations: AppAnimations.off,
         gifApiKey: 'my-own_key.123',
         autoDownloadMedia: false,
-        hideNotificationContent: false,
+        notificationPrivacy: NotificationPrivacy.generic,
+        firstRunSetupDone: true,
         secureScreens: false,
         allowNoAppPassword: true,
         bridgeEnabled: false,
@@ -54,7 +55,8 @@ void main() {
     expect(restored.animations, AppAnimations.off);
     expect(restored.gifApiKey, 'my-own_key.123');
     expect(restored.autoDownloadMedia, isFalse);
-    expect(restored.hideNotificationContent, isFalse);
+    expect(restored.notificationPrivacy, NotificationPrivacy.generic);
+    expect(restored.firstRunSetupDone, isTrue);
     expect(restored.secureScreens, isFalse);
     expect(restored.allowNoAppPassword, isTrue);
     expect(restored.bridgeEnabled, isFalse);

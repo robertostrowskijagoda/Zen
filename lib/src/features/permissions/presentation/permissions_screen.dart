@@ -35,22 +35,33 @@ class PermissionsScreen extends StatelessWidget {
 /// The first start, right after the app password: the same steps
 /// once; this phone is shown nearby only if the person turns that on.
 class PermissionsSetupStage extends StatelessWidget {
-  const PermissionsSetupStage({super.key});
+  const PermissionsSetupStage({this.welcome = true, super.key});
+
+  /// The welcome above the steps (not when the first-start setup came
+  /// first and said it).
+  final bool welcome;
 
   @override
-  Widget build(BuildContext context) => const Scaffold(
-    key: Key('permissions-setup'),
-    body: SafeArea(child: PermissionsPanel(firstStart: true)),
+  Widget build(BuildContext context) => Scaffold(
+    key: const Key('permissions-setup'),
+    body: SafeArea(child: PermissionsPanel(firstStart: true, welcome: welcome)),
   );
 }
 
 /// The steps, one button each; what is allowed already says so.
 class PermissionsPanel extends ConsumerStatefulWidget {
-  const PermissionsPanel({this.firstStart = false, super.key});
+  const PermissionsPanel({
+    this.firstStart = false,
+    this.welcome = true,
+    super.key,
+  });
 
   /// The first start: a "Gotowe" button at the end, visibility applied
   /// only then.
   final bool firstStart;
+
+  /// On the first start: the welcome above the steps.
+  final bool welcome;
 
   @override
   ConsumerState<PermissionsPanel> createState() => _PermissionsPanelState();
@@ -218,7 +229,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     final ZenColors zen = ZenColors.of(context);
     final PermissionsSnapshot? s = _snapshot;
     final List<Widget> children = <Widget>[
-      if (widget.firstStart) _welcome(zen),
+      if (widget.firstStart && widget.welcome) _welcome(zen),
       ZenHero(
         title: t('Uprawnienia i Bluetooth'),
         icon: Icons.verified_user_outlined,

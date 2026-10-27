@@ -112,13 +112,21 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
     await _persistSignalArtifacts(signal, timestamp);
     if (!onScreen) {
       final String name = mini.name.isEmpty ? t('Kontakt Zen') : mini.name;
+      // Not a friend: never a level of their own, always the setting's.
+      final NoticeText notice = messageNoticeText(
+        level: screenShareHidesNotifications.value
+            ? _appSettings.notificationPrivacy.atLeast(
+                NotificationPrivacy.senderOnly,
+              )
+            : _appSettings.notificationPrivacy,
+        sender: t('{name} (spoza znajomych)', <String, Object?>{'name': name}),
+        preview: text,
+      );
       await _presentSystemNotification(
         RuntimeSystemNotification(
           id: 'stranger-$id',
-          title: t('{name} (spoza znajomych)', <String, Object?>{'name': name}),
-          body: _appSettings.hideNotificationContent
-              ? t('Nowa wiadomość')
-              : text,
+          title: notice.title,
+          body: notice.body,
           createdAtMillis: timestamp,
           category: RuntimeSystemNotificationCategory.message,
           routeKey: buildConversationRouteKey(
@@ -126,7 +134,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
             title: name,
           ),
           slotKey: 'stranger-message',
-          contentRedacted: _appSettings.hideNotificationContent,
+          contentRedacted: true,
         ),
       );
     }
