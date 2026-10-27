@@ -660,10 +660,7 @@ List<PostAnnouncement> announcementsToPass(
     }
   }
   if (passFurther) {
-    for (final AnnouncedPost a in announcedPosts(
-      node,
-      nowMillis: now,
-    ).values) {
+    for (final AnnouncedPost a in announcedPosts(node, nowMillis: now).values) {
       if (a.hops != kMaxReachHops - 1) {
         continue;
       }

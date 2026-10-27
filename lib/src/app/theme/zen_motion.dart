@@ -36,9 +36,7 @@ abstract final class ZenMotion {
   /// The "Animacje" setting in force here; without a [ZenMotionScope] the
   /// system decides.
   static AppAnimations modeOf(BuildContext context) =>
-      context
-          .dependOnInheritedWidgetOfExactType<_ZenMotionModeScope>()
-          ?.mode ??
+      context.dependOnInheritedWidgetOfExactType<_ZenMotionModeScope>()?.mode ??
       AppAnimations.system;
 
   /// Whether the person turned the animations off ("Wyłączone"): the

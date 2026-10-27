@@ -333,27 +333,30 @@ void main() {
       expect(w.wall('d'), isEmpty);
     });
 
-    test('a friend of b who may not see b\'s friend list gets no notice', () async {
-      final _World w = await _World.chain(<String>['a', 'b', 'c', 'd']);
-      // A weak acquaintance does not see the list by default.
-      await w['b'].setLevel(w.mesh.address('c'), FriendLevel.weak);
-      await w.mesh.settle();
-      final LogEntry post = await _post(w['a'], 'Nie dla słabych znajomych');
-      await w.mesh.settle();
-      await w.rounds();
-      expect(w.passedOnBy('b').single.post, post.id);
-      expect(w.noticeEntriesOf('b'), hasLength(1));
-      expect(w.passedOnBy('b', reader: 'c'), isEmpty);
-      expect(announcedPosts(w['c']), isEmpty);
-      expect(w.wall('c'), isEmpty);
+    test(
+      'a friend of b who may not see b\'s friend list gets no notice',
+      () async {
+        final _World w = await _World.chain(<String>['a', 'b', 'c', 'd']);
+        // A weak acquaintance does not see the list by default.
+        await w['b'].setLevel(w.mesh.address('c'), FriendLevel.weak);
+        await w.mesh.settle();
+        final LogEntry post = await _post(w['a'], 'Nie dla słabych znajomych');
+        await w.mesh.settle();
+        await w.rounds();
+        expect(w.passedOnBy('b').single.post, post.id);
+        expect(w.noticeEntriesOf('b'), hasLength(1));
+        expect(w.passedOnBy('b', reader: 'c'), isEmpty);
+        expect(announcedPosts(w['c']), isEmpty);
+        expect(w.wall('c'), isEmpty);
 
-      // b shows the list to every friend: c reads the next notice.
-      w.lists['b'] = FriendListAudience.all;
-      await w.rounds();
-      expect(w.noticeEntriesOf('b').last.body['aud'], Audience.all.name);
-      expect(w.passedOnBy('b', reader: 'c').single.post, post.id);
-      expect(w.postOn('c', post.id)?.via, <String>['Bob']);
-    });
+        // b shows the list to every friend: c reads the next notice.
+        w.lists['b'] = FriendListAudience.all;
+        await w.rounds();
+        expect(w.noticeEntriesOf('b').last.body['aud'], Audience.all.name);
+        expect(w.passedOnBy('b', reader: 'c').single.post, post.id);
+        expect(w.postOn('c', post.id)?.via, <String>['Bob']);
+      },
+    );
 
     test('with the friend list shown to nobody nothing is passed on', () async {
       final _World w = await _World.chain(<String>['a', 'b', 'c']);

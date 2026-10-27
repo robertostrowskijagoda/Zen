@@ -29,6 +29,7 @@ enum InboxEntryType {
   /// Someone mentioned this person in a group chat, a post or a comment
   /// (`mentions.dart`).
   mention,
+
   /// One of this device's mailboxes stopped answering and needs replacing
   /// (`mailbox_quiet_notice.dart`).
   mailbox,
