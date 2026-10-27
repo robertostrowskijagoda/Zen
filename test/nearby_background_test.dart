@@ -650,6 +650,75 @@ void main() {
     expect(denied.looksPlanned, isFalse);
   });
 
+  test('locked, the looks come less often while they find nobody new, and '
+      'every few minutes again once someone new is near or the screen is '
+      'on', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', <String>['bob']);
+    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+    await ania.meet.shareNearbySecret('bob');
+    await bob.meet.setNearbyBackgroundScan(true);
+    final LockedNearby locked = LockedNearby(
+      kit: await _kitOf(bob),
+      radio: bob.radio,
+      keep: _Kept().keep,
+      notices: MemoryRuntimeSystemNotificationService(),
+      lookFor: const Duration(milliseconds: 5),
+      now: () => bob.clock,
+    );
+    await locked.start();
+    expect(locked.lookWait, const Duration(minutes: 5));
+    final List<int> waits = <int>[];
+    Future<void> look() async {
+      await locked.lookOnWake();
+      waits.add(locked.lookWait!.inMinutes);
+    }
+
+    await look();
+    await look();
+    await look();
+    expect(waits, <int>[10, 15, 15], reason: 'nobody around');
+    expect(bob.radio.scansStarted, 3, reason: 'each wake still looks');
+
+    // Ania comes by: every 5 minutes again; still there, nobody new.
+    bob.radio.around.add(<Object?, Object?>{
+      'type': 'seen',
+      'token': NearbyOwnKeys(
+        ania.meet.book.nearbyPrivate!,
+      ).advert(nearbySlot(bob.clock)),
+      'rssi': -65,
+      'device': 'mac-ania',
+    });
+    await look();
+    expect(waits.last, 5);
+    await look();
+    expect(waits.last, 10);
+    // One more phone than before: someone new.
+    bob.radio.around.add(<Object?, Object?>{
+      'type': 'seen',
+      'token': Uint8List.fromList(List<int>.generate(20, (int i) => i + 1)),
+      'rssi': -80,
+      'device': 'mac-obcy',
+    });
+    await look();
+    expect(waits.last, 5);
+
+    // The screen on (someone uses the phone): every 5 minutes, though
+    // nobody new is around.
+    await look();
+    expect(waits.last, 10);
+    bob.radio.power = <Object?, Object?>{'interactive': true};
+    await look();
+    expect(waits.last, 5);
+    // A look skipped in battery saver found nobody either.
+    bob.radio.power = <Object?, Object?>{'powerSave': true};
+    await look();
+    expect(waits.last, 10);
+    expect(locked.stats.skipped[NearbyLookSkip.powerSave], 1);
+    await locked.stop();
+    expect(locked.lookWait, isNull);
+  });
+
   test('the power-button shortcut raises the very alarm of the button: off '
       'by default, needs the PINs, ends only with a PIN', () async {
     final _Net net = _Net();

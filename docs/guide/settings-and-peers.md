@@ -45,11 +45,14 @@ people nearby without the Nearby screen open: by default for 8 seconds
 every 5 minutes (choices: every 2, 5, 10, 15 or 30 minutes, for 4, 8 or 15
 seconds, or off). The page shows an estimate of what it costs the battery
 a day, counting that every look wakes the phone for a few seconds: about
-42 mAh (1.4 %) by default, about 163 mAh every 2 minutes for 15 seconds,
-about 5 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
-visible nearby. These are estimates for a typical phone. It skips its turn
-below 15 % battery, in battery saver and while the phone sleeps, unless it
-is charging.
+42 mAh (1.4 %) by default, about 174 mAh every 2 minutes for 15 seconds,
+about 4 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
+visible nearby. These are estimates for a typical phone, and the most it
+costs: while Zen is locked and the looks find nobody new, they come less
+often (up to three times the chosen gap, at most 30 minutes apart) and go
+back to the chosen gap once someone new is seen or the screen is on. It
+skips its turn below 15 % battery, in battery saver and while the phone
+sleeps, unless it is charging.
 
 **Battery.** After 5 minutes in the background an Android phone only
 receives (no presence pings, scans or sync), lock or no lock; *Auto-lock*

@@ -360,10 +360,13 @@ final class NearbyKitKeeper {
 ///    is shows after unlock) and is kept for the app; anything else is at
 ///    most the quiet unchecked note, like in the app;
 ///  - with "Rozglądaj się też w tle" and "Zapisuj, kogo mijam" on, a short
-///    low-power look around every [lookEvery] when the [policy] allows it
-///    (not on low battery, in battery saver or while the phone sleeps);
-///    friends in range (and how many others) are kept for "Mijani" at most
-///    every [keepEvery].
+///    look around when the [policy] allows it (not on low battery, in
+///    battery saver or while the phone sleeps): every [lookEvery] at first,
+///    less and less often while the looks find nobody new (up to
+///    [NearbyLookPolicy.longest] apart, [nextNearbyLookWait]), every
+///    [lookEvery] again once one does or the screen is on; friends in range
+///    (and how many others) are kept for "Mijani" at most every
+///    [keepEvery].
 final class LockedNearby {
   LockedNearby({
     required this.kit,
@@ -419,9 +422,10 @@ final class LockedNearby {
   /// What the looks cost so far.
   final NearbyLookStats stats = NearbyLookStats();
 
-  /// Results a low-power scan batched up arrive a moment after it stops:
-  /// they still count until then.
-  static const Duration batchGrace = Duration(seconds: 3);
+  /// The last results on their way from the radio when the scan stops
+  /// still count for a moment (nothing is batched, so nothing waits for
+  /// them).
+  static const Duration lateResults = kLookLateResults;
   int _graceUntil = 0;
 
   /// What was seen goes to the inbox at most this often (and when this
@@ -443,7 +447,22 @@ final class LockedNearby {
   final Map<String, String?> _known = <String, String?>{};
 
   StreamSubscription<Map<Object?, Object?>>? _events;
-  WakeTimer? _lookTimer;
+
+  /// The looks on the shared beat; how long it waits changes with what
+  /// they find ([nextNearbyLookWait]).
+  BeatTimer? _lookTimer;
+
+  /// Friends and other phones the look going on (or the last one) saw.
+  final Set<String> _lookFriends = <String>{};
+  final Set<String> _lookOthers = <String>{};
+
+  /// Friends and how many others the look before it saw: someone not
+  /// among them is new.
+  Set<String> _lastFriends = <String>{};
+  int _lastOthers = 0;
+
+  /// The screen was on at the last look.
+  bool _screenOn = false;
   Timer? _remindTimer;
 
   /// Wakes the phone for the next reminder that is due.
@@ -562,10 +581,11 @@ final class LockedNearby {
   /// Plans the looks around while they can run ([radioOn]), or drops them.
   ///
   /// They go on the shared beat: the same wake as the mailbox polls, not
-  /// one of their own. A wake holds the phone for the look and the results
-  /// the scan batches, and lets it sleep as soon as that is done (a look
-  /// skipped on low battery or in battery saver: at once). Not in Doze: an
-  /// ordinary alarm that Doze puts off (the look is skipped in Doze).
+  /// one of their own. A wake holds the phone for the look and lets it
+  /// sleep as soon as that is done (a look skipped on low battery or in
+  /// battery saver: at once). Not in Doze: an ordinary alarm that Doze puts
+  /// off (the look is skipped in Doze). Planned anew (Bluetooth back on),
+  /// they start at [lookEvery] again.
   void _planLooks({required bool radioOn}) {
     if (!_running || !_lookPossible || !radioOn || !kit.look || !kit.record) {
       _lookTimer?.cancel();
@@ -575,8 +595,8 @@ final class LockedNearby {
     _lookTimer ??= ZenWake.beat(
       'nearby-look',
       lookEvery,
-      _lookOnWake,
-      hold: lookFor + batchGrace + const Duration(seconds: 4),
+      lookOnWake,
+      hold: lookFor + const Duration(seconds: 5),
       whileIdle: false,
     );
   }
@@ -585,15 +605,47 @@ final class LockedNearby {
   @visibleForTesting
   bool get looksPlanned => _lookTimer != null;
 
-  /// A look on a wake; after it, the results the scan batched still come.
-  Future<void> _lookOnWake() async {
+  /// How long until the next look now (tests, logs).
+  @visibleForTesting
+  Duration? get lookWait => _lookTimer?.every;
+
+  /// A look on a wake; then the wait for the next one: [lookEvery] when
+  /// this look found someone new or the screen was on, longer otherwise
+  /// (a skipped look found nobody either).
+  @visibleForTesting
+  Future<void> lookOnWake() async {
+    bool fresh = false;
     try {
       if (await lookNow()) {
-        await Future<void>.delayed(batchGrace);
+        fresh = _foundNew();
       }
     } on Object catch (error, stackTrace) {
       logZenError('Locked nearby: look', error, stackTrace);
     }
+    final BeatTimer? timer = _lookTimer;
+    if (timer == null || !_running) {
+      return;
+    }
+    final Duration next = nextNearbyLookWait(
+      last: timer.every,
+      fresh: fresh || _screenOn,
+      base: lookEvery,
+      max: policy.longest,
+    );
+    if (next != timer.every) {
+      timer.setEvery(next);
+    }
+  }
+
+  /// Whether the look that just ran saw a friend the one before did not,
+  /// or more other phones; it becomes the one before.
+  bool _foundNew() {
+    final bool fresh =
+        _lookFriends.any((String f) => !_lastFriends.contains(f)) ||
+        _lookOthers.length > _lastOthers;
+    _lastFriends = Set<String>.of(_lookFriends);
+    _lastOthers = _lookOthers.length;
+    return fresh;
   }
 
   /// Sets an alarm for the next reminder not shown yet.
@@ -616,13 +668,17 @@ final class LockedNearby {
     if (next == null) {
       return;
     }
+    // The wake's future: the phone sleeps again once the reminder is shown.
     _remindWake = ZenWake.after(
       'reminder',
       Duration(milliseconds: next - at),
-      () => unawaitedLogged(
-        remindIfDue().whenComplete(_wakeForNextReminder),
-        context: 'Locked reminders',
-      ),
+      () async {
+        try {
+          await remindIfDue();
+        } finally {
+          _wakeForNextReminder();
+        }
+      },
       hold: const Duration(seconds: 5),
       exact: true,
     );
@@ -663,18 +719,22 @@ final class LockedNearby {
     }
   }
 
-  /// One short, low-power look around. Returns whether it ran.
+  /// One short look around. Returns whether it ran.
   @visibleForTesting
   Future<bool> lookNow() async {
     if (!_running || !kit.look || !kit.record || _windowOpen || _held > 0) {
       return false;
     }
-    final NearbyLookSkip? why = policy.skipFor(await radio.state());
+    final Map<Object?, Object?> state = await radio.state();
+    _screenOn = NearbyPower.fromState(state).screenOn;
+    final NearbyLookSkip? why = policy.skipFor(state);
     if (why != null) {
       stats.skip(why);
       return false;
     }
     _windowOpen = true;
+    _lookFriends.clear();
+    _lookOthers.clear();
     try {
       if (!await radio.startScan(lowPower: true)) {
         stats.skip(NearbyLookSkip.busy);
@@ -683,7 +743,7 @@ final class LockedNearby {
       await Future<void>.delayed(lookFor);
     } finally {
       _windowOpen = false;
-      _graceUntil = _now() + batchGrace.inMilliseconds;
+      _graceUntil = _now() + lateResults.inMilliseconds;
       if (_held == 0) {
         await radio.stopScan();
       }
@@ -795,6 +855,7 @@ final class LockedNearby {
       }
     }
     if (friend != null) {
+      _lookFriends.add(friend);
       _pending = mergeEncounter(
         _pending,
         Encounter(friend: friend, start: at, end: at),
@@ -811,6 +872,9 @@ final class LockedNearby {
     }
     if (_strangers.length < EncounterLog.maxStrangersPerSlot) {
       _strangers.add(token);
+    }
+    if (_lookOthers.length < EncounterLog.maxStrangersPerSlot) {
+      _lookOthers.add(token);
     }
     final int window = encounterWindowOf(at);
     if (_strangers.length > (_crowds[window] ?? 0)) {

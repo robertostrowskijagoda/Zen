@@ -105,8 +105,10 @@ never your address.
   Network addresses are exchanged only between people who answered each
   other.
 - **Keep looking in the background too** (on by default): by default every
-  5 minutes an 8-second low-power look, skipped below 15 % battery, in
-  battery saver or when the phone sleeps. About 0.3 % of the radio's time.
+  5 minutes an 8-second look, skipped below 15 % battery, in battery saver
+  or when the phone sleeps. While Zen is locked and the looks find nobody
+  new, they come less often (5, 10, then every 15 minutes by default) and
+  every 5 minutes again once someone new is seen or the screen is on.
   **Settings → Looking around in the background** sets how often (2 to 30
   minutes) and how long (4 to 15 seconds), with an estimate of the battery
   cost (about 1.4 % a day by default; [details](settings-and-peers.md#settings)).
