@@ -31,7 +31,7 @@ dependencies:
   qr_code_dart_scan: ^0.11.5
   # Its QR decoder, used directly for camera pictures on computers.
   zxing_lib: ^1.1.4
-  record: ^6.2.0
+  record: ^7.1.2
   zstandard: ^1.5.0
   flutter_local_notifications: ^21.0.0
   flutter_foreground_task: ^9.2.1
