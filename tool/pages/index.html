@@ -3,167 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <title>Zen — invitation</title>
 <meta name="description" content="Zen: an open-source messenger for people who know each other. No servers, no ads, no algorithm.">
 <link rel="icon" type="image/png" href="zen-icon.png">
 <link rel="apple-touch-icon" href="zen-icon.png">
+<link rel="stylesheet" href="site.css">
+<script src="site.js"></script>
 <style>
-  /* Shared look of all the Zen pages (the same block is inlined in each page). */
-  :root {
-    color-scheme: light dark;
-    --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
-    --line: #e4e0ef; --soft: #efeaff; --link: #6234d8; --focus: #6234d8;
-    --btn1: #6d3df5; --btn2: #b01fc4; --bar: rgba(246, 244, 251, .88);
-    --glow: rgba(124, 77, 255, .20); --warn: #9a5b00;
-    --shadow: 0 1px 2px rgba(23, 21, 31, .05), 0 10px 28px rgba(70, 40, 140, .08);
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b0a10; --card: #16141f; --text: #f3f1fa; --muted: #a6a1ba;
-      --line: #2a2738; --soft: #221d36; --link: #b9a2ff; --focus: #c4b0ff;
-      --bar: rgba(11, 10, 16, .88); --glow: rgba(157, 123, 255, .22);
-      --warn: #f0b45a;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-  body {
-    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-    font: 16px/1.55 var(--font);
-  }
-  img { max-width: 100%; }
-  h1, h2, h3 { line-height: 1.2; }
-  p { margin: 8px 0 14px; }
-  a { color: var(--link); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
-  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
-  code {
-    font: 13.5px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line);
-    border-radius: 8px; padding: 2px 6px; word-break: break-all;
-  }
-  .hidden { display: none !important; }
-  .muted { color: var(--muted); }
-
-  /* Icons: one sprite per page, drawn with the text colour. */
-  .ico {
-    width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor;
-    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-  }
-  .ico.fill { fill: currentColor; stroke: none; }
-
-  /* Top bar: brand, links, language. */
-  .top { position: relative; z-index: 20; background: var(--bar); border-bottom: 1px solid var(--line); }
-  @media (min-width: 720px) {
-    .top { position: sticky; top: 0; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-  }
-  .top-in {
-    max-width: 1040px; margin: 0 auto; padding: 10px 16px;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-  }
-  .brand {
-    order: 1; margin-inline-end: auto; display: inline-flex; align-items: center; gap: 10px;
-    color: var(--text); font-weight: 800; font-size: 19px; text-decoration: none;
-  }
-  .brand img { width: 32px; height: 32px; border-radius: 9px; display: block; box-shadow: 0 0 0 1px var(--line); }
-  .topnav { order: 3; width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
-  .topnav a {
-    display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px;
-    border-radius: 999px; color: var(--text); font-weight: 600; font-size: 15px;
-    text-decoration: none; white-space: nowrap;
-  }
-  .topnav a:hover { background: var(--soft); }
-  .topnav a[aria-current="page"] { background: var(--soft); color: var(--link); }
-  .topnav .ico { width: 18px; height: 18px; display: none; }
-  @media (max-width: 419px) { .topnav a { padding: 0 8px; font-size: 14.5px; } }
-  @media (min-width: 520px) { .topnav .ico { display: block; } .topnav a { padding: 0 14px; } }
-  @media (min-width: 720px) {
-    .top-in { flex-wrap: nowrap; }
-    .topnav { order: 2; width: auto; flex-wrap: nowrap; margin-inline-start: auto; }
-    .langpick { order: 3; }
-  }
-
-  /* Language picker: a visible pill; the real select lies invisible on top. */
-  .langpick {
-    order: 2; position: relative; display: inline-flex; align-items: center; gap: 7px;
-    min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--card); color: var(--text); font-weight: 700; font-size: 14.5px;
-  }
-  .langpick:hover { border-color: var(--link); background: var(--soft); }
-  .langpick:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
-  .langpick .ico { width: 18px; height: 18px; }
-  .langpick .chev { width: 14px; height: 14px; opacity: .7; }
-  .langpick .lc { letter-spacing: .04em; }
-  .langpick .ln { display: none; }
-  @media (min-width: 420px) { .langpick .ln { display: inline; } }
-  .langpick select {
-    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0;
-    cursor: pointer; font: inherit; color: var(--text); background: var(--card);
-  }
-
-  /* Hero: the app icon, the name and one line about Zen. */
-  .hero {
-    position: relative; isolation: isolate; overflow: hidden; text-align: center;
-    padding: 34px 16px 12px;
-  }
-  .hero::before {
-    content: ""; position: absolute; z-index: -1; left: 50%; top: -120px;
-    width: min(900px, 140%); height: 440px; transform: translateX(-50%);
-    background: radial-gradient(closest-side, var(--glow), transparent);
-  }
-  .hero-icon {
-    width: 96px; height: 96px; display: block; margin: 0 auto 16px; border-radius: 26px;
-    box-shadow: 0 14px 34px rgba(109, 61, 245, .35), 0 0 0 1px var(--line);
-  }
-  .hero h1 { font-size: clamp(30px, 7vw, 46px); margin: 0 0 10px; letter-spacing: -.02em; }
-  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
-    .hero h1 {
-      background: linear-gradient(90deg, var(--btn1), var(--btn2));
-      -webkit-background-clip: text; background-clip: text;
-      -webkit-text-fill-color: transparent; color: transparent;
-    }
-    @media (prefers-color-scheme: dark) {
-      .hero h1 { background-image: linear-gradient(90deg, #b9a2ff, #f08af5); }
-    }
-  }
-  .hero .lead {
-    max-width: 34em; margin: 0 auto; color: var(--muted);
-    font-size: clamp(17px, 3.6vw, 20px);
-  }
-
-  main { display: block; max-width: 1040px; margin: 0 auto; padding: 18px 16px 24px; }
-
-  /* Buttons and link chips. */
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-    min-height: 48px; padding: 12px 20px; border-radius: 14px; border: 1px solid transparent;
-    font: 700 16px/1.2 var(--font); text-align: center; text-decoration: none; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .btn, .chip, .doc, .topnav a, .langpick {
-      transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease,
-        border-color .15s ease, filter .15s ease;
-    }
-    .btn:hover, .doc:hover { transform: translateY(-2px); }
-  }
-  .btn:active, .doc:active { transform: translateY(1px) scale(.985); }
-  .btn.primary {
-    background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff;
-    box-shadow: 0 8px 22px rgba(109, 61, 245, .32);
-  }
-  .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(109, 61, 245, .42); }
-  .btn.secondary { background: var(--card); color: var(--text); border-color: var(--line); }
-  .btn.secondary:hover { background: var(--soft); border-color: var(--link); }
-  .btn.discord { background: #5865f2; color: #fff; box-shadow: 0 8px 22px rgba(88, 101, 242, .32); }
-  .btn.discord:hover { filter: brightness(1.1); }
-  .btn.block { display: flex; width: 100%; }
-  .btn .ico { width: 22px; height: 22px; }
   /* "Open in Zen": the first thing in the page, as big as a thumb wants. */
   a.btn.open {
     display: flex; align-items: center; justify-content: center; gap: 14px;
@@ -173,369 +22,104 @@
   }
   a.btn.open .ico { width: 34px; height: 34px; stroke-width: 2.4; }
   @media (max-width: 380px) { a.btn.open { font-size: 24px; padding: 18px 14px; gap: 10px; } }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 5px 13px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
-    color: var(--link); font: 700 14.5px/1.2 var(--font); text-decoration: none;
-  }
-  .chip:hover { background: var(--soft); border-color: var(--link); }
-  .chip.wrap { border-radius: 16px; text-align: center; }
-  .chip .ico { width: 16px; height: 16px; }
-  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-
-  /* Cards and sections. */
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 22px;
-    padding: 20px 18px; box-shadow: var(--shadow);
-  }
-  .card h2, .card h3 { margin: 0 0 6px; }
-  .narrow { max-width: 560px; margin-inline: auto; }
-  .sec { margin: 46px 0 0; }
-  .sec > h2 { font-size: clamp(22px, 4.6vw, 30px); text-align: center; margin: 0 0 8px; }
-  .sec > .sub { text-align: center; color: var(--muted); max-width: 36em; margin: 0 auto 22px; }
-  .small { font-size: 14px; color: var(--muted); }
-  .hint { text-align: center; color: var(--muted); font-size: 14.5px; margin: 12px 0 0; }
-  .hint .chip { margin: 2px 2px; }
-
-  /* Footer. */
-  .foot {
-    max-width: 1040px; margin: 36px auto 0; padding: 26px 16px 40px; text-align: center;
-    border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
-  }
-  .foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; margin: 0 0 14px; }
-  .foot-links a { display: inline-flex; align-items: center; min-height: 32px; font-weight: 600; font-size: 15px; }
-  .foot p { margin: 6px 0; }
-
-  /* Blocks used by several pages. */
-  .get h2 { font-size: 21px; }
-  .get > p.muted { margin-top: 0; }
-  .stack { display: grid; gap: 10px; margin-top: 14px; }
-  .get .hint { margin-top: 10px; }
-  .iosnote { background: var(--soft); border-radius: 14px; padding: 12px 14px; margin: 0; text-align: start; }
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; }
-  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); }
-  .feat .fi {
-    width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
-    background: var(--soft); color: var(--link); margin-bottom: 12px;
-  }
-  .feat .fi .ico { width: 24px; height: 24px; }
-  .feat h3 { font-size: 18px; margin: 0 0 6px; }
-  .feat p { margin: 0; color: var(--muted); font-size: 15px; }
-  .shots {
-    display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
-    padding: 6px 4px 16px; margin: 0; list-style: none; justify-content: safe center;
-  }
-  .shots figure { margin: 0; flex: 0 0 190px; scroll-snap-align: center; text-align: center; font-size: 14.5px; font-weight: 600; color: var(--muted); }
-  .shots img {
-    display: block; width: 190px; height: auto; margin: 0 auto 8px; border-radius: 22px;
-    border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--card);
-  }
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; list-style: none; margin: 0; padding: 0; counter-reset: s; }
-  .steps li { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; counter-increment: s; }
-  .steps li::before {
-    content: counter(s); display: grid; place-items: center; width: 34px; height: 34px;
-    margin-bottom: 10px; border-radius: 50%; color: #fff; font-weight: 800;
-    background: linear-gradient(135deg, var(--btn1), var(--btn2));
-  }
-  .steps h3 { font-size: 17px; margin: 0 0 4px; }
-  .steps p { margin: 0; color: var(--muted); font-size: 15px; }
-  .cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-  .cta-row .btn { flex: 0 1 auto; }
-  @media (max-width: 480px) { .cta-row .btn { width: 100%; } }
-
-  /* Invitation / home page. */
-  .invite { max-width: 560px; margin: 0 auto 18px; text-align: center; }
-  .code {
-    font: 600 clamp(13px, 4.2vw, 19px)/1.4 var(--mono); letter-spacing: .04em; background: var(--card);
-    border: 2px dashed var(--link); border-radius: 16px; padding: 14px 10px;
-    margin: 0 0 12px; word-break: break-all; user-select: all;
-  }
-  .noapp { background: var(--soft); border-radius: 14px; padding: 12px 14px; margin: 0 0 12px; text-align: start; }
 </style>
 </head>
-<body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
-<symbol id="i-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
-<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
-<symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
-<symbol id="i-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol>
-<symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
-<symbol id="i-open" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
-<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
-<symbol id="i-list" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></symbol>
-<symbol id="i-noserver" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><line x1="7" y1="6.5" x2="7.01" y2="6.5"/><line x1="7" y1="17.5" x2="7.01" y2="17.5"/><line x1="2" y1="22" x2="22" y2="2"/></symbol>
-<symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
-<symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
-<symbol id="i-code" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
-</svg>
-<header class="top">
-  <div class="top-in">
-    <span class="brand"><img src="zen-icon.png" width="32" height="32" alt=""><span>Zen</span></span>
-    <nav class="topnav" aria-label="Main">
-      <a href="about/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="navAbout">About</span></a>
-      <a href="install/"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="navInstall">Install</span></a>
-      <a href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg><span>Discord</span></a>
-      <a href="https://github.com/robertostrowskijagoda/Zen" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
-    </nav>
-    <div class="langpick">
-      <svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg>
-      <span class="lc" id="langCode" aria-hidden="true">EN</span>
-      <span class="ln" id="langName" aria-hidden="true">English</span>
-      <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
-      <select id="langSel" aria-label="Language"></select>
-    </div>
-  </div>
-</header>
+<body data-nav="">
+<header class="top" id="zenTop"></header>
 <div class="hero">
-  <img class="hero-icon" src="zen-icon.png" width="96" height="96" alt="Zen">
+  <img class="hero-icon" src="zen-icon.png" width="88" height="88" alt="Zen">
   <h1 id="title">Zen</h1>
-  <p id="lead" class="lead">A network of people who know each other — no servers, ads or algorithm.</p>
+  <p id="lead" class="lead" data-i="lead">A network of people who know each other — no servers, ads or algorithm.</p>
 </div>
 <main>
-  <a id="open" class="btn primary open" href="#"><svg class="ico" aria-hidden="true"><use href="#i-open"/></svg><span id="openLabel">Open in Zen</span></a>
+  <a id="open" class="btn primary open" href="#"><svg class="ico" aria-hidden="true"><use href="#i-open"/></svg><span data-i="open">Open in Zen</span></a>
   <div class="invite">
     <div id="code" class="code hidden"></div>
     <p id="noapp" class="noapp hidden"></p>
-    <button id="copy" class="btn secondary block hidden" type="button"><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span id="copyLabel">Copy code</span></button>
+    <button id="copy" class="btn secondary block hidden" type="button"><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span id="copyLabel" data-i="copy">Copy code</span></button>
   </div>
 
   <section class="card narrow get" aria-labelledby="getTitle">
     <h2 id="getTitle" data-i="getTitle">Get Zen</h2>
     <p class="muted" data-i="getLead">Free, no account, no ads. It takes a minute.</p>
     <div class="stack">
-      <a id="android" class="btn primary block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span id="androidLabel">Download for Android</span></a>
-      <p id="otherAndroid" class="hint other"><span id="otherPhones">Other phones:</span>
+      <a id="android" class="btn primary block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlAndroid">Download for Android</span></a>
+      <p id="otherAndroid" class="hint other"><span data-i="otherPhones">Other phones:</span>
         <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk">armeabi-v7a</a>
         <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk">x86_64</a></p>
-      <a id="windows" class="btn primary block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span id="windowsLabel">Download for Windows</span></a>
-      <p id="desktop" class="hint other"><a class="chip" href="install/#macos">macOS</a> <a class="chip" href="install/#linux">Linux</a></p>
-      <p id="ios" class="iosnote hidden"></p>
+      <a id="windows" class="btn primary block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlWindows">Download for Windows</span></a>
+      <a id="linux" class="btn primary block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlLinux">Download for Linux</span></a>
+      <a id="iphone" class="btn primary block" href="install/iphone/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="instIphone">Install on iPhone</span></a>
+      <a id="macos" class="btn primary block" href="install/macos/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="instMac">Install on Mac</span></a>
     </div>
-    <p id="help" class="hint"></p>
-    <p class="hint"><a class="chip" href="install/"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span data-i="allInstall">All installation options</span></a></p>
-  </section>
-
-  <section class="sec" id="features" aria-labelledby="featTitle">
-    <h2 id="featTitle" data-i="featTitle">Why Zen is different</h2>
-    <p class="sub" data-i="featSub">A messenger for people who actually know each other.</p>
-    <div class="features">
-      <div class="feat"><div class="fi"><svg class="ico" aria-hidden="true"><use href="#i-noserver"/></svg></div><h3 data-i="f1t">No servers</h3><p data-i="f1d">Messages go straight between your friends’ devices. No company stores, reads or sells them.</p></div>
-      <div class="feat"><div class="fi"><svg class="ico" aria-hidden="true"><use href="#i-users"/></svg></div><h3 data-i="f2t">Friends as mailboxes</h3><p data-i="f2d">Up to six friends you trust keep your mail while you are offline — encrypted, so they can’t read it.</p></div>
-      <div class="feat"><div class="fi"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg></div><h3 data-i="f3t">End-to-end encrypted</h3><p data-i="f3d">Post-quantum encryption protects every message, call and file. Only the people in the chat can read them.</p></div>
-      <div class="feat"><div class="fi"><svg class="ico" aria-hidden="true"><use href="#i-code"/></svg></div><h3 data-i="f4t">Open source and free</h3><p data-i="f4d">No ads, no tracking, no algorithm. The whole code is on GitHub (GPL-3.0) for anyone to check.</p></div>
-    </div>
-  </section>
-
-  <section class="sec" id="screens" aria-labelledby="shotsTitle">
-    <h2 id="shotsTitle" data-i="shotsTitle">See it in action</h2>
-    <div class="shots" role="region" aria-labelledby="shotsTitle" tabindex="0">
-      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/chat-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/chat-light.png" alt="Chats" data-ia="shot1" loading="lazy" width="190" height="411"></picture><figcaption data-i="shot1">Chats</figcaption></figure>
-      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/feed-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/feed-light.png" alt="Feed" data-ia="shot2" loading="lazy" width="190" height="411"></picture><figcaption data-i="shot2">Feed</figcaption></figure>
-      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/neighbours-door-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/neighbours-door-light.png" alt="Neighbours" data-ia="shot3" loading="lazy" width="190" height="411"></picture><figcaption data-i="shot3">Neighbours</figcaption></figure>
-      <figure><picture><source srcset="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/meet-dark.png" media="(prefers-color-scheme: dark)"><img src="https://raw.githubusercontent.com/robertostrowskijagoda/Zen/main/docs/images/meet-light.png" alt="Meeting people" data-ia="shot4" loading="lazy" width="190" height="411"></picture><figcaption data-i="shot4">Meeting people</figcaption></figure>
-    </div>
-  </section>
-
-  <section class="sec" id="start" aria-labelledby="stepsTitle">
-    <h2 id="stepsTitle" data-i="stepsTitle">How to start</h2>
-    <ol class="steps">
-      <li><h3 data-i="s1t">Install Zen</h3><p data-i="s1d">On your phone or computer. Free, no account.</p></li>
-      <li><h3 data-i="s2t">Add your friend</h3><p data-i="s2d">Scan their QR code or open their invitation link — the app adds them for you.</p></li>
-      <li><h3 data-i="s3t">Say hello</h3><p data-i="s3d">Chat, call and share. Everything stays between you and your friends.</p></li>
-    </ol>
-  </section>
-
-  <section class="sec" id="community" aria-labelledby="comTitle">
-    <h2 id="comTitle" data-i="comTitle">Join the community</h2>
-    <p class="sub" data-i="comLead">Questions, help with installing, ideas — or just a chat with other people who use Zen.</p>
-    <div class="cta-row">
-      <a class="btn discord" href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg>Discord</a>
-      <a class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
-      <a class="btn secondary" href="about/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="navAbout">About</span></a>
-    </div>
-    <p id="support" class="hint"></p>
+    <p id="others" class="hint"><span data-i="otherSystems">Other systems:</span>
+      <a class="chip" data-os="android" href="install/android/">Android</a>
+      <a class="chip" data-os="iphone" href="install/iphone/">iPhone</a>
+      <a class="chip" data-os="windows" href="install/windows/">Windows</a>
+      <a class="chip" data-os="macos" href="install/macos/">Mac</a>
+      <a class="chip" data-os="linux" href="install/linux/">Linux</a></p>
+    <p class="hint">
+      <a class="chip" href="install/"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span data-i="moreInstall">All install options and help</span></a>
+      <a class="chip" href="features/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="whatIsZen">What is Zen?</span></a>
+      <a class="chip" href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg>Discord</a></p>
   </section>
 </main>
-<footer class="foot">
-  <div class="foot-links">
-    <a href="about/"><span data-i="navAbout">About</span></a>
-    <a href="install/"><span data-i="navInstall">Install</span></a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md" rel="noopener" data-i="footPrivacy">Privacy policy</a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md" rel="noopener" data-i="footTerms">Terms of use</a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/LICENSE" rel="noopener" data-i="footLicense">License</a>
-  </div>
-  <p data-i="footNote">Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda.</p>
-</footer>
+<footer class="foot" id="zenFoot"></footer>
 <script>
 (function () {
   "use strict";
-
-  // Every text on the page, per language (the 21 languages of the app).
-  // English is the default; the visitor's own language is picked from
-  // navigator.languages (or "?lang=xx"). In ios, help and support the part
-  // in [square brackets] becomes the link; {open} and {path} in noApp are
-  // filled in. otherPhones leads the links to the APKs of the other
-  // Android ABIs (32-bit phones, Chromebooks; the button is the APK of
-  // most phones). Other routes of this page add their texts to the same
-  // objects. The texts added later exist in English and Polish only; the
-  // other languages show the English ones (see tr()).
   var TEXTS = {
-    "en": {"title": "Zen — invitation", "lead": "A network of people who know each other — no servers, ads or algorithm.", "invTitle": "Invitation to Zen", "invLead": "Someone who knows you wants to add you as a friend in Zen.", "noApp": "It looks like you don’t have Zen yet. Install it (buttons below), then come back here and tap “{open}” — or in Zen: {path} and enter the code from the box.", "path": "Invite → I have someone’s code", "open": "Open in Zen", "copy": "Copy code", "copied": "Copied ✓", "otherPhones": "Other phones:", "android": "⬇ Download for Android", "windows": "⬇ Download for Windows", "ios": "iPhone: Zen is installed through SideStore — [instructions].", "help": "How to install it and how to check it is not malware: [project page on GitHub].", "support": "Zen is free and ad-free — [💜 support it].", "navAbout": "About", "navInstall": "Install", "getTitle": "Get Zen", "getLead": "Free, no account, no ads. It takes a minute.", "allInstall": "All installation options", "featTitle": "Why Zen is different", "featSub": "A messenger for people who actually know each other.", "f1t": "No servers", "f1d": "Messages go straight between your friends’ devices. No company stores, reads or sells them.", "f2t": "Friends as mailboxes", "f2d": "Up to six friends you trust keep your mail while you are offline — encrypted, so they can’t read it.", "f3t": "End-to-end encrypted", "f3d": "Post-quantum encryption protects every message, call and file. Only the people in the chat can read them.", "f4t": "Open source and free", "f4d": "No ads, no tracking, no algorithm. The whole code is on GitHub (GPL-3.0) for anyone to check.", "shotsTitle": "See it in action", "shot1": "Chats", "shot2": "Feed", "shot3": "Neighbours", "shot4": "Meeting people", "stepsTitle": "How to start", "s1t": "Install Zen", "s1d": "On your phone or computer. Free, no account.", "s2t": "Add your friend", "s2d": "Scan their QR code or open their invitation link — the app adds them for you.", "s3t": "Say hello", "s3d": "Chat, call and share. Everything stays between you and your friends.", "comTitle": "Join the community", "comLead": "Questions, help with installing, ideas — or just a chat with other people who use Zen.", "footPrivacy": "Privacy policy", "footTerms": "Terms of use", "footLicense": "License", "footNote": "Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."},
-    "pl": {"title": "Zen — zaproszenie", "lead": "Sieć ludzi, którzy się znają — bez serwerów, reklam i algorytmu.", "invTitle": "Zaproszenie do Zen", "invLead": "Ktoś, kto Cię zna, chce Cię dodać do znajomych w Zen.", "noApp": "Wygląda na to, że nie masz jeszcze Zen. Zainstaluj go (przyciski niżej), a potem wróć tutaj i stuknij „{open}” — albo w Zen: {path} i wpisz kod z ramki.", "path": "Zaproś → Mam czyjś kod", "open": "Otwórz w Zen", "copy": "Skopiuj kod", "copied": "Skopiowano ✓", "otherPhones": "Inne telefony:", "android": "⬇ Pobierz na Androida", "windows": "⬇ Pobierz na Windows", "ios": "iPhone: Zen instaluje się przez SideStore — [instrukcja].", "help": "Jak zainstalować i jak sprawdzić, że to nie wirus: [strona projektu na GitHubie].", "support": "Zen jest darmowy i bez reklam — [💜 wesprzyj go].", "navAbout": "O Zen", "navInstall": "Instalacja", "getTitle": "Pobierz Zen", "getLead": "Za darmo, bez konta i reklam. Zajmie minutę.", "allInstall": "Wszystkie sposoby instalacji", "featTitle": "Czym Zen się różni", "featSub": "Komunikator dla ludzi, którzy naprawdę się znają.", "f1t": "Bez serwerów", "f1d": "Wiadomości idą prosto między urządzeniami znajomych. Żadna firma ich nie przechowuje, nie czyta ani nie sprzedaje.", "f2t": "Znajomi jako skrzynki", "f2d": "Do sześciu zaufanych znajomych przechowuje Twoje wiadomości, gdy jesteś offline — zaszyfrowane, więc ich nie przeczytają.", "f3t": "Szyfrowanie end-to-end", "f3d": "Szyfrowanie odporne na komputery kwantowe chroni każdą wiadomość, rozmowę i plik. Czytają je tylko osoby z czatu.", "f4t": "Otwarty kod, za darmo", "f4d": "Bez reklam, śledzenia i algorytmu. Cały kod jest na GitHubie (GPL-3.0), każdy może go sprawdzić.", "shotsTitle": "Zobacz, jak działa", "shot1": "Czaty", "shot2": "Tablica", "shot3": "Sąsiedzi", "shot4": "Poznawanie ludzi", "stepsTitle": "Jak zacząć", "s1t": "Zainstaluj Zen", "s1d": "Na telefonie lub komputerze. Za darmo, bez konta.", "s2t": "Dodaj znajomego", "s2d": "Zeskanuj jego kod QR albo otwórz link z zaproszeniem — aplikacja doda go za Ciebie.", "s3t": "Przywitaj się", "s3d": "Pisz, dzwoń i dziel się. Wszystko zostaje między Tobą a znajomymi.", "comTitle": "Dołącz do społeczności", "comLead": "Pytania, pomoc przy instalacji, pomysły — albo zwykła rozmowa z innymi użytkownikami Zen.", "footPrivacy": "Polityka prywatności", "footTerms": "Regulamin", "footLicense": "Licencja", "footNote": "Zen to wolne oprogramowanie (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."},
-    "id": {"title": "Zen — undangan", "lead": "Jaringan orang-orang yang saling kenal — tanpa server, iklan, atau algoritma.", "invTitle": "Undangan ke Zen", "invLead": "Seseorang yang mengenal Anda ingin menambahkan Anda sebagai teman di Zen.", "noApp": "Sepertinya Anda belum memiliki Zen. Pasang dulu (tombol di bawah), lalu kembali ke sini dan ketuk “{open}” — atau di Zen: {path} lalu masukkan kode dari kotak.", "path": "Undang → Saya punya kode seseorang", "open": "Buka di Zen", "copy": "Salin kode", "copied": "Tersalin ✓", "otherPhones": "Ponsel lain:", "android": "⬇ Unduh untuk Android", "windows": "⬇ Unduh untuk Windows", "ios": "iPhone: Zen dipasang melalui SideStore — [petunjuk].", "help": "Cara memasang dan cara memastikan ini bukan malware: [halaman proyek di GitHub].", "support": "Zen gratis dan bebas iklan — [💜 dukung Zen]."},
-    "cs": {"title": "Zen — pozvánka", "lead": "Síť lidí, kteří se znají — bez serverů, reklam a algoritmu.", "invTitle": "Pozvánka do Zen", "invLead": "Někdo, kdo vás zná, vás chce přidat mezi přátele v Zen.", "noApp": "Vypadá to, že Zen ještě nemáte. Nainstalujte ho (tlačítka níže), pak se sem vraťte a klepněte na „{open}“ — nebo v Zen: {path} a zadejte kód z rámečku.", "path": "Pozvat → Mám něčí kód", "open": "Otevřít v Zen", "copy": "Zkopírovat kód", "copied": "Zkopírováno ✓", "otherPhones": "Jiné telefony:", "android": "⬇ Stáhnout pro Android", "windows": "⬇ Stáhnout pro Windows", "ios": "iPhone: Zen se instaluje přes SideStore — [návod].", "help": "Jak nainstalovat a jak ověřit, že to není malware: [stránka projektu na GitHubu].", "support": "Zen je zdarma a bez reklam — [💜 podpořit]."},
-    "de": {"title": "Zen — Einladung", "lead": "Ein Netz aus Menschen, die sich kennen — ohne Server, Werbung und Algorithmus.", "invTitle": "Einladung zu Zen", "invLead": "Jemand, der dich kennt, möchte dich in Zen als Freund hinzufügen.", "noApp": "Du hast Zen anscheinend noch nicht. Installiere es (Schaltflächen unten), komm dann hierher zurück und tippe auf „{open}“ — oder gib in Zen unter {path} den Code aus dem Feld ein.", "path": "Einladen → Ich habe den Code von jemandem", "open": "In Zen öffnen", "copy": "Code kopieren", "copied": "Kopiert ✓", "otherPhones": "Andere Handys:", "android": "⬇ Für Android herunterladen", "windows": "⬇ Für Windows herunterladen", "ios": "iPhone: Zen wird über SideStore installiert — [Anleitung].", "help": "So installierst du es und prüfst, dass es keine Schadsoftware ist: [Projektseite auf GitHub].", "support": "Zen ist kostenlos und werbefrei — [💜 unterstütze es]."},
-    "es": {"title": "Zen — invitación", "lead": "Una red de personas que se conocen — sin servidores, anuncios ni algoritmo.", "invTitle": "Invitación a Zen", "invLead": "Alguien que te conoce quiere añadirte como amigo en Zen.", "noApp": "Parece que aún no tienes Zen. Instálalo (botones de abajo), vuelve aquí y toca “{open}” — o en Zen: {path} e introduce el código del recuadro.", "path": "Invitar → Tengo el código de alguien", "open": "Abrir en Zen", "copy": "Copiar código", "copied": "Copiado ✓", "otherPhones": "Otros teléfonos:", "android": "⬇ Descargar para Android", "windows": "⬇ Descargar para Windows", "ios": "iPhone: Zen se instala con SideStore — [instrucciones].", "help": "Cómo instalarlo y cómo comprobar que no es malware: [página del proyecto en GitHub].", "support": "Zen es gratis y sin anuncios — [💜 apóyalo]."},
-    "fr": {"title": "Zen — invitation", "lead": "Un réseau de gens qui se connaissent — sans serveurs, sans pub, sans algorithme.", "invTitle": "Invitation à Zen", "invLead": "Quelqu’un qui vous connaît veut vous ajouter comme ami dans Zen.", "noApp": "Il semble que vous n’ayez pas encore Zen. Installez-le (boutons ci-dessous), puis revenez ici et touchez « {open} » — ou dans Zen : {path}, puis saisissez le code du cadre.", "path": "Inviter → J’ai le code de quelqu’un", "open": "Ouvrir dans Zen", "copy": "Copier le code", "copied": "Copié ✓", "otherPhones": "Autres téléphones :", "android": "⬇ Télécharger pour Android", "windows": "⬇ Télécharger pour Windows", "ios": "iPhone : Zen s’installe via SideStore — [instructions].", "help": "Comment l’installer et vérifier que ce n’est pas un logiciel malveillant : [page du projet sur GitHub].", "support": "Zen est gratuit et sans publicité — [💜 soutenez-le]."},
-    "it": {"title": "Zen — invito", "lead": "Una rete di persone che si conoscono — senza server, pubblicità né algoritmo.", "invTitle": "Invito a Zen", "invLead": "Qualcuno che ti conosce vuole aggiungerti come amico su Zen.", "noApp": "Sembra che tu non abbia ancora Zen. Installalo (pulsanti qui sotto), poi torna qui e tocca “{open}” — oppure in Zen: {path} e inserisci il codice nel riquadro.", "path": "Invita → Ho il codice di qualcuno", "open": "Apri in Zen", "copy": "Copia il codice", "copied": "Copiato ✓", "otherPhones": "Altri telefoni:", "android": "⬇ Scarica per Android", "windows": "⬇ Scarica per Windows", "ios": "iPhone: Zen si installa tramite SideStore — [istruzioni].", "help": "Come installarlo e come verificare che non sia un malware: [pagina del progetto su GitHub].", "support": "Zen è gratuito e senza pubblicità — [💜 sostienilo]."},
-    "hu": {"title": "Zen — meghívó", "lead": "Az egymást ismerő emberek hálózata — szerverek, reklámok és algoritmus nélkül.", "invTitle": "Meghívó a Zenbe", "invLead": "Valaki, aki ismer téged, barátként szeretne hozzáadni a Zenben.", "noApp": "Úgy tűnik, még nincs meg a Zen. Telepítsd (gombok lent), aztán térj vissza ide, és koppints a „{open}” gombra — vagy a Zenben: {path}, és írd be a keretben látható kódot.", "path": "Meghívás → Megvan valakinek a kódja", "open": "Megnyitás a Zenben", "copy": "Kód másolása", "copied": "Másolva ✓", "otherPhones": "Más telefonok:", "android": "⬇ Letöltés Androidra", "windows": "⬇ Letöltés Windowsra", "ios": "iPhone: a Zen a SideStore-on keresztül telepíthető — [útmutató].", "help": "Hogyan telepítheted, és hogyan ellenőrizheted, hogy nem kártevő: [a projekt oldala a GitHubon].", "support": "A Zen ingyenes és reklámmentes — [💜 támogasd]."},
-    "nl": {"title": "Zen — uitnodiging", "lead": "Een netwerk van mensen die elkaar kennen — zonder servers, advertenties of algoritme.", "invTitle": "Uitnodiging voor Zen", "invLead": "Iemand die je kent, wil je als vriend toevoegen in Zen.", "noApp": "Het lijkt erop dat je Zen nog niet hebt. Installeer het (knoppen hieronder), kom dan hier terug en tik op “{open}” — of ga in Zen naar {path} en voer de code uit het kader in.", "path": "Uitnodigen → Ik heb de code van iemand", "open": "Openen in Zen", "copy": "Code kopiëren", "copied": "Gekopieerd ✓", "otherPhones": "Andere telefoons:", "android": "⬇ Downloaden voor Android", "windows": "⬇ Downloaden voor Windows", "ios": "iPhone: Zen wordt geïnstalleerd via SideStore — [instructies].", "help": "Hoe je het installeert en controleert dat het geen malware is: [projectpagina op GitHub].", "support": "Zen is gratis en zonder advertenties — [💜 steun het]."},
-    "pt": {"title": "Zen — convite", "lead": "Uma rede de pessoas que se conhecem — sem servidores, anúncios nem algoritmo.", "invTitle": "Convite para o Zen", "invLead": "Alguém que conhece você quer adicioná-lo como amigo no Zen.", "noApp": "Parece que você ainda não tem o Zen. Instale-o (botões abaixo), depois volte aqui e toque em “{open}” — ou, no Zen: {path} e digite o código da caixa.", "path": "Convidar → Tenho o código de alguém", "open": "Abrir no Zen", "copy": "Copiar código", "copied": "Copiado ✓", "otherPhones": "Outros celulares:", "android": "⬇ Baixar para Android", "windows": "⬇ Baixar para Windows", "ios": "iPhone: o Zen é instalado pelo SideStore — [instruções].", "help": "Como instalar e como verificar que não é malware: [página do projeto no GitHub].", "support": "O Zen é gratuito e sem anúncios — [💜 apoie]."},
-    "ro": {"title": "Zen — invitație", "lead": "O rețea de oameni care se cunosc — fără servere, reclame sau algoritm.", "invTitle": "Invitație la Zen", "invLead": "Cineva care te cunoaște vrea să te adauge ca prieten în Zen.", "noApp": "Se pare că nu ai încă Zen. Instalează-l (butoanele de mai jos), apoi revino aici și atinge „{open}” — sau în Zen: {path} și introdu codul din casetă.", "path": "Invită → Am codul cuiva", "open": "Deschide în Zen", "copy": "Copiază codul", "copied": "Copiat ✓", "otherPhones": "Alte telefoane:", "android": "⬇ Descarcă pentru Android", "windows": "⬇ Descarcă pentru Windows", "ios": "iPhone: Zen se instalează prin SideStore — [instrucțiuni].", "help": "Cum îl instalezi și cum verifici că nu este malware: [pagina proiectului pe GitHub].", "support": "Zen este gratuit și fără reclame — [💜 susține-l]."},
-    "vi": {"title": "Zen — lời mời", "lead": "Mạng của những người quen biết nhau — không máy chủ, không quảng cáo, không thuật toán.", "invTitle": "Lời mời vào Zen", "invLead": "Có người quen biết bạn muốn kết bạn với bạn trong Zen.", "noApp": "Có vẻ bạn chưa có Zen. Hãy cài đặt (các nút bên dưới), rồi quay lại đây và nhấn “{open}” — hoặc trong Zen: {path} và nhập mã trong khung.", "path": "Mời → Tôi có mã của ai đó", "open": "Mở trong Zen", "copy": "Sao chép mã", "copied": "Đã sao chép ✓", "otherPhones": "Điện thoại khác:", "android": "⬇ Tải cho Android", "windows": "⬇ Tải cho Windows", "ios": "iPhone: Zen được cài qua SideStore — [hướng dẫn].", "help": "Cách cài đặt và cách kiểm tra rằng đây không phải mã độc: [trang dự án trên GitHub].", "support": "Zen miễn phí và không quảng cáo — [💜 ủng hộ Zen]."},
-    "tr": {"title": "Zen — davet", "lead": "Birbirini tanıyan insanların ağı — sunucu, reklam ve algoritma yok.", "invTitle": "Zen daveti", "invLead": "Seni tanıyan biri, Zen’de seni arkadaş olarak eklemek istiyor.", "noApp": "Görünüşe göre henüz Zen’in yok. Kur (aşağıdaki düğmeler), sonra buraya dön ve “{open}” düğmesine dokun — ya da Zen’de {path} yolundan çerçevedeki kodu gir.", "path": "Davet et → Birinin kodu bende", "open": "Zen’de aç", "copy": "Kodu kopyala", "copied": "Kopyalandı ✓", "otherPhones": "Diğer telefonlar:", "android": "⬇ Android için indir", "windows": "⬇ Windows için indir", "ios": "iPhone: Zen, SideStore ile kurulur — [yönergeler].", "help": "Nasıl kurulur ve zararlı yazılım olmadığı nasıl doğrulanır: [GitHub’daki proje sayfası].", "support": "Zen ücretsiz ve reklamsızdır — [💜 destek ol]."},
-    "ru": {"title": "Zen — приглашение", "lead": "Сеть людей, которые знают друг друга, — без серверов, рекламы и алгоритмов.", "invTitle": "Приглашение в Zen", "invLead": "Кто-то, кто вас знает, хочет добавить вас в друзья в Zen.", "noApp": "Похоже, у вас ещё нет Zen. Установите его (кнопки ниже), затем вернитесь сюда и нажмите «{open}» — или в Zen: {path} и введите код из рамки.", "path": "Пригласить → У меня есть чей-то код", "open": "Открыть в Zen", "copy": "Скопировать код", "copied": "Скопировано ✓", "otherPhones": "Другие телефоны:", "android": "⬇ Скачать для Android", "windows": "⬇ Скачать для Windows", "ios": "iPhone: Zen устанавливается через SideStore — [инструкция].", "help": "Как установить и как проверить, что это не вредоносная программа: [страница проекта на GitHub].", "support": "Zen бесплатный и без рекламы — [💜 поддержать]."},
-    "uk": {"title": "Zen — запрошення", "lead": "Мережа людей, які знають одне одного, — без серверів, реклами та алгоритмів.", "invTitle": "Запрошення до Zen", "invLead": "Хтось, хто вас знає, хоче додати вас у друзі в Zen.", "noApp": "Схоже, у вас ще немає Zen. Встановіть його (кнопки нижче), потім поверніться сюди й торкніться «{open}» — або в Zen: {path} і введіть код із рамки.", "path": "Запросити → У мене є чийсь код", "open": "Відкрити в Zen", "copy": "Скопіювати код", "copied": "Скопійовано ✓", "otherPhones": "Інші телефони:", "android": "⬇ Завантажити для Android", "windows": "⬇ Завантажити для Windows", "ios": "iPhone: Zen встановлюється через SideStore — [інструкція].", "help": "Як встановити і як перевірити, що це не шкідлива програма: [сторінка проєкту на GitHub].", "support": "Zen безкоштовний і без реклами — [💜 підтримати]."},
-    "ar": {"title": "Zen — دعوة", "lead": "شبكة من الناس الذين يعرفون بعضهم — بلا خوادم ولا إعلانات ولا خوارزميات.", "invTitle": "دعوة إلى Zen", "invLead": "شخص يعرفك يريد إضافتك صديقًا في Zen.", "noApp": "يبدو أنه ليس لديك Zen بعد. ثبّته (الأزرار أدناه)، ثم عد إلى هنا واضغط «{open}» — أو في Zen: {path} ثم أدخل الرمز الظاهر في الإطار.", "path": "ادعُ → لدي رمز شخص ما", "open": "افتح في Zen", "copy": "انسخ الرمز", "copied": "تم النسخ ✓", "otherPhones": "هواتف أخرى:", "android": "⬇ نزّل لنظام Android", "windows": "⬇ نزّل لنظام Windows", "ios": "iPhone: يُثبَّت Zen عبر SideStore — [التعليمات].", "help": "كيفية التثبيت وكيفية التأكد من أنه ليس برنامجًا خبيثًا: [صفحة المشروع على GitHub].", "support": "Zen مجاني وبلا إعلانات — [💜 ادعمه]."},
-    "hi": {"title": "Zen — आमंत्रण", "lead": "एक-दूसरे को जानने वाले लोगों का नेटवर्क — न सर्वर, न विज्ञापन, न एल्गोरिदम।", "invTitle": "Zen का आमंत्रण", "invLead": "आपको जानने वाला कोई व्यक्ति Zen में आपको दोस्त के रूप में जोड़ना चाहता है।", "noApp": "लगता है आपके पास अभी Zen नहीं है। इसे इंस्टॉल करें (नीचे दिए बटन), फिर यहाँ लौटकर “{open}” दबाएँ — या Zen में: {path} और बॉक्स का कोड दर्ज करें।", "path": "आमंत्रित करें → मेरे पास किसी का कोड है", "open": "Zen में खोलें", "copy": "कोड कॉपी करें", "copied": "कॉपी हो गया ✓", "otherPhones": "अन्य फ़ोन:", "android": "⬇ Android के लिए डाउनलोड करें", "windows": "⬇ Windows के लिए डाउनलोड करें", "ios": "iPhone: Zen SideStore के ज़रिए इंस्टॉल होता है — [निर्देश]।", "help": "इंस्टॉल कैसे करें और कैसे जाँचें कि यह मैलवेयर नहीं है: [GitHub पर प्रोजेक्ट पेज]।", "support": "Zen मुफ़्त है और विज्ञापन-रहित — [💜 इसे सपोर्ट करें]।"},
-    "zh": {"title": "Zen — 邀请", "lead": "一张彼此认识的人组成的网络——没有服务器，没有广告，没有算法。", "invTitle": "邀请你加入 Zen", "invLead": "认识你的人想在 Zen 中把你加为好友。", "noApp": "看来你还没有安装 Zen。请先安装（见下方按钮），然后回到这里点按“{open}”——或在 Zen 中进入 {path}，输入框中的代码。", "path": "邀请 → 我有别人的码", "open": "在 Zen 中打开", "copy": "复制代码", "copied": "已复制 ✓", "otherPhones": "其他手机：", "android": "⬇ 下载 Android 版", "windows": "⬇ 下载 Windows 版", "ios": "iPhone：Zen 通过 SideStore 安装——[说明]。", "help": "如何安装，以及如何确认它不是恶意软件：[GitHub 上的项目页面]。", "support": "Zen 免费且无广告——[💜 支持它]。"},
-    "ja": {"title": "Zen — 招待", "lead": "知り合い同士のネットワーク。サーバーも広告もアルゴリズムもありません。", "invTitle": "Zen への招待", "invLead": "あなたを知っている人が、Zen であなたを友だちに追加したいと思っています。", "noApp": "Zen をまだお持ちでないようです。先にインストールし（下のボタン）、ここに戻って「{open}」をタップするか、Zen で {path} を開き、枠内のコードを入力してください。", "path": "招待 → 相手のコードを持っている", "open": "Zen で開く", "copy": "コードをコピー", "copied": "コピーしました ✓", "otherPhones": "その他のスマホ：", "android": "⬇ Android 版をダウンロード", "windows": "⬇ Windows 版をダウンロード", "ios": "iPhone：Zen は SideStore 経由でインストールします — [手順]。", "help": "インストール方法と、マルウェアでないことの確認方法：[GitHub のプロジェクトページ]。", "support": "Zen は無料で広告もありません — [💜 応援する]。"},
-    "ko": {"title": "Zen — 초대", "lead": "서로 아는 사람들의 네트워크 — 서버도, 광고도, 알고리즘도 없습니다.", "invTitle": "Zen 초대", "invLead": "당신을 아는 누군가가 Zen에서 친구로 추가하고 싶어 해요.", "noApp": "아직 Zen이 없는 것 같아요. 먼저 설치한 다음(아래 버튼) 여기로 돌아와 “{open}”을 누르거나, Zen에서 {path} 메뉴로 가서 상자의 코드를 입력하세요.", "path": "초대 → 상대방의 코드가 있어요", "open": "Zen에서 열기", "copy": "코드 복사", "copied": "복사됨 ✓", "otherPhones": "다른 휴대폰:", "android": "⬇ Android용 다운로드", "windows": "⬇ Windows용 다운로드", "ios": "iPhone: Zen은 SideStore로 설치합니다 — [안내].", "help": "설치 방법과 악성 코드가 아님을 확인하는 방법: [GitHub 프로젝트 페이지].", "support": "Zen은 무료이며 광고가 없습니다 — [💜 후원하기]."},
+    "en": {"title": "Zen — invitation", "desc": "Zen: an open-source messenger for people who know each other. No servers, no ads, no algorithm.", "lead": "A network of people who know each other — no servers, ads or algorithm.", "invTitle": "Invitation to Zen", "invLead": "Someone who knows you wants to add you as a friend in Zen.", "noApp": "It looks like you don’t have Zen yet. Install it (buttons below), then come back here and tap “{open}” — or in Zen: {path} and enter the code from the box.", "path": "Invite → I have someone’s code", "otherPhones": "Other phones:"},
+    "pl": {"title": "Zen — zaproszenie", "desc": "Zen: komunikator o otwartym kodzie dla ludzi, którzy się znają. Bez serwerów, reklam i algorytmu.", "lead": "Sieć ludzi, którzy się znają — bez serwerów, reklam i algorytmu.", "invTitle": "Zaproszenie do Zen", "invLead": "Ktoś, kto Cię zna, chce Cię dodać do znajomych w Zen.", "noApp": "Wygląda na to, że nie masz jeszcze Zen. Zainstaluj go (przyciski niżej), a potem wróć tutaj i stuknij „{open}” — albo w Zen: {path} i wpisz kod z ramki.", "path": "Zaproś → Mam czyjś kod", "otherPhones": "Inne telefony:"},
+    "id": {"title": "Zen — undangan", "desc": "Zen: aplikasi pesan sumber terbuka untuk orang yang saling kenal. Tanpa server, iklan, atau algoritma.", "lead": "Jaringan orang-orang yang saling kenal — tanpa server, iklan, atau algoritma.", "invTitle": "Undangan ke Zen", "invLead": "Seseorang yang mengenal Anda ingin menambahkan Anda sebagai teman di Zen.", "noApp": "Sepertinya Anda belum memiliki Zen. Pasang dulu (tombol di bawah), lalu kembali ke sini dan ketuk “{open}” — atau di Zen: {path} lalu masukkan kode dari kotak.", "path": "Undang → Saya punya kode seseorang", "otherPhones": "Ponsel lain:"},
+    "cs": {"title": "Zen — pozvánka", "desc": "Zen: open-source komunikátor pro lidi, kteří se znají. Bez serverů, reklam a algoritmu.", "lead": "Síť lidí, kteří se znají — bez serverů, reklam a algoritmu.", "invTitle": "Pozvánka do Zen", "invLead": "Někdo, kdo vás zná, vás chce přidat mezi přátele v Zen.", "noApp": "Vypadá to, že Zen ještě nemáte. Nainstalujte ho (tlačítka níže), pak se sem vraťte a klepněte na „{open}“ — nebo v Zen: {path} a zadejte kód z rámečku.", "path": "Pozvat → Mám něčí kód", "otherPhones": "Jiné telefony:"},
+    "de": {"title": "Zen — Einladung", "desc": "Zen: ein Open-Source-Messenger für Menschen, die sich kennen. Keine Server, keine Werbung, kein Algorithmus.", "lead": "Ein Netz aus Menschen, die sich kennen — ohne Server, Werbung und Algorithmus.", "invTitle": "Einladung zu Zen", "invLead": "Jemand, der dich kennt, möchte dich in Zen als Freund hinzufügen.", "noApp": "Du hast Zen anscheinend noch nicht. Installiere es (Schaltflächen unten), komm dann hierher zurück und tippe auf „{open}“ — oder gib in Zen unter {path} den Code aus dem Feld ein.", "path": "Einladen → Ich habe den Code von jemandem", "otherPhones": "Andere Handys:"},
+    "es": {"title": "Zen — invitación", "desc": "Zen: un mensajero de código abierto para personas que se conocen. Sin servidores, sin anuncios, sin algoritmo.", "lead": "Una red de personas que se conocen — sin servidores, anuncios ni algoritmo.", "invTitle": "Invitación a Zen", "invLead": "Alguien que te conoce quiere añadirte como amigo en Zen.", "noApp": "Parece que aún no tienes Zen. Instálalo (botones de abajo), vuelve aquí y toca “{open}” — o en Zen: {path} e introduce el código del recuadro.", "path": "Invitar → Tengo el código de alguien", "otherPhones": "Otros teléfonos:"},
+    "fr": {"title": "Zen — invitation", "desc": "Zen : une messagerie open source pour des gens qui se connaissent. Pas de serveurs, pas de pub, pas d’algorithme.", "lead": "Un réseau de gens qui se connaissent — sans serveurs, sans pub, sans algorithme.", "invTitle": "Invitation à Zen", "invLead": "Quelqu’un qui vous connaît veut vous ajouter comme ami dans Zen.", "noApp": "Il semble que vous n’ayez pas encore Zen. Installez-le (boutons ci-dessous), puis revenez ici et touchez « {open} » — ou dans Zen : {path}, puis saisissez le code du cadre.", "path": "Inviter → J’ai le code de quelqu’un", "otherPhones": "Autres téléphones :"},
+    "it": {"title": "Zen — invito", "desc": "Zen: un messenger open source per persone che si conoscono. Niente server, niente pubblicità, niente algoritmo.", "lead": "Una rete di persone che si conoscono — senza server, pubblicità né algoritmo.", "invTitle": "Invito a Zen", "invLead": "Qualcuno che ti conosce vuole aggiungerti come amico su Zen.", "noApp": "Sembra che tu non abbia ancora Zen. Installalo (pulsanti qui sotto), poi torna qui e tocca “{open}” — oppure in Zen: {path} e inserisci il codice nel riquadro.", "path": "Invita → Ho il codice di qualcuno", "otherPhones": "Altri telefoni:"},
+    "hu": {"title": "Zen — meghívó", "desc": "Zen: nyílt forráskódú üzenetküldő egymást ismerő embereknek. Szerverek, reklámok és algoritmus nélkül.", "lead": "Az egymást ismerő emberek hálózata — szerverek, reklámok és algoritmus nélkül.", "invTitle": "Meghívó a Zenbe", "invLead": "Valaki, aki ismer téged, barátként szeretne hozzáadni a Zenben.", "noApp": "Úgy tűnik, még nincs meg a Zen. Telepítsd (gombok lent), aztán térj vissza ide, és koppints a „{open}” gombra — vagy a Zenben: {path}, és írd be a keretben látható kódot.", "path": "Meghívás → Megvan valakinek a kódja", "otherPhones": "Más telefonok:"},
+    "nl": {"title": "Zen — uitnodiging", "desc": "Zen: een open-source messenger voor mensen die elkaar kennen. Geen servers, geen advertenties, geen algoritme.", "lead": "Een netwerk van mensen die elkaar kennen — zonder servers, advertenties of algoritme.", "invTitle": "Uitnodiging voor Zen", "invLead": "Iemand die je kent, wil je als vriend toevoegen in Zen.", "noApp": "Het lijkt erop dat je Zen nog niet hebt. Installeer het (knoppen hieronder), kom dan hier terug en tik op “{open}” — of ga in Zen naar {path} en voer de code uit het kader in.", "path": "Uitnodigen → Ik heb de code van iemand", "otherPhones": "Andere telefoons:"},
+    "pt": {"title": "Zen — convite", "desc": "Zen: um mensageiro de código aberto para pessoas que se conhecem. Sem servidores, sem anúncios, sem algoritmo.", "lead": "Uma rede de pessoas que se conhecem — sem servidores, anúncios nem algoritmo.", "invTitle": "Convite para o Zen", "invLead": "Alguém que conhece você quer adicioná-lo como amigo no Zen.", "noApp": "Parece que você ainda não tem o Zen. Instale-o (botões abaixo), depois volte aqui e toque em “{open}” — ou, no Zen: {path} e digite o código da caixa.", "path": "Convidar → Tenho o código de alguém", "otherPhones": "Outros celulares:"},
+    "ro": {"title": "Zen — invitație", "desc": "Zen: un messenger open source pentru oameni care se cunosc. Fără servere, fără reclame, fără algoritm.", "lead": "O rețea de oameni care se cunosc — fără servere, reclame sau algoritm.", "invTitle": "Invitație la Zen", "invLead": "Cineva care te cunoaște vrea să te adauge ca prieten în Zen.", "noApp": "Se pare că nu ai încă Zen. Instalează-l (butoanele de mai jos), apoi revino aici și atinge „{open}” — sau în Zen: {path} și introdu codul din casetă.", "path": "Invită → Am codul cuiva", "otherPhones": "Alte telefoane:"},
+    "vi": {"title": "Zen — lời mời", "desc": "Zen: ứng dụng nhắn tin mã nguồn mở cho những người quen biết nhau. Không máy chủ, không quảng cáo, không thuật toán.", "lead": "Mạng của những người quen biết nhau — không máy chủ, không quảng cáo, không thuật toán.", "invTitle": "Lời mời vào Zen", "invLead": "Có người quen biết bạn muốn kết bạn với bạn trong Zen.", "noApp": "Có vẻ bạn chưa có Zen. Hãy cài đặt (các nút bên dưới), rồi quay lại đây và nhấn “{open}” — hoặc trong Zen: {path} và nhập mã trong khung.", "path": "Mời → Tôi có mã của ai đó", "otherPhones": "Điện thoại khác:"},
+    "tr": {"title": "Zen — davet", "desc": "Zen: birbirini tanıyan insanlar için açık kaynaklı mesajlaşma uygulaması. Sunucu yok, reklam yok, algoritma yok.", "lead": "Birbirini tanıyan insanların ağı — sunucu, reklam ve algoritma yok.", "invTitle": "Zen daveti", "invLead": "Seni tanıyan biri, Zen’de seni arkadaş olarak eklemek istiyor.", "noApp": "Görünüşe göre henüz Zen’in yok. Kur (aşağıdaki düğmeler), sonra buraya dön ve “{open}” düğmesine dokun — ya da Zen’de {path} yolundan çerçevedeki kodu gir.", "path": "Davet et → Birinin kodu bende", "otherPhones": "Diğer telefonlar:"},
+    "ru": {"title": "Zen — приглашение", "desc": "Zen: мессенджер с открытым кодом для людей, которые знают друг друга. Без серверов, рекламы и алгоритмов.", "lead": "Сеть людей, которые знают друг друга, — без серверов, рекламы и алгоритмов.", "invTitle": "Приглашение в Zen", "invLead": "Кто-то, кто вас знает, хочет добавить вас в друзья в Zen.", "noApp": "Похоже, у вас ещё нет Zen. Установите его (кнопки ниже), затем вернитесь сюда и нажмите «{open}» — или в Zen: {path} и введите код из рамки.", "path": "Пригласить → У меня есть чей-то код", "otherPhones": "Другие телефоны:"},
+    "uk": {"title": "Zen — запрошення", "desc": "Zen: месенджер із відкритим кодом для людей, які знають одне одного. Без серверів, реклами та алгоритмів.", "lead": "Мережа людей, які знають одне одного, — без серверів, реклами та алгоритмів.", "invTitle": "Запрошення до Zen", "invLead": "Хтось, хто вас знає, хоче додати вас у друзі в Zen.", "noApp": "Схоже, у вас ще немає Zen. Встановіть його (кнопки нижче), потім поверніться сюди й торкніться «{open}» — або в Zen: {path} і введіть код із рамки.", "path": "Запросити → У мене є чийсь код", "otherPhones": "Інші телефони:"},
+    "ar": {"title": "Zen — دعوة", "desc": "Zen: تطبيق مراسلة مفتوح المصدر لأشخاص يعرفون بعضهم. بلا خوادم، بلا إعلانات، بلا خوارزميات.", "lead": "شبكة من الناس الذين يعرفون بعضهم — بلا خوادم ولا إعلانات ولا خوارزميات.", "invTitle": "دعوة إلى Zen", "invLead": "شخص يعرفك يريد إضافتك صديقًا في Zen.", "noApp": "يبدو أنه ليس لديك Zen بعد. ثبّته (الأزرار أدناه)، ثم عد إلى هنا واضغط «{open}» — أو في Zen: {path} ثم أدخل الرمز الظاهر في الإطار.", "path": "ادعُ → لدي رمز شخص ما", "otherPhones": "هواتف أخرى:"},
+    "hi": {"title": "Zen — आमंत्रण", "desc": "Zen: एक-दूसरे को जानने वाले लोगों के लिए ओपन-सोर्स मैसेंजर। न सर्वर, न विज्ञापन, न एल्गोरिदम।", "lead": "एक-दूसरे को जानने वाले लोगों का नेटवर्क — न सर्वर, न विज्ञापन, न एल्गोरिदम।", "invTitle": "Zen का आमंत्रण", "invLead": "आपको जानने वाला कोई व्यक्ति Zen में आपको दोस्त के रूप में जोड़ना चाहता है।", "noApp": "लगता है आपके पास अभी Zen नहीं है। इसे इंस्टॉल करें (नीचे दिए बटन), फिर यहाँ लौटकर “{open}” दबाएँ — या Zen में: {path} और बॉक्स का कोड दर्ज करें।", "path": "आमंत्रित करें → मेरे पास किसी का कोड है", "otherPhones": "अन्य फ़ोन:"},
+    "zh": {"title": "Zen — 邀请", "desc": "Zen：为彼此认识的人打造的开源即时通讯应用。没有服务器，没有广告，没有算法。", "lead": "一张彼此认识的人组成的网络——没有服务器，没有广告，没有算法。", "invTitle": "邀请你加入 Zen", "invLead": "认识你的人想在 Zen 中把你加为好友。", "noApp": "看来你还没有安装 Zen。请先安装（见下方按钮），然后回到这里点按“{open}”——或在 Zen 中进入 {path}，输入框中的代码。", "path": "邀请 → 我有别人的码", "otherPhones": "其他手机："},
+    "ja": {"title": "Zen — 招待", "desc": "Zen：知り合い同士のためのオープンソースのメッセンジャー。サーバーも広告もアルゴリズムもありません。", "lead": "知り合い同士のネットワーク。サーバーも広告もアルゴリズムもありません。", "invTitle": "Zen への招待", "invLead": "あなたを知っている人が、Zen であなたを友だちに追加したいと思っています。", "noApp": "Zen をまだお持ちでないようです。先にインストールし（下のボタン）、ここに戻って「{open}」をタップするか、Zen で {path} を開き、枠内のコードを入力してください。", "path": "招待 → 相手のコードを持っている", "otherPhones": "その他のスマホ："},
+    "ko": {"title": "Zen — 초대", "desc": "Zen: 서로 아는 사람들을 위한 오픈 소스 메신저. 서버도, 광고도, 알고리즘도 없습니다.", "lead": "서로 아는 사람들의 네트워크 — 서버도, 광고도, 알고리즘도 없습니다.", "invTitle": "Zen 초대", "invLead": "당신을 아는 누군가가 Zen에서 친구로 추가하고 싶어 해요.", "noApp": "아직 Zen이 없는 것 같아요. 먼저 설치한 다음(아래 버튼) 여기로 돌아와 “{open}”을 누르거나, Zen에서 {path} 메뉴로 가서 상자의 코드를 입력하세요.", "path": "초대 → 상대방의 코드가 있어요", "otherPhones": "다른 휴대폰:"},
   };
-  var LINKS = {
-    ios: "https://robertostrowskijagoda.github.io/Zen/install/#iphone",
-    help: "https://github.com/robertostrowskijagoda/Zen",
-    support: "https://buycoffee.to/zen"
-  };
-  var RTL = { ar: true };
-  var ALIASES = { "in": "id", "iw": "he", "nb": "en", "no": "en" };
-
-  // Names of the languages in the picker, each in its own language.
-  var NAMES = {
-    en: "English", pl: "Polski", id: "Bahasa Indonesia", cs: "Čeština",
-    de: "Deutsch", es: "Español", fr: "Français", it: "Italiano",
-    hu: "Magyar", nl: "Nederlands", pt: "Português", ro: "Română",
-    vi: "Tiếng Việt", tr: "Türkçe", ru: "Русский", uk: "Українська",
-    ar: "العربية", hi: "हिन्दी", zh: "中文", ja: "日本語", ko: "한국어"
-  };
-  var STORE_KEY = "zen-lang";
-
   var $ = function (id) { return document.getElementById(id); };
-
-  // The visitor's manual choice (the storage may be blocked: then it is
-  // simply not remembered).
-  function readSaved() {
-    try { return localStorage.getItem(STORE_KEY) || ""; } catch (e) { return ""; }
-  }
-  function saveLang(l) {
-    try { localStorage.setItem(STORE_KEY, l); } catch (e) { /* not remembered */ }
-  }
-
-  function pickLanguage() {
-    var wanted = [];
-    var m = /(?:^|[?&])lang=([A-Za-z-]+)/.exec(location.search);
-    if (m) { wanted.push(m[1]); }
-    var saved = readSaved();
-    if (saved) { wanted.push(saved); }
-    var list = navigator.languages && navigator.languages.length
-      ? navigator.languages : [navigator.language || "en"];
-    for (var i = 0; i < list.length; i++) { wanted.push(list[i]); }
-    for (var j = 0; j < wanted.length; j++) {
-      var base = String(wanted[j]).toLowerCase().split(/[-_]/)[0];
-      base = ALIASES[base] || base;
-      if (Object.prototype.hasOwnProperty.call(TEXTS, base)) { return base; }
-    }
-    return "en";
-  }
-  var lang = pickLanguage();
-  var tx = TEXTS[lang];
-
-  // Plain text with an optional [link] part; built from nodes, never HTML.
-  function setLinked(el, text, href, cls) {
-    el.textContent = "";
-    var a = text.indexOf("["), b = text.indexOf("]");
-    if (a < 0 || b < a) { el.textContent = text; return; }
-    el.appendChild(document.createTextNode(text.slice(0, a)));
-    var link = document.createElement("a");
-    link.href = href;
-    if (cls) { link.className = cls; }
-    link.textContent = text.slice(a + 1, b);
-    el.appendChild(link);
-    el.appendChild(document.createTextNode(text.slice(b + 1)));
-  }
-  function setNoApp(el) {
-    el.textContent = "";
-    var parts = tx.noApp.replace("{open}", tx.open).split("{path}");
-    el.appendChild(document.createTextNode(parts[0]));
-    if (parts.length > 1) {
-      var bold = document.createElement("b");
-      bold.textContent = tx.path;
-      el.appendChild(bold);
-      el.appendChild(document.createTextNode(parts[1]));
-    }
-  }
-
-  var page = location.origin + location.pathname;
-  var ua = navigator.userAgent || "";
-  var android = /Android/i.test(ua);
-  var ios = /iPhone|iPad|iPod/i.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var os = Zen.os;
+  var android = os === "android";
   var raw = decodeURIComponent((location.hash || "").replace(/^#/, ""));
   // Only an invitation code (Crockford base32, dashes optional) is taken.
   var code = raw.toUpperCase().replace(/[^0-9A-Z]/g, "");
   if (!/^[0-9A-HJKMNP-TV-Z]{25}$/.test(code)) { code = ""; }
   var noApp = /(^|[?&])noapp=1(&|$)/.test(location.search);
+  var page = location.origin + location.pathname;
 
-  // A text of the page: the visitor's language, else English.
-  function tr(key) { return tx[key] || TEXTS.en[key] || ""; }
-  // A button label without its leading arrow (the icon replaces it).
-  function label(s) { return s.replace(/^⬇\s*/, ""); }
-
-  // All translated texts; run again when the visitor picks another language.
-  function applyLanguage() {
-    document.documentElement.lang = lang;
-    document.documentElement.dir = RTL[lang] ? "rtl" : "ltr";
-    document.title = tx.title;
-    $("lead").textContent = code ? tx.invLead : tx.lead;
-    if (code) { $("title").textContent = tx.invTitle; }
-    $("openLabel").textContent = tx.open;
-    $("copyLabel").textContent = tx.copy;
-    $("androidLabel").textContent = label(tx.android);
-    $("otherPhones").textContent = tx.otherPhones || TEXTS.en.otherPhones;
-    $("windowsLabel").textContent = label(tx.windows);
-    setLinked($("ios"), tx.ios, LINKS.ios, "chip");
-    setLinked($("help"), tx.help, LINKS.help, "chip");
-    setLinked($("support"), tx.support, LINKS.support, "chip");
-    setNoApp($("noapp"));
-    Array.prototype.forEach.call(document.querySelectorAll("[data-i]"), function (el) {
-      var key = el.getAttribute("data-i");
-      el.textContent = tr(key);
-      // An English text on a right-to-left page keeps its own direction.
-      if (tx[key]) { el.removeAttribute("dir"); } else { el.setAttribute("dir", "ltr"); }
-    });
-    Array.prototype.forEach.call(document.querySelectorAll("[data-ia]"), function (el) {
-      el.alt = tr(el.getAttribute("data-ia"));
-    });
-    $("langCode").textContent = lang.toUpperCase();
-    $("langName").textContent = NAMES[lang] || lang;
-    $("langSel").value = lang;
+  // {open} and {path} of the text are filled in; the path is bold.
+  function setNoApp() {
+    var el = $("noapp");
+    el.textContent = "";
+    var parts = Zen.t("noApp").replace("{open}", Zen.t("open")).split("{path}");
+    el.appendChild(document.createTextNode(parts[0]));
+    if (parts.length > 1) {
+      var bold = document.createElement("b");
+      bold.textContent = Zen.t("path");
+      el.appendChild(bold);
+      el.appendChild(document.createTextNode(parts[1]));
+    }
   }
-
-  var picker = $("langSel");
-  Object.keys(TEXTS).forEach(function (k) {
-    var o = document.createElement("option");
-    o.value = k;
-    o.textContent = NAMES[k] || k;
-    picker.appendChild(o);
-  });
-  picker.addEventListener("change", function () {
-    if (!Object.prototype.hasOwnProperty.call(TEXTS, picker.value)) { return; }
-    lang = picker.value;
-    tx = TEXTS[lang];
-    saveLang(lang);
-    applyLanguage();
-  });
+  function onLang() {
+    $("lead").textContent = Zen.t(code ? "invLead" : "lead");
+    $("title").textContent = code ? Zen.t("invTitle") : "Zen";
+    setNoApp();
+  }
+  Zen.init({ texts: TEXTS, onLang: onLang });
 
   var target = code ? "c/" + code : "inbox";
   var openUrl;
@@ -548,31 +132,27 @@
   }
   $("open").href = openUrl;
 
-  applyLanguage();
-
   if (code) {
     $("code").textContent = code.match(/.{1,5}/g).join("-");
     $("code").classList.remove("hidden");
     $("copy").classList.remove("hidden");
     $("copy").addEventListener("click", function () {
-      var text = $("code").textContent;
-      var done = function () { $("copyLabel").textContent = tx.copied; };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done, function () {});
-      }
+      Zen.copy($("code").textContent, function () { $("copyLabel").textContent = Zen.t("copied"); });
     });
   }
   if (noApp) { $("noapp").classList.remove("hidden"); }
-  if (ios) {
-    $("ios").classList.remove("hidden");
-    $("android").classList.add("hidden");
-    $("otherAndroid").classList.add("hidden");
-    $("windows").classList.add("hidden");
-    $("desktop").classList.add("hidden");
-  } else if (android) {
-    $("windows").classList.add("hidden");
-    $("desktop").classList.add("hidden");
-  }
+  // The visitor's own system gets its button; the others are small links to
+  // their install pages (an unknown system sees all five buttons).
+  ["android", "windows", "linux", "iphone", "macos"].forEach(function (id) {
+    var b = $(id);
+    if (os && id !== os) { b.classList.add("hidden"); }
+    if (!os) { b.classList.remove("primary"); b.classList.add("secondary"); }
+  });
+  if (os !== "android" && os) { $("otherAndroid").classList.add("hidden"); }
+  Array.prototype.forEach.call(document.querySelectorAll("#others .chip"), function (c) {
+    if (!os || c.getAttribute("data-os") === os) { c.classList.add("hidden"); }
+  });
+  if (!os) { $("others").classList.add("hidden"); }
   // Straight into the app when it is there (Android: otherwise back here
   // with "noapp", where the downloads are).
   if (android && !noApp) {

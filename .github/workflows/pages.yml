@@ -1,6 +1,8 @@
 # GitHub Pages (tool/pages): the invitation page
 # (https://robertostrowskijagoda.github.io/Zen/#KOD opens Zen with that
-# code), the install page (/install/) and, made here from the latest
+# code), the install page (/install/) with one page per system, the guide,
+# features, support and about pages (all of tool/pages is copied, with the
+# shared site.css and site.js) and, made here from the latest
 # published release:
 #   /apps.json     an AltStore / SideStore source: "Add Zen source" in
 #                  SideStore installs the release's Zen-unsigned.ipa and

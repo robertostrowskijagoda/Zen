@@ -361,6 +361,81 @@ class InvitationPagesTest(unittest.TestCase):
         self.assertEqual(texts.count('"otherPhones": '), len(languages))
 
 
+SITE_PAGES = ("index.html", "m/index.html", "about/index.html", "guide/index.html",
+              "features/index.html", "support/index.html", "install/index.html",
+              "install/android/index.html", "install/iphone/index.html",
+              "install/windows/index.html", "install/macos/index.html",
+              "install/linux/index.html")
+
+
+def language_tables(text):
+    """{language: {key: text}} of the "xx": {...} lines of a TEXTS / COMMON block."""
+    return {lang: json.loads(body) for lang, body in
+            re.findall(r'^\s{4}"(\w+)": (\{.*\}),?$', text, re.M)}
+
+
+class SitePagesTest(unittest.TestCase):
+    """Every page has all 21 languages, with the same texts keys in each."""
+
+    def test_the_shared_texts_cover_21_languages(self):
+        script = read("tool/pages/site.js")
+        common = language_tables(re.search(r"var COMMON = \{(.*?)\n  \};", script, re.S).group(1))
+        self.assertEqual(len(common), 21)
+        keys = set(common["en"])
+        for lang, table in common.items():
+            self.assertEqual(set(table), keys, lang)
+        self.common_keys = keys
+
+    def test_every_page_has_21_languages_and_the_same_keys(self):
+        script = read("tool/pages/site.js")
+        common = set(language_tables(
+            re.search(r"var COMMON = \{(.*?)\n  \};", script, re.S).group(1))["en"])
+        for path in SITE_PAGES:
+            html = read("tool/pages/" + path)
+            block = re.search(r"var TEXTS = \{(.*?)\n  \};", html, re.S).group(1)
+            tables = language_tables(block)
+            self.assertEqual(len(tables), 21, path)
+            keys = set(tables["en"])
+            for lang, table in tables.items():
+                self.assertEqual(set(table), keys, path + " " + lang)
+            # Every text an element asks for exists (the page's own or the shared).
+            asked = set(re.findall(r'data-i(?:a|al|t)?="([\w.]+)"', html))
+            for key in asked:
+                self.assertTrue(key in keys or key in common, path + ": " + key)
+
+    def test_downloads_of_every_page_name_release_files(self):
+        assets = set(contract_assets())
+        for path in SITE_PAGES:
+            html = read("tool/pages/" + path)
+            for name in re.findall(r'/releases/latest/download/([^"]+)"', html):
+                self.assertIn(name, assets, path + ": " + name)
+
+    def test_the_iphone_page_links_the_latest_ipa_and_the_android_page_the_apk(self):
+        iphone = read("tool/pages/install/iphone/index.html")
+        self.assertIn("/releases/latest/download/Zen-unsigned.ipa", iphone)
+        self.assertIn("sidestore://source?url=" + urllib.parse.quote(
+            release_source.PAGES + "apps.json", safe=""), iphone)
+        android = read("tool/pages/install/android/index.html")
+        self.assertIn("/releases/latest/download/Zen-arm64-v8a.apk", android)
+
+    def test_every_page_has_the_shared_header_and_the_language_switch(self):
+        for path in SITE_PAGES:
+            html = read("tool/pages/" + path)
+            self.assertIn('id="zenTop"', html, path)
+            self.assertIn('id="zenFoot"', html, path)
+            self.assertRegex(html, r'<script src="(\.\./)*site\.js"></script>', path)
+        script = read("tool/pages/site.js")
+        for part in ('id="langSel"', 'id="langCode"', 'id="langName"', 'localStorage'):
+            self.assertIn(part, script)
+        self.assertIn('"zen-lang"', script)
+
+    def test_every_page_links_the_pages_of_the_header(self):
+        script = read("tool/pages/site.js")
+        for target in ("install/", "guide/", "features/", "support/", "about/"):
+            self.assertIn('"' + target + '"', script)
+            self.assertTrue(os.path.exists(os.path.join(ROOT, "tool/pages", target, "index.html")))
+
+
 class DiscordTest(unittest.TestCase):
     def test_the_pages_and_the_app_link_the_same_server(self):
         url = re.search(r"kZenDiscordUrl = '([^']+)'",
