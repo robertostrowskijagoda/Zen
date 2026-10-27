@@ -91,6 +91,10 @@ type bridgeNode struct {
 	transitHoldMu   sync.Mutex
 	transitStop     chan struct{}
 	transitStopOnce sync.Once
+	// The node's key, held while it runs, and when the app last called on
+	// the node (node_identity.go); nil in tests that build a node by hand.
+	identity *nodeIdentityClaim
+	lastCall atomic.Int64
 }
 
 type configSummary struct {
