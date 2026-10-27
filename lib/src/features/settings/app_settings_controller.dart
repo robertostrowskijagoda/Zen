@@ -213,6 +213,14 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(seenTips: <String>{...state.seenTips, id}));
   }
 
+  /// The notification list was opened with [millis] as its newest entry.
+  Future<void> markNotificationsSeen(int millis) async {
+    if (millis <= state.notificationsSeenMillis) {
+      return;
+    }
+    await _save(state.copyWith(notificationsSeenMillis: millis));
+  }
+
   /// The terms, the privacy policy and the licence notice of [version]
   /// were accepted (on the first start, or again after they changed).
   Future<void> acceptLegalDocuments(String version, {DateTime? at}) async {

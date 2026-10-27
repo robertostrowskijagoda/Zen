@@ -432,6 +432,7 @@ final class AppSettings {
     this.multipeerLinks = false,
     this.keepReceivingInBackground = false,
     this.seenTips = const <String>{},
+    this.notificationsSeenMillis = 0,
   });
 
   static const int defaultInboxLimitMb = 100;
@@ -576,6 +577,10 @@ final class AppSettings {
   /// `ZenTips`): a card shows until its id is here.
   final Set<String> seenTips;
 
+  /// The newest entry of the in-app notification list that was on screen the
+  /// last time it was opened; newer ones count on the bell.
+  final int notificationsSeenMillis;
+
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
 
@@ -635,6 +640,7 @@ final class AppSettings {
     bool? multipeerLinks,
     bool? keepReceivingInBackground,
     Set<String>? seenTips,
+    int? notificationsSeenMillis,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -674,6 +680,8 @@ final class AppSettings {
       keepReceivingInBackground:
           keepReceivingInBackground ?? this.keepReceivingInBackground,
       seenTips: seenTips ?? this.seenTips,
+      notificationsSeenMillis:
+          notificationsSeenMillis ?? this.notificationsSeenMillis,
     );
   }
 
@@ -711,6 +719,8 @@ final class AppSettings {
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
+    if (notificationsSeenMillis > 0)
+      'notificationsSeenMillis': notificationsSeenMillis,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -767,6 +777,7 @@ final class AppSettings {
         final List<dynamic> ids => ids.whereType<String>().toSet(),
         _ => null,
       },
+      notificationsSeenMillis: pick<int>('notificationsSeenMillis'),
     );
   }
 
