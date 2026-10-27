@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
@@ -319,6 +320,7 @@ final class ZenBootstrapper {
       source: 'ui',
     );
     logZenMessage('App bootstrap running.');
+    unawaited(ZenTechLog.noteExits());
     final AppSecurityService appSecurityService =
         await _runCriticalStep<AppSecurityService>(
           'init security',

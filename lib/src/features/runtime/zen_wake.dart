@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 
 /// Work that runs later, also while an Android phone sleeps.
 abstract interface class WakeTimer {
@@ -555,6 +556,9 @@ final class _Beat {
   Future<void> _fire() {
     final int now = ZenWake.nowMillis();
     final List<Future<void>> running = <Future<void>>[];
+    // How long each work took, for the technical log.
+    final Map<String, int> took = <String, int>{};
+    final Stopwatch wake = Stopwatch()..start();
     _firing = true;
     try {
       for (final _BeatWork w in _dueBy(now)) {
@@ -563,9 +567,11 @@ final class _Beat {
         }
         w.dueAt = now + w.every.inMilliseconds;
         running.add(
-          Future<void>.sync(w.tick).catchError((Object error, StackTrace st) {
-            logZenError('Work on the wake (${w.name}) failed', error, st);
-          }),
+          Future<void>.sync(w.tick)
+              .catchError((Object error, StackTrace st) {
+                logZenError('Work on the wake (${w.name}) failed', error, st);
+              })
+              .whenComplete(() => took[w.name] = wake.elapsedMilliseconds),
         );
       }
     } finally {
@@ -573,7 +579,12 @@ final class _Beat {
     }
     _plan();
     // The phone may sleep again once everything that ran is done.
-    return Future.wait(running);
+    return Future.wait(running).whenComplete(
+      () => ZenTechLog.event('beat', <String, Object?>{
+        'ms': wake.elapsedMilliseconds,
+        'jobs': took,
+      }),
+    );
   }
 }
 
@@ -622,11 +633,25 @@ abstract final class ZenWake {
   }) => platform.after(
     name,
     delay,
-    fire,
+    _timed(name, fire),
     hold: hold,
     exact: exact,
     whileIdle: whileIdle,
   );
+
+  /// [fire], with how long its work took in the technical log (work that
+  /// returns a future: until it completes).
+  static FutureOr<void> Function() _timed(
+    String name,
+    FutureOr<void> Function() fire,
+  ) => () {
+    final Stopwatch took = Stopwatch()..start();
+    final FutureOr<void> work = fire();
+    if (work is Future<void>) {
+      return work.whenComplete(() => ZenTechLog.wake(name, took.elapsed));
+    }
+    ZenTechLog.wake(name, took.elapsed);
+  };
 
   /// Runs [tick] about every [every] on the shared beat: one wake of the
   /// phone for everything due about then (mailbox polls of every account,

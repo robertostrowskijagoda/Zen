@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -325,6 +326,11 @@ final class _IosBackgroundBridgeState
       'Background check (iOS): $frames frames in '
       '${watch.elapsed.inSeconds} s.',
     );
+    ZenTechLog.event('wake', {
+      'job': 'ios-check',
+      'ms': watch.elapsedMilliseconds,
+      'frames': frames,
+    });
     return true;
   }
 

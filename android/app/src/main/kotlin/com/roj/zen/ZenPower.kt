@@ -1,5 +1,6 @@
 package com.roj.zen
 
+import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -164,12 +165,43 @@ object ZenPower {
                         holdForCall(app, call.arguments as? Boolean ?: false)
                         result.success(null)
                     }
+                    "exitReasons" -> taskExecutor.execute {
+                        val exits = exitReasons(app)
+                        main.post { result.success(exits) }
+                    }
                     else -> result.notImplemented()
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "${call.method} failed", error)
                 result.error("power", error.message, null)
             }
+        }
+    }
+
+    /**
+     * How Android ended this app's last runs (Android 11 on), for the
+     * technical log: when, why and how much memory it held. No description:
+     * that is free text. Off the main thread (a call into the system).
+     */
+    private fun exitReasons(context: Context): List<Map<String, Any>> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return emptyList()
+        }
+        val activities = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
+        return try {
+            activities.getHistoricalProcessExitReasons(null, 0, 8).map {
+                mapOf(
+                    "at" to it.timestamp,
+                    "reason" to it.reason,
+                    "importance" to it.importance,
+                    "status" to it.status,
+                    "pssKb" to it.pss,
+                    "rssKb" to it.rss,
+                )
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Reading the exit reasons failed", error)
+            emptyList()
         }
     }
 

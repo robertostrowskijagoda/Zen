@@ -15,6 +15,7 @@ import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
@@ -1298,12 +1299,14 @@ final class _AndroidBackgroundRuntimeBridgeState
         logZenMessage('Long in the background: the service only receives.');
         await _handoffToReceiver();
       } else if (!_handoffActive) {
+        ZenTechLog.mode('background');
         _planReceiveOnlyWake(since, now, after);
       }
       return;
     }
     _backgroundSince = null;
     _cancelReceiveOnlyWake();
+    ZenTechLog.mode('app');
     await _restoreForegroundRuntime();
   }
 
@@ -1332,6 +1335,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       return;
     }
     _handoffInFlight = true;
+    final Stopwatch handoff = Stopwatch()..start();
     _inboxDrained = false;
     _cancelReceiveOnlyWake();
     // The phone may be asleep but for the alarm that woke it: it stays
@@ -1391,6 +1395,7 @@ final class _AndroidBackgroundRuntimeBridgeState
         // itself (kAndroidBackgroundHeartbeatTimeout).
         logZenWarning('Handoff failed: the service did not confirm the node.');
       }
+      ZenTechLog.handover('service', ok: started, took: handoff.elapsed);
       if (mounted) {
         _handoffActive = started;
         _lastConfirmedMode = started
@@ -1407,6 +1412,7 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   Future<void> _restoreForegroundRuntime() async {
+    final Stopwatch restore = Stopwatch()..start();
     final AndroidBackgroundServiceController controller = ref.read(
       androidBackgroundServiceControllerProvider,
     );
@@ -1439,6 +1445,7 @@ final class _AndroidBackgroundRuntimeBridgeState
         return;
       }
       _handoffActive = false;
+      ZenTechLog.handover('app', ok: true, took: restore.elapsed);
       // What the service took in and handed out as a mailbox for friends.
       await _mailboxKitWriter?.takeHeld();
       if (!mounted) {
@@ -2289,6 +2296,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       logZenError('Attaching the service log failed', error, stackTrace);
     }
     logZenMessage('Foreground service task started (${starter.name}).');
+    ZenTechLog.event('service-start', <String, Object?>{'by': starter.name});
+    unawaited(ZenTechLog.noteExits());
     _powerShortcut = const AlarmShortcutChannel().presses.listen(
       (_) => _onPowerShortcut(),
     );
@@ -2434,6 +2443,10 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _destroyed = true;
+    ZenTechLog.event('service-stop', <String, Object?>{
+      'timeout': isTimeout,
+      'byApp': _stopRequestedByApp,
+    });
     _updateCheck?.stop();
     _updateCheck = null;
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
@@ -2652,6 +2665,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       await _updateServiceNotification(AndroidBackgroundRuntimeMode.standby);
     }
     logZenMessage('Service reached "${mode.name}".');
+    ZenTechLog.mode(
+      mode == AndroidBackgroundRuntimeMode.active ? 'receive-only' : 'parked',
+    );
     _syncWatchdog(mode);
     _acknowledge(mode);
     if (mode == AndroidBackgroundRuntimeMode.active) {
