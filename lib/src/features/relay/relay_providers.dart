@@ -41,17 +41,17 @@ final Provider<RelayProgressSnapshot> relayDeliveryProgressProvider =
     });
 
 /// Whether this device is online most of the time and so makes a good
-/// mailbox for friends: a computer (Zen in the tray). Not a phone: an
-/// iPhone receives only while Zen is open, and an Android phone, locked or
-/// a few minutes in the background, only receives for itself (its
-/// background service holds no mail for friends, and every deposit, poll
-/// and sync sent to it would wake it for nothing).
+/// mailbox for friends: a computer (Zen in the tray) or an Android phone,
+/// whose background service goes on holding friends' mail while Zen is
+/// locked or long in the background (`LockedMailbox`). Not an iPhone: it
+/// receives only while Zen is open.
 bool get zenDeviceStaysOnline => zenPlatformStaysOnline(defaultTargetPlatform);
 
 /// [zenDeviceStaysOnline] for [platform].
 bool zenPlatformStaysOnline(TargetPlatform platform) =>
     !kIsWeb &&
-    (platform == TargetPlatform.linux ||
+    (platform == TargetPlatform.android ||
+        platform == TargetPlatform.linux ||
         platform == TargetPlatform.macOS ||
         platform == TargetPlatform.windows);
 

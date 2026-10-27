@@ -37,6 +37,7 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
+import 'package:zen/src/features/relay/locked_mailbox_writer.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
@@ -891,6 +892,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// in step for the locked service.
   LockedOutboxKitWriter? _outboxKitWriter;
 
+  /// Keeps the mailbox kit (this device as a mailbox for friends) in step
+  /// for the locked service, and takes over what the service held.
+  LockedMailboxKitWriter? _mailboxKitWriter;
+
   @override
   void initState() {
     super.initState();
@@ -949,6 +954,8 @@ final class _AndroidBackgroundRuntimeBridgeState
     _lockedKitsTimer = null;
     _outboxKitWriter?.detach();
     _outboxKitWriter = null;
+    _mailboxKitWriter?.detach();
+    _mailboxKitWriter = null;
     _kitMeet?.removeListener(_onMeetChanged);
     _kitMeet = null;
     _kitNeighbors?.removeListener(_onKitSourceChanged);
@@ -1108,7 +1115,8 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   /// The locked service keeps delivering this device's queue from the
-  /// outbox kit: written whenever the queue changes, and before handoff.
+  /// outbox kit, and keeps being a mailbox for friends from the mailbox kit:
+  /// both written whenever they change, and before handoff.
   void _attachOutboxKitWriter() {
     final RelayEngine? relay = ref.read(relayEngineProvider);
     if (relay == null || _outboxKitWriter != null) {
@@ -1127,6 +1135,18 @@ final class _AndroidBackgroundRuntimeBridgeState
         credentials: credentials,
         createKey: true,
       ).write(json),
+    )..attach();
+    _mailboxKitWriter = LockedMailboxKitWriter(
+      engine: relay,
+      write: (Object? json) => lockedMailboxKitFile(
+        supportDirectory: support,
+        credentials: credentials,
+        createKey: true,
+      ).write(json),
+      readHeld: () => lockedMailboxHeldFile(
+        supportDirectory: support,
+        credentials: credentials,
+      ).read(),
     )..attach();
   }
 
@@ -1250,6 +1270,9 @@ final class _AndroidBackgroundRuntimeBridgeState
     // keep delivering.
     final Future<void> outboxKitWritten =
         _outboxKitWriter?.flush() ?? Future<void>.value();
+    // The mail it holds for friends, and whom it holds it for.
+    final Future<void> mailboxKitWritten =
+        _mailboxKitWriter?.flush() ?? Future<void>.value();
     // The service is about to own the node; a heartbeat from here on would
     // only keep it parked.
     _heartbeatTimer?.cancel();
@@ -1262,6 +1285,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       await kitWritten;
       await lockedKitsWritten;
       await outboxKitWritten;
+      await mailboxKitWritten;
       // Saved and closed: nothing writes the ledger while the app is locked.
       await ledger?.suspend();
       final bool coreWasRunning = core.isStarted;
@@ -1326,6 +1350,11 @@ final class _AndroidBackgroundRuntimeBridgeState
         return;
       }
       _handoffActive = false;
+      // What the service took in and handed out as a mailbox for friends.
+      await _mailboxKitWriter?.takeHeld();
+      if (!mounted) {
+        return;
+      }
     }
     // The node is free (or never was taken): the ledger comes back.
     if (!serviceOwnsNode || parked) {
@@ -1869,6 +1898,21 @@ final class _LockedReceiverSession {
         credentials: credentials,
       ).read(),
     );
+    // This device as a mailbox for friends: the app's kit and what this
+    // service held in earlier runs, together.
+    final BackgroundKitFile heldFile = lockedMailboxHeldFile(
+      supportDirectory: () async => support,
+      credentials: credentials,
+    );
+    final LockedMailboxKit? mailboxKit = LockedMailboxKit.merge(
+      LockedMailboxKit.fromJson(
+        await lockedMailboxKitFile(
+          supportDirectory: () async => support,
+          credentials: credentials,
+        ).read(),
+      ),
+      LockedMailboxKit.fromJson(await heldFile.read()),
+    );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
         waitTimeout: payload.settings.signalWaitTimeout,
@@ -1912,6 +1956,21 @@ final class _LockedReceiverSession {
         notices: notices,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
+        mailbox: mailboxKit == null || mailboxKit.isEmpty
+            ? null
+            : LockedMailbox(
+                transport: runtime,
+                kit: mailboxKit,
+                isFriend: (String address) =>
+                    capability.kindOf(address) == BackgroundContactKind.friend,
+                isContact: (String address) =>
+                    capability.kindOf(address) ==
+                        BackgroundContactKind.friend ||
+                    capability.kindOf(address) ==
+                        BackgroundContactKind.groupMember,
+                save: (LockedMailboxKit held) => heldFile.write(held.toJson()),
+              ),
+        taken: mailboxKit?.taken ?? const <String>{},
         alarm: kit == null
             ? null
             : LockedAlarm(

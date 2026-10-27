@@ -175,7 +175,8 @@ the network. To keep that cheap, an Android phone keeps 4 links to public
 peers (swapped when one stops answering), sends presence pings only to
 friends and only while Zen is on the screen, and **after 5 minutes in the
 background only receives** (no pings, scans or sync), with or without the
-lock; it wakes for short, timed moments instead of holding the processor or
+lock, though it still holds friends' mail as one of their mailboxes; it
+wakes for short, timed moments instead of holding the processor or
 Wi-Fi awake. While the phone sleeps (Doze), mail from mailboxes can come a
 few minutes late. A computer on battery stops being a bridge for others and
 keeps only 4 public peers; plugged in, everything comes back. Animations

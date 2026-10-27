@@ -15,6 +15,7 @@ import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 part 'relay_engine_blobs.dart';
+part 'relay_engine_locked.dart';
 
 /// A friend as the relay layer sees it.
 @immutable
@@ -577,6 +578,27 @@ final class RelayEngine {
   final ValueNotifier<int> outboxRevision = ValueNotifier<int>(0);
   int _outboxSignature = 0;
 
+  /// Changes whenever what the locked service needs to be this device's
+  /// mailbox changes (mail held, receipts, whom it serves, what came in):
+  /// the [lockedMailboxKit] is written anew.
+  final ValueNotifier<int> lockedMailboxRevision = ValueNotifier<int>(0);
+  int _lockedMailboxSignature = 0;
+
+  int _lockedMailboxSignatureOf(RelayState state) => Object.hash(
+    Object.hashAll(<Object>[
+      for (final MapEntry<String, Map<String, Map<String, dynamic>>> e
+          in state.mailbox.entries) ...<Object>[e.key, ...e.value.keys],
+    ]),
+    state.tombstones.length,
+    state.seen.length,
+    state.seen.isEmpty ? '' : state.seen.keys.last,
+    Object.hashAll(<Object>[
+      for (final RelayPeerInfo peer in state.peers.values)
+        if (peer.relays.contains(_self))
+          Object.hash(peer.address, peer.relays.join(','), peer.version),
+    ]),
+  );
+
   /// Outbox ids already reported as [RelayDeliveryStatus.directOnly]. Memory
   /// only: after a restart the repeat is harmless (the chat applies it once).
   final Set<String> _reportedDirectOnly = <String>{};
@@ -640,6 +662,10 @@ final class RelayEngine {
   final Map<String, _BlobPull> _blobPulls = <String, _BlobPull>{};
 
   bool get isActive => _active;
+
+  /// Whether the friends are known yet (until then this device seems to
+  /// serve nobody as a mailbox).
+  bool get knowsFriends => _peers.isReady;
 
   /// Whether this engine can send, hold and collect attachments through
   /// mailboxes at all.
@@ -1019,6 +1045,126 @@ final class RelayEngine {
         );
       }
       return LockedOutboxKit(items: items, writtenAtMillis: now);
+    });
+  }
+
+  /// The kit the Android background service keeps being this device's
+  /// mailbox for friends from while Zen is locked (see
+  /// relay_engine_locked.dart): the friends that chose this device, the
+  /// mail held for them and its receipts, and tags of the newest payloads
+  /// this device took ([kLockedMailboxMaxTaken]).
+  Future<LockedMailboxKit> lockedMailboxKit() {
+    return _locked(() async {
+      final RelayState state = await _load();
+      final String self = _self;
+      final List<MapEntry<String, int>> newest = state.seen.entries.toList()
+        ..sort(
+          (MapEntry<String, int> a, MapEntry<String, int> b) =>
+              b.value.compareTo(a.value),
+        );
+      return LockedMailboxKit(
+        self: self,
+        served: <String, LockedMailboxPeer>{
+          for (final RelayPeerInfo peer in state.peers.values)
+            if (self.isNotEmpty &&
+                peer.relays.contains(self) &&
+                _isAcceptedFriend(peer.address))
+              peer.address: LockedMailboxPeer(
+                relays: List<String>.of(peer.relays),
+                depositKey: peer.depositKey,
+              ),
+        },
+        held: <String, Map<String, Map<String, dynamic>>>{
+          for (final MapEntry<String, Map<String, Map<String, dynamic>>> e
+              in state.mailbox.entries)
+            if (e.value.isNotEmpty)
+              e.key: <String, Map<String, dynamic>>{
+                for (final MapEntry<String, Map<String, dynamic>> h
+                    in e.value.entries)
+                  h.key: Map<String, dynamic>.of(h.value),
+              },
+        },
+        tombstones: Map<String, int>.of(state.tombstones),
+        taken: <String>{
+          for (final MapEntry<String, int> e in newest.take(
+            kLockedMailboxMaxTaken,
+          ))
+            if (e.key.contains('|'))
+              LockedMailboxKit.takenTag(
+                e.key.substring(0, e.key.indexOf('|')),
+                e.key.substring(e.key.indexOf('|') + 1),
+              ),
+        },
+        writtenAtMillis: _now(),
+      );
+    });
+  }
+
+  /// Takes over what the locked service did as this device's mailbox
+  /// ([held], its "held" kit): envelopes it took in are held here too, and
+  /// what it handed over is dropped and remembered as delivered. Taking the
+  /// same kit again changes nothing.
+  Future<void> takeLockedMailbox(LockedMailboxKit? held) {
+    return _locked(() async {
+      if (held == null) {
+        return;
+      }
+      final String self = _self;
+      if (self.isNotEmpty && held.self.isNotEmpty && held.self != self) {
+        return; // another account's
+      }
+      final RelayState state = await _load();
+      final int now = _now();
+      bool changed = false;
+      held.tombstones.forEach((String key, int until) {
+        if (until <= now) {
+          return;
+        }
+        if ((state.tombstones[key] ?? 0) < until) {
+          state.tombstones[key] = until;
+          changed = true;
+        }
+        final int bar = key.indexOf('|');
+        if (bar > 0) {
+          final String recipient = key.substring(0, bar);
+          final Map<String, Map<String, dynamic>>? mine =
+              state.mailbox[recipient];
+          if (mine?.remove(key.substring(bar + 1)) != null) {
+            changed = true;
+            if (mine!.isEmpty) {
+              state.mailbox.remove(recipient);
+            }
+          }
+        }
+      });
+      held.held.forEach((
+        String recipient,
+        Map<String, Map<String, dynamic>> envelopes,
+      ) {
+        bool added = false;
+        envelopes.forEach((String id, Map<String, dynamic> envelope) {
+          if (state.tombstones.containsKey('$recipient|$id') ||
+              _holdUntil(envelope) <= now) {
+            return;
+          }
+          final Map<String, Map<String, dynamic>> mine = state.mailbox
+              .putIfAbsent(recipient, () => <String, Map<String, dynamic>>{});
+          if (!mine.containsKey(id)) {
+            mine[id] = Map<String, dynamic>.of(envelope);
+            added = true;
+          }
+        });
+        if (added) {
+          _enforceQuota(state.mailbox[recipient]!);
+          changed = true;
+        }
+      });
+      if (!changed) {
+        return;
+      }
+      _capTombstones(state);
+      await _save(state);
+      logZenMessage('Took over the mail held while Zen was locked.');
     });
   }
 
@@ -1900,7 +2046,14 @@ final class RelayEngine {
   /// to go is taken from whoever holds the most, oldest first, and unvouched
   /// mail always goes before vouched mail: a flood only ever pushes out the
   /// flooder's own messages, never a friend's.
-  void _enforceQuota(Map<String, Map<String, dynamic>> held) {
+  void _enforceQuota(Map<String, Map<String, dynamic>> held) =>
+      _enforceQuotaIn(config, held);
+
+  /// [_enforceQuota] under [config] (the locked service's mailbox too).
+  static void _enforceQuotaIn(
+    RelayConfig config,
+    Map<String, Map<String, dynamic>> held,
+  ) {
     while (true) {
       final List<MapEntry<String, Map<String, dynamic>>> unvouched = held
           .entries
@@ -3388,6 +3541,11 @@ final class RelayEngine {
     if (signature != _outboxSignature) {
       _outboxSignature = signature;
       outboxRevision.value++;
+    }
+    final int mailboxSignature = _lockedMailboxSignatureOf(state);
+    if (mailboxSignature != _lockedMailboxSignature) {
+      _lockedMailboxSignature = mailboxSignature;
+      lockedMailboxRevision.value++;
     }
     _publishProgress(state);
     overview.value = RelayOverview(

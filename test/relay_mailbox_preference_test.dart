@@ -256,10 +256,11 @@ void main() {
     });
   });
 
-  test('only computers count as staying online, not phones', () {
-    // An Android phone, locked or a while in the background, holds no mail
-    // for friends: picked as a mailbox it would be woken for nothing.
-    expect(zenPlatformStaysOnline(TargetPlatform.android), isFalse);
+  test('computers and Android phones count as staying online, iPhones '
+      'not', () {
+    // An Android phone's background service holds friends' mail while Zen
+    // is locked; an iPhone receives only while Zen is open.
+    expect(zenPlatformStaysOnline(TargetPlatform.android), isTrue);
     expect(zenPlatformStaysOnline(TargetPlatform.iOS), isFalse);
     expect(zenPlatformStaysOnline(TargetPlatform.linux), isTrue);
     expect(zenPlatformStaysOnline(TargetPlatform.macOS), isTrue);

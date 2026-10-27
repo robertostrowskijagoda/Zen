@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
+import 'package:zen/src/features/relay/locked_mailbox_writer.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
@@ -164,8 +165,25 @@ final class _SimNode implements RelayPeerSource {
   /// transport (the locked service's node) instead of the engine.
   _LockedNode? locked;
 
+  /// The locked service's mailbox for friends (with [locked]): it takes the
+  /// mailbox duties, as the locked receiver hands them over.
+  LockedMailbox? lockedMailbox;
+
   Future<void> receive(String from, Map<String, dynamic> payload) async {
     final _LockedNode? node = locked;
+    final LockedMailbox? mailbox = lockedMailbox;
+    if (node != null &&
+        mailbox != null &&
+        LockedMailbox.dutyTypes.contains(payload['type'])) {
+      await mailbox.handle(
+        SignalTransportFrame(
+          from: from,
+          payload: payload,
+          receivedAtMillis: mesh.now,
+        ),
+      );
+      return;
+    }
     if (node != null) {
       await node.injectIncoming(
         from: from,
@@ -1622,6 +1640,187 @@ void main() {
     });
   });
 
+  group('phones as mailboxes while locked', () {
+    test('locked phones hold mail for an offline friend and hand it over '
+        'once the friend is back, with the sender gone', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final List<String> bobRelays =
+          (await mesh.nodes[bob]!.state()).currentRelays;
+      // Every one of bob's six mailboxes is a phone locked (or long in the
+      // background): only its background service runs.
+      final Map<String, LockedMailboxKit> held = <String, LockedMailboxKit>{};
+      final Map<String, LockedMailbox> boxes = <String, LockedMailbox>{
+        for (final String relay in bobRelays)
+          relay: await _lockAsMailbox(mesh, relay, held: held),
+      };
+      await mesh.goOffline(bob);
+
+      await mesh.nodes[alice]!.engine.submit(bob, _text('czekam na Ciebie'));
+      await mesh.settle();
+      await mesh.advance(const Duration(seconds: 5)); // past depositAfter
+
+      for (final String relay in bobRelays) {
+        expect(boxes[relay]!.heldFor(bob), hasLength(1), reason: relay);
+        expect(held[relay]?.held[bob], hasLength(1), reason: 'saved $relay');
+      }
+      final RelayOutboxEntry pending =
+          (await mesh.nodes[alice]!.state()).outbox.values.single;
+      expect(pending.depositedTo.toSet(), bobRelays.toSet());
+
+      // The sender goes away too: only the locked phones can deliver now.
+      await mesh.goOffline(alice);
+      await mesh.goOnline(bob);
+
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['czekam na Ciebie']);
+      for (final String relay in bobRelays) {
+        expect(boxes[relay]!.heldFor(bob), isEmpty, reason: 'purged $relay');
+      }
+
+      // A mailbox phone is unlocked: what its service did is the app's now,
+      // so the delivered copy does not come back.
+      final String first = bobRelays.first;
+      await _unlock(mesh, first, held: held[first]);
+      final RelayState state = await mesh.nodes[first]!.state();
+      expect(state.mailbox[bob], isNull);
+      expect(
+        state.tombstones.keys.where((String k) => k.startsWith('$bob|')),
+        hasLength(1),
+      );
+      await mesh.advance(const Duration(minutes: 11));
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['czekam na Ciebie']);
+    });
+
+    test('mail held before the lock is handed out by the locked service; '
+        'mail it took in stays with the app after the unlock', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final List<String> bobRelays =
+          (await mesh.nodes[bob]!.state()).currentRelays;
+      await mesh.goOffline(bob);
+      await mesh.nodes[alice]!.engine.submit(bob, _text('pierwsza'));
+      await mesh.advance(const Duration(seconds: 5));
+      for (final String relay in bobRelays) {
+        expect((await mesh.nodes[relay]!.state()).mailbox[bob], hasLength(1));
+      }
+
+      final Map<String, LockedMailboxKit> held = <String, LockedMailboxKit>{};
+      final Map<String, LockedMailbox> boxes = <String, LockedMailbox>{
+        for (final String relay in bobRelays)
+          relay: await _lockAsMailbox(mesh, relay, held: held),
+      };
+      for (final String relay in bobRelays) {
+        expect(boxes[relay]!.heldFor(bob), hasLength(1), reason: relay);
+      }
+      await mesh.nodes[alice]!.engine.submit(bob, _text('druga'));
+      await mesh.advance(const Duration(seconds: 5));
+      await mesh.goOffline(alice);
+
+      // One mailbox phone is unlocked before bob is back: it holds both.
+      final String first = bobRelays.first;
+      await _unlock(mesh, first, held: held[first]);
+      expect((await mesh.nodes[first]!.state()).mailbox[bob], hasLength(2));
+      // Taking the same held kit again changes nothing.
+      await mesh.nodes[first]!.engine.takeLockedMailbox(held[first]);
+      expect((await mesh.nodes[first]!.state()).mailbox[bob], hasLength(2));
+
+      await mesh.goOnline(bob);
+      expect(mesh.nodes[bob]!.receivedTexts.toSet(), <String>{
+        'pierwsza',
+        'druga',
+      });
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(2));
+      expect((await mesh.nodes[first]!.state()).mailbox[bob], isNull);
+      for (final String relay in bobRelays.skip(1)) {
+        expect(boxes[relay]!.heldFor(bob), isEmpty, reason: relay);
+      }
+    });
+
+    test(
+      'the kit says whom the phone serves, with their deposit keys, and '
+      'what the phone took already; it is written only when it changed',
+      () async {
+        final _SimMesh mesh = await _meshWithRelays();
+        final String relay =
+            (await mesh.nodes[bob]!.state()).currentRelays.first;
+        await mesh.nodes[alice]!.engine.submit(relay, _text('do skrzynki'));
+        await mesh.settle();
+        expect(mesh.nodes[relay]!.receivedTexts, <String>['do skrzynki']);
+
+        final List<Object?> written = <Object?>[];
+        final LockedMailboxKitWriter writer = LockedMailboxKitWriter(
+          engine: mesh.nodes[relay]!.engine,
+          write: (Object? json) async => written.add(json),
+          readHeld: () async => null,
+        );
+        await writer.flush();
+        await writer.flush();
+        expect(written, hasLength(1), reason: 'unchanged: not written again');
+
+        final LockedMailboxKit kit = LockedMailboxKit.fromJson(
+          jsonDecode(jsonEncode(written.single)),
+        )!;
+        expect(kit.self, relay);
+        expect(kit.served[bob]?.relays, contains(relay));
+        expect(kit.served[bob]?.depositKey, isNotNull);
+        final String took = (await mesh.nodes[relay]!.state()).seen.keys
+            .firstWhere((String k) => k.startsWith('$alice|'));
+        expect(
+          kit.taken,
+          contains(
+            LockedMailboxKit.takenTag(alice, took.substring(alice.length + 1)),
+          ),
+        );
+        // Nothing that would open anything.
+        expect(jsonEncode(written.single), isNot(contains('do skrzynki')));
+      },
+    );
+
+    test('a locked mailbox takes mail only from the sender itself or a '
+        'fellow mailbox, and only for a friend that chose it', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final List<String> bobRelays =
+          (await mesh.nodes[bob]!.state()).currentRelays;
+      final String outsider = helpers.firstWhere(
+        (String h) => !bobRelays.contains(h),
+      );
+      await mesh.goOffline(bob);
+      await mesh.nodes[alice]!.engine.submit(bob, _text('tylko od Ady'));
+      await mesh.settle();
+      final Map<String, dynamic> envelope =
+          (await mesh.nodes[alice]!.engine.lockedOutboxKit())
+              .items
+              .single
+              .envelope;
+      final String relay = bobRelays.first;
+      final LockedMailbox box = await _lockAsMailbox(mesh, relay);
+
+      // Handed in by someone who is neither the sender nor a mailbox of bob.
+      await mesh.send(outsider, relay, <String, dynamic>{
+        'type': 'rly_deposit',
+        'env': envelope,
+      });
+      await mesh.settle();
+      expect(box.heldFor(bob), isEmpty);
+
+      // For someone who never chose this phone.
+      final String nobody = _addr('200::dd');
+      await mesh.send(alice, relay, <String, dynamic>{
+        'type': 'rly_deposit',
+        'env': <String, dynamic>{...envelope, 'r': nobody},
+      });
+      await mesh.settle();
+      expect(box.heldFor(nobody), isEmpty);
+      expect(box.heldCount, 0);
+
+      // From the sender itself.
+      await mesh.send(alice, relay, <String, dynamic>{
+        'type': 'rly_deposit',
+        'env': envelope,
+      });
+      await mesh.settle();
+      expect(box.heldFor(bob), hasLength(1));
+    });
+  });
+
   group('queueing rules', () {
     test('with the recipient offline and no mailboxes, the message waits '
         'at the sender, survives a restart and arrives once', () async {
@@ -1932,6 +2131,52 @@ final class _LockedNode extends MemorySignalTransport {
     required String remoteAddress,
     required Map<String, dynamic> payload,
   }) => mesh.send(address, remoteAddress, payload);
+}
+
+/// Locks the phone [address] with its mailbox kit, as the app hands it to
+/// the locked service: the service's node takes its frames and its mailbox
+/// for friends goes on. [held] gets what the service writes back.
+Future<LockedMailbox> _lockAsMailbox(
+  _SimMesh mesh,
+  String address, {
+  Map<String, LockedMailboxKit>? held,
+}) async {
+  final _SimNode node = mesh.nodes[address]!;
+  final LockedMailboxKit kit = LockedMailboxKit.fromJson(
+    jsonDecode(jsonEncode((await node.engine.lockedMailboxKit()).toJson())),
+  )!;
+  final _LockedNode transport = await _lock(mesh, address);
+  final LockedMailbox mailbox = LockedMailbox(
+    transport: transport,
+    kit: kit,
+    isFriend: node.friends.contains,
+    isContact: node.friends.contains,
+    save: (LockedMailboxKit saved) async {
+      // Through JSON, as the service's file does it.
+      held?[address] = LockedMailboxKit.fromJson(
+        jsonDecode(jsonEncode(saved.toJson())),
+      )!;
+    },
+    now: () => mesh.now,
+  );
+  node.lockedMailbox = mailbox;
+  return mailbox;
+}
+
+/// Unlocks [address]: the app takes over what its locked service held and
+/// owns the node again.
+Future<void> _unlock(
+  _SimMesh mesh,
+  String address, {
+  LockedMailboxKit? held,
+}) async {
+  final _SimNode node = mesh.nodes[address]!;
+  node
+    ..locked = null
+    ..lockedMailbox = null;
+  await node.engine.takeLockedMailbox(held);
+  await node.engine.activate();
+  await mesh.settle();
 }
 
 /// Locks [address]: its engine stops, the service's node takes its frames.

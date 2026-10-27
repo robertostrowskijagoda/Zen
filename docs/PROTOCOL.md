@@ -674,6 +674,22 @@ relays.
   recipient, unvouched strangers 30 messages / 256 KiB per recipient and 10 per
   /64, clock skew 1 day, 5000 seen and 5000 tombstones. Polls every 5 min,
   relay sync every 10 min.
+- **A locked Android phone stays a mailbox.** Once Zen locks (or after 5
+  minutes in the background) the background service runs the node without
+  the master key. From a mailbox kit the app leaves it (whom the phone
+  serves with their relays and deposit keys, the mail held, tombstones;
+  sealed with the background key) it goes on answering `rly_deposit`,
+  `rly_poll`, `rly_mail_ack`, `rly_purge`, `rly_sync` and `rly_sync_want`
+  by the same rules, and writes what it holds back to a file of its own,
+  which the app merges after unlock (`relay_engine_locked.dart`).
+  Attachments (`rly_bput`...) wait for the unlock.
+- **Mail for a locked phone** (`rly_mail` to the locked service) is kept
+  envelope by envelope, keyed like the direct payload (`sender|id`): a copy
+  that came already, directly or from another mailbox, or that the app
+  took before it locked (tags in the mailbox kit), is not kept or announced
+  again. The service answers `rly_mail_ack {ids}` once the envelopes are on
+  the disk (and `rly_ack` for envelopes handed over by their own sender's
+  locked outbox), so they are not handed over again at every poll.
 - A deposit is accepted only from the claimed sender or from a co-relay. A
   deposit token (`HMAC-SHA256(depositKey, "zen.relay.deposit-token.v1|recipient|sender")`
   truncated to 16 bytes, where `depositKey = HMAC-SHA256(identityPrivate,
@@ -947,7 +963,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Ledger audiences | ChaCha20-Poly1305, 32-byte keys, nonce 12 bytes random, AAD `account|kid` | `audience_keys.dart` |
 | Nearby | masked hash-chain tokens (10-min slots) and alarm MAC (v6) with a per-friend pair key | `nearby_crypto.dart` |
 | Local links (offline) | adverts: Bloom filters of HMAC tags; handshake: ephemeral X25519 and ML-KEM-768, selectors, HKDF, AES-256-GCM records; secrets from the two devices' X25519 keys, mixed with contributions exchanged over the session layer once paired (1.6) | `local_link*.go`, `runtime_lan_discovery.dart` |
-| Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
+| Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door, outbox, mailbox) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
 | Dating | `DatingBox`: two layers of the classical X25519 box (`zen.relay.v1`) with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)`; every hop is inside the post-quantum session layer | `dating_crypto.dart` |
 | Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; one-time hybrid cards for anonymous requests and votes; LSAG ring signatures (classical) only for card registration between cellmates | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
 | Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |

@@ -9,6 +9,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -39,6 +40,24 @@ const int _framed60 = 4 + 1 + kHybridCiphertextBytes + 12 + 60 + 16;
 
 Uint8List _masterKey([int seed = 7]) =>
     Uint8List.fromList(List<int>.generate(32, (int i) => i + seed));
+
+/// A mailbox envelope as it travels (sealed contents made up): [id] is
+/// its payload's reliable id.
+Map<String, dynamic> _envelope(
+  String id, {
+  required String from,
+  String to = 'me.ygg',
+  int now = 1000000,
+}) => <String, dynamic>{
+  'id': id,
+  's': from,
+  'r': to,
+  'c': now,
+  'x': now + const Duration(days: 1).inMilliseconds,
+  'q': base64Url.encode(List<int>.filled(kHybridCiphertextBytes, 1)),
+  'n': base64Url.encode(List<int>.filled(12, 1)),
+  'b': base64Url.encode(List<int>.filled(40, 1)),
+};
 
 void main() {
   late Directory support;
@@ -684,7 +703,8 @@ void main() {
     });
 
     test(
-      'mailbox duties for friends pause; mail for this phone is kept',
+      'without a mailbox kit mailbox duties for friends pause; mail for this '
+      'phone is kept',
       () async {
         await startReceiver(await publishFor(_masterKey()));
         transport.sentSignals.clear();
@@ -697,12 +717,12 @@ void main() {
         expect(transport.sentSignals, isEmpty);
         await receive(_mailbox, <String, dynamic>{
           'type': 'rly_mail',
-          'items': <String>['sealed'],
+          'items': <Object>[_envelope('e0', from: _bob)],
         });
         // The mailbox is not a friend here: only friends' mail frames count.
         await receive(_ada, <String, dynamic>{
           'type': 'rly_mail',
-          'items': <String>['sealed'],
+          'items': <Object>['not an envelope', _envelope('e1', from: _bob)],
         });
         expect(receiver.keptCount, 1);
       },
@@ -951,6 +971,209 @@ void main() {
       );
       expect(order, <String>['a', 'b']);
       expect(await appVault.hasInbox(), isFalse);
+    });
+  });
+
+  group('locked receiver: one notice per message', () {
+    late MemorySignalTransport transport;
+    late MemoryRuntimeSystemNotificationService notices;
+    late LockedReceiver receiver;
+    int clock = 1000000;
+
+    Future<void> startReceiver({
+      Set<String> taken = const <String>{},
+      LockedMailbox? mailbox,
+      MemorySignalTransport? over,
+    }) async {
+      final BackgroundCapability capability = await publishFor(_masterKey());
+      transport = over ?? MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        mailboxPollInterval: Duration.zero,
+        taken: taken,
+        mailbox: mailbox,
+        now: () => clock,
+      );
+      await receiver.start();
+      transport.sentSignals.clear();
+    }
+
+    tearDown(() async {
+      await receiver.stop();
+    });
+
+    Future<void> receive(String from, Map<String, dynamic> payload) async {
+      await receiver.handleFrame(
+        SignalTransportFrame(
+          from: from,
+          payload: payload,
+          receivedAtMillis: clock,
+        ),
+      );
+    }
+
+    List<Map<String, dynamic>> sent(
+      String type, {
+      String? to,
+    }) => <Map<String, dynamic>>[
+      for (final ({String remoteAddress, Map<String, dynamic> payload}) s
+          in transport.sentSignals)
+        if (s.payload['type'] == type && (to == null || s.remoteAddress == to))
+          s.payload,
+    ];
+
+    test('the same message directly and then from a mailbox: kept and told '
+        'once, the mailbox hears it is here', () async {
+      await startReceiver();
+      await receive(_ada, <String, dynamic>{
+        'type': 'message',
+        '_rid': 'r1',
+        'text': 'Hej',
+      });
+      // Minutes later the mailbox (bob's phone) hands the same over.
+      clock += const Duration(minutes: 5).inMilliseconds;
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[_envelope('r1', from: _ada)],
+      });
+
+      expect(receiver.keptCount, 1);
+      expect(notices.activeNotifications, hasLength(1));
+      expect(notices.audibleAlertCount, 1);
+      expect(sent('rly_mail_ack', to: _bob).single['ids'], <String>['r1']);
+    });
+
+    test('a mailbox handing the same mail over at every poll: kept and told '
+        'once', () async {
+      await startReceiver();
+      for (int poll = 0; poll < 3; poll++) {
+        await receive(_bob, <String, dynamic>{
+          'type': 'rly_mail',
+          'items': <Object>[_envelope('m1', from: _ada)],
+        });
+        clock += kLockedMailboxPollInterval.inMilliseconds;
+      }
+      // And the same message straight from its sender after all.
+      await receive(_ada, <String, dynamic>{
+        'type': 'message',
+        '_rid': 'm1',
+        'text': 'Hej',
+      });
+
+      expect(receiver.keptCount, 1);
+      expect(notices.audibleAlertCount, 1);
+      expect(sent('rly_mail_ack', to: _bob), hasLength(3));
+      expect(sent('rly_ack', to: _ada).single['rid'], 'm1');
+    });
+
+    test('mail straight from a sender\'s locked outbox is confirmed to the '
+        'sender, so it stops sending it again', () async {
+      await startReceiver();
+      final Map<String, dynamic> mail = <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[_envelope('q1', from: _ada)],
+      };
+      await receive(_ada, mail);
+      clock += const Duration(minutes: 10).inMilliseconds;
+      await receive(_ada, mail);
+
+      expect(receiver.keptCount, 1);
+      expect(notices.audibleAlertCount, 1);
+      expect(
+        sent('rly_ack', to: _ada).map((Map<String, dynamic> p) => p['rid']),
+        <String>['q1', 'q1'],
+      );
+    });
+
+    test('what the app took before it locked is confirmed, never kept or told '
+        'about again', () async {
+      await startReceiver(
+        taken: <String>{
+          LockedMailboxKit.takenTag(_ada, 'old'),
+          LockedMailboxKit.takenTag(_ada, 'older'),
+        },
+      );
+      // The sender missed the app's confirmation and sends it again.
+      await receive(_ada, <String, dynamic>{
+        'type': 'message',
+        '_rid': 'old',
+        'text': 'Hej',
+      });
+      // A mailbox still had a copy of another one.
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[_envelope('older', from: _ada)],
+      });
+
+      expect(receiver.keptCount, 0);
+      expect(notices.activeNotifications, isEmpty);
+      expect(sent('rly_ack', to: _ada).single['rid'], 'old');
+      expect(sent('rly_mail_ack', to: _bob).single['ids'], <String>['older']);
+    });
+
+    test('a frame without a reliable id that comes again later is kept '
+        'once', () async {
+      await startReceiver();
+      final Map<String, dynamic> announce = <String, dynamic>{
+        'type': 'rly_announce',
+        'v': 3,
+        'relays': <String>[_bob],
+      };
+      await receive(_ada, announce);
+      clock += const Duration(minutes: 2).inMilliseconds;
+      await receive(_ada, announce);
+      expect(receiver.keptCount, 1);
+    });
+
+    test('with a mailbox kit the phone stays a mailbox: a friend\'s sender who '
+        'is no contact here leaves mail, the friend collects it', () async {
+      const String self = 'me.ygg';
+      final MemorySignalTransport shared = MemorySignalTransport();
+      LockedMailboxKit? saved;
+      final LockedMailbox mailbox = LockedMailbox(
+        transport: shared,
+        kit: const LockedMailboxKit(
+          self: self,
+          served: <String, LockedMailboxPeer>{
+            _ada: LockedMailboxPeer(relays: <String>[self, _bob]),
+          },
+        ),
+        isFriend: (String a) => a == _ada || a == _bob,
+        isContact: (String a) => a == _ada || a == _bob,
+        save: (LockedMailboxKit kit) async => saved = kit,
+        now: () => clock,
+      );
+      await startReceiver(mailbox: mailbox, over: shared);
+
+      await receive(_stranger, <String, dynamic>{
+        'type': 'rly_deposit',
+        'env': _envelope('d1', from: _stranger, to: _ada, now: clock),
+      });
+      expect(mailbox.heldFor(_ada), <String>['d1']);
+      expect(saved?.held[_ada]?.keys, <String>['d1']);
+      expect(sent('rly_deposit_ack', to: _stranger).single['id'], 'd1');
+
+      await receive(_ada, <String, dynamic>{'type': 'rly_poll'});
+      final List<Map<String, dynamic>> mail = sent('rly_mail', to: _ada);
+      expect(mail, isNotEmpty);
+      expect((mail.last['items'] as List).single['id'], 'd1');
+
+      await receive(_ada, <String, dynamic>{
+        'type': 'rly_mail_ack',
+        'ids': <String>['d1'],
+      });
+      expect(mailbox.heldFor(_ada), isEmpty);
+      expect(saved?.tombstones.keys, <String>['$_ada|d1']);
+      // Nothing of it went into this phone's own inbox, nothing was told.
+      expect(receiver.keptCount, 0);
+      expect(notices.activeNotifications, isEmpty);
     });
   });
 
