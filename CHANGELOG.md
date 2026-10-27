@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### What's new
+- [en] Messages reach you even when Zen is closed or locked: your trusted friends' phones keep them for you like mailboxes.
+- [en] See whether a friend has Zen open, in the background or offline, and find your notifications in a list behind the bell.
+- [en] Zen tells you about a new version within hours, with a short note like this one.
+- [pl] Wiadomości docierają nawet przy zamkniętym lub zablokowanym Zen: telefony zaufanych znajomych przechowują je dla Ciebie jak skrzynki.
+- [pl] Widzisz, czy znajomy ma Zen otwarty, w tle czy offline, a powiadomienia czekają na liście pod dzwonkiem.
+- [pl] Zen mówi o nowej wersji w ciągu kilku godzin, z krótką notką taką jak ta.
+
 ## 1.12.1 — 24.10.2026
 - Sending a GIF from the keyboard no longer crashes the app; GIFs show without a bubble or caption.
 - Unlocking asks for the fingerprint or face at once when biometric unlock is on.
