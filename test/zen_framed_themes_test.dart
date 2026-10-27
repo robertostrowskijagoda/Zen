@@ -142,6 +142,33 @@ void main() {
     }
   });
 
+  test('a frame leaves room for what is written inside it', () {
+    // The notches, the scallop bites and the leaf veins reach in as far as
+    // the frame's own marks: the content starts past them.
+    int checked = 0;
+    for (final AppPalette p in _framed) {
+      final ZenLook look = ZenLook.forPalette(p);
+      final ZenColors c = _colors(p, Brightness.light);
+      final ShapeBorder shape = look.panelShape(c);
+      final double room = (shape.dimensions.resolve(TextDirection.ltr)).left;
+      if (shape is ZenNotchBorder) {
+        expect(room, greaterThanOrEqualTo(shape.notch + 2), reason: '$p');
+        checked++;
+      } else if (shape is ZenScallopBorder) {
+        expect(
+          room,
+          greaterThanOrEqualTo(shape.bite + shape.width + 2),
+          reason: '$p',
+        );
+        checked++;
+      } else if (shape is ZenLeafBorder) {
+        expect(room, greaterThanOrEqualTo(shape.width + 3), reason: '$p');
+        checked++;
+      }
+    }
+    expect(checked, greaterThan(0), reason: 'a framed theme has such a frame');
+  });
+
   test('the frames compare, copy and scale', () {
     for (final AppPalette p in _framed) {
       final ZenLook look = ZenLook.forPalette(p);

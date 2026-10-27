@@ -110,6 +110,9 @@ void main() {
     );
 
     expect(_countText(tester), '2');
+    // A screen reader says the count too (the tooltip is its label), and it
+    // goes when there is nothing new.
+    expect(find.byTooltip('Powiadomienia: 2 nowe'), findsOneWidget);
     // The chats list no longer carries the alert banner or the plain cards.
     expect(find.text('Ada zaakceptował(a) zaproszenie'), findsNothing);
 
@@ -130,6 +133,7 @@ void main() {
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(_countText(tester), isNull);
+    expect(find.byTooltip('Powiadomienia'), findsOneWidget);
 
     await tester.tap(find.byKey(_bell));
     await tester.pumpAndSettle();

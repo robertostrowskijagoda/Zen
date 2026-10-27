@@ -370,5 +370,156 @@ void main() {
       expect(find.text('Hej @Ada!', findRichText: true), findsOneWidget);
       expect(find.textContaining('<@0>', findRichText: true), findsNothing);
     });
+
+    // A mention is told from the text around it by more than its colour.
+    bool underlined(InlineSpan root, String text) {
+      bool found = false;
+      root.visitChildren((InlineSpan span) {
+        if (span is TextSpan &&
+            (span.text ?? '').contains(text) &&
+            span.style?.decoration == TextDecoration.underline) {
+          found = true;
+        }
+        return true;
+      });
+      return found;
+    }
+
+    testWidgets(
+      'a mention in the text shown is underlined, not only coloured',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: CopyableText(
+                  'Hej <@0>!',
+                  mentions: <Mention>[_ada],
+                  style: TextStyle(),
+                ),
+              ),
+            ),
+          ),
+        );
+        final RichText shown = tester.widget<RichText>(
+          find.text('Hej @Ada!', findRichText: true),
+        );
+        expect(underlined(shown.text, '@Ada'), isTrue);
+        expect(underlined(shown.text, 'Hej'), isFalse);
+      },
+    );
+
+    testWidgets('a mention being written is underlined in the field', (
+      WidgetTester tester,
+    ) async {
+      final MentionTextController field = MentionTextController();
+      addTearDown(field.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TextField(key: const Key('f'), controller: field),
+          ),
+        ),
+      );
+      field.setStoredText('Hej <@0> ', <Mention>[_bob]);
+      await tester.pump();
+      final BuildContext context = tester.element(find.byKey(const Key('f')));
+      final TextSpan span = field.buildTextSpan(
+        context: context,
+        style: const TextStyle(),
+        withComposing: false,
+      );
+      expect(underlined(span, '@Bob Nowak'), isTrue);
+      expect(underlined(span, 'Hej'), isFalse);
+    });
+
+    testWidgets('a name nobody matches says so; a bare "@" says nothing', (
+      WidgetTester tester,
+    ) async {
+      final MentionTextController field = MentionTextController();
+      addTearDown(field.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: <Widget>[
+                  MentionSuggestions(
+                    controller: field,
+                    candidates: () => const <MentionCandidate>[
+                      MentionCandidate(
+                        mention: _ada,
+                        reach: MentionReach.member,
+                      ),
+                    ],
+                  ),
+                  TextField(key: const Key('f'), controller: field),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      final Finder empty = find.byKey(const Key('mention-suggestions-empty'));
+      final Finder list = find.byKey(const Key('mention-suggestions'));
+      await tester.enterText(find.byKey(const Key('f')), 'Hej @');
+      await tester.pump();
+      expect(list, findsOneWidget, reason: 'everyone is offered');
+      expect(empty, findsNothing);
+
+      await tester.enterText(find.byKey(const Key('f')), 'Hej @zzz');
+      await tester.pump();
+      expect(list, findsNothing);
+      expect(empty, findsOneWidget);
+      expect(find.text('Brak pasujących osób'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('f')), 'Hej Ada');
+      await tester.pump();
+      expect(empty, findsNothing);
+    });
+
+    testWidgets('the list comes into view when the field sits in a scroll', (
+      WidgetTester tester,
+    ) async {
+      final MentionTextController field = MentionTextController();
+      addTearDown(field.dispose);
+      tester.view.physicalSize = const Size(400, 300);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: Column(
+                  children: <Widget>[
+                    const SizedBox(height: 240),
+                    TextField(key: const Key('f'), controller: field),
+                    MentionSuggestions(
+                      controller: field,
+                      candidates: () => const <MentionCandidate>[
+                        MentionCandidate(
+                          mention: _ada,
+                          reach: MentionReach.member,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 200),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byKey(const Key('f')), '@');
+      await tester.pump();
+      await tester.pumpAndSettle();
+      final Rect box = tester.getRect(
+        find.byKey(const Key('mention-suggestions')),
+      );
+      expect(box.top, greaterThanOrEqualTo(0));
+      expect(box.bottom, lessThanOrEqualTo(300));
+    });
   });
 }

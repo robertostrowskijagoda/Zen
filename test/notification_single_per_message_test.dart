@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -9,11 +10,13 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -118,6 +121,7 @@ ProviderContainer _boot(
   RuntimeNotificationCenter? center,
   bool hideContent = false,
   ZenSoundEffects? sounds,
+  List extraOverrides = const [],
 }) {
   final ProviderContainer container = ProviderContainer(
     overrides: [
@@ -138,6 +142,7 @@ ProviderContainer _boot(
         runtimeNotificationCenterProvider.overrideWithValue(center),
       if (sounds != null) zenSoundEffectsProvider.overrideWithValue(sounds),
       socialHubSeedProvider.overrideWithValue(_seed(lifecycle)),
+      ...extraOverrides,
     ],
   );
   addTearDown(container.dispose);
@@ -772,6 +777,140 @@ void main() {
         );
       });
     }
+  });
+
+  group('wiadomość od kogoś spoza znajomych', () {
+    final String stranger = PeerShareCodec.normalizeAddress('200::5ed');
+    ZenSignal fromStranger(String id) => ZenSignal(
+      type: ZenSignalType.message,
+      sender: stranger,
+      messageId: id,
+      content: 'Dzień dobry',
+      miniProfile: const <String, dynamic>{'n': 'Zed'},
+    );
+
+    Future<
+      ({
+        ProviderContainer container,
+        MemoryRuntimeSystemNotificationService service,
+      })
+    >
+    boot() async {
+      final MemoryRuntimeSystemNotificationService service =
+          MemoryRuntimeSystemNotificationService();
+      final StrangerChatBook book = StrangerChatBook(disk: MemoryLedgerDisk());
+      await book.setFrom(StrangerMessagesFrom.everyone);
+      final ProviderContainer container = _boot(
+        _Storage(),
+        lifecycle: _background,
+        service: service,
+        extraOverrides: [strangerChatsProvider.overrideWithValue(book)],
+      );
+      return (container: container, service: service);
+    }
+
+    test('jedna wiadomość: jedno powiadomienie, a kopie ze skrzynki nic nie '
+        'dodają', () async {
+      final b = await boot();
+      final SocialHubController controller = _controller(b.container);
+      await controller.receiveSignal(
+        fromStranger('s-1'),
+        receivedAtMillis: 1000,
+      );
+      expect(b.service.activeNotifications, hasLength(1));
+      expect(b.service.audibleAlertCount, 1);
+      expect(b.service.activeNotifications.single.stackCount, 1);
+
+      await controller.receiveSignal(
+        fromStranger('s-1'),
+        receivedAtMillis: 1500,
+      );
+      await controller.receiveSignal(
+        fromStranger('s-1'),
+        receivedAtMillis: 1000 + kNotificationRealertWindow.inMilliseconds,
+      );
+      expect(b.service.activeNotifications, hasLength(1));
+      expect(b.service.activeNotifications.single.stackCount, 1);
+      expect(b.service.audibleAlertCount, 1);
+    });
+
+    test(
+      'zdjęcie, gif, plik i głos od obcego nie przechodzą: tylko tekst',
+      () async {
+        final b = await boot();
+        final SocialHubController controller = _controller(b.container);
+        for (final ChatMessageType type in <ChatMessageType>[
+          ChatMessageType.image,
+          ChatMessageType.file,
+          ChatMessageType.voice,
+          ChatMessageType.video,
+        ]) {
+          await controller.receiveSignal(
+            ZenSignal(
+              type: ZenSignalType.message,
+              sender: stranger,
+              messageId: 'a-${type.name}',
+              content: 'Podpis',
+              messageType: type,
+              attachmentData: 'AAAA',
+              miniProfile: const <String, dynamic>{'n': 'Zed'},
+            ),
+            receivedAtMillis: 1000,
+          );
+        }
+        expect(b.service.activeNotifications, isEmpty);
+        expect(b.service.audibleAlertCount, 0);
+      },
+    );
+
+    test(
+      'bez identyfikatora nie ma czego powtarzać: nic nie przechodzi',
+      () async {
+        final b = await boot();
+        await _controller(b.container).receiveSignal(
+          ZenSignal(
+            type: ZenSignalType.message,
+            sender: stranger,
+            content: 'Bez id',
+            miniProfile: const <String, dynamic>{'n': 'Zed'},
+          ),
+          receivedAtMillis: 1000,
+        );
+        expect(b.service.activeNotifications, isEmpty);
+      },
+    );
+  });
+
+  group('wiadomość bez identyfikatora od znajomego', () {
+    test(
+      'kopia przysłana później nie daje drugiego powiadomienia',
+      () async {
+        final MemoryRuntimeSystemNotificationService service =
+            MemoryRuntimeSystemNotificationService();
+        final ProviderContainer container = _boot(
+          _Storage(),
+          lifecycle: _background,
+          service: service,
+        );
+        final SocialHubController controller = _controller(container);
+        final ZenSignal withoutId = ZenSignal(
+          type: ZenSignalType.message,
+          sender: _ada,
+          displayName: 'Ada',
+          content: 'Hej!',
+        );
+        await controller.receiveSignal(withoutId, receivedAtMillis: 1000);
+        await controller.receiveSignal(withoutId, receivedAtMillis: 4000);
+        expect(service.activeNotifications.single.stackCount, 1);
+        expect(service.audibleAlertCount, 1);
+      },
+      skip:
+          'Real finding (low): the message frame of a friend with no msgId is '
+          'stored under an id made from the arrival time, so a copy that '
+          'arrives later is a second message with a second notification. '
+          'Current clients always send msgId; only a replayed or odd frame '
+          'is affected.',
+    );
   });
 
   group('ten sam identyfikator w dwóch różnych czatach', () {

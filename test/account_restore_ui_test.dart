@@ -539,5 +539,79 @@ void main() {
       expect(places.written.single, places.defaultPlace);
       expect(File(places.path).existsSync(), isTrue);
     });
+
+    testWidgets('the passwords are hidden until "Pokaż", both fields at once', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await pumpBackup(
+        tester,
+        _Places('${dir.path}/k.$kAccountBackupExtension'),
+      );
+      bool hidden(String key) =>
+          tester.widget<TextField>(find.byKey(Key(key))).obscureText;
+      expect(hidden('account-backup-password'), isTrue);
+      expect(hidden('account-backup-repeat'), isTrue);
+      expect(find.byTooltip('Pokaż'), findsNWidgets(2));
+
+      await tester.tap(find.byTooltip('Pokaż').first);
+      await tester.pump();
+      expect(hidden('account-backup-password'), isFalse);
+      expect(hidden('account-backup-repeat'), isFalse);
+      expect(find.byTooltip('Ukryj'), findsNWidgets(2));
+
+      await tester.tap(find.byTooltip('Ukryj').last);
+      await tester.pump();
+      expect(hidden('account-backup-password'), isTrue);
+    });
+
+    testWidgets('an error is a live region, scrolled into view below the '
+        'fold', (WidgetTester tester) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await pumpBackup(
+        tester,
+        _Places('${dir.path}/k.$kAccountBackupExtension'),
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-backup-password')),
+        'dobre hasło 1',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-backup-repeat')),
+        'inne hasło 1',
+      );
+      // A short window: the button, and so the message under it, are far
+      // below the first screenful.
+      tester.view.physicalSize = const Size(900, 500);
+      await tester.pump();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('account-backup-create')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(
+        find.byKey(const Key('account-backup-create')),
+      );
+      await tester.tap(find.byKey(const Key('account-backup-create')));
+      await _real(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      final Finder message = find.byKey(const Key('account-backup-message'));
+      expect(message, findsOneWidget);
+      expect(
+        find.descendant(
+          of: message,
+          matching: find.byWidgetPredicate(
+            (Widget w) => w is Semantics && w.properties.liveRegion == true,
+          ),
+        ),
+        findsOneWidget,
+        reason: 'read out when it appears',
+      );
+      final Rect box = tester.getRect(message);
+      expect(box.top, greaterThanOrEqualTo(0));
+      expect(box.bottom, lessThanOrEqualTo(500), reason: 'on screen');
+    });
   });
 }
