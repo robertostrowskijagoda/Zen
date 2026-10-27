@@ -3270,10 +3270,13 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
 /// battery managers kill that service after the app is swiped away, and
 /// Android 12+ refuses to let it restart itself from the background. The
 /// result the user sees is a missed call and no notification.
-/// Entry point to the shared on-device log.
+/// Entry point to the shared on-device log (with the technical log's
+/// lines: wakes, modes, the node's numbers, how Android ended the app).
 ///
 /// The foreground service isolate runs with no UI and no debugger attached, so
-/// when background delivery breaks this is the only way to see where.
+/// when background delivery breaks this is the only way to see where. The
+/// screen shows the latest [_shownEntries] entries; the saved file holds
+/// them all.
 class _DiagnosticsScreen extends StatefulWidget {
   const _DiagnosticsScreen();
 
@@ -3281,8 +3284,12 @@ class _DiagnosticsScreen extends StatefulWidget {
   State<_DiagnosticsScreen> createState() => _DiagnosticsScreenState();
 }
 
+/// How many of the latest entries the screen shows.
+const int _shownEntries = 500;
+
 class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   String? _contents;
+  int _total = 0;
 
   @override
   void initState() {
@@ -3291,11 +3298,42 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _reload() async {
-    final String contents = await ZenDiagnosticsLog.read();
+    final List<String> entries = await ZenDiagnosticsLog.entries();
     if (!mounted) {
       return;
     }
-    setState(() => _contents = contents);
+    final List<String> shown = entries.length > _shownEntries
+        ? entries.sublist(entries.length - _shownEntries)
+        : entries;
+    setState(() {
+      _total = entries.length;
+      _contents = shown.join('\n');
+    });
+  }
+
+  Future<void> _save() async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      final String? path = await saveDiagnosticsLog();
+      if (path != null) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              t('Zapisano bez szyfrowania: {path}', {'path': path}),
+            ),
+          ),
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Saving the diagnostics log failed', error, stackTrace);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            t('Nie udało się zapisać pliku: {error}', {'error': error}),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _copy() async {
@@ -3319,8 +3357,14 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
     final String? contents = _contents;
     return Scaffold(
       appBar: AppBar(
-        title: Text(t('Dziennik diagnostyczny')),
+        title: Text(t('Dziennik techniczny')),
         actions: <Widget>[
+          IconButton(
+            key: const Key('diagnostics-save'),
+            onPressed: contents == null || contents.isEmpty ? null : _save,
+            icon: const Icon(Icons.save_alt_rounded),
+            tooltip: t('Zapisz plik'),
+          ),
           IconButton(
             key: const Key('diagnostics-reload'),
             onPressed: _reload,
@@ -3366,23 +3410,38 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
             : Scrollbar(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: zen.surfaceSunk,
-                      borderRadius: context.zenRadius(18),
-                      border: Border.all(color: zen.outlineSoft),
-                    ),
-                    child: SelectableText(
-                      contents,
-                      style: zen.mono(
-                        color: zen.textSecondary,
-                        size: 11.5,
-                        height: 1.45,
-                        letterSpacing: 0,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      if (_total > _shownEntries)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            t(
+                              'Ostatnie {shown} z {total} wpisów. Cały dziennik jest w zapisanym pliku.',
+                              {'shown': _shownEntries, 'total': _total},
+                            ),
+                            style: TextStyle(color: zen.textSecondary),
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: zen.surfaceSunk,
+                          borderRadius: context.zenRadius(18),
+                          border: Border.all(color: zen.outlineSoft),
+                        ),
+                        child: SelectableText(
+                          contents,
+                          style: zen.mono(
+                            color: zen.textSecondary,
+                            size: 11.5,
+                            height: 1.45,
+                            letterSpacing: 0,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
