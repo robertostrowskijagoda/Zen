@@ -12,7 +12,7 @@ require (
 	github.com/wlynxg/anet v0.0.5
 	github.com/yggdrasil-network/yggdrasil-go v0.5.14
 	golang.org/x/crypto v0.53.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
