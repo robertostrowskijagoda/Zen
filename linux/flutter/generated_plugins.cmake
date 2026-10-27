@@ -3,10 +3,10 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  app_links_linux
   file_selector_linux
   flutter_secure_storage_linux
   flutter_webrtc
-  gtk
   record_linux
   screen_retriever_linux
   system_tray
