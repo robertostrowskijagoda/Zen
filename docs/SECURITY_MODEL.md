@@ -180,7 +180,9 @@ friend vouching for their key, is trust on first use.
   screenshots and screen recording (Android, Windows, macOS). Clipboard
   copies of secrets (the account key, a transfer code) expire after 60
   seconds; the invitation code is the public address and stays.
-  Notifications show no content by default.
+  Notifications show the sender and the start of a message by default; the
+  first-run setup asks, and "Without sender and content" or "Sender only"
+  can be chosen globally or per conversation.
 - **Media in the clear, briefly.** Some media must exist as a plain file for
   a moment (a call recording being written, an alarm clip, a video being
   published, a file handed to the system player). They go to a private
