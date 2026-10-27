@@ -24,8 +24,7 @@ String lockedNoticeKitSignature(SocialHubState state) {
       'f:${friend.status.name}:${friend.address}:${friend.displayLabel}',
     for (final GroupProfile group in state.groups.values)
       'g:${group.id}:${group.isInvitePending}:${group.name}:'
-          '${group.memberAddresses.join(',')}:'
-          '${jsonEncode(group.memberNames)}',
+          '${group.memberAddresses.join(',')}',
     for (final MapEntry<String, NotificationPrivacy> e
         in state.notificationPrivacy.entries)
       'n:${e.key}:${e.value.name}',

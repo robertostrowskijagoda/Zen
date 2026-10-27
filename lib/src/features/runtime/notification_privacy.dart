@@ -176,25 +176,35 @@ String conversationKeyOfSignal(ZenSignal signal) {
 /// [kLockedNoticePreviewChars] of what) in its notifications: the level
 /// ([privacy]) and the conversations'
 /// own levels ([overrides]); and the names ([names]: by normalized address
-/// and by group key) of only those conversations whose level shows the
-/// sender. Sealed with the background key, like the other kits; the app
-/// writes it whenever any of it changes ([lockedNoticeKitOf]).
+/// and by group key) and the members ([members]: by group key) of only
+/// those conversations whose level shows the sender. Sealed with the
+/// background key, like the other kits; the app writes it whenever any of
+/// it changes ([lockedNoticeKitOf]).
 ///
 /// A conversation the kit has no name for is told about without one: so is
-/// everything from strangers and everything without a kit.
+/// everything from strangers, a group message from anyone the kit does not
+/// list as a member of that group, and everything without a kit. A name
+/// the sender gave itself is never shown: only the names this person gave
+/// their friends.
 @immutable
 final class LockedNoticeKit {
   const LockedNoticeKit({
     this.privacy = AppSettings.defaultNotificationPrivacy,
     this.overrides = const <String, NotificationPrivacy>{},
     this.names = const <String, String>{},
+    this.members = const <String, Set<String>>{},
   });
 
   final NotificationPrivacy privacy;
   final Map<String, NotificationPrivacy> overrides;
   final Map<String, String> names;
 
-  /// The most names and levels a kit holds.
+  /// The normalized addresses of each group's members (a friend's other
+  /// devices among them), by group key.
+  final Map<String, Set<String>> members;
+
+  /// The most names and levels a kit holds, and the most members of all
+  /// its groups together.
   static const int maxEntries = 2000;
 
   NotificationPrivacy levelOf(String key) => overrides[key] ?? privacy;
@@ -228,11 +238,13 @@ final class LockedNoticeKit {
     if (level == NotificationPrivacy.generic || known == null) {
       return generic;
     }
+    // Anyone may claim to write in a group: only its members are told
+    // about by name, and only by the name this person gave them.
+    if (inGroup && !(members[key]?.contains(sender) ?? false)) {
+      return generic;
+    }
     final String senderName = inGroup
-        ? (names[sender] ??
-              (sanitizePeerName(signal.displayName).isNotEmpty
-                  ? sanitizePeerName(signal.displayName)
-                  : t('Kontakt Zen')))
+        ? (names[sender] ?? t('Kontakt Zen'))
         : known;
     final String? preview = signalNoticePreview(signal);
     return messageNoticeText(
@@ -254,6 +266,11 @@ final class LockedNoticeKit {
           e.key: e.value.name,
       },
     if (names.isNotEmpty) 'n': names,
+    if (members.isNotEmpty)
+      'm': <String, List<String>>{
+        for (final MapEntry<String, Set<String>> e in members.entries)
+          e.key: e.value.toList(growable: false),
+      },
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -273,6 +290,28 @@ final class LockedNoticeKit {
         key is String && key.isNotEmpty && key.length <= 300;
     final Object? o = json['o'];
     final Object? n = json['n'];
+    final Object? m = json['m'];
+    int memberCount = 0;
+    final Map<String, Set<String>> members = <String, Set<String>>{};
+    if (m is Map) {
+      for (final MapEntry<dynamic, dynamic> e in m.entries.take(maxEntries)) {
+        final Object? list = e.value;
+        if (!fits(e.key) || list is! List) {
+          continue;
+        }
+        final Set<String> group = <String>{};
+        for (final Object? address in list) {
+          if (memberCount >= maxEntries) {
+            break;
+          }
+          if (fits(address)) {
+            group.add(address as String);
+            memberCount += 1;
+          }
+        }
+        members[e.key as String] = group;
+      }
+    }
     return LockedNoticeKit(
       // An unreadable level says the least.
       privacy: level(json['p']) ?? NotificationPrivacy.generic,
@@ -288,13 +327,17 @@ final class LockedNoticeKit {
             if (fits(e.key) && e.value is String)
               e.key as String: sanitizePeerName(e.value as String),
       },
+      members: members,
     );
   }
 }
 
 /// The kit for [state] with the global level [privacy]: each friend's and
-/// each joined group's own level, and the names of those whose level shows
-/// who wrote. A friend's other devices ([directory]) count as the friend.
+/// each joined group's own level, and the names (and a group's members) of
+/// those whose level shows who wrote. A friend's other devices
+/// ([directory]) count as the friend. The names group members gave
+/// themselves stay out: a member who is not a friend is told about without
+/// a name.
 LockedNoticeKit lockedNoticeKitOf(
   SocialHubState state, {
   required NotificationPrivacy privacy,
@@ -304,6 +347,8 @@ LockedNoticeKit lockedNoticeKitOf(
   final Map<String, NotificationPrivacy> overrides =
       <String, NotificationPrivacy>{};
   final Map<String, String> names = <String, String>{};
+  final Map<String, Set<String>> members = <String, Set<String>>{};
+  int memberCount = 0;
   Iterable<String> devicesOf(String address) {
     final String? account = directory?.accountOf(address);
     return <String>{
@@ -346,18 +391,21 @@ LockedNoticeKit lockedNoticeKitOf(
       continue;
     }
     names[key] = group.name;
-    group.memberNames.forEach((String address, String name) {
-      final String member = normal(address);
-      if (member.isNotEmpty && name.trim().isNotEmpty) {
-        names.putIfAbsent(member, () => name);
-      }
-    });
+    final Set<String> listed = <String>{};
     for (final String member in group.memberAddresses) {
+      for (final String device in devicesOf(member)) {
+        if (device.isNotEmpty &&
+            memberCount < LockedNoticeKit.maxEntries &&
+            listed.add(device)) {
+          memberCount += 1;
+        }
+      }
       final FriendProfile? friend = state.friendByAddress(member);
       if (friend != null) {
         names[normal(member)] = friend.displayLabel;
       }
     }
+    members[key] = listed;
   }
   return LockedNoticeKit(
     privacy: privacy,
@@ -367,6 +415,7 @@ LockedNoticeKit lockedNoticeKitOf(
             names.entries.take(LockedNoticeKit.maxEntries),
           )
         : names,
+    members: members,
   );
 }
 

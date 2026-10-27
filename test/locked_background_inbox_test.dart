@@ -649,6 +649,9 @@ void main() {
           _member: 'Marek',
           'group:g1': 'Ekipa',
         },
+        members: <String, Set<String>>{
+          'group:g1': <String>{_ada, _member},
+        },
       );
       LockedNoticeKit kit({
         NotificationPrivacy privacy = NotificationPrivacy.senderAndContent,
@@ -658,6 +661,7 @@ void main() {
         privacy: privacy,
         overrides: overrides,
         names: names.names,
+        members: names.members,
       );
 
       Future<RuntimeSystemNotification> noticeFor(
@@ -697,6 +701,33 @@ void main() {
         expect(notice.title, 'Ekipa');
         expect(notice.body, 'Marek: Kto idzie?');
       });
+
+      test(
+        'a group message names only members, never by the name they sent',
+        () async {
+          // Not a member of the group: only that something came.
+          RuntimeSystemNotification notice = await noticeFor(
+            kit(),
+            _bob,
+            <String, dynamic>{...inGroup, '_rid': 'p3', 'senderName': 'Ada'},
+          );
+          expect(notice.title, 'Nowa wiadomość');
+          expect('${notice.title} ${notice.body}', isNot(contains('Ada')));
+          expect('${notice.title} ${notice.body}', isNot(contains('Kto')));
+          await receiver.stop();
+          // A member the kit has no name for: never the name it chose.
+          notice = await noticeFor(
+            LockedNoticeKit(
+              names: const <String, String>{'group:g1': 'Ekipa', _ada: 'Ada'},
+              members: names.members,
+            ),
+            _member,
+            <String, dynamic>{...inGroup, '_rid': 'p4', 'senderName': 'Ada'},
+          );
+          expect(notice.title, 'Ekipa');
+          expect(notice.body, 'Kontakt Zen: Kto idzie?');
+        },
+      );
 
       test('"Tylko nadawca": who, never what', () async {
         final RuntimeSystemNotification notice = await noticeFor(

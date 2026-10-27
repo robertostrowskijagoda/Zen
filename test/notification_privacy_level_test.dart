@@ -28,6 +28,8 @@ import 'package:zen/src/features/social/social_snapshot_store.dart';
 const String _ada = 'ada.ygg';
 const String _bob = 'bob.ygg';
 const String _groupId = 'grp-1';
+const String _eve = 'eve.ygg';
+const String _mallory = 'mallory.ygg';
 
 const LifecycleSnapshot _background = LifecycleSnapshot(
   visibility: AppVisibilityState.background,
@@ -363,6 +365,8 @@ void main() {
         expect(back.privacy, kit.privacy);
         expect(back.overrides, kit.overrides);
         expect(back.names, kit.names);
+        expect(back.members, kit.members);
+        expect(back.members['group:$_groupId'], <String>{_ada, _bob});
         expect(LockedNoticeKit.fromJson(<String, dynamic>{'v': 2}), isNull);
         expect(
           LockedNoticeKit.fromJson(<String, dynamic>{
@@ -411,6 +415,50 @@ void main() {
           'attachmentData': 'AAAA',
         }).body,
         isNot(contains('podpis')),
+      );
+    });
+
+    test('a group notice names only its members, by names given here', () {
+      final SocialHubState seeded = _seed(_background);
+      final LockedNoticeKit kit = lockedNoticeKitOf(
+        seeded.copyWith(
+          groups: <String, GroupProfile>{
+            _groupId: seeded.groups[_groupId]!.copyWith(
+              memberAddresses: <String>[_ada, _bob, _eve],
+              // Names members gave themselves, one of them for someone
+              // who is not in the group at all.
+              memberNames: const <String, String>{_eve: 'Bob', _mallory: 'Ada'},
+            ),
+          },
+        ),
+        privacy: NotificationPrivacy.senderAndContent,
+      );
+      expect(kit.names.containsKey(_eve), isFalse);
+      expect(kit.names.containsKey(_mallory), isFalse);
+      NoticeText notice(String from, String claimed) => kit.messageNotice(
+        from: from,
+        payload: <String, dynamic>{
+          'type': 'group_message',
+          'groupId': _groupId,
+          'text': 'Hej',
+          'senderName': claimed,
+        },
+        genericBody: '…',
+      );
+      // A member who is a friend: the name this person gave them.
+      expect(notice(_bob, 'Ada'), (title: 'Ekipa', body: 'Bob: Hej'));
+      // A member who is not a friend: no name at all.
+      expect(notice(_eve, 'Bob'), (title: 'Ekipa', body: 'Kontakt Zen: Hej'));
+      // Not a member: only that something came.
+      expect(notice(_mallory, 'Ada'), (title: 'Nowa wiadomość', body: '…'));
+      // Nor a 1:1 message from someone a group named.
+      expect(
+        kit.messageNotice(
+          from: _mallory,
+          payload: <String, dynamic>{'type': 'message', 'text': 'Hej'},
+          genericBody: '…',
+        ),
+        (title: 'Nowa wiadomość', body: '…'),
       );
     });
 
