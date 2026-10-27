@@ -179,7 +179,10 @@ final class DeviceChatSync {
     this.policy,
     this.retryEvery = const Duration(minutes: 5),
     this.fileWait = const Duration(minutes: 2),
-  });
+    this.fileAttempts = 20,
+    this.fileGiveUpAfter = const Duration(days: 3),
+    int Function()? clock,
+  }) : _clock = clock ?? _systemNow;
 
   final LedgerNode node;
   final ChatSyncTarget target;
@@ -195,6 +198,18 @@ final class DeviceChatSync {
 
   /// How long one file is waited for before it goes on the waiting list.
   final Duration fileWait;
+
+  /// A waiting file is given up once it was asked for this many times ...
+  final int fileAttempts;
+
+  /// ... and has waited at least this long (the other device may just be
+  /// off for a while): its message is then marked as one whose file will
+  /// not come, and it is not asked for again.
+  final Duration fileGiveUpAfter;
+
+  final int Function() _clock;
+
+  static int _systemNow() => DateTime.now().millisecondsSinceEpoch;
 
   static const String _pendingKey = 'account/sync/media_pending';
   Timer? _retry;
@@ -315,6 +330,11 @@ final class DeviceChatSync {
     await target.importSyncedMessage(key, m);
   }
 
+  /// A file message whose file the other device did not pass on (it no
+  /// longer has it, or it is too big to copy): it will not come.
+  Future<void> _importWithoutFile(String key, ChatMessage m) =>
+      _import(key, _hasFile(m) ? chatMessageWithoutFile(m) : m);
+
   /// [m] with its file [refJson]: the text at once; the file now, or —
   /// over mobile data with "Media tylko przez Wi-Fi" — once on Wi-Fi.
   Future<void> _importWithFile(
@@ -335,7 +355,7 @@ final class DeviceChatSync {
     }
     if (!await _takeFile(key, m, ref)) {
       await target.importSyncedMessage(key, m);
-      await _remember(key, m, refJson);
+      await _remember(key, m, refJson, asked: node.siblingAddresses.isNotEmpty);
     }
   }
 
@@ -393,17 +413,32 @@ final class DeviceChatSync {
   Future<void> _saveWaiting(List<Map<String, dynamic>> items) => node.disk
       .write(_pendingKey, Uint8List.fromList(utf8.encode(jsonEncode(items))));
 
-  Future<void> _remember(String key, ChatMessage m, Object? refJson) async {
+  /// Puts the file of [m] on the waiting list: since when it waits (`t`)
+  /// and how many times it was asked for (`n`; [asked] counts this time)
+  /// are kept when it is there already.
+  Future<void> _remember(
+    String key,
+    ChatMessage m,
+    Object? refJson, {
+    bool asked = false,
+  }) async {
     final List<Map<String, dynamic>> items = await _waiting();
+    final Map<String, dynamic>? had = items
+        .where(
+          (Map<String, dynamic> i) =>
+              i['m'] is Map && (i['m'] as Map)['id'] == m.id,
+        )
+        .firstOrNull;
+    final Object? since = had?['t'];
+    final Object? tries = had?['n'];
     items
-      ..removeWhere(
-        (Map<String, dynamic> i) =>
-            i['m'] is Map && (i['m'] as Map)['id'] == m.id,
-      )
+      ..remove(had)
       ..add(<String, dynamic>{
         'k': key,
         'm': chatMessageToSync(m),
         'f': refJson,
+        't': since is int ? since : _clock(),
+        'n': (tries is int ? tries : 0) + (asked ? 1 : 0),
       });
     await _saveWaiting(items);
   }
@@ -411,12 +446,17 @@ final class DeviceChatSync {
   /// How many files wait for Wi-Fi (or for the other device).
   Future<int> waitingFiles() async => (await _waiting()).length;
 
-  /// Takes the files that had to wait, when they may travel now.
+  /// Takes the files that had to wait, when they may travel now. One that
+  /// was asked for [fileAttempts] times over at least [fileGiveUpAfter] is
+  /// given up: its message says the file is not available.
   Future<void> retryWaitingFiles() async {
     final List<Map<String, dynamic>> items = await _waiting();
     if (items.isEmpty || (policy != null && !await policy!.mayFetchNow())) {
       return;
     }
+    // Only a try with a device to ask counts towards giving up.
+    final bool asked = node.siblingAddresses.isNotEmpty;
+    final int now = _clock();
     final List<Map<String, dynamic>> left = <Map<String, dynamic>>[];
     for (final Map<String, dynamic> item in items) {
       final Object? key = item['k'];
@@ -425,11 +465,32 @@ final class DeviceChatSync {
       if (key is! String || m == null || ref == null) {
         continue;
       }
-      if (!await _takeFile(key, m, ref)) {
-        left.add(item);
+      if (await _takeFile(key, m, ref)) {
+        continue;
       }
+      final Object? since = item['t'];
+      final Object? tries = item['n'];
+      final int started = since is int ? since : now;
+      final int count = (tries is int ? tries : 0) + (asked ? 1 : 0);
+      if (count >= fileAttempts &&
+          now - started >= fileGiveUpAfter.inMilliseconds) {
+        await _giveUpFile(key, m);
+        continue;
+      }
+      left.add(<String, dynamic>{...item, 't': started, 'n': count});
     }
     await _saveWaiting(left);
+  }
+
+  /// The file of [m] will not come from the account's other devices: the
+  /// message (when still here) says so, and it is not asked for again.
+  Future<void> _giveUpFile(String key, ChatMessage m) async {
+    final bool here = (await target.conversationMessages(
+      key,
+    )).any((ChatMessage have) => have.id == m.id);
+    if (here) {
+      await target.importSyncedMessage(key, chatMessageWithoutFile(m));
+    }
   }
 
   Future<void> _apply(LogEntry e) async {
@@ -447,7 +508,7 @@ final class DeviceChatSync {
         if (key is String && m != null) {
           final Object? file = body['f'];
           if (file == null) {
-            await _import(key, m);
+            await _importWithoutFile(key, m);
           } else {
             await _importWithFile(key, m, file);
           }
@@ -493,10 +554,12 @@ final class DeviceChatSync {
           if (m == null) {
             continue;
           }
-          // Text first, so the conversation is there at once.
-          await _import(c.key as String, m);
           final Object? ref = files is Map ? files[m.id] : null;
-          if (ref != null) {
+          // Text first, so the conversation is there at once.
+          if (ref == null) {
+            await _importWithoutFile(c.key as String, m);
+          } else {
+            await _import(c.key as String, m);
             withFiles.add((c.key as String, m, ref));
           }
         }

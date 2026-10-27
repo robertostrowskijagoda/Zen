@@ -281,6 +281,39 @@ final class _HubTarget implements ChatSyncTarget {
       hub.forgetGroupFromOtherDevice(groupId);
 }
 
+/// The new phone's social layer, where the person removed some messages.
+final class _RemovingTarget extends _HubTarget {
+  _RemovingTarget(SocialHubController hub) : super(hub, <String>[_peer]);
+
+  final Set<String> removed = <String>{};
+  final List<String> importedAfterRemoval = <String>[];
+
+  @override
+  Future<List<ChatMessage>> conversationMessages(String key) async =>
+      <ChatMessage>[
+        for (final ChatMessage m in await super.conversationMessages(key))
+          if (!removed.contains(m.id)) m,
+      ];
+
+  @override
+  Future<void> importSyncedMessage(
+    String key,
+    ChatMessage message, {
+    Uint8List? bytes,
+    String? storedPath,
+  }) {
+    if (removed.contains(message.id)) {
+      importedAfterRemoval.add(message.id);
+    }
+    return super.importSyncedMessage(
+      key,
+      message,
+      bytes: bytes,
+      storedPath: storedPath,
+    );
+  }
+}
+
 final class _LedgerLink extends MemorySignalTransport {
   _LedgerLink(this.address);
 
@@ -542,11 +575,18 @@ void main() {
       expect(restored[0].type, original[0].type);
       expect(restored[0].fileName, original[0].fileName);
       expect(restored[0].hasAttachment, isFalse, reason: 'no file in a copy');
+      expect(
+        restored[0].attachmentUnavailable,
+        isTrue,
+        reason: 'the file does not come from the copy',
+      );
       expect(restored[1].type, ChatMessageType.file);
       expect(restored[1].fileName, 'plan.pdf');
       expect(restored[1].attachmentSizeBytes, 3);
       expect(restored[1].hasAttachment, isFalse);
+      expect(restored[1].attachmentUnavailable, isTrue);
       expect(restored[2].text, 'tekst po plikach');
+      expect(restored[2].attachmentUnavailable, isFalse, reason: 'text');
     });
 
     test('a file the phone already has is not taken away by a copy without '
@@ -573,6 +613,7 @@ void main() {
       List<ChatMessage> now = await after.messages();
       expect(now, hasLength(1));
       expect(now.single.hasAttachment, isTrue);
+      expect(now.single.attachmentUnavailable, isFalse);
       expect(
         await after.container
             .read(mediaVaultProvider)
@@ -589,12 +630,73 @@ void main() {
         fileName: 'plan.pdf',
         size: 3,
       );
-      await after.add(second);
+      await after.putBack(
+        CircleBackupContent(
+          chats: <String, List<Map<String, dynamic>>>{
+            _peer: <Map<String, dynamic>>[chatMessageToSync(second)],
+          },
+        ),
+      );
       expect((await after.messages()).last.hasAttachment, isFalse);
+      expect((await after.messages()).last.attachmentUnavailable, isTrue);
       await after.add(second, bytes: Uint8List.fromList(<int>[7, 7, 7]));
       now = await after.messages();
       expect(now.map((ChatMessage m) => m.id), <String>['p1', 'f2']);
       expect(now.last.hasAttachment, isTrue);
+      expect(now.last.attachmentUnavailable, isFalse);
+    });
+
+    test('a message the copy left without its file may still get it from '
+        "the account's other device: its word wins while the file is "
+        'missing', () async {
+      final _Phone after = await _Phone.create();
+      final ChatMessage photo = _msg(
+        'p1',
+        1000,
+        type: ChatMessageType.image,
+        text: '',
+        fileName: 'kot.jpg',
+        size: 4,
+      );
+      await after.putBack(
+        CircleBackupContent(
+          chats: <String, List<Map<String, dynamic>>>{
+            _peer: <Map<String, dynamic>>[chatMessageToSync(photo)],
+          },
+        ),
+      );
+      expect((await after.messages()).single.attachmentUnavailable, isTrue);
+
+      // The other device has the file and is sending it: on its way.
+      await after.add(photo);
+      expect((await after.messages()).single.attachmentUnavailable, isFalse);
+
+      // It gave up on it after all.
+      await after.add(chatMessageWithoutFile(photo));
+      expect((await after.messages()).single.attachmentUnavailable, isTrue);
+
+      // A text message is never marked.
+      expect(
+        chatMessageWithoutFile(_msg('t', 1)).attachmentUnavailable,
+        isFalse,
+      );
+    });
+
+    test('the mark travels with the message and is kept', () {
+      final ChatMessage gone = chatMessageWithoutFile(
+        _msg('p1', 1000, type: ChatMessageType.video, text: ''),
+      );
+      expect(gone.attachmentUnavailable, isTrue);
+      expect(
+        chatMessageFromSync(chatMessageToSync(gone))!.attachmentUnavailable,
+        isTrue,
+      );
+      expect(
+        chatMessageFromSync(
+          chatMessageToSync(gone.copyWith(attachmentUnavailable: false)),
+        )!.attachmentUnavailable,
+        isFalse,
+      );
     });
 
     test('taking the same copy twice does not double the messages', () async {
@@ -639,11 +741,22 @@ void main() {
 
         expect(await after.ids(), <String>['m1', 'm2', 'm3', 'live']);
       },
-      skip:
-          'Gap: SocialHubController.importSyncedMessage appends (the upsert '
-          'in _upsertTimelineMessage does not insert by time), so restored '
-          'older messages land after newer ones already on the phone',
     );
+
+    test('history taken in any order lands by send time; a message already '
+        'here keeps its place', () async {
+      final _Phone phone = await _Phone.create();
+      await phone.add(_msg('m3', 3000));
+      await phone.add(_msg('m5', 5000, mine: true));
+      await phone.add(_msg('m1', 1000));
+      await phone.add(_msg('m4', 4000));
+      await phone.add(_msg('m2', 2000, mine: true));
+      await phone.add(_msg('m6', 6000));
+      // Taken again (another copy, another device): still once each.
+      await phone.add(_msg('m1', 1000));
+      await phone.add(_msg('m6', 6000));
+      expect(await phone.ids(), <String>['m1', 'm2', 'm3', 'm4', 'm5', 'm6']);
+    });
   });
 
   group('a file message without its file', () {
@@ -689,6 +802,54 @@ void main() {
           expect(find.text('zalacznik.bin'), findsOneWidget);
         },
       );
+
+      testWidgets('says the file is not available when it will not come, '
+          'not that it is on its way (${type.name})', (
+        WidgetTester tester,
+      ) async {
+        await pump(
+          tester,
+          chatMessageWithoutFile(
+            _msg(
+              'x1',
+              1000,
+              type: type,
+              text: '',
+              fileName: 'stary.bin',
+              size: 2048,
+            ),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        expect(find.text('stary.bin'), findsOneWidget);
+        expect(find.text('Plik niedostępny'), findsOneWidget);
+        expect(find.text('Transfer w toku'), findsNothing);
+      });
+
+      testWidgets('a file still on its way says so (${type.name})', (
+        WidgetTester tester,
+      ) async {
+        await pump(
+          tester,
+          _msg('x1', 1000, type: type, text: '', fileName: 'w-drodze.bin'),
+        );
+        expect(find.text('Transfer w toku'), findsOneWidget);
+        expect(find.text('Plik niedostępny'), findsNothing);
+
+        await pump(
+          tester,
+          _msg(
+            'x2',
+            1000,
+            type: type,
+            text: '',
+            fileName: 'w-drodze.bin',
+            size: 2048,
+          ),
+        );
+        expect(find.text('2.0 KB'), findsOneWidget);
+        expect(find.text('Plik niedostępny'), findsNothing);
+      });
     }
   });
 
@@ -785,6 +946,9 @@ void main() {
       expect(got[2].type, ChatMessageType.image);
       expect(got[2].fileName, 'zniknal.jpg');
       expect(got[2].hasAttachment, isFalse, reason: 'it was lost there');
+      expect(got[2].attachmentUnavailable, isTrue, reason: 'it will not come');
+      expect(got[1].attachmentUnavailable, isFalse);
+      expect(got[0].attachmentUnavailable, isFalse, reason: 'text');
       expect(await sync.waitingFiles(), 0, reason: 'nothing to wait for');
 
       // The same history again (the app restarted, the sync started anew).
@@ -853,6 +1017,7 @@ void main() {
       expect(got.map((ChatMessage m) => m.id), <String>['m1', 'v1', 'm2']);
       expect(got[1].fileName, 'film.mp4');
       expect(got[1].hasAttachment, isFalse);
+      expect(got[1].attachmentUnavailable, isFalse, reason: 'still may come');
       expect(await sync.waitingFiles(), 1, reason: 'remembered, not lost');
 
       // Asked again, still nothing: no failure, no duplicate, still waiting.
@@ -870,7 +1035,123 @@ void main() {
       got = await phone.messages();
       expect(got.map((ChatMessage m) => m.id), <String>['m1', 'v1', 'm2']);
       expect(got[1].hasAttachment, isTrue);
+      expect(got[1].attachmentUnavailable, isFalse);
       expect(await sync.waitingFiles(), 0);
+    });
+
+    test('a file the old device never hands over is given up after enough '
+        'tries over enough time: the message says it is not available and '
+        'it is not asked for again', () async {
+      final String a1 = _a('200::e5');
+      final String a2 = _a('200::e6');
+      final _SourceTarget source = _SourceTarget()
+        ..chats[_peer] = <ChatMessage>[
+          _msg('m1', 1000, mine: true),
+          _msg(
+            'v1',
+            2000,
+            type: ChatMessageType.video,
+            text: '',
+            fileName: 'film.mp4',
+            mimeType: 'video/mp4',
+            size: 3,
+            bytes: Uint8List.fromList(<int>[4, 5, 6]),
+          ),
+          _msg('m2', 3000),
+        ];
+      final p = await pair(a1, a2, source);
+      _LedgerLink.oldDeviceLostFiles = true;
+
+      int now = 1000000;
+      final _Phone phone = await _Phone.create();
+      final DeviceChatSync sync = DeviceChatSync(
+        node: p.second,
+        target: _HubTarget(phone.hub, <String>[_peer]),
+        fileWait: const Duration(milliseconds: 50),
+        fileAttempts: 3,
+        fileGiveUpAfter: const Duration(hours: 1),
+        clock: () => now,
+      );
+      await sync.start();
+      addTearDown(sync.stop);
+      await p.second.rememberDeviceAddresses(<String>[a1]);
+      await _settle(200);
+      await p.firstSync.idle;
+      await _settle(200);
+      await sync.idle;
+      expect(await sync.waitingFiles(), 1);
+
+      // Many tries, but all within the hour: the old device may be off.
+      for (int i = 0; i < 5; i++) {
+        await sync.retryWaitingFiles();
+      }
+      expect(await sync.waitingFiles(), 1);
+      expect((await phone.messages())[1].attachmentUnavailable, isFalse);
+
+      // Long enough and asked often enough: given up.
+      now += const Duration(hours: 2).inMilliseconds;
+      await sync.retryWaitingFiles();
+      expect(await sync.waitingFiles(), 0);
+      List<ChatMessage> got = await phone.messages();
+      expect(got.map((ChatMessage m) => m.id), <String>['m1', 'v1', 'm2']);
+      expect(got[1].hasAttachment, isFalse);
+      expect(got[1].attachmentUnavailable, isTrue);
+      expect(got[1].fileName, 'film.mp4');
+
+      // Not asked for again, nothing doubled.
+      _LedgerLink.oldDeviceLostFiles = false;
+      await sync.retryWaitingFiles();
+      await _settle(50);
+      got = await phone.messages();
+      expect(got.map((ChatMessage m) => m.id), <String>['m1', 'v1', 'm2']);
+      expect(got[1].hasAttachment, isFalse);
+      expect(await sync.waitingFiles(), 0);
+    });
+
+    test('a waiting file whose message was removed here meanwhile is given '
+        'up without bringing the message back', () async {
+      final String a1 = _a('200::e7');
+      final String a2 = _a('200::e8');
+      final _SourceTarget source = _SourceTarget()
+        ..chats[_peer] = <ChatMessage>[
+          _msg(
+            'v1',
+            2000,
+            type: ChatMessageType.video,
+            text: '',
+            fileName: 'film.mp4',
+            size: 3,
+            bytes: Uint8List.fromList(<int>[4, 5, 6]),
+          ),
+        ];
+      final p = await pair(a1, a2, source);
+      _LedgerLink.oldDeviceLostFiles = true;
+
+      int now = 1000000;
+      final _Phone phone = await _Phone.create();
+      final _RemovingTarget target = _RemovingTarget(phone.hub);
+      final DeviceChatSync sync = DeviceChatSync(
+        node: p.second,
+        target: target,
+        fileWait: const Duration(milliseconds: 50),
+        fileAttempts: 1,
+        fileGiveUpAfter: Duration.zero,
+        clock: () => now,
+      );
+      await sync.start();
+      addTearDown(sync.stop);
+      await p.second.rememberDeviceAddresses(<String>[a1]);
+      await _settle(200);
+      await p.firstSync.idle;
+      await _settle(200);
+      await sync.idle;
+      expect(await sync.waitingFiles(), 1);
+
+      target.removed.add('v1');
+      now += 1;
+      await sync.retryWaitingFiles();
+      expect(await sync.waitingFiles(), 0);
+      expect(target.importedAfterRemoval, isEmpty);
     });
   });
 
@@ -991,6 +1272,7 @@ void main() {
       ]);
       expect(got[2].fileName, 'kot.jpg');
       expect(got[2].hasAttachment, isFalse);
+      expect(got[2].attachmentUnavailable, isTrue, reason: 'not on its way');
       expect(s.fresh.restoring, isFalse);
     });
 
