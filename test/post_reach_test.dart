@@ -239,6 +239,38 @@ void main() {
       },
     );
 
+    test('a post fetched from its author, who is no friend, shows its text '
+        'but its photo is not fetched from the author', () async {
+      final _World w = await _World.chain(<String>['a', 'b', 'c']);
+      await w['a'].publish(
+        kProfileKind,
+        profileBody(name: 'Ada', address: w.mesh.address('a')),
+        spaceKind: 'profile',
+      );
+      await w.mesh.settle();
+      // Nothing c asks of b gets there: the post comes from the author.
+      w.mesh.drop = (String from, String to, Map<String, dynamic> payload) =>
+          from == 'c' &&
+          to == 'b' &&
+          (payload['type'] == kPostWantType ||
+              '${payload['type']}'.startsWith('lg_blob'));
+      final Map<String, dynamic> photo = await storeMedia(
+        w['a'].blobs,
+        Uint8List.fromList(List<int>.generate(3000, (int i) => i % 251)),
+      );
+      final LogEntry post = await _post(
+        w['a'],
+        'Prosto od autorki',
+        images: <Map<String, dynamic>>[photo],
+      );
+      await w.mesh.settle();
+      await w.rounds();
+      expect(w.mesh.sent['a']?[kPostAnswerType], greaterThan(0));
+      final FeedPost seen = w.postOn('c', post.id)!;
+      expect(seen.text, 'Prosto od autorki');
+      expect(w['c'].blobs.isComplete(seen.images.single.id), isFalse);
+    });
+
     test('d, looking three steps far, sees it "przez Cyryl", fetched from c '
         'while a and b are offline; d passes nothing on', () async {
       final _World w = await _World.chain(

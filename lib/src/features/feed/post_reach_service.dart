@@ -479,7 +479,10 @@ final class PostReachService implements HeldPosts {
   }
 
   /// Fetches the photos and videos of [h] (when automatic download is on)
-  /// from [from] and whoever else may have them.
+  /// from friends only: [from] when it is one, and the others who may have
+  /// them. Never by itself from the author or anyone else who is not a
+  /// friend (who would learn when this device looked, and could hand it any
+  /// file): the text is shown, a photo then waits for a friend who has it.
   void _fetchFiles(HeldPost h, String from) {
     if (!node.autoDownloadMedia()) {
       return;
@@ -489,9 +492,8 @@ final class PostReachService implements HeldPosts {
       return;
     }
     final List<String> sources = <String>[
-      from,
+      if (node.isFriendAddress(from)) from,
       for (final String address in node.friendAccounts.keys) address,
-      if (h.authorProfile?.address case final String a when a.isNotEmpty) a,
     ];
     for (final String id in ids) {
       node.blobs
