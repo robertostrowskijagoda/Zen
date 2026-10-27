@@ -97,6 +97,11 @@ cleared after 60 seconds).
 - **Lock now** sits in the top bar once you have a password.
 - Zen locks itself after a while in the background (Settings → Privacy and
   security).
+- With *Auto-lock* set to *Never* (it takes your password once), Zen opens
+  without the password even after a restart: anyone holding your unlocked
+  phone sees your chats. **Lock now** still locks it, restarts included,
+  until you unlock again; the emergency wipe password works only on that
+  lock screen.
 - An **emergency wipe password** typed on the lock screen quietly erases
   the data instead of opening it (Settings → Security). It is not the
   alarm's *duress PIN*, which erases nothing.

@@ -164,6 +164,13 @@ friend vouching for their key, is trust on first use.
   never leaves the security hardware: Android Keystore (StrongBox when
   present), the TPM on Windows (with Windows Hello), the Secure Enclave on
   macOS (Touch ID). A copy of the app's files is useless elsewhere.
+- **Auto-lock "Never"** with a password keeps a plain copy of the master key
+  in the system's secret store (Android Keystore, the iOS / macOS keychain,
+  the Windows credential store), so Zen opens without the password even
+  after a restart; the device's own screen lock is then all that guards it.
+  Choosing it takes the password once; choosing any other mode, or locking
+  by hand, deletes the copy at once. The password is still asked for before
+  security settings change or sensitive screens open.
 - **The locked phone (Android).** The background service holds a separate
   background key and only small kits (alarm, Nearby, doors), never the
   master key. What arrives is stored sealed until you unlock.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -63,6 +64,16 @@ const String appSecurityDeviceMasterKeyStorageKey =
     'zen_rewrite_device_master_key';
 const String appSecurityMasterKeyFingerprintStorageKey =
     'zen_rewrite_master_key_fingerprint';
+
+/// "Nigdy" with an app password: a plain copy of the master key (hex) in
+/// the system's secret store (Android Keystore, the iOS / macOS keychain,
+/// the Windows credential store — where the device master key lives
+/// without a password), so a start from scratch opens without the
+/// password. Written only right after the password (or biometrics) proved
+/// the person, dropped as soon as another lock mode is chosen or the app
+/// is locked by hand.
+const String appSecurityNeverLockMasterKeyStorageKey =
+    'zen_rewrite_never_lock_master_key';
 
 /// Whether the person wants biometric unlock: `1` on, `0` off. Absent: on
 /// where the hardware itself asks for the person before it unwraps
@@ -637,6 +648,17 @@ abstract class AppSecurityService extends ChangeNotifier {
   /// state.
   Future<bool> setBiometricUnlockEnabled(bool enabled);
 
+  /// Whether the master key is kept for "Nigdy"
+  /// ([appSecurityNeverLockMasterKeyStorageKey]): a start from scratch then
+  /// opens without the password.
+  bool get keepsNeverLockKey;
+
+  /// Before "Nigdy" is chosen: [password] (the app password) unwraps the
+  /// master key, which is then kept in the system's secret store. `false`,
+  /// keeping nothing, for a wrong password or none set. The lock mode itself
+  /// is the settings' (choosing another one drops the copy again).
+  Future<bool> keepMasterKeyForNeverLock(String password);
+
   void lock();
 
   Future<void> reset();
@@ -768,6 +790,9 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   bool _hasPassword = false;
   bool _hasPanicPassword = false;
   bool _isLocked = false;
+
+  /// Whether the copy for "Nigdy" is (believed to be) in the secret store.
+  bool _neverLockKeyKept = false;
   AppLockMode _lockMode = AppSettings.defaultLockMode;
   int _backgroundLockDelaySeconds =
       AppSettings.defaultBackgroundLockDelaySeconds;
@@ -813,9 +838,25 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
         null;
     if (_hasPassword) {
       // Password mode starts locked; the master key is only recovered by
-      // unlocking (password) or by the stored biometric token.
-      _isLocked = true;
-      _encryptionKey = null;
+      // unlocking (password) or by the stored biometric token — or, with
+      // "Nigdy", by the copy kept for it.
+      final String? keptHex = await _readNeverLockKeyEntry();
+      final Uint8List? kept = keptHex == null
+          ? null
+          : await _matchingMasterKey(_decodeMasterKeyHex(keptHex));
+      if (kept != null && _lockMode == AppLockMode.never) {
+        _neverLockKeyKept = true;
+        _encryptionKey = kept;
+        _isLocked = false;
+      } else {
+        if (keptHex != null) {
+          // Another mode (leaving "Nigdy" was cut short), or a copy that
+          // does not match: nothing opens without the password.
+          await _dropNeverLockKey();
+        }
+        _isLocked = true;
+        _encryptionKey = null;
+      }
     } else {
       final Uint8List? storedMasterKey = await _readDeviceMasterKey();
       final Uint8List masterKey = storedMasterKey ?? randomSecurityBytes(32);
@@ -835,7 +876,14 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
 
   @override
   Future<void> applySettings(AppSettings settings) async {
+    final bool leavesNeverLock =
+        settings.lockMode != AppLockMode.never &&
+        (_neverLockKeyKept || _lockMode == AppLockMode.never);
     _applySettingsState(settings);
+    if (leavesNeverLock) {
+      // Any other mode: the copy goes at once.
+      await _dropNeverLockKey();
+    }
     notifyListeners();
   }
 
@@ -880,6 +928,10 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     // The biometric token holds the master key (never the raw password),
     // sealed by the hardware vault.
     await _storeBiometricToken(currentMasterKey);
+    if (_lockMode == AppLockMode.never) {
+      // "Nigdy" keeps opening without the password it has just been given.
+      await _storeNeverLockKey(currentMasterKey);
+    }
     await _credentialsStore.delete(appSecurityDeviceMasterKeyStorageKey);
     _hasPassword = true;
     _isLocked = false;
@@ -901,6 +953,24 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       notifyListeners();
       return false;
     }
+    final Uint8List? masterKey = await _masterKeyFor(
+      password,
+      saltHex,
+      hashHex,
+    );
+    if (masterKey == null) {
+      return false;
+    }
+    await _finishUnlock(masterKey);
+    return true;
+  }
+
+  /// The master key [password] unwraps; `null` for a wrong password.
+  Future<Uint8List?> _masterKeyFor(
+    String password,
+    String saltHex,
+    String hashHex,
+  ) async {
     final Uint8List? derivedKey = await _derive(
       password,
       securityBytesFromHex(saltHex),
@@ -915,14 +985,9 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
           securityVerifyDigest(derivedKey),
           securityBytesFromHex(hashHex),
         )) {
-      return false;
+      return null;
     }
-    final Uint8List? masterKey = await _unwrapMasterKey(wrappedHex, derivedKey);
-    if (masterKey == null) {
-      return false;
-    }
-    await _finishUnlock(masterKey);
-    return true;
+    return _unwrapMasterKey(wrappedHex, derivedKey);
   }
 
   @override
@@ -1086,6 +1151,92 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     return sealed;
   }
 
+  @override
+  bool get keepsNeverLockKey => _neverLockKeyKept;
+
+  @override
+  Future<bool> keepMasterKeyForNeverLock(String password) async {
+    final String? saltHex = await _credentialsStore.read(
+      appSecuritySaltStorageKey,
+    );
+    final String? hashHex = await _credentialsStore.read(
+      appSecurityPasswordHashStorageKey,
+    );
+    if (saltHex == null || hashHex == null) {
+      return false;
+    }
+    final Uint8List? masterKey = await _matchingMasterKey(
+      await _masterKeyFor(password, saltHex, hashHex),
+    );
+    if (masterKey == null) {
+      return false;
+    }
+    await _storeNeverLockKey(masterKey);
+    notifyListeners();
+    return _neverLockKeyKept;
+  }
+
+  /// Keeps [masterKey] for "Nigdy" (see
+  /// [appSecurityNeverLockMasterKeyStorageKey]).
+  Future<void> _storeNeverLockKey(Uint8List masterKey) async {
+    try {
+      await _credentialsStore.write(
+        appSecurityNeverLockMasterKeyStorageKey,
+        securityHexFromBytes(masterKey),
+      );
+      _neverLockKeyKept = true;
+    } on Object catch (error, stackTrace) {
+      logZenError('Keeping the key for "Nigdy" failed', error, stackTrace);
+      await _dropNeverLockKey();
+    }
+  }
+
+  /// Drops the copy kept for "Nigdy": the password opens the data again.
+  Future<void> _dropNeverLockKey() async {
+    // Before the wait: a copy written meanwhile (an unlock) must count.
+    _neverLockKeyKept = false;
+    try {
+      await _credentialsStore.delete(appSecurityNeverLockMasterKeyStorageKey);
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Dropping the key kept for "Nigdy" failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  Future<String?> _readNeverLockKeyEntry() async {
+    try {
+      return await _credentialsStore.read(
+        appSecurityNeverLockMasterKeyStorageKey,
+      );
+    } on Object catch (error, stackTrace) {
+      logZenError('Reading the key kept for "Nigdy" failed', error, stackTrace);
+      return null;
+    }
+  }
+
+  /// [masterKey] when it is the one the stored fingerprint names; `null`
+  /// otherwise, or without a fingerprint to check it against.
+  Future<Uint8List?> _matchingMasterKey(Uint8List? masterKey) async {
+    if (masterKey == null ||
+        masterKey.length != appSecurityMasterKeyLengthBytes) {
+      return null;
+    }
+    final String? fingerprintHex = await _credentialsStore.read(
+      appSecurityMasterKeyFingerprintStorageKey,
+    );
+    if (fingerprintHex == null ||
+        !securityConstantTimeEquals(
+          securityMasterFingerprint(masterKey),
+          securityBytesFromHex(fingerprintHex),
+        )) {
+      return null;
+    }
+    return masterKey;
+  }
+
   /// Opens the sealed master key (the vault asks for biometrics) and checks
   /// it against the stored fingerprint.
   Future<Uint8List?> _openSealedMasterKey(String reason) async {
@@ -1149,6 +1300,12 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     }
     _isLocked = true;
     _encryptionKey = null;
+    if (_neverLockKeyKept) {
+      // Locked by hand under "Nigdy": the lock holds across a restart too
+      // (with the panic password there to type) until the password or
+      // biometrics open it again.
+      unawaited(_dropNeverLockKey());
+    }
     notifyListeners();
   }
 
@@ -1158,6 +1315,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   static const List<String> _keyMaterial = <String>[
     appSecurityWrappedMasterKeyStorageKey,
     appSecurityDeviceMasterKeyStorageKey,
+    appSecurityNeverLockMasterKeyStorageKey,
     appSecuritySealedBiometricTokenStorageKey,
     appSecurityPasswordHashStorageKey,
     // The node identity and what the background service may read.
@@ -1189,6 +1347,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   @override
   Future<void> reset() async {
     _encryptionKey = null;
+    _neverLockKeyKept = false;
     for (final String key in _keyMaterial) {
       await _deleteCredential(key);
     }
@@ -1256,6 +1415,11 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       await _storeBiometricToken(masterKey);
     }
     await _ensureMasterFingerprint(masterKey);
+    if (_lockMode == AppLockMode.never) {
+      // Unlocked after a lock by hand: "Nigdy" opens without the password
+      // again from now on.
+      await _storeNeverLockKey(masterKey);
+    }
     _hasPassword = true;
     _encryptionKey = masterKey;
     _isLocked = false;

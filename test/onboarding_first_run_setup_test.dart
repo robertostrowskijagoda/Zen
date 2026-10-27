@@ -10,6 +10,7 @@ import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -179,6 +180,103 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('aplikacja'), findsOneWidget);
     expect(find.byKey(const Key('first-run-setup')), findsNothing);
+  });
+
+  testWidgets('"Nigdy" in the setup takes the password just set once more '
+      'and keeps the key: the next cold start opens without it', (
+    WidgetTester tester,
+  ) async {
+    _tallScreen(tester);
+    final MemoryAppSettingsStore store = MemoryAppSettingsStore(
+      const AppSettings(),
+    );
+    final MemorySecurityCredentialsStore secrets =
+        MemorySecurityCredentialsStore();
+    LocalAppSecurityService securityOn() => LocalAppSecurityService(
+      credentialsStore: secrets,
+      passwordIterations: 10,
+    );
+    // The password step is behind: the setup comes right after it.
+    final LocalAppSecurityService security = securityOn();
+    await tester.runAsync(() async {
+      await security.initialize(settings: const AppSettings());
+      await security.setPassword('haslo-do-testu');
+    });
+    List overrides(AppSecurityService security, AppSettings? initial) => [
+      appSettingsStoreProvider.overrideWithValue(store),
+      appSecurityServiceProvider.overrideWithValue(security),
+      if (initial != null) ...[
+        appSettingsInitialStateProvider.overrideWithValue(initial),
+        appSettingsHydrationEnabledProvider.overrideWithValue(false),
+      ],
+      firstRunSetupRequiredProvider.overrideWithValue(true),
+      permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+      gateDefaultsProvider.overrideWithValue(_Gates()),
+    ];
+    Future<void> tapAndWait(Finder finder) async {
+      await tester.tap(finder);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await tester.pumpWidget(_gatedApp(overrides: overrides(security, null)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-step-lock')), findsOneWidget);
+
+    final Finder dialog = find.byKey(const Key('settings-never-lock-dialog'));
+    final Finder field = find.byKey(
+      const Key('settings-never-lock-password-field'),
+    );
+    final Finder note = find.byKey(const Key('settings-lock-never-note'));
+
+    // The warning first; cancelled, nothing changes.
+    await tapAndWait(find.byKey(const Key('settings-lock-mode-never')));
+    expect(dialog, findsOneWidget);
+    await tester.tap(find.text('Anuluj'));
+    await tester.pumpAndSettle();
+    expect(dialog, findsNothing);
+    expect(note, findsNothing);
+    expect(security.lockMode, isNot(AppLockMode.never));
+    expect(security.keepsNeverLockKey, isFalse);
+
+    // A wrong password keeps nothing.
+    await tapAndWait(find.byKey(const Key('settings-lock-mode-never')));
+    await tester.enterText(field, 'zle-haslo');
+    await tapAndWait(find.byKey(const Key('settings-never-lock-confirm')));
+    expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+    expect(security.keepsNeverLockKey, isFalse);
+
+    await tester.enterText(field, 'haslo-do-testu');
+    await tapAndWait(find.byKey(const Key('settings-never-lock-confirm')));
+    expect(dialog, findsNothing);
+    expect(security.lockMode, AppLockMode.never);
+    expect(security.keepsNeverLockKey, isTrue);
+    expect(
+      tester.widget<Text>(note).data,
+      contains('otwiera się bez hasła, także po restarcie'),
+    );
+
+    await tester.tap(find.byKey(const Key('first-run-skip')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('aplikacja'), findsOneWidget);
+    final AppSettings saved = (await store.load())!;
+    expect(saved.lockMode, AppLockMode.never);
+    expect(saved.firstRunSetupDone, isTrue);
+
+    // A start from scratch: no password asked.
+    await tester.pumpWidget(const SizedBox.shrink());
+    final LocalAppSecurityService restarted = securityOn();
+    await tester.runAsync(() => restarted.initialize(settings: saved));
+    expect(restarted.isLocked, isFalse);
+    await tester.pumpWidget(_gatedApp(overrides: overrides(restarted, saved)));
+    await tester.pumpAndSettle();
+    expect(find.text('aplikacja'), findsOneWidget);
+    expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
   });
 
   testWidgets('it can be skipped: the defaults stay', (
