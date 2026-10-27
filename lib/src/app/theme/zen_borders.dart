@@ -1,4 +1,5 @@
-import 'dart:ui' show lerpDouble;
+import 'dart:math' as math;
+import 'dart:ui' show PathMetric, lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -6,7 +7,9 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 /// The outlines a look can draw around its panels, besides the plain
 /// rounded rectangle: a bevelled chrome (or riveted) frame, an elegant
 /// double line (with ornaments), cut corners (with circuit pads), stepped
-/// pixel corners, an old window with its title bar, an iridescent line.
+/// pixel corners, an old window with its title bar, an iridescent line,
+/// leather stitches, a leaf, scallops, a ticket with bites and the corner
+/// marks of a drawing board.
 
 /// A 1px bevelled chrome frame with square corners: lit on the top and
 /// left, shaded on the bottom and right ([sunken] swaps them, a pressed
@@ -659,6 +662,470 @@ class ZenSheenBorder extends OutlinedBorder {
   @override
   int get hashCode =>
       Object.hash(borderRadius, Object.hashAll(colors), width, side);
+}
+
+/// A rounded (or square) base with a line around it: what the frames below
+/// share. [outline] is the shape the fill and the clip follow, the line
+/// runs along it, [paintDetails] adds the frame's own marks.
+abstract class _ZenFrameBorder extends OutlinedBorder {
+  const _ZenFrameBorder({
+    required this.borderRadius,
+    required this.color,
+    required this.width,
+    super.side,
+  });
+
+  final BorderRadius borderRadius;
+  final Color color;
+  final double width;
+
+  /// How far the frame reaches into the panel.
+  double get inset => width;
+
+  Path outline(Rect rect) => Path()..addRRect(borderRadius.toRRect(rect));
+
+  void paintDetails(Canvas canvas, Rect rect) {}
+
+  @override
+  EdgeInsetsGeometry get dimensions => EdgeInsets.all(inset);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) => outline(rect);
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      Path()..addRRect(borderRadius.toRRect(rect).deflate(inset));
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    if (rect.isEmpty || width <= 0) {
+      return;
+    }
+    final Rect r = rect.deflate(width / 2);
+    canvas.drawPath(
+      outline(r),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width
+        ..strokeJoin = StrokeJoin.round
+        ..color = color,
+    );
+    paintDetails(canvas, r);
+  }
+}
+
+/// A line with a row of stitches running inside it, like leather sewn
+/// with thread ([thread]: the colour of the stitches, [color] when null).
+@immutable
+class ZenStitchBorder extends _ZenFrameBorder {
+  const ZenStitchBorder({
+    super.borderRadius = BorderRadius.zero,
+    required super.color,
+    super.width = 1,
+    this.thread,
+    this.gap = 3,
+    super.side,
+  });
+
+  final Color? thread;
+
+  /// The distance between the line and the stitches.
+  final double gap;
+
+  @override
+  double get inset => width + gap + 2;
+
+  @override
+  void paintDetails(Canvas canvas, Rect rect) {
+    final RRect inner = borderRadius.toRRect(rect).deflate(gap + width / 2);
+    if (inner.width < 12 || inner.height < 12) {
+      return;
+    }
+    const double stitch = 4;
+    const double space = 3;
+    final Path dashed = Path();
+    for (final PathMetric m in (Path()..addRRect(inner)).computeMetrics()) {
+      for (double d = 0; d < m.length; d += stitch + space) {
+        dashed.addPath(
+          m.extractPath(d, math.min(d + stitch, m.length)),
+          Offset.zero,
+        );
+      }
+    }
+    canvas.drawPath(
+      dashed,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..strokeCap = StrokeCap.round
+        ..color = thread ?? color,
+    );
+  }
+
+  @override
+  ShapeBorder scale(double t) => ZenStitchBorder(
+    borderRadius: borderRadius * t,
+    color: color,
+    width: width * t,
+    thread: thread,
+    gap: gap * t,
+    side: side.scale(t),
+  );
+
+  @override
+  ZenStitchBorder copyWith({BorderSide? side}) => ZenStitchBorder(
+    borderRadius: borderRadius,
+    color: color,
+    width: width,
+    thread: thread,
+    gap: gap,
+    side: side ?? this.side,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZenStitchBorder &&
+      other.borderRadius == borderRadius &&
+      other.color == color &&
+      other.width == width &&
+      other.thread == thread &&
+      other.gap == gap &&
+      other.side == side;
+
+  @override
+  int get hashCode =>
+      Object.hash(borderRadius, color, width, thread, gap, side);
+}
+
+/// A leaf: two opposite corners deeply rounded, the other two almost
+/// square, the long curves drawn heavier in [vein].
+@immutable
+class ZenLeafBorder extends _ZenFrameBorder {
+  const ZenLeafBorder({
+    required super.borderRadius,
+    required super.color,
+    required this.vein,
+    super.width = 1,
+    super.side,
+  });
+
+  /// A leaf of [radius] in the long corners.
+  factory ZenLeafBorder.of({
+    required double radius,
+    required Color color,
+    required Color vein,
+  }) => ZenLeafBorder(
+    borderRadius: BorderRadius.only(
+      topLeft: Radius.circular(radius),
+      bottomRight: Radius.circular(radius),
+      topRight: Radius.circular(radius * 0.2),
+      bottomLeft: Radius.circular(radius * 0.2),
+    ),
+    color: color,
+    vein: vein,
+  );
+
+  final Color vein;
+
+  @override
+  void paintDetails(Canvas canvas, Rect rect) {
+    final RRect rr = borderRadius.toRRect(rect).scaleRadii();
+    final Path arcs = Path();
+    if (rr.tlRadiusX > 1) {
+      arcs
+        ..moveTo(rect.left, rect.top + rr.tlRadiusY)
+        ..arcTo(
+          Rect.fromLTWH(
+            rect.left,
+            rect.top,
+            rr.tlRadiusX * 2,
+            rr.tlRadiusY * 2,
+          ),
+          math.pi,
+          math.pi / 2,
+          false,
+        );
+    }
+    if (rr.brRadiusX > 1) {
+      arcs
+        ..moveTo(rect.right, rect.bottom - rr.brRadiusY)
+        ..arcTo(
+          Rect.fromLTRB(
+            rect.right - rr.brRadiusX * 2,
+            rect.bottom - rr.brRadiusY * 2,
+            rect.right,
+            rect.bottom,
+          ),
+          0,
+          math.pi / 2,
+          false,
+        );
+    }
+    canvas.drawPath(
+      arcs,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width * 2.2
+        ..strokeCap = StrokeCap.round
+        ..color = vein,
+    );
+  }
+
+  @override
+  ShapeBorder scale(double t) => ZenLeafBorder(
+    borderRadius: borderRadius * t,
+    color: color,
+    vein: vein,
+    width: width * t,
+    side: side.scale(t),
+  );
+
+  @override
+  ZenLeafBorder copyWith({BorderSide? side}) => ZenLeafBorder(
+    borderRadius: borderRadius,
+    color: color,
+    vein: vein,
+    width: width,
+    side: side ?? this.side,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZenLeafBorder &&
+      other.borderRadius == borderRadius &&
+      other.color == color &&
+      other.vein == vein &&
+      other.width == width &&
+      other.side == side;
+
+  @override
+  int get hashCode => Object.hash(borderRadius, color, vein, width, side);
+}
+
+/// An edge of little round scallops, like a doily or the rim of a pie
+/// ([bite]: how deep each scallop is). A panel too small for them is a
+/// plain rounded rectangle.
+@immutable
+class ZenScallopBorder extends _ZenFrameBorder {
+  const ZenScallopBorder({
+    required super.color,
+    super.width = 1,
+    this.bite = 3,
+    super.side,
+  }) : super(borderRadius: BorderRadius.zero);
+
+  final double bite;
+
+  @override
+  double get inset => bite + width;
+
+  @override
+  Path outline(Rect rect) {
+    if (rect.shortestSide < bite * 8) {
+      return Path()
+        ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(bite * 2)));
+    }
+    final Rect base = rect.deflate(bite);
+    final Path path = Path()..moveTo(base.left, base.top);
+    void edge(Offset from, Offset to) {
+      final double length = (to - from).distance;
+      final int count = math.max(1, (length / (bite * 4.5)).round());
+      final Offset step = (to - from) / count.toDouble();
+      final double chord = length / count;
+      // The circle through the chord with a sagitta of [bite].
+      final double radius = (chord * chord / 4 + bite * bite) / (2 * bite);
+      for (int i = 1; i <= count; i++) {
+        path.arcToPoint(
+          from + step * i.toDouble(),
+          radius: Radius.circular(radius),
+        );
+      }
+    }
+
+    edge(base.topLeft, base.topRight);
+    edge(base.topRight, base.bottomRight);
+    edge(base.bottomRight, base.bottomLeft);
+    edge(base.bottomLeft, base.topLeft);
+    return path..close();
+  }
+
+  @override
+  ShapeBorder scale(double t) => ZenScallopBorder(
+    color: color,
+    width: width * t,
+    bite: bite * t,
+    side: side.scale(t),
+  );
+
+  @override
+  ZenScallopBorder copyWith({BorderSide? side}) => ZenScallopBorder(
+    color: color,
+    width: width,
+    bite: bite,
+    side: side ?? this.side,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZenScallopBorder &&
+      other.color == color &&
+      other.width == width &&
+      other.bite == bite &&
+      other.side == side;
+
+  @override
+  int get hashCode => Object.hash(color, width, bite, side);
+}
+
+/// A ticket: a rounded rectangle with a half circle bitten out of the
+/// middle of each side ([notch]: its radius). A panel too small for the
+/// bites is a plain rounded rectangle.
+@immutable
+class ZenNotchBorder extends _ZenFrameBorder {
+  const ZenNotchBorder({
+    super.borderRadius = BorderRadius.zero,
+    required super.color,
+    super.width = 1,
+    this.notch = 6,
+    super.side,
+  });
+
+  final double notch;
+
+  @override
+  double get inset => width + 2;
+
+  @override
+  Path outline(Rect rect) {
+    final Path card = Path()..addRRect(borderRadius.toRRect(rect));
+    if (rect.height < notch * 6 || rect.width < notch * 8) {
+      return card;
+    }
+    final Path bites = Path()
+      ..addOval(Rect.fromCircle(center: rect.centerLeft, radius: notch))
+      ..addOval(Rect.fromCircle(center: rect.centerRight, radius: notch));
+    return Path.combine(PathOperation.difference, card, bites);
+  }
+
+  @override
+  ShapeBorder scale(double t) => ZenNotchBorder(
+    borderRadius: borderRadius * t,
+    color: color,
+    width: width * t,
+    notch: notch * t,
+    side: side.scale(t),
+  );
+
+  @override
+  ZenNotchBorder copyWith({BorderSide? side}) => ZenNotchBorder(
+    borderRadius: borderRadius,
+    color: color,
+    width: width,
+    notch: notch,
+    side: side ?? this.side,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZenNotchBorder &&
+      other.borderRadius == borderRadius &&
+      other.color == color &&
+      other.width == width &&
+      other.notch == notch &&
+      other.side == side;
+
+  @override
+  int get hashCode => Object.hash(borderRadius, color, width, notch, side);
+}
+
+/// A drawing-board frame: a fine line, heavier corner marks and a ruler
+/// scale along the top edge.
+@immutable
+class ZenBlueprintBorder extends _ZenFrameBorder {
+  const ZenBlueprintBorder({
+    required super.color,
+    super.width = 1,
+    this.mark = 10,
+    super.side,
+  }) : super(borderRadius: BorderRadius.zero);
+
+  /// The length of the corner marks.
+  final double mark;
+
+  @override
+  double get inset => width + 1;
+
+  @override
+  void paintDetails(Canvas canvas, Rect rect) {
+    if (rect.width < mark * 3 || rect.height < mark * 3) {
+      return;
+    }
+    final Path corners = Path();
+    for (final (Offset c, double sx, double sy) in <(Offset, double, double)>[
+      (rect.topLeft, 1, 1),
+      (rect.topRight, -1, 1),
+      (rect.bottomLeft, 1, -1),
+      (rect.bottomRight, -1, -1),
+    ]) {
+      corners
+        ..moveTo(c.dx + mark * sx, c.dy)
+        ..lineTo(c.dx, c.dy)
+        ..lineTo(c.dx, c.dy + mark * sy);
+    }
+    canvas.drawPath(
+      corners,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width * 2.2
+        ..strokeCap = StrokeCap.square
+        ..color = color,
+    );
+    // The ruler: a tick every 6, a longer one every 30.
+    final Paint tick = Paint()
+      ..strokeWidth = width
+      ..color = color.withValues(alpha: 0.55);
+    int i = 0;
+    for (
+      double x = rect.left + mark * 1.6;
+      x < rect.right - mark * 1.6;
+      x += 6
+    ) {
+      final double h = i % 5 == 0 ? 5 : 2.5;
+      canvas.drawLine(
+        Offset(x, rect.top + width),
+        Offset(x, rect.top + width + h),
+        tick,
+      );
+      i++;
+    }
+  }
+
+  @override
+  ShapeBorder scale(double t) => ZenBlueprintBorder(
+    color: color,
+    width: width * t,
+    mark: mark * t,
+    side: side.scale(t),
+  );
+
+  @override
+  ZenBlueprintBorder copyWith({BorderSide? side}) => ZenBlueprintBorder(
+    color: color,
+    width: width,
+    mark: mark,
+    side: side ?? this.side,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZenBlueprintBorder &&
+      other.color == color &&
+      other.width == width &&
+      other.mark == mark &&
+      other.side == side;
+
+  @override
+  int get hashCode => Object.hash(color, width, mark, side);
 }
 
 bool _sameColors(List<Color> a, List<Color> b) {

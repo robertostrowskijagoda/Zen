@@ -220,7 +220,12 @@ enum AppPalette {
   comic,
   steam,
   holo,
-  volcano;
+  volcano,
+  herbarium,
+  sweets,
+  cinema,
+  blueprint,
+  leather;
 
   String get label => switch (this) {
     AppPalette.classic => t('Klasyczny'),
@@ -250,6 +255,11 @@ enum AppPalette {
     AppPalette.steam => t('Mosiądz i para'),
     AppPalette.holo => t('Hologram'),
     AppPalette.volcano => t('Wulkan'),
+    AppPalette.herbarium => t('Zielnik'),
+    AppPalette.sweets => t('Cukiernia'),
+    AppPalette.cinema => t('Kino'),
+    AppPalette.blueprint => t('Rysunek techniczny'),
+    AppPalette.leather => t('Skóra i nić'),
   };
 
   String get tagline => switch (this) {
@@ -282,6 +292,13 @@ enum AppPalette {
     AppPalette.steam => t('nity, sepia, obracające się zębatki'),
     AppPalette.holo => t('tęczowy połysk, matowe szkło'),
     AppPalette.volcano => t('żar, pęknięcia, unoszące się iskry'),
+    AppPalette.herbarium => t('szałwia i papier, listki w kształcie ramek'),
+    AppPalette.sweets => t('róż i mięta, faliste brzegi, bąbelki'),
+    AppPalette.cinema => t('czerwony aksamit, złoto, bilety z wycięciem'),
+    AppPalette.blueprint => t(
+      'błękit i biel, siatka kreślarska, znaczniki w rogach',
+    ),
+    AppPalette.leather => t('brąz i krem, szwy zamiast ramek'),
   };
 }
 

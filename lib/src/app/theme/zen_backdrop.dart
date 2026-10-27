@@ -7,7 +7,8 @@ import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
 /// The backdrops of the looks ([ZenBackdrop]): digital rain, a neon floor
-/// grid, monitor scan lines and still blooms of colour. They are drawn
+/// grid, monitor scan lines, slowly drifting blooms of colour and the
+/// rest of the effects ([ZenEffects]). They are drawn
 /// behind every page (the pages of such a look are see-through), never on
 /// top of panels: text sits on cards and groups above them, and the
 /// strongest mark of an effect stays faint against the background
@@ -135,7 +136,7 @@ class _ZenBackdropLayerState extends State<ZenBackdropLayer>
       _watch.start();
       ZenBackdropLayer.running++;
       _timer = Timer.periodic(Duration(milliseconds: 1000 ~/ fps), (_) {
-        _clock.seconds = _stillSeconds + _watch.elapsedMilliseconds / 1000.0;
+        _clock.seconds = _stillSeconds + _watch.elapsedMicroseconds / 1e6;
       });
     } else if (!_animate && _timer != null) {
       _stopTimer();
@@ -233,7 +234,7 @@ class ZenBackdropPainter extends CustomPainter {
       case ZenBackdrop.scanlines:
         _paintScanlines(canvas, size, t);
       case ZenBackdrop.aurora:
-        _paintAurora(canvas, size);
+        _paintAurora(canvas, size, t);
       default:
         ZenEffects.paint(kind, canvas, size, t, colors);
     }
@@ -487,7 +488,7 @@ class ZenBackdropPainter extends CustomPainter {
 
   // --- Aurora --------------------------------------------------------------
 
-  void _paintAurora(Canvas canvas, Size size) {
+  void _paintAurora(Canvas canvas, Size size, double t) {
     final double top = maxAlpha(ZenBackdrop.aurora);
     void bloom(Alignment at, double radius, Color c, double alpha) {
       final Rect all = Offset.zero & size;
@@ -505,9 +506,29 @@ class ZenBackdropPainter extends CustomPainter {
       );
     }
 
-    bloom(const Alignment(-0.9, -0.85), 0.9, colors.accent, top);
-    bloom(const Alignment(1, -0.1), 0.8, colors.accentSecondary, top * 0.8);
-    bloom(const Alignment(-0.4, 1), 0.9, colors.accentTertiary, top * 0.6);
+    // Each bloom wanders slowly on its own slow circle.
+    Alignment drift(Alignment home, double speed, double phase) => Alignment(
+      home.x + 0.18 * math.sin(t * speed + phase),
+      home.y + 0.14 * math.cos(t * speed * 0.8 + phase),
+    );
+    bloom(
+      drift(const Alignment(-0.9, -0.85), 0.11, 0),
+      0.9,
+      colors.accent,
+      top,
+    );
+    bloom(
+      drift(const Alignment(1, -0.1), 0.09, 2),
+      0.8,
+      colors.accentSecondary,
+      top * 0.8,
+    );
+    bloom(
+      drift(const Alignment(-0.4, 1), 0.13, 4),
+      0.9,
+      colors.accentTertiary,
+      top * 0.6,
+    );
   }
 
   @override

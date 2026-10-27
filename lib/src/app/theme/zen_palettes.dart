@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_palettes_framed.dart';
 import 'package:zen/src/app/theme/zen_palettes_wild.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -39,7 +40,8 @@ enum ZenThemeCategory {
 /// character ([look]). Klasyczny is computed from the chosen accent
 /// ([ZenColors.resolve]); the others are hand-tuned, in a light and a dark
 /// variant each (every theme has both, keeping its identity); the wild
-/// ones are in [ZenWildPalettes]. Every variant
+/// ones are in [ZenWildPalettes] and the ones known by their frames in
+/// [ZenFramedPalettes]. Every variant
 /// keeps the contrast the theme test checks (body text 4.5:1 on every
 /// surface, labels on the accent 4.5:1, faint text 3:1).
 abstract final class ZenPalettes {
@@ -90,6 +92,20 @@ abstract final class ZenPalettes {
         dark ? ZenWildPalettes.holo : ZenWildPalettes.holoLight,
       AppPalette.volcano =>
         dark ? ZenWildPalettes.volcano : ZenWildPalettes.volcanoLight,
+      AppPalette.herbarium =>
+        dark
+            ? ZenFramedPalettes.herbariumDark
+            : ZenFramedPalettes.herbariumLight,
+      AppPalette.sweets =>
+        dark ? ZenFramedPalettes.sweetsDark : ZenFramedPalettes.sweetsLight,
+      AppPalette.cinema =>
+        dark ? ZenFramedPalettes.cinemaDark : ZenFramedPalettes.cinemaLight,
+      AppPalette.blueprint =>
+        dark
+            ? ZenFramedPalettes.blueprintDark
+            : ZenFramedPalettes.blueprintLight,
+      AppPalette.leather =>
+        dark ? ZenFramedPalettes.leatherDark : ZenFramedPalettes.leatherLight,
     };
   }
 
@@ -100,15 +116,18 @@ abstract final class ZenPalettes {
     AppPalette.graphite => ZenThemeCategory.classic,
     AppPalette.calm ||
     AppPalette.forest ||
-    AppPalette.mist => ZenThemeCategory.toned,
+    AppPalette.mist ||
+    AppPalette.herbarium => ZenThemeCategory.toned,
     AppPalette.neon ||
     AppPalette.grid ||
     AppPalette.rain ||
     AppPalette.player ||
-    AppPalette.phosphor => ZenThemeCategory.cool,
+    AppPalette.phosphor ||
+    AppPalette.blueprint => ZenThemeCategory.cool,
     AppPalette.dusk ||
     AppPalette.onyx ||
-    AppPalette.pearl => ZenThemeCategory.elegant,
+    AppPalette.pearl ||
+    AppPalette.leather => ZenThemeCategory.elegant,
     AppPalette.cipher ||
     AppPalette.lightcycle ||
     AppPalette.fairy ||
@@ -121,7 +140,9 @@ abstract final class ZenPalettes {
     AppPalette.comic ||
     AppPalette.steam ||
     AppPalette.holo ||
-    AppPalette.volcano => ZenThemeCategory.wild,
+    AppPalette.volcano ||
+    AppPalette.sweets ||
+    AppPalette.cinema => ZenThemeCategory.wild,
   };
 
   /// The component character of [palette].
@@ -153,6 +174,11 @@ abstract final class ZenPalettes {
     AppPalette.steam => ZenWildPalettes.steamLook,
     AppPalette.holo => ZenWildPalettes.holoLook,
     AppPalette.volcano => ZenWildPalettes.volcanoLook,
+    AppPalette.herbarium => ZenFramedPalettes.herbariumLook,
+    AppPalette.sweets => ZenFramedPalettes.sweetsLook,
+    AppPalette.cinema => ZenFramedPalettes.cinemaLook,
+    AppPalette.blueprint => ZenFramedPalettes.blueprintLook,
+    AppPalette.leather => ZenFramedPalettes.leatherLook,
   };
 
   // Atrament: paper and ink, nearly sharp corners, flat panels with a
@@ -287,7 +313,7 @@ abstract final class ZenPalettes {
     curve: Curves.easeInOutCubic,
   );
 
-  // Perła: frosted glass over still blooms of colour.
+  // Perła: frosted glass over slowly drifting blooms of colour.
   static const ZenLook _pearl = ZenLook(
     surfaces: ZenSurfaceStyle.glass,
     buttonFill: ZenButtonFill.gradient,
