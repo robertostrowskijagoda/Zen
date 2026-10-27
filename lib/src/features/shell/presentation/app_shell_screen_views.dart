@@ -621,7 +621,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                   child: ZenSection(t('Rozmowy'), top: 12),
                 ),
                 AnimatedSwitcher(
-                  duration: ZenMotion.enabled
+                  duration: ZenMotion.enabled && !ZenMotion.offIn(context)
                       ? const Duration(milliseconds: 240)
                       : Duration.zero,
                   switchInCurve: Curves.easeOutCubic,
@@ -2146,6 +2146,13 @@ class _AppearanceSection extends ConsumerWidget {
                 ),
             ],
           ),
+          const SizedBox(height: 20),
+          _SectionIntro(
+            title: t('Animacje'),
+            caption: t('Ruch teł motywów i drobnych efektów.'),
+          ),
+          const SizedBox(height: 10),
+          const AnimationsSettingChoice(),
           // The accent is the colour of Klasyczny; the other palettes have
           // their own.
           if (settings.palette == AppPalette.classic) ...<Widget>[

@@ -79,6 +79,7 @@ import 'package:zen/src/features/security/device_integrity.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
 import 'package:zen/src/features/settings/presentation/language_screen.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
