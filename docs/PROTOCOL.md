@@ -543,8 +543,10 @@ Computers run no GATT server: they cannot receive waves.
   service shows tokens worked out in advance (the nearby kit, 8 days) and
   never holds the private key.
 - **Same network**: the same advertisement (token + hint) rides on the LAN
-  beacons (1.6) while the app is unlocked and the Wi-Fi
-  discovery setting is on. The app hands the bridge the adverts of the
+  beacons (1.6) while the Wi-Fi discovery setting is on: from the app while
+  it is unlocked, and from the nearby kit's tokens in the locked Android
+  service (which has no devices to link with, so it only answers phones
+  that look around). The app hands the bridge the adverts of the
   coming slots (a day) and the bridge shows the one of the current slot, so
   a token never stays past its slot (`lan_nearby.go`). Adverts heard there
   are kept only while the app looks around ("Nearby" open, or a short look

@@ -15,6 +15,8 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/meet/locked_nearby.dart';
+import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
@@ -537,9 +539,53 @@ void main() {
       final AndroidBackgroundBootstrapPayload? back =
           AndroidBackgroundBootstrapPayload.fromData(payload.toData());
       expect(back?.settings.inboxLimitMb, 91);
+      expect(back?.settings.lanDiscoveryOn, isTrue);
       expect(payload.toData().containsKey('encryptionKey'), isFalse);
+      final AndroidBackgroundBootstrapPayload? noLan =
+          AndroidBackgroundBootstrapPayload.fromData(
+            const AndroidBackgroundBootstrapPayload(
+              settings: AppSettings(lanDiscovery: false),
+            ).toData(),
+          );
+      expect(noLan?.settings.lanDiscoveryOn, isFalse);
     },
   );
+
+  test('the locked service shows the nearby kit\'s tokens on the shared '
+      'Wi-Fi, with no devices to link with, only when shown and allowed', () {
+    final Uint8List adverts = Uint8List.fromList(
+      List<int>.generate(2 * kNearbyAdvertBytes, (int i) => i),
+    );
+    final NearbyKit kit = NearbyKit(
+      createdAt: 1,
+      self: 'bob',
+      visible: true,
+      firstSlot: 2950000,
+      adverts: adverts,
+    );
+    final Map<String, dynamic> json =
+        jsonDecode(lockedLocalLinksJson(kit, lan: true)!)
+            as Map<String, dynamic>;
+    expect(json['Lan'], isTrue);
+    expect(json['Peers'], isEmpty);
+    final Map<String, dynamic> nearby = json['Nearby'] as Map<String, dynamic>;
+    expect(nearby['Start'], 2950000);
+    expect(nearby['Looking'], isFalse);
+    expect(
+      nearby['Adverts'],
+      adverts.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(),
+    );
+    expect(lockedLocalLinksJson(kit, lan: false), isNull, reason: 'LAN off');
+    expect(lockedLocalLinksJson(null, lan: true), isNull, reason: 'no kit');
+    expect(
+      lockedLocalLinksJson(
+        const NearbyKit(createdAt: 1, self: 'bob'),
+        lan: true,
+      ),
+      isNull,
+      reason: 'not shown nearby',
+    );
+  });
 
   test(
     'the locked background runtime notice is throttled by its suppression key',

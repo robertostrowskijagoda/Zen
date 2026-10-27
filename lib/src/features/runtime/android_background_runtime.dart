@@ -44,6 +44,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -454,6 +455,8 @@ final class AndroidBackgroundBootstrapPayload {
       'autoCleanupDays': settings.autoCleanupDays,
       'lockMode': settings.lockMode.index,
       'backgroundLockDelaySeconds': settings.backgroundLockDelaySeconds,
+      // Whether the locked phone may show itself on the shared Wi-Fi.
+      'lanDiscovery': settings.lanDiscoveryOn,
       'mode': mode.name,
     };
   }
@@ -479,6 +482,7 @@ final class AndroidBackgroundBootstrapPayload {
         backgroundLockDelaySeconds:
             (data['backgroundLockDelaySeconds'] as num?)?.toInt() ??
             AppSettings.defaultBackgroundLockDelaySeconds,
+        lanDiscovery: data['lanDiscovery'] as bool?,
       ),
       // A payload without a mode (the on-disk fallback used when the
       // service restarts itself with no app around) means "own the node".
@@ -1872,6 +1876,26 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 }
 
+/// The local links of the locked service's node: "people nearby" on the
+/// shared network from the nearby [kit]'s tokens (the same the radio shows,
+/// one per slot), so a locked phone shown nearby is seen on the same Wi-Fi
+/// too. No devices to link with (that takes the ledger), so it sends no
+/// beacons of its own and only answers phones that look around there.
+/// `null`: nothing to show, or Wi-Fi discovery is off ([lan]).
+@visibleForTesting
+String? lockedLocalLinksJson(NearbyKit? kit, {required bool lan}) {
+  final Uint8List? adverts = kit?.adverts;
+  if (!lan || kit == null || !kit.visible || adverts == null) {
+    return null;
+  }
+  return localLinksSettingsJson(
+    lan: true,
+    beaconSeconds: kLocalLinkIdleBeaconSeconds,
+    peers: const <LocalLinkPeer>[],
+    nearby: LocalNearbyAdverts(firstSlot: kit.firstSlot, adverts: adverts),
+  );
+}
+
 /// The service's node while the app is locked or gone: the mesh
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
@@ -2013,6 +2037,14 @@ final class _LockedReceiverSession {
         fallbackPollInterval: const Duration(seconds: 2),
       ),
     );
+    // Shown nearby on the shared Wi-Fi too (safe before the node is up).
+    final String? localLinks = lockedLocalLinksJson(
+      nearbyKit,
+      lan: payload.settings.lanDiscoveryOn,
+    );
+    if (localLinks != null) {
+      runtime.setLocalLinks(localLinks);
+    }
     if (doorKit != null && !doorKit.isEmpty) {
       // Safe before the node is up: the doors come up with it. Knocks wait
       // in the inbox; only the door key is here, never the flat's keys.
