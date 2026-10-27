@@ -40,6 +40,16 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and
   "bridge" announcements in the ledger (`lg_bridges`).
+- Transit on phones (`transit_guard.go`) [V]: every Yggdrasil node forwards,
+  and ironwood weighs links by latency, so a phone on the same Wi-Fi as a
+  computer bridge can become the cheapest way for the bridge's strangers'
+  traffic to its own public peers. A phone estimates the traffic that only
+  passes through it (`traffic_meter.go`, every 10 s over 30-s windows);
+  above 64 KiB/s in a window, or 32 MiB within an hour, it keeps a single
+  peering (one public peer, or one device nearby when no public peer is up)
+  for 30 minutes, doubled for each further hold within a day (at most
+  6 hours), then takes its other peers, friends' bridges and local links
+  back. Its own packets (signals, call media) never count as transit.
 
 ### 1.2 Signal datagrams [V]
 
