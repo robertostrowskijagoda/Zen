@@ -169,8 +169,11 @@ friend vouching for their key, is trust on first use.
   the Windows credential store), so Zen opens without the password even
   after a restart; the device's own screen lock is then all that guards it.
   Choosing it takes the password once; choosing any other mode, or locking
-  by hand, deletes the copy at once. The password is still asked for before
-  security settings change or sensitive screens open.
+  by hand, deletes the copy at once (the lock screen appears only once it
+  is gone). Only choosing "Never" again, with the password, makes a new
+  copy: setting a password, unlocking or restoring settings never does.
+  The password is still asked for before security settings change or
+  sensitive screens open.
 - **The locked phone (Android and iPhone).** A locked Zen keeps receiving
   without the master key; see "The locked phone" below.
 - **Screens.** The wallet and other sensitive screens are protected from
@@ -287,7 +290,10 @@ list, the ledger and every other store stay under the master key.
 What the receiver reads in memory: a frame arrives decrypted by the mesh
 session (that is how any device receives). To write a notification it reads
 the sender and the text of a chat message, keeps at most its first 80
-characters (only as far as the conversation's notification level allows),
+characters (only as far as the conversation's notification level allows;
+a group message names its sender only when the notice kit lists them as a
+member of that group, and only by the name this person gave a friend,
+never by a name the sender chose),
 and writes nothing else from it in the clear: the whole frame goes into the
 sealed inbox at once and the plaintext is dropped. Mail held by friends'
 mailboxes is sealed for this device's relay identity, which is under the

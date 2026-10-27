@@ -287,8 +287,8 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 | type | Fields | Notes |
 |---|---|---|
 | `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
-| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`). |
-| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence. Never mailboxed; ignored by a locked phone. |
+| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
+| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence, at most once every 5 min (`kPresenceAwayEvery`): one held back goes out when that time is over, unless Zen is back on the screen by then. Never mailboxed; ignored by a locked phone. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
 
 Presence fields ride on the frames above; nothing is sent only for them.
@@ -546,17 +546,21 @@ in batches of at most 30 KB and 10 an hour per friend, through the reliable
 queue to friends who are offline, so they wait in those friends'
 mailboxes. The receiver takes them like `lg_entries`, with the same checks.
 
-`lg_mention` {`e`, `p`?, `pr`?} is reliable too: the notice to a person
-mentioned in a post, an edit or a comment. `e` is that signed entry, `p`
-the post a comment or an edit belongs to and `pr` the writer's profile,
-each with its device certificate. A mention is a token `<@N>` in the
+`lg_mention` {`e`, `p`?} is reliable too: the notice to a person
+mentioned in a post, an edit or a comment. `e` is that signed entry and
+`p` the post a comment or an edit belongs to, each with its device
+certificate. A mention is a token `<@N>` in the
 text, N indexing the body's `men` list of {`d` address, `a` account?,
 `n` name?} (at most 20). The receiver checks the signatures, that a token
 names its address or account, that the post is held or carried and signed
 by its author, and that the writer may mention it (its own post, a friend,
 it reacted to that post, or the sending address is on a friend list
 shared with it); it announces each mention once, at most 10 an hour per
-writer and 60 an hour from people who are not friends. Group messages
+writer, 20 an hour from people who are not friends and 5 an hour from them
+under one post, counted on the disk across restarts. It names the writer
+only by the name it gave a friend or the name on a friend's shared list;
+anyone else is "someone", and the notification then says only that
+somebody mentioned it. Group messages
 carry `men` the same way; the receiver announces a mention only from a
 member of the group.
 

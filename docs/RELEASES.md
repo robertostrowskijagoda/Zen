@@ -506,7 +506,10 @@ Rules (`tool/release.dart` checks them):
   language and falls back to the English ones, so write Polish too; other
   languages only when someone translated them.
 - Each line is at most 160 characters of **plain text**: no links (`http`,
-  `://`, `www.`), no Markdown or HTML (`*`, `` ` ``, `<`, `>`, `[`, `]`).
+  `://`, `www.`) or anything that looks like a domain (`example.org`: put
+  a space after every full stop), no invisible format marks (such as the
+  ones that turn text right to left), no Markdown or HTML (`*`, `` ` ``,
+  `<`, `>`, `[`, `]`).
   The app shows each line as one bullet, cut after two rows, and never
   makes anything in it clickable.
 - Say what a person notices ("Messages reach you even when Zen is
