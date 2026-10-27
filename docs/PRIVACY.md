@@ -223,10 +223,13 @@ another Zen user.
   when you download Zen or open that page, under GitHub's own policy. An invite
   code in a link is placed after `#` and is therefore not sent to the server by
   your browser. Zen itself (except the store build) asks GitHub's API for the
-  latest release about 20 seconds after start and every 12 hours, and
-  downloads the release file (and its `SHA256SUMS`) when you press
-  "Update"; GitHub then sees your IP address and the user agent "Zen" and
-  which release file you fetched, nothing else (no account, token or device
+  latest release about 20 seconds after start and then at most once an hour
+  (on Android also every few hours while the app is closed and receives in
+  the background), fetches the short note about a newer version and its
+  signature (`whats-new.json`, `SHA256SUMS.sig`), and downloads the release
+  file (and its `SHA256SUMS`) when you press "Update"; GitHub then sees
+  your IP address and the user agent "Zen" and which release file you
+  fetched, nothing else (no account, token or device
   id). If GitHub cannot be reached, the app says so. Zen checks the downloaded
   file against the release's checksums (and, on Android, against its own
   signing certificate) before it installs it.

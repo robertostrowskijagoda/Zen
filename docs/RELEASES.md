@@ -104,7 +104,9 @@ key, so every release must be signed with this key.
 **In short** (the details follow in items 1–7):
 
 1. Make sure `main` is green in CI and the "Unreleased" part of
-   `CHANGELOG.md` says what is new. For **1.12.0 only**: run
+   `CHANGELOG.md` says what is new, with the short `### What's new` block
+   in English and Polish that the app shows with the update notice
+   (section 3.5). For **1.12.0 only**: run
    `flutter test test/format_fixtures_test.dart` once outside CI (or with
    `ZEN_WRITE_FORMAT_FIXTURES=1`) and commit `test/fixtures/formats/1.12.0/`
    — the samples of every stored and sent format that later versions must
@@ -150,9 +152,17 @@ key, so every release must be signed with this key.
    `kMinPeerVersion` (`lib/src/app/peer_version.dart`, sent as `minv` in
    ping and pong) and/or put a line `zen-min: X.Y.Z` in the release
    description; older builds then show "update to X.Y.Z or newer".
-7. Publish the draft. This starts `pages.yml`, which refreshes the install
-   page data and the SideStore / AltStore source (`apps.json`) for the new
-   `Zen-unsigned.ipa`. Builds then find the release within 12 hours.
+7. Publish the draft as a full release: not a pre-release, with "Set as
+   the latest release" ticked (the app asks only for `releases/latest`,
+   which never shows a draft or a pre-release). This starts `pages.yml`,
+   which refreshes the install page data and the SideStore / AltStore
+   source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
+   finds the release within an hour, and at once when it starts or comes
+   back to the screen an hour or more after its last check; an Android
+   phone that receives in the background finds it within about 4 to 5
+   hours also while Zen is closed (Doze can put that off to its next
+   window). A phone whose friend already runs the new version asks GitHub
+   as soon as that friend's version reaches it (section 8.5).
 
 The checks behind it: `test/release_contract_test.dart` (the app's file
 names, the workflow, the version) and `test/github_release_e2e_test.dart`
@@ -462,6 +472,72 @@ SideStore or AltStore sign it with the user's free Apple ID (README, section
 - Python tests of these tools run in CI: `tool/ci/test_ci_checks.py` (ELF and
   APK alignment, PE imports, glibc, pinned runners, the environment),
   `tool/ci/test_release_source.py`, `tool/ci/test_check_libwebrtc.py`.
+
+### 3.5. What's new (the note in the update notice)
+
+The update notification, the banner across the top of the app and the card
+in "Updates and Pass it on" show a short note about the new version under
+"New version X is available". It is not the changelog: it is written for
+people who use Zen, in a few words, in English and Polish.
+
+Write it in `CHANGELOG.md` under `## Unreleased`, as its own block:
+
+```
+## Unreleased
+
+### What's new
+- [en] Messages reach you even when Zen is closed or locked.
+- [en] See whether a friend has Zen open, in the background or offline.
+- [pl] Wiadomości docierają nawet przy zamkniętym lub zablokowanym Zen.
+- [pl] Widzisz, czy znajomy ma Zen otwarty, w tle czy offline.
+
+### Messages
+- (the usual, detailed changelog entries)
+```
+
+Rules (`tool/release.dart` checks them):
+
+- Every line of the block is `- [xx] Text`, where `xx` is a two-letter
+  language code of the app (`en`, `pl`, `de`, …). Blank lines are allowed;
+  the block ends at the next heading.
+- **English is required** (1 to 3 lines). Every other language is
+  optional, also up to 3 lines. The app shows the lines of its own
+  language and falls back to the English ones, so write Polish too; other
+  languages only when someone translated them.
+- Each line is at most 160 characters of **plain text**: no links (`http`,
+  `://`, `www.`), no Markdown or HTML (`*`, `` ` ``, `<`, `>`, `[`, `]`).
+  The app shows each line as one bullet, cut after two rows, and never
+  makes anything in it clickable.
+- Say what a person notices ("Messages reach you even when Zen is
+  closed"), not how it was done. One change per line, the biggest first.
+
+How it travels:
+
+1. `dart run tool/release.dart prepare X.Y.Z` refuses while the block is
+   missing or breaks a rule, prints the lines it found and moves them with
+   the rest of "Unreleased" under `## X.Y.Z — <date>`.
+   `dart run tool/release.dart check` (CI, every push) checks a block
+   already written under "Unreleased"; `dart run tool/release.dart
+   whats-new` prints the file it would make.
+2. On the tag, the `checksums` job of `release.yml` runs
+   `dart run tool/release.dart whats-new --version X.Y.Z --out
+   dist/whats-new.json` before it computes `SHA256SUMS`: the note is one of
+   the release files, listed in `SHA256SUMS` and so signed in
+   `SHA256SUMS.sig` with all the others. The draft release's description
+   starts with the English lines.
+3. `whats-new.json` is
+   `{"t": "zen_whats_new", "app": "zen", "version": "X.Y.Z", "lines":
+   {"en": ["…"], "pl": ["…"]}}` (`lib/src/features/update/whats_new.dart`).
+   When a check finds the new version, the app fetches the note (from
+   `github.com/…/releases/download/`, not the API, so it costs nothing of
+   GitHub's rate limit) and shows it only when it is this version's note
+   and `SHA256SUMS.sig` signs it with a key in `kReleaseMaintainers` (with
+   no key pinned: when the release's `SHA256SUMS` lists it). A missing or
+   refused note only leaves the notice without it.
+
+It is a file of its own, not a field of `SHA256SUMS.sig`: builds up to
+1.12.1 read that file strictly (exactly four fields), and a new field there
+would stop them from updating themselves.
 
 ## 4. Android: developer verification (2026–2027)
 
@@ -880,10 +956,17 @@ In 2027:
 ## 8. Updates over the network (disabled)
 
 The mechanism from V1.10 is in the code but **disabled**: the maintainer key
-list `kReleaseMaintainers` in `lib/src/features/update/release.dart` is empty,
-so the app accepts no updates from the network. We do not want maintainers
+list `kReleaseMaintainers` in `lib/src/features/update/release.dart` holds
+one key (the release signing key of section 8.6), fewer than the
+`kReleaseThreshold` of 2 a network release needs, so the app accepts no
+updates from the network: no releases, holds, canaries or signed donation
+details from friends (`UpdateBook.enabled` is false). That one key is
+enough for the GitHub update (section 8.6). We do not want maintainers
 with separate keys; a proposed replacement (the same signing certificate +
 a higher `versionCode` + 7 days + a human's consent) is still to be decided.
+Even once enabled, a signed release starts to spread only from a device
+that loaded it by hand (the app does not fetch `release.json` from GitHub
+by itself).
 
 How it works today (if the list were not empty): a release is accepted when at
 least 2 of 3 maintainers signed it (hybrid Ed25519 + ML-DSA-65, both halves
@@ -971,23 +1054,44 @@ the oldest version the sender still talks to (`kMinPeerVersion` in
 than `zen-min` of the latest GitHub release) shows a red tile "This
 version of Zen is no longer supported" above the bar below. When friends have a newer version, Settings
 shows a quiet bar "Friends have a newer version of Zen (X)" leading to
-"Updates and Pass it on". The version is the
+"Updates and Pass it on", and the app asks GitHub at once whether that
+version is published (section 8.5). The version is the
 friend's own claim and affects nothing security-related. A signed release
 marker spreading by gossip is not done.
 
 ### 8.5 Updates from GitHub (on)
 
 Independent of section 8: every build except the store one asks
-`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` 20 s after
-start and every 12 h (one GET, only the User-Agent `Zen`;
-`lib/src/features/update/github_update_service.dart`). It sends
-`If-None-Match` with the last `ETag`, so an unchanged answer (304) costs no
-rate limit. On an error it retries after GitHub's `Retry-After` (or the
-`x-ratelimit-reset` time when `x-ratelimit-remaining` is 0) plus a minute,
-otherwise after 15 min, 30, 60… up to 12 h, and shows when; a good answer
-clears the backoff. A 404 is its own state ("no published release of Zen
-on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the release
-description is the oldest version still supported (section 3, step 6).
+`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` (one GET,
+only the User-Agent `Zen`;
+`lib/src/features/update/github_update_service.dart`) whenever GitHub's
+last answer is an hour old or older (`kGithubCheckEvery`): 20 s after
+start, when the app comes back to the screen and every hour while it
+stays open. On Android the background service
+(`background_update_check.dart`, started in every mode of the service,
+also while the app is locked) asks while Zen is closed once the last
+answer is 4 h old (`kBackgroundGithubCheckEvery`): it rides the service's
+shared wake as work that does not wake the phone in Doze, looks every hour
+whether a check is due (one small file, `update_check.json`, which the app
+and the service share, so whoever asked last counts) and asks at most once
+in those 4 h. A friend whose ping or pong names a newer version than any
+known here makes the app ask at once (once per version, not within 2
+minutes of the last attempt): the friend's claim is unsigned, GitHub's
+answer decides. A release that 2 maintainers signed, coming from friends
+(section 8, off today), is announced at once. It sends `If-None-Match`
+with the last `ETag`, so an unchanged answer (304) costs no rate limit.
+At one request an hour per device, about 60 devices behind one address
+(a mobile operator's shared IP) may meet GitHub's limit of 60 requests an
+hour; the app then waits as GitHub asks. On an error it retries after
+GitHub's `Retry-After` (or the `x-ratelimit-reset` time when
+`x-ratelimit-remaining` is 0) plus a minute, otherwise after 15 min, 30,
+60 (never later than the next regular check), and shows when; a good
+answer clears the backoff. A 404 is its own state ("no published release
+of Zen on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the
+release description is the oldest version still supported (section 3,
+step 6). A newer version is announced once with a quiet notification,
+whichever of the app and the service finds it first, with the release's
+short note (section 3.5) as its expanded text.
 Inside a Flatpak nothing is downloaded: the card shows the
 `flatpak install` command and opens the release page. A newer `v<version>`
 tag shows the bar "New version X is available — worth updating" with
@@ -1015,9 +1119,13 @@ Once `kReleaseMaintainers` holds at least one key, the GitHub update (all
 platforms; on Android in addition to the certificate check) installs a file
 only when the release also has `SHA256SUMS.sig`, signed with one of those
 keys, naming this version and this file with its SHA-256. Without that file,
-with a bad signature or another version, nothing is installed. While the
-list is empty (today) the app behaves as in section 8.5 and "Updates and Pass it
-on" says that this build cannot check the author's signature yet.
+with a bad signature or another version, nothing is installed. Builds since
+1.12.0 pin one key, so every release needs `SHA256SUMS.sig` made with it
+(the `ZEN_RELEASE_SIGNING_KEY` secret). A build with an empty list behaves
+as in section 8.5 and "Updates and Pass it on" says that it cannot check
+the author's signature yet. The notice itself never waits for the
+signature: a newer tag is announced from the API's answer alone; only
+installing (and showing the note of section 3.5) checks it.
 
 `SHA256SUMS.sig` has the format of a signed release, like the canary (section 8.3):
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
