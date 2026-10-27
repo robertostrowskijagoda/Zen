@@ -204,178 +204,184 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     return Scaffold(
       key: const Key('table-screen'),
       appBar: AppBar(title: Text(t('Stół na sześć'))),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: _table,
-          builder: (BuildContext context, Widget? _) {
-            final bool on = _table.myWish != null;
-            final int nearbyCount = _table.wishes.length;
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                ZenHero(
-                  title: t('Kolacja dla sześciu'),
-                  icon: Icons.dinner_dining_rounded,
-                  tone: zenTone(zen, 2),
-                  text: t(
-                    'Ty i pięcioro gości, których aplikacja dobiera sama: '
-                    'znajomi Twoich znajomych, którzy też chcą tak poznawać '
-                    'ludzi. Każdy zna kogoś, kto zna Ciebie — nikt nie jest '
-                    'zupełnie obcy, a prawie wszyscy są nowi.',
-                  ),
-                ),
-                ZenSection(t('1. Daj znać, że chcesz')),
-                TextField(
-                  key: const Key('table-city'),
-                  controller: _city,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
-                    labelText: t('Miasto'),
-                    prefixIcon: const Icon(Icons.location_city_rounded),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  key: const Key('table-area'),
-                  controller: _area,
-                  maxLength: kTableMaxArea,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
-                    labelText: t('Okolica (opcjonalnie)'),
-                    hintText: t('np. Wrzeszcz'),
-                    prefixIcon: const Icon(Icons.map_outlined),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  t('Kiedy możesz? Nic nie zaznaczysz — każdy dzień.'),
-                  style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
-                ),
-                const SizedBox(height: 8),
-                // The week in one row of equal toggles (never a lonely "nd"
-                // wrapped to its own line).
-                Row(
-                  children: <Widget>[
-                    for (int d = 1; d <= 7; d++) ...<Widget>[
-                      if (d > 1) const SizedBox(width: 6),
-                      Expanded(
-                        child: _DayToggle(
-                          key: Key('table-day-$d'),
-                          label: ZenFormat.weekdayShortOf(d, compact: true),
-                          selected: _days.contains(d),
-                          onTap: () => setState(() {
-                            _days = <int>{..._days};
-                            if (!_days.remove(d)) {
-                              _days.add(d);
-                            }
-                          }),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 10),
-                ZenGroup(
-                  children: <Widget>[
-                    SwitchListTile(
-                      key: const Key('table-wish'),
-                      value: on,
-                      title: Text(t('Chcę na Stół na sześć')),
-                      subtitle: Text(
-                        t(
-                          'Znajomi widzą to z Twoim imieniem, znajomi '
-                          'znajomych tylko imię, miasto, okolicę i dni — bez '
-                          'adresu.',
-                        ),
-                      ),
-                      onChanged: (bool v) => unawaited(
-                        _table.setWish(
-                          city: v ? _city.text : null,
-                          days: _days,
-                          area: _area.text,
-                        ),
-                      ),
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: _table,
+            builder: (BuildContext context, Widget? _) {
+              final bool on = _table.myWish != null;
+              final int nearbyCount = _table.wishes.length;
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  ZenHero(
+                    title: t('Kolacja dla sześciu'),
+                    icon: Icons.dinner_dining_rounded,
+                    tone: zenTone(zen, 2),
+                    text: t(
+                      'Ty i pięcioro gości, których aplikacja dobiera sama: '
+                      'znajomi Twoich znajomych, którzy też chcą tak poznawać '
+                      'ludzi. Każdy zna kogoś, kto zna Ciebie — nikt nie jest '
+                      'zupełnie obcy, a prawie wszyscy są nowi.',
                     ),
-                  ],
-                ),
-                if (_table.invitations.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Zaproszenia do stołu')),
-                  for (final TableInvite i in _table.invitations)
-                    _GuestInvite(table: _table, invite: i),
-                ],
-                ZenSection(t('2. Albo zorganizuj kolację')),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: zen.surface,
-                    borderRadius: context.zenRadius(22),
-                    border: Border.all(color: zen.outlineSoft),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  ZenSection(t('1. Daj znać, że chcesz')),
+                  TextField(
+                    key: const Key('table-city'),
+                    controller: _city,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: t('Miasto'),
+                      prefixIcon: const Icon(Icons.location_city_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('table-area'),
+                    controller: _area,
+                    maxLength: kTableMaxArea,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: t('Okolica (opcjonalnie)'),
+                      hintText: t('np. Wrzeszcz'),
+                      prefixIcon: const Icon(Icons.map_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    t('Kiedy możesz? Nic nie zaznaczysz — każdy dzień.'),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 8),
+                  // The week in one row of equal toggles (never a lonely "nd"
+                  // wrapped to its own line).
+                  Row(
                     children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Text(
-                            '$nearbyCount',
-                            style: zen.display(
-                              color: zenTone(zen, 2),
-                              size: 34,
-                            ),
+                      for (int d = 1; d <= 7; d++) ...<Widget>[
+                        if (d > 1) const SizedBox(width: 6),
+                        Expanded(
+                          child: _DayToggle(
+                            key: Key('table-day-$d'),
+                            label: ZenFormat.weekdayShortOf(d, compact: true),
+                            selected: _days.contains(d),
+                            onTap: () => setState(() {
+                              _days = <int>{..._days};
+                              if (!_days.remove(d)) {
+                                _days.add(d);
+                              }
+                            }),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              tn(
-                                nearbyCount,
-                                one: 'osoba w Twoim zasięgu chce na Stół',
-                                few: 'chętnych w Twoim zasięgu',
-                                many: 'chętnych w Twoim zasięgu',
-                              ),
-                              style: TextStyle(
-                                color: zen.textSecondary,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        key: const Key('table-set'),
-                        onPressed: () => unawaited(_setTable()),
-                        icon: const Icon(Icons.dinner_dining_rounded),
-                        label: Text(t('Zorganizuj stół')),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        t(
-                          'Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby '
-                          'jak najmniej się znali.',
                         ),
-                        style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                      ),
+                      ],
                     ],
                   ),
-                ),
-                for (final String e in _table.tables) ...<Widget>[
-                  ZenSection(
-                    t('Twój stół · {date}', {
-                      'date': eventDate(_table.sentFor(e).first.at),
-                    }),
-                    action: t('Wydarzenie'),
-                    onAction: () => unawaited(EventScreen.open(context, e)),
-                  ),
+                  const SizedBox(height: 10),
                   ZenGroup(
                     children: <Widget>[
-                      for (final TableInvite i in _table.sentFor(e))
-                        _HostInviteRow(table: _table, invite: i),
+                      SwitchListTile(
+                        key: const Key('table-wish'),
+                        value: on,
+                        title: Text(t('Chcę na Stół na sześć')),
+                        subtitle: Text(
+                          t(
+                            'Znajomi widzą to z Twoim imieniem, znajomi '
+                            'znajomych tylko imię, miasto, okolicę i dni — bez '
+                            'adresu.',
+                          ),
+                        ),
+                        onChanged: (bool v) => unawaited(
+                          _table.setWish(
+                            city: v ? _city.text : null,
+                            days: _days,
+                            area: _area.text,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
+                  if (_table.invitations.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Zaproszenia do stołu')),
+                    for (final TableInvite i in _table.invitations)
+                      _GuestInvite(table: _table, invite: i),
+                  ],
+                  ZenSection(t('2. Albo zorganizuj kolację')),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: zen.surface,
+                      borderRadius: context.zenRadius(22),
+                      border: Border.all(color: zen.outlineSoft),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Text(
+                              '$nearbyCount',
+                              style: zen.display(
+                                color: zenTone(zen, 2),
+                                size: 34,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                tn(
+                                  nearbyCount,
+                                  one: 'osoba w Twoim zasięgu chce na Stół',
+                                  few: 'chętnych w Twoim zasięgu',
+                                  many: 'chętnych w Twoim zasięgu',
+                                ),
+                                style: TextStyle(
+                                  color: zen.textSecondary,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          key: const Key('table-set'),
+                          onPressed: () => unawaited(_setTable()),
+                          icon: const Icon(Icons.dinner_dining_rounded),
+                          label: Text(t('Zorganizuj stół')),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          t(
+                            'Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby '
+                            'jak najmniej się znali.',
+                          ),
+                          style: TextStyle(
+                            color: zen.textMuted,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (final String e in _table.tables) ...<Widget>[
+                    ZenSection(
+                      t('Twój stół · {date}', {
+                        'date': eventDate(_table.sentFor(e).first.at),
+                      }),
+                      action: t('Wydarzenie'),
+                      onAction: () => unawaited(EventScreen.open(context, e)),
+                    ),
+                    ZenGroup(
+                      children: <Widget>[
+                        for (final TableInvite i in _table.sentFor(e))
+                          _HostInviteRow(table: _table, invite: i),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

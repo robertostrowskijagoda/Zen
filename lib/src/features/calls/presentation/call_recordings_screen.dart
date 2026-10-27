@@ -209,66 +209,69 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     return Scaffold(
       key: const Key('call-recordings-screen'),
       appBar: AppBar(title: Text(t('Nagrania rozmów'))),
-      body: items == null
-          ? const Center(child: CircularProgressIndicator())
-          : items.isEmpty
-          ? Center(
-              child: SingleChildScrollView(
-                child: ZenEmpty(
-                  icon: Icons.mic_none_rounded,
-                  title: t('Nie masz nagrań'),
-                  text: t(
-                    'Nagrywanie włączysz w trakcie rozmowy; '
-                    'rozmówca zawsze widzi, że nagrywasz.',
-                  ),
-                ),
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                ZenInfo(
-                  icon: Icons.lock_outline_rounded,
-                  text: t(
-                    'Nagrania są zaszyfrowane. Dotknij, aby odtworzyć; '
-                    'eksport zapisuje kopię bez szyfrowania.',
-                  ),
-                ),
-                const SizedBox(height: 6),
-                for (final CallRecording rec in items)
-                  ZenTile(
-                    key: Key('recording-${rec.id}'),
-                    icon: rec.isAudioOnly
-                        ? Icons.graphic_eq_rounded
-                        : Icons.videocam_outlined,
-                    tone: rec.isAudioOnly ? zenTone(zen, 2) : zenTone(zen, 5),
-                    title: rec.peer,
-                    subtitle: <String>[
-                      _when(rec.millis),
-                      _size(rec.bytes),
-                      if (rec.isAudioOnly) t('dźwięk'),
-                    ].join(' · '),
-                    onTap: () => unawaited(_play(rec)),
-                    trailing: PopupMenuButton<String>(
-                      tooltip: t('Więcej'),
-                      onSelected: (String v) => unawaited(
-                        v == 'export' ? _export(rec) : _delete(rec),
-                      ),
-                      itemBuilder: (BuildContext context) =>
-                          <PopupMenuEntry<String>>[
-                            PopupMenuItem<String>(
-                              value: 'export',
-                              child: Text(t('Eksportuj')),
-                            ),
-                            PopupMenuItem<String>(
-                              value: 'delete',
-                              child: Text(t('Usuń')),
-                            ),
-                          ],
+      body: SafeArea(
+        top: false,
+        child: items == null
+            ? const Center(child: CircularProgressIndicator())
+            : items.isEmpty
+            ? Center(
+                child: SingleChildScrollView(
+                  child: ZenEmpty(
+                    icon: Icons.mic_none_rounded,
+                    title: t('Nie masz nagrań'),
+                    text: t(
+                      'Nagrywanie włączysz w trakcie rozmowy; '
+                      'rozmówca zawsze widzi, że nagrywasz.',
                     ),
                   ),
-              ],
-            ),
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  ZenInfo(
+                    icon: Icons.lock_outline_rounded,
+                    text: t(
+                      'Nagrania są zaszyfrowane. Dotknij, aby odtworzyć; '
+                      'eksport zapisuje kopię bez szyfrowania.',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  for (final CallRecording rec in items)
+                    ZenTile(
+                      key: Key('recording-${rec.id}'),
+                      icon: rec.isAudioOnly
+                          ? Icons.graphic_eq_rounded
+                          : Icons.videocam_outlined,
+                      tone: rec.isAudioOnly ? zenTone(zen, 2) : zenTone(zen, 5),
+                      title: rec.peer,
+                      subtitle: <String>[
+                        _when(rec.millis),
+                        _size(rec.bytes),
+                        if (rec.isAudioOnly) t('dźwięk'),
+                      ].join(' · '),
+                      onTap: () => unawaited(_play(rec)),
+                      trailing: PopupMenuButton<String>(
+                        tooltip: t('Więcej'),
+                        onSelected: (String v) => unawaited(
+                          v == 'export' ? _export(rec) : _delete(rec),
+                        ),
+                        itemBuilder: (BuildContext context) =>
+                            <PopupMenuEntry<String>>[
+                              PopupMenuItem<String>(
+                                value: 'export',
+                                child: Text(t('Eksportuj')),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                child: Text(t('Usuń')),
+                              ),
+                            ],
+                      ),
+                    ),
+                ],
+              ),
+      ),
     );
   }
 }
