@@ -60,8 +60,11 @@ All names and artwork are original.
 
 ## Limits
 
-- Animated backgrounds run at 4 to 20 frames per second, pause when the app
-  is in the background and stop when the system asks for reduced motion.
+- Animated backgrounds run at 4 to 20 frames per second and pause when the
+  app is in the background. **Settings → Appearance → Animations** decides
+  the rest: *On* (the default) plays them even when the system asks for
+  reduced motion, *As the system* stops them when it does, *Off* never plays
+  them (and also drops the small press and list animations).
 - The alarm stays red in every theme, and QR codes stay black on white, so
   they are always recognised and scannable.
 - Icon weight does not change with the theme.

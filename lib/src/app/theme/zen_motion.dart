@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 
 /// Global switch for perpetual decorative animations (pulsing dots, ringing
 /// waves, marching dots). Infinite tickers would keep `pumpAndSettle` from
@@ -22,14 +23,28 @@ abstract final class ZenMotion {
   @visibleForTesting
   static bool get clockRunning => _LowRateClock.instance.isRunning;
 
-  /// Whether motion may play here: [enabled], the system does not ask for
-  /// reduced motion (`MediaQuery.disableAnimations`), and the widget is not
-  /// in a hidden part of the tree (a tab in the background, a page under
-  /// another one: `TickerMode` off there).
+  /// Whether motion may play here: [enabled], reduced motion is not in
+  /// force (`MediaQuery.disableAnimations`, which a [ZenMotionScope] sets
+  /// from the "Animacje" setting), and the widget is not in a hidden part of
+  /// the tree (a tab in the background, a page under another one:
+  /// `TickerMode` off there).
   static bool allowedIn(BuildContext context) =>
       enabled &&
       !(MediaQuery.maybeDisableAnimationsOf(context) ?? false) &&
       TickerMode.valuesOf(context).enabled;
+
+  /// The "Animacje" setting in force here; without a [ZenMotionScope] the
+  /// system decides.
+  static AppAnimations modeOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_ZenMotionModeScope>()
+          ?.mode ??
+      AppAnimations.system;
+
+  /// Whether the person turned the animations off ("Wyłączone"): the
+  /// small ones that follow touch (a press, a list changing) stand still too.
+  static bool offIn(BuildContext context) =>
+      modeOf(context) == AppAnimations.off;
 
   static bool _detectDefault() {
     if (kIsWeb) {
@@ -37,6 +52,48 @@ abstract final class ZenMotion {
     }
     return !Platform.environment.containsKey('FLUTTER_TEST');
   }
+}
+
+/// Applies the "Animacje" setting ([mode]) to everything below it: sets
+/// `MediaQuery.disableAnimations` ([AppAnimations.always] ignores the
+/// system's "remove animations", [AppAnimations.off] forces it, and
+/// [AppAnimations.system] keeps what the system says), so every widget that
+/// asks [ZenMotion.allowedIn] (or the media query itself) follows one rule.
+/// Put it once, above the navigator. Page transitions are navigation, not
+/// decoration, and do not depend on it.
+class ZenMotionScope extends StatelessWidget {
+  const ZenMotionScope({super.key, required this.mode, required this.child});
+
+  final AppAnimations mode;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final MediaQueryData data = MediaQuery.of(context);
+    return _ZenMotionModeScope(
+      mode: mode,
+      child: MediaQuery(
+        data: data.copyWith(
+          disableAnimations: switch (mode) {
+            AppAnimations.always => false,
+            AppAnimations.system => data.disableAnimations,
+            AppAnimations.off => true,
+          },
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _ZenMotionModeScope extends InheritedWidget {
+  const _ZenMotionModeScope({required this.mode, required super.child});
+
+  final AppAnimations mode;
+
+  @override
+  bool updateShouldNotify(_ZenMotionModeScope oldWidget) =>
+      mode != oldWidget.mode;
 }
 
 // ---------------------------------------------------------------------------
@@ -929,6 +986,7 @@ class _ZenPressableState extends State<ZenPressable> {
   @override
   Widget build(BuildContext context) {
     if (!ZenMotion.enabled ||
+        ZenMotion.offIn(context) ||
         (widget.onTap == null && widget.onLongPress == null)) {
       return InkWell(
         onTap: widget.onTap,

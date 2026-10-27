@@ -103,6 +103,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(palette: value));
   }
 
+  Future<void> setAnimations(AppAnimations value) async {
+    await _save(state.copyWith(animations: value));
+  }
+
   Future<void> setLockMode(AppLockMode value) async {
     await _save(state.copyWith(lockMode: value));
   }

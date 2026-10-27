@@ -34,6 +34,39 @@ enum AppThemeMode {
   };
 }
 
+/// Whether the decorative animations (moving theme backgrounds, pulsing
+/// dots, animated avatars) play (Ustawienia → Wygląd → Animacje).
+enum AppAnimations {
+  /// Always, whatever the system's "remove animations" says. They still
+  /// rest while the app or the screen is not shown.
+  always,
+
+  /// As the system asks: still when it has "remove animations" (reduced
+  /// motion) on.
+  system,
+
+  /// Never.
+  off;
+
+  String get label => switch (this) {
+    AppAnimations.always => t('Włączone'),
+    AppAnimations.system => t('Zgodnie z systemem'),
+    AppAnimations.off => t('Wyłączone'),
+  };
+
+  /// One line under the choice: what it does.
+  String get description => switch (this) {
+    AppAnimations.always => t(
+      'Tła i efekty ruszają się zawsze, także gdy system wyłącza animacje. '
+      'Gdy aplikacja jest schowana, stoją.',
+    ),
+    AppAnimations.system => t(
+      'Tła i efekty stoją, gdy w systemie włączone jest „Usuń animacje”.',
+    ),
+    AppAnimations.off => t('Żadnych ruchomych teł ani efektów.'),
+  };
+}
+
 /// Groups the accent themes into the sections the picker lists them under.
 enum AppThemeFamily {
   neutral,
@@ -335,6 +368,7 @@ final class AppSettings {
     this.themeMode = defaultThemeMode,
     this.accentTheme = defaultAccentTheme,
     this.palette = defaultPalette,
+    this.animations = defaultAnimations,
     this.gifApiKey = '',
     this.gifSearch = true,
     this.autoDownloadMedia = true,
@@ -372,6 +406,7 @@ final class AppSettings {
   static const AppThemeMode defaultThemeMode = AppThemeMode.system;
   static const AppAccentTheme defaultAccentTheme = AppAccentTheme.graphite;
   static const AppPalette defaultPalette = AppPalette.classic;
+  static const AppAnimations defaultAnimations = AppAnimations.always;
 
   final int inboxLimitMb;
   final int autoCleanupDays;
@@ -382,6 +417,10 @@ final class AppSettings {
   /// The accent of the [AppPalette.classic] palette.
   final AppAccentTheme accentTheme;
   final AppPalette palette;
+
+  /// Whether the decorative animations play (on by default, whatever the
+  /// system's "remove animations" says).
+  final AppAnimations animations;
 
   /// The user's own Klipy key; empty means the app's shared key is used.
   final String gifApiKey;
@@ -523,6 +562,7 @@ final class AppSettings {
     AppThemeMode? themeMode,
     AppAccentTheme? accentTheme,
     AppPalette? palette,
+    AppAnimations? animations,
     String? gifApiKey,
     bool? gifSearch,
     bool? autoDownloadMedia,
@@ -558,6 +598,7 @@ final class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       accentTheme: accentTheme ?? this.accentTheme,
       palette: palette ?? this.palette,
+      animations: animations ?? this.animations,
       gifApiKey: normalizeGifApiKey(gifApiKey ?? this.gifApiKey),
       gifSearch: gifSearch ?? this.gifSearch,
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
@@ -596,6 +637,7 @@ final class AppSettings {
     'themeMode': themeMode.name,
     'accentTheme': accentTheme.name,
     'palette': palette.name,
+    'animations': animations.name,
     'gifApiKey': gifApiKey,
     'gifSearch': gifSearch,
     'autoDownloadMedia': autoDownloadMedia,
@@ -644,6 +686,7 @@ final class AppSettings {
       themeMode: byName(AppThemeMode.values, 'themeMode'),
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       palette: byName(AppPalette.values, 'palette'),
+      animations: byName(AppAnimations.values, 'animations'),
       gifApiKey: pick<String>('gifApiKey'),
       gifSearch: pick<bool>('gifSearch'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),

@@ -33,6 +33,7 @@ void main() {
         themeMode: AppThemeMode.dark,
         accentTheme: AppAccentTheme.aurora,
         palette: AppPalette.forest,
+        animations: AppAnimations.off,
         gifApiKey: 'my-own_key.123',
         autoDownloadMedia: false,
         hideNotificationContent: false,
@@ -50,6 +51,7 @@ void main() {
     expect(restored.themeMode, AppThemeMode.dark);
     expect(restored.accentTheme, AppAccentTheme.aurora);
     expect(restored.palette, AppPalette.forest);
+    expect(restored.animations, AppAnimations.off);
     expect(restored.gifApiKey, 'my-own_key.123');
     expect(restored.autoDownloadMedia, isFalse);
     expect(restored.hideNotificationContent, isFalse);
@@ -62,6 +64,7 @@ void main() {
     expect(await store.load(), isNull);
     const AppSettings defaults = AppSettings();
     expect(defaults.themeMode, AppThemeMode.system);
+    expect(defaults.animations, AppAnimations.always);
     expect(defaults.lockMode, AppLockMode.background);
     expect(defaults.backgroundLockDelaySeconds, 300);
     expect(defaults.bridgeEnabled, isTrue, reason: 'a computer is a bridge');

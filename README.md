@@ -180,8 +180,9 @@ wakes for short, timed moments instead of holding the processor or
 Wi-Fi awake. While the phone sleeps (Doze), mail from mailboxes can come a
 few minutes late. A computer on battery stops being a bridge for others and
 keeps only 4 public peers; plugged in, everything comes back. Animations
-run at a low frame rate and stop when the window is not visible or the
-system asks to reduce motion.
+run at a low frame rate and stop when the window is not visible; a setting
+(Appearance → Animations) can also make them follow the system's reduce-motion
+flag or turn them off.
 
 ## How to install
 
