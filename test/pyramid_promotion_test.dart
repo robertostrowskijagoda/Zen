@@ -85,6 +85,13 @@ void main() {
       <String>['X', 'Y'],
       <String, dynamic>{'cell': '00', 'head': w.id('A1'), 'up': w.id('X')},
     );
+    // New in A's cell, X votes there once A says they know each other.
+    final PyramidRecord known = await w.rec(
+      PyrT.known,
+      t0 + day + 1,
+      <String>['A'],
+      <String, dynamic>{'k': w.id('X')},
+    );
     // A's cell (A, X) at once: too soon.
     Future<PyramidRecord> second(int at) => w.rec(
       PyrT.swap,
@@ -94,7 +101,7 @@ void main() {
     );
     final PyramidRecord soon = await second(t0 + day + h);
     final PyramidRecord later = await second(t0 + day + kPyrRiseCooldownMs);
-    final PyramidState st = w.fold(<PyramidRecord>[first, soon, later]);
+    final PyramidState st = w.fold(<PyramidRecord>[first, known, soon, later]);
     expect(st.rejected[soon.id], contains('7 dni'));
     expect(st.pathOf(w.id('X')), '0');
     expect(st.pathOf(w.id('A')), '00');
@@ -115,13 +122,24 @@ void main() {
       <String>['X', 'Y'],
       <String, dynamic>{'cell': '00', 'up': w.id('Y')},
     );
+    final PyramidRecord knownY = await w.rec(
+      PyrT.known,
+      t0 + 2 * day + 2 * h,
+      <String>['A'],
+      <String, dynamic>{'k': w.id('Y')},
+    );
     final PyramidRecord upAgain = await w.rec(
       PyrT.swap,
       t0 + 3 * day,
       <String>['Y', 'A'],
       <String, dynamic>{'cell': '0', 'head': w.id('A'), 'up': w.id('Y')},
     );
-    final PyramidState st2 = w.fold(<PyramidRecord>[leave, fill, upAgain]);
+    final PyramidState st2 = w.fold(<PyramidRecord>[
+      leave,
+      fill,
+      knownY,
+      upAgain,
+    ]);
     expect(st2.applied, contains(fill.id));
     expect(st2.pathOf(w.id('Y')), '00');
     expect(st2.lastRise[w.id('Y')], t0 + 2 * day + h);

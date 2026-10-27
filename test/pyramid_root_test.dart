@@ -406,6 +406,15 @@ void main() {
           <LedgerKeyPair>[w.a1, w.a2],
           <String, dynamic>{'cell': '0', 'head': w.a.id, 'up': w.a1.id},
         );
+        // New in the top cell, A1 votes there once somebody of it says
+        // they know each other ("Poznaliśmy się").
+        final PyramidRecord known = await rec(
+          PyrT.known,
+          w.py,
+          t0 + 3 * h,
+          <LedgerKeyPair>[w.b],
+          <String, dynamic>{'k': w.a1.id},
+        );
         // The next step up a week after the last one.
         final PyramidRecord upTop = await rec(
           PyrT.swap,
@@ -414,7 +423,12 @@ void main() {
           <LedgerKeyPair>[w.a1, w.b],
           <String, dynamic>{'cell': '', 'head': w.s.id, 'up': w.a1.id},
         );
-        final PyramidState st = w.fold(<PyramidRecord>[jump, upA, upTop]);
+        final PyramidState st = w.fold(<PyramidRecord>[
+          jump,
+          upA,
+          known,
+          upTop,
+        ]);
         expect(
           st.rejected[jump.id],
           'nowy szef nie jest członkiem tej komórki',

@@ -3544,13 +3544,12 @@ final class PyramidService extends ChangeNotifier {
     String? to;
     bool extra = false;
     if (p == root) {
-      // The root's vote goes to its first child (or stays here).
-      for (final String c in PyrPath.children(p)) {
-        if (s.occupant[c] != null) {
-          to = s.occupant[c];
-          extra = true;
-          break;
-        }
+      // The root's vote goes to its first child (or stays here); below a
+      // free place, to the first one under it.
+      final String? first = s.reportsTo(p).firstOrNull;
+      if (first != null) {
+        to = s.occupant[first];
+        extra = true;
       }
       if (to == null) {
         (_extraVotes[refId] ??= <String>{}).add('$k:$option');
@@ -3558,7 +3557,10 @@ final class PyramidService extends ChangeNotifier {
         return true;
       }
     } else {
-      to = s.occupant[PyrPath.parent(p)];
+      // To the head of this person's cell; when that place is free, to the
+      // nearest head above it.
+      final String? above = s.headAbove(p);
+      to = above == null ? null : s.occupant[above];
     }
     if (to == null) {
       return false;
@@ -3607,10 +3609,11 @@ final class PyramidService extends ChangeNotifier {
         opt >= r.options.length) {
       return;
     }
-    // Only one's own: a direct member, or (extra) the root above.
-    final bool direct = PyrPath.parent(vp) == mp && vp != mp;
+    // Only one's own: a member reporting here (directly or below a free
+    // place, [PyramidState.headAbove]), or (extra) the root above.
+    final bool direct = s.headAbove(vp) == mp && vp != mp;
     final bool fromRoot =
-        p['extra'] == true && vp == PyrPath.parent(mp) && vp == _countRoot(r);
+        p['extra'] == true && vp == s.headAbove(mp) && vp == _countRoot(r);
     if (_n(s.members[voter]?.addr ?? '') != _n(from) &&
         _n(from) != _n(host.ownAddress())) {
       return;
@@ -3645,14 +3648,12 @@ final class PyramidService extends ChangeNotifier {
       if (!PyrPath.within(mp, root)) {
         continue;
       }
-      final List<String> kidPaths = PyrPath.children(
-        mp,
-      ).where((String c) => s.occupant[c] != null).toList();
+      // The branches reporting here: right below, and below a free place
+      // under this person (a branch is never cut off).
+      final List<String> kidPaths = s.reportsTo(mp);
       final Map<String, int> direct = _headVotes[r.id] ?? const <String, int>{};
       // The root's own vote is held by its first child (or the root alone).
-      final List<String> rootKids = PyrPath.children(
-        root,
-      ).where((String c) => s.occupant[c] != null).toList();
+      final List<String> rootKids = s.reportsTo(root);
       final bool holdsRootVote = rootKids.isEmpty
           ? mp == root
           : mp == rootKids.first;
@@ -3668,10 +3669,7 @@ final class PyramidService extends ChangeNotifier {
         for (final String c in kidPaths) ?s.latestTally(r, c),
       ];
       final bool complete = kidPaths
-          .where(
-            (String c) =>
-                PyrPath.children(c).any((String g) => s.occupant[g] != null),
-          )
+          .where((String c) => s.reportsTo(c).isNotEmpty)
           .every((String c) => s.latestTally(r, c) != null);
       // Without a branch's sum only once the wait is over (the fold
       // refuses it sooner).
@@ -3687,7 +3685,7 @@ final class PyramidService extends ChangeNotifier {
       }
       for (final MapEntry<String, int> v in direct.entries) {
         if (s.pathOf(v.key) != null &&
-            PyrPath.parent(s.pathOf(v.key)!) == mp &&
+            s.headAbove(s.pathOf(v.key)!) == mp &&
             s.eligible(r, v.key)) {
           counts[v.value]++;
         }
@@ -4773,9 +4771,9 @@ final class PyramidService extends ChangeNotifier {
 
   /// Confirms that this person knows [key], somebody of their cell
   /// ("poznaliśmy się" — knowing each other, not a meeting): from then on
-  /// [key] votes in the cell and in referenda. Null when [key] is no
-  /// cellmate without a vote, this person has no vote yet, or it was said
-  /// already.
+  /// [key] votes in the cell and in referenda, and both votes count in the
+  /// cell they share. Null when [key] is no cellmate, this person has no
+  /// vote yet, or one of them said it already.
   Future<PyramidRecord?> confirmKnown(String key) async {
     final PyramidState? s = state;
     final String? me = myKey;
@@ -4784,8 +4782,7 @@ final class PyramidService extends ChangeNotifier {
         me == null ||
         !s.cellmates(key).contains(me) ||
         !s.canVote(me, t) ||
-        s.canVote(key, t) ||
-        (s.knownBy[key]?.containsKey(me) ?? false)) {
+        s.metWith(me, key, t)) {
       return null;
     }
     return propose(

@@ -196,6 +196,17 @@ void main() {
       );
       st = PyramidState.fold(py, all, now: 100);
       expect(st.pathOf(a1.id), '0');
+      // New in the top cell, A1 votes there once B (who has a vote there)
+      // says they know each other.
+      all.add(
+        await rec(
+          PyrT.known,
+          py,
+          11,
+          <LedgerKeyPair>[b],
+          <String, dynamic>{'k': a1.id},
+        ),
+      );
       // A1 and B replace S at the top: a new term — a week after A1's
       // last move up, never sooner.
       final PyramidRecord tooSoon = await rec(
