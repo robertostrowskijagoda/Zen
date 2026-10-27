@@ -176,7 +176,12 @@ SocialHubState _applySignal(
             isTyping: false,
             lastPresenceAtMillis: receivedAtMillis,
             lastMessagePreview: _clipText(
-              signal.content ?? t('Nowa wiadomość'),
+              chatPreviewLine(
+                signal.content ?? t('Nowa wiadomość'),
+                type: signal.messageType,
+                fileName: signal.fileName,
+                mimeType: signal.mimeType,
+              ),
               kMaxStoredPreviewChars,
             ),
             lastActivityLabel: t('Teraz'),
@@ -292,7 +297,12 @@ SocialHubState _applySignal(
         final String? senderName = signal.displayName?.trim();
         groups[groupId] = existing.copyWith(
           lastMessagePreview: _clipText(
-            signal.content ?? t('Nowa wiadomość grupowa'),
+            chatPreviewLine(
+              signal.content ?? t('Nowa wiadomość grupowa'),
+              type: signal.messageType,
+              fileName: signal.fileName,
+              mimeType: signal.mimeType,
+            ),
             kMaxStoredPreviewChars,
           ),
           lastActivityLabel: t('Teraz'),

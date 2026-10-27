@@ -335,6 +335,29 @@ ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
   );
 }
 
+bool _isGifMedia(String? fileName, String? mimeType) =>
+    mimeType?.toLowerCase() == 'image/gif' ||
+    (fileName?.toLowerCase().endsWith('.gif') ?? false);
+
+/// The line a conversation preview shows for a message whose text is [text]:
+/// a GIF (an image attachment) gives the neutral "GIF" label whatever its
+/// caption or file name, everything else keeps [text].
+String chatPreviewLine(
+  String text, {
+  ChatMessageType? type,
+  String? fileName,
+  String? mimeType,
+}) {
+  if (type == ChatMessageType.image && _isGifMedia(fileName, mimeType)) {
+    return chatMessageLabelForType(
+      ChatMessageType.image,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
+  }
+  return text;
+}
+
 String chatMessageLabelForType(
   ChatMessageType type, {
   String? fileName,
@@ -343,10 +366,7 @@ String chatMessageLabelForType(
   return switch (type) {
     ChatMessageType.text => '',
     ChatMessageType.image =>
-      (mimeType?.toLowerCase() == 'image/gif' ||
-              (fileName?.toLowerCase().endsWith('.gif') ?? false))
-          ? '🎞 GIF'
-          : t('📷 Zdjęcie'),
+      _isGifMedia(fileName, mimeType) ? '🎞 GIF' : t('📷 Zdjęcie'),
     ChatMessageType.file => fileName == null ? t('📎 Plik') : '📎 $fileName',
     ChatMessageType.voice => t('🎤 Wiadomość głosowa'),
     ChatMessageType.video => t('🎬 Wideo'),
