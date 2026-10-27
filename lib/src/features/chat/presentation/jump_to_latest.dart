@@ -201,43 +201,58 @@ class _JumpToLatestState extends State<JumpToLatest> {
                 ? Tooltip(
                     key: const Key('jump-to-latest'),
                     message: t('Przewiń na sam dół'),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: <Widget>[
-                        Material(
-                          color: zen.surfaceRaised,
-                          elevation: 3,
-                          shape: CircleBorder(
-                            side: BorderSide(color: zen.outline),
-                          ),
-                          child: InkResponse(
-                            key: const Key('jump-to-latest-button'),
-                            onTap: _jump,
-                            containedInkWell: true,
-                            highlightShape: BoxShape.circle,
-                            child: SizedBox(
-                              width: 40,
-                              height: 40,
-                              child: Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: zen.accent,
-                                size: 26,
+                    // Said once, with the count, by the button's own node.
+                    excludeFromSemantics: true,
+                    child: Semantics(
+                      button: true,
+                      excludeSemantics: true,
+                      label: _missed > 0
+                          ? tn(
+                              _missed,
+                              one: 'Przewiń na sam dół: {n} nowa wiadomość',
+                              few: 'Przewiń na sam dół: {n} nowe wiadomości',
+                              many: 'Przewiń na sam dół: {n} nowych wiadomości',
+                            )
+                          : t('Przewiń na sam dół'),
+                      onTap: _jump,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: <Widget>[
+                          Material(
+                            color: zen.surfaceRaised,
+                            elevation: 3,
+                            shape: CircleBorder(
+                              side: BorderSide(color: zen.outline),
+                            ),
+                            child: InkResponse(
+                              key: const Key('jump-to-latest-button'),
+                              onTap: _jump,
+                              containedInkWell: true,
+                              highlightShape: BoxShape.circle,
+                              child: SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: zen.accent,
+                                  size: 26,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        if (_missed > 0)
-                          PositionedDirectional(
-                            top: -8,
-                            end: -6,
-                            child: IgnorePointer(
-                              child: ZenCountBadge(
-                                _missed,
-                                key: const Key('jump-to-latest-badge'),
+                          if (_missed > 0)
+                            PositionedDirectional(
+                              top: -8,
+                              end: -6,
+                              child: IgnorePointer(
+                                child: ZenCountBadge(
+                                  _missed,
+                                  key: const Key('jump-to-latest-badge'),
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   )
                 : const SizedBox.shrink(key: Key('jump-to-latest-hidden')),
