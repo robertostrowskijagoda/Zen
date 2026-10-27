@@ -755,3 +755,17 @@ func TestDoorsSealTheirTrafficPostQuantum(t *testing.T) {
 		t.Fatal("a mailbox door sends nothing")
 	}
 }
+
+// A door host with two or more peers may be picked as the next hop between
+// them, so strangers' traffic would cross the phone: it keeps to one, a leaf.
+func TestDoorHostIsALeafWithOnePublicPeer(t *testing.T) {
+	if doorHostPeerCount != 1 {
+		t.Fatalf("the door host dials %d peers at once", doorHostPeerCount)
+	}
+	pool := []string{"tls://a:443", "tls://b:443", "tls://c:443", "tls://d:443"}
+	for offset := 0; offset < 8; offset++ {
+		if got := doorHostPeers(pool, "tls://a:443", offset, doorHostPeerCount); len(got) != 1 {
+			t.Fatalf("offset %d picked %v", offset, got)
+		}
+	}
+}
