@@ -61,7 +61,7 @@ class _PeerQrScannerPage extends StatefulWidget {
 class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
   bool _completed = false;
 
-  void _handleCapture(Result result) {
+  void _handleCapture(ScanResult result) {
     if (_completed) {
       return;
     }

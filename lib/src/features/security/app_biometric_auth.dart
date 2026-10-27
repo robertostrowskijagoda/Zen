@@ -41,6 +41,9 @@ final class PlatformAppBiometricAuthenticator
     } on PlatformException catch (error, stackTrace) {
       logZenError('Biometric availability check failed', error, stackTrace);
       return false;
+    } on LocalAuthException catch (error, stackTrace) {
+      logZenError('Biometric availability check failed', error, stackTrace);
+      return false;
     }
   }
 
@@ -49,15 +52,18 @@ final class PlatformAppBiometricAuthenticator
     try {
       return await _localAuthentication.authenticate(
         localizedReason: t('Odblokuj aplikacje Zen'),
-        options: Platform.isWindows
-            ? const AuthenticationOptions(stickyAuth: false)
-            : const AuthenticationOptions(
-                stickyAuth: true,
-                biometricOnly: true,
-              ),
+        biometricOnly: !Platform.isWindows,
+        persistAcrossBackgrounding: !Platform.isWindows,
       );
     } on MissingPluginException catch (error, stackTrace) {
       logZenError('Biometric authentication is unavailable', error, stackTrace);
+      return false;
+    } on LocalAuthException catch (error) {
+      // Backing out of the prompt is an answer, not a failure.
+      if (error.code != LocalAuthExceptionCode.userCanceled &&
+          error.code != LocalAuthExceptionCode.systemCanceled) {
+        logZenWarning('Biometric authentication failed: ${error.code.name}');
+      }
       return false;
     } catch (error, stackTrace) {
       logZenError('Biometric authentication failed', error, stackTrace);
