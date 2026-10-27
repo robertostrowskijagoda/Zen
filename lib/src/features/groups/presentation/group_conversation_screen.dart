@@ -22,6 +22,7 @@ import 'package:zen/src/features/chat/presentation/chat_attachment_picker.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/groups/group_board.dart';
@@ -588,6 +589,12 @@ class _GroupConversationScreenState
       groupMessagesProvider(widget.groupId),
     );
 
+    final int incomingCount =
+        messagesAsync.asData?.value
+            .where((ChatMessage m) => !m.isOutgoing && !m.isSystem)
+            .length ??
+        0;
+
     final OngoingGroupCall? runningCall = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.groupCalls[widget.groupId],
@@ -829,396 +836,414 @@ class _GroupConversationScreenState
                               ? t('Uczestnik')
                               : p.authorName),
                     )
-                  : messagesAsync.when(
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (Object err, _) => Center(
-                        child: Text(
-                          t('Błąd ładowania: {error}', {'error': err}),
+                  : JumpToLatest(
+                      controller: _scrollController,
+                      reversed: true,
+                      incomingCount: incomingCount,
+                      child: messagesAsync.when(
+                        loading: () =>
+                            const Center(child: CircularProgressIndicator()),
+                        error: (Object err, _) => Center(
+                          child: Text(
+                            t('Błąd ładowania: {error}', {'error': err}),
+                          ),
                         ),
-                      ),
-                      data: (List<ChatMessage> messages) {
-                        final bool animateEntrance =
-                            !_messageEntrancePlayed && messages.isNotEmpty;
-                        if (messages.isNotEmpty) {
-                          _messageEntrancePlayed = true;
-                        }
-                        if (messages.isEmpty) {
-                          return Center(
-                            child: SingleChildScrollView(
-                              child: ZenEmpty(
-                                icon: Icons.forum_outlined,
-                                title: t('Brak wiadomości w tej grupie'),
-                                text: isMember
-                                    ? t(
-                                        'Napisz pierwszą wiadomość do uczestników grupy.',
-                                      )
-                                    : t('Tu pojawią się wiadomości grupy.'),
-                              ),
-                            ),
-                          );
-                        }
-
-                        final Map<String, ChatMessage> byId =
-                            <String, ChatMessage>{
-                              for (final ChatMessage m in messages) m.id: m,
-                            };
-                        if (!_scrollMemoryUsed) {
-                          _scrollMemoryUsed = true;
-                          if (_scrollMemory.hasAnchor) {
-                            // The chat was closed with the app: back at the
-                            // message it was scrolled to.
-                            final List<String> ids = <String>[
-                              for (final ChatMessage m in messages) m.id,
-                            ];
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted) {
-                                _scrollMemory.restore(ids);
-                              }
-                            });
+                        data: (List<ChatMessage> messages) {
+                          final bool animateEntrance =
+                              !_messageEntrancePlayed && messages.isNotEmpty;
+                          if (messages.isNotEmpty) {
+                            _messageEntrancePlayed = true;
                           }
-                        }
-                        // Reversed, so the chat opens at the newest message and new
-                        // ones appear without the user having to scroll down.
-                        return ListView.builder(
-                          controller: _scrollController,
-                          reverse: true,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                          itemCount: messages.length,
-                          itemBuilder: (BuildContext context, int reversedIndex) {
-                            final int index =
-                                messages.length - 1 - reversedIndex;
-                            final ChatMessage msg = messages[index];
-                            if (msg.isSystem) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8,
+                          if (messages.isEmpty) {
+                            return Center(
+                              child: SingleChildScrollView(
+                                child: ZenEmpty(
+                                  icon: Icons.forum_outlined,
+                                  title: t('Brak wiadomości w tej grupie'),
+                                  text: isMember
+                                      ? t(
+                                          'Napisz pierwszą wiadomość do uczestników grupy.',
+                                        )
+                                      : t('Tu pojawią się wiadomości grupy.'),
                                 ),
-                                child: Center(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: zen.surfaceRaised.withValues(
-                                        alpha: 0.85,
+                              ),
+                            );
+                          }
+
+                          final Map<String, ChatMessage> byId =
+                              <String, ChatMessage>{
+                                for (final ChatMessage m in messages) m.id: m,
+                              };
+                          if (!_scrollMemoryUsed) {
+                            _scrollMemoryUsed = true;
+                            if (_scrollMemory.hasAnchor) {
+                              // The chat was closed with the app: back at the
+                              // message it was scrolled to.
+                              final List<String> ids = <String>[
+                                for (final ChatMessage m in messages) m.id,
+                              ];
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted) {
+                                  _scrollMemory.restore(ids);
+                                }
+                              });
+                            }
+                          }
+                          // Reversed, so the chat opens at the newest message and new
+                          // ones appear without the user having to scroll down.
+                          return ListView.builder(
+                            controller: _scrollController,
+                            reverse: true,
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                            itemCount: messages.length,
+                            itemBuilder: (BuildContext context, int reversedIndex) {
+                              final int index =
+                                  messages.length - 1 - reversedIndex;
+                              final ChatMessage msg = messages[index];
+                              if (msg.isSystem) {
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  child: Center(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: zen.surfaceRaised.withValues(
+                                          alpha: 0.85,
+                                        ),
+                                        borderRadius: context.zenRadius(16),
+                                        border: Border.all(
+                                          color: zen.outlineSoft,
+                                        ),
                                       ),
-                                      borderRadius: context.zenRadius(16),
-                                      border: Border.all(
-                                        color: zen.outlineSoft,
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 5,
-                                      ),
-                                      child: Text(
-                                        chatMessageText(msg),
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: zen.textSecondary,
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w500,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 5,
+                                        ),
+                                        child: Text(
+                                          chatMessageText(msg),
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: zen.textSecondary,
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            }
-                            final bool isSelf =
-                                msg.isOutgoing || msg.sender == 'self';
-                            if (!isSelf && hiddenByMe.hides(id: msg.id)) {
-                              return HiddenContentPlaceholder(
-                                key: Key('group-hidden-${msg.id}'),
-                                byMe: true,
-                                compact: true,
-                                onShow: () => showHiddenAnyway(ref, id: msg.id),
-                              );
-                            }
-                            final String senderName = isSelf
-                                ? t('Ty')
-                                : friends[msg.sender]?.displayLabel ??
-                                      ref
-                                          .read(socialHubControllerProvider)
-                                          .friendByAddress(msg.sender)
-                                          ?.displayLabel ??
-                                      group?.memberNames[msg.sender] ??
-                                      t('Uczestnik');
+                                );
+                              }
+                              final bool isSelf =
+                                  msg.isOutgoing || msg.sender == 'self';
+                              if (!isSelf && hiddenByMe.hides(id: msg.id)) {
+                                return HiddenContentPlaceholder(
+                                  key: Key('group-hidden-${msg.id}'),
+                                  byMe: true,
+                                  compact: true,
+                                  onShow: () =>
+                                      showHiddenAnyway(ref, id: msg.id),
+                                );
+                              }
+                              final String senderName = isSelf
+                                  ? t('Ty')
+                                  : friends[msg.sender]?.displayLabel ??
+                                        ref
+                                            .read(socialHubControllerProvider)
+                                            .friendByAddress(msg.sender)
+                                            ?.displayLabel ??
+                                        group?.memberNames[msg.sender] ??
+                                        t('Uczestnik');
 
-                            final Color senderTone = zenTone(
-                              zen,
-                              (msg.sender.hashCode & 0x7FFFFFFF) % 8,
-                            );
-                            // The look's own bubbles, or the gradient ones.
-                            final ZenLook look = ZenLook.of(context);
-                            final BoxDecoration? themed = look.bubble(
-                              zen,
-                              outgoing: isSelf,
-                            );
-                            // Files keep their own colours: only text sits on
-                            // the gradient.
-                            final bool onGradient =
-                                isSelf &&
-                                themed == null &&
-                                msg.type == ChatMessageType.text;
-                            final String key = 'group:${widget.groupId}';
-                            final List<ChatMenuItem> actions = isMember
-                                ? chatMessageActions(
-                                    context,
-                                    ref,
-                                    message: msg,
-                                    conversationKey: key,
-                                    onReply: () => setState(
-                                      () => _replyTo = _socialHub.replyTo(msg),
-                                    ),
-                                  )
-                                : const <ChatMenuItem>[];
-                            final ChatReply? reply = msg.isDeleted
-                                ? null
-                                : msg.reply;
-                            final ChatMessage? replyOriginal = reply == null
-                                ? null
-                                : byId[reply.messageId];
-                            final Widget bubble = Align(
-                              alignment: isSelf
-                                  ? AlignmentDirectional.centerEnd
-                                  : AlignmentDirectional.centerStart,
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 6),
-                                constraints: BoxConstraints(
-                                  maxWidth:
-                                      (MediaQuery.of(context).size.width * 0.78)
-                                          .clamp(160.0, 440.0),
-                                ),
-                                decoration:
-                                    themed ??
-                                    (onGradient
-                                        ? BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: <Color>[
-                                                zen.accent,
-                                                Color.lerp(
-                                                  zen.accent,
-                                                  zen.accentSecondary,
-                                                  0.35,
-                                                )!,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: look.bubbleRadius(
-                                              outgoing: true,
-                                            ),
-                                            boxShadow: ZenLook.of(context)
-                                                .tinted(
-                                                  zen,
-                                                  zen.accent,
-                                                  radius: 12,
-                                                  alpha: 0.18,
-                                                  offset: const Offset(0, 4),
-                                                ),
-                                          )
-                                        : BoxDecoration(
-                                            color: zen.surfaceRaised,
-                                            borderRadius: look.bubbleRadius(
-                                              outgoing: false,
-                                            ),
-                                            border: Border.all(
-                                              color: zen.outlineSoft,
-                                            ),
-                                          )),
-                                foregroundDecoration: _highlightId == msg.id
-                                    ? BoxDecoration(
-                                        borderRadius: look.bubbleRadius(
-                                          outgoing: isSelf,
-                                        ),
-                                        border: Border.all(
-                                          color: zen.accent,
-                                          width: 2,
-                                        ),
-                                      )
-                                    : null,
-                                padding: const EdgeInsets.fromLTRB(
-                                  14,
-                                  9,
-                                  14,
-                                  10,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    if (!isSelf)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 3,
-                                        ),
-                                        child: Text(
-                                          senderName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: senderTone,
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
+                              final Color senderTone = zenTone(
+                                zen,
+                                (msg.sender.hashCode & 0x7FFFFFFF) % 8,
+                              );
+                              // The look's own bubbles, or the gradient ones.
+                              final ZenLook look = ZenLook.of(context);
+                              final BoxDecoration? themed = look.bubble(
+                                zen,
+                                outgoing: isSelf,
+                              );
+                              // Files keep their own colours: only text sits on
+                              // the gradient.
+                              final bool onGradient =
+                                  isSelf &&
+                                  themed == null &&
+                                  msg.type == ChatMessageType.text;
+                              final String key = 'group:${widget.groupId}';
+                              final List<ChatMenuItem> actions = isMember
+                                  ? chatMessageActions(
+                                      context,
+                                      ref,
+                                      message: msg,
+                                      conversationKey: key,
+                                      onReply: () => setState(
+                                        () =>
+                                            _replyTo = _socialHub.replyTo(msg),
                                       ),
-                                    if (msg.forwarded && !msg.isDeleted)
-                                      ChatForwardedMarker(onAccent: onGradient),
-                                    if (reply != null)
-                                      ChatReplyQuote(
-                                        reply: reply,
-                                        original: replyOriginal,
-                                        senderLabel: _nameOf(
-                                          replyOriginal == null
-                                              ? reply.sender
-                                              : (replyOriginal.isOutgoing
-                                                    ? 'self'
-                                                    : replyOriginal.sender),
-                                        ),
-                                        onTap: () => unawaited(
-                                          _jumpToMessage(
-                                            reply.messageId,
-                                            messages,
-                                          ),
-                                        ),
-                                        onAccent: onGradient,
-                                      ),
-                                    if (msg.isDeleted)
-                                      Text(
-                                        deletedMessageLabel(),
-                                        key: Key('deleted-message-${msg.id}'),
-                                        style: TextStyle(
-                                          color: onGradient
-                                              ? zen.onAccent
-                                              : zen.textMuted,
-                                          fontSize: 14,
-                                          fontStyle: FontStyle.italic,
-                                        ),
-                                      )
-                                    else if (msg.type != ChatMessageType.text)
-                                      GestureDetector(
-                                        onLongPressStart:
-                                            (LongPressStartDetails d) =>
-                                                unawaited(
-                                                  showChatContextMenu(
-                                                    context,
-                                                    d.globalPosition,
-                                                    actions,
-                                                  ),
-                                                ),
-                                        child: ChatAttachmentBody(message: msg),
-                                      )
-                                    else
-                                      CopyableText(
-                                        msg.text,
-                                        actions: actions,
-                                        style: TextStyle(
-                                          color: onGradient
-                                              ? zen.onAccent
-                                              : zen.textPrimary,
-                                          fontSize: 15,
-                                          height: 1.4,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        // What others wrote can be reported.
-                                        onReport: isSelf
-                                            ? null
-                                            : () => unawaited(
-                                                reportContent(
-                                                  context,
-                                                  ref,
-                                                  authorAddress: msg.sender,
-                                                  text: msg.text,
-                                                  header: t(
-                                                    'Wiadomość w grupie {group} — {name}',
-                                                    {
-                                                      'group': widget.groupName,
-                                                      'name': senderName,
-                                                    },
-                                                  ),
-                                                  contentId: msg.id,
-                                                  deleteLocal: () async {
-                                                    await ref
-                                                        .read(
-                                                          socialHubControllerProvider
-                                                              .notifier,
-                                                        )
-                                                        .deleteMessageLocally(
-                                                          key:
-                                                              'group:${widget.groupId}',
-                                                          messageId: msg.id,
-                                                        );
-                                                  },
-                                                ),
+                                    )
+                                  : const <ChatMenuItem>[];
+                              final ChatReply? reply = msg.isDeleted
+                                  ? null
+                                  : msg.reply;
+                              final ChatMessage? replyOriginal = reply == null
+                                  ? null
+                                  : byId[reply.messageId];
+                              final Widget bubble = Align(
+                                alignment: isSelf
+                                    ? AlignmentDirectional.centerEnd
+                                    : AlignmentDirectional.centerStart,
+                                child: Container(
+                                  margin: const EdgeInsets.only(bottom: 6),
+                                  constraints: BoxConstraints(
+                                    maxWidth:
+                                        (MediaQuery.of(context).size.width *
+                                                0.78)
+                                            .clamp(160.0, 440.0),
+                                  ),
+                                  decoration:
+                                      themed ??
+                                      (onGradient
+                                          ? BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: <Color>[
+                                                  zen.accent,
+                                                  Color.lerp(
+                                                    zen.accent,
+                                                    zen.accentSecondary,
+                                                    0.35,
+                                                  )!,
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
                                               ),
-                                      ),
-                                    if (!msg.isDeleted &&
-                                        msg.reactions.isNotEmpty)
-                                      ChatReactionsBar(
-                                        reactions: msg.reactions,
-                                        nameOf: _nameOf,
-                                        onToggle: (String emoji) => unawaited(
-                                          _socialHub.reactToMessage(
-                                            conversationKey: key,
-                                            messageId: msg.id,
-                                            emoji: emoji,
+                                              borderRadius: look.bubbleRadius(
+                                                outgoing: true,
+                                              ),
+                                              boxShadow: ZenLook.of(context)
+                                                  .tinted(
+                                                    zen,
+                                                    zen.accent,
+                                                    radius: 12,
+                                                    alpha: 0.18,
+                                                    offset: const Offset(0, 4),
+                                                  ),
+                                            )
+                                          : BoxDecoration(
+                                              color: zen.surfaceRaised,
+                                              borderRadius: look.bubbleRadius(
+                                                outgoing: false,
+                                              ),
+                                              border: Border.all(
+                                                color: zen.outlineSoft,
+                                              ),
+                                            )),
+                                  foregroundDecoration: _highlightId == msg.id
+                                      ? BoxDecoration(
+                                          borderRadius: look.bubbleRadius(
+                                            outgoing: isSelf,
+                                          ),
+                                          border: Border.all(
+                                            color: zen.accent,
+                                            width: 2,
+                                          ),
+                                        )
+                                      : null,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    14,
+                                    9,
+                                    14,
+                                    10,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      if (!isSelf)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 3,
+                                          ),
+                                          child: Text(
+                                            senderName,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: senderTone,
+                                              fontSize: 12.5,
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    if (msg.isEdited && !msg.isDeleted)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: Text(
-                                          editedMarker(),
-                                          style: TextStyle(
-                                            color: onGradient
-                                                ? zen.onAccent.withValues(
-                                                    alpha: 0.72,
-                                                  )
-                                                : zen.textMuted,
-                                            fontSize: 11,
-                                            fontStyle: FontStyle.italic,
-                                          ),
-                                        ),
-                                      ),
-                                    // How far it got, over all members.
-                                    if (msg.isOutgoing)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: MessageDeliveryBadge(
-                                          message: msg,
-                                          conversationKey:
-                                              'group:${widget.groupId}',
-                                          isGroup: true,
+                                      if (msg.forwarded && !msg.isDeleted)
+                                        ChatForwardedMarker(
                                           onAccent: onGradient,
                                         ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            );
-                            // Stagger from the newest bubble up — those are the ones
-                            // visible when the conversation opens.
-                            final int fromEnd = messages.length - 1 - index;
-                            if (animateEntrance &&
-                                fromEnd < _entranceStaggerLimit) {
-                              return ZenFadeSlide(
-                                duration: const Duration(milliseconds: 300),
-                                delay: Duration(milliseconds: 30 * fromEnd),
-                                offset: Offset(isSelf ? 10 : -10, 6),
-                                child: KeyedSubtree(
-                                  key: _bubbleKey(msg.id),
-                                  child: bubble,
+                                      if (reply != null)
+                                        ChatReplyQuote(
+                                          reply: reply,
+                                          original: replyOriginal,
+                                          senderLabel: _nameOf(
+                                            replyOriginal == null
+                                                ? reply.sender
+                                                : (replyOriginal.isOutgoing
+                                                      ? 'self'
+                                                      : replyOriginal.sender),
+                                          ),
+                                          onTap: () => unawaited(
+                                            _jumpToMessage(
+                                              reply.messageId,
+                                              messages,
+                                            ),
+                                          ),
+                                          onAccent: onGradient,
+                                        ),
+                                      if (msg.isDeleted)
+                                        Text(
+                                          deletedMessageLabel(),
+                                          key: Key('deleted-message-${msg.id}'),
+                                          style: TextStyle(
+                                            color: onGradient
+                                                ? zen.onAccent
+                                                : zen.textMuted,
+                                            fontSize: 14,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        )
+                                      else if (msg.type != ChatMessageType.text)
+                                        GestureDetector(
+                                          onLongPressStart:
+                                              (LongPressStartDetails d) =>
+                                                  unawaited(
+                                                    showChatContextMenu(
+                                                      context,
+                                                      d.globalPosition,
+                                                      actions,
+                                                    ),
+                                                  ),
+                                          child: ChatAttachmentBody(
+                                            message: msg,
+                                          ),
+                                        )
+                                      else
+                                        CopyableText(
+                                          msg.text,
+                                          actions: actions,
+                                          style: TextStyle(
+                                            color: onGradient
+                                                ? zen.onAccent
+                                                : zen.textPrimary,
+                                            fontSize: 15,
+                                            height: 1.4,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          // What others wrote can be reported.
+                                          onReport: isSelf
+                                              ? null
+                                              : () => unawaited(
+                                                  reportContent(
+                                                    context,
+                                                    ref,
+                                                    authorAddress: msg.sender,
+                                                    text: msg.text,
+                                                    header: t(
+                                                      'Wiadomość w grupie {group} — {name}',
+                                                      {
+                                                        'group':
+                                                            widget.groupName,
+                                                        'name': senderName,
+                                                      },
+                                                    ),
+                                                    contentId: msg.id,
+                                                    deleteLocal: () async {
+                                                      await ref
+                                                          .read(
+                                                            socialHubControllerProvider
+                                                                .notifier,
+                                                          )
+                                                          .deleteMessageLocally(
+                                                            key:
+                                                                'group:${widget.groupId}',
+                                                            messageId: msg.id,
+                                                          );
+                                                    },
+                                                  ),
+                                                ),
+                                        ),
+                                      if (!msg.isDeleted &&
+                                          msg.reactions.isNotEmpty)
+                                        ChatReactionsBar(
+                                          reactions: msg.reactions,
+                                          nameOf: _nameOf,
+                                          onToggle: (String emoji) => unawaited(
+                                            _socialHub.reactToMessage(
+                                              conversationKey: key,
+                                              messageId: msg.id,
+                                              emoji: emoji,
+                                            ),
+                                          ),
+                                        ),
+                                      if (msg.isEdited && !msg.isDeleted)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 2,
+                                          ),
+                                          child: Text(
+                                            editedMarker(),
+                                            style: TextStyle(
+                                              color: onGradient
+                                                  ? zen.onAccent.withValues(
+                                                      alpha: 0.72,
+                                                    )
+                                                  : zen.textMuted,
+                                              fontSize: 11,
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                        ),
+                                      // How far it got, over all members.
+                                      if (msg.isOutgoing)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 2,
+                                          ),
+                                          child: MessageDeliveryBadge(
+                                            message: msg,
+                                            conversationKey:
+                                                'group:${widget.groupId}',
+                                            isGroup: true,
+                                            onAccent: onGradient,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               );
-                            }
-                            return KeyedSubtree(
-                              key: _bubbleKey(msg.id),
-                              child: bubble,
-                            );
-                          },
-                        );
-                      },
+                              // Stagger from the newest bubble up — those are the ones
+                              // visible when the conversation opens.
+                              final int fromEnd = messages.length - 1 - index;
+                              if (animateEntrance &&
+                                  fromEnd < _entranceStaggerLimit) {
+                                return ZenFadeSlide(
+                                  duration: const Duration(milliseconds: 300),
+                                  delay: Duration(milliseconds: 30 * fromEnd),
+                                  offset: Offset(isSelf ? 10 : -10, 6),
+                                  child: KeyedSubtree(
+                                    key: _bubbleKey(msg.id),
+                                    child: bubble,
+                                  ),
+                                );
+                              }
+                              return KeyedSubtree(
+                                key: _bubbleKey(msg.id),
+                                child: bubble,
+                              );
+                            },
+                          );
+                        },
+                      ),
                     ),
             ),
             // Composer Bar
