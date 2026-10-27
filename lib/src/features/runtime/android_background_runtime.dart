@@ -193,8 +193,32 @@ const Duration kAndroidBackgroundHeartbeatInterval = Duration(seconds: 5);
 /// "appGone", when the app's engine goes).
 const Duration kAndroidBackgroundHeartbeatTimeout = Duration(seconds: 20);
 
-/// How often the parked service wakes the phone to look at the heartbeats.
+/// How often the parked service wakes the phone to look at the heartbeats
+/// while the app is off screen.
+///
+/// The watchdog is what notices, with the screen off, that the app went
+/// silent (a handoff that failed, an engine gone without "appGone"), and
+/// its wake lets the app's own timers run too. That stretch is short: after
+/// [kAndroidReceiveOnlyAfter] in the background the app hands the node over
+/// and the watchdog ends.
 const Duration kAndroidStandbyWatchdogEvery = Duration(minutes: 1);
+
+/// How often the parked service looks while the app says it is on screen.
+///
+/// The screen is on then and the phone awake, so the service's repeat event
+/// (every [kAndroidBackgroundHeartbeatInterval], no alarm) looks at the
+/// heartbeats; this wake only backs up a lost "off screen" heartbeat, and
+/// it never wakes the phone in Doze.
+const Duration kAndroidStandbyWatchdogOnScreenEvery = Duration(minutes: 15);
+
+/// How often the parked service wakes the phone for its watchdog, given
+/// whether the app last said it is on screen.
+Duration standbyWatchdogEvery({required bool appOnScreen}) => appOnScreen
+    ? kAndroidStandbyWatchdogOnScreenEvery
+    : kAndroidStandbyWatchdogEvery;
+
+/// Key of the heartbeat's "the app is on screen" flag.
+const String _kHeartbeatOnScreenKey = 'onScreen';
 
 /// After this long in the background, unlocked or not, the app hands the
 /// node to the service's receive-only mode, whatever the lock setting: no
@@ -470,8 +494,10 @@ abstract interface class AndroidBackgroundServiceController {
 
   Future<bool> isRunning();
 
-  /// Signals the parked task isolate that the app is still running.
-  void sendHeartbeat();
+  /// Signals the parked task isolate that the app is still running, and
+  /// whether it is [onScreen] (the service's watchdog then wakes the phone
+  /// far less often).
+  void sendHeartbeat({required bool onScreen});
 
   /// Makes sure the foreground service exists and drives it to
   /// [AndroidBackgroundBootstrapPayload.mode].
@@ -498,7 +524,7 @@ final class NoopAndroidBackgroundServiceController
   Future<bool> isRunning() async => false;
 
   @override
-  void sendHeartbeat() {}
+  void sendHeartbeat({required bool onScreen}) {}
 
   @override
   Future<bool> start(
@@ -528,13 +554,14 @@ final class FlutterForegroundAndroidBackgroundServiceController
   /// Tells the parked service the app is still here. Silence is the signal
   /// that the UI isolate is gone and the service has to own the node again.
   @override
-  void sendHeartbeat() {
+  void sendHeartbeat({required bool onScreen}) {
     if (!Platform.isAndroid || !_initialized) {
       return;
     }
     try {
       FlutterForegroundTask.sendDataToTask(<String, Object?>{
         'type': _kRuntimeHeartbeatType,
+        _kHeartbeatOnScreenKey: onScreen,
       });
     } catch (error, stackTrace) {
       logZenError(
@@ -840,6 +867,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   bool _isObserving = false;
   Timer? _heartbeatTimer;
 
+  /// Wakes the phone for the drop to receive-only (see
+  /// [_planReceiveOnlyWake]).
+  WakeTimer? _receiveOnlyWake;
+
   /// Since when the app is in the background (wall clock: the time that
   /// counts here passes while the phone sleeps too); `null` on screen.
   DateTime? _backgroundSince;
@@ -948,6 +979,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     _security = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _cancelReceiveOnlyWake();
     _drainRetry?.cancel();
     _drainRetry = null;
     _lockedKitsTimer?.cancel();
@@ -980,7 +1012,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       _heartbeatTimer = null;
       return;
     }
-    ref.read(androidBackgroundServiceControllerProvider).sendHeartbeat();
+    _sendHeartbeat();
     if (_heartbeatTimer != null) {
       return;
     }
@@ -988,13 +1020,53 @@ final class _AndroidBackgroundRuntimeBridgeState
       if (!mounted) {
         return;
       }
-      ref.read(androidBackgroundServiceControllerProvider).sendHeartbeat();
+      _sendHeartbeat();
       // Frames stop while the app is off screen, so a deferred handoff has no
       // rebuild to ride on; this tick is what eventually runs it.
       if (ref.read(socialHubControllerProvider).lifecycle.isBackgroundLike) {
         _scheduleSync();
       }
     });
+  }
+
+  /// The heartbeat, with whether the app is on screen: the parked service
+  /// wakes the phone for its watchdog only while it is not.
+  void _sendHeartbeat() {
+    ref
+        .read(androidBackgroundServiceControllerProvider)
+        .sendHeartbeat(
+          onScreen: !ref
+              .read(socialHubControllerProvider)
+              .lifecycle
+              .isBackgroundLike,
+        );
+  }
+
+  /// Wakes the phone when the app has been [kAndroidReceiveOnlyAfter] in
+  /// the background, so it hands the node over on time even with the
+  /// screen off (the app's timers stand still while the phone sleeps).
+  void _planReceiveOnlyWake(DateTime since, DateTime now, Duration after) {
+    if (_receiveOnlyWake != null) {
+      return;
+    }
+    final Duration left = after - now.difference(since);
+    _receiveOnlyWake = ZenWake.after(
+      'receive-only',
+      // A moment past the threshold: the sync must find it reached.
+      (left.isNegative ? Duration.zero : left) + const Duration(seconds: 1),
+      () async {
+        _receiveOnlyWake = null;
+        if (mounted) {
+          await _runSyncLoop();
+        }
+      },
+      hold: const Duration(seconds: 10),
+    );
+  }
+
+  void _cancelReceiveOnlyWake() {
+    _receiveOnlyWake?.cancel();
+    _receiveOnlyWake = null;
   }
 
   /// Holds the phone and Wi-Fi awake exactly while a call runs (the only
@@ -1036,6 +1108,11 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     // `RuntimeLifecycleBridge` is an ancestor, so it has already published the
     // new lifecycle snapshot by the time this runs.
+    if (_heartbeatTimer != null) {
+      // On or off screen: the parked service hears it now, before the
+      // phone may fall asleep, and sets its watchdog for it.
+      _sendHeartbeat();
+    }
     _scheduleSync();
   }
 
@@ -1205,17 +1282,22 @@ final class _AndroidBackgroundRuntimeBridgeState
       // kAndroidReceiveOnlyAfter it hands the node to the service's
       // receive-only mode anyway, whatever the lock setting ("Nigdy" and
       // long delays too): everything else the core does costs battery.
+      final Duration after = ref.read(androidReceiveOnlyAfterProvider);
       if (shouldDropToReceiveOnly(
         backgroundSince: since,
         now: now,
-        after: ref.read(androidReceiveOnlyAfterProvider),
+        after: after,
       )) {
+        _cancelReceiveOnlyWake();
         logZenMessage('Long in the background: the service only receives.');
         await _handoffToReceiver();
+      } else if (!_handoffActive) {
+        _planReceiveOnlyWake(since, now, after);
       }
       return;
     }
     _backgroundSince = null;
+    _cancelReceiveOnlyWake();
     await _restoreForegroundRuntime();
   }
 
@@ -1245,6 +1327,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     _handoffInFlight = true;
     _inboxDrained = false;
+    _cancelReceiveOnlyWake();
     // The phone may be asleep but for the alarm that woke it: it stays
     // awake until the service runs the node.
     unawaited(ZenWake.hold(const Duration(seconds: 45), tag: 'handoff'));
@@ -2111,6 +2194,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// Wakes the phone now and then while parked, to look at the heartbeats.
   WakeTimer? _watchdog;
 
+  /// The app's last heartbeat said it is on screen.
+  bool _appOnScreen = false;
+
   /// The app's engine went away (ZenPower "appGone").
   StreamSubscription<void>? _appGone;
 
@@ -2193,6 +2279,16 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (data is Map<Object?, Object?> &&
         data['type'] == _kRuntimeHeartbeatType) {
       _noteAppAlive();
+      final bool onScreen = data[_kHeartbeatOnScreenKey] == true;
+      if (onScreen != _appOnScreen) {
+        _appOnScreen = onScreen;
+        if (_watchdog != null) {
+          // Parked: the watchdog comes as often as the app's place needs.
+          _watchdog?.cancel();
+          _watchdog = null;
+          _syncWatchdog(AndroidBackgroundRuntimeMode.standby);
+        }
+      }
       return;
     }
     if (data is Map<Object?, Object?> &&
@@ -2250,21 +2346,34 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       ..start();
   }
 
-  /// While parked, an alarm now and then wakes the phone to look at the
+  /// While parked, a wake on the shared beat now and then looks at the
   /// heartbeats (and lets the app's own timers run); none while this
-  /// service runs the node.
+  /// service runs the node. With the app on screen the phone is awake
+  /// anyway and the repeat event looks: the wake is rare then and never
+  /// comes in Doze ([standbyWatchdogEvery]).
   void _syncWatchdog(AndroidBackgroundRuntimeMode mode) {
     if (mode == AndroidBackgroundRuntimeMode.standby && !_destroyed) {
-      _watchdog ??= ZenWake.every(
+      _watchdog ??= ZenWake.beat(
         'watchdog',
-        kAndroidStandbyWatchdogEvery,
-        _checkStandbyWatchdog,
-        hold: const Duration(seconds: 5),
+        standbyWatchdogEvery(appOnScreen: _appOnScreen),
+        _watchOnWake,
+        hold: kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 3),
+        whileIdle: !_appOnScreen,
       );
     } else {
       _watchdog?.cancel();
       _watchdog = null;
     }
+  }
+
+  /// A watchdog wake: the app gets one heartbeat's time to report in (its
+  /// timers stood still while the phone slept, like the service's clock),
+  /// then the heartbeats are looked at and the phone may sleep again.
+  Future<void> _watchOnWake() async {
+    await Future<void>.delayed(
+      kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 1),
+    );
+    _checkStandbyWatchdog();
   }
 
   @override

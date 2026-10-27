@@ -100,6 +100,11 @@ void main() {
         ]),
       );
       expect(runtime.snapshot.serviceRunning, isTrue);
+      // The heartbeats say where the app is: the parked service's watchdog
+      // wakes the phone only while it is off screen.
+      expect(service.onScreenBeats.first, isTrue);
+      await tester.pump(kAndroidBackgroundHeartbeatInterval);
+      expect(service.onScreenBeats.last, isFalse);
 
       security.lock();
       await tester.pump();
@@ -137,6 +142,25 @@ void main() {
       expect(vault.drainCount, 0);
     },
   );
+
+  test('the parked service wakes the phone for its watchdog only while the '
+      'app is off screen, and rarely otherwise', () {
+    expect(
+      standbyWatchdogEvery(appOnScreen: false),
+      kAndroidStandbyWatchdogEvery,
+    );
+    expect(
+      standbyWatchdogEvery(appOnScreen: true),
+      greaterThanOrEqualTo(const Duration(minutes: 15)),
+    );
+    // Off screen it is short-lived: the app hands the node over after
+    // kAndroidReceiveOnlyAfter, and the watchdog ends with that.
+    expect(
+      kAndroidReceiveOnlyAfter.inMinutes ~/
+          kAndroidStandbyWatchdogEvery.inMinutes,
+      lessThanOrEqualTo(5),
+    );
+  });
 
   test('long in the background the app drops to receive-only', () {
     final DateTime left = DateTime(2026, 10, 22, 12);
@@ -793,12 +817,16 @@ final class _FakeAndroidBackgroundServiceController
 
   int heartbeatCount = 0;
 
+  /// Whether the app said it is on screen, heartbeat by heartbeat.
+  final List<bool> onScreenBeats = <bool>[];
+
   @override
   Future<void> initialize() async {}
 
   @override
-  void sendHeartbeat() {
+  void sendHeartbeat({required bool onScreen}) {
     heartbeatCount += 1;
+    onScreenBeats.add(onScreen);
   }
 
   @override
