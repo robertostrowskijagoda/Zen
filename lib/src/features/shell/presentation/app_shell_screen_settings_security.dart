@@ -134,6 +134,28 @@ class _SettingsSecuritySection extends ConsumerWidget {
                         ),
                     ],
                   ),
+                  if (settings.lockMode == AppLockMode.never) ...<Widget>[
+                    const SizedBox(height: 12),
+                    // The password is what opens the data key, so a start from
+                    // scratch (the system closed the app, the phone restarted)
+                    // still asks for it: only the locking while Zen runs goes.
+                    Text(
+                      t(
+                        'Zen nie blokuje się sam, także gdy jest w tle: kto '
+                        'weźmie odblokowany telefon, zobaczy Twoje rozmowy. '
+                        'Gdy system zamknie aplikację albo telefon się '
+                        'zrestartuje, hasło i tak będzie potrzebne — to ono '
+                        'odszyfrowuje dane.',
+                      ),
+                      key: const Key('settings-lock-never-note'),
+                      softWrap: true,
+                      style: TextStyle(
+                        color: zen.warning,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
                   if (settings.lockMode == AppLockMode.background) ...<Widget>[
                     const SizedBox(height: 16),
                     Text(

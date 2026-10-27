@@ -104,6 +104,69 @@ void main() {
     await comeBack(tester);
   });
 
+  testWidgets('"Nigdy": leaving the app, coming back or closing it never '
+      'locks', (WidgetTester tester) async {
+    final MemoryAppSecurityService security = await pumpGate(
+      tester,
+      mode: AppLockMode.never,
+    );
+    leave(tester);
+    await tester.pump(const Duration(hours: 5));
+    expect(security.isLocked, isFalse);
+    await comeBack(tester);
+    expect(security.isLocked, isFalse);
+    expect(find.text('aplikacja'), findsOneWidget);
+    expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.detached);
+    await tester.pump();
+    expect(security.isLocked, isFalse);
+    expect(find.text('aplikacja'), findsOneWidget);
+  });
+
+  testWidgets('a cold start with a password asks for it whatever the mode: '
+      'the password is what opens the data key', (WidgetTester tester) async {
+    final MemorySecurityCredentialsStore store =
+        MemorySecurityCredentialsStore();
+    final LocalAppSecurityService first = LocalAppSecurityService(
+      credentialsStore: store,
+      passwordIterations: 10,
+    );
+    await first.initialize(settings: const AppSettings());
+    await first.setPassword('haslo-do-testu');
+
+    const AppSettings never = AppSettings(lockMode: AppLockMode.never);
+    final LocalAppSecurityService restarted = LocalAppSecurityService(
+      credentialsStore: store,
+      passwordIterations: 10,
+    );
+    await restarted.initialize(settings: never);
+    // The master key exists on disk only wrapped by the password: without
+    // it (or the hardware-sealed copy) there is nothing to open the data with.
+    expect(restarted.isLocked, isTrue);
+    expect(await restarted.currentEncryptionKey(), isNull);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(never),
+          ),
+          appSecurityServiceProvider.overrideWithValue(restarted),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          builder: (BuildContext context, Widget? child) =>
+              AppSecurityGate(child: child!),
+          home: const Scaffold(body: Text('aplikacja')),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('app-unlock-password-field')), findsOneWidget);
+    expect(find.text('aplikacja'), findsNothing);
+  });
+
   testWidgets(
     'a computer locks after the delay without a key press or the mouse',
     (WidgetTester tester) async {
