@@ -3,6 +3,7 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_mentions.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -62,6 +63,28 @@ final class _Phone {
     addTearDown(s.dispose);
     return s;
   }
+}
+
+/// Dan, who is no friend of Ada's, mentions her in comment [i] under
+/// [post]; whether [ada] told of it.
+Future<bool> _danMentions(
+  LedgerMesh mesh,
+  _Phone ada,
+  LogEntry post,
+  int i,
+) async {
+  final LogEntry comment = await mesh['dan'].publish(
+    kCommentKind,
+    commentBody(post.id, '<@0> $i', mentions: <Mention>[_of(mesh, 'ada')]),
+    spaceKind: 'acts',
+  );
+  return ada.service.handleNotice(
+    SignalTransportFrame(
+      from: mesh.address('dan'),
+      payload: mentionNoticeFrame(mesh['dan'], comment)!,
+      receivedAtMillis: 0,
+    ),
+  );
 }
 
 Mention _of(LedgerMesh mesh, String name) => Mention(
@@ -278,7 +301,48 @@ void main() {
         );
         expect(await ada.service.handleNotice(again), isTrue);
         expect(ada.inbox.single.title, 'Ktoś wspomniał(a) o Tobie');
-        expect(ada.shown, hasLength(1));
+        // Not a friend nor on a friend's list: the notification tells only
+        // that it came, whatever the level.
+        final RuntimeSystemNotification n = ada.shown.single;
+        expect(n.title, 'Ktoś wspomniał o Tobie');
+        expect(n.body, isNot(contains('Hej')));
+      },
+    );
+
+    test(
+      'a stranger is never named by the name they give themselves',
+      () async {
+        final LedgerMesh mesh = await world();
+        final _Phone ada = _Phone(mesh, 'ada');
+        ada.service.start();
+        final LogEntry post = await mesh['ada'].publish(
+          kPostKind,
+          newPostBody('Mój post'),
+        );
+        final LogEntry comment = await mesh['dan'].publish(
+          kCommentKind,
+          commentBody(
+            post.id,
+            'Przelej mi <@0>',
+            mini: const MiniProfileTag(name: 'Bob'),
+            mentions: <Mention>[_of(mesh, 'ada')],
+          ),
+          spaceKind: 'acts',
+        );
+        expect(
+          await ada.service.handleNotice(
+            SignalTransportFrame(
+              from: mesh.address('dan'),
+              payload: mentionNoticeFrame(mesh['dan'], comment)!,
+              receivedAtMillis: 0,
+            ),
+          ),
+          isTrue,
+        );
+        expect(ada.inbox.single.title, 'Ktoś wspomniał(a) o Tobie');
+        final RuntimeSystemNotification n = ada.shown.single;
+        expect('${n.title} ${n.body}', isNot(contains('Bob')));
+        expect('${n.title} ${n.body}', isNot(contains('Przelej')));
       },
     );
 
@@ -334,31 +398,50 @@ void main() {
         kPostKind,
         newPostBody('Mój post'),
       );
+      // Three posts, so no one post's limit is reached first.
+      final List<LogEntry> posts = <LogEntry>[
+        post,
+        await mesh['ada'].publish(kPostKind, newPostBody('Drugi')),
+        await mesh['ada'].publish(kPostKind, newPostBody('Trzeci')),
+      ];
       int told = 0;
       for (int i = 0; i < kMentionNoticesPerSenderHour + 3; i++) {
         // Dan is no friend: the post is Ada's, so he may mention her.
-        final LogEntry comment = await mesh['dan'].publish(
-          kCommentKind,
-          commentBody(
-            post.id,
-            '<@0> $i',
-            mentions: <Mention>[_of(mesh, 'ada')],
-          ),
-          spaceKind: 'acts',
-        );
-        if (await ada.service.handleNotice(
-          SignalTransportFrame(
-            from: mesh.address('dan'),
-            payload: mentionNoticeFrame(mesh['dan'], comment)!,
-            receivedAtMillis: 0,
-          ),
-        )) {
+        if (await _danMentions(mesh, ada, posts[i % posts.length], i)) {
           told++;
         }
       }
       expect(told, kMentionNoticesPerSenderHour);
       expect(ada.inbox, hasLength(kMentionNoticesPerSenderHour));
       expect(ada.inbox.first.body, '@Ada 0');
+
+      // The count is on the disk: starting again does not reset it.
+      ada.service.dispose();
+      final _Phone again = _Phone(mesh, 'ada')..service.start();
+      expect(await _danMentions(mesh, again, post, 99), isFalse);
+      expect(again.inbox, isEmpty);
+    });
+
+    test('mentions by people who are not friends are limited under one '
+        'post', () async {
+      final LedgerMesh mesh = await world();
+      final _Phone ada = _Phone(mesh, 'ada');
+      ada.service.start();
+      final LogEntry post = await mesh['ada'].publish(
+        kPostKind,
+        newPostBody('Mój post'),
+      );
+      int told = 0;
+      for (int i = 0; i < kMentionNoticesPerPostHour + 3; i++) {
+        if (await _danMentions(mesh, ada, post, i)) {
+          told++;
+        }
+      }
+      expect(
+        kMentionNoticesPerPostHour,
+        lessThan(kMentionNoticesPerSenderHour),
+      );
+      expect(told, kMentionNoticesPerPostHour);
     });
 
     test('a friend\'s mention comes once although it also arrives by sync; the '

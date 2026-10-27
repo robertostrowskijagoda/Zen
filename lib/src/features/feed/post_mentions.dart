@@ -8,7 +8,6 @@ import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
-import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
@@ -45,8 +44,11 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 // them at all: this is their post, the writer is their friend, they
 // reacted to that post themselves, or the device that sent the notice is a
 // friend of one of their friends (on a list shared with them). Each
-// mention is told of once (by post, or by comment), and one writer's
-// notices are limited per hour.
+// mention is told of once (by post, or by comment); one writer's notices,
+// and those of everyone who is not a friend (all together and under one
+// post), are limited per hour, on the disk so a restart does not reset the
+// count. Somebody who is neither a friend nor on a friend's list is never
+// named: only "Ktoś", and the notification tells only that it came.
 
 /// Payload type of the notice about a mention.
 const String kMentionNoticeType = 'lg_mention';
@@ -64,7 +66,14 @@ const Duration kMentionNoticeMaxAge = Duration(days: 3);
 const int kMentionNoticesPerSenderHour = 10;
 
 /// Mentions by people who are not friends told of per hour, all together.
-const int kMentionNoticesStrangersHour = 60;
+const int kMentionNoticesStrangersHour = 20;
+
+/// Mentions by people who are not friends told of per hour under one post
+/// (its comments together).
+const int kMentionNoticesPerPostHour = 5;
+
+/// Where the hourly limits are counted.
+const String kMentionBudgetKey = 'feed/mention_budget';
 
 /// Mentions remembered as told of at most.
 const int _maxKnownMentions = 500;
@@ -265,13 +274,13 @@ List<MentionCandidate> postMentionCandidates(
 // ---- the notice ---------------------------------------------------------------
 
 /// The notice to one mentioned person about [entry] (a post, an edit or a
-/// comment of this account): the entry, [post] (what a comment or an edit
-/// belongs to) and the writer's [profile], each with its certificate.
+/// comment of this account): the entry and [post] (what a comment or an
+/// edit belongs to), each with its certificate. No name comes with it: the
+/// receiver names only people it knows.
 Map<String, dynamic>? mentionNoticeFrame(
   LedgerNode node,
   LogEntry entry, {
   LogEntry? post,
-  LogEntry? profile,
 }) {
   final LogEntry? e = certifiedEntry(node, entry);
   if (e == null) {
@@ -281,7 +290,6 @@ Map<String, dynamic>? mentionNoticeFrame(
     'type': kMentionNoticeType,
     'e': e.toCertifiedJson(),
     'p': ?certifiedEntry(node, post)?.toCertifiedJson(),
-    'pr': ?certifiedEntry(node, profile)?.toCertifiedJson(),
   };
 }
 
@@ -318,13 +326,9 @@ final class MentionNotice {
   final bool inComment;
 
   /// What a notification shows of [text].
-  String get preview {
-    final String plain = plainText(
-      text,
-      mentions: mentions,
-    ).replaceAll(RegExp(r'\s+'), ' ').trim();
-    return plain.length > 80 ? '${plain.substring(0, 80)}…' : plain;
-  }
+  String get preview => shortNoticePreview(
+    plainText(text, mentions: mentions).replaceAll(RegExp(r'\s+'), ' '),
+  );
 }
 
 /// The system notification about [n] at [level] (`mentionNoticeText`).
@@ -424,10 +428,6 @@ final class PostMentionService {
   /// Friends' sealed entries waiting for their key.
   final List<LogEntry> _waiting = <LogEntry>[];
 
-  /// Per writer (address or account): the hour and how many were told of.
-  final Map<String, (int, int)> _budget = <String, (int, int)>{};
-  (int, int) _strangers = (0, 0);
-
   /// Checks one at a time (the record of what was told of is shared).
   Future<void> _queue = Future<void>.value();
 
@@ -525,7 +525,6 @@ final class PostMentionService {
       node,
       entry,
       post: post,
-      profile: latestProfileEntry(node, node.account),
     );
     if (frame == null) {
       return 0;
@@ -626,19 +625,11 @@ final class PostMentionService {
     if (p['p'] != null) {
       carried = await verifiedEntry(p['p']);
     }
-    String? profileName;
-    if (p['pr'] != null) {
-      final LogEntry? pr = await verifiedEntry(p['pr']);
-      if (pr != null && pr.account == entry.account) {
-        profileName = profileFromEntry(pr)?.name;
-      }
-    }
     return _consider(
       entry,
       body,
       from: PeerShareCodec.normalizeAddress(frame.from),
       carriedPost: carried,
-      profileName: profileName,
     );
   }
 
@@ -667,7 +658,6 @@ final class PostMentionService {
     Map<String, dynamic> body, {
     required String from,
     LogEntry? carriedPost,
-    String? profileName,
   }) async {
     final int now = _now();
     final Object? text = body['text'];
@@ -729,32 +719,30 @@ final class PostMentionService {
     final bool isFriend = friendAddress.isNotEmpty;
     final String? listedName = from.isEmpty ? null : friendOfFriend?.call(from);
     final String? sentBy = from.isEmpty ? null : node.accountOfAnyAddress(from);
+    final bool listed =
+        listedName != null && (sentBy == null || sentBy == entry.account);
     final bool allowed =
-        postAuthor == node.account ||
-        isFriend ||
-        _reactedTo(postId) ||
-        (listedName != null && (sentBy == null || sentBy == entry.account));
+        postAuthor == node.account || isFriend || _reactedTo(postId) || listed;
     if (!allowed) {
       return false;
     }
     final String id = inComment ? 'c:${entry.id}' : 'p:$postId';
     final _Told told = await _Told.load(node);
     if (told.ids.containsKey(id) ||
-        !_withinBudget(from, entry.account, isFriend)) {
+        !await _withinBudget(from, entry.account, postId, isFriend)) {
       return false;
     }
     told.ids[id] = entry.hlc.millis;
     // Saved first: told of once even if what follows fails.
     await told.save(node, nowMillis: now);
-    final String mini =
-        MiniProfileTag.fromJson(body[kMiniProfileKey])?.name ?? '';
+    // Only a name this person gave, or one a friend's list shows: whatever
+    // anybody else calls themselves could pretend to be someone known.
+    final String listedAs = listed ? listedName.trim() : '';
     final String name = isFriend
         ? nameOf(friendAddress)
-        : (listedName?.trim().isNotEmpty ?? false)
-        ? listedName!.trim()
-        : (profileName?.trim().isNotEmpty ?? false)
-        ? profileName!.trim()
-        : (mini.isNotEmpty ? mini : t('Ktoś'));
+        : listedAs.isNotEmpty
+        ? listedAs
+        : t('Ktoś');
     final MentionNotice notice = MentionNotice(
       id: id,
       postId: postId,
@@ -777,7 +765,11 @@ final class PostMentionService {
       await notify(
         mentionNotification(
           notice,
-          level: isFriend ? privacyOf(friendAddress) : privacy(),
+          level: isFriend
+              ? privacyOf(friendAddress)
+              : listedAs.isNotEmpty
+              ? privacy()
+              : NotificationPrivacy.generic,
           createdAtMillis: now,
         ),
       );
@@ -794,27 +786,100 @@ final class PostMentionService {
             e.body['post'] == postId,
       );
 
-  bool _withinBudget(String from, String account, bool friend) {
-    final int hour = _now() ~/ 3600000;
-    if (!friend) {
-      final int all = _strangers.$1 == hour ? _strangers.$2 : 0;
-      if (all >= kMentionNoticesStrangersHour) {
-        return false;
-      }
-      _strangers = (hour, all + 1);
-    }
-    final String key = from.isNotEmpty ? from : account;
-    final (int, int)? had = _budget[key];
-    final int used = had == null || had.$1 != hour ? 0 : had.$2;
-    if (used >= kMentionNoticesPerSenderHour) {
+  /// Whether one more mention by the writer at [from] (or [account]) under
+  /// post [postId] may be told of this hour; counts it when so.
+  Future<bool> _withinBudget(
+    String from,
+    String account,
+    String postId,
+    bool friend,
+  ) async {
+    final _Budget budget = await _Budget.load(node, hour: _now() ~/ 3600000);
+    final String writer = from.isNotEmpty ? from : account;
+    final int byWriter = budget.writers[writer] ?? 0;
+    final int underPost = budget.posts[postId] ?? 0;
+    if (byWriter >= kMentionNoticesPerSenderHour ||
+        (!friend &&
+            (budget.strangers >= kMentionNoticesStrangersHour ||
+                underPost >= kMentionNoticesPerPostHour)) ||
+        (budget.writers.length >= _maxBudgetKeys &&
+            !budget.writers.containsKey(writer))) {
       return false;
     }
-    if (had == null && _budget.length >= 1000) {
-      _budget.removeWhere((String _, (int, int) b) => b.$1 != hour);
+    budget.writers[writer] = byWriter + 1;
+    if (!friend) {
+      budget.strangers += 1;
+      if (budget.posts.length < _maxBudgetKeys ||
+          budget.posts.containsKey(postId)) {
+        budget.posts[postId] = underPost + 1;
+      }
     }
-    _budget[key] = (hour, used + 1);
+    await budget.save(node);
     return true;
   }
+}
+
+/// Writers and posts counted per hour at most.
+const int _maxBudgetKeys = 1000;
+
+/// What was told of this hour ([hour]): by writer, by people who are not
+/// friends ([strangers]) and by those under each post.
+final class _Budget {
+  _Budget(
+    this.hour, {
+    this.strangers = 0,
+    Map<String, int>? writers,
+    Map<String, int>? posts,
+  }) : writers = writers ?? <String, int>{},
+       posts = posts ?? <String, int>{};
+
+  final int hour;
+  int strangers;
+  final Map<String, int> writers;
+  final Map<String, int> posts;
+
+  /// The count for [hour]; another hour's starts again at nothing.
+  static Future<_Budget> load(LedgerNode node, {required int hour}) async {
+    final Uint8List? raw = await node.disk.read(kMentionBudgetKey);
+    if (raw == null) {
+      return _Budget(hour);
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is! Map || json['h'] != hour) {
+        return _Budget(hour);
+      }
+      Map<String, int> counts(Object? map) => <String, int>{
+        if (map is Map)
+          for (final MapEntry<dynamic, dynamic> e in map.entries)
+            if (e.key is String && e.value is int)
+              e.key as String: e.value as int,
+      };
+      final Object? s = json['s'];
+      return _Budget(
+        hour,
+        strangers: s is int ? s : 0,
+        writers: counts(json['w']),
+        posts: counts(json['p']),
+      );
+    } on FormatException {
+      return _Budget(hour);
+    }
+  }
+
+  Future<void> save(LedgerNode node) => node.disk.write(
+    kMentionBudgetKey,
+    Uint8List.fromList(
+      utf8.encode(
+        jsonEncode(<String, Object>{
+          'h': hour,
+          's': strangers,
+          'w': writers,
+          'p': posts,
+        }),
+      ),
+    ),
+  );
 }
 
 /// What was told of: `p:<post>` / `c:<comment>` → when it was written.
