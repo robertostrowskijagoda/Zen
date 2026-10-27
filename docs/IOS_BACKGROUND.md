@@ -126,7 +126,12 @@ Where the receiver runs:
   `done`, and the engine is let go. This is how Android's background service
   runs too: an engine without an Activity that reads only what the
   background key opens. If Zen comes to the screen meanwhile, the engine is
-  told to stop and let go of the node first.
+  told to stop; it answers `done` only once its node stopped, and the app's
+  node waits for that before it starts. The bridge also refuses to start a
+  second node with a key that already runs in the process, so a hand-over
+  that slips leaves the app retrying instead of two nodes with one identity;
+  only a node nobody has called on for a minute (its engine went away
+  without stopping it) is stopped to make room.
 
 With the keep-alive on and Zen locked, the receiver keeps running, so
 messages arrive within seconds with notifications also while Zen is locked.

@@ -251,15 +251,24 @@ final Provider<bool> iosBackgroundBridgeEnabledProvider = Provider<bool>(
   (Ref ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS,
 );
 
-/// One node per identity: while the locked receiver runs its node in this
+/// One node per identity: while a locked receiver runs its node in this
 /// process, the app's own node must not start. The app's node config is
-/// read through [protector], which waits until the receiver let go.
+/// read through [protector], which waits until the receiver let go: the one
+/// in this isolate ([hold], [release]), and one in an engine without a
+/// screen (ZenBackgroundBridge.swift), whose isolate has a gate of its own,
+/// so only the native side can tell when it stopped its node (`nodeFree`).
 abstract final class IosNodeGate {
   static Completer<void>? _held;
 
-  /// The longest the app's node waits (a receiver that never let go must
-  /// not keep the app offline for good).
+  /// The longest the app's node waits for each (a receiver that never let
+  /// go must not keep the app offline for good; the bridge then refuses a
+  /// second node with the same key, and the app's start retries).
   static const Duration maxWait = Duration(seconds: 30);
+
+  /// Completes once no engine without a screen runs a node (tests replace
+  /// it).
+  @visibleForTesting
+  static Future<void> Function() headlessFree = _askNodeFree;
 
   static bool get isHeld => _held != null;
 
@@ -274,15 +283,30 @@ abstract final class IosNodeGate {
   /// Completes once no receiver holds the node.
   static Future<void> free() async {
     final Completer<void>? held = _held;
-    if (held == null) {
-      return;
+    if (held != null) {
+      await held.future.timeout(
+        maxWait,
+        onTimeout: () => logZenWarning(
+          'The locked receiver kept the node too long; the app starts its own.',
+        ),
+      );
     }
-    await held.future.timeout(
+    await headlessFree().timeout(
       maxWait,
       onTimeout: () => logZenWarning(
-        'The locked receiver kept the node too long; the app starts its own.',
+        'The background engine kept the node too long; the app starts its own.',
       ),
     );
+  }
+
+  static Future<void> _askNodeFree() async {
+    try {
+      await _channel.invokeMethod<Object?>('nodeFree');
+    } on MissingPluginException {
+      // Not an iPhone: no engine without a screen.
+    } on PlatformException catch (error) {
+      logZenWarning('zen/background nodeFree: ${error.message}');
+    }
   }
 
   /// [inner], opening the node config only once the node is free.

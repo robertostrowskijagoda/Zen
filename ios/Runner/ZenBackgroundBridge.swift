@@ -22,6 +22,7 @@ import UserNotifications
 ///    which a Shortcuts automation can run every hour.
 ///
 /// Dart calls `configure` {ready, keepAlive} → status, `status` → status,
+/// `nodeFree` (answers once no engine without a screen runs a node),
 /// `openSettings` (Zen's page in Settings) and `openShortcuts`. `ready`:
 /// Zen can receive in the background now — the unlocked app runs, or, while
 /// Zen is locked, its locked receiver (ios_background.dart); nothing runs
@@ -32,8 +33,10 @@ import UserNotifications
 /// no scene and so no Flutter engine: the check then runs in an engine of
 /// its own without a screen (`zenIosBackgroundMain` in
 /// ios_locked_receiver.dart, the locked receiver with only the background
-/// key), which is stopped and let go once it is done, or as soon as Zen
-/// comes to the screen. Everything runs on the main thread.
+/// key). It is told to stop as soon as Zen comes to the screen, and let go
+/// only once it answered `done`, which it sends after its node stopped: the
+/// app's node waits for that (`nodeFree`), one node per identity. Everything
+/// runs on the main thread.
 final class ZenBackgroundBridge {
   static let shared = ZenBackgroundBridge()
 
@@ -80,6 +83,10 @@ final class ZenBackgroundBridge {
   private var headlessChannel: FlutterMethodChannel?
   private var headlessWaiting: [(Bool) -> Void] = []
 
+  /// The app's engine waiting to start its node (`nodeFree`) until the
+  /// engine without a screen stopped its own.
+  private var nodeFreeWaiting: [FlutterResult] = []
+
   private init() {}
 
   /// From `application(_:didFinishLaunchingWithOptions:)`: iOS takes the
@@ -119,7 +126,8 @@ final class ZenBackgroundBridge {
   }
 
   private func attach(_ messenger: FlutterBinaryMessenger) {
-    // The app's own engine is up: one without a screen lets go of the node.
+    // The app's own engine is up: one without a screen lets go of the node
+    // (the app's node waits for that through `nodeFree`).
     stopHeadless()
     let channel = FlutterMethodChannel(name: "zen/background", binaryMessenger: messenger)
     channel.setMethodCallHandler { [weak self] call, result in
@@ -145,6 +153,15 @@ final class ZenBackgroundBridge {
       }
       updateKeepAlive()
       result(status())
+    case "nodeFree":
+      // One node per identity: the app's node starts once the engine
+      // without a screen stopped its node and was let go.
+      guard headless != nil else {
+        result(true)
+        return
+      }
+      nodeFreeWaiting.append(result)
+      stopHeadless()
     case "status":
       // Whether notifications are allowed comes asynchronously.
       UNUserNotificationCenter.current().getNotificationSettings { settings in
@@ -346,40 +363,44 @@ final class ZenBackgroundBridge {
     }
     // The plugins Dart needs there: the keychain, the files, notifications.
     GeneratedPluginRegistrant.register(with: engine)
-    // Dart answers within its budget; this only covers an engine that never
-    // does.
+    // Dart answers within its budget; this only covers an engine that does
+    // not: the check ends unchecked, and the engine is told to stop.
     DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds + 15)) {
       [weak self, weak engine] in
       guard let self = self, let engine = engine, self.headless === engine else {
         return
       }
       NSLog("Zen: the background engine did not answer in time")
-      self.endHeadless(false)
+      self.answerHeadlessWaiting(false)
+      self.stopHeadless()
     }
   }
 
   /// Asks the engine without a screen to let go of the node now; it answers
-  /// `done` within moments (or is let go anyway).
+  /// `done` within moments, once its node stopped. It is not let go before:
+  /// its node would keep running without anything to stop it, holding the
+  /// identity the app's node needs.
   private func stopHeadless() {
-    guard let engine = headless else {
+    guard headless != nil else {
       return
     }
     headlessChannel?.invokeMethod("stop", arguments: nil)
-    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(3)) { [weak self, weak engine] in
-      guard let self = self, let engine = engine, self.headless === engine else {
-        return
-      }
-      self.endHeadless(false)
-    }
   }
 
   private func endHeadless(_ checked: Bool) {
-    let waiting = headlessWaiting
-    headlessWaiting = []
     headlessChannel?.setMethodCallHandler(nil)
     headlessChannel = nil
     headless?.destroyContext()
     headless = nil
+    answerHeadlessWaiting(checked)
+    let nodeWaiting = nodeFreeWaiting
+    nodeFreeWaiting = []
+    nodeWaiting.forEach { $0(true) }
+  }
+
+  private func answerHeadlessWaiting(_ checked: Bool) {
+    let waiting = headlessWaiting
+    headlessWaiting = []
     waiting.forEach { $0(checked) }
   }
 

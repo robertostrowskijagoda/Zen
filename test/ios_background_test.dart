@@ -395,6 +395,34 @@ void main() {
         IosNodeGate.release();
         await open;
         expect(opened, isTrue);
+        // The native side was asked whether an engine without a screen
+        // still runs a node.
+        expect(calls.map((MethodCall c) => c.method), contains('nodeFree'));
+      },
+    );
+
+    test(
+      'the app\'s node config waits for the engine without a screen too',
+      () async {
+        final Future<void> Function() original = IosNodeGate.headlessFree;
+        addTearDown(() => IosNodeGate.headlessFree = original);
+        final Completer<void> headlessStopped = Completer<void>();
+        IosNodeGate.headlessFree = () => headlessStopped.future;
+        final KeyedBinaryPayloadProtector gated = IosNodeGate.protector(
+          const _PlainProtector(),
+        );
+        bool opened = false;
+        final Future<void> open = gated
+            .unsealFor('node', Uint8List.fromList(<int>[1]))
+            .then((_) => opened = true);
+        await Future<void>.delayed(Duration.zero);
+        // Nothing holds the gate in this isolate, yet the other engine's
+        // node still runs.
+        expect(IosNodeGate.isHeld, isFalse);
+        expect(opened, isFalse);
+        headlessStopped.complete();
+        await open;
+        expect(opened, isTrue);
       },
     );
   });
