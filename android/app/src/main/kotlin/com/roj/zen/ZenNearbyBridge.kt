@@ -83,6 +83,12 @@ import javax.crypto.spec.SecretKeySpec
  * the background service while it takes them (it does only while it runs
  * the node, i.e. while the app is locked or closed — on screen behind its
  * lock screen the app could not answer them either), otherwise the app.
+ *
+ * Everything runs on the main thread except the token's change of a
+ * schedule, which runs on [ZenPower]'s wake task thread (Bluetooth calls
+ * can block, and a blocked main thread holds up the wake broadcast); the
+ * radio's state is changed only under [radio], and [clients] only on the
+ * main thread.
  */
 object ZenNearbyBridge {
     private const val TAG = "ZenNearby"
@@ -92,7 +98,10 @@ object ZenNearbyBridge {
     private val SERVICE: UUID = UUID.fromString("5a454e00-6e65-6172-6279-000000000001")
     private val WAVE: UUID = UUID.fromString("5a454e00-6e65-6172-6279-000000000002")
 
-    /** One engine using the radio. Touched on the main thread only. */
+    /**
+     * One engine using the radio. Changed on the main thread under [radio];
+     * the token's change reads it under [radio] from the wake task thread.
+     */
     private class Client(val engine: FlutterEngine, val activity: FragmentActivity?) {
         val background: Boolean
             get() = activity == null
@@ -121,6 +130,14 @@ object ZenNearbyBridge {
         var alarmKeys: List<String> = emptyList()
     }
 
+    /**
+     * Guards the radio: the clients' wishes, advertising, scanning, the GATT
+     * server and the token's change. Held around every Bluetooth call that
+     * starts or stops them, on whichever thread.
+     */
+    private val radio = Any()
+
+    /** Added and removed on the main thread only (under [radio]). */
     private val clients = ArrayList<Client>()
     private var appContext: Context? = null
     private var advertiseCallback: AdvertiseCallback? = null
@@ -143,8 +160,9 @@ object ZenNearbyBridge {
     /** Bluetooth on/off, registered once per process. */
     private var stateReceiver: BroadcastReceiver? = null
 
-    /** The next token change of a schedule (main thread). */
+    /** The next token change of a schedule, and its slot boundary (under [radio]). */
     private var rotation: Runnable? = null
+    private var rotationAt = 0L
 
     /** When waves came (main thread): per phone and in all. */
     private val waveTimes = HashMap<String, ArrayDeque<Long>>()
@@ -214,26 +232,30 @@ object ZenNearbyBridge {
 
     /** [engine] is going away: whatever only it wanted stops. */
     fun unregister(engine: FlutterEngine) {
-        if (!clients.removeAll { it.engine === engine }) {
-            return
-        }
-        tokenKeysEpoch = Long.MIN_VALUE
-        val context = appContext ?: return
-        try {
-            applyAdvertising(context)
-            applyScan(context)
-        } catch (error: Exception) {
-            Log.w(TAG, "Releasing the radio failed", error)
+        synchronized(radio) {
+            if (!clients.removeAll { it.engine === engine }) {
+                return
+            }
+            tokenKeysEpoch = Long.MIN_VALUE
+            val context = appContext ?: return
+            try {
+                applyAdvertising(context)
+                applyScan(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Releasing the radio failed", error)
+            }
         }
     }
 
     private fun attach(engine: FlutterEngine, context: Context, activity: FragmentActivity?) {
         appContext = context
         watchBluetoothState(context)
-        clients.removeAll { it.engine === engine }
-        tokenKeysEpoch = Long.MIN_VALUE
         val client = Client(engine, activity)
-        clients.add(client)
+        synchronized(radio) {
+            clients.removeAll { it.engine === engine }
+            clients.add(client)
+        }
+        tokenKeysEpoch = Long.MIN_VALUE
         val messenger = engine.dartExecutor.binaryMessenger
         EventChannel(messenger, "zen/nearby/events").setStreamHandler(
             object : EventChannel.StreamHandler {
@@ -263,10 +285,13 @@ object ZenNearbyBridge {
                         if (token == null) {
                             result.success(false)
                         } else {
-                            client.token = token
-                            client.schedule = null
-                            client.tokenSetAt = SystemClock.elapsedRealtime()
-                            result.success(applyAdvertising(context))
+                            val shown = synchronized(radio) {
+                                client.token = token
+                                client.schedule = null
+                                client.tokenSetAt = SystemClock.elapsedRealtime()
+                                applyAdvertising(context)
+                            }
+                            result.success(shown)
                         }
                     }
                     "startAdvertisingSchedule" -> {
@@ -282,31 +307,41 @@ object ZenNearbyBridge {
                         } else {
                             // Kept also while Bluetooth is off: shown once
                             // it is back on.
-                            client.token = null
-                            client.schedule = adverts.copyOf()
-                            client.scheduleStart = start
-                            client.tokenSetAt = SystemClock.elapsedRealtime()
-                            result.success(applyAdvertising(context))
+                            val shown = synchronized(radio) {
+                                client.token = null
+                                client.schedule = adverts.copyOf()
+                                client.scheduleStart = start
+                                client.tokenSetAt = SystemClock.elapsedRealtime()
+                                applyAdvertising(context)
+                            }
+                            result.success(shown)
                         }
                     }
                     "stopAdvertising" -> {
-                        client.token = null
-                        client.schedule = null
-                        applyAdvertising(context)
+                        synchronized(radio) {
+                            client.token = null
+                            client.schedule = null
+                            applyAdvertising(context)
+                        }
                         result.success(null)
                     }
                     "startScan" -> {
-                        client.scanning = true
-                        client.lowPower = call.argument<Boolean>("lowPower") ?: false
-                        val ok = applyScan(context)
-                        if (!ok) {
-                            client.scanning = false
+                        val ok = synchronized(radio) {
+                            client.scanning = true
+                            client.lowPower = call.argument<Boolean>("lowPower") ?: false
+                            val started = applyScan(context)
+                            if (!started) {
+                                client.scanning = false
+                            }
+                            started
                         }
                         result.success(ok)
                     }
                     "stopScan" -> {
-                        client.scanning = false
-                        applyScan(context)
+                        synchronized(radio) {
+                            client.scanning = false
+                            applyScan(context)
+                        }
                         result.success(null)
                     }
                     "setAlarmReceiver" -> {
@@ -457,25 +492,29 @@ object ZenNearbyBridge {
     }
 
     private fun onBluetoothOn(context: Context) {
-        try {
-            applyAdvertising(context)
-            applyScan(context)
-        } catch (error: Exception) {
-            Log.w(TAG, "Restarting the radio failed", error)
+        synchronized(radio) {
+            try {
+                applyAdvertising(context)
+                applyScan(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Restarting the radio failed", error)
+            }
         }
         reportBluetooth(true)
     }
 
     /** The stack forgot advertising, scanning and the GATT server. */
     private fun onBluetoothOff() {
-        advertiseCallback = null
-        advertisedToken = null
-        scanCallback = null
-        try {
-            gattServer?.close()
-        } catch (_: Exception) {
+        synchronized(radio) {
+            advertiseCallback = null
+            advertisedToken = null
+            scanCallback = null
+            try {
+                gattServer?.close()
+            } catch (_: Exception) {
+            }
+            gattServer = null
         }
-        gattServer = null
         synchronized(pendingWrites) {
             pendingWrites.clear()
         }
@@ -511,29 +550,47 @@ object ZenNearbyBridge {
     }
 
     /**
-     * While any engine follows a schedule, applies it again right after the
-     * next slot boundary. An exact alarm that wakes the phone (nothing holds
-     * it awake in between), so a token never stays on air past its slot.
+     * While any engine follows a schedule that shows a token now or later,
+     * applies it again right after the next slot boundary. An exact alarm
+     * that wakes the phone (nothing holds it awake in between), so a token
+     * never stays on air past its slot, nor into Android's own address
+     * change (an inexact alarm could come minutes late). None once every
+     * schedule is over (nothing would change), nor while Bluetooth is off
+     * ([onBluetoothOn] applies the schedule again); one already set for the
+     * same boundary is kept. Under [radio]; the change itself runs on the
+     * wake task thread.
      */
     private fun scheduleRotation(context: Context) {
+        val now = System.currentTimeMillis()
+        val slot = now / NEARBY_SLOT_MS
+        val next = (slot + 1) * NEARBY_SLOT_MS
+        val wanted = adapter(context)?.isEnabled == true &&
+            clients.any { client ->
+                val schedule = client.schedule
+                schedule != null && slot < client.scheduleStart + schedule.size / ADVERT_BYTES
+            }
+        if (wanted && rotation != null && rotationAt == next) {
+            return
+        }
         if (rotation != null) {
             ZenPower.cancel(context, ROTATION_ALARM)
         }
         rotation = null
-        if (clients.none { it.schedule != null }) {
+        if (!wanted) {
             return
         }
-        val now = System.currentTimeMillis()
-        val next = (now / NEARBY_SLOT_MS + 1) * NEARBY_SLOT_MS
         val task = Runnable {
-            rotation = null
-            try {
-                applyAdvertising(context)
-            } catch (error: Exception) {
-                Log.w(TAG, "Changing the token failed", error)
+            synchronized(radio) {
+                rotation = null
+                try {
+                    applyAdvertising(context)
+                } catch (error: Exception) {
+                    Log.w(TAG, "Changing the token failed", error)
+                }
             }
         }
         rotation = task
+        rotationAt = next
         ZenPower.scheduleNative(
             context,
             ROTATION_ALARM,
@@ -546,6 +603,7 @@ object ZenNearbyBridge {
     /**
      * Shows the newest wanted token while any engine wants to be visible (both
      * engines compute the same one; restarting for an equal token is skipped).
+     * Under [radio], like everything that starts or stops the radio below.
      */
     private fun applyAdvertising(context: Context): Boolean {
         scheduleRotation(context)
@@ -595,8 +653,10 @@ object ZenNearbyBridge {
                 val failed = this
                 // Tried again on the next request instead of looking shown.
                 main.post {
-                    if (advertiseCallback === failed) {
-                        advertisedToken = null
+                    synchronized(radio) {
+                        if (advertiseCallback === failed) {
+                            advertisedToken = null
+                        }
                     }
                 }
             }
