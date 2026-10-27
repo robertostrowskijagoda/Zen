@@ -63,7 +63,7 @@ or X25519 holds. It protects:
 | What | How |
 |---|---|
 | Every signal between two devices (messages, calls set-up, sync, everything) | a session per pair of devices: the KEM secret and a challenge encapsulated to the sender's device key give the keys (HKDF); ChaCha20-Poly1305 per frame, replay window; there is no plaintext mode |
-| Mailbox mail and the Android locked inbox | sealed again for the recipient's hybrid key (plus ephemeral and static X25519 for sender authentication); one encapsulation per recipient key per day, a fresh key for every envelope |
+| Mailbox mail and the locked inbox (Android, iPhone) | sealed again for the recipient's hybrid key (plus ephemeral and static X25519 for sender authentication); one encapsulation per recipient key per day, a fresh key for every envelope |
 | Neighbours' doors | every door runs the same session layer; a sealed knock also has a second layer from the sticker's token (knock) or the knocker's hybrid key (answer) |
 | Nearby (Bluetooth) hellos and answers | a one-time ML-KEM-768 + X25519 key per hello, sent in chunks over GATT |
 | Local link handshakes (Wi-Fi, Wi-Fi Direct, Bluetooth) | both sides add a one-time ML-KEM-768 to the link key |
@@ -171,9 +171,8 @@ friend vouching for their key, is trust on first use.
   Choosing it takes the password once; choosing any other mode, or locking
   by hand, deletes the copy at once. The password is still asked for before
   security settings change or sensitive screens open.
-- **The locked phone (Android).** The background service holds a separate
-  background key and only small kits (alarm, Nearby, doors), never the
-  master key. What arrives is stored sealed until you unlock.
+- **The locked phone (Android and iPhone).** A locked Zen keeps receiving
+  without the master key; see "The locked phone" below.
 - **Screens.** The wallet and other sensitive screens are protected from
   screenshots and screen recording (Android, Windows, macOS). Clipboard
   copies of secrets (the account key, a transfer code) expire after 60
@@ -253,6 +252,56 @@ friend vouching for their key, is trust on first use.
   ChaCha20-Poly1305 under that key, inside the post-quantum session every
   signal already travels in. Blocks wait in the encrypted store, so a
   transfer cut short goes on from where it stopped.
+
+## The locked phone
+
+A locked Zen keeps receiving: Android's background service, and on an
+iPhone the same receiver whenever iOS lets Zen run (docs/IOS_BACKGROUND.md).
+It never holds the master key. It works with a second, **background key**: a
+random 256-bit key in the system's secret store (Android Keystore-backed
+storage; on iOS the keychain with "after first unlock, this device only"),
+readable without the app password. The model is: the background key may
+receive, never read back.
+
+What the background key opens (each file sealed with AES-256-GCM, bound to
+its name):
+
+| File | What it holds | Can it read messages? |
+|---|---|---|
+| Node config | this device's mesh identity | no stored ones; with it, frames addressed to this device can be received while it runs (that is its purpose) |
+| Capability | the public half of the inbox key, the mailboxes' addresses, contacts as keyed tags (a contact can be recognised, not listed) | no |
+| Notice kit | the notification level of each conversation and the names of those whose level shows the sender, by address | no; it names contacts |
+| Outbox kit | this device's own pending payloads, each already sealed end to end for its recipient, and where they go | no; the device cannot open them either |
+| Mailbox kit and the mail held for friends | envelopes sealed for their recipients, whom this device serves, the deposit keys that check senders' tokens | no |
+| Door, Nearby and alarm kits (Android) | door keys, the household's knock-sealing key, rotating tokens, the alarm's recipients | only sealed knocks, never messages |
+
+What it does **not** open: the sealed inbox. Every frame the receiver keeps
+is sealed to the inbox key — a hybrid ML-KEM-768 + X25519 key pair derived
+from the master key — with AES-256-GCM per record (one encapsulation for up
+to 256 records or an hour). The receiver has only the public half, so
+nothing it wrote can be read back by the receiver, by someone who copies the
+files with the background key, or later with a quantum computer; only the
+unlocked app opens it, merges it and deletes it. Chats, history, the friend
+list, the ledger and every other store stay under the master key.
+
+What the receiver reads in memory: a frame arrives decrypted by the mesh
+session (that is how any device receives). To write a notification it reads
+the sender and the text of a chat message, keeps at most its first 80
+characters (only as far as the conversation's notification level allows),
+and writes nothing else from it in the clear: the whole frame goes into the
+sealed inbox at once and the plaintext is dropped. Mail held by friends'
+mailboxes is sealed for this device's relay identity, which is under the
+master key, so the receiver keeps it unopened and says only that something
+came. The notification itself is visible on the lock screen and stays in the
+system's notification history, which is why it is short and follows the
+notification level.
+
+Limits: someone who takes the background key out of a running, unlocked-
+since-boot phone (root, a forensic tool) can run this device's mesh identity
+and receive what is sent to it from then on, and learn the contacts' names
+in the notice kit and the addresses of the mailboxes and of friends served.
+They still cannot read the chats, the history or anything in the sealed
+inbox.
 
 ## Files from others
 

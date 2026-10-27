@@ -739,7 +739,15 @@ relays.
   `rly_poll`, `rly_mail_ack`, `rly_purge`, `rly_sync` and `rly_sync_want`
   by the same rules, and writes what it holds back to a file of its own,
   which the app merges after unlock (`relay_engine_locked.dart`).
-  Attachments (`rly_bput`...) wait for the unlock.
+  Attachments (`rly_bput`...) wait for the unlock. A locked iPhone runs the
+  same receiver whenever iOS lets Zen run (a background check, a Shortcuts
+  run, the keep-alive; docs/IOS_BACKGROUND.md), so it answers the same
+  frames then.
+- **What a locked phone reads.** It keeps every frame sealed to the inbox
+  key (hybrid ML-KEM-768 + X25519, derived from the master key; only its
+  public half is with the receiver) and reads a chat message only in
+  memory, for a notification of at most 80 characters as the conversation's
+  notification level allows (docs/SECURITY_MODEL.md, "The locked phone").
 - **Mail for a locked phone** (`rly_mail` to the locked service) is kept
   envelope by envelope, keyed like the direct payload (`sender|id`): a copy
   that came already, directly or from another mailbox, or that the app

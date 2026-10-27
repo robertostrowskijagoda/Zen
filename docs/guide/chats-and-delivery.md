@@ -123,12 +123,16 @@ iOS lets Zen run in the background only briefly. On an iPhone:
   after you leave it; after that a message to someone offline waits on the
   iPhone (*Waiting on your iPhone, recipient offline*) until the next check
   or until you open Zen again;
-- all of this works only while Zen is unlocked: with the lock *After leaving
-  the app* it stops when Zen locks;
-- **Settings → Background work** shows when iOS last woke Zen and has
-  **Keep receiving in the background**: Zen plays a silent sound so that iOS
-  does not suspend it, and messages and calls arrive at once — at a clear
-  battery cost ([details](../IOS_BACKGROUND.md));
+- a locked Zen receives too: messages wait encrypted until you unlock, and
+  their notifications show at most the start of a message;
+- **Settings → Background work** (and a step of the first-run setup) lets
+  you choose how Zen is woken: **automatically by iOS** (a few times a day,
+  almost no battery), a **Shortcuts automation every hour** (the action
+  *Check Zen messages*; iOS may show a short banner each run) and a
+  **silent sound for receiving at once** (messages and calls arrive at
+  once — at a clear battery cost). It also checks the iPhone's settings Zen
+  needs: Background App Refresh, Low Power Mode off, notifications, and not
+  swiping Zen away ([details](../IOS_BACKGROUND.md));
 - friends pick an iPhone as their mailbox only after devices that stay
   online.
 
