@@ -3369,6 +3369,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
           context: context,
           builder: (BuildContext dialog) => AlertDialog(
             key: const Key('diagnostics-clear-dialog'),
+            scrollable: true,
             title: Text(t('Wyczyścić dziennik?')),
             content: Text(
               t(
