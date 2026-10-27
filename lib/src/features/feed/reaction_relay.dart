@@ -342,7 +342,7 @@ Future<int> relayReactions(
     } else if (e.kind == kPostAnnounceKind && e.account == node.account) {
       // Posts passed on to friends of friends: what they say goes back
       // towards the author the same way.
-      for (final PostAnnouncement a in announcementsIn(e)) {
+      for (final PostAnnouncement a in announcementsIn(node, e)) {
         postsAuthor.putIfAbsent(a.post, () => a.author);
       }
     }

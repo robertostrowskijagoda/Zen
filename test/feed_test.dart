@@ -51,7 +51,6 @@ void main() {
     expect(newPostBody('  Cześć  '), <String, dynamic>{
       'text': 'Cześć',
       'aud': 'public',
-      'reach': 2,
     });
   });
 

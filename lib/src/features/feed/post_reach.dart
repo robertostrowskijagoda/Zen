@@ -1,96 +1,72 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 
 // How far a post goes.
 //
-// The author picks a reach for a public post: friends, friends of friends
-// (the default) or one step further. Friends read the post itself, as
-// always (they keep the author's feed). Beyond them only a small notice
-// travels: a friend of the author writes a `post_ann` entry in their own
-// `acts` (which only their friends read) naming the post, its author, when
-// it was written, its reach and how many steps from the author its readers
-// are. No text, no photos. Whoever reads such a notice fetches the post
-// itself (`lg_post_want` → `lg_post`) from the friend who passed it on (who
-// holds it) or from the author, and checks the author's signature and that
-// the author really gave the post that reach. A friend of a friend passes
-// the notice one step further only for a post of reach 3, and only once
-// the post is on their own device, so their friends can fetch it from
-// them. A post for any other audience is sealed for the author's friends
-// and never goes further, whatever its reach.
+// Every public post may travel up to [kMaxReachHops] steps of friendship
+// from its author; how far each reader looks is their own choice (the
+// Tablica's „Znajomi”, „2. stopień” or „3. stopień”, [kDefaultFeedDepth]
+// at first). Friends read the post itself, as always (they keep the
+// author's feed). Beyond them only a small notice travels: a friend of the
+// author writes a `post_ann` entry in their own `acts` naming the post,
+// its author, when it was written and how many steps from the author its
+// readers are. No text, no photos. A notice shows whom its writer knows,
+// so the entry is sealed for the friends who may see the writer's friend
+// list ([noticeAudienceFor]); with that list hidden nothing is passed on.
+// Whoever reads such a notice and looks that far fetches the post itself
+// (`lg_post_want` → `lg_post`) from the friend who passed it on (who holds
+// it) or from the author, and checks the author's signature and that the
+// post is public. A friend of a friend who looks at least two steps far
+// passes the notice one step further, only once the post is on their own
+// device, so their friends can fetch it from them. A post for any other
+// audience is sealed for the author's friends and never goes further.
 //
-// What a reader learns: the post, its author (who chose to be seen that
-// far), and which of their own friends passed it on ("przez …"). A notice
-// carries no path, only the number of steps.
+// What a reader learns: the post, its author (who made it public), and
+// which of their own friends passed it on ("przez …"). A notice carries no
+// path, only the number of steps.
 //
 // Bounds: notices only about posts from the last [kReachWindow]; each post
-// passed on once (again only when it was edited or removed); at most
-// [kMaxAnnouncedPerAuthorDay] posts of one author and [kMaxAnnouncedPerDay]
-// in all a day, [kMaxAnnouncedPerEntry] in one entry; readers apply the
-// same caps to what each friend passes on. Reshares are not affected: a
-// reshare carries the whole post as before and goes as far as people
-// reshare it.
+// passed on once (again only when it was edited or removed, or the friend
+// list's audience changed); at most [kMaxAnnouncedPerAuthorDay] posts of
+// one author and [kMaxAnnouncedPerDay] in all a day,
+// [kMaxAnnouncedPerEntry] in one entry; readers apply the same caps to
+// what each friend passes on. Reshares are not affected: a reshare carries
+// the whole post as before and goes as far as people reshare it.
 
-/// How far a post travels, in steps of friendship from its author.
-enum PostReach {
-  /// Friends only (and followers of a public post).
-  friends(1),
+/// Steps of friendship a public post's notice travels at most.
+const int kMaxReachHops = 3;
 
-  /// Also friends of friends.
-  friendsOfFriends(2),
+/// How far a reader looks until they pick otherwise: friends of friends.
+const int kDefaultFeedDepth = 2;
 
-  /// One step further: friends of friends of friends.
-  third(3);
+/// Whether a post [body] may go past friends: only a public one (anything
+/// else is sealed for the author's friends).
+bool isPublicPost(Map<String, dynamic>? body) =>
+    body != null && !isSealed(body) && body['aud'] == Audience.public.name;
 
-  const PostReach(this.hops);
-
-  /// Steps of friendship from the author.
-  final int hops;
-
-  /// The reach of [hops] steps, or `null`.
-  static PostReach? byHops(Object? hops) =>
-      PostReach.values.where((PostReach r) => r.hops == hops).firstOrNull;
-
-  String get label => switch (this) {
-    PostReach.friends => t('Znajomi'),
-    PostReach.friendsOfFriends => t('Znajomi znajomych'),
-    PostReach.third => t('3. stopień'),
-  };
-
-  String get hint => switch (this) {
-    PostReach.friends => t('Tylko Twoi znajomi i obserwujący.'),
-    PostReach.friendsOfFriends => t('Także znajomi Twoich znajomych.'),
-    PostReach.third => t(
-      'Jeszcze krok dalej: znajomi znajomych Twoich znajomych.',
-    ),
-  };
-}
-
-/// The reach a new public post starts with.
-const PostReach kDefaultPostReach = PostReach.friendsOfFriends;
-
-/// Key of the reach in a public post's body (1–3 steps).
-const String kPostReachKey = 'reach';
-
-/// The reach of a post [body]: only a public post goes further than
-/// friends (anything else is sealed for the author's friends).
-PostReach reachOfBody(Map<String, dynamic>? body) {
-  if (body == null || isSealed(body) || body['aud'] != Audience.public.name) {
-    return PostReach.friends;
-  }
-  return PostReach.byHops(body[kPostReachKey]) ?? PostReach.friends;
-}
+/// The audience whose key seals this account's notices: the friends who
+/// may see its friend list ([FriendListAudience]), since a notice shows
+/// whom it knows. `null` when nobody may, or only friends let in one by
+/// one (no audience key reaches exactly them): nothing is passed on then.
+Audience? noticeAudienceFor(FriendListAudience who) => switch (who) {
+  FriendListAudience.all => Audience.all,
+  FriendListAudience.friends => Audience.mid,
+  FriendListAudience.close => Audience.close,
+  FriendListAudience.onRequest || FriendListAudience.nobody => null,
+};
 
 /// Entry kind of passed-on notices in the writer's `acts/<account>` space:
-/// `{items: [notice…]}` ([PostAnnouncement]).
+/// `{items: [notice…]}` ([PostAnnouncement]), sealed for the audience
+/// [noticeAudienceFor] gives.
 const String kPostAnnounceKind = 'post_ann';
 
 /// Asks whoever holds a post for it: `{type, id, a}` (post id, author).
@@ -121,18 +97,17 @@ const int _day = 24 * 3600 * 1000;
 
 final RegExp _entryId = RegExp(r'^[0-9a-f]{64}$');
 
-/// One notice: [post] of [author] written at [millis] with [reach], read
-/// [hops] steps from the author. [authorAddress] is the address the author
-/// shows in their public profile (to fetch the post from them);
-/// [editMillis] when it was last edited and [removed] tell readers who
-/// hold an older version to fetch it again.
+/// One notice: [post] of [author] written at [millis], read [hops] steps
+/// from the author. [authorAddress] is the address the author shows in
+/// their public profile (to fetch the post from them); [editMillis] when it
+/// was last edited and [removed] tell readers who hold an older version to
+/// fetch it again.
 @immutable
 final class PostAnnouncement {
   const PostAnnouncement({
     required this.post,
     required this.author,
     required this.millis,
-    required this.reach,
     required this.hops,
     this.authorAddress = '',
     this.editMillis = 0,
@@ -142,7 +117,6 @@ final class PostAnnouncement {
   final String post;
   final String author;
   final int millis;
-  final PostReach reach;
   final int hops;
   final String authorAddress;
   final int editMillis;
@@ -155,15 +129,14 @@ final class PostAnnouncement {
     'p': post,
     'a': author,
     't': millis,
-    'r': reach.hops,
     'h': hops,
     if (authorAddress.isNotEmpty) 'aa': authorAddress,
     if (editMillis > 0) 'e': editMillis,
     if (removed) 'x': 1,
   };
 
-  /// A notice, or `null` when anything is off: a reach of friends only, a
-  /// step count outside 2…reach.
+  /// A notice, or `null` when anything is off: a step count outside
+  /// 2…[kMaxReachHops].
   static PostAnnouncement? fromJson(Object? json) {
     if (json is! Map) {
       return null;
@@ -171,7 +144,6 @@ final class PostAnnouncement {
     final Object? p = json['p'];
     final Object? a = json['a'];
     final Object? at = json['t'];
-    final PostReach? reach = PostReach.byHops(json['r']);
     final Object? h = json['h'];
     final Object? aa = json['aa'];
     final Object? e = json['e'];
@@ -182,18 +154,15 @@ final class PostAnnouncement {
         a.length > 100 ||
         at is! int ||
         at <= 0 ||
-        reach == null ||
-        reach == PostReach.friends ||
         h is! int ||
         h < 2 ||
-        h > reach.hops) {
+        h > kMaxReachHops) {
       return null;
     }
     return PostAnnouncement(
       post: p,
       author: a,
       millis: at,
-      reach: reach,
       hops: h,
       authorAddress: aa is String && aa.length <= kMaxProfileAddress ? aa : '',
       editMillis: e is int && e > 0 ? e : 0,
@@ -202,7 +171,8 @@ final class PostAnnouncement {
   }
 }
 
-/// Body of a `post_ann` entry passing on [items].
+/// Body of a `post_ann` entry passing on [items] (sealed before it is
+/// written).
 Map<String, dynamic> announceBody(List<PostAnnouncement> items) =>
     <String, dynamic>{
       'items': <Map<String, dynamic>>[
@@ -211,10 +181,14 @@ Map<String, dynamic> announceBody(List<PostAnnouncement> items) =>
       ],
     };
 
-/// The valid notices of a `post_ann` entry [e].
-List<PostAnnouncement> announcementsIn(LogEntry e) {
-  final Object? items = e.body['items'];
-  if (e.kind != kPostAnnounceKind || items is! List) {
+/// The valid notices of a `post_ann` entry [e], as [node] reads it (none
+/// without the key it is sealed with).
+List<PostAnnouncement> announcementsIn(LedgerNode node, LogEntry e) {
+  final Map<String, dynamic>? body = e.kind == kPostAnnounceKind
+      ? node.bodyOf(e)
+      : null;
+  final Object? items = body?['items'];
+  if (items is! List) {
     return const <PostAnnouncement>[];
   }
   return <PostAnnouncement>[
@@ -232,7 +206,6 @@ final class AnnouncedPost {
     required this.post,
     required this.author,
     required this.millis,
-    required this.reach,
     required this.hops,
     required this.via,
     this.authorAddress = '',
@@ -243,7 +216,6 @@ final class AnnouncedPost {
   final String post;
   final String author;
   final int millis;
-  final PostReach reach;
   final int hops;
   final List<String> via;
   final String authorAddress;
@@ -256,7 +228,6 @@ final class AnnouncedPost {
       post: post,
       author: author,
       millis: millis,
-      reach: a.reach.hops > reach.hops ? a.reach : reach,
       hops: closer ? a.hops : hops,
       via: closer
           ? <String>[friend]
@@ -273,6 +244,7 @@ final class AnnouncedPost {
 /// What one friend's [acts] pass on: the newest notice per post (with the
 /// fewest steps any of them named), within the window and the caps.
 Map<String, PostAnnouncement> _passedOnBy(
+  LedgerNode node,
   Iterable<LogEntry> acts, {
   required int since,
   required int now,
@@ -284,7 +256,7 @@ Map<String, PostAnnouncement> _passedOnBy(
   final Map<String, PostAnnouncement> out = <String, PostAnnouncement>{};
   final Map<String, int> perAuthorDay = <String, int>{};
   for (final LogEntry e in entries) {
-    for (final PostAnnouncement a in announcementsIn(e)) {
+    for (final PostAnnouncement a in announcementsIn(node, e)) {
       if (a.millis < since || a.millis > now + _day) {
         continue;
       }
@@ -303,7 +275,6 @@ Map<String, PostAnnouncement> _passedOnBy(
           post: a.post,
           author: a.author,
           millis: had.millis,
-          reach: a.reach,
           hops: math.min(had.hops, a.hops),
           authorAddress: a.authorAddress.isNotEmpty
               ? a.authorAddress
@@ -319,6 +290,8 @@ Map<String, PostAnnouncement> _passedOnBy(
 
 /// Posts that reached this account only through friends' notices, by post
 /// id: never this account's own nor a friend's (those it reads itself).
+/// Whatever the steps: how far the reader looks is applied by who reads
+/// this.
 Map<String, AnnouncedPost> announcedPosts(LedgerNode node, {int? nowMillis}) {
   final int now = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
   final int since = now - kReachWindow.inMilliseconds;
@@ -327,6 +300,7 @@ Map<String, AnnouncedPost> announcedPosts(LedgerNode node, {int? nowMillis}) {
   final Map<String, AnnouncedPost> out = <String, AnnouncedPost>{};
   for (final String friend in friends) {
     final Map<String, PostAnnouncement> passed = _passedOnBy(
+      node,
       node.entriesOf(spaceKind: 'acts', ofAccount: friend),
       since: since,
       now: now,
@@ -341,7 +315,6 @@ Map<String, AnnouncedPost> announcedPosts(LedgerNode node, {int? nowMillis}) {
           post: a.post,
           author: a.author,
           millis: a.millis,
-          reach: a.reach,
           hops: a.hops,
           via: <String>[friend],
           authorAddress: a.authorAddress,
@@ -389,9 +362,6 @@ final class HeldPost {
 
   LedgerProfile? get authorProfile =>
       profile == null ? null : profileFromEntry(profile!);
-
-  /// The post's reach as its author signed it.
-  PostReach get reach => reachOfBody(post?.body);
 
   /// This held post brought up to date with [newer] (an answer for the
   /// same post): a removal wins, the newest edit and profile stay.
@@ -442,7 +412,11 @@ final class HeldPost {
     final Object? id = json['id'];
     final Object? a = json['a'];
     final Object? h = json['h'];
-    if (id is! String || a is! String || h is! int || h < 2 || h > 3) {
+    if (id is! String ||
+        a is! String ||
+        h is! int ||
+        h < 2 ||
+        h > kMaxReachHops) {
       return null;
     }
     LogEntry? read(Object? j) {
@@ -511,8 +485,9 @@ Map<String, dynamic> postAnswerFrame(
 };
 
 /// The post an `lg_post` [answer] carries, checked: signed by [author],
-/// the very post [id] of their feed, public and with a reach of at least
-/// [hops]; or the author's tombstone for it. `null` if anything is off.
+/// the very post [id] of their feed and public; or the author's tombstone
+/// for it. [hops] is how many steps from the author it came. `null` if
+/// anything is off.
 Future<HeldPost?> checkPostAnswer(
   Map<String, dynamic> answer, {
   required String id,
@@ -543,7 +518,7 @@ Future<HeldPost?> checkPostAnswer(
       post.kind != kPostKind ||
       post.account != author ||
       post.space != space ||
-      reachOfBody(post.body).hops < hops) {
+      !isPublicPost(post.body)) {
     return null;
   }
   LogEntry? edit = answer['edit'] == null
@@ -606,19 +581,24 @@ LogEntry? certifiedEntry(LedgerNode node, LogEntry? e) {
   return cert == null ? null : e.withCertificate(cert);
 }
 
-/// What this account passes on to its friends now: its friends' public
-/// posts whose reach goes past friends (their friends are two steps from
-/// the author), and posts of reach 3 that reached it two steps from their
-/// authors and are held here ([held]). Only what is new or changed since
-/// it last passed them on, newest first, within the caps.
+/// What this account passes on now to the friends of [audience] (those who
+/// may see its friend list): its friends' public posts (their friends are
+/// two steps from the author) and, with [passFurther] (it looks at least
+/// that far itself), the posts that reached it two steps from their
+/// authors and are held here ([held]), for three steps. Only what is new
+/// or changed since it last passed them on to [audience], newest first,
+/// within the caps.
 List<PostAnnouncement> announcementsToPass(
   LedgerNode node, {
   required HeldPost? Function(String id) held,
+  required Audience audience,
+  bool passFurther = true,
   int? nowMillis,
 }) {
   final int now = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
   final int since = now - kReachWindow.inMilliseconds;
-  // What this account passed on before, and how much of it in the last day.
+  // What this account passed on to [audience] before, and how much of it
+  // (to anyone) in the last day.
   final Map<String, String> passed = <String, String>{};
   final Map<String, int> perAuthor = <String, int>{};
   int today = 0;
@@ -627,8 +607,11 @@ List<PostAnnouncement> announcementsToPass(
       continue;
     }
     final bool recent = e.hlc.millis >= now - _day;
-    for (final PostAnnouncement a in announcementsIn(e)) {
-      passed[a.post] = a.state;
+    final bool same = e.body['aud'] == audience.name;
+    for (final PostAnnouncement a in announcementsIn(node, e)) {
+      if (same) {
+        passed[a.post] = a.state;
+      }
       if (recent) {
         today++;
         perAuthor[a.author] = (perAuthor[a.author] ?? 0) + 1;
@@ -659,11 +642,8 @@ List<PostAnnouncement> announcementsToPass(
       if (e.kind != kPostKind ||
           e.account != friend ||
           e.hlc.millis < since ||
-          e.hlc.millis > now + _day) {
-        continue;
-      }
-      final PostReach reach = reachOfBody(e.body);
-      if (reach.hops < 2) {
+          e.hlc.millis > now + _day ||
+          !isPublicPost(e.body)) {
         continue;
       }
       candidates.add(
@@ -671,7 +651,6 @@ List<PostAnnouncement> announcementsToPass(
           post: e.id,
           author: friend,
           millis: e.hlc.millis,
-          reach: reach,
           hops: 2,
           authorAddress: address,
           editMillis: edits[e.id] ?? 0,
@@ -680,29 +659,30 @@ List<PostAnnouncement> announcementsToPass(
       );
     }
   }
-  for (final AnnouncedPost a in announcedPosts(node, nowMillis: now).values) {
-    if (a.hops != 2) {
-      continue;
+  if (passFurther) {
+    for (final AnnouncedPost a in announcedPosts(
+      node,
+      nowMillis: now,
+    ).values) {
+      if (a.hops != kMaxReachHops - 1) {
+        continue;
+      }
+      final HeldPost? h = held(a.post);
+      if (h == null || h.author != a.author || h.hops != a.hops) {
+        continue;
+      }
+      candidates.add(
+        PostAnnouncement(
+          post: a.post,
+          author: a.author,
+          millis: h.post?.hlc.millis ?? a.millis,
+          hops: kMaxReachHops,
+          authorAddress: h.authorProfile?.address ?? a.authorAddress,
+          editMillis: h.editMillis,
+          removed: h.removed,
+        ),
+      );
     }
-    final HeldPost? h = held(a.post);
-    if (h == null || h.author != a.author || h.hops != 2) {
-      continue;
-    }
-    if (!h.removed && h.reach.hops < 3) {
-      continue;
-    }
-    candidates.add(
-      PostAnnouncement(
-        post: a.post,
-        author: a.author,
-        millis: h.post?.hlc.millis ?? a.millis,
-        reach: PostReach.third,
-        hops: 3,
-        authorAddress: h.authorProfile?.address ?? a.authorAddress,
-        editMillis: h.editMillis,
-        removed: h.removed,
-      ),
-    );
   }
   candidates.sort(
     (PostAnnouncement x, PostAnnouncement y) => y.millis.compareTo(x.millis),

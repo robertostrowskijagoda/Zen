@@ -34,8 +34,7 @@ Map<String, dynamic> deletePostBody(String postId) => <String, dynamic>{
 
 /// Body of an edit of [postId] (validated like a new post). With [images]
 /// the post's photos and videos are replaced too (`img`, even when empty);
-/// without, they stay as they were. Who sees the post and how far it goes
-/// stay as the post said.
+/// without, they stay as they were.
 Map<String, dynamic> editPostBody(
   String postId,
   String text, {
@@ -46,7 +45,7 @@ Map<String, dynamic> editPostBody(
     text,
     audience: audience,
     images: images ?? const <Map<String, dynamic>>[],
-  )..remove(kPostReachKey),
+  ),
   'img': ?images,
   'post': postId,
 };
@@ -492,7 +491,6 @@ final class FeedPost {
     this.audience = Audience.public,
     this.images = const <MediaRef>[],
     this.likes = const <FeedLiker>[],
-    this.reach = PostReach.friends,
     this.degree = 1,
     this.via = const <String>[],
     int? likeTotal,
@@ -546,12 +544,9 @@ final class FeedPost {
   /// Who may read it (only public posts can be reshared).
   final Audience audience;
 
-  /// How far its author let it go (`post_reach.dart`).
-  final PostReach reach;
-
   /// Steps of friendship between this account and the author as the post
   /// reached it: 1 for friends, followed people and reshares, 2 or 3 for a
-  /// post passed on by notices.
+  /// post passed on by notices (`post_reach.dart`).
   final int degree;
 
   /// The friends whose notices brought the post ("przez …"), by name; empty
@@ -592,7 +587,6 @@ final class FeedPost {
     images: images,
     sortMillis: sortMillis,
     likes: likes,
-    reach: reach,
     degree: degree,
     via: via,
     likeTotal: likeTotal,
@@ -636,13 +630,13 @@ Set<String> likedPosts(Iterable<LogEntry> acts) {
 /// then sealed with [LedgerNode.seal] before it is written.
 ///
 /// [images] are references from [storeMedia]; a post with photos may have
-/// no text. [reach] says how far a public post goes; any other audience is
-/// sealed for friends and goes no further.
+/// no text. A public post may be passed on up to three steps from its
+/// author (`post_reach.dart`); any other audience is sealed for friends
+/// and goes no further.
 Map<String, dynamic> newPostBody(
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
-  PostReach reach = kDefaultPostReach,
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -672,7 +666,6 @@ Map<String, dynamic> newPostBody(
     'text': trimmed,
     'aud': audience.name,
     if (images.isNotEmpty) 'img': images,
-    if (audience == Audience.public) kPostReachKey: reach.hops,
   };
 }
 
@@ -711,7 +704,6 @@ FeedPost? _postFrom(
     entry: entry,
     audience: audienceByName(b['aud']) ?? Audience.public,
     images: images,
-    reach: reachOfBody(b),
   );
 }
 
@@ -790,7 +782,6 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
     audience: post.audience,
     images: images,
     edited: true,
-    reach: post.reach,
     degree: post.degree,
     via: post.via,
     authorAddress: post.authorAddress,
@@ -798,10 +789,10 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
   );
 }
 
-/// Posts friends' notices brought from two or three steps away whose
-/// content [held] has and whose author let them go that far, unless
-/// already [shown] or [deleted]; labelled with the friends who passed them
-/// on.
+/// Public posts friends' notices brought from two or three steps away
+/// whose content [held] has, unless already [shown] or [deleted]; labelled
+/// with the friends who passed them on. How far the reader looks is
+/// applied when the wall is shown (`composeFeed`).
 List<FeedPost> _announced(
   LedgerNode node, {
   required HeldPosts held,
@@ -828,7 +819,7 @@ List<FeedPost> _announced(
         h.author != a.author ||
         shown.contains(a.post) ||
         deleted.contains(a.post) ||
-        h.reach.hops < a.hops) {
+        !isPublicPost(entry.body)) {
       continue;
     }
     final LedgerProfile? profile = h.authorProfile;
@@ -852,7 +843,6 @@ List<FeedPost> _announced(
           entry: entry,
           authorAddress: profile?.address ?? a.authorAddress,
           images: post.images,
-          reach: post.reach,
           degree: a.hops,
           via: <String>[
             for (final String friend in a.via)
@@ -973,7 +963,6 @@ List<FeedPost> buildFeed(
             entry: b.$1,
             authorAddress: profile?.address ?? '',
             images: post.images,
-            reach: post.reach,
             sortMillis: b.$3,
           ),
         );

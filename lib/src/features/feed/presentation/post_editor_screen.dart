@@ -13,7 +13,6 @@ import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
-import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
@@ -58,16 +57,11 @@ final class PostDraft {
     required this.text,
     required this.audience,
     this.media = const <DraftMedia>[],
-    this.reach = PostReach.friends,
   });
 
   final String text;
   final Audience audience;
   final List<DraftMedia> media;
-
-  /// How far the post goes ([PostReach.friends] for anything but a public
-  /// post).
-  final PostReach reach;
 }
 
 /// Publishes a draft; returns an error message ('' = stay quietly), or null
@@ -125,12 +119,6 @@ DraftMedia audioDraft(Uint8List bytes, {String name = '', int? durationMs}) {
 /// Videos are shared as they are (no re-encoding on the phone), so they
 /// are kept small enough to travel between friends.
 const int kMaxVideoBytes = 50 * 1024 * 1024;
-
-const Map<PostReach, IconData> kReachIcons = <PostReach, IconData>{
-  PostReach.friends: Icons.person_rounded,
-  PostReach.friendsOfFriends: Icons.group_work_rounded,
-  PostReach.third: Icons.hub_rounded,
-};
 
 const Map<Audience, IconData> kAudienceIcons = <Audience, IconData>{
   Audience.public: Icons.public_rounded,
@@ -353,7 +341,6 @@ class PostEditorScreen extends StatefulWidget {
     this.initialText = '',
     this.initialMedia = const <DraftMedia>[],
     this.initialAudience = Audience.public,
-    this.initialReach = kDefaultPostReach,
     this.editing = false,
     this.pickPhotos,
     this.pickVideos,
@@ -367,9 +354,6 @@ class PostEditorScreen extends StatefulWidget {
   final String initialText;
   final List<DraftMedia> initialMedia;
   final Audience initialAudience;
-
-  /// How far a public post goes (picked next to who sees it).
-  final PostReach initialReach;
   final bool editing;
 
   /// Override the pickers (tests).
@@ -390,7 +374,6 @@ class PostEditorScreen extends StatefulWidget {
     String initialText = '',
     List<DraftMedia> initialMedia = const <DraftMedia>[],
     Audience initialAudience = Audience.public,
-    PostReach initialReach = kDefaultPostReach,
     bool editing = false,
     PhotoSource? pickPhotos,
     VideoSource? pickVideos,
@@ -406,7 +389,6 @@ class PostEditorScreen extends StatefulWidget {
             initialText: initialText,
             initialMedia: initialMedia,
             initialAudience: initialAudience,
-            initialReach: initialReach,
             editing: editing,
             pickPhotos: pickPhotos,
             pickVideos: pickVideos,
@@ -468,7 +450,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 
   late Audience _audience = widget.initialAudience;
-  late PostReach _reach = widget.initialReach;
 
   /// A voice message being recorded, and since when.
   VoiceMessageRecorder? _recording;
@@ -1036,76 +1017,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     }
   }
 
-  /// "Jak daleko?": only a public post goes past friends.
-  Future<void> _chooseReach() async {
-    final PostReach? picked = await showModalBottomSheet<PostReach>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (BuildContext context) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    t('Jak daleko ma dotrzeć?'),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-                child: Text(
-                  t(
-                    'Dalej niż do znajomych idzie tylko zapowiedź posta. '
-                    'Treść pobiera się od Ciebie albo od znajomych, którzy '
-                    'ją mają. Każdy widzi, przez kogo post do niego dotarł.',
-                  ),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: ZenColors.of(context).textSecondary,
-                  ),
-                ),
-              ),
-              for (final PostReach r in PostReach.values)
-                ListTile(
-                  key: Key('post-reach-${r.name}'),
-                  leading: ZenIconBadge(
-                    icon: kReachIcons[r]!,
-                    tone: r == _reach
-                        ? ZenColors.of(context).accent
-                        : ZenColors.of(context).textSecondary,
-                    size: 38,
-                  ),
-                  title: Text(r.label),
-                  subtitle: Text(r.hint),
-                  trailing: r == _reach
-                      ? Icon(
-                          Icons.check_circle_rounded,
-                          color: ZenColors.of(context).accent,
-                        )
-                      : null,
-                  onTap: () => Navigator.of(context).pop(r),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (picked != null && mounted) {
-      setState(() => _reach = picked);
-    }
-  }
-
   Future<void> _close() async {
     if (!_dirty || _submitting) {
       Navigator.of(context).pop(false);
@@ -1150,7 +1061,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         text: _source,
         audience: _audience,
         media: List<DraftMedia>.unmodifiable(_media),
-        reach: _audience == Audience.public ? _reach : PostReach.friends,
       ),
     );
     if (!mounted) {
@@ -1579,47 +1489,25 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 12),
-                                // The pills wrap under each other when
-                                // they do not fit side by side.
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(
-                                        t('Ty'),
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 15,
-                                          color: zen.textPrimary,
-                                        ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      t('Ty'),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                        color: zen.textPrimary,
                                       ),
-                                      const SizedBox(height: 4),
-                                      Wrap(
-                                        spacing: 6,
-                                        runSpacing: 6,
-                                        children: <Widget>[
-                                          _AudiencePill(
-                                            audience: _audience,
-                                            onTap: widget.editing
-                                                ? null
-                                                : () => unawaited(
-                                                    _chooseAudience(),
-                                                  ),
-                                          ),
-                                          if (_audience == Audience.public)
-                                            _ReachPill(
-                                              reach: _reach,
-                                              onTap: widget.editing
-                                                  ? null
-                                                  : () => unawaited(
-                                                      _chooseReach(),
-                                                    ),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _AudiencePill(
+                                      audience: _audience,
+                                      onTap: widget.editing
+                                          ? null
+                                          : () => unawaited(_chooseAudience()),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -1731,53 +1619,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ReachPill extends StatelessWidget {
-  const _ReachPill({required this.reach, this.onTap});
-
-  final PostReach reach;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    return Material(
-      color: zen.surfaceSunk,
-      shape: StadiumBorder(side: BorderSide(color: zen.outlineSoft)),
-      child: InkWell(
-        key: const Key('post-reach'),
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(10, 5, 6, 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(kReachIcons[reach], size: 15, color: zen.textPrimary),
-              const SizedBox(width: 6),
-              Text(
-                reach.label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: zen.textPrimary,
-                ),
-              ),
-              if (onTap != null)
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: 20,
-                  color: zen.textSecondary,
-                )
-              else
-                const SizedBox(width: 6),
-            ],
           ),
         ),
       ),

@@ -12,6 +12,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
@@ -78,17 +79,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   StreamSubscription<void>? _opened;
 
   /// The audience of the last post: the next one starts with it.
-  /// New posts are for friends unless the user picks otherwise.
-  Audience _audience = Audience.all;
-
-  /// How far the last public post went: the next one starts with it (kept
-  /// on the device; friends of friends at first).
-  PostReach _postReach = kDefaultPostReach;
+  /// New posts are public unless the user picks otherwise.
+  Audience _audience = Audience.public;
   StreamSubscription<String>? _media;
   LedgerNode? _node;
   final ReshareCache _reshares = ReshareCache();
 
-  /// Posts passed on beyond friends: what is fetched shows on the wall.
+  /// Posts passed on beyond friends: what is fetched shows on the wall, as
+  /// far as the user looks ([PostReachService.depth]).
   PostReachService? _reach;
   StreamSubscription<void>? _reachChanges;
   String? _error;
@@ -113,17 +111,19 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   bool _filterPicked = false;
 
   static const String _filterKey = 'ui/feed_filter';
-  static const String _postReachKey = 'ui/post_reach';
 
   @override
   void initState() {
     super.initState();
+    _node = ref.read(ledgerNodeProvider);
+    _reach = ref.read(postReachProvider);
     // Asked for before this screen was first built.
     final FeedFilter? asked = feedFilterRequest.value;
     if (asked != null) {
       feedFilterRequest.value = null;
       _filterPicked = true;
       _filter = asked;
+      _lookAsFar(asked);
     }
     feedFilterRequest.addListener(_onFilterRequest);
     unawaited(
@@ -141,22 +141,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           })
           .catchError((Object _) {}),
     );
-    unawaited(
-      ref
-          .read(ledgerDiskProvider)
-          .read(_postReachKey)
-          .then((Uint8List? raw) {
-            final PostReach? kept = raw == null || raw.isEmpty
-                ? null
-                : PostReach.byHops(raw.first);
-            if (mounted && kept != null) {
-              _postReach = kept;
-            }
-          })
-          .catchError((Object _) {}),
-    );
-    _node = ref.read(ledgerNodeProvider);
-    _reach = ref.read(postReachProvider);
     _reachChanges = _reach?.changes.listen((_) {
       _feedRevision++;
       if (mounted) {
@@ -227,6 +211,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   void _pick(FeedFilter filter) {
     _filterPicked = true;
+    _lookAsFar(filter);
     if (mounted && filter != _filter) {
       setState(() => _filter = filter);
     }
@@ -236,6 +221,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           .write(_filterKey, Uint8List.fromList(<int>[filter.index]))
           .catchError((Object _) {}),
     );
+  }
+
+  /// „Znajomi”, „2. stopień” and „3. stopień” say how far the user looks:
+  /// only posts that near are fetched and shown, „Wszystko” included.
+  void _lookAsFar(FeedFilter filter) {
+    final int? depth = filter.depth;
+    if (depth != null) {
+      unawaitedLogged(
+        _reach?.setDepth(depth) ?? Future<void>.value(),
+        context: 'Posty dalszych znajomych',
+      );
+    }
   }
 
   /// Follows the pyramid's decisions (content bans) once it is running.
@@ -294,7 +291,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       context,
       onSubmit: _publish,
       initialAudience: _audience,
-      initialReach: _postReach,
       pickPhotos: widget.pickPhotos,
       pickOnOpen: withPhotos,
     );
@@ -319,15 +315,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final String? error = await publishDraft(ref, draft);
     if (error == null) {
       _audience = draft.audience;
-      if (draft.audience == Audience.public && draft.reach != _postReach) {
-        _postReach = draft.reach;
-        unawaited(
-          ref
-              .read(ledgerDiskProvider)
-              .write(_postReachKey, Uint8List.fromList(<int>[draft.reach.hops]))
-              .catchError((Object _) {}),
-        );
-      }
       if (mounted) {
         setState(() => _error = null);
       }
@@ -843,6 +830,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           node != null &&
           p.authorAddress.isNotEmpty &&
           node.levelOf(p.authorAddress) == FriendLevel.close,
+      depth: _reach?.depth ?? kDefaultFeedDepth,
     );
     final List<Widget> header = <Widget>[
       _ComposerPrompt(
@@ -977,8 +965,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 ? t('Nic od znajomych znajomych')
                 : t('Nic z trzeciego stopnia'),
             text: t(
-              'Tu są posty, które znajomi przekazali dalej, bo autor dał '
-              'im taki zasięg. Przy każdym widać, przez kogo dotarł.',
+              'Tu są też publiczne posty, które znajomi przekazali dalej. '
+              'Przy każdym widać, przez kogo dotarł.',
             ),
           ),
           FeedFilter.close => ZenEmpty(
@@ -1136,7 +1124,6 @@ Future<bool> editOwnPost(
     initialText: post.text,
     initialMedia: media,
     initialAudience: post.audience,
-    initialReach: post.reach,
     onSubmit: (PostDraft draft) async {
       try {
         final List<Map<String, dynamic>> refs = <Map<String, dynamic>>[
@@ -1238,7 +1225,6 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
       text,
       audience: draft.audience,
       images: media,
-      reach: draft.reach,
     );
     await node.publish(
       kPostKind,
