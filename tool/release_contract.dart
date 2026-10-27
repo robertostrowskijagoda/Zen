@@ -507,10 +507,13 @@ const String kWhatsNewFallbackLanguage = 'en';
 final RegExp _whatsNewLine = RegExp(r'^- \[([a-z]{2})\] (.*)$');
 
 /// What a line of the note must not hold, exactly as the app refuses it
-/// (isPlainWhatsNewLine): control characters, links, Markdown or HTML.
+/// (isPlainWhatsNewLine): control characters, invisible format marks,
+/// links or anything that looks like a domain, Markdown or HTML.
 final RegExp _notPlainWhatsNew = RegExp(
-  r'[\u0000-\u001f\u007f*`<>\[\]]|://|www\.|https?:',
+  r'[\u0000-\u001f\u007f-\u009f\u2028\u2029*`<>\[\]]|\p{Cf}|://|www\.'
+  r'|https?:|[\p{L}\p{N}_-]\.\p{L}{2,}',
   caseSensitive: false,
+  unicode: true,
 );
 
 /// Why [text] cannot be a line of the note, or null when it can.
@@ -522,7 +525,8 @@ String? whatsNewLineProblem(String text) {
     return 'has ${text.length} characters (at most $kMaxWhatsNewLineLength)';
   }
   if (_notPlainWhatsNew.hasMatch(text)) {
-    return 'is not plain text (no links, *, `, <, >, [ or ])';
+    return 'is not plain text (no links or domains, invisible marks, *, `, '
+        '<, >, [ or ])';
   }
   return null;
 }

@@ -160,6 +160,13 @@ void main() {
         'A <b>tag</b>',
         'A [link](x)',
         'Two\nrows',
+        'Visit example.org',
+        'Write to zen@example.com',
+        'Turned \u202Ereversed\u202C text',
+        'Isolated \u2066mark\u2069',
+        'Zero\u200Bwidth',
+        'Next\u0085line',
+        'Line\u2028separator',
         ' padded',
         '',
         'x' * (kMaxWhatsNewLineLength + 1),
@@ -179,6 +186,7 @@ void main() {
       for (final String line in <String>[
         "Friends' phones keep your messages: like mailboxes.",
         'Wiadomości docierają — nawet przy zamkniętym Zen (100%).',
+        'Zen 1.13.0 is faster, e.g. on Wi-Fi.',
         'x' * kMaxWhatsNewLineLength,
       ]) {
         expect(isPlainWhatsNewLine(line), isTrue, reason: line);

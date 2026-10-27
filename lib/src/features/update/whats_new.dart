@@ -29,11 +29,16 @@ const String kWhatsNewFallbackLanguage = 'en';
 /// A language code of the note: two lower-case letters, as Zen's own.
 final RegExp _languageCode = RegExp(r'^[a-z]{2}$');
 
-/// What a line of the note must not hold: control characters, links and
-/// the marks of Markdown or HTML (it is shown as plain text).
+/// What a line of the note must not hold: control characters, invisible
+/// format marks (those that turn text right to left among them, which
+/// could make a line read as something else), links and anything that
+/// looks like a domain ("example.org"), and the marks of Markdown or HTML
+/// (it is shown as plain text).
 final RegExp _notPlain = RegExp(
-  r'[\u0000-\u001f\u007f*`<>\[\]]|://|www\.|https?:',
+  r'[\u0000-\u001f\u007f-\u009f\u2028\u2029*`<>\[\]]|\p{Cf}|://|www\.'
+  r'|https?:|[\p{L}\p{N}_-]\.\p{L}{2,}',
   caseSensitive: false,
+  unicode: true,
 );
 
 /// Whether [line] may be shown as a line of the note: plain text of 1 to
