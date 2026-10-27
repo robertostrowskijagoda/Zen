@@ -19,6 +19,9 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/local_link.dart';
+import 'package:zen/src/features/runtime/local_links_controller.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -222,8 +225,41 @@ Future<void> _syncNearbySecrets(MeetService service) async {
   }
 }
 
-/// People nearby. Starts showing this phone when Bluetooth may be
-/// used and the person did not hide it.
+/// "W pobliżu" on the shared local network: the node's LAN beacons carry
+/// the adverts ([localNearbyProvider]), and what they heard comes with the
+/// local links' status.
+final class LocalLinksNearbyNetwork implements NearbyNetwork {
+  LocalLinksNearbyNetwork({
+    required this.nearby,
+    required LocalLinksStatus Function() status,
+  }) : _status = status;
+
+  final ValueNotifier<LocalNearbyAdverts?> nearby;
+  final LocalLinksStatus Function() _status;
+
+  @override
+  void update({
+    required int firstSlot,
+    required Uint8List? adverts,
+    required bool looking,
+  }) {
+    nearby.value = adverts == null && !looking
+        ? null
+        : LocalNearbyAdverts(
+            firstSlot: firstSlot,
+            adverts: adverts,
+            looking: looking,
+          );
+  }
+
+  @override
+  List<(Uint8List, int)> heard() => <(Uint8List, int)>[
+    for (final LocalNearbyHeard h in _status().nearby) (h.advert, h.at),
+  ];
+}
+
+/// People nearby. Shows this phone (over Bluetooth once it may be used,
+/// and on the shared network) unless the person hid it.
 final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
   Ref ref,
 ) {
@@ -232,6 +268,11 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
   final NearbyService nearby = NearbyService(
     // The phone's own radio, or the computer's Bluetooth.
     radio: platformNearbyRadio(),
+    // And the same Wi-Fi.
+    network: LocalLinksNearbyNetwork(
+      nearby: ref.read(localNearbyProvider),
+      status: () => ref.read(localLinksStatusReaderProvider)(),
+    ),
     meet: meet,
     ownAddress: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
     sendMesh: (String to, Map<String, dynamic> payload) =>
@@ -240,11 +281,11 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
   )..encounters = ref.watch(encounterLogProvider);
   void onMeet() => nearby.friendsChanged();
   meet.addListener(onMeet);
+  // Also while Bluetooth is off or not allowed yet: the network shows the
+  // phone at once, the radio once it may (Bluetooth coming on shows it
+  // again, see below).
   Future<void> showIfAllowed() async {
-    final Map<Object?, Object?> state = await nearby.radio.state();
-    if (state['permitted'] == true &&
-        state['enabled'] == true &&
-        meet.book.nearbyVisible) {
+    if (meet.book.nearbyVisible) {
       await nearby.setVisible(true);
     }
   }

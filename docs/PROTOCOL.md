@@ -243,6 +243,13 @@ device keys, label `zen.local.v1`); a stranger has none.
   every time, filter size in steps of 16 bytes), so to anyone without the
   secret they are random bytes; they reveal only that a Zen device with
   local links is there and roughly how many devices it links with.
+- **LAN beacon**: the advert, then the "people nearby" advert of 2.12 (20
+  bytes, only while the person is visible), an info byte (that advert's
+  length, 0 or 20, plus `0x80` while the sender looks around) and the TCP
+  port (2 bytes, big-endian). A device looking around beacons every 5 s; a
+  visible device answers such a beacon with one beacon sent straight back
+  (at most every 5 s per address). A device with no devices to link with
+  beacons only while it looks around.
 - **Handshake** (both ends, any stream): fresh X25519 keys, a selector
   `HMAC(selKey, ephemeral key)[:8]` per candidate device shuffled with random
   padding, session keys from HKDF over the X25519 result with the pair's
@@ -535,6 +542,16 @@ Computers run no GATT server: they cannot receive waves.
   stranger sees random bytes that change every slot. The locked Android
   service shows tokens worked out in advance (the nearby kit, 8 days) and
   never holds the private key.
+- **Same network**: the same advertisement (token + hint) rides on the LAN
+  beacons (1.6) while the app is unlocked and the Wi-Fi
+  discovery setting is on. The app hands the bridge the adverts of the
+  coming slots (a day) and the bridge shows the one of the current slot, so
+  a token never stays past its slot (`lan_nearby.go`). Adverts heard there
+  are kept only while the app looks around ("Nearby" open, or a short look
+  in the background), for at most 2 minutes. Nobody is written to over the
+  network (no hello, no alarm wave). The sender's IP address does not change
+  with the token, so others on that network can tell that the successive
+  pseudonyms are one device while it stays there (never who it is).
 - **GATT server**: service `5a454e00-6e65-6172-6279-000000000001`, one
   writable characteristic `5a454e00-6e65-6172-6279-000000000002` ("wave"),
   no pairing. Writes up to 600 bytes (long writes are assembled). A phone may

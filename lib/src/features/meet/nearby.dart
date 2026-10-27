@@ -102,6 +102,37 @@ String nearbyDistance(int rssi) {
   return t('dalej');
 }
 
+/// Signal strength of a phone heard only on the shared network.
+const int kNearbyNoSignal = -127;
+
+/// Slots of tokens handed to the network at once (a day); worked out again
+/// once half of them are gone.
+const int kNearbyNetworkSlots = 144;
+
+/// How often the network is read while looking around.
+const Duration kNearbyNetworkRead = Duration(seconds: 3);
+
+/// The shared local network (the same Wi-Fi or router) as a second way to
+/// people nearby, next to Bluetooth: the very adverts of the radio (token
+/// and hint) ride on the network's beacons
+/// (native/yggdrasil_bridge/lan_nearby.go), so friends recognise this phone
+/// there as over Bluetooth and everyone else sees the same changing
+/// pseudonym. No address goes out, and nobody is written to over it.
+abstract interface class NearbyNetwork {
+  /// Shows [adverts] ([kNearbyAdvertBytes] per slot from [firstSlot] on: the
+  /// other side picks the one of the slot it is in, and shows nothing once
+  /// they are over) or nothing (`null`), and looks around or not.
+  void update({
+    required int firstSlot,
+    required Uint8List? adverts,
+    required bool looking,
+  });
+
+  /// Adverts heard lately while looking around ([kNearbyAdvertBytes]
+  /// each), with when (milliseconds since the epoch).
+  List<(Uint8List, int)> heard();
+}
+
 /// The Bluetooth radio (native in the app, a fake in tests).
 abstract interface class NearbyRadio {
   Stream<Map<Object?, Object?>> get events;
@@ -225,17 +256,31 @@ final class NearbyPerson {
     required this.rssi,
     required this.seenAt,
     this.friend,
+    this.networkSeenAt = 0,
   });
 
   final String token;
+
+  /// Its Bluetooth address ('' when only heard on the shared network).
   String device;
   int rssi;
   int seenAt;
+
+  /// When it was last heard on the shared network (0: never).
+  int networkSeenAt;
 
   /// A friend's address when the token is theirs.
   final String? friend;
 
   String get pseudonym => nearbyPseudonym(_unhex(token));
+
+  /// Seen over Bluetooth: it can be written to.
+  bool get overBluetooth => device.isNotEmpty;
+
+  /// How close ([nearbyDistance]); a phone heard only on the shared network
+  /// has no signal to tell it by.
+  String get distance =>
+      overBluetooth ? nearbyDistance(rssi) : t('w tej samej sieci');
 }
 
 List<int> _unhex(String hex) => <int>[
@@ -318,6 +363,7 @@ final class NearbyService extends ChangeNotifier {
     required this.ownAddress,
     required this.sendMesh,
     required Stream<SignalTransportFrame> frames,
+    this.network,
     int Function()? now,
     Random? random,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
@@ -328,6 +374,9 @@ final class NearbyService extends ChangeNotifier {
   }
 
   final NearbyRadio radio;
+
+  /// The shared local network, next to the radio (`null`: none).
+  final NearbyNetwork? network;
   final MeetService meet;
   final String Function() ownAddress;
   final Future<void> Function(String to, Map<String, dynamic> payload) sendMesh;
@@ -373,6 +422,23 @@ final class NearbyService extends ChangeNotifier {
 
   NearbyOwnKeys? _own;
   String? _ownFrom;
+
+  /// This phone's token of [_myTokenSlot] (hex), worked out once a slot: it
+  /// is checked against every advert heard.
+  String _myToken = '';
+  int _myTokenSlot = -1;
+  NearbyOwnKeys? _myTokenKeys;
+
+  /// What the network was given: tokens from [_networkFirst] on, and
+  /// whether it looks around ([_networkTimer] reads it meanwhile).
+  int _networkFirst = 0;
+  Uint8List? _networkAdverts;
+  NearbyOwnKeys? _networkKeys;
+  bool _networkLook = false;
+  Timer? _networkTimer;
+
+  /// How often the network is read while looking around.
+  Duration networkEvery = kNearbyNetworkRead;
 
   /// The friends' keys last handed to the radio ([_pushAlarmKeys]).
   String? _alarmKeysGiven;
@@ -463,8 +529,20 @@ final class NearbyService extends ChangeNotifier {
   /// The token this phone shows now (hex), '' before it has a key.
   String get myToken {
     final NearbyOwnKeys? keys = _ownKeys;
-    return keys == null ? '' : _hex(keys.token(nearbySlot(_now())));
+    if (keys == null) {
+      return '';
+    }
+    final int slot = nearbySlot(_now());
+    if (slot != _myTokenSlot || !identical(keys, _myTokenKeys)) {
+      _myTokenSlot = slot;
+      _myTokenKeys = keys;
+      _myToken = _hex(keys.token(slot));
+    }
+    return _myToken;
   }
+
+  /// Looking around: over Bluetooth ([scanning]), on the network, or both.
+  bool get looking => scanning || _networkLook;
 
   String get myPseudonym {
     final String token = myToken;
@@ -545,6 +623,7 @@ final class NearbyService extends ChangeNotifier {
     visible = on;
     if (!on) {
       _advertisedSlot = -1;
+      _pushNetwork();
       await radio.stopAdvertising();
       _syncTimer();
       notifyListeners();
@@ -568,9 +647,81 @@ final class NearbyService extends ChangeNotifier {
     if (keys == null) {
       return false;
     }
+    // On the network too, also while Bluetooth is off.
+    _showOnNetwork(keys, slot);
     final bool ok = await radio.startAdvertising(keys.advert(slot));
     _advertisedSlot = ok ? slot : -1;
     return ok;
+  }
+
+  /// Hands the network this phone's tokens from [slot] on (worked out again
+  /// once half of them are gone, or for a new key).
+  void _showOnNetwork(NearbyOwnKeys keys, int slot) {
+    if (network == null) {
+      return;
+    }
+    if (_networkAdverts == null ||
+        !identical(keys, _networkKeys) ||
+        slot < _networkFirst ||
+        slot >= _networkFirst + kNearbyNetworkSlots ~/ 2) {
+      _networkKeys = keys;
+      _networkFirst = slot;
+      _networkAdverts = keys.adverts(slot, kNearbyNetworkSlots);
+    }
+    _pushNetwork();
+  }
+
+  void _pushNetwork() {
+    network?.update(
+      firstSlot: _networkFirst,
+      adverts: visible ? _networkAdverts : null,
+      looking: _networkLook,
+    );
+  }
+
+  /// Looks around on the network (or stops): its beacons ask the phones
+  /// there to answer, and what is heard is read every
+  /// [networkEvery].
+  void _lookOnNetwork(bool on) {
+    if (network == null || on == _networkLook) {
+      return;
+    }
+    _networkTimer?.cancel();
+    _networkTimer = null;
+    if (!on) {
+      // What came until now still counts.
+      _readNetwork();
+    }
+    _networkLook = on;
+    _pushNetwork();
+    if (on) {
+      _networkTimer = Timer.periodic(networkEvery, (_) => _readNetwork());
+    }
+  }
+
+  void _readNetwork() {
+    final NearbyNetwork? net = network;
+    if (net == null || !_networkLook) {
+      return;
+    }
+    final List<(Uint8List, int)> heard;
+    try {
+      heard = net.heard();
+    } on Object catch (error) {
+      logZenWarning('W pobliżu (sieć): $error');
+      return;
+    }
+    final int t = _now();
+    for (final (Uint8List advert, int at) in heard) {
+      if (advert.length != kNearbyAdvertBytes) {
+        continue;
+      }
+      _seen(
+        advert.sublist(0, 16),
+        advert.sublist(16, kNearbyAdvertBytes),
+        at: min(at, t),
+      );
+    }
   }
 
   Future<bool> startScanning({bool lowPower = false}) async {
@@ -582,6 +733,8 @@ final class NearbyService extends ChangeNotifier {
 
   Future<bool> _startScan({required bool lowPower}) async {
     friendsChanged();
+    // The network needs no permission and works with Bluetooth off.
+    _lookOnNetwork(true);
     scanning = await radio.startScan(lowPower: lowPower);
     _syncTimer();
     notifyListeners();
@@ -590,6 +743,7 @@ final class NearbyService extends ChangeNotifier {
 
   Future<void> stopScanning() async {
     _windowOpen = false;
+    _lookOnNetwork(false);
     scanning = false;
     await radio.stopScan();
     _syncTimer();
@@ -613,6 +767,7 @@ final class NearbyService extends ChangeNotifier {
     _windowOpen = true;
     if (!await _startScan(lowPower: true)) {
       _windowOpen = false;
+      _lookOnNetwork(false);
       return false;
     }
     await Future<void>.delayed(length);
@@ -623,7 +778,7 @@ final class NearbyService extends ChangeNotifier {
   }
 
   void _syncTimer() {
-    if (!visible && !scanning) {
+    if (!visible && !looking) {
       _tick?.cancel();
       _tick = null;
       return;
@@ -661,7 +816,7 @@ final class NearbyService extends ChangeNotifier {
         if (h == null) {
           return;
         }
-        _seen(token.sublist(0, 16), h, device, rssi);
+        _seen(token.sublist(0, 16), h, device: device, rssi: rssi);
       case 'wave':
         final Object? data = event['data'];
         final Object? writer = event['device'];
@@ -685,23 +840,39 @@ final class NearbyService extends ChangeNotifier {
     }
   }
 
-  /// A Zen phone nearby showed [raw] (16 bytes) with [hint].
-  void _seen(List<int> raw, List<int> hint, String device, int rssi) {
+  /// A Zen phone nearby showed [raw] (16 bytes) with [hint]: over
+  /// Bluetooth from [device] with [rssi], or (without them) on the shared
+  /// network at [at].
+  void _seen(
+    List<int> raw,
+    List<int> hint, {
+    String? device,
+    int? rssi,
+    int? at,
+  }) {
     final String token = _hex(raw);
     if (token == myToken) {
       return;
     }
+    final int t = at ?? _now();
+    final NearbyPerson? had = _people[token];
+    if (device == null && had != null && had.networkSeenAt >= t) {
+      // Read from the network again: nothing new.
+      return;
+    }
     _refreshFriendKeys();
     final String? friend = _recognise(raw, _hex(hint), token);
-    final int t = _now();
     // Only who (a friend) or how many (anyone else) — never the address.
     encounters?.saw(token: token, at: t, friend: friend);
-    final NearbyPerson? had = _people[token];
     if (had != null) {
-      had
-        ..device = device
-        ..rssi = rssi
-        ..seenAt = t;
+      if (device != null) {
+        had
+          ..device = device
+          ..rssi = rssi ?? had.rssi;
+      } else {
+        had.networkSeenAt = t;
+      }
+      had.seenAt = max(had.seenAt, t);
     } else {
       if (_people.length >= maxPeople) {
         _people.removeWhere(
@@ -713,10 +884,11 @@ final class NearbyService extends ChangeNotifier {
       }
       _people[token] = NearbyPerson(
         token: token,
-        device: device,
-        rssi: rssi,
+        device: device ?? '',
+        rssi: rssi ?? kNearbyNoSignal,
         seenAt: t,
         friend: friend,
+        networkSeenAt: device == null ? t : 0,
       );
     }
     notifyListeners();
@@ -763,7 +935,7 @@ final class NearbyService extends ChangeNotifier {
   /// someone who answers ([kNearbyReplyVersion]).
   Future<NearbySession?> wave(NearbyPerson person, String text) async {
     final String message = _clip(text.trim(), kNearbyHelloMaxLength);
-    if (ownAddress().isEmpty || message.isEmpty) {
+    if (ownAddress().isEmpty || message.isEmpty || !person.overBluetooth) {
       return null;
     }
     await meet.nearbyPrivateKey();
@@ -820,7 +992,7 @@ final class NearbyService extends ChangeNotifier {
     }
     int sent = 0;
     for (final NearbyPerson p in people) {
-      if (only != null && !only(p)) {
+      if (!p.overBluetooth || (only != null && !only(p))) {
         continue;
       }
       Uint8List out = data;
@@ -885,7 +1057,7 @@ final class NearbyService extends ChangeNotifier {
   ) async {
     int sent = 0;
     for (final NearbyPerson p in people) {
-      if (only != null && !only(p)) {
+      if (!p.overBluetooth || (only != null && !only(p))) {
         continue;
       }
       bool all = true;
@@ -1129,7 +1301,9 @@ final class NearbyService extends ChangeNotifier {
     ];
     // Only to the phone that said hello when it still shows the same
     // token (the answer is longer now); else to every phone around.
-    final bool seen = people.any((NearbyPerson p) => p.token == s.peerToken);
+    final bool seen = people.any(
+      (NearbyPerson p) => p.token == s.peerToken && p.overBluetooth,
+    );
     final int sent = await _lookAroundAnd(
       replyListen,
       () => _waveEach(
@@ -1342,6 +1516,10 @@ final class NearbyService extends ChangeNotifier {
 
   Future<void> close() async {
     _tick?.cancel();
+    _networkTimer?.cancel();
+    _networkTimer = null;
+    _networkLook = false;
+    network?.update(firstSlot: 0, adverts: null, looking: false);
     for (final StreamSubscription<Object?> sub in _subs) {
       await sub.cancel();
     }

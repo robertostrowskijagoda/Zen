@@ -96,9 +96,13 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       _state = state;
       _loaded = true;
     });
-    if (scan && state['permitted'] == true && state['enabled'] == true) {
-      // Low power: the list fills a little slower, the battery lasts.
-      await _nearby.startScanning(lowPower: true);
+    if (scan) {
+      // A full scan, only while this screen is on screen: a low-power one
+      // lets Android batch what it hears, and a batched low-power scan
+      // listens only a second or two every few minutes, so the list would
+      // stay empty. The shared network is looked at too, also with
+      // Bluetooth off or not allowed.
+      await _nearby.startScanning();
       final MeetService meet = ref.read(meetServiceProvider);
       if (meet.book.nearbyVisible && !_nearby.visible) {
         await _nearby.setVisible(true);
@@ -370,7 +374,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                           '(zmienia się co 10 minut, więc nikt Cię nie wyśledzi). '
                           'Telefon nadaje oszczędnie cały czas, także przy '
                           'zamkniętym albo zablokowanym Zen — do tygodnia od '
-                          'ostatniego odblokowania.',
+                          'ostatniego odblokowania. W tej samej sieci Wi-Fi '
+                          'widać Cię też, dopóki Zen jest odblokowany.',
                           {'name': _nearby.myPseudonym},
                         ),
                       ),
@@ -410,7 +415,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                           style: zen.label(color: zen.textMuted),
                         ),
                       ),
-                      if (_nearby.scanning)
+                      if (_nearby.looking)
                         ZenPill(
                           text: t('Szukam'),
                           tone: zen.success,
@@ -427,15 +432,21 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 ),
                 if (people.isEmpty)
                   ZenEmpty(
-                    icon: _nearby.scanning
+                    icon: _nearby.looking
                         ? Icons.radar_rounded
                         : Icons.bluetooth_searching_rounded,
                     tone: tone,
-                    title: _nearby.scanning
+                    title: _nearby.looking
                         ? t('Nikogo jeszcze nie widać')
                         : t('Nie szukam'),
                     text: _nearby.scanning
                         ? t('Szukam… Nikogo z Zen jeszcze nie widać.')
+                        : _nearby.looking
+                        // Bluetooth off or not allowed: the same Wi-Fi only.
+                        ? t(
+                            'Szukam tylko w tej samej sieci Wi-Fi. Włącz '
+                            'Bluetooth, żeby widzieć też ludzi obok.',
+                          )
                         : t('Nie szukam (brak Bluetooth albo zgody).'),
                   ),
                 for (final NearbyPerson p in people)
@@ -519,10 +530,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         tone: zen.success,
         title: meet.host.nameOf(friend),
         subtitle: met
-            ? t('{distance} · spotkani osobiście', {
-                'distance': nearbyDistance(p.rssi),
-              })
-            : nearbyDistance(p.rssi),
+            ? t('{distance} · spotkani osobiście', {'distance': p.distance})
+            : p.distance,
         // Being near is only a hint: the meeting is signed when confirmed.
         trailing: met
             ? Icon(Icons.verified_rounded, color: zen.success)
@@ -546,7 +555,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     // Badges: what this phone knows of the stranger, nothing more.
     final List<NearbySession> talks = _nearby.sessionsWith(p.token).toList();
     final List<String> badges = <String>[
-      nearbyDistance(p.rssi),
+      p.distance,
       if (talks.any((NearbySession s) => !s.startedByMe && !s.iAnswered))
         t('napisał(a) do Ciebie')
       else if (talks.any((NearbySession s) => s.startedByMe && !s.theyWrote))
@@ -560,8 +569,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       tone: tone,
       title: p.pseudonym,
       subtitle: badges.join(' · '),
-      // A computer cannot write to anyone nearby (no GATT there).
-      trailing: _state['canWave'] == false && talks.isEmpty
+      // A computer cannot write to anyone nearby (no GATT there), and
+      // nobody is written to over the shared network (a hello goes over
+      // Bluetooth only).
+      trailing:
+          (_state['canWave'] == false || !p.overBluetooth) && talks.isEmpty
           ? null
           : FilledButton.tonal(
               // Already talking: the conversation opens instead of a new hello.
