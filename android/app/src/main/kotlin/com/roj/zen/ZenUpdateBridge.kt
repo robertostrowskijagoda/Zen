@@ -49,6 +49,8 @@ object ZenUpdateBridge {
     /** `${applicationId}.zenshare` in the manifest. */
     private const val SHARE_AUTHORITY_SUFFIX = ".zenshare"
     private const val APK_MIME = "application/vnd.android.package-archive"
+    private const val UPDATE_CHANNEL = "zen/app_update"
+    private const val SHARE_CHANNEL = "zen/share_app"
 
     private var statusReceiver: BroadcastReceiver? = null
     private var hotspot: WifiManager.LocalOnlyHotspotReservation? = null
@@ -56,7 +58,7 @@ object ZenUpdateBridge {
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         val messenger = engine.dartExecutor.binaryMessenger
         registerStatusReceiver(activity)
-        MethodChannel(messenger, "zen/app_update").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, UPDATE_CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
                     "apkPath" -> {
@@ -112,7 +114,7 @@ object ZenUpdateBridge {
                 result.error("app_update", error.message, null)
             }
         }
-        MethodChannel(messenger, "zen/share_app").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, SHARE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "startHotspot" -> startHotspot(activity, result)
                 "stopHotspot" -> {
@@ -128,6 +130,16 @@ object ZenUpdateBridge {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /**
+     * [engine] is going away: its handlers (they hold the Activity) go with
+     * it. The install status receiver stays (it needs no Activity).
+     */
+    fun unregister(engine: FlutterEngine) {
+        val messenger = engine.dartExecutor.binaryMessenger
+        messenger.setMessageHandler(UPDATE_CHANNEL, null)
+        messenger.setMessageHandler(SHARE_CHANNEL, null)
     }
 
     /**

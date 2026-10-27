@@ -91,14 +91,24 @@ class MainActivity : FlutterFragmentActivity() {
         ZenPower.register(flutterEngine, this, background = false)
     }
 
+    // Every bridge of configureFlutterEngine lets go of this engine: the
+    // bridges live as long as the process (the background service keeps it),
+    // and whatever they keep of the engine keeps this Activity too.
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         ZenCallBridge.unregister(flutterEngine)
+        ZenSecurityBridge.unregister(flutterEngine)
+        ZenUpdateBridge.unregister(flutterEngine)
+        ZenSystemBridge.unregister(flutterEngine)
+        ZenMulticastLock.unregister(flutterEngine)
         // Only this engine's share of the radio stops; the background
         // service keeps whatever it still uses.
         ZenNearbyBridge.unregister(flutterEngine)
         ZenWifiDirectBridge.unregister(flutterEngine)
         ZenBluetoothLinkBridge.unregister(flutterEngine)
+        ZenPermissionsBridge.unregister(flutterEngine)
+        ZenLocationBridge.unregister(flutterEngine)
         ZenAlarmShortcut.unregister(flutterEngine)
+        ZenVideoBridge.unregister(flutterEngine)
         ZenPower.unregister(flutterEngine)
         // The background service takes the node over now, not after its
         // watchdog misses the heartbeats.

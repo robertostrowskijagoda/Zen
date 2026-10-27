@@ -29,9 +29,15 @@ import io.flutter.plugin.common.MethodChannel
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
+    private const val CHANNEL = "zen/system"
+
+    /** [engine] is going away: its handler (it holds the Activity) goes with it. */
+    fun unregister(engine: FlutterEngine) {
+        engine.dartExecutor.binaryMessenger.setMessageHandler(CHANNEL, null)
+    }
 
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
-        MethodChannel(engine.dartExecutor.binaryMessenger, "zen/system")
+        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 try {
                     when (call.method) {

@@ -26,9 +26,15 @@ import io.flutter.plugin.common.MethodChannel
 object ZenPermissionsBridge {
     private const val TAG = "ZenPermissions"
     private const val PERMISSION_REQUEST = 3301
+    private const val CHANNEL = "zen/permissions"
+
+    /** [engine] is going away: its handler (it holds the Activity) goes with it. */
+    fun unregister(engine: FlutterEngine) {
+        engine.dartExecutor.binaryMessenger.setMessageHandler(CHANNEL, null)
+    }
 
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
-        MethodChannel(engine.dartExecutor.binaryMessenger, "zen/permissions")
+        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 try {
                     when (call.method) {
