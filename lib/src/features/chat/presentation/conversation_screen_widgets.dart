@@ -273,9 +273,15 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
   return items;
 }
 
+/// What a file message without its file says: the file is still on its
+/// way, or it will not come at all.
+String _missingFileLabel(ChatMessage message) => message.attachmentUnavailable
+    ? t('Plik niedostępny')
+    : t('Transfer w toku');
+
 /// The file of a chat message as its bubble shows it (photo, GIF, film,
-/// voice message, file; a placeholder while it is still coming), for
-/// group chats too.
+/// voice message, file; a placeholder while it is still coming or when it
+/// will not come), for group chats too.
 class ChatAttachmentBody extends StatelessWidget {
   const ChatAttachmentBody({super.key, required this.message});
 
@@ -768,7 +774,7 @@ class _FileAttachmentContent extends StatelessWidget {
                 label: Text(
                   message.hasAttachment
                       ? t('Zapisz kopie')
-                      : t('Transfer w toku'),
+                      : _missingFileLabel(message),
                 ),
               ),
             ],
@@ -793,6 +799,7 @@ class _AttachmentStubContent extends StatelessWidget {
       ChatMessageType.video => Icons.videocam_outlined,
       _ => Icons.insert_drive_file_outlined,
     };
+    final bool gone = message.attachmentUnavailable;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -804,7 +811,7 @@ class _AttachmentStubContent extends StatelessWidget {
           ),
           child: Padding(
             padding: const EdgeInsets.all(11),
-            child: Icon(icon, color: zen.accent),
+            child: Icon(icon, color: gone ? zen.textMuted : zen.accent),
           ),
         ),
         const SizedBox(width: 12),
@@ -824,8 +831,8 @@ class _AttachmentStubContent extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                message.attachmentSizeBytes == null
-                    ? t('Transfer w toku')
+                gone || message.attachmentSizeBytes == null
+                    ? _missingFileLabel(message)
                     : formatAttachmentSize(message.attachmentSizeBytes!),
                 style: TextStyle(color: zen.textMuted, fontSize: 12),
               ),

@@ -321,7 +321,11 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
               logZenWarning('A file of the copy was not taken: $error');
             }
           }
-          await _hub.importSyncedMessage(c.key, m, storedPath: stored);
+          await _hub.importSyncedMessage(
+            c.key,
+            stored == null ? chatMessageWithoutFile(m) : m,
+            storedPath: stored,
+          );
         }
         step();
       }

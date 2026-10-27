@@ -1154,10 +1154,14 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     String? displayName,
   });
 
+  /// Replaces message [messageId] in the conversation with [peerAddress]
+  /// by what [build] makes of it, or adds it: at the end, or — [byTime] —
+  /// by its send time (history that may be older than what is here).
   Future<void> _upsertTimelineMessage({
     required String peerAddress,
     required String messageId,
     required ChatMessage Function(ChatMessage? existing) build,
+    bool byTime = false,
   });
 
   /// A system line in the conversation with [peerAddress]: [event] (shown

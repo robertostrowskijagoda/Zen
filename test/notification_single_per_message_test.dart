@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
@@ -662,6 +663,75 @@ void main() {
       expect(plugin.shown.last.number, 2);
       expect(plugin.shown.last.lines, <String>['Pierwsza', 'Druga']);
     });
+  });
+
+  group('historia z innego urządzenia konta lub z kopii u znajomych', () {
+    // History put back after the account is recovered (or sent by the
+    // account's other device) is not news: no notification, no sound, no
+    // unread count — and it goes in by its time, not at the bottom.
+    for (final _Chat chat in _chats) {
+      test('${chat.name}: stare wiadomości nie powiadamiają, nie zwiększają '
+          'licznika i trafiają na swoje miejsce', () async {
+        final MemoryRuntimeSystemNotificationService service =
+            MemoryRuntimeSystemNotificationService();
+        final _Storage storage = _Storage();
+        final ProviderContainer container = _boot(
+          storage,
+          lifecycle: _background,
+          service: service,
+        );
+        final SocialHubController controller = _controller(container);
+        final String key = chat.slot.startsWith('group')
+            ? 'group:$_groupId'
+            : _ada;
+        int unread() {
+          final SocialHubState state = container.read(
+            socialHubControllerProvider,
+          );
+          return key == _ada
+              ? state.friends[_ada]!.unreadCount
+              : state.groups[_groupId]!.unreadCount;
+        }
+
+        await controller.receiveSignal(
+          chat.signal('live'),
+          receivedAtMillis: DateTime.now().millisecondsSinceEpoch,
+        );
+        expect(service.activeNotifications, hasLength(1));
+        expect(service.audibleAlertCount, 1);
+        final int unreadAfterLive = unread();
+        final List<ChatMessage> before = await storage.timeline.load(key);
+        expect(before.map((ChatMessage m) => m.id), <String>['live']);
+
+        for (final (String id, int at) in <(String, int)>[
+          ('h2', 2000),
+          ('h1', 1000),
+          ('h3', 3000),
+        ]) {
+          await controller.importSyncedMessage(
+            key,
+            ChatMessage(
+              id: id,
+              sender: _ada,
+              text: 'stara $id',
+              sentAtMillis: at,
+              direction: ChatMessageDirection.incoming,
+            ),
+          );
+        }
+        // The live one again, as history: still one.
+        await controller.importSyncedMessage(key, before.single);
+
+        expect(service.activeNotifications, hasLength(1));
+        expect(service.activeNotifications.single.stackCount, 1);
+        expect(service.audibleAlertCount, 1, reason: 'jeden dźwięk');
+        expect(unread(), unreadAfterLive);
+        expect(
+          (await storage.timeline.load(key)).map((ChatMessage m) => m.id),
+          <String>['h1', 'h2', 'h3', 'live'],
+        );
+      });
+    }
   });
 
   group('ten sam identyfikator w dwóch różnych czatach', () {

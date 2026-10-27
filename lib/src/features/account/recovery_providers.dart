@@ -305,7 +305,8 @@ final class AppCircleBackupData implements CircleBackupData {
       for (final Map<String, dynamic> json in c.value) {
         final ChatMessage? m = chatMessageFromSync(json);
         if (m != null) {
-          await _hub.importSyncedMessage(c.key, m);
+          // The copy never has the files: they do not come from here.
+          await _hub.importSyncedMessage(c.key, chatMessageWithoutFile(m));
         }
         step();
       }

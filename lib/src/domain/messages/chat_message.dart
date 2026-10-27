@@ -111,6 +111,7 @@ final class ChatMessage {
     this.deletedAtMillis,
     this.forwarded = false,
     this.pendingMedia,
+    this.attachmentUnavailable = false,
   });
 
   final String id;
@@ -151,6 +152,11 @@ final class ChatMessage {
   /// A file a group member shared as content-addressed blocks
   /// (`chat_media_blocks.dart`): its reference until it is downloaded.
   final Map<String, dynamic>? pendingMedia;
+
+  /// A file message whose file will not come: nobody this device can ask
+  /// still has it (a recovered conversation, a file the account's other
+  /// device lost). Not the same as a file still on its way.
+  final bool attachmentUnavailable;
 
   bool get isEdited => editedAtMillis != null;
 
@@ -208,6 +214,7 @@ final class ChatMessage {
     Object? deletedAtMillis = _chatMessageUnset,
     bool? forwarded,
     Object? pendingMedia = _chatMessageUnset,
+    bool? attachmentUnavailable,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -273,6 +280,8 @@ final class ChatMessage {
               pendingMedia,
               fieldName: 'pendingMedia',
             ),
+      attachmentUnavailable:
+          attachmentUnavailable ?? this.attachmentUnavailable,
     );
   }
 
@@ -292,8 +301,8 @@ final class ChatMessage {
 }
 
 /// What [m] has beyond the basic fields (reply, reactions, edit, deletion,
-/// forwarding, a file still to fetch), for storage and copies; `null` when
-/// there is nothing.
+/// forwarding, a file still to fetch, a file that will not come), for
+/// storage and copies; `null` when there is nothing.
 Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
   final Map<String, dynamic> out = <String, dynamic>{
     if (m.reply != null) 're': m.reply!.toJson(),
@@ -302,6 +311,7 @@ Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
     'del': ?m.deletedAtMillis,
     if (m.forwarded) 'fwd': true,
     'pm': ?m.pendingMedia,
+    if (m.attachmentUnavailable) 'nf': true,
   };
   return out.isEmpty ? null : out;
 }
@@ -332,8 +342,21 @@ ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
     deletedAtMillis: deleted is int ? deleted : null,
     forwarded: json['fwd'] == true,
     pendingMedia: pending is Map ? Map<String, dynamic>.from(pending) : null,
+    attachmentUnavailable: json['nf'] == true,
   );
 }
+
+/// [m] as it comes back from a copy without its file: a file message is
+/// marked as one whose file will not come from there (see
+/// [ChatMessage.attachmentUnavailable]); anything else — and a group file
+/// still to be fetched from its members — stays as it is.
+ChatMessage chatMessageWithoutFile(ChatMessage m) =>
+    m.type == ChatMessageType.text ||
+        m.isDeleted ||
+        m.hasAttachment ||
+        m.pendingMedia != null
+    ? m
+    : m.copyWith(attachmentUnavailable: true);
 
 bool _isGifMedia(String? fileName, String? mimeType) =>
     mimeType?.toLowerCase() == 'image/gif' ||

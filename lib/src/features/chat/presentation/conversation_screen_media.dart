@@ -1681,7 +1681,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
                       else
                         Flexible(
                           child: Text(
-                            t('Transfer w toku'),
+                            _missingFileLabel(widget.message),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -1732,7 +1732,9 @@ class _VideoAttachmentContent extends StatelessWidget {
               : null,
           icon: const Icon(Icons.play_arrow_rounded),
           label: Text(
-            message.hasAttachment ? t('Otwórz podglad') : t('Transfer w toku'),
+            message.hasAttachment
+                ? t('Otwórz podglad')
+                : _missingFileLabel(message),
           ),
         ),
         if (message.hasAttachment)

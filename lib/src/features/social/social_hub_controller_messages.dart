@@ -1067,6 +1067,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     required String peerAddress,
     required String messageId,
     required ChatMessage Function(ChatMessage? existing) build,
+    bool byTime = false,
   }) async {
     if (!ref.mounted) {
       return;
@@ -1076,15 +1077,14 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final int index = thread.indexWhere(
       (ChatMessage message) => message.id == messageId,
     );
-    final List<ChatMessage> next = List<ChatMessage>.from(
-      thread,
-      growable: true,
-    );
     final ChatMessage updated = build(index >= 0 ? thread[index] : null);
+    final List<ChatMessage> next;
     if (index >= 0) {
-      next[index] = updated;
+      next = List<ChatMessage>.from(thread)..[index] = updated;
+    } else if (byTime) {
+      next = insertChronologically(thread, updated);
     } else {
-      next.add(updated);
+      next = <ChatMessage>[...thread, updated];
     }
     await timelineStore.save(peerAddress, List<ChatMessage>.unmodifiable(next));
     _bumpTimelineRevision();
