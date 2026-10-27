@@ -101,6 +101,10 @@ type localLinkManager struct {
 	lan       *lanDiscovery
 	lanError  string
 	stopped   bool
+	// A phone holding back strangers' traffic (transit_guard.go) links
+	// with no device but holdKeep ("" none) until it is released.
+	held     bool
+	holdKeep string
 }
 
 func newLocalLinkManager(c localLinkCore, logger *log.Logger) *localLinkManager {
@@ -247,6 +251,62 @@ func (m *localLinkManager) stop() {
 	}
 }
 
+// hold closes every link but the one to keep (a mesh address, "" none) and
+// takes no new ones until release: a phone that passed strangers' traffic
+// keeps a single peering for a while (transit_guard.go).
+func (m *localLinkManager) hold(keep string) {
+	m.mu.Lock()
+	m.held = true
+	m.holdKeep = keep
+	var gone []*localLink
+	for id, link := range m.links {
+		if link.address != keep {
+			gone = append(gone, link)
+			delete(m.links, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, link := range gone {
+		link.close()
+	}
+	if len(gone) > 0 {
+		m.infof("local links: %d closed while the node holds back transit", len(gone))
+	}
+}
+
+// linkedDevices are the live links, the account's own devices first, then
+// the oldest first.
+func (m *localLinkManager) linkedDevices() []transitLink {
+	m.mu.Lock()
+	links := make([]transitLink, 0, len(m.links))
+	for _, link := range m.links {
+		links = append(links, transitLink{address: link.address, peerURI: link.peerURI, own: link.own, since: link.since})
+	}
+	m.mu.Unlock()
+	sort.Slice(links, func(i, j int) bool {
+		if links[i].own != links[j].own {
+			return links[i].own
+		}
+		return links[i].since.Before(links[j].since)
+	})
+	return links
+}
+
+// release ends a hold: devices nearby link again as they are heard.
+func (m *localLinkManager) release() {
+	m.mu.Lock()
+	m.held = false
+	m.holdKeep = ""
+	m.mu.Unlock()
+}
+
+// mayLink tells whether a link with address may be made now.
+func (m *localLinkManager) mayLink(address string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.held || address == m.holdKeep
+}
+
 // hasLink tells whether a link to address is up.
 func (m *localLinkManager) hasLink(address string) bool {
 	m.mu.Lock()
@@ -298,6 +358,8 @@ func (m *localLinkManager) attach(session *localLinkSession, transport, remote s
 	switch {
 	case m.stopped:
 		err = errors.New("local links stopped")
+	case m.held && link.address != m.holdKeep:
+		err = errors.New("local links: on hold")
 	case len(m.links) >= localLinkMaxLinks:
 		err = errors.New("local links: too many links")
 	default:
@@ -497,6 +559,9 @@ func (m *localLinkManager) status() map[string]any {
 		"running":    m.lan != nil,
 		"interfaces": []string{},
 	}
+	if m.held {
+		lan["held"] = true
+	}
 	nearby := []map[string]any{}
 	if m.lan != nil {
 		lan["interfaces"] = m.lan.interfaceNames()
@@ -525,7 +590,7 @@ func (m *localLinkManager) advert(bloomBytes int) ([]byte, error) {
 // with, and not one linked already.
 func (m *localLinkManager) matches(advert []byte) bool {
 	for _, peer := range matchLocalAdvert(m.peers(), advert, time.Now()) {
-		if !m.hasLink(peer.address) {
+		if !m.hasLink(peer.address) && m.mayLink(peer.address) {
 			return true
 		}
 	}

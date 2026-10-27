@@ -20,7 +20,17 @@ func (node *bridgeNode) localLinkManager() *localLinkManager {
 	defer node.localLinksMu.Unlock()
 	if node.localLinks == nil {
 		node.localLinks = newLocalLinkManager(node.core, node.logger)
+		if keep, held := node.transitHoldLink(); held {
+			node.localLinks.hold(keep)
+		}
 	}
+	return node.localLinks
+}
+
+// existingLocalLinks is the node's manager, nil when none was made.
+func (node *bridgeNode) existingLocalLinks() *localLinkManager {
+	node.localLinksMu.Lock()
+	defer node.localLinksMu.Unlock()
 	return node.localLinks
 }
 
