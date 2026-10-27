@@ -20,15 +20,15 @@ dependencies:
   flutter_riverpod: ^3.3.1
   crypto: ^3.0.6
   # BlueZ (Linux Bluetooth links, bluez_le.dart).
-  dbus: ^0.7.12
-  mime: ^2.0.0
-  video_player: ^2.10.0
+  dbus: ^0.7.15
+  mime: ^2.1.0
+  video_player: ^2.14.1
   # Linux has no video_player backend: UnsupportedVideoPlayer stands in.
   video_player_platform_interface: ^6.9.0
-  video_player_win: ^3.2.2
-  path_provider: ^2.1.5
+  video_player_win: ^3.3.1
+  path_provider: ^2.1.6
   qr_flutter: ^4.1.0
-  qr_code_dart_scan: ^0.11.5
+  qr_code_dart_scan: ^0.14.0
   # Its QR decoder, used directly for camera pictures on computers.
   zxing_lib: ^1.1.4
   record: ^6.2.0
@@ -39,16 +39,16 @@ dependencies:
   flutter_secure_storage: ^10.0.0
   local_auth: ^2.3.0
   system_tray: ^2.0.3
-  window_manager: ^0.5.1
+  window_manager: ^0.5.2
   # 1.5.0+: a prebuilt libwebrtc for Windows on ARM64 (windows-arm64).
   flutter_webrtc: ^1.5.2
   app_links: ^6.0.0
-  image_picker: ^1.2.3
+  image_picker: ^1.2.4
   # The own camera of the "Filmy" section (hold to record).
-  camera: ^0.11.0
+  camera: ^0.12.1
   # Its Windows backend (not endorsed by camera, so named here).
   camera_windows: ^0.2.6
-  image: ^4.8.0
+  image: ^4.12.0
 
 dev_dependencies:
   flutter_test:
