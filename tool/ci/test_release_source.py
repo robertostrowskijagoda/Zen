@@ -322,9 +322,12 @@ class InstallPageTest(unittest.TestCase):
             return value.replace("${kZenPagesBase}", base)
 
         page = resolve(re.search(r"kInstallPageUrl =\s*'([^']+)'", dart).group(1))
-        source = resolve(re.search(r"kSideStoreSourceUrl =\s*'([^']+)'", dart).group(1))
         self.assertEqual(page, release_source.PAGES + "install/")
-        self.assertEqual(source, release_source.PAGES + "apps.json")
+        # The app's guide installs the iPhone build through Scarlet; the
+        # SideStore / AltStore source stays on the website only.
+        source = re.search(r"kSideStoreSourceUrl =\s*'([^']+)'", dart)
+        if source:
+            self.assertEqual(resolve(source.group(1)), release_source.PAGES + "apps.json")
         self.assertTrue(os.path.exists(os.path.join(ROOT, "tool/pages/install/index.html")))
 
 
