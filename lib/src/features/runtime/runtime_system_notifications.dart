@@ -636,8 +636,18 @@ final class FlutterLocalRuntimeSystemNotificationService
       return false;
     }
     final String slotKey = notification.slotKey ?? notification.id;
-    final RuntimeSystemNotification? previous =
-        _activeNotificationsBySlot[slotKey];
+    RuntimeSystemNotification? previous = _activeNotificationsBySlot[slotKey];
+    if (previous != null &&
+        notification.createdAtMillis - previous.createdAtMillis >=
+            _shadeCheckAfter.inMilliseconds &&
+        !await _stillInShade(slotKey)) {
+      // Swiped away or opened from the shade: what it said was seen. Stacked
+      // onto it, the next message would bring the old one back as well ("2
+      // nowe wiadomości" for one).
+      _activeNotificationsBySlot.remove(slotKey);
+      _lastAlertAtBySlot.remove(slotKey);
+      previous = null;
+    }
     if (_isRedundantRingingRepost(previous, notification)) {
       // Already on screen and unchanged: re-posting it would only re-fire the
       // ringtone and the full-screen intent.
@@ -707,6 +717,33 @@ final class FlutterLocalRuntimeSystemNotificationService
         );
         return false;
       }
+    }
+  }
+
+  /// An entry posted this recently is not looked for in the shade yet (the
+  /// system may not list it at once).
+  static const Duration _shadeCheckAfter = Duration(seconds: 3);
+
+  /// Whether the notification of [slotKey] is still in the shade. Android
+  /// tells (the person may have swiped it away or opened it); elsewhere, or
+  /// when asking fails, it counts as still there.
+  Future<bool> _stillInShade(String slotKey) async {
+    try {
+      await _ensureInitialized();
+      final AndroidFlutterLocalNotificationsPlugin? android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      if (android == null) {
+        return true;
+      }
+      final int id = slotKey.hashCode & 0x7fffffff;
+      return (await android.getActiveNotifications()).any(
+        (ActiveNotification active) => active.id == id,
+      );
+    } on Object catch (error) {
+      logZenWarning('Reading the notifications on screen failed: $error');
+      return true;
     }
   }
 
@@ -1174,6 +1211,24 @@ final class _RuntimeSystemNotificationsBridgeState
   @override
   void initState() {
     super.initState();
+    // Followed here, not with `ref.watch` in build: this bridge lives in the
+    // app's first screen, and a watch pauses while another screen covers it
+    // (the app is often left on a chat). Coming back to Zen there must
+    // still clear what the shade shows, or the next message would be
+    // stacked onto ones already read.
+    ref.listenManual<bool>(
+      socialHubControllerProvider.select((state) => state.lifecycle.isFocused),
+      (bool? previous, bool isFocused) {
+        if (_initialized && isFocused && !_lastFocused) {
+          unawaitedLogged(
+            ref.read(runtimeSystemNotificationServiceProvider).clear(),
+            context: 'Clearing focused system notifications failed',
+          );
+        }
+        _lastFocused = isFocused;
+      },
+      fireImmediately: true,
+    );
     unawaitedLogged(
       _initialize(),
       context: 'Runtime system notifications bridge initialization failed',
@@ -1193,18 +1248,6 @@ final class _RuntimeSystemNotificationsBridgeState
       socialHubControllerProvider.select(_callSoundStateOf),
       _onCallSoundState,
     );
-    final bool isFocused = ref.watch(
-      socialHubControllerProvider.select((state) => state.lifecycle.isFocused),
-    );
-    if (_initialized && isFocused && !_lastFocused) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaitedLogged(
-          ref.read(runtimeSystemNotificationServiceProvider).clear(),
-          context: 'Clearing focused system notifications failed',
-        );
-      });
-    }
-    _lastFocused = isFocused;
     return widget.child;
   }
 

@@ -166,6 +166,64 @@ final class _FakePlugin implements FlutterLocalNotificationsPlugin {
   }
 }
 
+/// One post to the Android shade, as the test reads it back.
+typedef _Posted = ({
+  int id,
+  String? body,
+  int? number,
+  List<String> lines,
+  bool onlyAlertOnce,
+});
+
+/// The system on Android: what is in the shade can be asked for.
+final class _AndroidShadePlugin implements FlutterLocalNotificationsPlugin {
+  final List<_Posted> shown = <_Posted>[];
+
+  /// Ids of the notifications still in the shade.
+  final Set<int> shade = <int>{};
+  late final _FakeAndroid _android = _FakeAndroid(this);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    if (invocation.memberName == #show) {
+      final int id = invocation.namedArguments[#id] as int;
+      final AndroidNotificationDetails? android =
+          (invocation.namedArguments[#notificationDetails]
+                  as NotificationDetails?)
+              ?.android;
+      final StyleInformation? style = android?.styleInformation;
+      shown.add((
+        id: id,
+        body: invocation.namedArguments[#body] as String?,
+        number: android?.number,
+        lines: style is InboxStyleInformation ? style.lines : const <String>[],
+        onlyAlertOnce: android?.onlyAlertOnce ?? false,
+      ));
+      shade.add(id);
+      return Future.value(null);
+    }
+    if (invocation.memberName == #resolvePlatformSpecificImplementation) {
+      return _android;
+    }
+    return Future.value(null);
+  }
+}
+
+final class _FakeAndroid implements AndroidFlutterLocalNotificationsPlugin {
+  _FakeAndroid(this._plugin);
+
+  final _AndroidShadePlugin _plugin;
+
+  @override
+  Future<List<ActiveNotification>> getActiveNotifications() async =>
+      <ActiveNotification>[
+        for (final int id in _plugin.shade) ActiveNotification(id: id),
+      ];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
+}
+
 final class _FakeHandle implements ZenSoundHandle {
   @override
   Future<void> stop() async {}
@@ -550,6 +608,61 @@ void main() {
       });
     });
   }
+
+  group('powiadomienie zdjęte z szuflady (Android)', () {
+    // The service remembers what it showed in a slot to stack the next
+    // message onto it. The person may have swiped it away (or opened it)
+    // without Zen hearing about it: the next message must then come alone,
+    // not as "2 nowe wiadomości" with the old one back in it.
+    late _AndroidShadePlugin plugin;
+    late FlutterLocalRuntimeSystemNotificationService service;
+    late SocialHubController controller;
+
+    setUp(() {
+      plugin = _AndroidShadePlugin();
+      service = FlutterLocalRuntimeSystemNotificationService(plugin: plugin);
+      controller = _controller(
+        _boot(_Storage(), lifecycle: _background, service: service),
+      );
+    });
+
+    test(
+      'po zdjęciu następna wiadomość przychodzi sama, z dźwiękiem',
+      () async {
+        await controller.receiveSignal(
+          _direct('m-1', 'Pierwsza'),
+          receivedAtMillis: 1000,
+        );
+        expect(plugin.shown.single.number, isNull);
+        plugin.shade.clear(); // swiped away
+
+        await controller.receiveSignal(
+          _direct('m-2', 'Druga'),
+          receivedAtMillis: 1000 + 60 * 1000,
+        );
+
+        expect(plugin.shown, hasLength(2));
+        expect(plugin.shown.last.body, 'Druga');
+        expect(plugin.shown.last.number, isNull, reason: 'nic nie doklejone');
+        expect(plugin.shown.last.lines, isNot(contains('Pierwsza')));
+        expect(plugin.shown.last.onlyAlertOnce, isFalse);
+      },
+    );
+
+    test('wciąż widoczne: następna wiadomość się dokleja', () async {
+      await controller.receiveSignal(
+        _direct('m-1', 'Pierwsza'),
+        receivedAtMillis: 1000,
+      );
+      await controller.receiveSignal(
+        _direct('m-2', 'Druga'),
+        receivedAtMillis: 1000 + 60 * 1000,
+      );
+
+      expect(plugin.shown.last.number, 2);
+      expect(plugin.shown.last.lines, <String>['Pierwsza', 'Druga']);
+    });
+  });
 
   group('ten sam identyfikator w dwóch różnych czatach', () {
     test('wiadomość 1:1 i grupowa o tym samym id to dwie wiadomości, każda '
