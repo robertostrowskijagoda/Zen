@@ -232,6 +232,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, int> disappearedMessages = <String, int>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
     final Map<String, String> peerAppVersions = <String, String>{};
@@ -351,6 +352,14 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      final Object? gone = decoded['disappeared'];
+      if (gone is Map) {
+        for (final MapEntry<dynamic, dynamic> e in gone.entries) {
+          if (e.key is String && e.value is int) {
+            disappearedMessages[e.key as String] = e.value as int;
+          }
+        }
+      }
       final Object? levels = decoded['notifyPrivacy'];
       if (levels is Map) {
         for (final MapEntry<dynamic, dynamic> e in levels.entries) {
@@ -431,6 +440,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      disappearedMessages: disappearedMessages,
       notificationPrivacy: notificationPrivacy,
       peerAppVersions: peerAppVersions,
     );
@@ -611,6 +621,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        'disappeared': state.disappearedMessages,
         'notifyPrivacy': <String, String>{
           for (final MapEntry<String, NotificationPrivacy> e
               in state.notificationPrivacy.entries)
@@ -720,6 +731,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      disappearedMessages: Map<String, int>.from(state.disappearedMessages),
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,
       ),

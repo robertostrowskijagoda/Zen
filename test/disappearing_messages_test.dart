@@ -228,6 +228,41 @@ void main() {
       expect(sanitizeDisappearSeconds(5), 60);
       expect(sanitizeDisappearSeconds(999999999), kMaxDisappearSeconds);
     });
+
+    test('disappeared messages are remembered only while a copy can come', () {
+      final int now = kDisappearedMemory.inMilliseconds * 3;
+      final int old = now - kDisappearedMemory.inMilliseconds - 1;
+      Map<String, int> gone = rememberDisappeared(
+        const <String, int>{},
+        key: 'a',
+        id: 'old',
+        expiredAtMillis: old,
+        nowMillis: now,
+      );
+      expect(gone, <String, int>{'a|old': old});
+      gone = rememberDisappeared(
+        gone,
+        key: 'a',
+        id: 'new',
+        expiredAtMillis: now,
+        nowMillis: now,
+      );
+      expect(gone, <String, int>{'a|new': now});
+
+      final Map<String, int> full = <String, int>{
+        for (int i = 0; i < kMaxDisappearedMessages; i++) 'k|$i': now + i,
+      };
+      gone = rememberDisappeared(
+        full,
+        key: 'k',
+        id: 'last',
+        expiredAtMillis: now + kMaxDisappearedMessages,
+        nowMillis: now,
+      );
+      expect(gone, hasLength(kMaxDisappearedMessages));
+      expect(gone.containsKey('k|0'), isFalse, reason: 'the oldest goes');
+      expect(gone.containsKey('k|last'), isTrue);
+    });
   });
 
   group('social hub', () {
@@ -381,42 +416,70 @@ void main() {
       );
     });
 
-    test(
-      'a late copy of a message that already disappeared does not bring '
-      'it back',
-      () async {
-        final Map<String, dynamic> frame = <String, dynamic>{
-          'type': 'message',
-          'msgId': 'm1',
-          'text': 'tajne',
-          'ttl': 3600,
-        };
-        await h.receive(ada, frame);
-        final ChatMessage got = (await h.timelines.load(
-          ada,
-        )).firstWhere((ChatMessage m) => m.id == 'm1');
-        await h.timelines.save(ada, <ChatMessage>[
-          got.copyWith(expiresAtMillis: 1),
-        ]);
-        await h.hub.sweepDisappearingMessages();
-        expect(
-          (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm1'),
-          isEmpty,
-        );
+    test('a late copy of a message that already disappeared does not bring '
+        'it back', () async {
+      final Map<String, dynamic> frame = <String, dynamic>{
+        'type': 'message',
+        'msgId': 'm1',
+        'text': 'tajne',
+        'ttl': 3600,
+      };
+      await h.receive(ada, frame);
+      final ChatMessage got = (await h.timelines.load(
+        ada,
+      )).firstWhere((ChatMessage m) => m.id == 'm1');
+      await h.timelines.save(ada, <ChatMessage>[
+        got.copyWith(expiresAtMillis: 1),
+      ]);
+      await h.hub.sweepDisappearingMessages();
+      expect(
+        (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm1'),
+        isEmpty,
+      );
 
-        // A mailbox hands the same message over after it is gone.
-        await h.receive(ada, frame);
-        expect(
-          (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm1'),
-          isEmpty,
-        );
-      },
-      skip:
-          'Real finding: once the sweep removed the message nothing '
-          'remembers its id, so a late copy (a mailbox handing it over '
-          'again, a retry from the sender) is stored anew with a fresh '
-          'expiry, announced again and counted unread again (N7).',
-    );
+      // A mailbox hands the same message over after it is gone.
+      await h.receive(ada, frame);
+      expect(
+        (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm1'),
+        isEmpty,
+      );
+      // Still acknowledged, so the sender and its mailboxes stop.
+      expect(
+        h.transport.sentSignals
+            .where(
+              (({String remoteAddress, Map<String, dynamic> payload}) s) =>
+                  s.payload['type'] == 'message_ack' &&
+                  s.payload['msgId'] == 'm1',
+            )
+            .length,
+        2,
+      );
+      // Remembered with its expiry, also across a restart.
+      expect(h.state.disappearedMessages['$ada|m1'], 1);
+      expect((await h.snapshots.load())!.disappearedMessages['$ada|m1'], 1);
+    });
+
+    test('a copy that expired but is not swept yet stays gone', () async {
+      final Map<String, dynamic> frame = <String, dynamic>{
+        'type': 'message',
+        'msgId': 'm2',
+        'text': 'tajne',
+        'ttl': 3600,
+      };
+      await h.receive(ada, frame);
+      final ChatMessage got = (await h.timelines.load(
+        ada,
+      )).firstWhere((ChatMessage m) => m.id == 'm2');
+      await h.timelines.save(ada, <ChatMessage>[
+        got.copyWith(expiresAtMillis: 1),
+      ]);
+      await h.receive(ada, frame);
+      expect(
+        (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm2'),
+        hasLength(1),
+        reason: 'not stored a second time with a new clock',
+      );
+    });
 
     test('the timers are kept in the snapshot', () async {
       await h.hub.setDisappearingTimer(ada, 3600);

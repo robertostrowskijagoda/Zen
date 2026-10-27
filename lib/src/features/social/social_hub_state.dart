@@ -142,6 +142,7 @@ final class SocialHubState {
     this.peerProfiles = const <String, PeerPublicProfile>{},
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
+    this.disappearedMessages = const <String, int>{},
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.snapshotUnreadable = false,
     this.peerAppVersions = const <String, String>{},
@@ -273,6 +274,12 @@ final class SocialHubState {
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
+  /// Disappearing messages that are gone here (see
+  /// `disappearedMessageKey`) → when they expired. A copy that comes late (from a mailbox, or
+  /// sent again) is dropped instead of coming back with a new clock; each
+  /// is forgotten once no copy can still be on its way.
+  final Map<String, int> disappearedMessages;
+
   /// Conversations whose notifications tell more or less than the setting
   /// says (`AppSettings.notificationPrivacy`): conversation key (a
   /// friend's address or `group:<id>`) → its own level. Absent = "Jak
@@ -396,6 +403,7 @@ final class SocialHubState {
     Map<String, PeerPublicProfile>? peerProfiles,
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
+    Map<String, int>? disappearedMessages,
     Map<String, NotificationPrivacy>? notificationPrivacy,
     bool? snapshotUnreadable,
     Map<String, String>? peerAppVersions,
@@ -423,6 +431,7 @@ final class SocialHubState {
       peerProfiles: peerProfiles ?? this.peerProfiles,
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
+      disappearedMessages: disappearedMessages ?? this.disappearedMessages,
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
       peerAppVersions: peerAppVersions ?? this.peerAppVersions,

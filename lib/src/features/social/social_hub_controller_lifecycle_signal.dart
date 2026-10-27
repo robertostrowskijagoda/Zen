@@ -354,13 +354,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     );
     // Disappearing messages that expired while the app was closed.
     if (state.disappearingTimers.isNotEmpty) {
-      final int expired = await _disappearingStore.sweep(
-        List<String>.of(state.disappearingTimers.keys),
-      );
-      if (expired > 0) {
-        _bumpTimelineRevision();
-      }
-      await _scheduleDisappearSweep();
+      await sweepDisappearingMessages();
     }
     // The unqueued flush: this already runs inside the queue.
     await _flushPendingSignals();
@@ -689,11 +683,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         }
       }
     }
+    if (await _dropDisappearedCopy(signal)) {
+      // A late copy of a disappearing message that is already gone here.
+      return;
+    }
     if (signal.type == ZenSignalType.message &&
-        (signal.messageId?.trim().isNotEmpty ?? false) &&
         await _timelineHasMessage(
           peerAddress: signal.sender,
-          messageId: signal.messageId!.trim(),
+          messageId: _incomingMessageIdOf(signal),
         )) {
       // A copy of a message already on file (a re-send, or a datagram the
       // mesh delivered twice). Persisting it again only re-sends the delivery

@@ -501,9 +501,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   Future<void> _onMessageExpired(String key, ChatMessage message);
 
+  Future<bool> _dropDisappearedCopy(ZenSignal signal);
+
   void _noteExpiry(int atMillis);
 
-  Future<void> _scheduleDisappearSweep();
+  Future<void> sweepDisappearingMessages();
 
   Future<void> _handleDisappearTimer(ZenSignal signal, int timestamp);
 
@@ -968,6 +970,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   Future<void> dismissInboxEntry(String id);
 
   Future<bool> _timelineHasMessage({
+    required String peerAddress,
+    required String messageId,
+  });
+
+  Future<void> _sendMessageAck({
     required String peerAddress,
     required String messageId,
   });
