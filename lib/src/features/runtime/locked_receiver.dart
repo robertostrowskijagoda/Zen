@@ -122,8 +122,34 @@ const Set<String> _socialTypes = <String>{
 const int kLockedStrangerFramesPerSender = 5;
 const int kLockedStrangerFramesTotal = 50;
 
-/// How often the receiver asks its mailboxes for mail held for it.
+/// How often the receiver asks its mailboxes for mail held for it, at
+/// first and again once something came.
+///
+/// The polls only back the mailboxes up: they hand mail over by themselves
+/// the moment it is deposited while this phone is reachable, and whenever
+/// it shows a sign of life. A poll catches what such a hand-over missed.
 const Duration kLockedMailboxPollInterval = Duration(minutes: 5);
+
+/// The longest wait between polls: each poll that brought nothing doubles
+/// the wait (5, 10, 20, 30 minutes), all multiples of the first, so the
+/// polls keep sharing their wakes with the rest of the beat.
+const Duration kLockedMailboxPollMaxInterval = Duration(minutes: 30);
+
+/// The wait before the mailboxes are asked again, after one that lasted
+/// [last]: [base] when something was kept since the last poll, otherwise
+/// twice [last], at most [max].
+Duration nextMailboxPollWait({
+  required Duration last,
+  required bool keptSince,
+  Duration base = kLockedMailboxPollInterval,
+  Duration max = kLockedMailboxPollMaxInterval,
+}) {
+  if (keptSince || last < base) {
+    return base;
+  }
+  final Duration doubled = last * 2;
+  return doubled > max ? max : doubled;
+}
 
 /// How often a locked phone answers one contact's pings at most.
 const Duration kLockedPongEvery = Duration(minutes: 4);
@@ -487,7 +513,8 @@ final class LockedReceiver {
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
     this.mailboxPollInterval = kLockedMailboxPollInterval,
-    this.pollAnswerGrace = const Duration(seconds: 4),
+    this.mailboxPollMax = kLockedMailboxPollMaxInterval,
+    this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
   }) : _transport = transport,
        _capability = capability,
@@ -532,7 +559,11 @@ final class LockedReceiver {
   final Duration noticeThrottle;
   final Duration mailboxPollInterval;
 
-  /// How long a poll's wake waits for the mailboxes' first answers.
+  /// The longest wait between polls ([nextMailboxPollWait]).
+  final Duration mailboxPollMax;
+
+  /// How long a poll's wake waits for the mailboxes' first answers (later
+  /// ones wake the phone themselves, like any frame).
   final Duration pollAnswerGrace;
 
   /// A contact's pings get a pong at most this often: friends ping only
@@ -545,7 +576,10 @@ final class LockedReceiver {
   StreamSubscription<SignalTransportFrame>? _doorSubscription;
   final Map<String, int> _doorFramesBy = <String, int>{};
   int _doorFramesTotal = 0;
-  WakeTimer? _pollTimer;
+  BeatTimer? _pollTimer;
+
+  /// [keptCount] when the last poll went out.
+  int _keptAtPoll = 0;
   Timer? _ringTimer;
   String? _ringingFrom;
   bool _running = false;
@@ -596,17 +630,19 @@ final class LockedReceiver {
     }
     // An alarm that was going on when the app locked carries on here.
     await _alarm?.start();
+    _keptAtPoll = _keptCount;
     await _pollMailboxes();
     if (mailboxPollInterval > Duration.zero &&
         _capability.mailboxes.isNotEmpty) {
       // On the shared beat: one wake of the phone for the polls of every
-      // account (and a look around nearby), held for the polls and their
-      // first answers and let go then.
+      // account (and a look around nearby, the outbox's rounds), held for
+      // the polls and their first answers and let go then. Polls that find
+      // nothing come less and less often ([nextMailboxPollWait]).
       _pollTimer = ZenWake.beat(
         'mailbox-poll',
         mailboxPollInterval,
         _pollOnWake,
-        hold: const Duration(seconds: 15),
+        hold: const Duration(seconds: 10),
       );
     }
     logZenMessage(
@@ -729,6 +765,19 @@ final class LockedReceiver {
   /// The polls on a wake, then a moment for the answers (mail that comes
   /// later wakes the phone itself, like any frame).
   Future<void> _pollOnWake() async {
+    final BeatTimer? poll = _pollTimer;
+    if (poll != null) {
+      final Duration next = nextMailboxPollWait(
+        last: poll.every,
+        keptSince: _keptCount != _keptAtPoll,
+        base: mailboxPollInterval,
+        max: mailboxPollMax,
+      );
+      if (next != poll.every) {
+        poll.setEvery(next);
+      }
+    }
+    _keptAtPoll = _keptCount;
     try {
       await _pollMailboxes();
     } on Object catch (error, stackTrace) {
@@ -907,7 +956,7 @@ final class LockedReceiver {
     while (_kept.length > _maxKeptIds) {
       _kept.remove(_kept.first);
     }
-    _keptCount += 1;
+    _noteKept();
     if (rid != null) {
       await _acknowledge(frame.from, rid);
     }
@@ -918,6 +967,21 @@ final class LockedReceiver {
     }
     await _announce(type, frame.payload, kind);
   }
+
+  /// Something from friends was kept: more may be on its way, so the
+  /// mailboxes are asked again in [mailboxPollInterval] (not after a long
+  /// wait that grew while nothing came).
+  void _noteKept() {
+    _keptCount += 1;
+    final BeatTimer? poll = _pollTimer;
+    if (poll != null && poll.every > mailboxPollInterval) {
+      poll.setEvery(mailboxPollInterval);
+    }
+  }
+
+  /// How long until the next poll now (tests).
+  @visibleForTesting
+  Duration? get mailboxPollWait => _pollTimer?.every;
 
   Future<void> _acknowledge(String to, String rid) =>
       _sendQuietly(to, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
@@ -994,7 +1058,7 @@ final class LockedReceiver {
         while (_kept.length > _maxKeptIds) {
           _kept.remove(_kept.first);
         }
-        _keptCount += 1;
+        _noteKept();
         here.addAll(<String>[
           for (final Map<String, dynamic> item in fresh) item['id'] as String,
         ]);

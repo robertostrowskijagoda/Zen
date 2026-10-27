@@ -514,6 +514,93 @@ void main() {
       expect(wake.calls, <String>['hold ring 8']);
     });
 
+    test('polls that find nothing come less often, and often again once '
+        'something came', () async {
+      final _BeatAlarms wake = _BeatAlarms();
+      int clock = 0;
+      ZenWake.platform = wake;
+      ZenWake.nowMillis = () => clock;
+      addTearDown(() {
+        ZenWake.resetForTest();
+        ZenWake.platform = const TimerWakePlatform();
+        ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
+      });
+      final BackgroundCapability capability = await publishFor(_masterKey());
+      transport = MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        pollAnswerGrace: Duration.zero,
+      );
+      await receiver.start();
+      expect(receiver.mailboxPollWait, kLockedMailboxPollInterval);
+
+      Future<void> nextPoll() async {
+        final WakeTimer alarm = wake.live.single;
+        clock += wake.delayOf(alarm).inMilliseconds;
+        await wake.ring(alarm);
+      }
+
+      final List<int> waits = <int>[];
+      for (int i = 0; i < 5; i++) {
+        await nextPoll();
+        waits.add(receiver.mailboxPollWait!.inMinutes);
+      }
+      expect(waits, <int>[10, 20, 30, 30, 30]);
+      expect(
+        transport.sentSignals.where((s) => s.payload['type'] == 'rly_poll'),
+        hasLength(6),
+        reason: 'one at the start and one on each wake',
+      );
+      expect(
+        wake.delayOf(wake.live.single),
+        kLockedMailboxPollMaxInterval,
+      );
+
+      // A message came: more may follow, the mailboxes are asked again soon.
+      await receive(_ada, <String, dynamic>{
+        'type': 'message',
+        '_rid': 'b1',
+        'text': 'Hej',
+      });
+      expect(receiver.mailboxPollWait, kLockedMailboxPollInterval);
+      expect(wake.delayOf(wake.live.single), kLockedMailboxPollInterval);
+      await nextPoll();
+      expect(
+        receiver.mailboxPollWait,
+        kLockedMailboxPollInterval,
+        reason: 'the poll right after still counts what came',
+      );
+      await nextPoll();
+      expect(receiver.mailboxPollWait, const Duration(minutes: 10));
+    });
+
+    test('the wait between polls doubles up to its longest', () {
+      Duration wait = kLockedMailboxPollInterval;
+      final List<int> minutes = <int>[];
+      for (int i = 0; i < 5; i++) {
+        wait = nextMailboxPollWait(last: wait, keptSince: false);
+        minutes.add(wait.inMinutes);
+      }
+      expect(minutes, <int>[10, 20, 30, 30, 30]);
+      expect(
+        nextMailboxPollWait(last: wait, keptSince: true),
+        kLockedMailboxPollInterval,
+      );
+      expect(
+        kLockedMailboxPollMaxInterval.inMinutes %
+            kLockedMailboxPollInterval.inMinutes,
+        0,
+        reason: 'the polls keep to the beat\'s wakes',
+      );
+    });
+
     test(
       'keeps a friend\'s message sealed, acknowledges it after, and tells only '
       'that a message came',
@@ -1307,4 +1394,63 @@ final class _WakeCalls implements ZenWakePlatform {
   @override
   Future<void> release(String tag, {Duration after = Duration.zero}) async =>
       calls.add('release $tag ${after.inMilliseconds}');
+}
+
+/// Alarms as the phone would get them, rung by the test.
+final class _BeatAlarms implements ZenWakePlatform {
+  final List<_BeatAlarm> _alarms = <_BeatAlarm>[];
+
+  List<WakeTimer> get live => <WakeTimer>[
+    for (final _BeatAlarm a in _alarms)
+      if (a.isActive) a,
+  ];
+
+  Duration delayOf(WakeTimer alarm) => (alarm as _BeatAlarm).delay;
+
+  Future<void> ring(WakeTimer alarm) async {
+    final _BeatAlarm a = alarm as _BeatAlarm;
+    a.fired = true;
+    await a.fire();
+  }
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) {
+    final _BeatAlarm alarm = _BeatAlarm(delay, fire);
+    _alarms.add(alarm);
+    return alarm;
+  }
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {}
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {}
+}
+
+final class _BeatAlarm implements WakeTimer {
+  _BeatAlarm(this.delay, this.fire);
+
+  final Duration delay;
+  final FutureOr<void> Function() fire;
+  bool cancelled = false;
+  bool fired = false;
+
+  @override
+  bool get isActive => !cancelled && !fired;
+
+  @override
+  void cancel() => cancelled = true;
 }
