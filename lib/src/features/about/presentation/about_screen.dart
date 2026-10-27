@@ -59,74 +59,77 @@ class AboutScreen extends StatelessWidget {
     return Scaffold(
       key: const Key('about-screen'),
       appBar: ZenSectionBar(title: t('O aplikacji')),
-      body: SelectionArea(
-        child: ListView(
-          key: const Key('about-list'),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            const _LogoCard(),
-            const SizedBox(height: 14),
-            Text(
-              t(
-                'Komunikator i sieć dla ludzi, którzy się znają — bez '
-                'serwerów, reklam i algorytmu. Wiadomości, zdjęcia i posty '
-                'idą wprost między urządzeniami znajomych, zaszyfrowane.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            key: const Key('about-list'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              const _LogoCard(),
+              const SizedBox(height: 14),
+              Text(
+                t(
+                  'Komunikator i sieć dla ludzi, którzy się znają — bez '
+                  'serwerów, reklam i algorytmu. Wiadomości, zdjęcia i posty '
+                  'idą wprost między urządzeniami znajomych, zaszyfrowane.',
+                ),
+                key: const Key('about-description'),
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 14.5,
+                  height: 1.5,
+                ),
               ),
-              key: const Key('about-description'),
-              style: TextStyle(
-                color: zen.textSecondary,
-                fontSize: 14.5,
-                height: 1.5,
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  ZenPill(
+                    text: t('Bez serwerów'),
+                    tone: zenTone(zen, 0),
+                    icon: Icons.hub_rounded,
+                  ),
+                  ZenPill(
+                    text: t('Bez reklam'),
+                    tone: zenTone(zen, 1),
+                    icon: Icons.block_rounded,
+                  ),
+                  ZenPill(
+                    text: t('Bez algorytmu'),
+                    tone: zenTone(zen, 2),
+                    icon: Icons.timeline_rounded,
+                  ),
+                  ZenPill(
+                    text: t('Szyfrowane'),
+                    tone: zen.success,
+                    icon: Icons.lock_rounded,
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                ZenPill(
-                  text: t('Bez serwerów'),
-                  tone: zenTone(zen, 0),
-                  icon: Icons.hub_rounded,
-                ),
-                ZenPill(
-                  text: t('Bez reklam'),
-                  tone: zenTone(zen, 1),
-                  icon: Icons.block_rounded,
-                ),
-                ZenPill(
-                  text: t('Bez algorytmu'),
-                  tone: zenTone(zen, 2),
-                  icon: Icons.timeline_rounded,
-                ),
-                ZenPill(
-                  text: t('Szyfrowane'),
-                  tone: zen.success,
-                  icon: Icons.lock_rounded,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const _NetworkCountsCard(),
-            _LinkTile(
-              key: const Key('about-github'),
-              icon: Icons.code_rounded,
-              tone: zenTone(zen, 6),
-              title: t('Zen na GitHubie'),
-              subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
-              url: kZenRepositoryUrl,
-            ),
-            _LinkTile(
-              key: const Key('about-discord'),
-              icon: Icons.forum_rounded,
-              tone: zenTone(zen, 6),
-              title: t('Zen na Discordzie'),
-              subtitle: t('Pytania, nowości i rozmowy o Zen'),
-              url: kZenDiscordUrl,
-            ),
-            for (final AboutSection section in AboutSection.values)
-              _SectionTile(section: section),
-          ],
+              const SizedBox(height: 10),
+              const _NetworkCountsCard(),
+              _LinkTile(
+                key: const Key('about-github'),
+                icon: Icons.code_rounded,
+                tone: zenTone(zen, 6),
+                title: t('Zen na GitHubie'),
+                subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
+                url: kZenRepositoryUrl,
+              ),
+              _LinkTile(
+                key: const Key('about-discord'),
+                icon: Icons.forum_rounded,
+                tone: zenTone(zen, 6),
+                title: t('Zen na Discordzie'),
+                subtitle: t('Pytania, nowości i rozmowy o Zen'),
+                url: kZenDiscordUrl,
+              ),
+              for (final AboutSection section in AboutSection.values)
+                _SectionTile(section: section),
+            ],
+          ),
         ),
       ),
     );

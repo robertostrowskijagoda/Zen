@@ -54,6 +54,35 @@ void main() {
     expect(find.text('Zen na Discordzie'), findsOneWidget);
   });
 
+  testWidgets('the last row scrolls into view above the system bar', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    // A small screen with a system navigation bar (52 dp) at the bottom.
+    tester.view.physicalSize = const Size(1080, 1400);
+    tester.view.padding = const FakeViewPadding(bottom: 144);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 144);
+    await tester.pump();
+    final Finder last = find.byKey(
+      Key('about-section-${AboutSection.values.last.name}'),
+    );
+    await tester.scrollUntilVisible(
+      last,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    // Scroll to the very end of the list.
+    await tester.drag(
+      find.byKey(const Key('about-list')),
+      const Offset(0, -4000),
+    );
+    await tester.pumpAndSettle();
+    final double usableBottom =
+        (tester.view.physicalSize.height - 144) / tester.view.devicePixelRatio;
+    expect(find.text('Wesprzyj Zen'), findsOneWidget);
+    expect(tester.getBottomLeft(last).dy, lessThanOrEqualTo(usableBottom));
+  });
+
   testWidgets('the logo is black on light in the light theme', (
     WidgetTester tester,
   ) async {

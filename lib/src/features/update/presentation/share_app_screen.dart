@@ -814,361 +814,376 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     return Scaffold(
       key: const Key('share-app-screen'),
       appBar: AppBar(title: Text(t('Podaj dalej'))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          ZenHero(
-            title: t('Podaj Zen dalej'),
-            icon: Icons.volunteer_activism_rounded,
-            tone: tone,
-            text: t(
-              'Znajomy nie potrzebuje sklepu ani internetu. Wystarczy, że jest '
-              'obok: w tej samej sieci Wi-Fi albo podłączony do Twojego '
-              'hotspotu.',
-            ),
-          ),
-          const SizedBox(height: 12),
-          ZenTile(
-            key: const Key('share-app-install-guide'),
-            icon: Icons.install_mobile_rounded,
-            tone: tone,
-            title: t('Jak zainstalować Zen na innym telefonie / komputerze'),
-            subtitle: t(
-              'Kod QR do strony instalacji i kroki dla każdego systemu',
-            ),
-            trailing: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
-            onTap: () => unawaited(InstallGuideScreen.open(context)),
-          ),
-          if (!kIsWeb && Platform.isIOS)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: ZenInfo(
-                icon: Icons.phone_iphone_rounded,
-                tone: zen.warning,
-                text: t(
-                  'iPhone nie pozwala przekazać aplikacji z ręki do ręki. '
-                  'Znajomy z iPhonem instaluje Zen przez SideStore (kroki '
-                  'wyżej, w „Jak zainstalować Zen”). Stąd możesz podać plik '
-                  '.apk znajomemu z Androidem.',
-                ),
-              ),
-            ),
-          ZenSection(t('Co udostępnić'), top: 12),
-          if (_sources.isEmpty)
-            ZenInfo(
-              icon: Icons.inventory_2_outlined,
-              tone: zen.warning,
-              text: _isAndroid
-                  ? t('Nie znalazłem pliku instalacyjnego tej aplikacji.')
-                  : t(
-                      'Wybierz plik .apk z Zen (np. z aktualizacji albo ze '
-                      'strony projektu).',
-                    ),
-            )
-          else
-            for (final _ShareSource s in _sources)
-              ZenTile(
-                icon: Icons.android_rounded,
-                tone: s == _source ? zen.accent : zenTone(zen, 5),
-                title: s.label,
-                subtitle: s.name,
-                trailing: Icon(
-                  s == _source
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  color: s == _source ? zen.accent : zen.textMuted,
-                ),
-                onTap: () {
-                  setState(() => _source = s);
-                  unawaited(_stopServer());
-                  unawaited(_checkSignature(s));
-                },
-              ),
-          if (_source?.abis case final Set<String> abis when abis.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: ZenInfo(
-                key: const Key('share-app-abi'),
-                icon: Icons.memory_rounded,
-                tone: zen.textMuted,
-                text: t(
-                  'Ten plik jest dla telefonów typu {type}. Telefon innego '
-                  'typu może go nie zainstalować: wtedy znajomy pobiera Zen '
-                  'ze strony instalacji (inne telefony).',
-                  {'type': androidAbisLabel(abis)},
-                ),
-              ),
-            ),
-          if (_source != null && !_source!.own) _signatureInfo(zen),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
-              key: const Key('share-app-pick'),
-              onPressed: () => unawaited(_pickApk()),
-              icon: const Icon(Icons.folder_open_rounded),
-              label: Text(t('Wybierz inny plik .apk')),
-            ),
-          ),
-          if (_isAndroid) ...<Widget>[
-            ZenSection(t('Prosto na telefon obok'), top: 16),
-            _shareSheetCard(zen),
-          ],
-          ZenSection(t('Przez Wi-Fi albo hotspot'), top: 16),
-          ZenCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (_isAndroid && _hotspot == null) ...<Widget>[
-                  OutlinedButton.icon(
-                    key: const Key('share-app-hotspot'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    onPressed: _busy || _source == null
-                        ? null
-                        : () => unawaited(_startHotspot()),
-                    icon: const Icon(Icons.wifi_tethering_rounded),
-                    label: Text(t('Włącz hotspot (bez internetu)')),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                if (_hotspot != null) ...<Widget>[
-                  _step(
-                    zen,
-                    t('1. Znajomy skanuje ten kod, żeby połączyć się z Wi-Fi:'),
-                  ),
-                  _qr(
-                    wifiQrText(
-                      ssid: _hotspot!.ssid,
-                      password: _hotspot!.password,
-                    ),
-                    180,
-                  ),
-                  const SizedBox(height: 10),
-                  SelectableText(
-                    t('Sieć: {ssid}\nHasło: {password}', {
-                      'ssid': _hotspot!.ssid,
-                      'password': _hotspot!.password,
-                    }),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: zen.textSecondary,
-                      fontSize: 14,
-                      height: 1.45,
-                    ),
-                  ),
-                  Divider(height: 28, color: zen.outlineSoft),
-                ],
-                if (server == null)
-                  FilledButton.icon(
-                    key: const Key('share-app-start'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                    ),
-                    onPressed: _source == null
-                        ? null
-                        : () => unawaited(_startServer()),
-                    icon: const Icon(Icons.qr_code_2_rounded),
-                    label: Text(t('Udostępnij')),
-                  )
-                else if (first != null) ...<Widget>[
-                  _step(
-                    zen,
-                    _hotspot != null
-                        ? t('2. Potem skanuje ten kod i pobiera Zen:')
-                        : t('Znajomy skanuje ten kod aparatem i pobiera Zen:'),
-                  ),
-                  _qr(
-                    server.pageUri(first).toString(),
-                    200,
-                    key: const Key('share-app-qr'),
-                  ),
-                  const SizedBox(height: 10),
-                  for (final InternetAddress a in _addresses)
-                    SelectableText(
-                      server.pageUri(a).toString(),
-                      textAlign: TextAlign.center,
-                      style: zen.mono(
-                        color: zen.textSecondary,
-                        size: 12.5,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  if (_networks.length > 1) ...<Widget>[
-                    const SizedBox(height: 10),
-                    Text(
-                      t('Sieć, w której udostępniasz:'),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: <Widget>[
-                        for (final ShareNetwork n in _networks)
-                          ChoiceChip(
-                            label: Text(n.label),
-                            selected: n == _network,
-                            onSelected: (bool selected) {
-                              if (!selected || n == _network) {
-                                return;
-                              }
-                              setState(() => _network = n);
-                              unawaited(_startServer());
-                            },
-                          ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  _checksum(zen),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: _downloads == 0
-                        ? ZenPill(
-                            text: t('Czekam na pobranie…'),
-                            icon: Icons.hourglass_top_rounded,
-                            tone: zen.warning,
-                          )
-                        : ZenPill(
-                            text: t('Pobrano: {count}', {'count': _downloads}),
-                            icon: Icons.download_done_rounded,
-                            tone: zen.success,
-                          ),
-                  ),
-                  if (_downloads == 0) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Text(
-                      t(
-                        'Udostępnianie wyłączy się po 20 minutach albo po '
-                        'zamknięciu tego ekranu.',
-                      ),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  TextButton(
-                    style: TextButton.styleFrom(foregroundColor: zen.danger),
-                    onPressed: () => unawaited(_stopServer()),
-                    child: Text(t('Zakończ udostępnianie')),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (_message != null)
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: zen.accent.withValues(alpha: 0.09),
-                borderRadius: context.zenRadius(18),
-                border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Icon(Icons.info_outline_rounded, color: zen.accent, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _message!,
-                      key: const Key('share-app-message'),
-                      style: TextStyle(
-                        color: zen.textPrimary,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (_isDesktop) ...<Widget>[
-            ZenSection(t('Kablem USB na telefon z Androidem'), top: 24),
-            ZenInfo(
-              icon: Icons.usb_rounded,
-              title: t('Działa nawet tam, gdzie sklep i strony są zablokowane'),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            ZenHero(
+              title: t('Podaj Zen dalej'),
+              icon: Icons.volunteer_activism_rounded,
+              tone: tone,
               text: t(
-                'Na telefonie włącz „Debugowanie USB” (Ustawienia → '
-                'Informacje o telefonie → 7 razy dotknij „Numer '
-                'kompilacji”, potem Opcje programisty), podłącz kabel i '
-                'zezwól na debugowanie.',
+                'Znajomy nie potrzebuje sklepu ani internetu. Wystarczy, że jest '
+                'obok: w tej samej sieci Wi-Fi albo podłączony do Twojego '
+                'hotspotu.',
               ),
             ),
-            const SizedBox(height: 4),
-            if (_adb == null)
-              ZenCard(
-                child: Row(
-                  children: <Widget>[
-                    SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: zen.accent,
+            const SizedBox(height: 12),
+            ZenTile(
+              key: const Key('share-app-install-guide'),
+              icon: Icons.install_mobile_rounded,
+              tone: tone,
+              title: t('Jak zainstalować Zen na innym telefonie / komputerze'),
+              subtitle: t(
+                'Kod QR do strony instalacji i kroki dla każdego systemu',
+              ),
+              trailing: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
+              onTap: () => unawaited(InstallGuideScreen.open(context)),
+            ),
+            if (!kIsWeb && Platform.isIOS)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ZenInfo(
+                  icon: Icons.phone_iphone_rounded,
+                  tone: zen.warning,
+                  text: t(
+                    'iPhone nie pozwala przekazać aplikacji z ręki do ręki. '
+                    'Znajomy z iPhonem instaluje Zen przez SideStore (kroki '
+                    'wyżej, w „Jak zainstalować Zen”). Stąd możesz podać plik '
+                    '.apk znajomemu z Androidem.',
+                  ),
+                ),
+              ),
+            ZenSection(t('Co udostępnić'), top: 12),
+            if (_sources.isEmpty)
+              ZenInfo(
+                icon: Icons.inventory_2_outlined,
+                tone: zen.warning,
+                text: _isAndroid
+                    ? t('Nie znalazłem pliku instalacyjnego tej aplikacji.')
+                    : t(
+                        'Wybierz plik .apk z Zen (np. z aktualizacji albo ze '
+                        'strony projektu).',
+                      ),
+              )
+            else
+              for (final _ShareSource s in _sources)
+                ZenTile(
+                  icon: Icons.android_rounded,
+                  tone: s == _source ? zen.accent : zenTone(zen, 5),
+                  title: s.label,
+                  subtitle: s.name,
+                  trailing: Icon(
+                    s == _source
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    color: s == _source ? zen.accent : zen.textMuted,
+                  ),
+                  onTap: () {
+                    setState(() => _source = s);
+                    unawaited(_stopServer());
+                    unawaited(_checkSignature(s));
+                  },
+                ),
+            if (_source?.abis case final Set<String> abis when abis.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: ZenInfo(
+                  key: const Key('share-app-abi'),
+                  icon: Icons.memory_rounded,
+                  tone: zen.textMuted,
+                  text: t(
+                    'Ten plik jest dla telefonów typu {type}. Telefon innego '
+                    'typu może go nie zainstalować: wtedy znajomy pobiera Zen '
+                    'ze strony instalacji (inne telefony).',
+                    {'type': androidAbisLabel(abis)},
+                  ),
+                ),
+              ),
+            if (_source != null && !_source!.own) _signatureInfo(zen),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                key: const Key('share-app-pick'),
+                onPressed: () => unawaited(_pickApk()),
+                icon: const Icon(Icons.folder_open_rounded),
+                label: Text(t('Wybierz inny plik .apk')),
+              ),
+            ),
+            if (_isAndroid) ...<Widget>[
+              ZenSection(t('Prosto na telefon obok'), top: 16),
+              _shareSheetCard(zen),
+            ],
+            ZenSection(t('Przez Wi-Fi albo hotspot'), top: 16),
+            ZenCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (_isAndroid && _hotspot == null) ...<Widget>[
+                    OutlinedButton.icon(
+                      key: const Key('share-app-hotspot'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      onPressed: _busy || _source == null
+                          ? null
+                          : () => unawaited(_startHotspot()),
+                      icon: const Icon(Icons.wifi_tethering_rounded),
+                      label: Text(t('Włącz hotspot (bez internetu)')),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (_hotspot != null) ...<Widget>[
+                    _step(
+                      zen,
+                      t(
+                        '1. Znajomy skanuje ten kod, żeby połączyć się z Wi-Fi:',
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    _qr(
+                      wifiQrText(
+                        ssid: _hotspot!.ssid,
+                        password: _hotspot!.password,
+                      ),
+                      180,
+                    ),
+                    const SizedBox(height: 10),
+                    SelectableText(
+                      t('Sieć: {ssid}\nHasło: {password}', {
+                        'ssid': _hotspot!.ssid,
+                        'password': _hotspot!.password,
+                      }),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: zen.textSecondary,
+                        fontSize: 14,
+                        height: 1.45,
+                      ),
+                    ),
+                    Divider(height: 28, color: zen.outlineSoft),
+                  ],
+                  if (server == null)
+                    FilledButton.icon(
+                      key: const Key('share-app-start'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                      ),
+                      onPressed: _source == null
+                          ? null
+                          : () => unawaited(_startServer()),
+                      icon: const Icon(Icons.qr_code_2_rounded),
+                      label: Text(t('Udostępnij')),
+                    )
+                  else if (first != null) ...<Widget>[
+                    _step(
+                      zen,
+                      _hotspot != null
+                          ? t('2. Potem skanuje ten kod i pobiera Zen:')
+                          : t(
+                              'Znajomy skanuje ten kod aparatem i pobiera Zen:',
+                            ),
+                    ),
+                    _qr(
+                      server.pageUri(first).toString(),
+                      200,
+                      key: const Key('share-app-qr'),
+                    ),
+                    const SizedBox(height: 10),
+                    for (final InternetAddress a in _addresses)
+                      SelectableText(
+                        server.pageUri(a).toString(),
+                        textAlign: TextAlign.center,
+                        style: zen.mono(
+                          color: zen.textSecondary,
+                          size: 12.5,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    if (_networks.length > 1) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Text(
+                        t('Sieć, w której udostępniasz:'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          for (final ShareNetwork n in _networks)
+                            ChoiceChip(
+                              label: Text(n.label),
+                              selected: n == _network,
+                              onSelected: (bool selected) {
+                                if (!selected || n == _network) {
+                                  return;
+                                }
+                                setState(() => _network = n);
+                                unawaited(_startServer());
+                              },
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _checksum(zen),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: _downloads == 0
+                          ? ZenPill(
+                              text: t('Czekam na pobranie…'),
+                              icon: Icons.hourglass_top_rounded,
+                              tone: zen.warning,
+                            )
+                          : ZenPill(
+                              text: t('Pobrano: {count}', {
+                                'count': _downloads,
+                              }),
+                              icon: Icons.download_done_rounded,
+                              tone: zen.success,
+                            ),
+                    ),
+                    if (_downloads == 0) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Text(
+                        t(
+                          'Udostępnianie wyłączy się po 20 minutach albo po '
+                          'zamknięciu tego ekranu.',
+                        ),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: zen.danger),
+                      onPressed: () => unawaited(_stopServer()),
+                      child: Text(t('Zakończ udostępnianie')),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (_message != null)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: BoxDecoration(
+                  color: zen.accent.withValues(alpha: 0.09),
+                  borderRadius: context.zenRadius(18),
+                  border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Icon(
+                      Icons.info_outline_rounded,
+                      color: zen.accent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        t('Szukam narzędzia adb…'),
-                        style: TextStyle(color: zen.textSecondary),
+                        _message!,
+                        key: const Key('share-app-message'),
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              )
-            else if (!_adb!.available)
+              ),
+            if (_isDesktop) ...<Widget>[
+              ZenSection(t('Kablem USB na telefon z Androidem'), top: 24),
               ZenInfo(
-                icon: Icons.build_circle_outlined,
-                tone: zen.warning,
+                icon: Icons.usb_rounded,
+                title: t(
+                  'Działa nawet tam, gdzie sklep i strony są zablokowane',
+                ),
                 text: t(
-                  'Nie znalazłem narzędzia adb. Zainstaluj „Android SDK '
-                  'Platform-Tools” od Google (albo Android Studio) i otwórz '
-                  'ten ekran ponownie.',
-                ),
-              )
-            else ...<Widget>[
-              if (_devices.isEmpty)
-                ZenEmpty(
-                  icon: Icons.phonelink_off_rounded,
-                  title: t('Nie widzę podłączonego telefonu.'),
-                ),
-              for (final AdbDevice d in _devices)
-                ZenTile(
-                  icon: Icons.smartphone_rounded,
-                  tone: d.ready ? zen.success : zen.warning,
-                  title: d.label,
-                  subtitle: d.ready
-                      ? t('Gotowy')
-                      : d.state == 'unauthorized'
-                      ? t('Zezwól na debugowanie USB na telefonie')
-                      : d.state,
-                  trailing: FilledButton(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 38),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                    ),
-                    onPressed: _busy || _source == null
-                        ? null
-                        : () => unawaited(_installUsb(d)),
-                    child: Text(t('Zainstaluj')),
-                  ),
-                ),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  onPressed: () => unawaited(_refreshDevices()),
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: Text(t('Odśwież')),
+                  'Na telefonie włącz „Debugowanie USB” (Ustawienia → '
+                  'Informacje o telefonie → 7 razy dotknij „Numer '
+                  'kompilacji”, potem Opcje programisty), podłącz kabel i '
+                  'zezwól na debugowanie.',
                 ),
               ),
+              const SizedBox(height: 4),
+              if (_adb == null)
+                ZenCard(
+                  child: Row(
+                    children: <Widget>[
+                      SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: zen.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          t('Szukam narzędzia adb…'),
+                          style: TextStyle(color: zen.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (!_adb!.available)
+                ZenInfo(
+                  icon: Icons.build_circle_outlined,
+                  tone: zen.warning,
+                  text: t(
+                    'Nie znalazłem narzędzia adb. Zainstaluj „Android SDK '
+                    'Platform-Tools” od Google (albo Android Studio) i otwórz '
+                    'ten ekran ponownie.',
+                  ),
+                )
+              else ...<Widget>[
+                if (_devices.isEmpty)
+                  ZenEmpty(
+                    icon: Icons.phonelink_off_rounded,
+                    title: t('Nie widzę podłączonego telefonu.'),
+                  ),
+                for (final AdbDevice d in _devices)
+                  ZenTile(
+                    icon: Icons.smartphone_rounded,
+                    tone: d.ready ? zen.success : zen.warning,
+                    title: d.label,
+                    subtitle: d.ready
+                        ? t('Gotowy')
+                        : d.state == 'unauthorized'
+                        ? t('Zezwól na debugowanie USB na telefonie')
+                        : d.state,
+                    trailing: FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 38),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      onPressed: _busy || _source == null
+                          ? null
+                          : () => unawaited(_installUsb(d)),
+                      child: Text(t('Zainstaluj')),
+                    ),
+                  ),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: () => unawaited(_refreshDevices()),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: Text(t('Odśwież')),
+                  ),
+                ),
+              ],
             ],
           ],
-        ],
+        ),
       ),
     );
   }
