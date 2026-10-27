@@ -15,8 +15,9 @@ import 'package:zen/src/features/update/presentation/updates_screen.dart';
 /// Across the top of the app: "Jest nowa wersja … — warto zaktualizować"
 /// with "Aktualizuj", and, when github.com cannot be reached while the rest
 /// of the internet works, the warning that someone may be blocking Zen.
-/// Both can be closed. Nothing shows otherwise (and never in the store
-/// build, which has no GitHub check).
+/// Both can be closed (the new version's banner for good, for that
+/// version; the updates screen still offers it). Nothing shows otherwise
+/// (and never in the store build, which has no GitHub check).
 class GithubUpdateBanner extends ConsumerWidget {
   const GithubUpdateBanner({super.key});
 
@@ -425,13 +426,15 @@ class GithubUpdateCard extends ConsumerWidget {
                       service.verifiesAuthorSignature
                           ? t(
                               'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co 12 godzin. Pobrany plik '
+                              'co 12 godzin, na Androidzie także w tle, i '
+                              'o nowej wersji powiadamia raz. Pobrany plik '
                               'instaluje dopiero po sprawdzeniu podpisu '
                               'autora i zgodności z SHA256SUMS wydania.',
                             )
                           : t(
                               'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co 12 godzin. Pobrany plik '
+                              'co 12 godzin, na Androidzie także w tle, i '
+                              'o nowej wersji powiadamia raz. Pobrany plik '
                               'instaluje dopiero po zgodności z SHA256SUMS '
                               'wydania.',
                             ),

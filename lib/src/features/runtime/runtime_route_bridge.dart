@@ -18,6 +18,7 @@ import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
 class RuntimeRouteBridge extends ConsumerStatefulWidget {
   const RuntimeRouteBridge({required this.child, super.key});
@@ -188,6 +189,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.flatKnocks:
         // "Ktoś puka do drzwi": the knocks wait at the top of Sąsiedzi.
         unawaited(NeighborsScreen.open(context));
+        break;
+      case RuntimeRouteTarget.updates:
+        // "Jest nowa wersja Zen": where "Aktualizuj" is.
+        unawaited(UpdatesScreen.open(context));
         break;
     }
     _handledIntentId = handledId;

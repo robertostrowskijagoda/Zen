@@ -52,6 +52,9 @@ enum RuntimeSystemNotificationCategory {
 
   /// A friend's alarm: loudest, full screen, cannot be missed.
   alarm,
+
+  /// A new version of Zen: quiet, once per version.
+  update,
 }
 
 /// Whether [notification] comes from the neighbours section (its posts'
@@ -70,7 +73,8 @@ ZenSound? zenSoundFor(RuntimeSystemNotification notification) {
     RuntimeSystemNotificationCategory.message => ZenSound.message,
     RuntimeSystemNotificationCategory.social =>
       isNeighboursNotification(notification) ? ZenSound.knock : ZenSound.social,
-    RuntimeSystemNotificationCategory.transfer => null,
+    RuntimeSystemNotificationCategory.transfer ||
+    RuntimeSystemNotificationCategory.update => null,
   };
 }
 
@@ -468,6 +472,7 @@ final class FlutterLocalRuntimeSystemNotificationService
   static const String _callChannelId = 'zen_calls_v4';
   static const String _alarmChannelId = 'zen_alarm_v2';
   static const String _transferChannelId = 'zen_transfers';
+  static const String _updateChannelId = 'zen_updates';
 
   /// Android's FLAG_INSISTENT: the sound repeats until the notification is
   /// opened or cancelled (a friend's alarm).
@@ -544,6 +549,15 @@ final class FlutterLocalRuntimeSystemNotificationService
         enableVibration: false,
         showBadge: false,
       ),
+      AndroidNotificationChannel(
+        _updateChannelId,
+        t('Aktualizacje'),
+        description: t('Nowa wersja Zen, raz na wersję.'),
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ),
     ];
   }
 
@@ -553,6 +567,12 @@ final class FlutterLocalRuntimeSystemNotificationService
     RuntimeSystemNotification notification,
   ) {
     final String id = switch (zenSoundFor(notification)) {
+      // Silent like a transfer, but a channel of its own (which a person
+      // may switch off without losing anything else).
+      null
+          when notification.category ==
+              RuntimeSystemNotificationCategory.update =>
+        _updateChannelId,
       ZenSound.alarm => _alarmChannelId,
       ZenSound.ringtone => _callChannelId,
       ZenSound.knock => _neighboursChannelId,
@@ -888,10 +908,12 @@ final class FlutterLocalRuntimeSystemNotificationService
         isAlarm ||
         notification.category == RuntimeSystemNotificationCategory.call;
     final bool isRinging = notification.isRingingCall;
+    final bool isUpdate =
+        notification.category == RuntimeSystemNotificationCategory.update;
     final DarwinNotificationDetails darwin = DarwinNotificationDetails(
       presentAlert: true,
       presentBanner: true,
-      presentSound: true,
+      presentSound: !isUpdate,
       presentBadge: true,
       sound: sound?.appleFileName,
       categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
@@ -908,8 +930,16 @@ final class FlutterLocalRuntimeSystemNotificationService
         largeIcon: fallback
             ? null
             : const DrawableResourceAndroidBitmap('ic_launcher'),
-        importance: isCall ? Importance.max : Importance.high,
-        priority: isCall ? Priority.max : Priority.high,
+        importance: isCall
+            ? Importance.max
+            : isUpdate
+            ? Importance.low
+            : Importance.high,
+        priority: isCall
+            ? Priority.max
+            : isUpdate
+            ? Priority.low
+            : Priority.high,
         category: isAlarm
             ? AndroidNotificationCategory.alarm
             : isCall
@@ -999,7 +1029,9 @@ final class FlutterLocalRuntimeSystemNotificationService
             : null,
         subtitle: channel.name,
         // Zen plays its own sound instead (see [_playOwnSound]).
-        audio: _playsOwnSounds ? WindowsNotificationAudio.silent() : null,
+        audio: _playsOwnSounds || isUpdate
+            ? WindowsNotificationAudio.silent()
+            : null,
       ),
       iOS: darwin,
       macOS: darwin,
@@ -1007,7 +1039,7 @@ final class FlutterLocalRuntimeSystemNotificationService
         urgency: isCall
             ? LinuxNotificationUrgency.critical
             : LinuxNotificationUrgency.normal,
-        suppressSound: _playsOwnSounds,
+        suppressSound: _playsOwnSounds || isUpdate,
       ),
     );
   }

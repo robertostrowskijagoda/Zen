@@ -58,6 +58,7 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/update/background_update_check.dart';
 
 /// The quiet channel of the background service (minimum importance).
 const String kAndroidBackgroundChannelId = 'zen_background_quiet';
@@ -2078,6 +2079,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// (within [kAlarmShortcutMaxDelay]).
   DateTime? _pendingPowerAlarmAt;
 
+  /// The look at GitHub for a new version while the app is closed.
+  BackgroundUpdateCheck? _updateCheck;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     await (_serviceLanguageLoad ?? Future<void>.value());
@@ -2109,6 +2113,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         );
     _request(payload);
     await _transitions;
+    if (!_destroyed) {
+      _updateCheck ??= startBackgroundUpdateCheck(notices: _readyNotices);
+    }
   }
 
   @override
@@ -2209,6 +2216,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _destroyed = true;
+    _updateCheck?.stop();
+    _updateCheck = null;
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
     await _appGone?.cancel();
     _appGone = null;
