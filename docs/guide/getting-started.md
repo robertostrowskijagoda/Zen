@@ -57,7 +57,8 @@ to the install page and the same steps for every system.
    unlocks Zen here. You can also unlock with biometrics. *No password* is
    possible for the default account, but not recommended.
 3. **Setup.** A few questions, each with a sensible default, that you can
-   skip: when Zen locks itself (with what *Never* really means), what
+   skip: when Zen locks itself (with what *Never* really means; choosing it
+   asks for the password you have just set once more), what
    notifications say (*Sender and content*, *Sender only* or *Notice
    only*), whether your gates are open for free or need your consent, and
    the animations. *Settings → Run the setup again* asks them all again.
