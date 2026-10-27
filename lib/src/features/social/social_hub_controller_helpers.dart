@@ -314,6 +314,14 @@ SocialHubState _applySignal(
                   signal.sender: senderName,
                 },
         );
+        // Like a 1:1 message: the in-app list tells of it unless the group
+        // is open (an invitation not answered yet tells nothing).
+        if (!isGroupOpen && !existing.isInvitePending) {
+          return current.copyWith(
+            groups: groups,
+            inbox: _prependInbox(current.inbox, inboxEntry),
+          );
+        }
       }
       return current.copyWith(groups: groups);
     case ZenSignalType.groupLeave:

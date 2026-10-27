@@ -503,6 +503,14 @@ void main() {
         expect(service.activeNotifications, isEmpty);
         expect(service.audibleAlertCount, 0);
         expect(center.activeNotifications, hasLength(1));
+        // The in-app list (the bell) tells of it once, in a group chat too.
+        final List<InboxEntry> listed = container
+            .read(socialHubControllerProvider)
+            .inbox
+            .where((InboxEntry e) => e.type == InboxEntryType.message)
+            .toList();
+        expect(listed, hasLength(1));
+        expect(listed.single.body, 'Hej!');
       });
     });
 
@@ -613,6 +621,34 @@ void main() {
       });
     });
   }
+
+  test(
+    'wpis o nowych postach zastępuje swój poprzedni stan na liście',
+    () async {
+      final ProviderContainer container = _boot(
+        _Storage(),
+        lifecycle: _focused,
+        service: MemoryRuntimeSystemNotificationService(),
+      );
+      final SocialHubController controller = _controller(container);
+      InboxEntry posts(String title, int at) => InboxEntry(
+        id: 'post-p1',
+        type: InboxEntryType.post,
+        title: title,
+        body: 'Od: Ada',
+        createdAtMillis: at,
+        routeKey: 'zen://feed?f=all&p=p2',
+      );
+      await controller.putInboxEntry(posts('Nowy post od Ada', 1000));
+      await controller.putInboxEntry(posts('2 nowe posty', 2000));
+      final List<InboxEntry> inbox = container
+          .read(socialHubControllerProvider)
+          .inbox;
+      expect(inbox, hasLength(1));
+      expect(inbox.single.title, '2 nowe posty');
+      expect(inbox.single.type, InboxEntryType.post);
+    },
+  );
 
   group('powiadomienie zdjęte z szuflady (Android)', () {
     // The service remembers what it showed in a slot to stack the next
