@@ -1072,6 +1072,20 @@ class _SettingsScreen extends ConsumerWidget {
                         _FullScreenCallSection(),
                       ],
                     ),
+                  if (Platform.isIOS)
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-ios-background'),
+                      icon: Icons.notifications_active_outlined,
+                      tone: ZenTone.communication,
+                      title: t('Praca w tle'),
+                      subtitle: t(
+                        'Sprawdzanie skrzynek w tle, odbieranie cały czas',
+                      ),
+                      pageTitle: t('Praca w tle'),
+                      pageChildren: const <Widget>[
+                        _Panel(child: IosBackgroundSection()),
+                      ],
+                    ),
                 ],
               ),
               _SettingsGroup(

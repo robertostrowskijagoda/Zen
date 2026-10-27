@@ -355,6 +355,7 @@ final class AppSettings {
     this.wifiDirect = false,
     this.bluetoothLinks = false,
     this.multipeerLinks = false,
+    this.keepReceivingInBackground = false,
     this.seenTips = const <String>{},
   });
 
@@ -478,6 +479,11 @@ final class AppSettings {
   /// Connectivity between nearby Apple devices. Off by default.
   final bool multipeerLinks;
 
+  /// iPhone: "Odbieraj w tle cały czas" — a silent sound keeps Zen running
+  /// off the screen, so messages and calls come at once. Off by default: it
+  /// costs a lot of battery (docs/IOS_BACKGROUND.md).
+  final bool keepReceivingInBackground;
+
   /// One-time cards and reminders already shown or dismissed, by id (see
   /// `ZenTips`): a card shows until its id is here.
   final Set<String> seenTips;
@@ -537,6 +543,7 @@ final class AppSettings {
     bool? wifiDirect,
     bool? bluetoothLinks,
     bool? multipeerLinks,
+    bool? keepReceivingInBackground,
     Set<String>? seenTips,
   }) {
     return AppSettings(
@@ -573,6 +580,8 @@ final class AppSettings {
       wifiDirect: wifiDirect ?? this.wifiDirect,
       bluetoothLinks: bluetoothLinks ?? this.bluetoothLinks,
       multipeerLinks: multipeerLinks ?? this.multipeerLinks,
+      keepReceivingInBackground:
+          keepReceivingInBackground ?? this.keepReceivingInBackground,
       seenTips: seenTips ?? this.seenTips,
     );
   }
@@ -607,6 +616,7 @@ final class AppSettings {
     'wifiDirect': wifiDirect,
     'bluetoothLinks': bluetoothLinks,
     'multipeerLinks': multipeerLinks,
+    'keepReceivingInBackground': keepReceivingInBackground,
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
   };
 
@@ -654,6 +664,7 @@ final class AppSettings {
       wifiDirect: pick<bool>('wifiDirect'),
       bluetoothLinks: pick<bool>('bluetoothLinks'),
       multipeerLinks: pick<bool>('multipeerLinks'),
+      keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       seenTips: switch (json['seenTips']) {
         final List<dynamic> ids => ids.whereType<String>().toSet(),
         _ => null,

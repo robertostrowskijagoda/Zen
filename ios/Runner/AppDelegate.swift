@@ -14,6 +14,8 @@ import UserNotifications
     // plugins (flutter_local_notifications) through FlutterAppDelegate.
     UNUserNotificationCenter.current().delegate = self as? UNUserNotificationCenterDelegate
     privacyGuard.start()
+    // Background refresh handlers: iOS takes them only during launch.
+    ZenBackgroundBridge.shared.start()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -42,6 +44,10 @@ import UserNotifications
     // Pictures on the clipboard ("Wklej" in chats: GIFs keyboards copy).
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenMediaTransferBridge") {
       ZenMediaTransferBridge.register(with: registrar.messenger())
+    }
+    // Time to run off the screen: background refresh, the keep-alive.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenBackgroundBridge") {
+      ZenBackgroundBridge.register(with: registrar.messenger())
     }
   }
 }

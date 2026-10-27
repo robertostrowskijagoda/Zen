@@ -174,6 +174,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(multipeerLinks: value));
   }
 
+  /// "Odbieraj w tle cały czas" (iPhone).
+  Future<void> setKeepReceivingInBackground(bool value) async {
+    await _save(state.copyWith(keepReceivingInBackground: value));
+  }
+
   /// The first-start permissions step is done.
   Future<void> setPermissionsSetupDone(bool value) async {
     await _save(state.copyWith(permissionsSetupDone: value));

@@ -17,6 +17,7 @@ import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_route_bridge.dart';
@@ -153,11 +154,14 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
               // A computer's tray: the background accounts' nodes.
               child: DesktopBackgroundBridge(
                 child: RuntimeSignalBridge(
-                  child: TestHarnessBridge(
-                    child: AlarmWatcher(
-                      child: RuntimeRouteBridge(
-                        // After a restore: its progress and what came back.
-                        child: AccountImportLayer(child: AppShellScreen()),
+                  // An iPhone: background checks, the keep-alive.
+                  child: IosBackgroundBridge(
+                    child: TestHarnessBridge(
+                      child: AlarmWatcher(
+                        child: RuntimeRouteBridge(
+                          // After a restore: its progress and what came back.
+                          child: AccountImportLayer(child: AppShellScreen()),
+                        ),
                       ),
                     ),
                   ),

@@ -70,6 +70,7 @@ import 'package:zen/src/features/relay/iphone_delivery_notice.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
 import 'package:zen/src/features/runtime/presentation/offline_links_section.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
