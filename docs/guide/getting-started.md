@@ -35,7 +35,7 @@ install page) and tap **Install**. With a free Apple ID the signature
 **expires after 7 days**: once a week turn on LocalDevVPN, open SideStore
 and tap **Refresh** (your data stays). Zen reminds you in Chats 2 days
 before. A free Apple ID allows 3 such apps at a time (SideStore counts).
-On iPhone Zen receives and sends only while it is open (see
+On iPhone Zen receives and sends at once only while it is open (see
 [Chats](chats-and-delivery.md#iphone)).
 AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
 Zen yet.

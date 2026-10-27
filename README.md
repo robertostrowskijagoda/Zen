@@ -161,7 +161,7 @@ Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 | System | Builds | Notes |
 |---|---|---|
 | Android | `Zen-arm64-v8a.apk` (most phones), `Zen-armeabi-v7a.apk` (older 32-bit phones), `Zen-x86_64.apk` (Chromebooks, emulators) | full feature set, background receiving while locked |
-| iPhone | `Zen-unsigned.ipa` (iOS 15+) | sideloaded; receives only while open |
+| iPhone | `Zen-unsigned.ipa` (iOS 15+) | sideloaded; receives while open, in the background only now and then |
 | Windows | `Zen-Windows.zip` (x64), `Zen-Windows-arm64.zip` | the Visual C++ runtime is inside the ZIP |
 | Linux | `.tar.gz`, `.deb` (x64, arm64), `.flatpak` (x64) | Ubuntu 22.04+, Debian 12+, Mint 21+ (glibc 2.35+); other systems: Flatpak |
 | macOS | `Zen-macOS.zip` (12+, Apple Silicon and Intel) | |
@@ -275,10 +275,12 @@ which SideStore signs with your own Apple ID; AltStore Classic and other
 signers take the same file.
 
 **What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
-the background. Messages and calls arrive only while Zen is open (no push
+the background for long. Messages and calls arrive while Zen is open, and
+otherwise only when iOS wakes Zen for a short check now and then (no push
 notifications); until then they wait with the sender or in the mailboxes
-your friends' devices keep for you. Messages you write also go out only
-while Zen is open. It works best when one friend has Zen on a computer (in
+your friends' devices keep for you. Settings → Praca w tle can keep Zen
+receiving all the time, at a clear battery cost; see
+[iPhone: receiving in the background](docs/IOS_BACKGROUND.md). It works best when one friend has Zen on a computer (in
 the tray) or on Android: that device keeps the mail for the whole group of
 friends while the iPhones sleep. There is no Nearby (offline links with
 friends use Apple's Multipeer while Zen is open).
