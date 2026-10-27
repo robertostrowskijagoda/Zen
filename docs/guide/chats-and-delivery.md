@@ -51,7 +51,21 @@
   aware: whoever already read it may remember it, and a modified app can
   ignore the deletion and keep a copy.
 - **Forwarding** passes a text or a file to a friend or a group, marked
-  *Forwarded*. Disappearing messages cannot be forwarded.
+  *Forwarded*. Disappearing messages cannot be forwarded. Mentions in a
+  forwarded message become plain names.
+- **Mentions in groups.** Type **@** in a group chat and pick a member from
+  the list under the field (only members of that group are offered, and a
+  message can mention only members). The mention shows highlighted; tap it
+  for the person's mini-profile. A mention is kept as a reference to the
+  member next to the text, so it shows their current name. The person
+  mentioned gets the group message's notification as a mention ("Ada
+  mentioned you"), in its own notification slot, and an entry in the
+  notification list that opens the chat at that message. Their phone
+  checks that the sender is a member of the group; one sender's mentions
+  are announced at most 5 times in 10 minutes, after that they notify like
+  any other message. The group's privacy level applies as for any message
+  (at *Notice only* a mention says only "New message"). Editing a
+  message keeps its mentions (it adds nobody).
 
 Reactions, edits and deletions travel like messages (queue, mailboxes) to
 everyone in the chat and to your other devices, without notifications.

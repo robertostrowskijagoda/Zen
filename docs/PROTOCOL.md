@@ -531,13 +531,27 @@ relay engine and never reaches the app layer.
 See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 `lg_sibling`, `lg_heads`, `lg_want`, `lg_entries`, `lg_revoke`, `lg_cert_want`,
 `lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`,
-`lg_post_want`, `lg_post`.
+`lg_post_want`, `lg_post`, `lg_mention`.
 
 `lg_push` {`entries`} is the only reliable ledger frame: a device's new
 entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
 in batches of at most 30 KB and 10 an hour per friend, through the reliable
 queue to friends who are offline, so they wait in those friends'
 mailboxes. The receiver takes them like `lg_entries`, with the same checks.
+
+`lg_mention` {`e`, `p`?, `pr`?} is reliable too: the notice to a person
+mentioned in a post, an edit or a comment. `e` is that signed entry, `p`
+the post a comment or an edit belongs to and `pr` the writer's profile,
+each with its device certificate. A mention is a token `<@N>` in the
+text, N indexing the body's `men` list of {`d` address, `a` account?,
+`n` name?} (at most 20). The receiver checks the signatures, that a token
+names its address or account, that the post is held or carried and signed
+by its author, and that the writer may mention it (its own post, a friend,
+it reacted to that post, or the sending address is on a friend list
+shared with it); it announces each mention once, at most 10 an hour per
+writer and 60 an hour from people who are not friends. Group messages
+carry `men` the same way; the receiver announces a mention only from a
+member of the group.
 
 ### 2.11 Pyramid (`pyr_*`)
 
@@ -691,8 +705,8 @@ still inflate it; it is a rough guide only.
   every 4 h; any sign of life of the recipient, and a restart or 10 minutes
   of silence, start over. TTL 14 days (`messageTtl`).
 - Reactions, edits and deletions (`msg_react`, `msg_edit`, `msg_delete`),
-  group board posts (`group_post`), `lg_push`, `date_key` and `date_intro*`
-  are reliable too.
+  group board posts (`group_post`), `lg_push`, `lg_mention`, `date_key` and
+  `date_intro*` are reliable too.
 - Calls, typing, presence and file chunks are not reliable.
 
 ### 3.2 Mailboxes (store and forward) [V]

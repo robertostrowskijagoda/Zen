@@ -55,6 +55,54 @@ post starts with the audience you picked last.
   keeps the signed original as evidence and can remove the post from your
   device.
 
+## Mentions
+
+**What it is.** Type **@** in a post, an edit of your post or a comment
+and pick a person from the list under the field (name and photo, filtered
+as you type). The mention shows highlighted; tap it to open that person's
+mini-profile. The person mentioned gets a notification ("Ada mentioned
+you") and an entry in the notification list that opens the feed at the
+post.
+
+**Who can be mentioned.** Under a post (in the post itself and in its
+comments) only:
+
+- the post's author;
+- your friends, and friends of your friends as far as the friend lists
+  your friends share with you show them;
+- people who commented on or liked that post, when your phone knows how to
+  reach them.
+
+A post for an audience (anything but public) can only be read by the
+author's friends, so there you can mention only its author, people who
+reacted to it and the author's friends (when the post is yours: the
+friends of a high enough level; otherwise those on the author's shared
+friend list). A name you typed for anyone else stays plain text.
+
+**How it works.**
+
+- A mention is stored as a reference to the person (their address and
+  account) next to the text, together with the name you saw. Everyone sees
+  the person's current name, so a later change of name breaks nothing.
+- Your phone sends each person you mention a small signed notice through
+  the reliable queue (it waits in their mailboxes while they are offline);
+  friends also see the post or comment arrive by the usual sync. An edit
+  notifies only the people it adds.
+- Before saying anything the mentioned person's phone checks the notice:
+  the signature, that the text really names them, that the post exists
+  (on their phone, or carried in the notice and signed by its author), and
+  that the writer may mention them at all: it is their own post, the
+  writer is their friend, they commented on or liked that post themselves,
+  or the writer is on a friend list one of their friends shares with them.
+  Anything else is dropped without a word.
+- Each mention is announced once (per post, per comment). One writer can
+  cause at most 10 mention notifications an hour, and all people who are
+  not friends together at most 60.
+- The notification follows your notification privacy level (the writer's
+  conversation's own level, if you set one): *Sender and content* shows who
+  and what, *Sender only* only who, *Notice only* only "Someone mentioned
+  you".
+
 ## How far a post goes
 
 **What it is.** A public post can reach friends of your friends and one
