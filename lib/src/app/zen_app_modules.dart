@@ -19,6 +19,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
+import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
 import 'package:zen/src/features/runtime/local_links_controller.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/update/update_service.dart';
@@ -61,6 +62,8 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(updateServiceProvider);
       // The anonymous estimate of people in the network (O aplikacji).
       ref.read(networkCensusProvider);
+      // A mailbox that stopped answering: told in the notifications.
+      ref.read(relayQuietWatchProvider);
     },
   ),
   // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct.

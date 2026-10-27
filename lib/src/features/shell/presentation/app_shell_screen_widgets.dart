@@ -1470,6 +1470,7 @@ IconData _inboxIcon(InboxEntryType type) {
     InboxEntryType.groupInvite => Icons.group_add_outlined,
     InboxEntryType.post => Icons.article_outlined,
     InboxEntryType.mention => Icons.alternate_email_rounded,
+    InboxEntryType.mailbox => Icons.markunread_mailbox_outlined,
   };
 }
 
@@ -1486,6 +1487,7 @@ Color _inboxTone(ZenColors zen, InboxEntryType type) {
     InboxEntryType.groupInvite => zen.tone(ZenTone.people),
     InboxEntryType.post => zen.tone(ZenTone.people),
     InboxEntryType.mention => zen.tone(ZenTone.communication),
+    InboxEntryType.mailbox => zen.warning,
   };
 }
 

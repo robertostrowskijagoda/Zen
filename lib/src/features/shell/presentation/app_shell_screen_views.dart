@@ -509,6 +509,10 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const IPhoneDeliveryNotice(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // A mailbox stopped answering and needs replacing.
+                const _RelayQuietCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 // Enough friends for the recovery circle and none yet.
                 const CircleReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -1535,11 +1539,7 @@ class _RelayNavTile extends ConsumerWidget {
           subtitle: overview.relays.isEmpty
               ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać')
               : '$mailboxes · $mode',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) => const _RelayMailboxScreen(),
-            ),
-          ),
+          onTap: () => unawaited(openRelayMailboxScreen(context)),
         );
       },
     );

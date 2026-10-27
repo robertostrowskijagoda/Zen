@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
@@ -123,6 +124,211 @@ final class RelayEnvelope {
   }
 }
 
+/// What kind of device a friend's Zen runs on, as far as being a mailbox
+/// goes: how much of the time it is there to take and hand out mail.
+/// Announced by every device about itself (`rly_announce` `dc`).
+enum RelayDeviceClass {
+  /// A computer with Zen in the tray: online whenever it is switched on.
+  desktop('pc', 0.9),
+
+  /// An Android phone: its background service holds friends' mail also
+  /// while Zen is locked or long in the background.
+  android('android', 0.8),
+
+  /// An iPhone with "Odbieraj w tle cały czas" on: online most of the
+  /// time, until iOS stops the keep-alive (Low Power Mode, a restart).
+  iphoneKeepAlive('ios_on', 0.45),
+
+  /// An iPhone without the keep-alive: receives only while Zen is open,
+  /// and for a moment whenever iOS wakes it.
+  iphone('ios', 0.15),
+
+  /// Not announced (yet).
+  unknown('', 0.35);
+
+  const RelayDeviceClass(this.wire, this.prior);
+
+  final String wire;
+
+  /// How often a device of this kind is expected to answer, before this
+  /// device has seen it answer or not (0-1).
+  final double prior;
+
+  /// An iPhone, with or without the keep-alive.
+  bool get isIPhone => this == iphone || this == iphoneKeepAlive;
+
+  static RelayDeviceClass fromWire(Object? value) {
+    for (final RelayDeviceClass kind in values) {
+      if (kind != unknown && kind.wire == value) {
+        return kind;
+      }
+    }
+    return unknown;
+  }
+}
+
+/// How one friend's device has answered this device: the polls sent to it
+/// as a mailbox and the mail handed to it for others ("asks"). Kept per
+/// device, not per friend: a friend whose old phone went quiet while their
+/// new one is online must not look reachable through the new one.
+///
+/// Counted by the hour: every hour in which this device asked something
+/// is one [hours], and one of [answered] if anything at all came from the
+/// device in it. So a phone that is off for a night costs a few hours, not
+/// a hundred missed polls, and this device being offline itself counts
+/// nothing. Both fade with a half-life (`RelayConfig.reachHalfLife`): last
+/// week counts less than today.
+final class RelayReach {
+  RelayReach({
+    this.answered = 0,
+    this.hours = 0,
+    this.sampledAtMillis = 0,
+    this.hourAtMillis = 0,
+    this.hourAnswered = false,
+    this.heardAtMillis = 0,
+    this.askedAtMillis = 0,
+    this.failingSinceMillis = 0,
+  });
+
+  /// Hours with an answer, and hours with asks (both fading).
+  double answered;
+  double hours;
+
+  /// When [answered] and [hours] were last brought up to date.
+  int sampledAtMillis;
+
+  /// The hour being counted now: when its first ask went out (0: none), and
+  /// whether anything came back in it so far.
+  int hourAtMillis;
+  bool hourAnswered;
+
+  /// When anything at all last came from the device (0: never).
+  int heardAtMillis;
+
+  /// An ask not answered yet (0: none).
+  int askedAtMillis;
+
+  /// When the first ask that went unanswered was made, since the last
+  /// answer (0: the last ask was answered).
+  int failingSinceMillis;
+
+  static const int _hour = 60 * 60 * 1000;
+
+  /// What the [RelayDeviceClass.prior] is worth, in hours: a day.
+  static const double _priorHours = 24;
+
+  /// The hour being counted, closed when it is over at [now].
+  void _closeHour(int now, Duration halfLife) {
+    if (hourAtMillis == 0 || now - hourAtMillis < _hour) {
+      return;
+    }
+    final int end = hourAtMillis + _hour;
+    answered = _faded(answered, end, halfLife);
+    hours = _faded(hours, end, halfLife);
+    sampledAtMillis = max(sampledAtMillis, end);
+    hours += 1;
+    if (hourAnswered) {
+      answered += 1;
+    }
+    hourAtMillis = 0;
+    hourAnswered = false;
+  }
+
+  /// Something came from the device at [now].
+  void heard(int now, Duration halfLife) {
+    _closeHour(now, halfLife);
+    heardAtMillis = max(heardAtMillis, now);
+    if (hourAtMillis > 0) {
+      hourAnswered = true;
+    }
+    askedAtMillis = 0;
+    failingSinceMillis = 0;
+  }
+
+  /// Something that wants an answer went to the device at [now]. An ask
+  /// still unanswered after [answerWithin] means the device is not there
+  /// (see [failingSinceMillis]).
+  void asked(
+    int now, {
+    required Duration answerWithin,
+    required Duration halfLife,
+  }) {
+    _closeHour(now, halfLife);
+    if (hourAtMillis == 0) {
+      hourAtMillis = now;
+    }
+    if (askedAtMillis > 0) {
+      if (now - askedAtMillis < answerWithin.inMilliseconds) {
+        return; // the one before is still in time
+      }
+      if (failingSinceMillis == 0) {
+        failingSinceMillis = askedAtMillis;
+      }
+    }
+    askedAtMillis = now;
+  }
+
+  /// Whether this device has asked it anything yet.
+  bool get wasAsked => hours > 0 || hourAtMillis > 0;
+
+  double _faded(double value, int now, Duration halfLife) =>
+      sampledAtMillis > 0 && now > sampledAtMillis
+      ? value *
+            pow(
+              0.5,
+              (now - sampledAtMillis) / halfLife.inMilliseconds,
+            ).toDouble()
+      : value;
+
+  /// [hours] as they stand at [now].
+  double hoursAt(int now, Duration halfLife) => _faded(hours, now, halfLife);
+
+  /// The share of hours it answered in, as it stands at [now], or `null`
+  /// before a whole hour was counted.
+  double? answeredShare(int now, Duration halfLife) {
+    final double counted = hoursAt(now, halfLife);
+    return counted < 0.5 ? null : _faded(answered, now, halfLife) / counted;
+  }
+
+  /// How good a mailbox a device of [kind] with these answers makes (0-1):
+  /// the share of hours it answered in, starting from what its kind
+  /// promises ([RelayDeviceClass.prior], worth a day of hours) and moving
+  /// away from it as the hours pile up.
+  double quality(RelayDeviceClass kind, int now, Duration halfLife) =>
+      (_faded(answered, now, halfLife) + _priorHours * kind.prior) /
+      (hoursAt(now, halfLife) + _priorHours);
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (answered > 0) 'y': answered,
+    if (hours > 0) 'n': hours,
+    if (sampledAtMillis > 0) 's': sampledAtMillis,
+    if (hourAtMillis > 0) 'o': hourAtMillis,
+    if (hourAnswered) 'oy': true,
+    if (heardAtMillis > 0) 'h': heardAtMillis,
+    if (askedAtMillis > 0) 'q': askedAtMillis,
+    if (failingSinceMillis > 0) 'f': failingSinceMillis,
+  };
+
+  static RelayReach fromJson(Object? json) {
+    if (json is! Map) {
+      return RelayReach();
+    }
+    double number(Object? v) =>
+        v is num && v.isFinite && v > 0 ? v.toDouble() : 0;
+    int millis(Object? v) => v is num ? max(0, v.toInt()) : 0;
+    return RelayReach(
+      answered: number(json['y']),
+      hours: number(json['n']),
+      sampledAtMillis: millis(json['s']),
+      hourAtMillis: millis(json['o']),
+      hourAnswered: json['oy'] == true,
+      heardAtMillis: millis(json['h']),
+      askedAtMillis: millis(json['q']),
+      failingSinceMillis: millis(json['f']),
+    );
+  }
+}
+
 /// What this device knows about a friend's relay setup.
 @immutable
 final class RelayPeerInfo {
@@ -137,7 +343,7 @@ final class RelayPeerInfo {
     this.depositToken,
     this.blobQuotaBytes = 0,
     this.blobRelays = const <String, int>{},
-    this.staysOnline = false,
+    this.deviceClass = RelayDeviceClass.unknown,
   });
 
   final String address;
@@ -177,10 +383,9 @@ final class RelayPeerInfo {
   /// quota in bytes.
   final Map<String, int> blobRelays;
 
-  /// The peer's device is online most of the time (a computer with Zen in
-  /// the tray, Android with its background service), so it makes a good
-  /// mailbox; an iPhone receives only while Zen is open.
-  final bool staysOnline;
+  /// What kind of device the peer is (`rly_announce` `dc`): how much of
+  /// the time it is online, so how good a mailbox it makes.
+  final RelayDeviceClass deviceClass;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': address,
@@ -193,7 +398,7 @@ final class RelayPeerInfo {
     if (depositToken != null) 'tk': depositToken,
     if (blobQuotaBytes > 0) 'bq': blobQuotaBytes,
     if (blobRelays.isNotEmpty) 'br': blobRelays,
-    if (staysOnline) 'on': true,
+    if (deviceClass != RelayDeviceClass.unknown) 'dc': deviceClass.wire,
   };
 
   static RelayPeerInfo? fromJson(Object? json) {
@@ -212,7 +417,7 @@ final class RelayPeerInfo {
       depositToken: token is String && token.isNotEmpty ? token : null,
       blobQuotaBytes: (json['bq'] as num?)?.toInt() ?? 0,
       blobRelays: _intMap(json['br']),
-      staysOnline: json['on'] == true,
+      deviceClass: RelayDeviceClass.fromWire(json['dc']),
     );
   }
 }
@@ -559,7 +764,13 @@ final class RelayState {
     Map<String, RelayBlobIn>? inBlobs,
     Map<String, RelayTrackedMessage>? tracked,
     Map<String, RelayPartsIn>? inParts,
+    Map<String, RelayReach>? reach,
+    this.mailboxChangedAtMillis = 0,
+    this.announcedClass = '',
+    Map<String, int>? quietTold,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
+       reach = reach ?? <String, RelayReach>{},
+       quietTold = quietTold ?? <String, int>{},
        tracked = tracked ?? <String, RelayTrackedMessage>{},
        inParts = inParts ?? <String, RelayPartsIn>{},
        outBlobs = outBlobs ?? <String, RelayBlobOut>{},
@@ -579,12 +790,29 @@ final class RelayState {
   /// Friends' relay announcements, by canonical address.
   final Map<String, RelayPeerInfo> peers;
 
-  /// `null` = pick automatically; otherwise the user's own choice.
+  /// `null` = pick automatically; otherwise the user's own choice: the
+  /// friends (as the app knows them), each served by the best of their
+  /// devices.
   List<String>? manualRelays;
 
-  /// The relay set this device currently announces.
+  /// The relay set this device currently announces (device addresses).
   List<String> currentRelays;
   int relaySetVersion;
+
+  /// How friends' devices answered this one, by device address (friends'
+  /// devices only).
+  final Map<String, RelayReach> reach;
+
+  /// When the automatic choice last replaced a mailbox that was still a
+  /// friend's (filling an empty place does not count).
+  int mailboxChangedAtMillis;
+
+  /// The [RelayDeviceClass.wire] this device last announced about itself.
+  String announcedClass;
+
+  /// Mailboxes the person was told stopped answering (an entry in the
+  /// notifications): device address -> since when it is quiet.
+  final Map<String, int> quietTold;
 
   /// Last announcement version each friend confirmed.
   final Map<String, int> announcedVersions;
@@ -689,6 +917,14 @@ final class RelayState {
       'trk': tracked.values.map((RelayTrackedMessage m) => m.toJson()).toList(),
     if (inParts.isNotEmpty)
       'pin': inParts.values.map((RelayPartsIn p) => p.toJson()).toList(),
+    if (reach.isNotEmpty)
+      'rch': <String, dynamic>{
+        for (final MapEntry<String, RelayReach> e in reach.entries)
+          e.key: e.value.toJson(),
+      },
+    if (mailboxChangedAtMillis > 0) 'mch': mailboxChangedAtMillis,
+    if (announcedClass.isNotEmpty) 'acl': announcedClass,
+    if (quietTold.isNotEmpty) 'qt': quietTold,
     ...extra,
   });
 
@@ -745,6 +981,7 @@ final class RelayState {
       }
     }
     final Object? manual = decoded['manual'];
+    final Object? rawReach = decoded['rch'];
     return RelayState(
       identity: RelayIdentity.fromJson(decoded['id']),
       peers: peers,
@@ -790,6 +1027,14 @@ final class RelayState {
                 .whereType<RelayTrackedMessage>())
           message.messageId: message,
       },
+      reach: <String, RelayReach>{
+        if (rawReach is Map)
+          for (final MapEntry<Object?, Object?> e in rawReach.entries)
+            if (e.key is String) e.key as String: RelayReach.fromJson(e.value),
+      },
+      mailboxChangedAtMillis: (decoded['mch'] as num?)?.toInt() ?? 0,
+      announcedClass: decoded['acl'] is String ? decoded['acl'] as String : '',
+      quietTold: _intMap(decoded['qt']),
     );
   }
 }

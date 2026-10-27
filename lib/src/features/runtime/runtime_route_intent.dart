@@ -28,6 +28,9 @@ enum RuntimeRouteTarget {
   /// "Aktualizacje i Podaj dalej" (`zen://updates`): the notification
   /// about a new version.
   updates,
+
+  /// "Skrzynki offline" (`zen://mailboxes`): a mailbox stopped answering.
+  mailboxes,
 }
 
 @immutable
@@ -130,6 +133,11 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.updates);
   }
 
+  /// "Skrzynki offline" (a mailbox that stopped answering).
+  factory RuntimeRouteIntent.mailboxes({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.mailboxes);
+  }
+
   /// The Tablica, filtered by [filter] (a name of the feed's filters), at
   /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
@@ -215,6 +223,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.feed => t('Otwórz Tablicę'),
     RuntimeRouteTarget.flatKnocks => t('Otwórz Sąsiadów'),
     RuntimeRouteTarget.updates => t('Aktualizuj'),
+    RuntimeRouteTarget.mailboxes => t('Wybierz skrzynkę'),
   };
 }
 
@@ -222,6 +231,9 @@ String buildInboxRouteKey() => 'zen://inbox';
 
 /// "Aktualizacje i Podaj dalej" (a new version's notification).
 String buildUpdatesRouteKey() => 'zen://updates';
+
+/// "Skrzynki offline" (a mailbox that stopped answering).
+String buildMailboxesRouteKey() => 'zen://mailboxes';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
@@ -346,6 +358,9 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'updates') {
     return RuntimeRouteIntent.updates(id: id);
+  }
+  if (uri.host == 'mailboxes') {
+    return RuntimeRouteIntent.mailboxes(id: id);
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(

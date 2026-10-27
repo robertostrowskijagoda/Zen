@@ -29,6 +29,8 @@ import 'package:zen/src/features/neighbors/household_sync.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -143,6 +145,40 @@ final class SettingsSyncDomain extends _PokedDomain {
     await ref
         .read(appSettingsControllerProvider.notifier)
         .restoreAll(AppSettings.fromJson(merged));
+  }
+}
+
+/// The mailboxes picked by hand: the friends (by the addresses the app
+/// knows them by), the same on all the account's devices, so a new phone
+/// starts with the person's choice. Each device has mailboxes of its own
+/// (its own key, its own announcement), served by the best device of each
+/// friend; an automatic choice is each device's own.
+final class RelayMailboxSyncDomain extends _PokedDomain {
+  RelayMailboxSyncDomain(this.engine);
+
+  final RelayEngine engine;
+
+  @override
+  String get id => 'relay';
+
+  /// The friends in their order.
+  @override
+  Set<String> get wholeKeys => const <String>{'manual'};
+
+  @override
+  Future<Map<String, Object?>?> read() async {
+    final List<String>? manual = await engine.manualMailboxes();
+    return <String, Object?>{'auto': manual == null, 'manual': ?manual};
+  }
+
+  @override
+  Future<void> write(Map<String, Object?> state) async {
+    final Object? manual = state['manual'];
+    await engine.setManualRelays(
+      state['auto'] == false && manual is List
+          ? manual.whereType<String>().toList()
+          : null,
+    );
   }
 }
 
@@ -620,6 +656,14 @@ final class AccountDevicesKeeper {
     for (final StoredStateSyncDomain d in meet) {
       _listen(services[d.key]!.$1(), d);
     }
+    // The hand-picked mailboxes (where store-and-forward runs).
+    final RelayEngine? relay = ref.read(relayEngineProvider);
+    final RelayMailboxSyncDomain? mailboxes = relay == null
+        ? null
+        : RelayMailboxSyncDomain(relay);
+    if (relay != null && mailboxes != null) {
+      _listen(relay.mailboxChoiceRevision, mailboxes);
+    }
     final HouseholdSyncDomain household = HouseholdSyncDomain(
       kHeldHousehold,
       ref.read(neighborsServiceProvider),
@@ -636,6 +680,7 @@ final class AccountDevicesKeeper {
       profile,
       ...meet,
       strangers,
+      ?mailboxes,
     ]);
     final AccountStateSync sync = AccountStateSync(
       channel: LedgerAccountSyncChannel(node),

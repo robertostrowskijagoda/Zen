@@ -220,6 +220,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         // "Jest nowa wersja Zen": where "Aktualizuj" is.
         unawaited(UpdatesScreen.open(context));
         break;
+      case RuntimeRouteTarget.mailboxes:
+        // "Skrzynka … nie odpowiada": the picker, to choose another.
+        unawaited(openRelayMailboxScreen(context));
+        break;
     }
     _handledIntentId = handledId;
     _scheduledIntentId = null;

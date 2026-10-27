@@ -13,6 +13,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
@@ -49,7 +50,12 @@ enum SimDevice {
   /// choice.
   iphone;
 
-  bool get staysOnline => this != iphone;
+  /// What the device announces about itself.
+  RelayDeviceClass get relayClass => switch (this) {
+    android => RelayDeviceClass.android,
+    desktop => RelayDeviceClass.desktop,
+    iphone => RelayDeviceClass.iphone,
+  };
 }
 
 /// Every notification a phone posted (the ones the user could see or hear),
@@ -224,7 +230,22 @@ final class _LockedSide {
 /// engine, social controller (a real [SocialHubController] over memory
 /// stores), reliable transport and notifications, on the simulated network.
 final class FriendsPhone implements RelayPeerSource {
-  FriendsPhone._(this.world, this.name, this.sim, this.device, this.directory);
+  FriendsPhone._(
+    this.world,
+    this.name,
+    this.sim,
+    this.device,
+    this.directory, {
+    SocialHubState? seed,
+  }) : _seed = seed;
+
+  /// The social state the phone starts with (another device of an account
+  /// starts with the account's friends).
+  final SocialHubState? _seed;
+
+  /// Which account each address belongs to, as this phone's ledger would
+  /// tell (see [FriendsWorld.addDevice]).
+  late final AccountDeviceDirectory accounts = _WorldAccounts(this);
 
   final FriendsWorld world;
   final String name;
@@ -285,13 +306,28 @@ final class FriendsPhone implements RelayPeerSource {
   @override
   String get localAddress => address;
 
+  /// Friends with their other devices (never an unlinked one); a friend's
+  /// presence is the newest of their devices', as the app sees it (every
+  /// device of theirs speaks as the friend).
   @override
   List<RelayFriend> acceptedFriends() => <RelayFriend>[
     for (final FriendProfile f in state.acceptedFriends)
-      RelayFriend(
-        address: f.address,
-        lastSeenAtMillis: world._lastSeenOf(f.address),
-      ),
+      if (accounts.unlinkedAccountOf(f.address) == null ||
+          world._devicesOf(f.address).length > 1)
+        RelayFriend(
+          linked: accounts.unlinkedAccountOf(f.address) == null,
+          address: f.address,
+          lastSeenAtMillis: <int>[
+            for (final String a in world._devicesOf(f.address))
+              world._lastSeenOf(a),
+          ].fold<int>(0, max),
+          devices: <String>[
+            for (final String a in world._devicesOf(f.address))
+              if (a != PeerShareCodec.normalizeAddress(f.address) &&
+                  accounts.unlinkedAccountOf(a) == null)
+                a,
+          ],
+        ),
   ];
 
   @override
@@ -365,7 +401,7 @@ final class FriendsPhone implements RelayPeerSource {
       send: (String to, Map<String, dynamic> payload) =>
           link.send(remoteAddress: to, payload: payload),
       clock: () => world.net.now,
-      staysOnline: device.staysOnline,
+      deviceClass: () => device.relayClass,
     );
     // Only used to send: the frames are taken to the engine by [_onFrame],
     // which waits for the app to be done with each one.
@@ -378,13 +414,19 @@ final class FriendsPhone implements RelayPeerSource {
       overrides: [
         signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
         socialSnapshotStoreProvider.overrideWithValue(
-          MemorySocialSnapshotStore(),
+          MemorySocialSnapshotStore(_seed),
         ),
         messageTimelineStoreProvider.overrideWithValue(timeline),
         attachmentTransferStoreProvider.overrideWithValue(
           MemoryAttachmentTransferStore(),
         ),
-        signalTransportProvider.overrideWithValue(transport),
+        // Friends with several devices look like one person, as in the app.
+        signalTransportProvider.overrideWithValue(
+          AccountRoutingTransport(
+            delegate: transport,
+            directory: () => accounts,
+          ),
+        ),
         relayEngineProvider.overrideWithValue(engine),
         runtimeNodeRuntimeProvider.overrideWithValue(_runtime),
         runtimeSystemNotificationServiceProvider.overrideWithValue(notices),
@@ -437,8 +479,12 @@ final class FriendsPhone implements RelayPeerSource {
     final List<SignalTransportFrame> out = await engine.handleIncoming(frame);
     for (final SignalTransportFrame next in out) {
       _appFrames.add(next);
+      final String? from = _speakerOf(next.from);
+      if (from == null) {
+        continue;
+      }
       final ZenSignal? signal = zenSignalFromTransportPayload(
-        sender: next.from,
+        sender: from,
         payload: next.payload,
       );
       if (signal != null) {
@@ -449,6 +495,20 @@ final class FriendsPhone implements RelayPeerSource {
       }
     }
     return true;
+  }
+
+  /// Who the app hears in a frame from [address], as the account routing
+  /// makes it: a friend's other device speaks as the friend; an unlinked
+  /// device is not heard (`null`).
+  String? _speakerOf(String address) {
+    if (accounts.unlinkedAccountOf(address) != null) {
+      return null;
+    }
+    final String? account = accounts.accountOf(address);
+    if (account == null || account == accounts.ownAccount) {
+      return address;
+    }
+    return accounts.contactAddressOf(account) ?? address;
   }
 
   Future<void> _lock() async {
@@ -606,6 +666,13 @@ final class FriendsWorld {
   final Map<String, FriendsPhone> _byName = <String, FriendsPhone>{};
   final Map<String, FriendsPhone> _byAddress = <String, FriendsPhone>{};
   final Map<String, int> _aliveAt = <String, int>{};
+
+  /// Address -> account (each phone has its own unless added with
+  /// [addDevice]).
+  final Map<String, String> _accountOf = <String, String>{};
+
+  /// Devices their owner unlinked.
+  final Set<String> _unlinked = <String>{};
   int _sentAtGuard = 0;
 
   /// Builds a world with [names] (one phone each, or with the device kinds
@@ -640,14 +707,78 @@ final class FriendsWorld {
   Future<FriendsPhone> add(
     String name, {
     SimDevice device = SimDevice.android,
+  }) => _add(name, device: device, account: name);
+
+  Future<FriendsPhone> _add(
+    String name, {
+    required SimDevice device,
+    required String account,
+    SocialHubState? seed,
   }) async {
     final SimPhone sim = net.phone(name);
     final Directory dir = Directory.systemTemp.createTempSync('zen-world-');
-    final FriendsPhone p = FriendsPhone._(this, name, sim, device, dir);
+    final FriendsPhone p = FriendsPhone._(
+      this,
+      name,
+      sim,
+      device,
+      dir,
+      seed: seed,
+    );
     _byName[name] = p;
     _byAddress[sim.address] = p;
+    _accountOf[sim.address] = account;
     await p._start();
     return p;
+  }
+
+  /// [owner]'s account gets another device, [name]: a second phone, a
+  /// computer, or the phone the account moved to. It has the account's
+  /// friends (the account's devices share them), but its own address,
+  /// mailbox key and mailboxes; the friends know it is [owner]'s (as their
+  /// ledger tells them). The announcements settle afterwards.
+  Future<FriendsPhone> addDevice(
+    FriendsPhone owner,
+    String name, {
+    SimDevice device = SimDevice.android,
+  }) async {
+    final SocialHubState seed =
+        SocialHubState.empty(
+          lifecycle: const LifecycleSnapshot(
+            visibility: AppVisibilityState.background,
+            generation: 1,
+            capturedAtMillis: 0,
+          ),
+        ).copyWith(
+          friends: <String, FriendProfile>{
+            for (final FriendProfile f in owner.state.acceptedFriends)
+              f.address: f,
+          },
+        );
+    final FriendsPhone p = await _add(
+      name,
+      device: device,
+      account: _accountOf[owner.address]!,
+      seed: seed,
+    );
+    await settleMailboxes();
+    return p;
+  }
+
+  /// [p]'s owner unlinks it (a lost phone): friends neither send to it nor
+  /// hear it any more; the account's other devices stand in for it.
+  void unlink(FriendsPhone p) => _unlinked.add(p.address);
+
+  /// Every device of the account [address] belongs to.
+  List<String> _devicesOf(String address) {
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    final String? account = _accountOf[normal];
+    return account == null
+        ? <String>[normal]
+        : <String>[
+            for (final MapEntry<String, String> e in _accountOf.entries)
+              if (e.value == account) e.key,
+          ];
   }
 
   /// Makes [a] and [b] friends the way the app does it: an invitation over
@@ -957,4 +1088,42 @@ final class FriendsWorld {
       await p._dispose();
     }
   }
+}
+
+/// What a phone's ledger would know about accounts: the world's truth.
+final class _WorldAccounts implements AccountDeviceDirectory {
+  _WorldAccounts(this.phone);
+
+  final FriendsPhone phone;
+
+  FriendsWorld get _world => phone.world;
+
+  @override
+  String get ownAccount => _world._accountOf[phone.address] ?? '';
+
+  @override
+  String? accountOf(String address) =>
+      _world._accountOf[PeerShareCodec.normalizeAddress(address)];
+
+  @override
+  List<String> addressesOf(String account) => <String>[
+    for (final MapEntry<String, String> e in _world._accountOf.entries)
+      if (e.value == account && e.key != phone.address) e.key,
+  ];
+
+  @override
+  String? contactAddressOf(String account) {
+    for (final FriendProfile f in phone.state.acceptedFriends) {
+      if (accountOf(f.address) == account) {
+        return f.address;
+      }
+    }
+    return null;
+  }
+
+  @override
+  String? unlinkedAccountOf(String address) =>
+      _world._unlinked.contains(PeerShareCodec.normalizeAddress(address))
+      ? accountOf(address)
+      : null;
 }
