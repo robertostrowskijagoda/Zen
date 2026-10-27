@@ -1,0 +1,125 @@
+# Keeps ios/Podfile.lock and macos/Podfile.lock in step with the Flutter
+# packages. A package update can change the pods the Mac and iPhone builds
+# resolve, and release.yml (and ios.yml) refuse a build whose pods differ from
+# the committed files; only a Mac can resolve them, so this does it here:
+# - a push to main that changes the packages: when the files differ it pushes
+#   a branch podfile-lock/<commit> with the new files, opens a pull request
+#   and starts CI on it;
+# - a pull request from a branch of this repository: it commits the new files
+#   to that branch and starts CI on it again;
+# - a Dependabot pull request (its token can only read): it fails and keeps
+#   the files as the artifact podfile-locks; once merged, the push to main
+#   above brings them.
+# Only the two Podfile.lock files are ever committed.
+name: Podfile.lock
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pubspec.lock
+      - ios/Podfile
+      - macos/Podfile
+      - .github/workflows/podfile-lock.yml
+  pull_request:
+    paths:
+      - pubspec.lock
+      - ios/Podfile
+      - macos/Podfile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: podfile-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.1'
+
+jobs:
+  refresh:
+    name: Refresh Podfile.lock
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      # The same resolution the builds make: Flutter writes its pod settings,
+      # then CocoaPods resolves the pods.
+      - name: Resolve the pods
+        run: |
+          flutter build macos --config-only --release
+          (cd macos && pod install)
+          flutter build ios --config-only --release --no-codesign
+          (cd ios && pod install)
+
+      - name: Compare with the committed files
+        id: diff
+        run: |
+          if git diff --quiet -I '^COCOAPODS:' -- ios/Podfile.lock macos/Podfile.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The committed Podfile.lock files match the packages." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- ios/Podfile.lock macos/Podfile.lock
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: podfile-locks
+          path: |
+            ios/Podfile.lock
+            macos/Podfile.lock
+          if-no-files-found: warn
+
+      - name: Commit the new files
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$EVENT" = "pull_request" ]; then
+            if [ "$ACTOR" = "dependabot[bot]" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+              echo "::error::The pods differ from the committed Podfile.lock. The new files are in the artifact podfile-locks; after the merge the push to main brings them in a pull request of their own."
+              exit 1
+            fi
+            branch="$HEAD_REF"
+          else
+            branch="podfile-lock/${GITHUB_SHA::7}"
+            git switch -c "$branch"
+          fi
+          git add ios/Podfile.lock macos/Podfile.lock
+          git commit -m "Update Podfile.lock for the new packages"
+          git push origin "HEAD:$branch"
+          if [ "$EVENT" != "pull_request" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "Update Podfile.lock for the new packages" \
+              --body "The pods resolved for the current packages differ from the committed Podfile.lock files. This updates only ios/Podfile.lock and macos/Podfile.lock." \
+              || echo "Open the pull request by hand: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?expand=1" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # A push made with this token starts no workflow, so CI is started
+          # here for the new commit.
+          gh workflow run ci.yml --ref "$branch"
