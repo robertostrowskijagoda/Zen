@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -12,12 +14,16 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// What the wall does in the background: system notifications about
-/// reactions to your posts and the storage limits.
+/// reactions to your posts, posts passed on beyond friends and the storage
+/// limits.
 final class FeedMaintenance {
-  FeedMaintenance({required this.node, required this.notifier});
+  FeedMaintenance({required this.node, required this.notifier, this.reach});
 
   final LedgerNode node;
   final ReactionSystemNotifier notifier;
+
+  /// Passes posts on beyond friends and fetches those passed on to us.
+  final PostReachService? reach;
 
   Timer? _first;
 
@@ -31,6 +37,10 @@ final class FeedMaintenance {
   /// shortly after the start (the ledger is read from disk by then).
   void start() {
     notifier.start();
+    unawaitedLogged(
+      reach?.start() ?? Future<void>.value(),
+      context: 'Posty dalszych znajomych',
+    );
     _first ??= Timer(
       const Duration(seconds: 45),
       () => unawaited(enforceLimits()),
@@ -40,6 +50,7 @@ final class FeedMaintenance {
   /// Once a minute from the app's clock: the limits are applied every
   /// [kStorageRetentionInterval].
   void minute(int minute) {
+    reach?.minute(minute);
     if (minute % kStorageRetentionInterval.inMinutes == 0) {
       unawaited(enforceLimits());
     }
@@ -52,7 +63,10 @@ final class FeedMaintenance {
     }
     _enforcing = true;
     try {
-      final RetentionResult result = await enforceStorageLimits(node);
+      final RetentionResult result = await enforceStorageLimits(
+        node,
+        held: reach?.heldEntries ?? const <LogEntry>[],
+      );
       cleaned = RetentionResult(
         expiredFiles: cleaned.expiredFiles + result.expiredFiles,
         expiredBytes: cleaned.expiredBytes + result.expiredBytes,
@@ -84,6 +98,7 @@ final Provider<FeedMaintenance?> feedMaintenanceProvider =
       }
       final FeedMaintenance maintenance = FeedMaintenance(
         node: node,
+        reach: ref.watch(postReachProvider),
         notifier: ReactionSystemNotifier(
           node: node,
           nameOf: (String address) {
@@ -121,7 +136,12 @@ final FutureProvider<StorageReport?> storageReportProvider =
       }
       await maintenance.node.start();
       return StorageReport(
-        usage: storageUsageOf(storedMediaOf(maintenance.node)),
+        usage: storageUsageOf(
+          storedMediaOf(
+            maintenance.node,
+            held: maintenance.reach?.heldEntries ?? const <LogEntry>[],
+          ),
+        ),
         cleaned: maintenance.cleaned,
       );
     });

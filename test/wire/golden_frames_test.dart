@@ -19,6 +19,7 @@ import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 
 const String _ada = '200:1111:2222:3333:4444:5555:6666:7777';
@@ -336,6 +337,24 @@ const String _ledgerEntryEd25519Only = '''
 }
 ''';
 
+/// Asking whoever holds a post passed on beyond friends for it.
+const String _postWant =
+    '{"type":"lg_post_want",'
+    '"id":"$_ledgerEntryId",'
+    '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs="}';
+
+/// The body of a `post_ann` entry: two notices, the second about a post
+/// its author removed.
+const String _postAnnounceBody =
+    '{"items":['
+    '{"p":"$_ledgerEntryId",'
+    '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs=",'
+    '"t":1790000000000,"r":3,"h":2,"aa":"$_ada","e":1790000600000},'
+    '{"p":"0000000000000000000000000000000000000000000000000000000000000000",'
+    '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs=",'
+    '"t":1790000000000,"r":2,"h":2,"x":1}'
+    ']}';
+
 Map<String, dynamic> _frame(String json) =>
     jsonDecode(json) as Map<String, dynamic>;
 
@@ -401,6 +420,57 @@ void main() {
     expect(signal.memberAddresses, <String>[_ada, _bob]);
     expect(signal.displayName, 'Ada');
     expect(signal.inviteId, 'inv-golden-1');
+  });
+
+  group('posts passed on beyond friends', () {
+    test('lg_post_want names the post and its author', () {
+      final ({String id, String author})? want = readPostWant(
+        _frame(_postWant),
+      );
+      expect(want?.id, _ledgerEntryId);
+      expect(want?.author, 'GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs=');
+      expect(postWantFrame(want!.id, want.author), _frame(_postWant));
+    });
+
+    test('a post_ann notice keeps its keys', () {
+      final List<PostAnnouncement> items = <PostAnnouncement>[
+        for (final Object? item in _frame(_postAnnounceBody)['items'] as List)
+          PostAnnouncement.fromJson(item)!,
+      ];
+      expect(items.first.post, _ledgerEntryId);
+      expect(items.first.reach, PostReach.third);
+      expect(items.first.hops, 2);
+      expect(items.first.authorAddress, _ada);
+      expect(items.first.editMillis, 1790000600000);
+      expect(items.last.removed, isTrue);
+      expect(
+        announceBody(items),
+        _frame(_postAnnounceBody),
+        reason: 'what this build writes is the frozen sample',
+      );
+    });
+
+    test('lg_post uses the frozen keys', () {
+      final Map<String, dynamic> part = <String, dynamic>{'x': 1};
+      final Map<String, dynamic> answer = postAnswerFrame(
+        _ledgerEntryId,
+        'konto',
+        entry: part,
+        edit: part,
+        tombstone: part,
+        profile: part,
+      );
+      expect(answer.keys, <String>[
+        'type',
+        'id',
+        'a',
+        'entry',
+        'edit',
+        'del',
+        'prof',
+      ]);
+      expect(answer['type'], 'lg_post');
+    });
   });
 
   group('ledger entry', () {

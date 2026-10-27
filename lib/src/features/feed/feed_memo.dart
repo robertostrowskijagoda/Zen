@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
@@ -24,6 +25,7 @@ final class FeedMemo {
     required int revision,
     required String Function(String address) nameOf,
     ReshareCache? reshares,
+    HeldPosts? held,
     Set<String> pyramidAddresses = const <String>{},
     int? nowMillis,
   }) {
@@ -48,7 +50,9 @@ final class FeedMemo {
         node,
         nameOf: nameOf,
         reshares: reshares,
+        held: held,
         pyramidAddresses: pyramidAddresses,
+        nowMillis: now,
       ))
         if (!p.isOwn && keptOnWall(p, now, friends)) p,
     ]);

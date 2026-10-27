@@ -6,15 +6,18 @@ import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 
 /// What each chip of the Tablica shows: one content, one card.
 void main() {
-  FeedPost friend(String id, int at, {bool own = false}) => FeedPost(
-    id: id,
-    account: 'acc-$id',
-    authorLabel: 'Kasia',
-    authorAddress: 'addr-$id',
-    text: 'Zdjęcia z wycieczki',
-    millis: at,
-    isOwn: own,
-  );
+  FeedPost friend(String id, int at, {bool own = false, int degree = 1}) =>
+      FeedPost(
+        id: id,
+        account: 'acc-$id',
+        authorLabel: 'Kasia',
+        authorAddress: 'addr-$id',
+        text: 'Zdjęcia z wycieczki',
+        millis: at,
+        isOwn: own,
+        degree: degree,
+        via: degree > 1 ? const <String>['Bob'] : const <String>[],
+      );
 
   PyrFeedPost post(
     String id,
@@ -72,6 +75,29 @@ void main() {
 
   test('„Znajomi”: the friends only', () {
     expect(ids(FeedFilter.friends, member), <String>['f1', 'f2']);
+  });
+
+  test('„2. stopień” and „3. stopień”: posts passed on from that far; '
+      '„Znajomi” leaves them out, „Wszystko” keeps them in time', () {
+    final List<FeedPost> mixed = <FeedPost>[
+      friend('near', 50),
+      friend('second', 40, degree: 2),
+      friend('third', 30, degree: 3),
+      friend('near2', 20),
+    ];
+    List<String> shown(FeedFilter f) => <String>[
+      for (final FeedItem i in composeFeed(
+        f,
+        wall: mixed,
+        pyramid: PyramidFeed.empty,
+      ))
+        i.id,
+    ];
+    expect(shown(FeedFilter.friends), <String>['near', 'near2']);
+    expect(shown(FeedFilter.second), <String>['second']);
+    expect(shown(FeedFilter.third), <String>['third']);
+    expect(shown(FeedFilter.all), <String>['near', 'second', 'third', 'near2']);
+    expect(FeedFilter.parse('second'), FeedFilter.second);
   });
 
   test('„Przyjaciele”: only the posts of close friends, never own ones', () {
@@ -178,21 +204,32 @@ void main() {
     expect(ids(FeedFilter.all, outside), <String>['f1', 'f2', 'top']);
     expect(ids(FeedFilter.pyramid, outside), <String>['top']);
     expect(ids(FeedFilter.national, outside), <String>['nat']);
-    expect(feedFiltersFor(outside), FeedFilter.values);
+    const List<FeedFilter> every = <FeedFilter>[
+      FeedFilter.all,
+      FeedFilter.friends,
+      FeedFilter.second,
+      FeedFilter.third,
+      FeedFilter.close,
+      FeedFilter.pyramid,
+      FeedFilter.national,
+    ];
+    expect(feedFiltersFor(outside), every);
 
     final PyramidFeed onlyTop = PyramidFeed(
       posts: <PyrFeedPost>[post('top', PyrFeedKind.top, at: 10, level: 0)],
     );
-    expect(feedFiltersFor(onlyTop), FeedFilter.values);
+    expect(feedFiltersFor(onlyTop), every);
     expect(feedFiltersFor(PyramidFeed.empty), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
+      FeedFilter.second,
+      FeedFilter.third,
       FeedFilter.close,
       FeedFilter.national,
     ], reason: '„Kraj” is always there: the countries are picked in it');
     expect(
       feedFiltersFor(const PyramidFeed(member: true, nat: 'PL')),
-      FeedFilter.values,
+      every,
       reason: 'a member has the chips without posts too',
     );
   });

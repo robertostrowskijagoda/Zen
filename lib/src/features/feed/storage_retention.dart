@@ -190,13 +190,22 @@ Iterable<String> _blobIdsOf(LogEntry e) sync* {
 /// limits do not cover, like a profile) also uses is left out: it stays.
 /// So is a file no other writer's entry brought here (one this phone made,
 /// or a chat's): an old-dated entry naming it cannot make it expire.
-List<StoredMedia> storedMediaOf(LedgerNode node) {
+/// [held] are posts fetched from beyond friends (`post_reach.dart`), kept
+/// outside the ledger: their files count like those of posts in it.
+List<StoredMedia> storedMediaOf(
+  LedgerNode node, {
+  Iterable<LogEntry> held = const <LogEntry>[],
+}) {
   final Set<String> friends = node.friendAccounts.values.toSet();
   final Set<String> pinned = <String>{};
   final Map<String, ({int millis, String account, bool friend})> used =
       <String, ({int millis, String account, bool friend})>{};
-  for (final String space in node.store.spaces.toList()) {
-    for (final LogEntry e in node.store.entries(space)) {
+  for (final Iterable<LogEntry> entries in <Iterable<LogEntry>>[
+    for (final String space in node.store.spaces.toList())
+      node.store.entries(space),
+    held,
+  ]) {
+    for (final LogEntry e in entries) {
       final Iterable<String> ids = _blobIdsOf(e);
       if ((e.account == node.account && !_passedOnKinds.contains(e.kind)) ||
           !_limitedKinds.contains(e.kind)) {
@@ -312,6 +321,7 @@ final class RetentionResult {
 Future<RetentionResult> enforceStorageLimits(
   LedgerNode node, {
   int? nowMillis,
+  Iterable<LogEntry> held = const <LogEntry>[],
 }) async {
   await node.start();
   if (node.isSuspended) {
@@ -337,7 +347,7 @@ Future<RetentionResult> enforceStorageLimits(
     removedFiles++;
   }
   final RetentionPlan plan = planStorageRetention(
-    storedMediaOf(node),
+    storedMediaOf(node, held: held),
     nowMillis: nowMillis ?? DateTime.now().millisecondsSinceEpoch,
   );
   if (plan.isEmpty) {

@@ -147,6 +147,8 @@ void main() {
     expect(feedFiltersFor(w['P'].feed), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
+      FeedFilter.second,
+      FeedFilter.third,
       FeedFilter.close,
       FeedFilter.national,
     ]);

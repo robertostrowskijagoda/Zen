@@ -22,6 +22,8 @@ import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
+import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/presentation/comment_composer.dart';
 import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/mutual_friends.dart';
@@ -78,9 +80,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   /// The audience of the last post: the next one starts with it.
   /// New posts are for friends unless the user picks otherwise.
   Audience _audience = Audience.all;
+
+  /// How far the last public post went: the next one starts with it (kept
+  /// on the device; friends of friends at first).
+  PostReach _postReach = kDefaultPostReach;
   StreamSubscription<String>? _media;
   LedgerNode? _node;
   final ReshareCache _reshares = ReshareCache();
+
+  /// Posts passed on beyond friends: what is fetched shows on the wall.
+  PostReachService? _reach;
+  StreamSubscription<void>? _reachChanges;
   String? _error;
 
   /// Bumped whenever something [buildFeed] reads may have changed (the
@@ -103,6 +113,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   bool _filterPicked = false;
 
   static const String _filterKey = 'ui/feed_filter';
+  static const String _postReachKey = 'ui/post_reach';
 
   @override
   void initState() {
@@ -130,7 +141,29 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           })
           .catchError((Object _) {}),
     );
+    unawaited(
+      ref
+          .read(ledgerDiskProvider)
+          .read(_postReachKey)
+          .then((Uint8List? raw) {
+            final PostReach? kept = raw == null || raw.isEmpty
+                ? null
+                : PostReach.byHops(raw.first);
+            if (mounted && kept != null) {
+              _postReach = kept;
+            }
+          })
+          .catchError((Object _) {}),
+    );
     _node = ref.read(ledgerNodeProvider);
+    _reach = ref.read(postReachProvider);
+    _reachChanges = _reach?.changes.listen((_) {
+      _feedRevision++;
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    unawaited(_reach?.start());
     _media = _node?.mediaCompleted.listen((_) {
       if (mounted) {
         setState(() {});
@@ -172,6 +205,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     unawaited(_storeChanges?.cancel());
     unawaited(_opened?.cancel());
     unawaited(_media?.cancel());
+    unawaited(_reachChanges?.cancel());
     super.dispose();
   }
 
@@ -260,6 +294,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       context,
       onSubmit: _publish,
       initialAudience: _audience,
+      initialReach: _postReach,
       pickPhotos: widget.pickPhotos,
       pickOnOpen: withPhotos,
     );
@@ -284,6 +319,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final String? error = await publishDraft(ref, draft);
     if (error == null) {
       _audience = draft.audience;
+      if (draft.audience == Audience.public && draft.reach != _postReach) {
+        _postReach = draft.reach;
+        unawaited(
+          ref
+              .read(ledgerDiskProvider)
+              .write(_postReachKey, Uint8List.fromList(<int>[draft.reach.hops]))
+              .catchError((Object _) {}),
+        );
+      }
       if (mounted) {
         setState(() => _error = null);
       }
@@ -769,6 +813,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         revision: _feedRevision,
         nameOf: (String address) => _nameOf(social, address),
         reshares: _reshares,
+        held: _reach,
         pyramidAddresses: _pyramidAddresses(),
       );
 
@@ -925,6 +970,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             title: t('Jeszcze nic'),
             text: t('W sekcji krajowej nikt jeszcze nie pisał.'),
           ),
+          FeedFilter.second || FeedFilter.third => ZenEmpty(
+            key: const Key('feed-end'),
+            icon: Icons.alt_route_rounded,
+            title: filter == FeedFilter.second
+                ? t('Nic od znajomych znajomych')
+                : t('Nic z trzeciego stopnia'),
+            text: t(
+              'Tu są posty, które znajomi przekazali dalej, bo autor dał '
+              'im taki zasięg. Przy każdym widać, przez kogo dotarł.',
+            ),
+          ),
           FeedFilter.close => ZenEmpty(
             key: const Key('feed-end'),
             icon: Icons.favorite_outline_rounded,
@@ -1080,6 +1136,7 @@ Future<bool> editOwnPost(
     initialText: post.text,
     initialMedia: media,
     initialAudience: post.audience,
+    initialReach: post.reach,
     onSubmit: (PostDraft draft) async {
       try {
         final List<Map<String, dynamic>> refs = <Map<String, dynamic>>[
@@ -1181,6 +1238,7 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
       text,
       audience: draft.audience,
       images: media,
+      reach: draft.reach,
     );
     await node.publish(
       kPostKind,
@@ -1234,7 +1292,8 @@ String postTimeLabel(int millis, {bool withYear = false}) {
 }
 
 /// "Co słychać?" at the top of the wall; opens the post editor.
-/// „Wszystko · Znajomi · Przyjaciele · Piramida · Kraj” over the list.
+/// „Wszystko · Znajomi · 2. stopień · 3. stopień · Przyjaciele · Piramida ·
+/// Kraj” over the list.
 class _FilterChips extends StatelessWidget {
   const _FilterChips({
     required this.filters,
@@ -1249,6 +1308,8 @@ class _FilterChips extends StatelessWidget {
   String _label(FeedFilter f) => switch (f) {
     FeedFilter.all => t('Wszystko'),
     FeedFilter.friends => t('Znajomi'),
+    FeedFilter.second => t('2. stopień'),
+    FeedFilter.third => t('3. stopień'),
     FeedFilter.close => t('Przyjaciele'),
     FeedFilter.pyramid => t('Piramida'),
     FeedFilter.national => t('Kraj'),
@@ -1589,7 +1650,9 @@ class _PostCard extends StatelessWidget {
                 const SizedBox(width: 8),
             ],
           ),
-          if (post.resharedBy.isNotEmpty || post.audience != Audience.public)
+          if (post.resharedBy.isNotEmpty ||
+              post.via.isNotEmpty ||
+              post.audience != Audience.public)
             Padding(
               padding: const EdgeInsetsDirectional.only(top: 10, end: 8),
               child: Wrap(
@@ -1603,6 +1666,13 @@ class _PostCard extends StatelessWidget {
                       text: t('Udostępnił(a): {names}', {
                         'names': post.resharedBy.join(', '),
                       }),
+                      tone: zen.tone(ZenTone.people),
+                    ),
+                  if (post.via.isNotEmpty)
+                    _Pill(
+                      key: Key('feed-via-${post.id}'),
+                      icon: Icons.alt_route_rounded,
+                      text: t('przez {names}', {'names': post.via.join(', ')}),
                       tone: zen.tone(ZenTone.people),
                     ),
                   if (post.audience != Audience.public)
