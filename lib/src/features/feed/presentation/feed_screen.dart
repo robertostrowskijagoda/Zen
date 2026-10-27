@@ -1021,7 +1021,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       appBar: ZenSectionBar(
         title: t('Tablica'),
         actions: <Widget>[
-          if (node != null) ReactionNoticesButton(node: node),
+          const ReactionNoticesButton(),
           if (node != null)
             Padding(
               padding: const EdgeInsetsDirectional.only(end: 8),
