@@ -213,8 +213,24 @@ final class AppSettingsController extends Notifier<AppSettings> {
   }
 
   /// The setup (as of [kSetupRevision]) was gone through or skipped.
+  ///
+  /// Set only once it is on the disk: the gate leaves the setup as soon as
+  /// the state says so, so a write that fails must leave the state as it
+  /// was, for the setup to stay and say that it could not save.
   Future<void> setSetupDone() async {
-    await _save(state.copyWith(setupRevision: kSetupRevision));
+    final AppSettings before = state;
+    final AppSettings next = before.copyWith(setupRevision: kSetupRevision);
+    await ref.read(appSettingsStoreProvider).save(next);
+    if (!ref.mounted) {
+      return;
+    }
+    if (!identical(state, before)) {
+      // Something else was set meanwhile: saved again, with it.
+      await _save(state.copyWith(setupRevision: kSetupRevision));
+      return;
+    }
+    state = next;
+    await ref.read(appSecurityServiceProvider).applySettings(next);
   }
 
   /// The first-start permissions step is done.

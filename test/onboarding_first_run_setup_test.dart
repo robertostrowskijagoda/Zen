@@ -219,13 +219,14 @@ void main() {
     expect(find.text('aplikacja'), findsOneWidget);
   });
 
-  testWidgets('a setup that could not be saved does not hold the person in '
-      'it', (WidgetTester tester) async {
+  testWidgets('a setup that could not be saved says so, stays, and goes on '
+      'once a retry is saved', (WidgetTester tester) async {
     _tallScreen(tester);
+    final _FailingStore store = _FailingStore();
     await tester.pumpWidget(
       _gatedApp(
         overrides: [
-          appSettingsStoreProvider.overrideWithValue(_FailingStore()),
+          appSettingsStoreProvider.overrideWithValue(store),
           appSettingsInitialStateProvider.overrideWithValue(
             const AppSettings(),
           ),
@@ -239,10 +240,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('first-run-skip')));
     await tester.pumpAndSettle();
-    // The answer holds for this run (the gate follows the settings in
-    // memory); the file is written again with the next change. The error
-    // line of the screen is for a failure that leaves the state unset, which
-    // the controller does not produce today.
+    // Not on the disk: the next start would ask again, so the setup stays
+    // and says so instead of pretending it is done.
+    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+    expect(
+      find.text('Nie udało się zapisać. Spróbuj ponownie.'),
+      findsOneWidget,
+    );
+    expect(find.text('aplikacja'), findsNothing);
+
+    // Tried again once the disk takes it: on to the app.
+    store.failing = false;
+    await tester.tap(find.byKey(const Key('first-run-skip')));
+    await tester.pumpAndSettle();
     expect(find.text('aplikacja'), findsOneWidget);
     expect(find.byKey(const Key('first-run-setup')), findsNothing);
   });
@@ -645,9 +655,7 @@ void main() {
     );
   });
 
-  // Real finding, left skipped: the buttons ask for minimumSize 44, but the
-  // app theme is compact on phones (VisualDensity.compact takes 8 px off a
-  // button's minimum, tap target shrinkWrap), so they measure 36 px.
+  // The app theme is compact on phones; these buttons keep their 44 px.
   testWidgets('an iPhone: the buttons of the wake step are 44 px tall', (
     WidgetTester tester,
   ) async {
@@ -662,5 +670,5 @@ void main() {
         reason: button,
       );
     }
-  }, skip: true);
+  });
 }
