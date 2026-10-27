@@ -33,8 +33,12 @@ String? _conversationRelationshipStatusLabel(FriendProfile? friend) {
     // No relationship at all (a chat opened from a link, for one): say so,
     // so nothing on screen passes them off as someone the user knows.
     null => t('Nieznajomy'),
-    FriendRelationshipStatus.accepted =>
-      friend?.isOnline == true ? t('Aktywny teraz') : t('Offline'),
+    // Online, in the background or offline, with when Zen was last open
+    // there; nothing for a friend who does not show it.
+    FriendRelationshipStatus.accepted => friendPresenceLine(
+      friend!,
+      DateTime.now().millisecondsSinceEpoch,
+    ),
   };
 }
 

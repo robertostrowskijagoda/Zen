@@ -42,6 +42,7 @@ import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
@@ -2013,6 +2014,13 @@ final class _LockedReceiverSession {
         credentials: credentials,
       ).read(),
     );
+    // What a pong may tell friends: "w tle", when Zen was last open.
+    final LockedPresenceKit? presenceKit = LockedPresenceKit.fromJson(
+      await lockedPresenceKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
     // This device as a mailbox for friends: the app's kit and what this
     // service held in earlier runs, together.
     final BackgroundKitFile heldFile = lockedMailboxHeldFile(
@@ -2080,6 +2088,7 @@ final class _LockedReceiverSession {
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
         noticeKit: noticeKit,
+        presence: presenceKit,
         mailbox: mailboxKit == null || mailboxKit.isEmpty
             ? null
             : LockedMailbox(

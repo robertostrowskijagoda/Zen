@@ -1,20 +1,27 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -31,10 +38,21 @@ final Provider<RuntimePresenceConfig> runtimePresenceConfigProvider =
 /// screen and "away" when it leaves it.
 const Duration kPresencePingInterval = Duration(minutes: 2, seconds: 30);
 
-/// A friend with no sign of life for this long counts as offline: longer
-/// than two pings, because a locked phone answers only every other one
-/// (kLockedPongEvery).
-const Duration kPresenceOfflineAfter = Duration(minutes: 7);
+/// A friend "w tle" with no sign of life for this long counts as offline
+/// (and no longer reachable directly). A phone in the background never
+/// pings; it only answers this phone's pings, which go out only while Zen
+/// is on this screen, every [kPresencePingInterval], and a locked phone
+/// answers one contact at most every kLockedPongEvery (4 min): an answer
+/// comes about every 5 min, up to 6.5 min after coming back on the screen
+/// between two rounds. Twice that, so one lost answer is not "offline".
+const Duration kPresenceOfflineAfter = Duration(minutes: 12);
+
+/// A friend "online" with no new sign for this long counts as offline. A
+/// friend on the screen pings every [kPresencePingInterval] and answers
+/// this phone's pings at once, and tells "away" when Zen leaves their
+/// screen (an "away" lost: the next answer says "w tle"). Silence for two
+/// rounds and a bit means Zen was closed or the phone lost the network.
+const Duration kPresenceForegroundFor = Duration(minutes: 6);
 
 /// After coming back on the screen, how long the answers to the first pings
 /// may take before friends who did not answer count as offline.
@@ -44,11 +62,34 @@ final class RuntimePresenceConfig {
   const RuntimePresenceConfig({
     this.pingInterval = kPresencePingInterval,
     this.offlineAfter = kPresenceOfflineAfter,
+    this.foregroundFor = kPresenceForegroundFor,
   });
 
   final Duration pingInterval;
   final Duration offlineAfter;
+  final Duration foregroundFor;
 }
+
+/// Whether this device stops receiving once Zen leaves the screen: an
+/// iPhone, which iOS suspends, unless the keep-alive runs
+/// (docs/IOS_BACKGROUND.md). Friends then see it offline, not "w tle".
+final Provider<bool> presenceAsleepOffScreenProvider = Provider<bool>((
+  Ref ref,
+) {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+    return false;
+  }
+  return !ref.watch(
+    appSettingsControllerProvider.select(
+      (AppSettings settings) => settings.keepReceivingInBackground,
+    ),
+  );
+});
+
+/// Whether a friend at [level] may see this person's presence and last
+/// opening: not a weak acquaintance ("Słaby znajomy" sees no statuses but
+/// "Nie przeszkadzać"); `null` (the ledger is not up) counts as "Znajomy".
+bool presenceVisibleTo(FriendLevel? level) => level != FriendLevel.weak;
 
 /// Who gets presence pings: accepted friends, and the members of a group
 /// this phone invited who did not confirm the invite yet (a sign of life
@@ -77,6 +118,11 @@ bool isSecurityBlockingUi(AppSecurityService security) {
 /// friend now and then ([kPresencePingInterval]), "I am here" when it
 /// comes on the screen and "away" when it leaves it. Off the screen it
 /// pings no one; it still answers friends' pings.
+///
+/// Each ping, pong and "away" to a friend who may see it says this
+/// device's state (on the screen, in the background, or about to stop
+/// receiving) and how long ago Zen was last open here ([presenceFields]);
+/// nothing goes out just for that.
 final class RuntimeSignalModule extends ZenModule {
   RuntimeSignalModule(this._ref)
     : _inService = _ref.read(zenHostProvider) == ZenHost.backgroundService;
@@ -108,6 +154,10 @@ final class RuntimeSignalModule extends ZenModule {
   /// say it was lately, coming back on the screen pings no one at once.
   DateTime? _pingedAt;
   Timer? _pingedLately;
+
+  /// When Zen last left the screen in this run (wall time); `null` when it
+  /// was not on the screen yet (a computer starting in the tray).
+  DateTime? _leftScreenAt;
 
   @override
   String get id => 'signal';
@@ -176,6 +226,19 @@ final class RuntimeSignalModule extends ZenModule {
       _presenceTimer = null;
       _settleTimer?.cancel();
       _settleTimer = null;
+      if (_wasInteractive) {
+        final DateTime left = DateTime.now();
+        _leftScreenAt = left;
+        // Android: what the locked service may tell friends from now on.
+        scheduleMicrotask(() {
+          if (_running) {
+            unawaitedLogged(
+              writeLockedPresenceKit(_ref, lastOpenedAt: left),
+              context: 'Writing the presence kit failed',
+            );
+          }
+        });
+      }
       if (_wasInteractive && _awayOwed) {
         _wasInteractive = false;
         _awayOwed = false;
@@ -273,16 +336,17 @@ final class RuntimeSignalModule extends ZenModule {
         remoteAddress: from,
         payload: <String, dynamic>{
           'type': 'pong',
-          'state': _presenceStateLabel(),
+          if (isAcceptedFriend) ..._presenceFor(from),
           if (isAcceptedFriend) ...versionHello(),
           if (isAcceptedFriend) ..._hello(from),
         },
       );
       if (isAcceptedFriend) {
-        // A ping is a friend's "I am here": Zen is on their screen.
+        // A ping is a friend's "I am here": Zen is on their screen (as far
+        // as they show it).
         await hub.updatePeerPresence(
           peerAddress: from,
-          isForeground: true,
+          report: PresenceReport.fromPayload(frame.payload),
           observedAtMillis: frame.receivedAtMillis,
         );
         await _notePeerVersion(hub, from, frame.payload);
@@ -291,11 +355,12 @@ final class RuntimeSignalModule extends ZenModule {
     }
     if (type == kPresenceAwayType) {
       if (isAcceptedFriend) {
-        // Off their screen; still reachable (in the background) until no
-        // answer comes for kPresenceOfflineAfter.
+        // Off their screen: still reachable ("w tle") until no answer comes
+        // for kPresenceOfflineAfter, or offline at once when their device
+        // stops receiving (an iPhone).
         await hub.updatePeerPresence(
           peerAddress: from,
-          isForeground: false,
+          report: PresenceReport.fromPayload(frame.payload),
           observedAtMillis: frame.receivedAtMillis,
         );
       }
@@ -308,7 +373,7 @@ final class RuntimeSignalModule extends ZenModule {
       }
       await hub.updatePeerPresence(
         peerAddress: from,
-        isForeground: (frame.payload['state'] as String? ?? '') == 'foreground',
+        report: PresenceReport.fromPayload(frame.payload),
         observedAtMillis: frame.receivedAtMillis,
       );
       if (isAcceptedFriend) {
@@ -397,6 +462,7 @@ final class RuntimeSignalModule extends ZenModule {
           'type': 'ping',
           if (hubState.friendByAddress(address)?.status ==
               FriendRelationshipStatus.accepted) ...<String, dynamic>{
+            ..._presenceFor(address),
             ...versionHello(),
             ..._hello(address),
           },
@@ -415,7 +481,36 @@ final class RuntimeSignalModule extends ZenModule {
     }
   }
 
-  /// "Away" to every friend: Zen left the screen.
+  /// What [friend] (an accepted friend) may hear about this device's
+  /// presence: nothing when they may not see it ([presenceVisibleTo]);
+  /// otherwise the state and, unless the person keeps it to themselves,
+  /// how long ago Zen was last open (unknown before it was on the screen
+  /// in this run).
+  Map<String, dynamic> _presenceFor(String friend) {
+    if (!presenceVisibleTo(_ref.read(friendLevelLookupProvider).of(friend))) {
+      return const <String, dynamic>{};
+    }
+    final bool onScreen = _isUiInteractive();
+    final DateTime? left = _leftScreenAt;
+    final Duration? openedAgo =
+        !_ref.read(appSettingsControllerProvider).showLastOpened
+        ? null
+        : onScreen
+        ? Duration.zero
+        : left == null
+        ? null
+        : DateTime.now().difference(left);
+    return presenceFields(
+      own: onScreen
+          ? PeerPresence.online
+          : _ref.read(presenceAsleepOffScreenProvider)
+          ? PeerPresence.offline
+          : PeerPresence.background,
+      openedAgo: openedAgo,
+    );
+  }
+
+  /// "Away" to every friend who may see it: Zen left the screen.
   Future<void> _sendAway() async {
     final SignalTransport? transport = _transport;
     final SocialHubController hub = _ref.read(
@@ -437,10 +532,15 @@ final class RuntimeSignalModule extends ZenModule {
           !isRoutablePeerAddress(address)) {
         continue;
       }
+      final Map<String, dynamic> presence = _presenceFor(address);
+      if (presence.isEmpty) {
+        // They see nothing of it: nothing to tell.
+        continue;
+      }
       try {
         await transport.send(
           remoteAddress: address,
-          payload: const <String, dynamic>{'type': kPresenceAwayType},
+          payload: <String, dynamic>{'type': kPresenceAwayType, ...presence},
         );
       } on Object catch (error) {
         logZenWarning('"Away" to a friend was not sent: $error');
@@ -452,10 +552,14 @@ final class RuntimeSignalModule extends ZenModule {
     if (!_running || !_presenceRuns()) {
       return;
     }
+    final RuntimePresenceConfig config = _ref.read(
+      runtimePresenceConfigProvider,
+    );
     await _ref
         .read(socialHubControllerProvider.notifier)
         .decayPresence(
-          offlineAfter: _ref.read(runtimePresenceConfigProvider).offlineAfter,
+          offlineAfter: config.offlineAfter,
+          foregroundFor: config.foregroundFor,
         );
   }
 
@@ -530,10 +634,6 @@ final class RuntimeSignalModule extends ZenModule {
 
   /// Presence pings go out only while Zen is on the screen and unlocked.
   bool _presenceRuns() => _runsUnseen || _isUiInteractive();
-
-  String _presenceStateLabel() {
-    return _isUiInteractive() ? 'foreground' : 'background';
-  }
 
   bool _isUiInteractive() {
     final AppSecurityService security = _ref.read(appSecurityServiceProvider);

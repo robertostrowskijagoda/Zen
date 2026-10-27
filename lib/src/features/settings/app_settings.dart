@@ -431,6 +431,7 @@ final class AppSettings {
     this.bluetoothLinks = false,
     this.multipeerLinks = false,
     this.keepReceivingInBackground = false,
+    this.showLastOpened = true,
     this.seenTips = const <String>{},
     this.notificationsSeenMillis = 0,
   });
@@ -573,6 +574,10 @@ final class AppSettings {
   /// costs a lot of battery (docs/IOS_BACKGROUND.md).
   final bool keepReceivingInBackground;
 
+  /// "Pokazuj, kiedy ostatnio otwierałem aplikację": friends who see this
+  /// person's presence also see when Zen was last open here. On by default.
+  final bool showLastOpened;
+
   /// One-time cards and reminders already shown or dismissed, by id (see
   /// `ZenTips`): a card shows until its id is here.
   final Set<String> seenTips;
@@ -639,6 +644,7 @@ final class AppSettings {
     bool? bluetoothLinks,
     bool? multipeerLinks,
     bool? keepReceivingInBackground,
+    bool? showLastOpened,
     Set<String>? seenTips,
     int? notificationsSeenMillis,
   }) {
@@ -679,6 +685,7 @@ final class AppSettings {
       multipeerLinks: multipeerLinks ?? this.multipeerLinks,
       keepReceivingInBackground:
           keepReceivingInBackground ?? this.keepReceivingInBackground,
+      showLastOpened: showLastOpened ?? this.showLastOpened,
       seenTips: seenTips ?? this.seenTips,
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
@@ -718,6 +725,7 @@ final class AppSettings {
     'bluetoothLinks': bluetoothLinks,
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
+    'showLastOpened': showLastOpened,
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
     if (notificationsSeenMillis > 0)
       'notificationsSeenMillis': notificationsSeenMillis,
@@ -773,6 +781,7 @@ final class AppSettings {
       bluetoothLinks: pick<bool>('bluetoothLinks'),
       multipeerLinks: pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
+      showLastOpened: pick<bool>('showLastOpened'),
       seenTips: switch (json['seenTips']) {
         final List<dynamic> ids => ids.whereType<String>().toSet(),
         _ => null,

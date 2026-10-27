@@ -3,6 +3,7 @@ import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/calls/ongoing_group_call.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
@@ -159,6 +160,7 @@ final class SocialHubState {
           displayName: 'Ada',
           status: FriendRelationshipStatus.accepted,
           isOnline: true,
+          presence: PeerPresence.online,
           lastMessagePreview:
               'Jestem online, mogę wejść na rozmowę za 5 minut.',
           lastActivityLabel: 'Teraz',
@@ -169,6 +171,7 @@ final class SocialHubState {
           displayName: 'Maks',
           status: FriendRelationshipStatus.accepted,
           isOnline: true,
+          presence: PeerPresence.background,
           lastMessagePreview:
               'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
           lastActivityLabel: '08:41',
@@ -425,8 +428,13 @@ final class SocialHubState {
       if (unreadDelta != 0) {
         return unreadDelta;
       }
-      if (left.isOnline != right.isOnline) {
-        return right.isOnline ? 1 : -1;
+      // Online first, then in the background (a friend hiding it counts as
+      // offline here).
+      final int presenceDelta = right.presence.index.compareTo(
+        left.presence.index,
+      );
+      if (presenceDelta != 0) {
+        return presenceDelta;
       }
       return left.displayLabel.compareTo(right.displayLabel);
     });

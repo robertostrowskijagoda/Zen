@@ -23,6 +23,7 @@ import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
@@ -267,6 +268,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       friend: friend,
       peerAddress: widget.peerAddress,
     );
+    // The presence dot: only for a friend who shows it.
+    final PeerPresence presence = friend?.presence ?? PeerPresence.hidden;
+    final bool showsPresence =
+        friend?.status == FriendRelationshipStatus.accepted &&
+        presence != PeerPresence.hidden;
     final AsyncValue<List<ChatMessage>> messages = ref.watch(
       conversationMessagesProvider(widget.peerAddress),
     );
@@ -320,6 +326,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   address: widget.peerAddress,
                   name: conversationTitle,
                   size: 40,
+                  online: presence == PeerPresence.online,
+                  away: presence == PeerPresence.background,
+                  showStatus: showsPresence,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -358,8 +367,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       else
                         Row(
                           children: <Widget>[
-                            ZenStatusDot(on: friend?.isOnline == true, size: 6),
-                            const SizedBox(width: 4),
+                            if (showsPresence) ...<Widget>[
+                              ZenStatusDot(
+                                on: presence == PeerPresence.online,
+                                away: presence == PeerPresence.background,
+                                size: 6,
+                              ),
+                              const SizedBox(width: 4),
+                            ],
                             Flexible(
                               child: Text(
                                 <String>[
@@ -367,27 +382,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   // their own name.
                                   if (friend?.hasNickname == true)
                                     friend!.nickname.trim(),
-                                  conversationSubtitle.isNotEmpty
-                                      ? conversationSubtitle
-                                      : (friend?.isOnline == true
-                                            ? t('online')
-                                            // Quiet for a week or more: say
-                                            // since when (Zen removed?).
-                                            : quietFriendLabel(
-                                                    friend?.lastPresenceAtMillis ??
-                                                        0,
-                                                    DateTime.now()
-                                                        .millisecondsSinceEpoch,
-                                                  ) ??
-                                                  t('offline')),
+                                  if (conversationSubtitle.isNotEmpty)
+                                    conversationSubtitle,
                                 ].join(' · '),
                                 key: const Key('conversation-subtitle'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  color: friend?.isOnline == true
-                                      ? zen.success
-                                      : zen.textSecondary,
+                                  color: !showsPresence
+                                      ? zen.textSecondary
+                                      : switch (presence) {
+                                          PeerPresence.online => zen.success,
+                                          PeerPresence.background =>
+                                            zen.warning,
+                                          _ => zen.textSecondary,
+                                        },
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w500,
                                 ),

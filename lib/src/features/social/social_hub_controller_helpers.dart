@@ -1444,26 +1444,6 @@ String _activityLabelForMillis(int sentAtMillis) {
   return ZenFormat.dayMonth(sentAt);
 }
 
-String _presenceLastSeenLabel({
-  required int nowMillis,
-  required int lastSeenAtMillis,
-}) {
-  final int deltaMillis = nowMillis <= lastSeenAtMillis
-      ? 0
-      : nowMillis - lastSeenAtMillis;
-  final Duration delta = Duration(milliseconds: deltaMillis);
-  if (delta < const Duration(minutes: 1)) {
-    return t('Przed chwila');
-  }
-  if (delta < const Duration(hours: 1)) {
-    return t('{count} min temu', {'count': delta.inMinutes});
-  }
-  if (delta < const Duration(days: 1)) {
-    return t('{count} h temu', {'count': delta.inHours});
-  }
-  return t('{count} d temu', {'count': delta.inDays});
-}
-
 List<InboxEntry> _removeEntriesForPeer(
   List<InboxEntry> entries,
   String peerAddress, {

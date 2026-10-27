@@ -16,6 +16,7 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/calls/ongoing_group_call.dart';
 import 'package:zen/src/domain/friends/friend_lifecycle_reducer.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -157,8 +158,9 @@ final Provider<Duration> callReRingIntervalProvider = Provider<Duration>((
   return const Duration(seconds: 1);
 });
 
-/// A friend who keeps answering pings has their "last seen" time written
-/// to the state at most this often (in between it lives in memory).
+/// A friend who keeps answering pings has their "last seen" time (and the
+/// time their presence was confirmed) written to the state at most this
+/// often (in between it lives in memory).
 const Duration kPresenceStoreEvery = Duration(minutes: 10);
 
 final NotifierProvider<SocialHubController, SocialHubState>
@@ -726,6 +728,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// screen only lands here: the whole state is not copied, re-encrypted
   /// and written for it (B3).
   final Map<String, int> _presenceSeenAt = <String, int>{};
+
+  /// When each friend's presence was last confirmed, and when they last had
+  /// Zen open as they told it: in memory like [_presenceSeenAt] while the
+  /// state shows the same.
+  final Map<String, int> _presenceConfirmedAt = <String, int>{};
+  final Map<String, int> _openedAt = <String, int>{};
 
   Timer? _persistSoonTimer;
 

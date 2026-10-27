@@ -15,9 +15,11 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -1375,7 +1377,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final Map<String, PyramidMark> pyr = pyramidMarks(pyramid);
     final GraphFacts facts = GraphFacts(
       statusOf: (String a) => meet.book.intentOf(a, nowMs),
-      online: (String a) => byAddress[a]?.friend?.isOnline ?? false,
+      // Zen open on their screen (in the background is not online).
+      online: (String a) =>
+          byAddress[a]?.friend?.presence == PeerPresence.online,
       openOf: open.openOf,
       met: data.met.contains,
       nearby: near.contains,
@@ -2791,9 +2795,19 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                           Text(
                             <String>[
                               _ringLabel(n.ring),
-                              if (friend != null && friend.isOnline)
-                                t('online')
+                              if (friend != null &&
+                                  friend.presence != PeerPresence.hidden &&
+                                  friend.presence != PeerPresence.offline)
+                                presenceStateLabel(friend.presence)!
                               else if (friend != null &&
+                                  friend.presence != PeerPresence.hidden &&
+                                  friend.lastOpenedAtMillis > 0)
+                                lastOpenedLabel(
+                                  friend.lastOpenedAtMillis,
+                                  meet.now,
+                                )!
+                              else if (friend != null &&
+                                  friend.presence != PeerPresence.hidden &&
                                   friend.lastPresenceAtMillis > 0)
                                 t('widziany(-a) {ago}', {
                                   'ago': _ago(

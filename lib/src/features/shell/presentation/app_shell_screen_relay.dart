@@ -372,14 +372,21 @@ class _RelayFriendTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
-        friend.isOnline ? t('online') : friend.lastActivityLabel,
+        friendPresenceLine(friend, DateTime.now().millisecondsSinceEpoch) ??
+            friend.lastActivityLabel,
         style: TextStyle(
-          color: friend.isOnline ? zen.success : zen.textSecondary,
+          color: switch (friend.presence) {
+            PeerPresence.online => zen.success,
+            PeerPresence.background => zen.warning,
+            _ => zen.textSecondary,
+          },
         ),
       ),
       secondary: ZenBlobAvatar(
         name: friend.displayLabel,
-        online: friend.isOnline,
+        online: friend.presence == PeerPresence.online,
+        away: friend.presence == PeerPresence.background,
+        showStatus: friend.presence != PeerPresence.hidden,
         size: 40,
       ),
     );

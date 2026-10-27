@@ -15,6 +15,7 @@ import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -473,9 +474,10 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   the inbox; a reliable one is acknowledged (`rly_ack`) only once it is
 ///   on the disk, so nothing the sender drops is lost. The app opens and
 ///   merges them after unlock.
-/// * Presence: a ping from a contact gets a pong ("background"), so
-///   friends deliver directly instead of through mailboxes. It pings no
-///   one itself.
+/// * Presence: a ping from a contact gets a pong, so friends deliver
+///   directly instead of through mailboxes; to the friends who may see it
+///   the pong also says "w tle" and when Zen was last open
+///   ([LockedPresenceKit]). It pings no one itself.
 /// * Its own mailboxes are asked for held mail (`rly_poll`); each envelope
 ///   is kept once (also when it came directly before, or the app already
 ///   took it: `taken`) and confirmed to whoever handed it over, so it is
@@ -512,6 +514,7 @@ final class LockedReceiver {
     LockedKnockWatch? knocks,
     LockedMailbox? mailbox,
     LockedNoticeKit? noticeKit,
+    LockedPresenceKit? presence,
     Set<String> taken = const <String>{},
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
@@ -529,6 +532,7 @@ final class LockedReceiver {
        _knocks = knocks,
        _mailbox = mailbox,
        _noticeKit = noticeKit ?? const LockedNoticeKit(),
+       _presence = presence ?? const LockedPresenceKit(),
        _taken = taken,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -554,6 +558,10 @@ final class LockedReceiver {
   /// What a message's notice may say (without a kit: only that it came).
   final LockedNoticeKit _noticeKit;
 
+  /// What a pong may say about this phone (without a kit: only that it
+  /// answers).
+  final LockedPresenceKit _presence;
+
   /// [LockedMailboxKit.takenTag]s of what the app already took before it
   /// locked: a copy of one is confirmed, never kept or told about again.
   final Set<String> _taken;
@@ -576,7 +584,7 @@ final class LockedReceiver {
 
   /// A contact's pings get a pong at most this often: friends ping only
   /// while Zen is on their screen, and a pong every other ping keeps this
-  /// phone "in the background" for them (kPresenceOfflineAfter).
+  /// phone reachable, "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
   final Map<String, int> _pongedAt = <String, int>{};
 
@@ -837,7 +845,8 @@ final class LockedReceiver {
         _pongedAt[from] = at;
         await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
-          'state': 'background',
+          if (kind == BackgroundContactKind.friend)
+            ..._presence.pongFields(from, at),
           if (kind == BackgroundContactKind.friend) ...versionHello(),
         });
       }

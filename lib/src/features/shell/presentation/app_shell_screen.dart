@@ -24,6 +24,7 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -42,6 +43,7 @@ import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
@@ -286,7 +288,8 @@ final class ConversationPreview {
     required this.lastMessage,
     required this.timeLabel,
     required this.unreadCount,
-    required this.isOnline,
+    this.presence = PeerPresence.offline,
+    this.lastOpenedAtMillis = 0,
     this.isTyping = false,
     this.avatarPath,
     this.nickname = '',
@@ -304,8 +307,15 @@ final class ConversationPreview {
   final String lastMessage;
   final String timeLabel;
   final int unreadCount;
-  final bool isOnline;
+
+  /// What the friend's Zen is doing ([PeerPresence.hidden]: they do not
+  /// show it), and when it was last open there (0: not known).
+  final PeerPresence presence;
+  final int lastOpenedAtMillis;
   final bool isTyping;
+
+  /// Zen is open on their screen now.
+  bool get isOnline => presence == PeerPresence.online;
 }
 
 class AppShellScreen extends ConsumerWidget {

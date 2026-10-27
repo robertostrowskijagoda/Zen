@@ -30,12 +30,18 @@ class PeerAvatar extends ConsumerWidget {
     required this.name,
     this.size = 44,
     this.online = false,
+    this.away = false,
+    this.showStatus = true,
   });
 
   final String address;
   final String name;
   final double size;
   final bool online;
+  final bool away;
+
+  /// The presence dot (not when the friend does not show it).
+  final bool showStatus;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,6 +54,8 @@ class PeerAvatar extends ConsumerWidget {
       name: name,
       size: size,
       online: online,
+      away: away,
+      showStatus: showStatus,
       image: peerAvatarImage(path),
     );
   }

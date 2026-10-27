@@ -53,6 +53,7 @@ const Set<String> kSyncedSettingKeys = <String>{
   'legalAcceptedVersion',
   'legalAcceptedAtMillis',
   'groupInviteFrom',
+  'showLastOpened',
 };
 
 /// Stored states of meetings and circles kept the same on every device.

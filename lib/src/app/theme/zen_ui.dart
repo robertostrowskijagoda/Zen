@@ -538,12 +538,21 @@ class ZenHairline extends StatelessWidget {
   }
 }
 
-/// Online (a green dot) or not (a ring). Still: it pulses briefly only when
-/// it turns on, so a screen full of online friends draws nothing.
+/// Online (a green dot), in the background ([away]: a still amber dot) or
+/// not (a ring). Still: it pulses briefly only when it turns on, so a
+/// screen full of online friends draws nothing.
 class ZenStatusDot extends StatefulWidget {
-  const ZenStatusDot({super.key, required this.on, this.size = 6});
+  const ZenStatusDot({
+    super.key,
+    required this.on,
+    this.away = false,
+    this.size = 6,
+  });
 
   final bool on;
+
+  /// Not on the screen but reachable ("w tle"); [on] wins.
+  final bool away;
   final double size;
 
   @override
@@ -577,6 +586,20 @@ class _ZenStatusDotState extends State<ZenStatusDot> {
         pulseOnStart: _turnedOn > 0,
       );
     }
+    if (widget.away) {
+      return SizedBox.square(
+        dimension: size + 6,
+        child: Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: zen.warning,
+            ),
+            child: SizedBox.square(dimension: size),
+          ),
+        ),
+      );
+    }
     return SizedBox.square(
       dimension: size + 6,
       child: Center(
@@ -597,6 +620,7 @@ class ZenBlobAvatar extends StatelessWidget {
     super.key,
     required this.name,
     this.online = false,
+    this.away = false,
     this.size = 44,
     this.glyph,
     this.image,
@@ -605,6 +629,9 @@ class ZenBlobAvatar extends StatelessWidget {
 
   final String name;
   final bool online;
+
+  /// In the background ("w tle"): the dot says so ([ZenStatusDot.away]).
+  final bool away;
 
   /// The online dot (not for your own avatar).
   final bool showStatus;
@@ -691,7 +718,7 @@ class ZenBlobAvatar extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(color: zen.background, width: 2),
                 ),
-                child: ZenStatusDot(on: online, size: 6),
+                child: ZenStatusDot(on: online, away: away, size: 6),
               ),
             ),
         ],

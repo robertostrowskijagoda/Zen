@@ -185,6 +185,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(keepReceivingInBackground: value));
   }
 
+  /// "Pokazuj, kiedy ostatnio otwierałem aplikację".
+  Future<void> setShowLastOpened(bool value) async {
+    await _save(state.copyWith(showLastOpened: value));
+  }
+
   /// The first-start setup was gone through or skipped.
   Future<void> setFirstRunSetupDone(bool value) async {
     await _save(state.copyWith(firstRunSetupDone: value));

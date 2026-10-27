@@ -947,6 +947,23 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('Zaproszenia do grup'),
                     pageChildren: const <Widget>[GroupInviteFromTile()],
                   ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-show-last-opened'),
+                    icon: Icons.history_toggle_off_rounded,
+                    tone: ZenTone.privacy,
+                    title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
+                    subtitle: t(
+                      'Znajomi widzą, czy masz Zen otwarty, w tle czy '
+                      'offline, a przy tym, kiedy ostatnio go otwierałeś. '
+                      'Słabi znajomi nie widzą żadnego z tych statusów.',
+                    ),
+                    value: settings.showLastOpened,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setShowLastOpened(value),
+                    ),
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-stranger-messages'),
                     icon: Icons.mark_chat_unread_outlined,
