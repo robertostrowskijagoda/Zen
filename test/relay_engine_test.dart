@@ -1591,6 +1591,7 @@ void main() {
       );
       await outbox.start();
       addTearDown(outbox.stop);
+      expect(outbox.nextWait, outbox.schedule.first);
       await outbox.runRound();
       await mesh.settle();
       for (final String relay in item.mailboxes) {
@@ -1600,6 +1601,9 @@ void main() {
           reason: relay,
         );
       }
+      // The mailboxes hold it and hand it over when bob is back: the
+      // rounds only back them up now, rarely.
+      expect(outbox.nextWait, outbox.heldEvery);
 
       await mesh.goOnline(bob);
       await Future<void>.delayed(Duration.zero);
