@@ -1,22 +1,32 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 
-/// Rolling on-device log shared by the UI isolate and the foreground service
+/// Rolling on-device log of the UI isolate and the foreground service
 /// isolate.
 ///
 /// The background runtime does most of its work with no UI attached and no
 /// debugger in reach, so a failure there is otherwise invisible: the user just
-/// sees a call that never rings. Both isolates append to one file in the app
-/// support directory, and the settings screen can read it back.
+/// sees a call that never rings. Each isolate appends to a file of its own in
+/// the app support directory (`zen-diagnostics-<source>.log`), so neither
+/// ever cuts into the other's lines; when a file grows past
+/// [fileLimitBytes] it becomes `<file>.1` (replacing the one before) and a
+/// new one starts. The settings screen reads all of them back as one log,
+/// in time order.
 abstract final class ZenDiagnosticsLog {
-  static const String fileName = 'zen-diagnostics.log';
+  /// What every file of the log is named after.
+  static const String filePrefix = 'zen-diagnostics';
 
-  /// Size the log is trimmed back to, and the point at which trimming kicks in
-  /// (at twice this, so trims stay rare).
-  static const int keepBytes = 128 * 1024;
+  /// How large a file grows before it is set aside as `<file>.1`: each
+  /// isolate keeps at most about twice this. Tests lower it.
+  static int fileLimitBytes = 512 * 1024;
+
+  /// The current file of [source] (`ui`, `svc`).
+  static String fileNameFor(String source) => '$filePrefix-$source.log';
 
   static File? _file;
   static String _source = 'app';
@@ -39,22 +49,30 @@ abstract final class ZenDiagnosticsLog {
 
   static File? get file => _file;
 
-  /// Points the log at [supportDirectory]. [source] tags every line so the two
-  /// isolates can be told apart when reading the file back.
+  /// Completes once every line this isolate queued so far is written.
+  static Future<void> get settled => _writes;
+
+  /// Points the log at [supportDirectory]. [source] names this isolate's
+  /// file and tags every line, so the two isolates can be told apart when
+  /// reading the log back.
   static Future<void> attach(
     Directory supportDirectory, {
     required String source,
   }) async {
     try {
       final File target = File(
-        '${supportDirectory.path}${Platform.pathSeparator}$fileName',
+        '${supportDirectory.path}${Platform.pathSeparator}'
+        '${fileNameFor(source)}',
       );
       await target.parent.create(recursive: true);
       _source = source;
       _privatePlaces = diagnosticsPrivatePlaces(supportDirectory.path);
       _home = _homeDirectory();
       _file = target;
-      write('--- $source attached (${Platform.operatingSystemVersion}) ---');
+      write(
+        '--- $source attached (Zen $kAppVersion+$kAppBuild, '
+        '${Platform.operatingSystemVersion}) ---',
+      );
       final List<(DateTime, String)> early = List<(DateTime, String)>.of(
         _early,
       );
@@ -142,52 +160,100 @@ abstract final class ZenDiagnosticsLog {
         await Future<void>.delayed(Duration(milliseconds: 25 * attempt));
       }
     }
-    final int length = await target.length();
-    if (length <= keepBytes * 2) {
+    if (await target.length() <= fileLimitBytes) {
       return;
     }
-    // Trim through a temp file + rename: the rename is atomic, so the other
-    // isolate never observes a half-written log.
-    final String contents = await target.readAsString();
-    final String trimmed = contents.substring(
-      contents.length > keepBytes ? contents.length - keepBytes : 0,
-    );
-    final int newlineIndex = trimmed.indexOf('\n');
-    final File temp = File('${target.path}.tmp');
-    await temp.writeAsString(
-      newlineIndex >= 0 ? trimmed.substring(newlineIndex + 1) : trimmed,
-      flush: true,
-    );
-    await temp.rename(target.path);
+    // Only this isolate writes this file, so setting it aside cannot cut
+    // into anyone's line; a rename that fails (a scanner holding the file)
+    // is tried again on the next line.
+    final File previous = File('${target.path}.1');
+    if (await previous.exists()) {
+      await previous.delete();
+    }
+    await target.rename(previous.path);
   }
 
-  /// Reads the log back, newest content last. Returns an empty string when
-  /// nothing has been recorded yet. Lines are redacted when written.
-  static Future<String> read() async {
+  /// The log's files in [folder] by source, each source's older file
+  /// first.
+  static Future<Map<String, List<File>>> _files(Directory folder) async {
+    final RegExp name = RegExp(
+      '^${RegExp.escape(filePrefix)}-([a-z0-9]+)\\.log(\\.1)?\$',
+    );
+    final Map<String, List<File>> bySource = <String, List<File>>{};
+    if (!await folder.exists()) {
+      return bySource;
+    }
+    final List<(String, bool, File)> found = <(String, bool, File)>[];
+    await for (final FileSystemEntity entity in folder.list()) {
+      if (entity is! File) {
+        continue;
+      }
+      final RegExpMatch? match = name.firstMatch(_nameOf(entity));
+      if (match != null) {
+        found.add((match[1]!, match[2] != null, entity));
+      }
+    }
+    found.sort(((String, bool, File) a, (String, bool, File) b) {
+      final int bySourceName = a.$1.compareTo(b.$1);
+      if (bySourceName != 0 || a.$2 == b.$2) {
+        return bySourceName;
+      }
+      return a.$2 ? -1 : 1;
+    });
+    for (final (String source, bool _, File file) in found) {
+      bySource.putIfAbsent(source, () => <File>[]).add(file);
+    }
+    return bySource;
+  }
+
+  /// Every entry of the log (a line, with the stack frames under it), of
+  /// both isolates, oldest first. Empty when nothing has been recorded yet.
+  /// Lines are redacted when written.
+  static Future<List<String>> entries() async {
     final File? target = _file;
     if (target == null) {
-      return '';
+      return const <String>[];
     }
-    try {
-      if (!await target.exists()) {
-        return '';
+    final List<String> texts = <String>[];
+    for (final List<File> files in (await _files(target.parent)).values) {
+      final StringBuffer text = StringBuffer();
+      for (final File file in files) {
+        try {
+          // A line cut short by the process ending must not lose the rest.
+          text.write(
+            utf8.decode(await file.readAsBytes(), allowMalformed: true),
+          );
+        } on FileSystemException {
+          // Set aside or deleted meanwhile: the rest still reads.
+        }
       }
-      return await target.readAsString();
+      texts.add(text.toString());
+    }
+    return mergeDiagnosticsLogs(texts);
+  }
+
+  /// Reads the log back as text, newest content last (see [entries]).
+  /// Returns an empty string when nothing has been recorded yet.
+  static Future<String> read() async {
+    try {
+      final List<String> all = await entries();
+      return all.isEmpty ? '' : '${all.join('\n')}\n';
     } catch (error) {
       return t('Nie udało się odczytać dziennika: {error}', {'error': error});
     }
   }
 
-  /// Deletes the log: the settings' "clear", and every wipe of the app's
-  /// data (the panic password's too). Queued after the lines already
-  /// written, so none of them brings the file back afterwards.
+  /// Deletes the log, both isolates' files: the settings' "clear", and
+  /// every wipe of the app's data (the panic password's too). Queued after
+  /// the lines already written, so none of them brings a file back
+  /// afterwards.
   static Future<void> clear() async {
     _early.clear();
     final File? target = _file;
     if (target == null) {
       return;
     }
-    final Future<void> cleared = _writes.then((_) => _delete(target));
+    final Future<void> cleared = _writes.then((_) => _delete(target.parent));
     _writes = cleared.catchError((Object _) {});
     try {
       await cleared;
@@ -196,14 +262,73 @@ abstract final class ZenDiagnosticsLog {
     }
   }
 
-  static Future<void> _delete(File target) async {
-    // The trim's temporary copy too, if one was left behind.
-    for (final File file in <File>[target, File('${target.path}.tmp')]) {
-      if (await file.exists()) {
-        await file.delete();
+  static Future<void> _delete(Directory folder) async {
+    if (!await folder.exists()) {
+      return;
+    }
+    await for (final FileSystemEntity entity in folder.list()) {
+      // The log's files and what the technical log keeps beside them.
+      if (entity is File && _nameOf(entity).startsWith(filePrefix)) {
+        await entity.delete();
       }
     }
   }
+
+  static String _nameOf(File file) => file.path.split(RegExp(r'[/\\]')).last;
+}
+
+/// The logs of several isolates ([texts], each in the order it was
+/// written) as one, by time: entry by entry (a line starting with its
+/// time, with the lines under it that do not), each log's own order kept.
+@visibleForTesting
+List<String> mergeDiagnosticsLogs(List<String> texts) {
+  final List<List<String>> logs = <List<String>>[
+    for (final String text in texts) _entriesOf(text),
+  ];
+  final List<int> next = List<int>.filled(logs.length, 0);
+  final List<String> merged = <String>[];
+  while (true) {
+    int? pick;
+    for (int i = 0; i < logs.length; i++) {
+      if (next[i] >= logs[i].length) {
+        continue;
+      }
+      if (pick == null ||
+          _timeOf(logs[i][next[i]]).compareTo(_timeOf(logs[pick][next[pick]])) <
+              0) {
+        pick = i;
+      }
+    }
+    if (pick == null) {
+      return merged;
+    }
+    merged.add(logs[pick][next[pick]]);
+    next[pick] += 1;
+  }
+}
+
+final RegExp _entryStart = RegExp(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d');
+
+List<String> _entriesOf(String text) {
+  final List<String> entries = <String>[];
+  for (final String line in const LineSplitter().convert(text)) {
+    if (line.isEmpty) {
+      continue;
+    }
+    if (entries.isEmpty || _entryStart.hasMatch(line)) {
+      entries.add(line);
+    } else {
+      entries.last = '${entries.last}\n$line';
+    }
+  }
+  return entries;
+}
+
+/// The time an entry starts with (ISO 8601, local: such times sort as
+/// text).
+String _timeOf(String entry) {
+  final int space = entry.indexOf(' ');
+  return space < 0 ? entry : entry.substring(0, space);
 }
 
 /// Console output (logcat on Android) for development only.
