@@ -3,352 +3,102 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>Install Zen</title>
-<meta name="description" content="Install Zen on Android, iPhone, Windows, macOS or Linux.">
+<meta name="description" content="Install Zen on Android, iPhone, Windows, Mac or Linux: one recommended way for each system, step by step.">
 <link rel="icon" type="image/png" href="../zen-icon.png">
 <link rel="apple-touch-icon" href="../zen-icon.png">
-<style>
-  /* Shared look of all the Zen pages (the same block is inlined in each page). */
-  :root {
-    color-scheme: light dark;
-    --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
-    --line: #e4e0ef; --soft: #efeaff; --link: #6234d8; --focus: #6234d8;
-    --btn1: #6d3df5; --btn2: #b01fc4; --bar: rgba(246, 244, 251, .88);
-    --glow: rgba(124, 77, 255, .20); --warn: #9a5b00;
-    --shadow: 0 1px 2px rgba(23, 21, 31, .05), 0 10px 28px rgba(70, 40, 140, .08);
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b0a10; --card: #16141f; --text: #f3f1fa; --muted: #a6a1ba;
-      --line: #2a2738; --soft: #221d36; --link: #b9a2ff; --focus: #c4b0ff;
-      --bar: rgba(11, 10, 16, .88); --glow: rgba(157, 123, 255, .22);
-      --warn: #f0b45a;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-  body {
-    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-    font: 16px/1.55 var(--font);
-  }
-  img { max-width: 100%; }
-  h1, h2, h3 { line-height: 1.2; }
-  p { margin: 8px 0 14px; }
-  a { color: var(--link); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
-  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
-  code {
-    font: 13.5px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line);
-    border-radius: 8px; padding: 2px 6px; word-break: break-all;
-  }
-  .hidden { display: none !important; }
-  .muted { color: var(--muted); }
-
-  /* Icons: one sprite per page, drawn with the text colour. */
-  .ico {
-    width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor;
-    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-  }
-  .ico.fill { fill: currentColor; stroke: none; }
-
-  /* Top bar: brand, links, language. */
-  .top { position: relative; z-index: 20; background: var(--bar); border-bottom: 1px solid var(--line); }
-  @media (min-width: 720px) {
-    .top { position: sticky; top: 0; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-  }
-  .top-in {
-    max-width: 1040px; margin: 0 auto; padding: 10px 16px;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-  }
-  .brand {
-    order: 1; margin-inline-end: auto; display: inline-flex; align-items: center; gap: 10px;
-    color: var(--text); font-weight: 800; font-size: 19px; text-decoration: none;
-  }
-  .brand img { width: 32px; height: 32px; border-radius: 9px; display: block; box-shadow: 0 0 0 1px var(--line); }
-  .topnav { order: 3; width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
-  .topnav a {
-    display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px;
-    border-radius: 999px; color: var(--text); font-weight: 600; font-size: 15px;
-    text-decoration: none; white-space: nowrap;
-  }
-  .topnav a:hover { background: var(--soft); }
-  .topnav a[aria-current="page"] { background: var(--soft); color: var(--link); }
-  .topnav .ico { width: 18px; height: 18px; display: none; }
-  @media (max-width: 419px) { .topnav a { padding: 0 8px; font-size: 14.5px; } }
-  @media (min-width: 520px) { .topnav .ico { display: block; } .topnav a { padding: 0 14px; } }
-  @media (min-width: 720px) {
-    .top-in { flex-wrap: nowrap; }
-    .topnav { order: 2; width: auto; flex-wrap: nowrap; margin-inline-start: auto; }
-    .langpick { order: 3; }
-  }
-
-  /* Language picker: a visible pill; the real select lies invisible on top. */
-  .langpick {
-    order: 2; position: relative; display: inline-flex; align-items: center; gap: 7px;
-    min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--card); color: var(--text); font-weight: 700; font-size: 14.5px;
-  }
-  .langpick:hover { border-color: var(--link); background: var(--soft); }
-  .langpick:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
-  .langpick .ico { width: 18px; height: 18px; }
-  .langpick .chev { width: 14px; height: 14px; opacity: .7; }
-  .langpick .lc { letter-spacing: .04em; }
-  .langpick .ln { display: none; }
-  @media (min-width: 420px) { .langpick .ln { display: inline; } }
-  .langpick select {
-    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0;
-    cursor: pointer; font: inherit; color: var(--text); background: var(--card);
-  }
-
-  /* Hero: the app icon, the name and one line about Zen. */
-  .hero {
-    position: relative; isolation: isolate; overflow: hidden; text-align: center;
-    padding: 34px 16px 12px;
-  }
-  .hero::before {
-    content: ""; position: absolute; z-index: -1; left: 50%; top: -120px;
-    width: min(900px, 140%); height: 440px; transform: translateX(-50%);
-    background: radial-gradient(closest-side, var(--glow), transparent);
-  }
-  .hero-icon {
-    width: 96px; height: 96px; display: block; margin: 0 auto 16px; border-radius: 26px;
-    box-shadow: 0 14px 34px rgba(109, 61, 245, .35), 0 0 0 1px var(--line);
-  }
-  .hero h1 { font-size: clamp(30px, 7vw, 46px); margin: 0 0 10px; letter-spacing: -.02em; }
-  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
-    .hero h1 {
-      background: linear-gradient(90deg, var(--btn1), var(--btn2));
-      -webkit-background-clip: text; background-clip: text;
-      -webkit-text-fill-color: transparent; color: transparent;
-    }
-    @media (prefers-color-scheme: dark) {
-      .hero h1 { background-image: linear-gradient(90deg, #b9a2ff, #f08af5); }
-    }
-  }
-  .hero .lead {
-    max-width: 34em; margin: 0 auto; color: var(--muted);
-    font-size: clamp(17px, 3.6vw, 20px);
-  }
-
-  main { display: block; max-width: 1040px; margin: 0 auto; padding: 18px 16px 24px; }
-
-  /* Buttons and link chips. */
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-    min-height: 48px; padding: 12px 20px; border-radius: 14px; border: 1px solid transparent;
-    font: 700 16px/1.2 var(--font); text-align: center; text-decoration: none; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .btn, .chip, .doc, .topnav a, .langpick {
-      transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease,
-        border-color .15s ease, filter .15s ease;
-    }
-    .btn:hover, .doc:hover { transform: translateY(-2px); }
-  }
-  .btn:active, .doc:active { transform: translateY(1px) scale(.985); }
-  .btn.primary {
-    background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff;
-    box-shadow: 0 8px 22px rgba(109, 61, 245, .32);
-  }
-  .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(109, 61, 245, .42); }
-  .btn.secondary { background: var(--card); color: var(--text); border-color: var(--line); }
-  .btn.secondary:hover { background: var(--soft); border-color: var(--link); }
-  .btn.discord { background: #5865f2; color: #fff; box-shadow: 0 8px 22px rgba(88, 101, 242, .32); }
-  .btn.discord:hover { filter: brightness(1.1); }
-  .btn.block { display: flex; width: 100%; }
-  .btn .ico { width: 22px; height: 22px; }
-  /* "Open in Zen": the first thing in the page, as big as a thumb wants. */
-  a.btn.open {
-    display: flex; align-items: center; justify-content: center; gap: 14px;
-    width: 100%; max-width: 560px; min-height: 112px; margin: 6px auto 20px; padding: 20px 22px;
-    border-radius: 26px; font: 800 30px/1.15 var(--font);
-    box-shadow: 0 14px 34px rgba(109, 61, 245, .4);
-  }
-  a.btn.open .ico { width: 34px; height: 34px; stroke-width: 2.4; }
-  @media (max-width: 380px) { a.btn.open { font-size: 24px; padding: 18px 14px; gap: 10px; } }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 5px 13px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
-    color: var(--link); font: 700 14.5px/1.2 var(--font); text-decoration: none;
-  }
-  .chip:hover { background: var(--soft); border-color: var(--link); }
-  .chip.wrap { border-radius: 16px; text-align: center; }
-  .chip .ico { width: 16px; height: 16px; }
-  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-
-  /* Cards and sections. */
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 22px;
-    padding: 20px 18px; box-shadow: var(--shadow);
-  }
-  .card h2, .card h3 { margin: 0 0 6px; }
-  .narrow { max-width: 560px; margin-inline: auto; }
-  .sec { margin: 46px 0 0; }
-  .sec > h2 { font-size: clamp(22px, 4.6vw, 30px); text-align: center; margin: 0 0 8px; }
-  .sec > .sub { text-align: center; color: var(--muted); max-width: 36em; margin: 0 auto 22px; }
-  .small { font-size: 14px; color: var(--muted); }
-  .hint { text-align: center; color: var(--muted); font-size: 14.5px; margin: 12px 0 0; }
-  .hint .chip { margin: 2px 2px; }
-
-  /* Footer. */
-  .foot {
-    max-width: 1040px; margin: 36px auto 0; padding: 26px 16px 40px; text-align: center;
-    border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
-  }
-  .foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; margin: 0 0 14px; }
-  .foot-links a { display: inline-flex; align-items: center; min-height: 32px; font-weight: 600; font-size: 15px; }
-  .foot p { margin: 6px 0; }
-
-  /* Blocks used by several pages. */
-  .get h2 { font-size: 21px; }
-  .get > p.muted { margin-top: 0; }
-  .stack { display: grid; gap: 10px; margin-top: 14px; }
-  .get .hint { margin-top: 10px; }
-  .iosnote { background: var(--soft); border-radius: 14px; padding: 12px 14px; margin: 0; text-align: start; }
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; }
-  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); }
-  .feat .fi {
-    width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
-    background: var(--soft); color: var(--link); margin-bottom: 12px;
-  }
-  .feat .fi .ico { width: 24px; height: 24px; }
-  .feat h3 { font-size: 18px; margin: 0 0 6px; }
-  .feat p { margin: 0; color: var(--muted); font-size: 15px; }
-  .shots {
-    display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory;
-    padding: 6px 4px 16px; margin: 0; list-style: none; justify-content: safe center;
-  }
-  .shots figure { margin: 0; flex: 0 0 190px; scroll-snap-align: center; text-align: center; font-size: 14.5px; font-weight: 600; color: var(--muted); }
-  .shots img {
-    display: block; width: 190px; height: auto; margin: 0 auto 8px; border-radius: 22px;
-    border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--card);
-  }
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; list-style: none; margin: 0; padding: 0; counter-reset: s; }
-  .steps li { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; counter-increment: s; }
-  .steps li::before {
-    content: counter(s); display: grid; place-items: center; width: 34px; height: 34px;
-    margin-bottom: 10px; border-radius: 50%; color: #fff; font-weight: 800;
-    background: linear-gradient(135deg, var(--btn1), var(--btn2));
-  }
-  .steps h3 { font-size: 17px; margin: 0 0 4px; }
-  .steps p { margin: 0; color: var(--muted); font-size: 15px; }
-  .cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-  .cta-row .btn { flex: 0 1 auto; }
-  @media (max-width: 480px) { .cta-row .btn { width: 100%; } }
-
-  /* Install page. */
-  main.inst { max-width: 760px; }
-  .verpill {
-    display: inline-block; margin: 14px 0 0; padding: 4px 14px; border: 1px solid var(--line);
-    border-radius: 999px; background: var(--card); color: var(--muted); font-size: 13.5px;
-  }
-  .verpill:empty { display: none; }
-  #systems { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 4px 0 18px; }
-  #systems button {
-    display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--card);
-    color: var(--text); font: 600 15px/1.2 var(--font); cursor: pointer;
-  }
-  #systems button .ico { width: 18px; height: 18px; }
-  #systems button:hover { background: var(--soft); border-color: var(--link); }
-  #systems button[aria-selected="true"] {
-    background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff; border-color: transparent;
-    box-shadow: 0 6px 16px rgba(109, 61, 245, .3);
-  }
-  section.card { margin-bottom: 18px; padding: 22px 20px; }
-  section.card h2 { display: flex; align-items: center; gap: 10px; font-size: 22px; margin: 0 0 4px; }
-  section.card h2 .ico { width: 26px; height: 26px; color: var(--link); }
-  ol { list-style: none; padding: 0; margin: 14px 0 0; counter-reset: step; }
-  ol > li { counter-increment: step; position: relative; padding: 0 0 18px 46px; min-height: 40px; }
-  ol > li::before {
-    content: counter(step); position: absolute; left: 0; top: 0; width: 32px; height: 32px;
-    border-radius: 50%; color: #fff; font-weight: 800; text-align: center; line-height: 32px;
-    background: linear-gradient(135deg, var(--btn1), var(--btn2));
-  }
-  [dir="rtl"] ol > li { padding: 0 46px 18px 0; }
-  [dir="rtl"] ol > li::before { left: auto; right: 0; }
-  .step { display: flex; gap: 12px; align-items: flex-start; }
-  .step .txt { flex: 1; }
-  .pic { flex: 0 0 72px; width: 72px; height: 96px; color: var(--link); }
-  .pic svg { width: 72px; height: 96px; display: block; }
-  li .btn, .note .btn { display: flex; width: fit-content; max-width: 100%; margin: 8px 0 6px; min-height: 44px; }
-  .note {
-    background: var(--soft); border-radius: 14px; padding: 12px 14px; margin-top: 12px;
-    font-size: 14.5px; color: var(--muted); border-inline-start: 4px solid var(--link);
-  }
-  .note b { color: var(--text); }
-  .other { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
-  .help-cta { text-align: center; }
-  .help-cta h2 { justify-content: center; }
-  .help-cta .cta-row { margin-top: 14px; }
-  .foot a { font-weight: 600; }
-</style>
+<link rel="stylesheet" href="../site.css">
+<script src="../site.js"></script>
 </head>
-<body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
-<symbol id="i-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
-<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
-<symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
-<symbol id="i-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol>
-<symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
-<symbol id="i-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></symbol>
-<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
-<symbol id="i-laptop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></symbol>
-<symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
-</svg>
-<header class="top">
-  <div class="top-in">
-    <a class="brand" href="../about/"><img src="../zen-icon.png" width="32" height="32" alt=""><span>Zen</span></a>
-    <nav class="topnav" aria-label="Main">
-      <a href="../about/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="navAbout">About</span></a>
-      <a href="./" aria-current="page"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="navInstall">Install</span></a>
-      <a href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg><span>Discord</span></a>
-      <a href="https://github.com/robertostrowskijagoda/Zen" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
-    </nav>
-    <div class="langpick">
-      <svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg>
-      <span class="lc" id="langCode" aria-hidden="true">EN</span>
-      <span class="ln" id="langName" aria-hidden="true">English</span>
-      <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
-      <select id="langSel" aria-label="Language"></select>
-    </div>
-  </div>
-</header>
+<body data-nav="install">
+<header class="top" id="zenTop"></header>
 <div class="hero">
-  <img class="hero-icon" src="../zen-icon.png" width="96" height="96" alt="Zen">
-  <h1 id="title"></h1>
-  <p id="lead" class="lead"></p>
-  <span id="version" class="verpill"></span>
+  <img class="hero-icon" src="../zen-icon.png" width="88" height="88" alt="Zen">
+  <h1 data-i="h1">Install Zen</h1>
+  <p class="lead" data-i="lead">Pick your system. Zen is free, has no ads, and comes only from this project’s GitHub page or from a friend.</p>
+  <span class="pill" id="version" data-version></span>
 </div>
-<main class="inst">
-  <nav id="systems" role="tablist"></nav>
-  <div id="guides"></div>
-  <section class="card help-cta" aria-labelledby="helpTitle">
-    <h2 id="helpTitle" data-i="helpTitle">Stuck?</h2>
-    <p class="muted" data-i="helpText">Ask the community — someone will help you install Zen.</p>
+<main>
+  <div class="os-grid" id="systems">
+    <article class="os-card" id="android" data-os="android">
+      <span class="badge hidden" data-i="yours">For your device</span>
+      <div class="os-ico"><svg class="ico" aria-hidden="true"><use href="#i-phone"/></svg></div>
+      <h3>Android</h3>
+      <p data-i="androidHow">Download the file, tap it, allow once. Zen then updates itself.</p>
+      <span class="os-time" data-i="androidTime">About 1 minute</span>
+      <div class="os-act">
+        <a class="btn primary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlAndroid">Download for Android</span></a>
+        <a class="btn secondary" href="android/"><span data-i="stepByStep">Step by step</span></a>
+      </div>
+    </article>
+    <article class="os-card" id="iphone" data-os="iphone">
+      <span class="badge hidden" data-i="yours">For your device</span>
+      <div class="os-ico"><svg class="ico" aria-hidden="true"><use href="#i-phone"/></svg></div>
+      <h3>iPhone</h3>
+      <p data-i="iphoneHow">Install Scarlet, then open Zen’s file with it. Four short steps.</p>
+      <span class="os-time" data-i="iphoneTime">About 5 minutes</span>
+      <div class="os-act">
+        <a class="btn primary" href="iphone/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="stepByStep">Step by step</span></a>
+      </div>
+    </article>
+    <article class="os-card" id="windows" data-os="windows">
+      <span class="badge hidden" data-i="yours">For your device</span>
+      <div class="os-ico"><svg class="ico" aria-hidden="true"><use href="#i-monitor"/></svg></div>
+      <h3>Windows</h3>
+      <p data-i="windowsHow">Download the zip, unpack it and run zen.exe.</p>
+      <span class="os-time" data-i="windowsTime">About 2 minutes</span>
+      <div class="os-act">
+        <a class="btn primary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlWindows">Download for Windows</span></a>
+        <a class="btn secondary" href="windows/"><span data-i="stepByStep">Step by step</span></a>
+      </div>
+    </article>
+    <article class="os-card" id="macos" data-os="macos">
+      <span class="badge hidden" data-i="yours">For your device</span>
+      <div class="os-ico"><svg class="ico" aria-hidden="true"><use href="#i-laptop"/></svg></div>
+      <h3>Mac</h3>
+      <p data-i="macHow">Download the zip, drag Zen to Applications and allow it once.</p>
+      <span class="os-time" data-i="macTime">About 3 minutes</span>
+      <div class="os-act">
+        <a class="btn primary" href="macos/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="stepByStep">Step by step</span></a>
+      </div>
+    </article>
+    <article class="os-card" id="linux" data-os="linux">
+      <span class="badge hidden" data-i="yours">For your device</span>
+      <div class="os-ico"><svg class="ico" aria-hidden="true"><use href="#i-terminal"/></svg></div>
+      <h3>Linux</h3>
+      <p data-i="linuxHow">One command on Debian, Ubuntu and Mint; Flatpak elsewhere.</p>
+      <span class="os-time" data-i="linuxTime">About 2 minutes</span>
+      <div class="os-act">
+        <a class="btn primary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlLinux">Download for Linux</span></a>
+        <a class="btn secondary" href="linux/"><span data-i="stepByStep">Step by step</span></a>
+      </div>
+    </article>
+  </div>
+
+  <h2 class="h2i"><svg class="ico" aria-hidden="true"><use href="#i-package"/></svg><span data-i="filesTitle">All files of the latest release</span></h2>
+  <details class="acc">
+    <summary><span data-i="filesOpen">Show all files</span><svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+    <div class="acc-body">
+      <div class="files-wrap"><table class="files"><tbody id="files"></tbody></table></div>
+    </div>
+  </details>
+
+  <div class="note ok" style="margin-top:22px"><span data-i="verify">Is it really Zen? Download only from GitHub or from a friend, and compare the file with the checksums.</span>
+    <span class="chip" data-i="sumsLink"><a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/SHA256SUMS" rel="noopener">SHA256SUMS</a></span>
+    <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a></div>
+
+  <section class="card narrow" style="margin-top:28px;text-align:center" aria-labelledby="stuck">
+    <h2 id="stuck" data-i="stuckTitle">Stuck?</h2>
+    <p class="muted" data-i="stuckText">Ask the community — someone will help you install Zen.</p>
     <div class="cta-row">
       <a class="btn discord" href="https://discord.gg/g4vHvpKV37" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-discord"/></svg>Discord</a>
-      <a class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/issues" rel="noopener"><svg class="ico fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+      <a class="btn secondary" href="../support/"><svg class="ico" aria-hidden="true"><use href="#i-lifebuoy"/></svg><span data-i="navSupport">Support</span></a>
     </div>
   </section>
 </main>
-<footer class="foot">
-  <p id="footer"></p>
-  <div class="foot-links">
-    <a href="../about/"><span data-i="navAbout">About</span></a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md" rel="noopener" data-i="footPrivacy">Privacy policy</a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md" rel="noopener" data-i="footTerms">Terms of use</a>
-    <a href="https://github.com/robertostrowskijagoda/Zen/blob/main/LICENSE" rel="noopener" data-i="footLicense">License</a>
-  </div>
-  <p data-i="footNote">Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda.</p>
-</footer>
+<footer class="foot" id="zenFoot" data-tm></footer>
 <script>
 (function () {
   "use strict";
@@ -356,6 +106,8 @@
   var REPO = "https://github.com/robertostrowskijagoda/Zen";
   var DL = REPO + "/releases/latest/download/";
   var SOURCE = "https://robertostrowskijagoda.github.io/Zen/apps.json";
+  // Every download follows the latest release by its file name; the install
+  // pages of the systems use the same addresses.
   var LINKS = {
     apk: DL + "Zen-arm64-v8a.apk",
     apk32: DL + "Zen-armeabi-v7a.apk",
@@ -377,349 +129,80 @@
     sums: DL + "SHA256SUMS",
     releases: REPO + "/releases/latest",
     repo: REPO,
-    msSubmit: "https://www.microsoft.com/wdsi/filesubmission",
-    android2027: REPO + "#android",
     discord: "https://discord.gg/g4vHvpKV37"
   };
-  var SYSTEMS = ["android", "iphone", "windows", "macos", "linux"];
-
-  // Markup in the texts: **bold**, `code`, [label|link] for a link and
-  // {label|link} for a button, with link a key of LINKS; {source} is the
-  // source address. A system's "other" is a small line under its first
-  // step (Android: the APKs of the less common ABIs; the button is the one
-  // of most phones).
-  var TEXTS = {
-    en: {
-      title: "Install Zen",
-      lead: "Pick your system. Zen is free, has no ads, and comes only from this project’s GitHub page or from a friend.",
-      version: "Latest version: {version} ({date})",
-      names: { android: "Android", iphone: "iPhone", windows: "Windows", macos: "Mac", linux: "Linux" },
-      android: {
-        intro: "Takes a minute. No store and no account needed.",
-        steps: [
-          "Download Zen on this phone. {⬇ Download Zen|apk}",
-          "Open the downloaded file. If the phone asks, allow your browser to install apps (**Allow from this source**) and go back.",
-          "Tap **Install**. If Play Protect warns about an unknown app: **More details → Install anyway**."
-        ],
-        other: "The button fits most phones (arm64-v8a). Other phones: [armeabi-v7a|apk32] (older 32-bit phones), [x86_64|apkX64] (Chromebooks, emulators). The phone says “App not installed”? Try the 32-bit one.",
-        notes: [
-          "**Updates by themselves:** with the free [Obtainium|obtainiumApp] app, tap {Add Zen to Obtainium|obtainium} once.",
-          "**Signing certificate (SHA-256):** {fingerprint}. Android never installs a copy with another key over Zen.",
-          "Phone says the developer is not verified (from 2027)? See [this short guide|android2027]."
-        ]
-      },
-      iphone: {
-        intro: "Apps from outside the App Store go through **SideStore**. You need a computer once (Windows, Mac or Linux), a USB cable and your Apple ID. About 15 minutes; after that, everything happens on the phone.",
-        steps: [
-          "On the iPhone, install the free **LocalDevVPN** app from the App Store.",
-          "On a computer, download **iloader** from the [SideStore guide|sidestore] and connect the iPhone with a cable.",
-          "In iloader, sign in with your Apple ID and choose **Install SideStore**.",
-          "On the iPhone: **Settings → Privacy & Security → Developer Mode** → on. The phone restarts; confirm **Turn On**.",
-          "**Settings → General → VPN & Device Management** → your Apple ID → **Trust**.",
-          "Open **LocalDevVPN** and connect. Then open **SideStore** and sign in with your Apple ID.",
-          "Add the Zen source: {Add Zen to SideStore|addSideStore} or, in SideStore, **Sources → +** and paste `{source}`.",
-          "In SideStore, open **Zen** and tap **Install**. Done!"
-        ],
-        notes: [
-          "**Every 7 days** SideStore refreshes Zen by itself. Just open SideStore with LocalDevVPN on now and then. Your data stays.",
-          "A free Apple ID allows **3** such apps at a time (SideStore counts) and 10 installs a week.",
-          "**EU:** AltStore PAL installs only apps notarized by Apple, and Zen is not there yet. Use SideStore. AltStore Classic users: {Add Zen to AltStore|addAltStore}.",
-          "Prefer another signer? The file is [Zen-unsigned.ipa|ipa]."
-        ]
-      },
-      windows: {
-        intro: "Windows 10 or 11 (everything Zen needs is in the zip).",
-        steps: [
-          "Download Zen and unpack the whole zip: you get a folder **Zen**. {⬇ Zen-Windows.zip|win} ARM computers: [Zen-Windows-arm64.zip|winArm].",
-          "Run **zen.exe** in that **Zen** folder. Keep the folder whole, with nothing else in it: Zen updates itself only there. If SmartScreen says *Windows protected your PC*: **More info → Run anyway**."
-        ],
-        notes: [
-          "**Smart App Control blocked Zen?** Windows 11 with Smart App Control on blocks apps that are not code-signed yet, like Zen, and offers no *Run anyway*. You can turn it off in **Windows Security → App & browser control → Smart App Control settings → Off**. That lowers the protection against unknown apps for the whole computer, so decide for yourself. On Windows 11 before the April 2026 update it can only be turned on again by reinstalling Windows. Otherwise, use Zen on your phone or another computer.",
-          "**Antivirus warns about Zen?** New programs without a code signature sometimes get false alarms. Compare the zip with [SHA256SUMS|sums]: if it matches, it is the file from GitHub. Report the false alarm to your antivirus (Microsoft Defender: [submit a file|msSubmit]).",
-          "Zen updates itself: it checks GitHub and asks before updating."
-        ]
-      },
-      macos: {
-        intro: "macOS 12 or newer, Apple Silicon and Intel.",
-        steps: [
-          "Download Zen, open the zip and drag **Zen** into **Applications**. {⬇ Zen-macOS.zip|mac}",
-          "Open Zen. macOS says it cannot check it for malware: click **Done**. Then open **System Settings → Privacy & Security**, scroll down to *“Zen” was blocked* and click **Open Anyway**, enter your password and click **Open Anyway** once more. Only the first time.",
-          "After an update macOS may ask for keychain access: **Always Allow**."
-        ],
-        notes: [
-          "Right-click → **Open** no longer helps since macOS 15: use **Open Anyway** as above. For the Terminal: `xattr -dr com.apple.quarantine /Applications/Zen.app` does the same.",
-          "Zen updates itself: it checks GitHub and asks before updating."
-        ]
-      },
-      linux: {
-        intro: "x64 and arm64 (e.g. Raspberry Pi 4/5). Ubuntu 22.04, Debian 12, Linux Mint 21 or newer; other distributions through Flatpak.",
-        steps: [
-          "Debian, Ubuntu, Mint: {⬇ Zen-Linux-x64.deb|deb} then `sudo apt install ./Zen-Linux-x64.deb`. ARM: [Zen-Linux-arm64.deb|debArm].",
-          "Other distributions: {⬇ Flatpak|flatpak} then `flatpak install --user ./Zen-Linux-x64.flatpak`. Or [Zen-Linux-x64.tar.gz|tar] ([arm64|tarArm]): unpack, run `Zen/zen`; `Zen/install-desktop-entry.sh` adds it to the menu."
-        ],
-        notes: [
-          "Needs GNOME Keyring or KWallet (Zen keeps its key there); for videos and voice notes GStreamer with `gstreamer1.0-plugins-good` and `gstreamer1.0-libav`.",
-          "**Updates:** the tar.gz copy updates itself. With the .deb Zen saves the new package to Downloads; with Flatpak it opens the release page: install the new file the same way as the first one."
-        ]
-      },
-      footer: "Is it really Zen? Download only from [GitHub|releases] or from a friend, and compare the file with [SHA256SUMS|sums]. Source code: [github.com/robertostrowskijagoda/Zen|repo]. Questions and news: [Discord|discord].",
-      unknown: "shown with each release on GitHub",
-      navAbout: "About",
-      navInstall: "Install",
-      helpTitle: "Stuck?",
-      helpText: "Ask the community — someone will help you install Zen.",
-      footPrivacy: "Privacy policy",
-      footTerms: "Terms of use",
-      footLicense: "License",
-      footNote: "Zen is free software (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."
-    },
-    pl: {
-      title: "Zainstaluj Zen",
-      lead: "Wybierz system. Zen jest darmowy, bez reklam i pochodzi tylko ze strony projektu na GitHubie albo od znajomego.",
-      version: "Najnowsza wersja: {version} ({date})",
-      names: { android: "Android", iphone: "iPhone", windows: "Windows", macos: "Mac", linux: "Linux" },
-      android: {
-        intro: "Zajmie minutę. Bez sklepu i bez konta.",
-        steps: [
-          "Pobierz Zen na ten telefon. {⬇ Pobierz Zen|apk}",
-          "Otwórz pobrany plik. Jeśli telefon zapyta, pozwól przeglądarce instalować aplikacje (**Zezwalaj z tego źródła**) i wróć.",
-          "Stuknij **Zainstaluj**. Jeśli Play Protect ostrzega o nieznanej aplikacji: **Więcej szczegółów → Zainstaluj mimo to**."
-        ],
-        other: "Przycisk pasuje do większości telefonów (arm64-v8a). Inne telefony: [armeabi-v7a|apk32] (starsze telefony 32-bitowe), [x86_64|apkX64] (Chromebooki, emulatory). Telefon pisze „Aplikacja nie została zainstalowana”? Spróbuj wersji 32-bitowej.",
-        notes: [
-          "**Aktualizacje same:** w darmowej aplikacji [Obtainium|obtainiumApp] stuknij raz {Dodaj Zen do Obtainium|obtainium}.",
-          "**Certyfikat podpisu (SHA-256):** {fingerprint}. Android nigdy nie zainstaluje kopii z innym kluczem w miejsce Zen.",
-          "Telefon mówi, że deweloper nie jest zweryfikowany (od 2027)? Zobacz [krótką instrukcję|android2027]."
-        ]
-      },
-      iphone: {
-        intro: "Aplikacje spoza App Store instaluje się przez **SideStore**. Raz potrzebny jest komputer (Windows, Mac albo Linux), kabel USB i Twoje Apple ID. Około 15 minut; potem wszystko dzieje się na telefonie.",
-        steps: [
-          "Na iPhonie zainstaluj z App Store darmową aplikację **LocalDevVPN**.",
-          "Na komputerze pobierz **iloader** z [instrukcji SideStore|sidestore] i podłącz iPhone’a kablem.",
-          "W iloader zaloguj się swoim Apple ID i wybierz **Install SideStore**.",
-          "Na iPhonie: **Ustawienia → Prywatność i ochrona → Tryb dewelopera** → włącz. Telefon uruchomi się ponownie; potwierdź **Włącz**.",
-          "**Ustawienia → Ogólne → VPN i zarządzanie urządzeniem** → Twoje Apple ID → **Ufaj**.",
-          "Otwórz **LocalDevVPN** i połącz. Potem otwórz **SideStore** i zaloguj się Apple ID.",
-          "Dodaj źródło Zen: {Dodaj Zen do SideStore|addSideStore} albo w SideStore **Sources → +** i wklej `{source}`.",
-          "W SideStore otwórz **Zen** i stuknij **Install**. Gotowe!"
-        ],
-        notes: [
-          "**Co 7 dni** SideStore sam odświeża Zen. Wystarczy czasem otworzyć SideStore z włączonym LocalDevVPN. Dane zostają.",
-          "Darmowe Apple ID pozwala na **3** takie aplikacje naraz (SideStore się liczy) i 10 instalacji w tygodniu.",
-          "**UE:** AltStore PAL instaluje tylko aplikacje poświadczone przez Apple, a Zen jeszcze tam nie ma. Użyj SideStore. Użytkownicy AltStore Classic: {Dodaj Zen do AltStore|addAltStore}.",
-          "Wolisz inne narzędzie do podpisu? Plik to [Zen-unsigned.ipa|ipa]."
-        ]
-      },
-      windows: {
-        intro: "Windows 10 albo 11 (wszystko, czego Zen potrzebuje, jest w pliku zip).",
-        steps: [
-          "Pobierz Zen i rozpakuj cały plik zip: powstanie folder **Zen**. {⬇ Zen-Windows.zip|win} Komputery ARM: [Zen-Windows-arm64.zip|winArm].",
-          "Uruchom **zen.exe** z folderu **Zen**. Trzymaj ten folder w całości i nie wkładaj do niego innych plików: tylko tam Zen aktualizuje się sam. Jeśli SmartScreen pisze *System Windows ochronił ten komputer*: **Więcej informacji → Uruchom mimo to**."
-        ],
-        notes: [
-          "**Smart App Control zablokował Zen?** Windows 11 z włączonym Smart App Control blokuje aplikacje bez podpisu kodu, takie jak (na razie) Zen, i nie daje przycisku *Uruchom mimo to*. Można go wyłączyć: **Zabezpieczenia Windows → Kontrola aplikacji i przeglądarki → Ustawienia Smart App Control → Wyłączone**. To obniża ochronę przed nieznanymi programami na całym komputerze, więc zdecyduj sam. W Windows 11 sprzed aktualizacji z kwietnia 2026 ponowne włączenie wymaga reinstalacji systemu. Inaczej: używaj Zen na telefonie albo innym komputerze.",
-          "**Antywirus ostrzega przed Zen?** Nowe programy bez podpisu kodu czasem dostają fałszywe alarmy. Porównaj plik zip z [SHA256SUMS|sums]: jeśli się zgadza, to plik z GitHuba. Zgłoś fałszywy alarm producentowi antywirusa (Microsoft Defender: [zgłoś plik|msSubmit]).",
-          "Zen aktualizuje się sam: sprawdza GitHuba i pyta przed aktualizacją."
-        ]
-      },
-      macos: {
-        intro: "macOS 12 lub nowszy, Apple Silicon i Intel.",
-        steps: [
-          "Pobierz Zen, otwórz zip i przeciągnij **Zen** do **Aplikacji**. {⬇ Zen-macOS.zip|mac}",
-          "Otwórz Zen. macOS napisze, że nie może sprawdzić go pod kątem złośliwego oprogramowania: kliknij **Gotowe**. Potem **Ustawienia systemowe → Prywatność i ochrona**, przewiń do *Zablokowano „Zen”* i kliknij **Otwórz mimo to**, wpisz hasło i jeszcze raz **Otwórz mimo to**. Tylko za pierwszym razem.",
-          "Po aktualizacji macOS może zapytać o pęk kluczy: **Zawsze pozwalaj**."
-        ],
-        notes: [
-          "Prawy klik → **Otwórz** od macOS 15 już nie pomaga: użyj **Otwórz mimo to** jak wyżej. W Terminalu to samo robi `xattr -dr com.apple.quarantine /Applications/Zen.app`.",
-          "Zen aktualizuje się sam: sprawdza GitHuba i pyta przed aktualizacją."
-        ]
-      },
-      linux: {
-        intro: "x64 i arm64 (np. Raspberry Pi 4/5). Ubuntu 22.04, Debian 12, Linux Mint 21 lub nowsze; inne dystrybucje przez Flatpak.",
-        steps: [
-          "Debian, Ubuntu, Mint: {⬇ Zen-Linux-x64.deb|deb}, potem `sudo apt install ./Zen-Linux-x64.deb`. ARM: [Zen-Linux-arm64.deb|debArm].",
-          "Inne dystrybucje: {⬇ Flatpak|flatpak}, potem `flatpak install --user ./Zen-Linux-x64.flatpak`. Albo [Zen-Linux-x64.tar.gz|tar] ([arm64|tarArm]): rozpakuj, uruchom `Zen/zen`; `Zen/install-desktop-entry.sh` doda Zen do menu."
-        ],
-        notes: [
-          "Potrzebny GNOME Keyring albo KWallet (tam Zen trzyma klucz); do filmów i nagrań GStreamer z `gstreamer1.0-plugins-good` i `gstreamer1.0-libav`.",
-          "**Aktualizacje:** wersja z tar.gz aktualizuje się sama. Przy .deb Zen zapisuje nowy pakiet w Pobranych, przy Flatpaku otwiera stronę wydania: nowy plik instaluje się tak samo jak pierwszy."
-        ]
-      },
-      footer: "Czy to na pewno Zen? Pobieraj tylko z [GitHuba|releases] albo od znajomego i porównaj plik z [SHA256SUMS|sums]. Kod źródłowy: [github.com/robertostrowskijagoda/Zen|repo]. Pytania i nowości: [Discord|discord].",
-      unknown: "podany przy każdym wydaniu na GitHubie",
-      navAbout: "O Zen",
-      navInstall: "Instalacja",
-      helpTitle: "Coś nie działa?",
-      helpText: "Zapytaj społeczność — ktoś pomoże zainstalować Zen.",
-      footPrivacy: "Polityka prywatności",
-      footTerms: "Regulamin",
-      footLicense: "Licencja",
-      footNote: "Zen to wolne oprogramowanie (GPL-3.0). © 2026 Robert Ostrowski-Jagoda."
-    }
-  };
-
-  // Simple pictures for the iPhone steps: a phone outline and one sign
-  // (no Apple artwork).
-  var GLYPHS = [
-    '<path d="M36 34l12 5v9c0 8-5 13-12 16-7-3-12-8-12-16v-9z" fill="none" stroke="currentColor" stroke-width="3"/><text x="36" y="54" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor">VPN</text>',
-    '<rect x="14" y="34" width="30" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="3"/><path d="M10 58h38" stroke="currentColor" stroke-width="3"/><path d="M44 50c8 0 8 10 14 10" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="52" y="56" width="8" height="14" rx="2" fill="currentColor"/>',
-    '<circle cx="36" cy="40" r="8" fill="none" stroke="currentColor" stroke-width="3"/><path d="M22 64c2-9 8-13 14-13s12 4 14 13" fill="none" stroke="currentColor" stroke-width="3"/>',
-    '<rect x="18" y="40" width="36" height="18" rx="9" fill="currentColor" opacity=".25"/><rect x="18" y="40" width="36" height="18" rx="9" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="45" cy="49" r="6" fill="currentColor"/>',
-    '<circle cx="36" cy="48" r="14" fill="none" stroke="currentColor" stroke-width="3"/><path d="M29 48l5 5 9-10" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>',
-    '<rect x="20" y="32" width="32" height="32" rx="8" fill="currentColor" opacity=".25"/><path d="M28 48h16M36 40v16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M50 30l6-6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
-    '<path d="M22 40h28M22 48h28M22 56h18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="50" cy="58" r="7" fill="currentColor"/><path d="M50 54v8M46 58h8" stroke="#fff" stroke-width="2"/>',
-    '<path d="M36 32v22M27 46l9 9 9-9" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 62h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>'
+  // The table of all files: the system, and the link of each.
+  var FILES = [
+    ["Android · arm64-v8a", "apk"], ["Android · armeabi-v7a (32-bit)", "apk32"],
+    ["Android · x86_64", "apkX64"], ["iPhone · IPA", "ipa"],
+    ["Windows · x64", "win"], ["Windows · ARM64", "winArm"], ["macOS", "mac"],
+    ["Linux · .deb x64", "deb"], ["Linux · .deb arm64", "debArm"],
+    ["Linux · Flatpak x64", "flatpak"], ["Linux · .tar.gz x64", "tar"],
+    ["Linux · .tar.gz arm64", "tarArm"]
   ];
-  function picture(i) {
-    return '<div class="pic" aria-hidden="true"><svg viewBox="0 0 72 96">' +
-      '<rect x="6" y="4" width="60" height="88" rx="12" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".55"/>' +
-      '<rect x="28" y="9" width="16" height="4" rx="2" fill="currentColor" opacity=".55"/>' +
-      (GLYPHS[i] || "") + "</svg></div>";
-  }
+  var TEXTS = {
+    "en": {"title": "Install Zen", "desc": "Install Zen on Android, iPhone, Windows, Mac or Linux: one recommended way for each system, step by step.", "h1": "Install Zen", "lead": "Pick your system. Zen is free, has no ads, and comes only from this project’s GitHub page or from a friend.", "yours": "For your device", "androidHow": "Download the file, tap it, allow once. Zen then updates itself.", "androidTime": "About 1 minute", "iphoneHow": "Install Scarlet, then open Zen’s file with it. Four short steps.", "iphoneTime": "About 5 minutes", "windowsHow": "Download the zip, unpack it and run zen.exe.", "windowsTime": "About 2 minutes", "macHow": "Download the zip, drag Zen to Applications and allow it once.", "macTime": "About 3 minutes", "linuxHow": "One command on Debian, Ubuntu and Mint; Flatpak elsewhere.", "linuxTime": "About 2 minutes", "stepByStep": "Step by step", "filesTitle": "All files of the latest release", "filesOpen": "Show all files", "verify": "Is it really Zen? Download only from GitHub or from a friend, and compare the file with the checksums.", "stuckTitle": "Stuck?", "stuckText": "Ask the community — someone will help you install Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "pl": {"title": "Zainstaluj Zen", "desc": "Zainstaluj Zen na Androidzie, iPhonie, Windows, Macu lub Linuksie: jeden polecany sposób dla każdego systemu, krok po kroku.", "h1": "Zainstaluj Zen", "lead": "Wybierz system. Zen jest darmowy, bez reklam i pochodzi tylko ze strony projektu na GitHubie albo od znajomego.", "yours": "Dla Twojego urządzenia", "androidHow": "Pobierz plik, stuknij go i zezwól raz. Potem Zen aktualizuje się sam.", "androidTime": "Około 1 minuty", "iphoneHow": "Zainstaluj Scarlet, a potem otwórz nim plik Zen. Cztery krótkie kroki.", "iphoneTime": "Około 5 minut", "windowsHow": "Pobierz zip, rozpakuj go i uruchom zen.exe.", "windowsTime": "Około 2 minut", "macHow": "Pobierz zip, przeciągnij Zen do Aplikacji i zezwól raz.", "macTime": "Około 3 minut", "linuxHow": "Jedno polecenie w Debianie, Ubuntu i Mincie; gdzie indziej Flatpak.", "linuxTime": "Około 2 minut", "stepByStep": "Krok po kroku", "filesTitle": "Wszystkie pliki najnowszego wydania", "filesOpen": "Pokaż wszystkie pliki", "verify": "Czy to na pewno Zen? Pobieraj tylko z GitHuba albo od znajomego i porównaj plik z sumami kontrolnymi.", "stuckTitle": "Coś nie działa?", "stuckText": "Zapytaj społeczność — ktoś pomoże zainstalować Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "id": {"title": "Pasang Zen", "desc": "Pasang Zen di Android, iPhone, Windows, Mac, atau Linux: satu cara yang disarankan untuk setiap sistem, selangkah demi selangkah.", "h1": "Pasang Zen", "lead": "Pilih sistem Anda. Zen gratis, tanpa iklan, dan hanya berasal dari halaman GitHub proyek ini atau dari teman.", "yours": "Untuk perangkat Anda", "androidHow": "Unduh file, ketuk, izinkan sekali. Setelah itu Zen memperbarui dirinya sendiri.", "androidTime": "Sekitar 1 menit", "iphoneHow": "Pasang Scarlet, lalu buka file Zen dengannya. Empat langkah singkat.", "iphoneTime": "Sekitar 5 menit", "windowsHow": "Unduh zip, ekstrak, dan jalankan zen.exe.", "windowsTime": "Sekitar 2 menit", "macHow": "Unduh zip, seret Zen ke Applications, dan izinkan sekali.", "macTime": "Sekitar 3 menit", "linuxHow": "Satu perintah di Debian, Ubuntu, dan Mint; Flatpak di tempat lain.", "linuxTime": "Sekitar 2 menit", "stepByStep": "Langkah demi langkah", "filesTitle": "Semua file rilis terbaru", "filesOpen": "Tampilkan semua file", "verify": "Benarkah ini Zen? Unduh hanya dari GitHub atau dari teman, dan bandingkan file dengan checksum.", "stuckTitle": "Buntu?", "stuckText": "Tanyakan ke komunitas — seseorang akan membantu Anda memasang Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "cs": {"title": "Instalace Zen", "desc": "Nainstalujte Zen na Android, iPhone, Windows, Mac nebo Linux: jeden doporučený způsob pro každý systém, krok za krokem.", "h1": "Instalace Zen", "lead": "Vyberte svůj systém. Zen je zdarma, bez reklam a pochází jen ze stránky projektu na GitHubu nebo od přítele.", "yours": "Pro vaše zařízení", "androidHow": "Stáhněte soubor, klepněte na něj a jednou povolte. Pak se Zen aktualizuje sám.", "androidTime": "Asi 1 minuta", "iphoneHow": "Nainstalujte Scarlet a jím otevřete soubor Zen. Čtyři krátké kroky.", "iphoneTime": "Asi 5 minut", "windowsHow": "Stáhněte zip, rozbalte ho a spusťte zen.exe.", "windowsTime": "Asi 2 minuty", "macHow": "Stáhněte zip, přetáhněte Zen do Aplikací a jednou povolte.", "macTime": "Asi 3 minuty", "linuxHow": "Jeden příkaz v Debianu, Ubuntu a Mintu; jinde Flatpak.", "linuxTime": "Asi 2 minuty", "stepByStep": "Krok za krokem", "filesTitle": "Všechny soubory nejnovějšího vydání", "filesOpen": "Zobrazit všechny soubory", "verify": "Je to opravdu Zen? Stahujte jen z GitHubu nebo od přítele a porovnejte soubor s kontrolními součty.", "stuckTitle": "Nejde to?", "stuckText": "Zeptejte se komunity — někdo vám s instalací Zen pomůže.", "sumsLink": "[SHA256SUMS|sums]"},
+    "de": {"title": "Zen installieren", "desc": "Installiere Zen auf Android, iPhone, Windows, Mac oder Linux: ein empfohlener Weg pro System, Schritt für Schritt.", "h1": "Zen installieren", "lead": "Wähle dein System. Zen ist kostenlos, hat keine Werbung und kommt nur von der GitHub-Seite des Projekts oder von einem Freund.", "yours": "Für dein Gerät", "androidHow": "Datei herunterladen, antippen, einmal erlauben. Danach aktualisiert sich Zen selbst.", "androidTime": "Etwa 1 Minute", "iphoneHow": "Scarlet installieren und damit die Zen-Datei öffnen. Vier kurze Schritte.", "iphoneTime": "Etwa 5 Minuten", "windowsHow": "Zip herunterladen, entpacken und zen.exe starten.", "windowsTime": "Etwa 2 Minuten", "macHow": "Zip herunterladen, Zen in Programme ziehen und einmal erlauben.", "macTime": "Etwa 3 Minuten", "linuxHow": "Ein Befehl unter Debian, Ubuntu und Mint; sonst Flatpak.", "linuxTime": "Etwa 2 Minuten", "stepByStep": "Schritt für Schritt", "filesTitle": "Alle Dateien der neuesten Version", "filesOpen": "Alle Dateien anzeigen", "verify": "Ist es wirklich Zen? Lade nur von GitHub oder von einem Freund herunter und vergleiche die Datei mit den Prüfsummen.", "stuckTitle": "Hängst du fest?", "stuckText": "Frag die Community — jemand hilft dir bei der Installation von Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "es": {"title": "Instalar Zen", "desc": "Instala Zen en Android, iPhone, Windows, Mac o Linux: una forma recomendada para cada sistema, paso a paso.", "h1": "Instalar Zen", "lead": "Elige tu sistema. Zen es gratis, no tiene anuncios y solo viene de la página de GitHub del proyecto o de un amigo.", "yours": "Para tu dispositivo", "androidHow": "Descarga el archivo, tócalo y permite una vez. Después Zen se actualiza solo.", "androidTime": "Aprox. 1 minuto", "iphoneHow": "Instala Scarlet y abre con él el archivo de Zen. Cuatro pasos cortos.", "iphoneTime": "Aprox. 5 minutos", "windowsHow": "Descarga el zip, descomprímelo y ejecuta zen.exe.", "windowsTime": "Aprox. 2 minutos", "macHow": "Descarga el zip, arrastra Zen a Aplicaciones y permite una vez.", "macTime": "Aprox. 3 minutos", "linuxHow": "Un comando en Debian, Ubuntu y Mint; Flatpak en el resto.", "linuxTime": "Aprox. 2 minutos", "stepByStep": "Paso a paso", "filesTitle": "Todos los archivos de la última versión", "filesOpen": "Mostrar todos los archivos", "verify": "¿Es realmente Zen? Descarga solo desde GitHub o de un amigo y compara el archivo con las sumas de verificación.", "stuckTitle": "¿Atascado?", "stuckText": "Pregunta a la comunidad: alguien te ayudará a instalar Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "fr": {"title": "Installer Zen", "desc": "Installez Zen sur Android, iPhone, Windows, Mac ou Linux : une méthode recommandée par système, pas à pas.", "h1": "Installer Zen", "lead": "Choisissez votre système. Zen est gratuit, sans pub, et ne vient que de la page GitHub du projet ou d’un ami.", "yours": "Pour votre appareil", "androidHow": "Téléchargez le fichier, touchez-le, autorisez une fois. Ensuite Zen se met à jour tout seul.", "androidTime": "Environ 1 minute", "iphoneHow": "Installez Scarlet, puis ouvrez le fichier de Zen avec lui. Quatre étapes courtes.", "iphoneTime": "Environ 5 minutes", "windowsHow": "Téléchargez le zip, décompressez-le et lancez zen.exe.", "windowsTime": "Environ 2 minutes", "macHow": "Téléchargez le zip, faites glisser Zen dans Applications et autorisez une fois.", "macTime": "Environ 3 minutes", "linuxHow": "Une commande sous Debian, Ubuntu et Mint ; Flatpak ailleurs.", "linuxTime": "Environ 2 minutes", "stepByStep": "Pas à pas", "filesTitle": "Tous les fichiers de la dernière version", "filesOpen": "Afficher tous les fichiers", "verify": "Est-ce bien Zen ? Ne téléchargez que depuis GitHub ou auprès d’un ami, et comparez le fichier aux sommes de contrôle.", "stuckTitle": "Bloqué ?", "stuckText": "Demandez à la communauté : quelqu’un vous aidera à installer Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "it": {"title": "Installa Zen", "desc": "Installa Zen su Android, iPhone, Windows, Mac o Linux: un metodo consigliato per ogni sistema, passo dopo passo.", "h1": "Installa Zen", "lead": "Scegli il tuo sistema. Zen è gratuito, senza pubblicità, e arriva solo dalla pagina GitHub del progetto o da un amico.", "yours": "Per il tuo dispositivo", "androidHow": "Scarica il file, toccalo, consenti una volta. Poi Zen si aggiorna da solo.", "androidTime": "Circa 1 minuto", "iphoneHow": "Installa Scarlet e apri con lui il file di Zen. Quattro brevi passaggi.", "iphoneTime": "Circa 5 minuti", "windowsHow": "Scarica lo zip, estrailo ed esegui zen.exe.", "windowsTime": "Circa 2 minuti", "macHow": "Scarica lo zip, trascina Zen in Applicazioni e consenti una volta.", "macTime": "Circa 3 minuti", "linuxHow": "Un comando su Debian, Ubuntu e Mint; altrove Flatpak.", "linuxTime": "Circa 2 minuti", "stepByStep": "Passo dopo passo", "filesTitle": "Tutti i file dell’ultima versione", "filesOpen": "Mostra tutti i file", "verify": "È davvero Zen? Scarica solo da GitHub o da un amico e confronta il file con i checksum.", "stuckTitle": "Bloccato?", "stuckText": "Chiedi alla community: qualcuno ti aiuterà a installare Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "hu": {"title": "A Zen telepítése", "desc": "Telepítsd a Zent Androidra, iPhone-ra, Windowsra, Macre vagy Linuxra: rendszerenként egy ajánlott mód, lépésről lépésre.", "h1": "A Zen telepítése", "lead": "Válaszd ki a rendszeredet. A Zen ingyenes, reklámmentes, és csak a projekt GitHub-oldaláról vagy egy baráttól származik.", "yours": "A te eszközödhöz", "androidHow": "Töltsd le a fájlt, koppints rá, és engedélyezd egyszer. Utána a Zen magától frissül.", "androidTime": "Kb. 1 perc", "iphoneHow": "Telepítsd a Scarletet, majd nyisd meg vele a Zen fájlját. Négy rövid lépés.", "iphoneTime": "Kb. 5 perc", "windowsHow": "Töltsd le a zipet, csomagold ki, és indítsd el a zen.exe-t.", "windowsTime": "Kb. 2 perc", "macHow": "Töltsd le a zipet, húzd a Zent az Alkalmazások közé, és engedélyezd egyszer.", "macTime": "Kb. 3 perc", "linuxHow": "Egy parancs Debianon, Ubuntun és Minten; máshol Flatpak.", "linuxTime": "Kb. 2 perc", "stepByStep": "Lépésről lépésre", "filesTitle": "A legújabb kiadás összes fájlja", "filesOpen": "Összes fájl megjelenítése", "verify": "Tényleg a Zen az? Csak a GitHubról vagy egy baráttól tölts le, és hasonlítsd össze a fájlt az ellenőrző összegekkel.", "stuckTitle": "Elakadtál?", "stuckText": "Kérdezd a közösséget — valaki segít a Zen telepítésében.", "sumsLink": "[SHA256SUMS|sums]"},
+    "nl": {"title": "Zen installeren", "desc": "Installeer Zen op Android, iPhone, Windows, Mac of Linux: één aanbevolen manier per systeem, stap voor stap.", "h1": "Zen installeren", "lead": "Kies je systeem. Zen is gratis, heeft geen advertenties en komt alleen van de GitHub-pagina van dit project of van een vriend.", "yours": "Voor jouw apparaat", "androidHow": "Download het bestand, tik erop en sta het één keer toe. Daarna werkt Zen zichzelf bij.", "androidTime": "Ongeveer 1 minuut", "iphoneHow": "Installeer Scarlet en open er het Zen-bestand mee. Vier korte stappen.", "iphoneTime": "Ongeveer 5 minuten", "windowsHow": "Download de zip, pak hem uit en start zen.exe.", "windowsTime": "Ongeveer 2 minuten", "macHow": "Download de zip, sleep Zen naar Programma’s en sta het één keer toe.", "macTime": "Ongeveer 3 minuten", "linuxHow": "Eén opdracht op Debian, Ubuntu en Mint; elders Flatpak.", "linuxTime": "Ongeveer 2 minuten", "stepByStep": "Stap voor stap", "filesTitle": "Alle bestanden van de nieuwste release", "filesOpen": "Alle bestanden tonen", "verify": "Is het echt Zen? Download alleen van GitHub of van een vriend en vergelijk het bestand met de controlesommen.", "stuckTitle": "Kom je er niet uit?", "stuckText": "Vraag het de community — iemand helpt je Zen te installeren.", "sumsLink": "[SHA256SUMS|sums]"},
+    "pt": {"title": "Instalar o Zen", "desc": "Instale o Zen no Android, iPhone, Windows, Mac ou Linux: uma forma recomendada para cada sistema, passo a passo.", "h1": "Instalar o Zen", "lead": "Escolha seu sistema. O Zen é grátis, não tem anúncios e vem apenas da página do projeto no GitHub ou de um amigo.", "yours": "Para o seu dispositivo", "androidHow": "Baixe o arquivo, toque nele e permita uma vez. Depois o Zen se atualiza sozinho.", "androidTime": "Cerca de 1 minuto", "iphoneHow": "Instale o Scarlet e abra o arquivo do Zen com ele. Quatro passos curtos.", "iphoneTime": "Cerca de 5 minutos", "windowsHow": "Baixe o zip, extraia e execute o zen.exe.", "windowsTime": "Cerca de 2 minutos", "macHow": "Baixe o zip, arraste o Zen para Aplicativos e permita uma vez.", "macTime": "Cerca de 3 minutos", "linuxHow": "Um comando no Debian, Ubuntu e Mint; Flatpak nos demais.", "linuxTime": "Cerca de 2 minutos", "stepByStep": "Passo a passo", "filesTitle": "Todos os arquivos da versão mais recente", "filesOpen": "Mostrar todos os arquivos", "verify": "É mesmo o Zen? Baixe apenas do GitHub ou de um amigo e compare o arquivo com as somas de verificação.", "stuckTitle": "Travou?", "stuckText": "Pergunte à comunidade — alguém ajuda você a instalar o Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "ro": {"title": "Instalează Zen", "desc": "Instalează Zen pe Android, iPhone, Windows, Mac sau Linux: un mod recomandat pentru fiecare sistem, pas cu pas.", "h1": "Instalează Zen", "lead": "Alege sistemul tău. Zen este gratuit, fără reclame și vine doar de pe pagina GitHub a proiectului sau de la un prieten.", "yours": "Pentru dispozitivul tău", "androidHow": "Descarcă fișierul, atinge-l și permite o dată. Apoi Zen se actualizează singur.", "androidTime": "Circa 1 minut", "iphoneHow": "Instalează Scarlet și deschide cu el fișierul Zen. Patru pași scurți.", "iphoneTime": "Circa 5 minute", "windowsHow": "Descarcă zip-ul, dezarhivează-l și rulează zen.exe.", "windowsTime": "Circa 2 minute", "macHow": "Descarcă zip-ul, trage Zen în Applications și permite o dată.", "macTime": "Circa 3 minute", "linuxHow": "O comandă pe Debian, Ubuntu și Mint; în rest Flatpak.", "linuxTime": "Circa 2 minute", "stepByStep": "Pas cu pas", "filesTitle": "Toate fișierele ultimei versiuni", "filesOpen": "Arată toate fișierele", "verify": "Este chiar Zen? Descarcă doar de pe GitHub sau de la un prieten și compară fișierul cu sumele de control.", "stuckTitle": "Ai rămas blocat?", "stuckText": "Întreabă comunitatea — cineva te va ajuta să instalezi Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "vi": {"title": "Cài đặt Zen", "desc": "Cài Zen trên Android, iPhone, Windows, Mac hoặc Linux: một cách được khuyên dùng cho mỗi hệ thống, từng bước một.", "h1": "Cài đặt Zen", "lead": "Chọn hệ thống của bạn. Zen miễn phí, không quảng cáo, và chỉ đến từ trang GitHub của dự án hoặc từ một người bạn.", "yours": "Dành cho thiết bị của bạn", "androidHow": "Tải tệp, chạm vào và cho phép một lần. Sau đó Zen tự cập nhật.", "androidTime": "Khoảng 1 phút", "iphoneHow": "Cài Scarlet rồi mở tệp của Zen bằng nó. Bốn bước ngắn.", "iphoneTime": "Khoảng 5 phút", "windowsHow": "Tải tệp zip, giải nén và chạy zen.exe.", "windowsTime": "Khoảng 2 phút", "macHow": "Tải tệp zip, kéo Zen vào Applications và cho phép một lần.", "macTime": "Khoảng 3 phút", "linuxHow": "Một lệnh trên Debian, Ubuntu và Mint; nơi khác dùng Flatpak.", "linuxTime": "Khoảng 2 phút", "stepByStep": "Từng bước một", "filesTitle": "Tất cả tệp của bản phát hành mới nhất", "filesOpen": "Hiện tất cả tệp", "verify": "Có đúng là Zen không? Chỉ tải từ GitHub hoặc từ bạn bè, và so tệp với các giá trị kiểm tra.", "stuckTitle": "Bị kẹt?", "stuckText": "Hỏi cộng đồng — sẽ có người giúp bạn cài Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "tr": {"title": "Zen’i kur", "desc": "Zen’i Android, iPhone, Windows, Mac veya Linux’a kur: her sistem için önerilen tek bir yol, adım adım.", "h1": "Zen’i kur", "lead": "Sistemini seç. Zen ücretsizdir, reklamsızdır ve yalnızca bu projenin GitHub sayfasından ya da bir arkadaştan gelir.", "yours": "Cihazın için", "androidHow": "Dosyayı indir, dokun ve bir kez izin ver. Sonra Zen kendini günceller.", "androidTime": "Yaklaşık 1 dakika", "iphoneHow": "Scarlet’ı kur ve Zen dosyasını onunla aç. Dört kısa adım.", "iphoneTime": "Yaklaşık 5 dakika", "windowsHow": "Zip’i indir, çıkar ve zen.exe’yi çalıştır.", "windowsTime": "Yaklaşık 2 dakika", "macHow": "Zip’i indir, Zen’i Uygulamalar’a sürükle ve bir kez izin ver.", "macTime": "Yaklaşık 3 dakika", "linuxHow": "Debian, Ubuntu ve Mint’te tek komut; başka yerlerde Flatpak.", "linuxTime": "Yaklaşık 2 dakika", "stepByStep": "Adım adım", "filesTitle": "Son sürümün tüm dosyaları", "filesOpen": "Tüm dosyaları göster", "verify": "Gerçekten Zen mi? Yalnızca GitHub’dan ya da bir arkadaştan indir ve dosyayı sağlama toplamlarıyla karşılaştır.", "stuckTitle": "Takıldın mı?", "stuckText": "Topluluğa sor — biri Zen’i kurmana yardım edecektir.", "sumsLink": "[SHA256SUMS|sums]"},
+    "ru": {"title": "Установка Zen", "desc": "Установите Zen на Android, iPhone, Windows, Mac или Linux: один рекомендуемый способ для каждой системы, шаг за шагом.", "h1": "Установка Zen", "lead": "Выберите свою систему. Zen бесплатный, без рекламы и приходит только со страницы проекта на GitHub или от друга.", "yours": "Для вашего устройства", "androidHow": "Скачайте файл, нажмите на него и один раз разрешите. Дальше Zen обновляется сам.", "androidTime": "Около 1 минуты", "iphoneHow": "Установите Scarlet и откройте им файл Zen. Четыре коротких шага.", "iphoneTime": "Около 5 минут", "windowsHow": "Скачайте zip, распакуйте и запустите zen.exe.", "windowsTime": "Около 2 минут", "macHow": "Скачайте zip, перетащите Zen в «Программы» и один раз разрешите.", "macTime": "Около 3 минут", "linuxHow": "Одна команда в Debian, Ubuntu и Mint; в остальных — Flatpak.", "linuxTime": "Около 2 минут", "stepByStep": "Шаг за шагом", "filesTitle": "Все файлы последнего выпуска", "filesOpen": "Показать все файлы", "verify": "Это точно Zen? Скачивайте только с GitHub или от друга и сверяйте файл с контрольными суммами.", "stuckTitle": "Не получается?", "stuckText": "Спросите сообщество — кто-нибудь поможет установить Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "uk": {"title": "Встановлення Zen", "desc": "Встановіть Zen на Android, iPhone, Windows, Mac або Linux: один рекомендований спосіб для кожної системи, крок за кроком.", "h1": "Встановлення Zen", "lead": "Виберіть свою систему. Zen безкоштовний, без реклами й надходить лише зі сторінки проєкту на GitHub або від друга.", "yours": "Для вашого пристрою", "androidHow": "Завантажте файл, торкніться його й один раз дозвольте. Далі Zen оновлюється сам.", "androidTime": "Близько 1 хвилини", "iphoneHow": "Встановіть Scarlet і відкрийте ним файл Zen. Чотири короткі кроки.", "iphoneTime": "Близько 5 хвилин", "windowsHow": "Завантажте zip, розпакуйте й запустіть zen.exe.", "windowsTime": "Близько 2 хвилин", "macHow": "Завантажте zip, перетягніть Zen у «Програми» й один раз дозвольте.", "macTime": "Близько 3 хвилин", "linuxHow": "Одна команда в Debian, Ubuntu і Mint; в інших — Flatpak.", "linuxTime": "Близько 2 хвилин", "stepByStep": "Крок за кроком", "filesTitle": "Усі файли останнього випуску", "filesOpen": "Показати всі файли", "verify": "Це точно Zen? Завантажуйте лише з GitHub або від друга й звіряйте файл із контрольними сумами.", "stuckTitle": "Не виходить?", "stuckText": "Запитайте спільноту — хтось допоможе встановити Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "ar": {"title": "تثبيت Zen", "desc": "ثبّت Zen على Android أو iPhone أو Windows أو Mac أو Linux: طريقة واحدة موصى بها لكل نظام، خطوة بخطوة.", "h1": "تثبيت Zen", "lead": "اختر نظامك. Zen مجاني وبلا إعلانات، ويأتي فقط من صفحة المشروع على GitHub أو من صديق.", "yours": "لجهازك", "androidHow": "نزّل الملف، واضغط عليه، واسمح مرة واحدة. بعدها يحدّث Zen نفسه.", "androidTime": "نحو دقيقة", "iphoneHow": "ثبّت Scarlet ثم افتح به ملف Zen. أربع خطوات قصيرة.", "iphoneTime": "نحو 5 دقائق", "windowsHow": "نزّل ملف zip وفك ضغطه وشغّل zen.exe.", "windowsTime": "نحو دقيقتين", "macHow": "نزّل ملف zip واسحب Zen إلى Applications واسمح مرة واحدة.", "macTime": "نحو 3 دقائق", "linuxHow": "أمر واحد على Debian وUbuntu وMint؛ وFlatpak في غيرها.", "linuxTime": "نحو دقيقتين", "stepByStep": "خطوة بخطوة", "filesTitle": "كل ملفات أحدث إصدار", "filesOpen": "اعرض كل الملفات", "verify": "هل هو فعلًا Zen؟ نزّل فقط من GitHub أو من صديق، وقارن الملف بمجاميع التحقق.", "stuckTitle": "هل تعثّرت؟", "stuckText": "اسأل المجتمع — سيساعدك أحدهم على تثبيت Zen.", "sumsLink": "[SHA256SUMS|sums]"},
+    "hi": {"title": "Zen इंस्टॉल करें", "desc": "Zen को Android, iPhone, Windows, Mac या Linux पर इंस्टॉल करें: हर सिस्टम के लिए एक अनुशंसित तरीक़ा, कदम-दर-कदम।", "h1": "Zen इंस्टॉल करें", "lead": "अपना सिस्टम चुनें। Zen मुफ़्त है, विज्ञापन-रहित है, और केवल इस प्रोजेक्ट के GitHub पेज या किसी दोस्त से आता है।", "yours": "आपके डिवाइस के लिए", "androidHow": "फ़ाइल डाउनलोड करें, उस पर टैप करें और एक बार अनुमति दें। इसके बाद Zen ख़ुद अपडेट होता है।", "androidTime": "लगभग 1 मिनट", "iphoneHow": "Scarlet इंस्टॉल करें और उससे Zen की फ़ाइल खोलें। चार छोटे कदम।", "iphoneTime": "लगभग 5 मिनट", "windowsHow": "zip डाउनलोड करें, एक्सट्रैक्ट करें और zen.exe चलाएँ।", "windowsTime": "लगभग 2 मिनट", "macHow": "zip डाउनलोड करें, Zen को Applications में खींचें और एक बार अनुमति दें।", "macTime": "लगभग 3 मिनट", "linuxHow": "Debian, Ubuntu और Mint पर एक कमांड; बाक़ी पर Flatpak।", "linuxTime": "लगभग 2 मिनट", "stepByStep": "कदम-दर-कदम", "filesTitle": "नवीनतम रिलीज़ की सभी फ़ाइलें", "filesOpen": "सभी फ़ाइलें दिखाएँ", "verify": "क्या यह सचमुच Zen है? केवल GitHub से या किसी दोस्त से डाउनलोड करें और फ़ाइल को चेकसम से मिलाएँ।", "stuckTitle": "अटक गए?", "stuckText": "समुदाय से पूछें — कोई Zen इंस्टॉल करने में आपकी मदद करेगा।", "sumsLink": "[SHA256SUMS|sums]"},
+    "zh": {"title": "安装 Zen", "desc": "在 Android、iPhone、Windows、Mac 或 Linux 上安装 Zen：每个系统一种推荐方式，逐步说明。", "h1": "安装 Zen", "lead": "选择你的系统。Zen 免费、没有广告，只来自本项目的 GitHub 页面或朋友。", "yours": "适合你的设备", "androidHow": "下载文件，点按它并允许一次。之后 Zen 会自动更新。", "androidTime": "约 1 分钟", "iphoneHow": "安装 Scarlet，再用它打开 Zen 的文件。共四个简短步骤。", "iphoneTime": "约 5 分钟", "windowsHow": "下载 zip，解压并运行 zen.exe。", "windowsTime": "约 2 分钟", "macHow": "下载 zip，把 Zen 拖到“应用程序”，并允许一次。", "macTime": "约 3 分钟", "linuxHow": "Debian、Ubuntu 和 Mint 上一条命令；其他发行版用 Flatpak。", "linuxTime": "约 2 分钟", "stepByStep": "逐步说明", "filesTitle": "最新版本的所有文件", "filesOpen": "显示所有文件", "verify": "这真的是 Zen 吗？只从 GitHub 或朋友那里下载，并将文件与校验和对照。", "stuckTitle": "卡住了？", "stuckText": "问问社区——会有人帮你安装 Zen。", "sumsLink": "[SHA256SUMS|sums]"},
+    "ja": {"title": "Zen をインストール", "desc": "Android、iPhone、Windows、Mac、Linux に Zen をインストール：各システムにおすすめの方法をひとつずつ、手順つきで。", "h1": "Zen をインストール", "lead": "お使いのシステムを選んでください。Zen は無料で広告もなく、このプロジェクトの GitHub ページか友だちからのみ入手できます。", "yours": "お使いの端末向け", "androidHow": "ファイルをダウンロードしてタップし、一度だけ許可します。その後は Zen が自動で更新されます。", "androidTime": "約1分", "iphoneHow": "Scarlet をインストールし、それで Zen のファイルを開きます。短い4ステップ。", "iphoneTime": "約5分", "windowsHow": "zip をダウンロードして展開し、zen.exe を実行します。", "windowsTime": "約2分", "macHow": "zip をダウンロードし、Zen を「アプリケーション」にドラッグして、一度だけ許可します。", "macTime": "約3分", "linuxHow": "Debian、Ubuntu、Mint ではコマンド1つ。その他は Flatpak。", "linuxTime": "約2分", "stepByStep": "手順を見る", "filesTitle": "最新リリースのすべてのファイル", "filesOpen": "すべてのファイルを表示", "verify": "本当に Zen ですか？ GitHub か友だちからのみダウンロードし、ファイルをチェックサムと照合してください。", "stuckTitle": "困っていますか？", "stuckText": "コミュニティに聞いてみましょう。誰かが Zen のインストールを手伝ってくれます。", "sumsLink": "[SHA256SUMS|sums]"},
+    "ko": {"title": "Zen 설치", "desc": "Android, iPhone, Windows, Mac, Linux에 Zen을 설치하세요. 시스템마다 권장 방법 하나를 단계별로 안내합니다.", "h1": "Zen 설치", "lead": "시스템을 선택하세요. Zen은 무료이고 광고가 없으며, 이 프로젝트의 GitHub 페이지나 친구를 통해서만 받을 수 있어요.", "yours": "내 기기용", "androidHow": "파일을 다운로드해 누르고 한 번만 허용하세요. 그 뒤에는 Zen이 스스로 업데이트됩니다.", "androidTime": "약 1분", "iphoneHow": "Scarlet을 설치하고 그것으로 Zen 파일을 엽니다. 짧은 4단계예요.", "iphoneTime": "약 5분", "windowsHow": "zip을 다운로드해 압축을 풀고 zen.exe를 실행하세요.", "windowsTime": "약 2분", "macHow": "zip을 다운로드하고 Zen을 응용 프로그램으로 끌어다 놓은 뒤 한 번만 허용하세요.", "macTime": "약 3분", "linuxHow": "Debian, Ubuntu, Mint에서는 명령 한 줄, 그 밖에는 Flatpak.", "linuxTime": "약 2분", "stepByStep": "단계별 안내", "filesTitle": "최신 릴리스의 모든 파일", "filesOpen": "모든 파일 보기", "verify": "정말 Zen일까요? GitHub이나 친구에게서만 받고, 파일을 체크섬과 비교하세요.", "stuckTitle": "막히셨나요?", "stuckText": "커뮤니티에 물어보세요. 누군가 Zen 설치를 도와줄 거예요.", "sumsLink": "[SHA256SUMS|sums]"},
+  };
+  Zen.init({ texts: TEXTS, links: LINKS });
 
-  // Names of the languages in the picker, each in its own language.
-  var NAMES = { en: "English", pl: "Polski" };
-  // Icons of the sprite at the top of the page.
-  function icon(name) {
-    return '<svg class="ico" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
-  }
-  var SYSTEM_ICONS = { android: "phone", iphone: "phone", windows: "monitor", macos: "laptop", linux: "terminal" };
+  var rows = document.getElementById("files");
+  FILES.forEach(function (f) {
+    var tr = document.createElement("tr");
+    var name = document.createElement("td");
+    name.textContent = f[0];
+    var file = document.createElement("td");
+    var a = document.createElement("a");
+    a.className = "chip";
+    a.href = LINKS[f[1]];
+    a.innerHTML = Zen.icon("download") + "<span></span>";
+    a.lastChild.textContent = LINKS[f[1]].split("/").pop();
+    file.appendChild(a);
+    tr.appendChild(name);
+    tr.appendChild(file);
+    rows.appendChild(tr);
+  });
 
-  var lang = "en";
-  var system = "android";
-  var release = null;
-
-  function esc(s) {
-    return String(s).replace(/[&<>"]/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
-    });
-  }
-  function render(text) {
-    var fp = release && release.apkCertificateSha256
-      ? release.apkCertificateSha256.match(/../g).join(":").toUpperCase()
-      : TEXTS[lang].unknown;
-    var html = esc(text.replace("{fingerprint}", fp).replace("{source}", SOURCE));
-    html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-    html = html.replace(/\*([^*]+)\*/g, "<i>$1</i>");
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-    html = html.replace(/\{([^|{}]+)\|(\w+)\}/g, function (_, label, key) {
-      var down = /^⬇/.test(label);
-      return '<a class="btn ' + (down ? "primary" : "secondary") + '" href="' +
-        esc(LINKS[key] || "#") + '">' + (down ? icon("download") : "") +
-        "<span>" + label.replace(/^⬇\s*/, "") + "</span></a>";
-    });
-    html = html.replace(/\[([^|\]]+)\|(\w+)\]/g, function (_, label, key) {
-      return '<a href="' + esc(LINKS[key] || "#") + '">' + label + "</a>";
-    });
-    return html;
-  }
-
-  function draw() {
-    var T = TEXTS[lang];
-    document.documentElement.lang = lang;
-    document.title = T.title;
-    document.getElementById("title").textContent = T.title;
-    document.getElementById("lead").textContent = T.lead;
-    var v = document.getElementById("version");
-    v.textContent = release && release.version
-      ? T.version.replace("{version}", release.version).replace("{date}", release.date)
-      : "";
-    var nav = document.getElementById("systems");
-    nav.innerHTML = "";
-    SYSTEMS.forEach(function (s) {
-      var b = document.createElement("button");
-      b.type = "button";
-      b.setAttribute("role", "tab");
-      b.setAttribute("aria-selected", s === system ? "true" : "false");
-      b.innerHTML = icon(SYSTEM_ICONS[s]);
-      var name = document.createElement("span");
-      name.textContent = T.names[s];
-      b.appendChild(name);
-      b.addEventListener("click", function () {
-        system = s;
-        history.replaceState(null, "", "#" + s);
-        draw();
-      });
-      nav.appendChild(b);
-    });
-    var g = T[system];
-    var html = '<section class="card" id="' + system + '"><h2>' + icon(SYSTEM_ICONS[system]) +
-      esc(T.names[system]) + '</h2><p class="muted">' + render(g.intro) + "</p><ol>";
-    g.steps.forEach(function (step, i) {
-      html += "<li>" + (system === "iphone"
-        ? '<div class="step"><div class="txt">' + render(step) + "</div>" + picture(i) + "</div>"
-        : render(step)) +
-        (i === 0 && g.other ? '<div class="other">' + render(g.other) + "</div>" : "") +
-        "</li>";
-    });
-    html += "</ol>";
-    g.notes.forEach(function (n) { html += '<div class="note">' + render(n) + "</div>"; });
-    html += "</section>";
-    document.getElementById("guides").innerHTML = html;
-    document.getElementById("footer").innerHTML = render(T.footer);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-i]"), function (el) {
-      el.textContent = T[el.getAttribute("data-i")] || TEXTS.en[el.getAttribute("data-i")] || "";
-    });
-    document.getElementById("langCode").textContent = lang.toUpperCase();
-    document.getElementById("langName").textContent = NAMES[lang] || lang;
-    document.getElementById("langSel").value = lang;
-  }
-
-  function detectSystem() {
-    var hash = location.hash.replace("#", "");
-    if (SYSTEMS.indexOf(hash) >= 0) { return hash; }
-    var ua = navigator.userAgent || "";
-    if (/android/i.test(ua)) { return "android"; }
-    if (/iphone|ipad|ipod/i.test(ua) ||
-        (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) { return "iphone"; }
-    if (/windows/i.test(ua)) { return "windows"; }
-    if (/macintosh|mac os x/i.test(ua)) { return "macos"; }
-    if (/linux|x11|cros/i.test(ua)) { return "linux"; }
-    return "android";
-  }
-  function detectLang() {
-    var has = function (l) { return Object.prototype.hasOwnProperty.call(TEXTS, l); };
-    // "?lang=xx", then the visitor's earlier choice (the storage may be
-    // blocked), then the browser's languages; English otherwise.
-    var asked = String(new URLSearchParams(location.search).get("lang") || "")
-      .slice(0, 2).toLowerCase();
-    if (has(asked)) { return asked; }
-    try {
-      var saved = localStorage.getItem("zen-lang");
-      if (saved && has(saved)) { return saved; }
-    } catch (e) { /* not remembered */ }
-    var langs = navigator.languages && navigator.languages.length
-      ? navigator.languages : [navigator.language || "en"];
-    for (var i = 0; i < langs.length; i++) {
-      var code = String(langs[i]).slice(0, 2).toLowerCase();
-      if (has(code)) { return code; }
+  // The visitor's own system goes first, with a badge.
+  var os = Zen.os;
+  if (os) {
+    var card = document.getElementById(os);
+    if (card) {
+      card.classList.add("mine");
+      card.querySelector(".badge").classList.remove("hidden");
     }
-    return "en";
   }
-
-  var picker = document.getElementById("langSel");
-  Object.keys(TEXTS).forEach(function (k) {
-    var o = document.createElement("option");
-    o.value = k;
-    o.textContent = NAMES[k] || k;
-    picker.appendChild(o);
-  });
-  picker.addEventListener("change", function () {
-    if (!Object.prototype.hasOwnProperty.call(TEXTS, picker.value)) { return; }
-    lang = picker.value;
-    try { localStorage.setItem("zen-lang", lang); } catch (e) { /* not remembered */ }
-    draw();
-  });
-  window.addEventListener("hashchange", function () { system = detectSystem(); draw(); });
-  system = detectSystem();
-  lang = detectLang();
-  draw();
-  // The version and the fingerprint of the latest release (pages.yml).
-  fetch("../release.json", { cache: "no-cache" })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (data) { if (data && data.version) { release = data; draw(); } })
-    .catch(function () {});
+  // An old link with a system in its address (install/#iphone) lands on its card.
+  var want = location.hash.replace("#", "");
+  var wanted = want && document.getElementById(want);
+  if (wanted && wanted.classList.contains("os-card")) {
+    Array.prototype.forEach.call(document.querySelectorAll(".os-card.mine"), function (c) {
+      c.classList.remove("mine");
+      c.querySelector(".badge").classList.add("hidden");
+    });
+    wanted.classList.add("mine");
+    wanted.querySelector(".badge").classList.remove("hidden");
+    wanted.scrollIntoView();
+  }
 })();
 </script>
 </body>

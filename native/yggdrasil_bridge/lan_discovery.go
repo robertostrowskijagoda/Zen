@@ -505,7 +505,7 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 	}
 	var candidates []*localPeer
 	for _, peer := range matchLocalAdvert(lan.m.peers(), beacon.advert, now) {
-		if !lan.m.hasLink(peer.address) {
+		if !lan.m.hasLink(peer.address) && lan.m.mayLink(peer.address) {
 			candidates = append(candidates, peer)
 		}
 	}

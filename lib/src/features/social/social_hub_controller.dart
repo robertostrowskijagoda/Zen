@@ -16,6 +16,7 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/calls/ongoing_group_call.dart';
 import 'package:zen/src/domain/friends/friend_lifecycle_reducer.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -59,6 +60,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -157,8 +159,9 @@ final Provider<Duration> callReRingIntervalProvider = Provider<Duration>((
   return const Duration(seconds: 1);
 });
 
-/// A friend who keeps answering pings has their "last seen" time written
-/// to the state at most this often (in between it lives in memory).
+/// A friend who keeps answering pings has their "last seen" time (and the
+/// time their presence was confirmed) written to the state at most this
+/// often (in between it lives in memory).
 const Duration kPresenceStoreEvery = Duration(minutes: 10);
 
 final NotifierProvider<SocialHubController, SocialHubState>
@@ -226,6 +229,13 @@ const int _maxStrangerInvitesPerWindow = 24;
 const int _maxStrangerAlertSendersPerWindow = 10;
 
 const int _maxTrackedStrangerIdentities = 4096;
+
+/// Window of the limit on mention notifications from one person.
+const Duration _mentionAlertWindow = Duration(minutes: 10);
+
+/// Group messages of one sender per window that may say they mention this
+/// person; past it they notify like any other message.
+const int kMaxMentionAlertsPerSender = 5;
 
 /// Delays of the extra call-teardown attempts, relative to the first one.
 const List<Duration> _callTeardownRetryDelays = <Duration>[
@@ -380,6 +390,49 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     return true;
   }
 
+  /// When each sender's recent mentions of this person were announced.
+  final Map<String, List<int>> _mentionAlertTimes = <String, List<int>>{};
+
+  /// [signal] marked as mentioning this person ([kMentionsYouKey]) when it
+  /// is a group message whose text names this device, from a member of a
+  /// group this device is in, and its sender is still within
+  /// [kMaxMentionAlertsPerSender]. Anything else comes back unchanged.
+  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) {
+    if (signal.type != ZenSignalType.groupMessage) {
+      return signal;
+    }
+    final GroupProfile? group = state.groups[signal.groupId ?? ''];
+    final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    if (group == null ||
+        group.isInvitePending ||
+        self.isEmpty ||
+        PeerShareCodec.addressesEqual(signal.sender, self) ||
+        !(groupHasMember(group, signal.sender) ||
+            PeerShareCodec.addressesEqual(group.createdById, signal.sender)) ||
+        !mentionsAnyOf(
+          signal.content ?? '',
+          signalMentions(signal),
+          addresses: <String>[self],
+        )) {
+      return signal;
+    }
+    final int windowStart = nowMillis - _mentionAlertWindow.inMilliseconds;
+    final String key = PeerShareCodec.identityKeyForAddress(signal.sender);
+    final List<int> times = _mentionAlertTimes[key] ??= <int>[];
+    times.removeWhere((int at) => at < windowStart);
+    if (times.length >= kMaxMentionAlertsPerSender) {
+      return signal;
+    }
+    times.add(nowMillis);
+    while (_mentionAlertTimes.length > _maxTrackedStrangerIdentities) {
+      _mentionAlertTimes.remove(_mentionAlertTimes.keys.first);
+    }
+    return signal.withChatExtras(<String, dynamic>{
+      ...?signal.chatExtras,
+      kMentionsYouKey: true,
+    });
+  }
+
   /// When each (group, peer) invite was last re-sent from here.
   final Map<String, int> _groupInviteResentAtMillis = <String, int>{};
   final Set<String> _dismissedOrRejectedGroupIds = <String>{};
@@ -448,9 +501,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   Future<void> _onMessageExpired(String key, ChatMessage message);
 
+  Future<bool> _dropDisappearedCopy(ZenSignal signal);
+
   void _noteExpiry(int atMillis);
 
-  Future<void> _scheduleDisappearSweep();
+  Future<void> sweepDisappearingMessages();
 
   Future<void> _handleDisappearTimer(ZenSignal signal, int timestamp);
 
@@ -727,6 +782,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// and written for it (B3).
   final Map<String, int> _presenceSeenAt = <String, int>{};
 
+  /// When each friend's presence was last confirmed, and when they last had
+  /// Zen open as they told it: in memory like [_presenceSeenAt] while the
+  /// state shows the same.
+  final Map<String, int> _presenceConfirmedAt = <String, int>{};
+  final Map<String, int> _openedAt = <String, int>{};
+
   Timer? _persistSoonTimer;
 
   /// Saves the state a moment later, once for a burst of small changes
@@ -909,6 +970,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   Future<void> dismissInboxEntry(String id);
 
   Future<bool> _timelineHasMessage({
+    required String peerAddress,
+    required String messageId,
+  });
+
+  Future<void> _sendMessageAck({
     required String peerAddress,
     required String messageId,
   });
@@ -1234,6 +1300,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String text,
     ChatReply? replyTo,
     bool forwarded = false,
+    List<Mention> mentions = const <Mention>[],
   });
 
   /// Reactions, edits, deletions, files in groups

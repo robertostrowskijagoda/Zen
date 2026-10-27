@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart'
     as app_installer;
@@ -499,6 +500,106 @@ void main() {
       // GitHub's JSON is what the app reads too.
       expect(GithubRelease.fromJson(release())?.version, '1.12.0');
       expect(jsonEncode(release()), isNotEmpty);
+    });
+  });
+
+  group("what's new", () {
+    const String log =
+        '# Changelog\n\n## Unreleased\n\n'
+        "### What's new\n"
+        '- [en] Messages reach you while Zen is closed.\n'
+        '- [en] See who has Zen open.\n'
+        '\n'
+        '- [pl] Wiadomości docierają przy zamkniętym Zen.\n\n'
+        '### Messages\n- A detail that stays in the changelog.\n\n'
+        '## 1.12.1 — 24.10.2026\n'
+        "### What's new\n- [en] GIFs from the keyboard work.\n";
+
+    test('the note is read from its version\'s part of CHANGELOG.md', () {
+      final ({Map<String, List<String>> lines, List<String> problems}) next =
+          whatsNewSection(log);
+      expect(next.problems, isEmpty);
+      expect(next.lines, <String, List<String>>{
+        'en': <String>[
+          'Messages reach you while Zen is closed.',
+          'See who has Zen open.',
+        ],
+        'pl': <String>['Wiadomości docierają przy zamkniętym Zen.'],
+      });
+      expect(whatsNewSection(log, version: '1.12.1').lines, <String, Object>{
+        'en': <String>['GIFs from the keyboard work.'],
+      });
+      expect(whatsNewSection(log, version: '1.12.0').problems, <String>[
+        'CHANGELOG.md has no "## 1.12.0" part',
+      ]);
+      // prepare moves the note with the rest of "Unreleased".
+      expect(
+        whatsNewSection(
+          moveUnreleased(log, '1.13.0', DateTime(2026, 11, 2)),
+          version: '1.13.0',
+        ).lines,
+        next.lines,
+      );
+    });
+
+    test('prepare refuses a missing or broken note; check only a broken '
+        'one', () {
+      const String empty = '# Changelog\n\n## Unreleased\n\n## 1.12.1\n';
+      expect(whatsNewSection(empty).problems, hasLength(1));
+      expect(whatsNewSection(empty, required: false).problems, isEmpty);
+      String note(String lines) =>
+          "## Unreleased\n### What's new\n$lines\n## 1.0.0\n";
+      for (final String bad in <String>[
+        '- [pl] Tylko po polsku.',
+        '- [en] One.\n- [en] Two.\n- [en] Three.\n- [en] Four.',
+        '- [en] See https://example.org for more.',
+        '- [en] **Bold** news.',
+        '* [en] Another bullet.',
+        '- [english] A long code.',
+        '- [en] ${'x' * 161}',
+        'Just a sentence.',
+      ]) {
+        expect(
+          whatsNewSection(note(bad), required: false).problems,
+          isNotEmpty,
+          reason: bad,
+        );
+      }
+      // The next release's note in this repository is as the app takes it.
+      expect(
+        whatsNewSection(
+          File('CHANGELOG.md').readAsStringSync(),
+          required: false,
+        ).problems,
+        isEmpty,
+      );
+    });
+
+    test('release.yml makes whats-new.json before SHA256SUMS, on tags', () {
+      final String yml = File(
+        '.github/workflows/release.yml',
+      ).readAsStringSync();
+      expect(workflowAssetNames(yml), contains(kWhatsNewAsset));
+      final int note = yml.indexOf('tool/release.dart whats-new');
+      expect(note, greaterThan(0));
+      expect(note, lessThan(yml.indexOf('sha256sum -- *')));
+      expect(kOptionalAssets, contains(kWhatsNewAsset));
+    });
+
+    test('a downloaded note of another version is reported', () async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen_note_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final String json = whatsNewJson('1.11.0', <String, List<String>>{
+        'en': <String>['Old news.'],
+      });
+      File('${dir.path}/$kWhatsNewAsset').writeAsStringSync(json);
+      File(
+        '${dir.path}/$kSumsAsset',
+      ).writeAsStringSync('${sha256Hex(utf8.encode(json))}  $kWhatsNewAsset\n');
+      expect(
+        await verifyReleaseFolder(dir, version: '1.12.0'),
+        contains('$kWhatsNewAsset is the note of 1.11.0, not 1.12.0'),
+      );
     });
   });
 }

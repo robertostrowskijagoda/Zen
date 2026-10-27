@@ -235,8 +235,73 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
   Iterable<String> _disappearingKeys() =>
       List<String>.of(state.disappearingTimers.keys);
 
+  /// Whether [signal] is a chat message that already disappeared here (a
+  /// mailbox handing it over late, a retry from the sender): such a copy
+  /// would come back with a new clock, be announced and counted unread
+  /// again. It is dropped; a friend's message is still acknowledged, so
+  /// the sender (and its mailboxes) stop sending it.
+  @override
+  Future<bool> _dropDisappearedCopy(ZenSignal signal) async {
+    final String key;
+    final String id;
+    if (signal.type == ZenSignalType.message) {
+      key = _disappearKey(signal.sender);
+      id = _incomingMessageIdOf(signal);
+    } else if (signal.type == ZenSignalType.groupMessage &&
+        (signal.groupId?.isNotEmpty ?? false) &&
+        (signal.messageId?.isNotEmpty ?? false)) {
+      key = 'group:${signal.groupId}';
+      id = signal.messageId!;
+    } else {
+      return false;
+    }
+    if (!state.disappearedMessages.containsKey(
+      disappearedMessageKey(key, id),
+    )) {
+      // Expired but not swept yet (only conversations that ever had a
+      // timer can hold such messages).
+      final bool hadTimer =
+          state.disappearingTimers.containsKey(key) ||
+          state.disappearSecondsFor(key) > 0;
+      if (!hadTimer || !await _disappearingStore.holdsExpired(key, id)) {
+        return false;
+      }
+    }
+    final String? ownId = signal.messageId?.trim();
+    if (signal.type == ZenSignalType.message &&
+        ownId != null &&
+        ownId.isNotEmpty) {
+      unawaitedLogged(
+        _sendMessageAck(peerAddress: signal.sender, messageId: ownId),
+        context: 'Acknowledging a disappeared message',
+      );
+    }
+    return true;
+  }
+
+  /// True while a sweep runs: it saves what it remembered once, at the end.
+  bool _sweepingDisappeared = false;
+
   @override
   Future<void> _onMessageExpired(String key, ChatMessage message) async {
+    if (ref.mounted) {
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      state = state.copyWith(
+        disappearedMessages: rememberDisappeared(
+          state.disappearedMessages,
+          key: key,
+          id: message.id,
+          expiredAtMillis: message.expiresAtMillis ?? now,
+          nowMillis: now,
+        ),
+      );
+      if (!_sweepingDisappeared) {
+        unawaitedLogged(
+          _persistState(),
+          context: 'Saving a disappeared message',
+        );
+      }
+    }
     await _deleteManagedAttachmentIfPresent(message);
     if (!key.startsWith('group:')) {
       await _transferStore.deleteIncoming(key, message.id);
@@ -245,16 +310,25 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
   }
 
   /// Deletes what expired and waits for the next one.
+  @override
   Future<void> sweepDisappearingMessages() async {
     if (_controllerDisposed || !ref.mounted) {
       return;
     }
     final DisappearingTimelineStore store = _disappearingStore;
-    final int removed = await store.sweep(_disappearingKeys());
+    final int removed;
+    _sweepingDisappeared = true;
+    try {
+      removed = await store.sweep(_disappearingKeys());
+    } finally {
+      _sweepingDisappeared = false;
+    }
     if (!ref.mounted) {
       return;
     }
     if (removed > 0) {
+      // What disappeared is remembered (see `_dropDisappearedCopy`).
+      await _persistState();
       _bumpTimelineRevision();
       for (final String key in _disappearingKeys()) {
         if (!key.startsWith('group:')) {
@@ -292,7 +366,6 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     state = state.copyWith(friends: friends);
   }
 
-  @override
   Future<void> _scheduleDisappearSweep() async {
     if (_controllerDisposed || !ref.mounted) {
       return;

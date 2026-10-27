@@ -1,7 +1,7 @@
 /// The project's web addresses, in one place.
 ///
 /// Links the app makes (invitation QR codes, door stickers, the install
-/// page, the SideStore source, the link a store build passes on) start with
+/// page, the link a store build passes on) start with
 /// [kZenPagesBase]. Links are taken from every base in [kZenPageBases], so
 /// once the pages move to an own domain the stickers and posters already
 /// printed keep working.

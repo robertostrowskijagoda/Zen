@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 
 /// The "Animacje" question: three choices and a line saying what the chosen
 /// one does. It holds no state, so any screen can ask it (Ustawienia →
@@ -29,15 +30,17 @@ class AnimationsChoice extends StatelessWidget {
         Wrap(
           key: const Key('settings-animations-choice'),
           spacing: 8,
-          runSpacing: 8,
+          runSpacing: 0,
           children: <Widget>[
             for (final AppAnimations mode in AppAnimations.values)
-              ChoiceChip(
-                key: Key('settings-animations-${mode.name}'),
-                showCheckmark: false,
-                label: Text(mode.label),
-                selected: value == mode,
-                onSelected: (_) => onChanged(mode),
+              ChipTapTarget(
+                child: ChoiceChip(
+                  key: Key('settings-animations-${mode.name}'),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: Text(mode.label),
+                  selected: value == mode,
+                  onSelected: (_) => onChanged(mode),
+                ),
               ),
           ],
         ),

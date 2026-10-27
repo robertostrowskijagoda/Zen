@@ -4,6 +4,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/launcher_disguise.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final Provider<AppSettings> appSettingsInitialStateProvider =
     Provider<AppSettings>((Ref ref) {
@@ -132,6 +133,27 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(notificationPrivacy: value));
   }
 
+  /// "Powiadomienia o nowych postach" on or off.
+  Future<void> setPostNotifications(bool value) async {
+    await _save(state.copyWith(postNotifications: value));
+  }
+
+  /// "Wycisz posty tej osoby": new posts of the friend at [address] are
+  /// not announced while [muted].
+  Future<void> setPostAuthorMuted(String address, {required bool muted}) async {
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    if (normal.isEmpty || state.mutedPostAuthors.contains(normal) == muted) {
+      return;
+    }
+    await _save(
+      state.copyWith(
+        mutedPostAuthors: muted
+            ? <String>{...state.mutedPostAuthors, normal}
+            : (Set<String>.of(state.mutedPostAuthors)..remove(normal)),
+      ),
+    );
+  }
+
   Future<void> setInAppSounds(bool value) async {
     await _save(state.copyWith(inAppSounds: value));
   }
@@ -185,9 +207,30 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(keepReceivingInBackground: value));
   }
 
-  /// The first-start setup was gone through or skipped.
-  Future<void> setFirstRunSetupDone(bool value) async {
-    await _save(state.copyWith(firstRunSetupDone: value));
+  /// "Pokazuj, kiedy ostatnio otwierałem aplikację".
+  Future<void> setShowLastOpened(bool value) async {
+    await _save(state.copyWith(showLastOpened: value));
+  }
+
+  /// The setup (as of [kSetupRevision]) was gone through or skipped.
+  ///
+  /// Set only once it is on the disk: the gate leaves the setup as soon as
+  /// the state says so, so a write that fails must leave the state as it
+  /// was, for the setup to stay and say that it could not save.
+  Future<void> setSetupDone() async {
+    final AppSettings before = state;
+    final AppSettings next = before.copyWith(setupRevision: kSetupRevision);
+    await ref.read(appSettingsStoreProvider).save(next);
+    if (!ref.mounted) {
+      return;
+    }
+    if (!identical(state, before)) {
+      // Something else was set meanwhile: saved again, with it.
+      await _save(state.copyWith(setupRevision: kSetupRevision));
+      return;
+    }
+    state = next;
+    await ref.read(appSecurityServiceProvider).applySettings(next);
   }
 
   /// The first-start permissions step is done.
@@ -211,6 +254,14 @@ final class AppSettingsController extends Notifier<AppSettings> {
       return;
     }
     await _save(state.copyWith(seenTips: <String>{...state.seenTips, id}));
+  }
+
+  /// The notification list was opened with [millis] as its newest entry.
+  Future<void> markNotificationsSeen(int millis) async {
+    if (millis <= state.notificationsSeenMillis) {
+      return;
+    }
+    await _save(state.copyWith(notificationsSeenMillis: millis));
   }
 
   /// The terms, the privacy policy and the licence notice of [version]

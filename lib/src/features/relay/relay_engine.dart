@@ -16,6 +16,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 
 part 'relay_engine_blobs.dart';
 part 'relay_engine_locked.dart';
+part 'relay_engine_mailboxes.dart';
 
 /// A friend as the relay layer sees it.
 @immutable
@@ -24,10 +25,40 @@ final class RelayFriend {
     required this.address,
     this.lastSeenAtMillis = 0,
     this.closeness = 1,
+    this.devices = const <String>[],
+    this.linked = true,
   });
 
+  /// The address the app knows the friend by.
   final String address;
+
+  /// When the friend was last seen, on any of their devices.
   final int lastSeenAtMillis;
+
+  /// The friend's other devices (another phone, a computer, the phone the
+  /// account moved to), never one its owner unlinked. Each has its own
+  /// mailbox key and mailboxes: mail for the friend goes to every one of
+  /// them, and any one of them can hold this device's mail.
+  final List<String> devices;
+
+  /// False when the friend unlinked the device at [address] (a lost or
+  /// stolen phone): it holds no mail and gets nothing, [devices] stand in
+  /// for it. [address] still names the friend.
+  final bool linked;
+
+  /// The friend's devices that count: [address] (unless unlinked) and
+  /// [devices], canonical.
+  Iterable<String> get allAddresses sync* {
+    if (linked) {
+      yield PeerShareCodec.normalizeAddress(address);
+    }
+    for (final String device in devices) {
+      final String normal = PeerShareCodec.normalizeAddress(device);
+      if (normal.isNotEmpty) {
+        yield normal;
+      }
+    }
+  }
 
   /// How close this friend is (0 "Słaby znajomy", 1 "Znajomy", 2
   /// "Przyjaciel"): free mailbox places go to the closest first.
@@ -60,6 +91,10 @@ final class RelayConfig {
   const RelayConfig({
     this.maxRelays = 6,
     this.staleRelayAfter = const Duration(days: 3),
+    this.mailboxChangeSpacing = const Duration(days: 1),
+    this.reachHalfLife = const Duration(days: 3),
+    this.answerWithin = const Duration(minutes: 2),
+    this.quietObservedFor = const Duration(hours: 12),
     this.messageTtl = const Duration(days: 14),
     this.depositAfter = const Duration(seconds: 4),
     this.directRetrySchedule = const <Duration>[
@@ -113,8 +148,27 @@ final class RelayConfig {
   /// How many friends hold this device's mail.
   final int maxRelays;
 
-  /// A mailbox not seen for this long is replaced by a friend seen lately.
+  /// A mailbox not heard from for this long (while this device kept asking
+  /// it) counts as gone quiet: it is replaced by a friend's device that
+  /// answers, or the person is asked to pick another one.
   final Duration staleRelayAfter;
+
+  /// The automatic choice replaces at most one mailbox per this time (an
+  /// empty place is filled at once): each change makes friends send their
+  /// mail somewhere else, and the mailboxes catch up with each other.
+  final Duration mailboxChangeSpacing;
+
+  /// Half-life of what friends' devices answered ([RelayReach]).
+  final Duration reachHalfLife;
+
+  /// An ask (a poll, a deposit) not answered within this counts as missed
+  /// once the next ask goes out.
+  final Duration answerWithin;
+
+  /// A mailbox counts as gone quiet only after this device has been asking
+  /// it in vain for at least this long, not after one missed ask when this
+  /// device itself comes back from days offline.
+  final Duration quietObservedFor;
 
   /// How long anything is kept for delivery (outbox and relays alike).
   final Duration messageTtl;
@@ -250,6 +304,9 @@ final class RelayOverview {
     this.blobQuotaBytes = 0,
     this.heldBlobBytes = 0,
     this.outgoingBlobCount = 0,
+    this.mailboxFriends = const <String>[],
+    this.candidates = const <String, RelayMailboxCandidate>{},
+    this.quiet = const <RelayQuietMailbox>[],
   });
 
   final bool isAutomatic;
@@ -258,8 +315,19 @@ final class RelayOverview {
   /// (off unless the person switched it on).
   final bool shareWithGroups;
 
-  /// Friends currently holding this device's mail.
+  /// Friends' devices currently holding this device's mail.
   final List<String> relays;
+
+  /// The friend (as the app knows them) of each of [relays], in order.
+  final List<String> mailboxFriends;
+
+  /// How good a mailbox each friend makes, by the address the app knows
+  /// them by: for the picker.
+  final Map<String, RelayMailboxCandidate> candidates;
+
+  /// Mailboxes that stopped answering with nobody to take their place
+  /// automatically (or chosen by hand): the person should pick another.
+  final List<RelayQuietMailbox> quiet;
 
   /// Messages from here still waiting for their recipient.
   final int outboxCount;
@@ -278,6 +346,68 @@ final class RelayOverview {
 
   /// Attachments from here still on their way to the mailboxes.
   final int outgoingBlobCount;
+}
+
+/// How good a mailbox one friend makes, as this device has seen it.
+@immutable
+final class RelayMailboxCandidate {
+  const RelayMailboxCandidate({
+    required this.friend,
+    required this.device,
+    this.deviceClass = RelayDeviceClass.unknown,
+    this.quality = 0,
+    this.answeredShare,
+    this.heardAtMillis = 0,
+    this.quietSinceMillis = 0,
+    this.deviceClasses = const <RelayDeviceClass>[],
+  });
+
+  /// The friend, as the app knows them.
+  final String friend;
+
+  /// Their device that would hold the mail (the best of theirs).
+  final String device;
+  final RelayDeviceClass deviceClass;
+
+  /// 0-1, see [RelayReach.quality].
+  final double quality;
+
+  /// The share of asks the device answered lately, `null` before it was
+  /// asked enough.
+  final double? answeredShare;
+
+  /// When anything last came from the device (0: not seen by the mailbox
+  /// layer).
+  final int heardAtMillis;
+
+  /// Since when it has gone quiet (0: it answers, or was not asked).
+  final int quietSinceMillis;
+
+  /// The kinds of all of the friend's devices that announced one (each
+  /// kind once), for showing what the friend uses.
+  final List<RelayDeviceClass> deviceClasses;
+}
+
+/// One of this device's mailboxes that stopped answering (see
+/// [RelayOverview.quiet]).
+@immutable
+final class RelayQuietMailbox {
+  const RelayQuietMailbox({
+    required this.friend,
+    required this.device,
+    required this.sinceMillis,
+    this.told = false,
+  });
+
+  /// The friend, as the app knows them.
+  final String friend;
+  final String device;
+
+  /// When it was last heard from (or first asked in vain, if never).
+  final int sinceMillis;
+
+  /// The person was told already ([RelayEngine.markQuietTold]).
+  final bool told;
 }
 
 /// Payload types that must reach their recipient eventually.
@@ -304,6 +434,9 @@ const Set<String> kReliablePayloadTypes = <String>{
   // Posts, comments and likes for friends who are offline
   // (ledger_mail_push.dart).
   'lg_push',
+  // A mention in a post or a comment, to the person mentioned
+  // (post_mentions.dart).
+  'lg_mention',
   'profile_update',
   'disappear_timer',
   // Meeting features: a friend offline now still gets them.
@@ -433,6 +566,26 @@ const String kSendOnceKey = '_once';
 /// [RelayConfig.messageTtl]; not sent along.
 const String kReliableTtlKey = '_ttl';
 
+/// Set on a `rly_poll` that wants an answer even when the mailbox holds
+/// nothing: the mailbox then says `rly_here`, so the poller can tell a
+/// mailbox with no mail from one that is gone (see [RelayReach]). Only the
+/// periodic polls ask it, never the ones sent on a sign of life.
+const String kRelayProbeKey = 'p';
+
+/// "I am here, with nothing for you": a mailbox's answer to a probing
+/// poll.
+const String kRelayHereType = 'rly_here';
+
+/// An automatic mailbox that went quiet is replaced only by a device at
+/// least this good ([RelayReach.quality]): an iPhone nobody has seen answer
+/// is no better, and the person is asked to choose instead.
+const double kMinMailboxQuality = 0.3;
+
+/// A mailbox that answers is replaced only by a device this much better
+/// (an iPhone by a computer or an Android phone, a phone that is mostly off
+/// by one that is mostly on), never for a small difference.
+const double kMailboxQualityGap = 0.35;
+
 /// Longest reliable id accepted; the app's own are about 25 characters.
 const int _maxReliableIdLength = 128;
 
@@ -518,9 +671,16 @@ bool isReliablePayload(Map<String, dynamic> payload) {
 /// * once the recipient confirms (`rly_mail_ack`) it also tells its other
 ///   relays (`rly_purge`), and everyone drops the copy.
 ///
-/// **Relay sets propagate.** Each device announces its relay list, version
-/// and public key to all friends (`rly_announce`) — when the set changes and
-/// whenever a friend that has not confirmed the latest version shows up.
+/// **Relay sets propagate.** Each device announces its relay list, version,
+/// public key and kind of device to all friends (`rly_announce`) — when the
+/// set changes and whenever a friend that has not confirmed the latest
+/// version shows up. How the set is chosen and watched:
+/// `relay_engine_mailboxes.dart`.
+///
+/// **Devices, not accounts.** A friend with several devices (or one that
+/// moved to a new phone) has a key, mailboxes and an announcement per
+/// device ([RelayFriend.devices]); the account routing above sends to each
+/// device, and delivery is tracked per person.
 ///
 /// The recipient de-duplicates by `_rid`, so the same payload arriving
 /// directly and from several relays is handled exactly once.
@@ -536,11 +696,12 @@ final class RelayEngine {
     this.config = const RelayConfig(),
     int Function()? clock,
     RelayBlobStore? blobStore,
-    this.staysOnline = false,
+    RelayDeviceClass Function()? deviceClass,
   }) : _store = store,
        _peers = peers,
        _rawSend = send,
        _blobs = blobStore,
+       _deviceClass = deviceClass ?? (() => RelayDeviceClass.unknown),
        _now = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final RelayStateStore _store;
@@ -553,15 +714,19 @@ final class RelayEngine {
   final int Function() _now;
   final RelayConfig config;
 
-  /// This device is online most of the time (a computer with Zen in the
-  /// tray, Android with its background service). Announced to friends, who
-  /// then prefer it as a mailbox; an iPhone, which receives only while Zen
-  /// is open, announces `false`.
-  final bool staysOnline;
+  /// What kind of device this is ([RelayDeviceClass]): announced to
+  /// friends, who prefer the kinds that are online most of the time as
+  /// mailboxes. Asked again now and then (an iPhone's keep-alive can be
+  /// switched on and off); a change is announced like a new relay set.
+  final RelayDeviceClass Function() _deviceClass;
 
   final ValueNotifier<RelayOverview> overview = ValueNotifier<RelayOverview>(
     const RelayOverview(),
   );
+
+  /// Changes whenever the person switches between automatic and
+  /// hand-picked mailboxes or picks others ([setManualRelays]).
+  final ValueNotifier<int> mailboxChoiceRevision = ValueNotifier<int>(0);
 
   /// How many [RelayDeliveryReport]s wait for [takeDeliveryReports]. The chat
   /// layer listens to this and takes the reports whenever it is above zero.
@@ -616,8 +781,19 @@ final class RelayEngine {
   /// When the last frame of any kind arrived (0: none yet).
   int _lastFrameAtMillis = 0;
 
+  /// [RelayOverview.quiet] as last published (see `_quietSignatureOf`).
+  int _quietSignature = 0;
+
+  /// When [RelayState.reach] first changed since the state was last saved
+  /// (0: saved). Answers come with nearly every frame; they are saved along
+  /// with whatever is saved next, or after a while by themselves.
+  int _reachDirtySince = 0;
+
   /// Outbox ids too large even to be cut into parts.
   final Set<String> _tooLargeToSplit = <String>{};
+
+  /// The friends during the current operation (see `_acceptedFriends`).
+  List<RelayFriend>? _friendsNow;
 
   /// Deposits ignore their spacing once (after a network change).
   bool _depositsDueNow = false;
@@ -685,6 +861,7 @@ final class RelayEngine {
       _blobPulls.clear();
       final RelayState state = await _load();
       _active = true;
+      _noteOwnClass(state);
       _refreshRelaySet(state);
       // A new start of the node (an app start, a restart after the network
       // changed): whatever waits is tried again on the next tick instead of
@@ -704,7 +881,7 @@ final class RelayEngine {
       // up, and make sure every friend knows where to leave mail.
       for (final String relay in state.currentRelays) {
         _lastPollAt[relay] = now;
-        await _sendQuietly(relay, <String, dynamic>{'type': 'rly_poll'});
+        await _probe(state, relay, now);
       }
     });
   }
@@ -892,14 +1069,22 @@ final class RelayEngine {
             : null,
       ),
     );
+    final String person = _personOf(entry.recipient);
     tracked.pending[entry.recipient] = entry.rid;
-    tracked.delivered.remove(entry.recipient);
-    tracked.expired.remove(entry.recipient);
+    tracked.delivered.remove(person);
+    tracked.expired.remove(person);
     tracked.settledAtMillis = 0;
     _capTracked(state);
   }
 
   /// [entry] was confirmed by its recipient ([delivered]) or expired.
+  ///
+  /// Kept per person ([_personOf]): [RelayTrackedMessage.pending] names the
+  /// devices a copy is on its way to, [RelayTrackedMessage.delivered] and
+  /// [RelayTrackedMessage.expired] the people. One device of a friend
+  /// confirming it delivers it to the friend (the copies for their other
+  /// devices still go, untracked); it expires for the friend only once no
+  /// device of theirs is left to get it.
   void _settleTracked(
     RelayState state,
     RelayOutboxEntry entry, {
@@ -911,8 +1096,18 @@ final class RelayEngine {
     if (tracked == null || tracked.pending[entry.recipient] != entry.rid) {
       return;
     }
+    final String person = _personOf(entry.recipient);
     tracked.pending.remove(entry.recipient);
-    (delivered ? tracked.delivered : tracked.expired).add(entry.recipient);
+    if (delivered) {
+      tracked.pending.removeWhere(
+        (String device, String _) => _personOf(device) == person,
+      );
+      tracked.expired.remove(person);
+      tracked.delivered.add(person);
+    } else if (!tracked.delivered.contains(person) &&
+        !tracked.pending.keys.any((String d) => _personOf(d) == person)) {
+      tracked.expired.add(person);
+    }
     if (!tracked.isSettled) {
       return;
     }
@@ -924,7 +1119,7 @@ final class RelayEngine {
     state.deliveryReports.add(
       RelayDeliveryReport(
         rid: entry.rid,
-        recipient: entry.recipient,
+        recipient: person,
         messageId: tracked.messageId,
         status: tracked.expired.isEmpty
             ? RelayDeliveryStatus.delivered
@@ -1183,41 +1378,68 @@ final class RelayEngine {
     final Map<String, MessageDeliveryProgress> messages =
         <String, MessageDeliveryProgress>{};
     for (final RelayTrackedMessage tracked in state.tracked.values) {
+      // Per person: the furthest any copy for one of their devices got
+      // (in mailboxes, then on its first try, then waiting here, then only
+      // while both are online).
+      final Map<String, ({int stage, int copies, bool self})> people =
+          <String, ({int stage, int copies, bool self})>{};
+      tracked.pending.forEach((String recipient, String rid) {
+        final RelayOutboxEntry? entry = state.outbox[rid];
+        int stage;
+        int copies = 0;
+        bool self = false;
+        if (entry == null) {
+          stage = 2;
+        } else {
+          final Set<String> holders = _holdersOf(state, entry);
+          if (holders.isNotEmpty) {
+            stage = 3;
+            copies = holders.length;
+            self = holders.contains(_self);
+          } else if (entry.directAttempts <= 1 &&
+              now - entry.createdAtMillis <
+                  config.depositAfter.inMilliseconds * 2) {
+            stage = 2;
+          } else if (!entry.relayable &&
+              entry.blobId == null &&
+              entry.partRids.isEmpty) {
+            // Too large for the mailboxes it has: only while both are online.
+            stage = 0;
+          } else {
+            stage = 1;
+          }
+        }
+        final String person = _personOf(recipient);
+        final ({int stage, int copies, bool self})? known = people[person];
+        if (known == null ||
+            stage > known.stage ||
+            (stage == known.stage && copies > known.copies)) {
+          people[person] = (stage: stage, copies: copies, self: self);
+        }
+      });
       int sending = 0;
       int waiting = 0;
       int inMailboxes = 0;
       int copies = 0;
       int bothOnline = 0;
       bool heldBySelf = false;
-      tracked.pending.forEach((String recipient, String rid) {
-        final RelayOutboxEntry? entry = state.outbox[rid];
-        if (entry == null) {
-          sending++;
-          return;
+      for (final ({int stage, int copies, bool self}) p in people.values) {
+        switch (p.stage) {
+          case 3:
+            inMailboxes++;
+            copies += p.copies;
+            heldBySelf = heldBySelf || p.self;
+          case 2:
+            sending++;
+          case 1:
+            waiting++;
+          default:
+            bothOnline++;
         }
-        final Set<String> holders = _holdersOf(state, entry);
-        if (holders.isNotEmpty) {
-          inMailboxes++;
-          copies += holders.length;
-          heldBySelf = heldBySelf || holders.contains(_self);
-        } else if (entry.directAttempts <= 1 &&
-            now - entry.createdAtMillis <
-                config.depositAfter.inMilliseconds * 2) {
-          sending++;
-        } else if (!entry.relayable &&
-            entry.blobId == null &&
-            entry.partRids.isEmpty) {
-          // Too large for the mailboxes it has: only while both are online.
-          bothOnline++;
-        } else {
-          waiting++;
-        }
-      });
+      }
       messages[tracked.messageId] = MessageDeliveryProgress(
         recipients:
-            tracked.pending.length +
-            tracked.delivered.length +
-            tracked.expired.length,
+            people.length + tracked.delivered.length + tracked.expired.length,
         delivered: tracked.delivered.length,
         failed: tracked.expired.length,
         sending: sending,
@@ -1397,7 +1619,7 @@ final class RelayEngine {
     state.deliveryReports.add(
       RelayDeliveryReport(
         rid: entry.rid,
-        recipient: entry.recipient,
+        recipient: _personOf(entry.recipient),
         messageId: messageId,
         status: status,
         atMillis: now,
@@ -1436,6 +1658,8 @@ final class RelayEngine {
         changed = true;
       }
       _lastFrameAtMillis = arrivedAt;
+      // Anything at all from a friend's device answers what it was asked.
+      _heardFrom(state, from, arrivedAt);
       if (type.startsWith('rly_')) {
         changed = await _handleProtocolFrame(
           state,
@@ -1596,8 +1820,17 @@ final class RelayEngine {
         return true;
       case 'rly_poll':
         // Asked for explicitly: everything, even what went out a moment ago.
-        await _pushMail(state, from, force: true);
+        // Nothing held, but asked whether this mailbox is there: it is.
+        if (!await _pushMail(state, from, force: true) &&
+            payload[kRelayProbeKey] == true &&
+            _isAcceptedFriend(from)) {
+          await _sendQuietly(from, const <String, dynamic>{
+            'type': kRelayHereType,
+          });
+        }
         return false;
+      case kRelayHereType:
+        return false; // counted as heard above
       case 'rly_mail':
         return _handleMail(state, from, payload['items'], forward);
       case 'rly_mail_ack':
@@ -1654,9 +1887,9 @@ final class RelayEngine {
     Map<String, dynamic> payload,
   ) {
     if (!_isContact(from)) {
-      // Relay sets are only taken from friends and group members; an
-      // unconfirmed announcement is simply re-sent once the relationship is
-      // in place.
+      // Relay sets are only taken from friends (any of their devices) and
+      // group members; an unconfirmed announcement is simply re-sent once
+      // the relationship is in place.
       return false;
     }
     final int version = (payload['v'] as num?)?.toInt() ?? 0;
@@ -1697,7 +1930,7 @@ final class RelayEngine {
           : null,
       blobQuotaBytes: max(0, _intOf(payload['bq'])),
       blobRelays: _blobRelaysFrom(payload['br'], relays),
-      staysOnline: payload['on'] == true,
+      deviceClass: RelayDeviceClass.fromWire(payload['dc']),
     );
     if (_blobs != null &&
         state.currentRelays.contains(from) &&
@@ -1741,7 +1974,7 @@ final class RelayEngine {
         'pq': base64Url.encode(identity.pqPublicKey!),
       'relays': state.currentRelays,
       'v': state.relaySetVersion,
-      if (staysOnline) 'on': true,
+      if (state.announcedClass.isNotEmpty) 'dc': state.announcedClass,
       'tk': _depositToken(depositKey, recipient: _self, sender: to),
       if (state.currentRelays.contains(to)) 'dk': base64Url.encode(depositKey),
       if (_blobs != null) ...<String, dynamic>{
@@ -1774,47 +2007,40 @@ final class RelayEngine {
 
   /// Re-derives this device's relay set; bumps the version when it changed.
   ///
-  /// Automatic mode is sticky on purpose: re-ranking on every presence
-  /// change would re-announce to every friend all the time and scatter the
-  /// mail across ever-changing devices. A relay stays until it stops being a
-  /// friend, or until it has not been seen for [RelayConfig.staleRelayAfter]
-  /// while a fresher friend could take its place. Free places go first to
-  /// friends whose device stays online (computers in the tray, Android with
-  /// its background service), then to the closest, then to the most
-  /// recently seen; a device that stays online also takes the place of one
-  /// that does not (one iPhone holding mail for another iPhone delivers
-  /// only when both happen to have Zen open).
+  /// Automatic mode is sticky on purpose: every change makes friends leave
+  /// their mail somewhere else and the mailboxes catch up with each other,
+  /// so re-ranking on every sign of life would scatter the mail across
+  /// ever-changing devices. An empty place (a mailbox that stopped being a
+  /// friend) is filled at once; otherwise at most one mailbox is replaced
+  /// per [RelayConfig.mailboxChangeSpacing], and only when it has gone
+  /// quiet or a far better device is there (see [rankRelays]). A friend's
+  /// mailbox is always one of their devices, the best of them (the phone
+  /// they moved to, their computer rather than their iPhone).
   bool _refreshRelaySet(RelayState state) {
     if (!_peers.isReady) {
       return false;
     }
-    final List<RelayFriend> friends = _peers.acceptedFriends();
-    final Set<String> friendAddresses =
-        friends
-            .map((RelayFriend f) => PeerShareCodec.normalizeAddress(f.address))
-            .toSet()
-          ..remove(_self);
+    final int now = _now();
+    final _MailboxJudge judge = _judgeOf(state, now);
     final List<String> next;
     final List<String>? manual = state.manualRelays;
     if (manual != null) {
-      next = manual
-          .map(PeerShareCodec.normalizeAddress)
-          .where(friendAddresses.contains)
-          .toSet()
-          .take(config.maxRelays)
-          .toList(growable: false);
+      next = judge.resolve(manual, current: state.currentRelays);
     } else {
-      next = rankRelays(
+      next = judge.rank(
         current: state.currentRelays,
-        friends: <RelayFriend>[
-          for (final RelayFriend f in friends)
-            if (PeerShareCodec.normalizeAddress(f.address) != _self) f,
-        ],
-        staysOnline: (String a) => state.peers[a]?.staysOnline ?? false,
-        nowMillis: _now(),
-        maxRelays: config.maxRelays,
-        staleAfter: config.staleRelayAfter,
+        mayReplace:
+            state.mailboxChangedAtMillis == 0 ||
+            now - state.mailboxChangedAtMillis >=
+                config.mailboxChangeSpacing.inMilliseconds,
       );
+      // A mailbox that is still a friend's device and is not kept was
+      // replaced: the next replacement waits.
+      if (state.currentRelays.any(
+        (String a) => judge.owner.containsKey(a) && !next.contains(a),
+      )) {
+        state.mailboxChangedAtMillis = now;
+      }
     }
     if (listEquals(next, state.currentRelays)) {
       return false;
@@ -1825,111 +2051,114 @@ final class RelayEngine {
     return true;
   }
 
+  /// The mailbox choice over this device's friends as things stand now.
+  _MailboxJudge _judgeOf(RelayState state, int now) => _MailboxJudge(
+    friends: <RelayFriend>[
+      if (_peers.isReady)
+        for (final RelayFriend f in _acceptedFriends())
+          if (PeerShareCodec.normalizeAddress(f.address) != _self) f,
+    ],
+    deviceClass: (String a) =>
+        state.peers[a]?.deviceClass ?? RelayDeviceClass.unknown,
+    reach: (String a) => state.reach[a],
+    nowMillis: now,
+    config: config,
+  );
+
   /// The automatic relay set (see [_refreshRelaySet]): [current] kept where
-  /// it still fits, vacancies filled from [friends] by preference.
+  /// it still fits, empty places filled from [friends] by preference, and
+  /// with [mayReplace] at most one mailbox replaced.
   ///
-  /// Weak acquaintances ("Słaby znajomy", closeness 0) never jump the queue
-  /// for staying online. A relay not seen for [staleAfter] (0 = never seen,
-  /// not stale) is replaced only by a friend seen within that time.
+  /// The preference, best first: a device that has not gone quiet; not a
+  /// weak acquaintance ("Słaby znajomy", closeness 0); a better mailbox
+  /// ([RelayReach.quality]: what the device's kind promises, corrected by
+  /// how it answered polls and deposits); "Przyjaciel" before "Znajomy";
+  /// the most recently seen. One device per friend.
+  ///
+  /// A mailbox has gone quiet when it was not heard from for
+  /// [RelayConfig.staleRelayAfter] while asked in vain (or, never asked, its
+  /// friend was not seen for that long). It is replaced by the best device
+  /// that has not, if that one is at least [kMinMailboxQuality] (otherwise
+  /// the person is asked, see [RelayOverview.quiet]). A mailbox that answers
+  /// is replaced only by one at least [kMailboxQualityGap] better, never by
+  /// a weak acquaintance, and not while it is away (an outage is waited out
+  /// until it has gone quiet).
   @visibleForTesting
   static List<String> rankRelays({
     required List<String> current,
     required List<RelayFriend> friends,
-    required bool Function(String address) staysOnline,
+    required RelayDeviceClass Function(String address) deviceClass,
+    RelayReach? Function(String address)? reach,
     required int nowMillis,
-    required int maxRelays,
-    required Duration staleAfter,
-  }) {
-    final Map<String, RelayFriend> byAddress = <String, RelayFriend>{
-      for (final RelayFriend f in friends)
-        PeerShareCodec.normalizeAddress(f.address): f,
-    };
-    bool stale(String a) {
-      final int seen = byAddress[a]?.lastSeenAtMillis ?? 0;
-      return seen > 0 && nowMillis - seen > staleAfter.inMilliseconds;
-    }
+    RelayConfig config = const RelayConfig(),
+    bool mayReplace = true,
+  }) => _MailboxJudge(
+    friends: friends,
+    deviceClass: deviceClass,
+    reach: reach ?? (String _) => null,
+    nowMillis: nowMillis,
+    config: config,
+  ).rank(current: current, mayReplace: mayReplace);
 
-    bool preferred(String a) =>
-        staysOnline(a) && (byAddress[a]?.closeness ?? 0) > 0 && !stale(a);
-    int seenAt(String a) => byAddress[a]?.lastSeenAtMillis ?? 0;
-
-    final List<String> kept = current
-        .map(PeerShareCodec.normalizeAddress)
-        .where(byAddress.containsKey)
-        .toSet()
-        .take(maxRelays)
-        .toList();
-    final List<String> candidates =
-        byAddress.keys.where((String a) => !kept.contains(a)).toList()
-          ..sort((String a, String b) {
-            final int byOnline = (preferred(b) ? 1 : 0).compareTo(
-              preferred(a) ? 1 : 0,
-            );
-            if (byOnline != 0) {
-              return byOnline;
-            }
-            final int byFresh = (stale(a) ? 1 : 0).compareTo(stale(b) ? 1 : 0);
-            if (byFresh != 0) {
-              return byFresh;
-            }
-            // "Przyjaciel" first, then the most recently seen.
-            final int byLevel = byAddress[b]!.closeness.compareTo(
-              byAddress[a]!.closeness,
-            );
-            return byLevel != 0 ? byLevel : seenAt(b).compareTo(seenAt(a));
-          });
-    // Vacancies first.
-    while (kept.length < maxRelays && candidates.isNotEmpty) {
-      kept.add(candidates.removeAt(0));
-    }
-    // A relay gone quiet for days makes way for a friend seen lately; one
-    // that does not stay online makes way for one that does.
-    for (final String candidate in List<String>.of(candidates)) {
-      if (stale(candidate)) {
-        break; // sorted: no fresher one follows
-      }
-      final List<String> replaceable =
-          kept
-              .where(
-                (String a) =>
-                    stale(a) || (preferred(candidate) && !preferred(a)),
-              )
-              .toList()
-            ..sort((String a, String b) {
-              final int byStale = (stale(b) ? 1 : 0).compareTo(
-                stale(a) ? 1 : 0,
-              );
-              return byStale != 0 ? byStale : seenAt(a).compareTo(seenAt(b));
-            });
-      if (replaceable.isEmpty) {
-        continue;
-      }
-      kept[kept.indexOf(replaceable.first)] = candidate;
-    }
-    return kept;
-  }
-
-  /// Switches between automatic (`null`) and a hand-picked relay list.
+  /// Switches between automatic (`null`) and hand-picked mailboxes: the
+  /// friends, by the addresses the app knows them by (each is served by
+  /// the best of their devices). The account's other devices take the same
+  /// choice (`RelayMailboxSyncDomain`).
   Future<void> setManualRelays(List<String>? relays) {
     return _locked(() async {
       final RelayState state = await _load();
-      state.manualRelays = relays
+      final List<String>? next = relays
           ?.map(PeerShareCodec.normalizeAddress)
           .where((String a) => a.isNotEmpty)
           .toSet()
           .take(config.maxRelays)
           .toList(growable: false);
+      final bool choiceChanged =
+          (next == null) != (state.manualRelays == null) ||
+          (next != null && !listEquals(next, state.manualRelays));
+      state.manualRelays = next;
       if (_refreshRelaySet(state) && _active) {
         await _announceToAll(state);
       }
       await _save(state);
+      if (choiceChanged) {
+        mailboxChoiceRevision.value++;
+      }
+    });
+  }
+
+  /// The hand-picked mailboxes (friends' addresses, see [setManualRelays]),
+  /// or `null` while they are chosen automatically.
+  Future<List<String>?> manualMailboxes() {
+    return _locked(() async {
+      final List<String>? manual = (await _load()).manualRelays;
+      return manual == null ? null : List<String>.of(manual);
+    });
+  }
+
+  /// The person was told that the mailboxes in [quiet] stopped answering
+  /// (see [RelayOverview.quiet]): not again until they answer and go quiet
+  /// once more.
+  Future<void> markQuietTold(List<RelayQuietMailbox> quiet) {
+    return _locked(() async {
+      final RelayState state = await _load();
+      bool changed = false;
+      for (final RelayQuietMailbox q in quiet) {
+        if (state.currentRelays.contains(q.device) &&
+            state.quietTold[q.device] != q.sinceMillis) {
+          state.quietTold[q.device] = q.sinceMillis;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _save(state);
+      }
     });
   }
 
   Future<void> _announceToAll(RelayState state) async {
     final int now = _now();
-    for (final RelayFriend friend in _announceAudience(state)) {
-      final String address = PeerShareCodec.normalizeAddress(friend.address);
+    for (final String address in _announceAudience(state)) {
       if (address == _self) {
         continue;
       }
@@ -2195,7 +2424,7 @@ final class RelayEngine {
   /// [force]d (the recipient asked with `rly_poll`): every frame from the
   /// recipient counts as a sighting, and resending the whole mailbox each
   /// time would flood it.
-  Future<void> _pushMail(
+  Future<bool> _pushMail(
     RelayState state,
     String recipient, {
     bool force = false,
@@ -2203,7 +2432,7 @@ final class RelayEngine {
     final Map<String, Map<String, dynamic>>? held = state.mailbox[recipient];
     if (held == null || held.isEmpty) {
       _lastPushedAt.remove(recipient);
-      return;
+      return false;
     }
     final int now = _now();
     final Map<String, int> pushed = _lastPushedAt.putIfAbsent(
@@ -2243,6 +2472,7 @@ final class RelayEngine {
         'items': batch,
       });
     }
+    return true;
   }
 
   /// Drops what [recipient] confirmed (or a co-relay reports delivered) and
@@ -2654,12 +2884,18 @@ final class RelayEngine {
       if (_forgetFormerContacts(state)) {
         changed = true;
       }
+      if (_noteOwnClass(state)) {
+        changed = true;
+      }
+      if (_reachDirtySince > 0 &&
+          now - _reachDirtySince >= config.pollInterval.inMilliseconds) {
+        changed = true;
+      }
       if (_refreshRelaySet(state)) {
         changed = true;
       }
       // Announcements not yet confirmed.
-      for (final RelayFriend friend in _announceAudience(state)) {
-        final String address = PeerShareCodec.normalizeAddress(friend.address);
+      for (final String address in _announceAudience(state)) {
         if (address == _self ||
             state.announcedVersions[address] == state.relaySetVersion) {
           continue;
@@ -2684,12 +2920,13 @@ final class RelayEngine {
         await _depositBlobs(state);
         await _resumeBlobPulls(state, now);
       }
-      // Collect from our relays now and then.
+      // Collect from our relays now and then (and see whether they are
+      // still there).
       for (final String relay in state.currentRelays) {
         final int? last = _lastPollAt[relay];
         if (last == null || now - last >= config.pollInterval.inMilliseconds) {
           _lastPollAt[relay] = now;
-          await _sendQuietly(relay, <String, dynamic>{'type': 'rly_poll'});
+          await _probe(state, relay, now);
         }
       }
       // Co-relays catch each other up.
@@ -2711,6 +2948,10 @@ final class RelayEngine {
       } else {
         // First tries turn into "waiting" as time passes, unsaved.
         _publishProgress(state);
+        // A mailbox goes quiet as time passes too.
+        if (_quietSignatureOf(state) != _quietSignature) {
+          _publishOverview(state);
+        }
       }
       _frequentTicks = _computeFrequentTicks(state, _now());
     });
@@ -2730,8 +2971,16 @@ final class RelayEngine {
     for (final RelayOutboxEntry entry in lapsed) {
       state.outbox.remove(entry.rid);
       _sealed.remove(entry.rid);
-      _report(state, entry, RelayDeliveryStatus.expired, now);
       _settleTracked(state, entry, delivered: false, now: now);
+      // Not failed while another device of the friend got it, or may still.
+      final String? id = _trackedIdOf(entry.payload);
+      final RelayTrackedMessage? tracked = id == null
+          ? null
+          : state.tracked[id];
+      if (tracked == null ||
+          tracked.expired.contains(_personOf(entry.recipient))) {
+        _report(state, entry, RelayDeliveryStatus.expired, now);
+      }
     }
     final int trackedBefore = state.tracked.length;
     _capTracked(state, now: now);
@@ -2805,19 +3054,30 @@ final class RelayEngine {
   }
 
   /// Forgets announcement confirmations of people who are no longer
-  /// contacts (and any that should never have been stored).
+  /// contacts (and any that should never have been stored), and what
+  /// devices that are no friends' any more answered.
   bool _forgetFormerContacts(RelayState state) {
-    if (!_peers.isReady || state.announcedVersions.isEmpty) {
+    if (!_peers.isReady) {
       return false;
     }
-    final Set<String> audience = _announceAudience(state)
-        .map((RelayFriend f) => PeerShareCodec.normalizeAddress(f.address))
-        .toSet();
+    final Set<String> audience = _announceAudience(state);
     final int before = state.announcedVersions.length;
     state.announcedVersions.removeWhere(
       (String address, int _) => !audience.contains(address),
     );
-    return state.announcedVersions.length != before;
+    // Answers are kept for friends' devices only; told-about quiet
+    // mailboxes only while they are mailboxes.
+    final int reachBefore = state.reach.length;
+    state.reach.removeWhere(
+      (String address, RelayReach _) => !_isAcceptedFriend(address),
+    );
+    final int toldBefore = state.quietTold.length;
+    state.quietTold.removeWhere(
+      (String address, int _) => !state.currentRelays.contains(address),
+    );
+    return state.announcedVersions.length != before ||
+        state.reach.length != reachBefore ||
+        state.quietTold.length != toldBefore;
   }
 
   Future<RelayOutboxEntry> _attemptDirect(
@@ -2940,6 +3200,7 @@ final class RelayEngine {
       );
       for (final String relay in targets) {
         attempts[relay] = now;
+        _askedOf(state, relay, now);
         await _sendQuietly(relay, <String, dynamic>{
           'type': 'rly_deposit',
           'env': wire,
@@ -3237,15 +3498,17 @@ final class RelayEngine {
   // Plumbing
   // ---------------------------------------------------------------------------
 
-  /// Friends always; group members too while sharing with groups is on.
-  List<RelayFriend> _announceAudience(RelayState state) {
+  /// Friends (every device of theirs) always; group members too while
+  /// sharing with groups is on. Canonical addresses.
+  Set<String> _announceAudience(RelayState state) {
     if (!_peers.isReady) {
-      return const <RelayFriend>[];
+      return const <String>{};
     }
-    return <RelayFriend>[
-      ..._peers.acceptedFriends(),
-      if (state.shareWithGroups) ..._peers.groupContacts(),
-    ];
+    return <String>{
+      for (final RelayFriend f in _acceptedFriends()) ...f.allAddresses,
+      if (state.shareWithGroups)
+        for (final RelayFriend f in _peers.groupContacts()) ...f.allAddresses,
+    };
   }
 
   bool _shouldAnnounceTo(RelayState state, String address) {
@@ -3482,13 +3745,38 @@ final class RelayEngine {
     });
   }
 
+  /// The friends, read once per operation of the engine: who is a friend
+  /// (at which devices) is asked for nearly every frame and every tracked
+  /// message, and the answer does not change within one.
+  List<RelayFriend> _acceptedFriends() =>
+      _friendsNow ??= _peers.acceptedFriends();
+
+  /// A friend, at any of their devices.
   bool _isAcceptedFriend(String address) {
     if (!_peers.isReady) {
       return false;
     }
-    return _peers.acceptedFriends().any(
-      (RelayFriend f) => PeerShareCodec.addressesEqual(f.address, address),
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    return _acceptedFriends().any(
+      (RelayFriend f) => f.allAddresses.contains(normal),
     );
+  }
+
+  /// The address the app knows the owner of [address] by: a friend's own
+  /// for any of their devices, [address] itself otherwise. Delivery is
+  /// tracked per person: a message reached a friend once any of their
+  /// devices has it.
+  String _personOf(String address) {
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    if (!_peers.isReady) {
+      return normal;
+    }
+    for (final RelayFriend f in _acceptedFriends()) {
+      if (f.devices.isNotEmpty && f.allAddresses.contains(normal)) {
+        return PeerShareCodec.normalizeAddress(f.address);
+      }
+    }
+    return normal;
   }
 
   Future<void> _sendQuietly(String to, Map<String, dynamic> payload) async {
@@ -3521,6 +3809,7 @@ final class RelayEngine {
 
   Future<void> _save(RelayState state) async {
     await _store.save(state);
+    _reachDirtySince = 0;
     if (_active) {
       _state = state;
     }
@@ -3548,9 +3837,29 @@ final class RelayEngine {
       lockedMailboxRevision.value++;
     }
     _publishProgress(state);
+    _publishOverview(state);
+    deliveryReportCount.value = state.deliveryReports.length;
+  }
+
+  void _publishOverview(RelayState state) {
+    final ({
+      List<String> friends,
+      Map<String, RelayMailboxCandidate> candidates,
+      List<RelayQuietMailbox> quiet,
+    })
+    mailboxes = _mailboxView(state);
+    _quietSignature = Object.hashAll(<Object>[
+      for (final RelayQuietMailbox q in mailboxes.quiet)
+        Object.hash(q.device, q.sinceMillis, q.told),
+    ]);
     overview.value = RelayOverview(
       isAutomatic: state.manualRelays == null,
       relays: List<String>.unmodifiable(state.currentRelays),
+      mailboxFriends: List<String>.unmodifiable(mailboxes.friends),
+      candidates: Map<String, RelayMailboxCandidate>.unmodifiable(
+        mailboxes.candidates,
+      ),
+      quiet: List<RelayQuietMailbox>.unmodifiable(mailboxes.quiet),
       outboxCount: state.outbox.length,
       heldEnvelopeCount: state.mailbox.values.fold<int>(
         0,
@@ -3563,7 +3872,6 @@ final class RelayEngine {
       heldBlobBytes: _heldBlobBytes(state),
       outgoingBlobCount: state.outBlobs.length,
     );
-    deliveryReportCount.value = state.deliveryReports.length;
   }
 
   static String _fingerprint(Uint8List? key) {
@@ -3586,7 +3894,14 @@ final class RelayEngine {
   }
 
   Future<T> _locked<T>(Future<T> Function() action) {
-    final Future<T> result = _lock.then((_) => action());
+    final Future<T> result = _lock.then((_) async {
+      _friendsNow = null;
+      try {
+        return await action();
+      } finally {
+        _friendsNow = null;
+      }
+    });
     _lock = result.then<void>(
       (_) {},
       onError: (Object error, StackTrace st) {

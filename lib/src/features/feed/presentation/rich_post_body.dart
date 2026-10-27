@@ -2,10 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
+import 'package:zen/src/features/profile/presentation/mini_profile.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// Style of one run, shared by the post view and the editor.
 TextStyle richRunStyle(
@@ -49,17 +55,22 @@ TextStyle richRunStyle(
 
 /// A post's text with its formatting, and its photos and videos in the
 /// places the author put them. Media the text does not mention are
-/// left to the caller (shown after the text).
+/// left to the caller (shown after the text). Each mention (a token of
+/// [mentions]) shows as "@name" and opens the person's mini-profile.
 class RichPostBody extends StatefulWidget {
   const RichPostBody({
     required this.source,
     required this.mediaBuilder,
     required this.mediaCount,
+    this.mentions = const <Mention>[],
     this.fontSize = 15,
     super.key,
   });
 
   final String source;
+
+  /// The people the text's `<@N>` tokens mention.
+  final List<Mention> mentions;
 
   /// Builds the [index]-th media of the post.
   final Widget Function(BuildContext context, int index) mediaBuilder;
@@ -72,6 +83,9 @@ class RichPostBody extends StatefulWidget {
 
 class _RichPostBodyState extends State<RichPostBody> {
   final Set<int> _revealed = <int>{};
+
+  /// Who is who, for the names of the mentions (only with mentions).
+  SocialHubState? _social;
   final List<GestureRecognizer> _recognizers = <GestureRecognizer>[];
 
   @override
@@ -94,6 +108,23 @@ class _RichPostBodyState extends State<RichPostBody> {
 
   InlineSpan _run(RichRun r, TextStyle base, ZenColors zen, int id) {
     GestureRecognizer? tap;
+    if (r.isMention && r.mention < widget.mentions.length) {
+      final Mention who = widget.mentions[r.mention];
+      final SocialHubState? social = _social;
+      tap = TapGestureRecognizer()
+        ..onTap = () => unawaited(showMiniProfile(context, who.address));
+      _recognizers.add(tap);
+      return TextSpan(
+        text:
+            '@${mentionLabel(who, nameOf: social == null ? null : (Mention m) => knownMentionName(social, m))}',
+        recognizer: tap,
+        style: richRunStyle(
+          r,
+          base,
+          zen,
+        ).copyWith(color: zen.accent, fontWeight: FontWeight.w700),
+      );
+    }
     if (r.spoiler && !_revealed.contains(id)) {
       tap = TapGestureRecognizer()
         ..onTap = () => setState(() => _revealed.add(id));
@@ -122,6 +153,20 @@ class _RichPostBodyState extends State<RichPostBody> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.mentions.isEmpty) {
+      return _content(context);
+    }
+    // The names of the mentions as this phone knows them (a friend's new
+    // name shows at once).
+    return Consumer(
+      builder: (BuildContext context, WidgetRef ref, Widget? _) {
+        _social = ref.watch(socialHubControllerProvider);
+        return _content(context);
+      },
+    );
+  }
+
+  Widget _content(BuildContext context) {
     for (final GestureRecognizer r in _recognizers) {
       r.dispose();
     }

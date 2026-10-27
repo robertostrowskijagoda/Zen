@@ -13,6 +13,7 @@ import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/relay/reliable_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -40,20 +41,30 @@ final Provider<RelayProgressSnapshot> relayDeliveryProgressProvider =
       return engine.progress.value;
     });
 
-/// Whether this device is online most of the time and so makes a good
-/// mailbox for friends: a computer (Zen in the tray) or an Android phone,
-/// whose background service goes on holding friends' mail while Zen is
-/// locked or long in the background (`LockedMailbox`). Not an iPhone: it
-/// receives only while Zen is open.
-bool get zenDeviceStaysOnline => zenPlatformStaysOnline(defaultTargetPlatform);
-
-/// [zenDeviceStaysOnline] for [platform].
-bool zenPlatformStaysOnline(TargetPlatform platform) =>
-    !kIsWeb &&
-    (platform == TargetPlatform.android ||
-        platform == TargetPlatform.linux ||
-        platform == TargetPlatform.macOS ||
-        platform == TargetPlatform.windows);
+/// What kind of mailbox [platform] makes for friends ([RelayDeviceClass]):
+/// a computer (Zen in the tray), an Android phone, whose background service
+/// goes on holding friends' mail while Zen is locked or long in the
+/// background (`LockedMailbox`), or an iPhone, which receives only while
+/// Zen is open — unless the person keeps it receiving in the background
+/// ([iosKeepAlive]).
+RelayDeviceClass zenPlatformDeviceClass(
+  TargetPlatform platform, {
+  bool web = kIsWeb,
+  bool iosKeepAlive = false,
+}) {
+  if (web) {
+    return RelayDeviceClass.unknown;
+  }
+  return switch (platform) {
+    TargetPlatform.android => RelayDeviceClass.android,
+    TargetPlatform.linux ||
+    TargetPlatform.macOS ||
+    TargetPlatform.windows => RelayDeviceClass.desktop,
+    TargetPlatform.iOS =>
+      iosKeepAlive ? RelayDeviceClass.iphoneKeepAlive : RelayDeviceClass.iphone,
+    TargetPlatform.fuchsia => RelayDeviceClass.unknown,
+  };
+}
 
 /// Overrides that put [ReliableSignalTransport] between the app and
 /// [runtime]. Used by both the UI isolate and the Android background service.
@@ -73,7 +84,13 @@ List buildRelayTransportProviderOverrides({
           final RelayBlobStore blobs => blobs,
           _ => null,
         },
-        staysOnline: zenDeviceStaysOnline,
+        deviceClass: () => zenPlatformDeviceClass(
+          defaultTargetPlatform,
+          // Only an iPhone asks the settings.
+          iosKeepAlive:
+              defaultTargetPlatform == TargetPlatform.iOS &&
+              ref.read(appSettingsControllerProvider).keepReceivingInBackground,
+        ),
       );
     }),
     signalTransportProvider.overrideWith((Ref ref) {
@@ -123,19 +140,43 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
   @override
   List<RelayFriend> acceptedFriends() {
     final FriendLevelLookup levels = _ref.read(friendLevelLookupProvider);
-    return _ref
-        .read(socialHubControllerProvider)
-        .acceptedFriends
-        // A device its owner unlinked holds no mail and gets no keys.
-        .where((FriendProfile friend) => !levels.isUnlinked(friend.address))
-        .map(
-          (FriendProfile friend) => RelayFriend(
+    final AccountDeviceDirectory? devices = _ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    return <RelayFriend>[
+      for (final FriendProfile friend
+          in _ref.read(socialHubControllerProvider).acceptedFriends)
+        if (_otherDevicesOf(devices, friend.address)
+            case final List<String> others
+            // A device its owner unlinked holds no mail and gets no keys;
+            // the account's other devices stand in for it.
+            when !levels.isUnlinked(friend.address) || others.isNotEmpty)
+          RelayFriend(
             address: friend.address,
             lastSeenAtMillis: friend.lastPresenceAtMillis,
             closeness: (levels.of(friend.address) ?? FriendLevel.friend).index,
+            devices: others,
+            linked: !levels.isUnlinked(friend.address),
           ),
-        )
-        .toList(growable: false);
+    ];
+  }
+
+  /// The friend's other devices the ledger knows (another phone, a
+  /// computer, the phone the account moved to), never an unlinked one.
+  static List<String> _otherDevicesOf(
+    AccountDeviceDirectory? directory,
+    String address,
+  ) {
+    final String? account = directory?.accountOf(address);
+    if (directory == null || account == null) {
+      return const <String>[];
+    }
+    return <String>[
+      for (final String device in directory.addressesOf(account))
+        if (!PeerShareCodec.addressesEqual(device, address) &&
+            directory.unlinkedAccountOf(device) == null)
+          PeerShareCodec.normalizeAddress(device),
+    ];
   }
 
   @override

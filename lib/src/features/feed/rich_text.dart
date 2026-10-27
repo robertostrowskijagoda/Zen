@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 /// Formatting in posts, Discord-style: plain text with markers, so a
 /// post stays readable anywhere and nothing executes.
@@ -8,7 +9,8 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 /// `~~przekreślenie~~`, `` `kod` ``, `||spoiler||`, links (http/https).
 /// Lines: `# `, `## `, `### ` headings, `> ` quote, `- ` list, `1. ` list,
 /// ```` ``` ```` code blocks, and `{{media:N}}` for the N-th photo or video
-/// placed at that point.
+/// placed at that point. A mention is a token `<@N>` (`mentions.dart`): the
+/// N-th person of the text's mentions.
 
 /// A piece of text with its look. [marker] pieces are the formatting
 /// characters themselves (shown faint in the editor, hidden in posts).
@@ -24,6 +26,7 @@ final class RichRun {
     this.spoiler = false,
     this.link = false,
     this.marker = false,
+    this.mention = -1,
   });
 
   final String text;
@@ -36,6 +39,12 @@ final class RichRun {
   final bool link;
   final bool marker;
 
+  /// The index of the person a mention token names (its [text] is the
+  /// token); -1 for anything else.
+  final int mention;
+
+  bool get isMention => mention >= 0;
+
   RichRun withText(String t) => RichRun(
     t,
     bold: bold,
@@ -46,6 +55,7 @@ final class RichRun {
     spoiler: spoiler,
     link: link,
     marker: marker,
+    mention: mention,
   );
 
   bool sameLook(RichRun o) =>
@@ -56,11 +66,14 @@ final class RichRun {
       code == o.code &&
       spoiler == o.spoiler &&
       link == o.link &&
-      marker == o.marker;
+      marker == o.marker &&
+      // Two mentions side by side stay two.
+      mention < 0 &&
+      o.mention < 0;
 
   @override
   String toString() =>
-      '${<String>[if (bold) 'b', if (italic) 'i', if (underline) 'u', if (strike) 's', if (code) 'c', if (spoiler) 'sp', if (link) 'a', if (marker) 'm'].join()}:$text';
+      '${<String>[if (bold) 'b', if (italic) 'i', if (underline) 'u', if (strike) 's', if (code) 'c', if (spoiler) 'sp', if (link) 'a', if (marker) 'm', if (mention >= 0) '@$mention'].join()}:$text';
 }
 
 final class _Style {
@@ -86,7 +99,12 @@ final class _Style {
     spoiler: spoiler || marker == '||',
   );
 
-  RichRun run(String text, {bool code = false, bool link = false}) => RichRun(
+  RichRun run(
+    String text, {
+    bool code = false,
+    bool link = false,
+    int mention = -1,
+  }) => RichRun(
     text,
     bold: bold,
     italic: italic,
@@ -95,6 +113,7 @@ final class _Style {
     spoiler: spoiler,
     code: code,
     link: link,
+    mention: mention,
   );
 
   RichRun marker(String text) => RichRun(
@@ -143,6 +162,20 @@ List<RichRun> _merge(List<RichRun> runs) {
 }
 
 void _plain(String text, _Style style, List<RichRun> out) {
+  int at = 0;
+  for (final RegExpMatch m in mentionTokenPattern.allMatches(text)) {
+    if (m.start > at) {
+      _links(text.substring(at, m.start), style, out);
+    }
+    out.add(style.run(m.group(0)!, mention: int.parse(m.group(1)!)));
+    at = m.end;
+  }
+  if (at < text.length) {
+    _links(text.substring(at), style, out);
+  }
+}
+
+void _links(String text, _Style style, List<RichRun> out) {
   int at = 0;
   for (final RegExpMatch m in _url.allMatches(text)) {
     if (m.start > at) {
@@ -375,8 +408,13 @@ List<RichBlock> parseBlocks(String source) {
   return out;
 }
 
-/// Text without any formatting (previews, notifications).
-String plainText(String source) {
+/// Text without any formatting (previews, notifications), each mention as
+/// "@name" from [mentions] (see [mentionsAsPlainText]).
+String plainText(
+  String source, {
+  List<Mention> mentions = const <Mention>[],
+  String Function(Mention mention)? nameOf,
+}) {
   final List<String> parts = <String>[];
   for (final RichBlock b in parseBlocks(source)) {
     switch (b.type) {
@@ -388,5 +426,5 @@ String plainText(String source) {
         parts.add(visibleRuns(b.text).map((RichRun r) => r.text).join());
     }
   }
-  return parts.join('\n');
+  return mentionsAsPlainText(parts.join('\n'), mentions, nameOf: nameOf);
 }

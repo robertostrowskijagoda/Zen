@@ -10,10 +10,18 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 
-/// How often Zen asks GitHub for its newest release, wherever it asks from
-/// (the app, the Android background service): one request in this time at
-/// most, whoever made it.
-const Duration kGithubCheckEvery = Duration(hours: 12);
+/// How old GitHub's last answer may get while the app runs before the app
+/// asks again: at start, when it comes back to the screen and while it
+/// stays open. Whoever asked last (the app, the Android background
+/// service) counts. One request an hour per device is far below GitHub's
+/// limit of 60 an hour per IP address, and an unchanged release answered
+/// 304 (`If-None-Match`) does not count at all.
+const Duration kGithubCheckEvery = Duration(hours: 1);
+
+/// How old GitHub's last answer may get before the Android background
+/// service asks while the app is closed. The service's look rides wakes
+/// that come anyway (the mailbox polls), so it adds no alarm of its own.
+const Duration kBackgroundGithubCheckEvery = Duration(hours: 4);
 
 /// The notification slot of "Jest nowa wersja Zen": a newer version takes
 /// the place of the one before.
@@ -26,8 +34,8 @@ const String kUpdateNoticeSlot = 'app-update';
 const String kUpdateNoticeFileName = 'update_check.json';
 
 /// What the app and the Android background service share about the look
-/// at GitHub, so that together they ask at most every [kGithubCheckEvery]
-/// and tell the person about a version once.
+/// at GitHub, so that together they ask no more often than needed and tell
+/// the person about a version once.
 @immutable
 final class UpdateNoticeState {
   const UpdateNoticeState({
@@ -132,6 +140,12 @@ bool updateCheckDue(
 bool _seenAtLeast(String? seen, String version) =>
     seen != null && compareAppVersions(seen, version) >= 0;
 
+/// Whether [version] is still to be announced: neither it nor a newer one
+/// was announced, and its banner was not closed.
+bool updateNoticeDue(UpdateNoticeState state, String version) =>
+    !_seenAtLeast(state.notifiedVersion, version) &&
+    !_seenAtLeast(state.dismissedVersion, version);
+
 /// Where [UpdateNoticeState] is kept; in memory in tests.
 abstract interface class UpdateNoticeStore {
   /// What is kept now (empty when nothing is, or it cannot be read).
@@ -220,16 +234,22 @@ final class FileUpdateNoticeStore implements UpdateNoticeStore {
 
 /// "Jest nowa wersja Zen": tapping it opens "Aktualizacje i Podaj dalej".
 /// Quiet (no sound), and with nothing private in it, so the "no content"
-/// setting leaves it as it is.
+/// setting leaves it as it is. [whatsNew]: the release's note in the app's
+/// language (whats_new.dart), a line each under the first one, shown when
+/// the notification is expanded.
 RuntimeSystemNotification updateAvailableNotification(
   String version, {
   required int createdAtMillis,
+  List<String> whatsNew = const <String>[],
 }) {
   return RuntimeSystemNotification(
     id: '$kUpdateNoticeSlot-$version',
     slotKey: kUpdateNoticeSlot,
     title: t('Jest nowa wersja Zen'),
-    body: t('Wersja {version} — warto zaktualizować', {'version': version}),
+    body: <String>[
+      t('Wersja {version} — warto zaktualizować', {'version': version}),
+      for (final String line in whatsNew) '• $line',
+    ].join('\n'),
     createdAtMillis: createdAtMillis,
     category: RuntimeSystemNotificationCategory.update,
     routeKey: buildUpdatesRouteKey(),
@@ -237,20 +257,20 @@ RuntimeSystemNotification updateAvailableNotification(
   );
 }
 
-/// Shows [updateAvailableNotification] for [version] once: never again for
-/// it or an older one, whichever isolate asks, and not at all when its
-/// banner was already closed. Returns whether it was shown now.
+/// Shows [updateAvailableNotification] for [version] (with [whatsNew])
+/// once: never again for it or an older one, whichever isolate asks, and
+/// not at all when its banner was already closed. Returns whether it was
+/// shown now.
 Future<bool> announceUpdateOnce({
   required UpdateNoticeStore store,
   required RuntimeSystemNotificationService notices,
   required String version,
   required int nowMillis,
+  List<String> whatsNew = const <String>[],
 }) async {
   bool due = false;
   await store.update((UpdateNoticeState state) {
-    due =
-        !_seenAtLeast(state.notifiedVersion, version) &&
-        !_seenAtLeast(state.dismissedVersion, version);
+    due = updateNoticeDue(state, version);
     // Noted before it is shown: two isolates finding the version at the
     // same moment show it once (and the slot keeps one anyway).
     return due ? state.copyWith(notifiedVersion: version) : state;
@@ -260,7 +280,11 @@ Future<bool> announceUpdateOnce({
   }
   try {
     return await notices.show(
-      updateAvailableNotification(version, createdAtMillis: nowMillis),
+      updateAvailableNotification(
+        version,
+        createdAtMillis: nowMillis,
+        whatsNew: whatsNew,
+      ),
     );
   } on Object catch (error, stackTrace) {
     logZenError('Showing the update notification failed', error, stackTrace);

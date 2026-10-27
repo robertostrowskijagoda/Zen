@@ -10,6 +10,7 @@ import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 /// Entry kind of a reaction bundle in the writer's `acts/<account>` space:
 /// the likes and comments a post got in the writer's circle, so they
@@ -85,6 +86,7 @@ typedef BundleComment = ({
   int millis,
   MediaRef? avatar,
   List<MediaRef> images,
+  List<Mention> mentions,
 });
 
 List<BundleLike> _likesOf(Object? likes) => <BundleLike>[
@@ -119,6 +121,7 @@ List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
           millis: c['at'] as int,
           avatar: mediaRefFromJson(c[kBundleAvatarKey]),
           images: commentImagesOf(c[kBundleImagesKey]),
+          mentions: mentionsFromJson(c[kMentionsKey]),
         ),
 ];
 
@@ -342,7 +345,7 @@ Future<int> relayReactions(
     } else if (e.kind == kPostAnnounceKind && e.account == node.account) {
       // Posts passed on to friends of friends: what they say goes back
       // towards the author the same way.
-      for (final PostAnnouncement a in announcementsIn(e)) {
+      for (final PostAnnouncement a in announcementsIn(node, e)) {
         postsAuthor.putIfAbsent(a.post, () => a.author);
       }
     }
@@ -433,6 +436,7 @@ Future<int> relayReactions(
           't': c.text,
           'at': e.hlc.millis,
           kBundleAvatarKey: ?avatar,
+          if (c.mentions.isNotEmpty) kMentionsKey: mentionsToJson(c.mentions),
           if (c.images.isNotEmpty)
             kBundleImagesKey: <Map<String, dynamic>>[
               for (final MediaRef m in c.images) mediaRefToJson(m),
@@ -462,6 +466,7 @@ Future<int> relayReactions(
             'n': c.name,
             't': c.text,
             'at': c.millis,
+            if (c.mentions.isNotEmpty) kMentionsKey: mentionsToJson(c.mentions),
             kBundleAvatarKey: ?(c.avatar == null
                 ? null
                 : mediaRefToJson(c.avatar!)),

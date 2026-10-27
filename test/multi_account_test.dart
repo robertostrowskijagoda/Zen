@@ -335,6 +335,84 @@ void main() {
     });
   });
 
+  test('"Nigdy" keeps each account\'s own key, and an additional account '
+      'never opens by itself', () async {
+    const AppSettings never = AppSettings(lockMode: AppLockMode.never);
+    final ZenAccountScope a = await registry.create();
+    final AppSecurityService main = securityFor(ZenAccountScope.defaultAccount);
+    await main.initialize(settings: const AppSettings());
+    await main.setPassword('haslo-glowne');
+    await main.applySettings(never);
+    expect(await main.keepMasterKeyForNeverLock('haslo-glowne'), isTrue);
+    final AppSecurityService other = securityFor(a);
+    await other.initialize(settings: const AppSettings());
+    await other.setPassword('haslo-konta-a');
+    await other.applySettings(never);
+    expect(await other.keepMasterKeyForNeverLock('haslo-konta-a'), isTrue);
+
+    // One account's copy is not the other's, and neither is the other key.
+    final String? mainCopy = await secrets
+        .forAccount(null)
+        .read(appSecurityNeverLockMasterKeyStorageKey);
+    final String? otherCopy = await secrets
+        .forAccount(a.secret)
+        .read(appSecurityNeverLockMasterKeyStorageKey);
+    expect(mainCopy, isNotNull);
+    expect(otherCopy, isNotNull);
+    expect(otherCopy, isNot(mainCopy));
+    expect(
+      keychain.items.containsKey(appSecurityNeverLockMasterKeyStorageKey),
+      isTrue,
+    );
+    expect(
+      keychain.items.keys.where(
+        (String name) =>
+            name.contains('never_lock') &&
+            name != appSecurityNeverLockMasterKeyStorageKey,
+      ),
+      isEmpty,
+      reason: 'an additional account\'s entry names say nothing',
+    );
+
+    // Leaving "Nigdy" on the default account leaves the other one alone.
+    await main.applySettings(const AppSettings());
+    expect(
+      await secrets
+          .forAccount(null)
+          .read(appSecurityNeverLockMasterKeyStorageKey),
+      isNull,
+    );
+    expect(
+      await secrets
+          .forAccount(a.secret)
+          .read(appSecurityNeverLockMasterKeyStorageKey),
+      otherCopy,
+    );
+
+    // Another account is only ever opened by its ID and password: the copy
+    // opens nothing there (and goes).
+    ZenAccountUnlockResult result = await unlockZenAccount(
+      a,
+      'zle-haslo-123',
+      registry: registry,
+      security: securityFor,
+    );
+    expect(result.outcome, ZenAccountUnlock.refused);
+    expect(
+      await secrets
+          .forAccount(a.secret)
+          .read(appSecurityNeverLockMasterKeyStorageKey),
+      isNull,
+    );
+    result = await unlockZenAccount(
+      a,
+      'haslo-konta-a',
+      registry: registry,
+      security: securityFor,
+    );
+    expect(result.outcome, ZenAccountUnlock.opened);
+  });
+
   test(
     'the app root opens the asked account with its checked password',
     () async {

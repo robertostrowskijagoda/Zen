@@ -213,11 +213,10 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     final AppSettings appSettings = ref.watch(appSettingsControllerProvider);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
     _follow(security);
-    // Once, after the app password, the setup: the lock, notifications,
-    // gates, animations.
+    // After the app password, the setup (once per [kSetupRevision]): the
+    // lock, notifications, gates, animations.
     final bool setupStep =
-        ref.watch(firstRunSetupRequiredProvider) &&
-        !appSettings.firstRunSetupDone;
+        ref.watch(firstRunSetupRequiredProvider) && appSettings.setupPending;
     // Then, once, the permissions and Bluetooth step (skipped where there
     // is nothing to ask): the setup's last step.
     final bool permissionsStep =

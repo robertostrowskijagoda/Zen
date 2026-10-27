@@ -1,5 +1,73 @@
 part of 'app_shell_screen.dart';
 
+/// Opens "Skrzynki offline" (the mailbox picker) over whatever is shown.
+Future<void> openRelayMailboxScreen(BuildContext context) =>
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const _RelayMailboxScreen(),
+      ),
+    );
+
+/// A card on the chats list while one of this device's mailboxes has
+/// stopped answering and nobody can take its place by itself
+/// ([RelayOverview.quiet]): "Skrzynka Ola nie odpowiada od 4 dni — wybierz
+/// inną", with the way to the picker.
+class _RelayQuietCard extends ConsumerWidget {
+  const _RelayQuietCard({this.padding = EdgeInsets.zero});
+
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final RelayEngine? engine = ref.watch(relayEngineProvider);
+    if (engine == null) {
+      return const SizedBox.shrink();
+    }
+    final SocialHubState social = watchSocialPeople(ref);
+    return ValueListenableBuilder<RelayOverview>(
+      valueListenable: engine.overview,
+      builder: (BuildContext context, RelayOverview overview, Widget? _) {
+        if (overview.quiet.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final ZenColors zen = ZenColors.of(context);
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        return Padding(
+          padding: padding,
+          child: ZenCard(
+            key: const Key('relay-quiet-card'),
+            tone: zen.warning,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (final RelayQuietMailbox q in overview.quiet)
+                  ZenInfo(
+                    icon: Icons.markunread_mailbox_outlined,
+                    tone: zen.warning,
+                    title: quietMailboxTitle(
+                      friendNameFor(social, q.friend),
+                      q.sinceMillis,
+                      now,
+                    ),
+                    text: quietMailboxText(),
+                  ),
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: TextButton(
+                    key: const Key('relay-quiet-card-pick'),
+                    onPressed: () => unawaited(openRelayMailboxScreen(context)),
+                    child: Text(t('Wybierz skrzynkę')),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Settings entry for the offline mailboxes (friends relaying mail).
 class _RelayMailboxPanel extends ConsumerWidget {
   const _RelayMailboxPanel();
@@ -32,11 +100,7 @@ class _RelayMailboxPanel extends ConsumerWidget {
           tone: zen.tone(ZenTone.network),
           title: t('Skrzynki offline'),
           subtitle: subtitle,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) => const _RelayMailboxScreen(),
-            ),
-          ),
+          onTap: () => unawaited(openRelayMailboxScreen(context)),
         );
       },
     );
@@ -92,6 +156,32 @@ class _RelayMailboxScreen extends ConsumerWidget {
                         'od pierwszej skrzynki, która jest dostępna.',
                       ),
                     ),
+                    if (overview.quiet.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 12),
+                      for (final RelayQuietMailbox q in overview.quiet)
+                        ZenInfo(
+                          key: Key('relay-quiet-${q.device}'),
+                          icon: Icons.markunread_mailbox_outlined,
+                          tone: zen.warning,
+                          title: quietMailboxTitle(
+                            friendNameFor(watchSocialPeople(ref), q.friend),
+                            q.sinceMillis,
+                            DateTime.now().millisecondsSinceEpoch,
+                          ),
+                          text: overview.isAutomatic
+                              ? t(
+                                  'Żaden inny znajomy nie bywa online na '
+                                  'tyle, żeby zastąpić ją sam. Wyłącz wybór '
+                                  'automatyczny i zaznacz kogoś — najlepiej '
+                                  'z komputerem albo Androidem.',
+                                )
+                              : t(
+                                  'Odznacz ją i zaznacz kogoś, kto bywa '
+                                  'online — najlepiej z komputerem albo '
+                                  'Androidem.',
+                                ),
+                        ),
+                    ],
                     ZenSection(t('Wybór skrzynek'), top: 16),
                     ZenGroup(
                       children: <Widget>[
@@ -111,7 +201,9 @@ class _RelayMailboxScreen extends ConsumerWidget {
                           ),
                           value: overview.isAutomatic,
                           onChanged: (bool automatic) => setManual(
-                            automatic ? null : List<String>.of(overview.relays),
+                            automatic
+                                ? null
+                                : List<String>.of(overview.mailboxFriends),
                           ),
                         ),
                       ],
@@ -143,7 +235,12 @@ class _RelayMailboxScreen extends ConsumerWidget {
                           for (final FriendProfile friend in friends)
                             _RelayFriendTile(
                               friend: friend,
-                              selected: overview.relays.any(
+                              candidate:
+                                  overview
+                                      .candidates[PeerShareCodec.normalizeAddress(
+                                    friend.address,
+                                  )],
+                              selected: overview.mailboxFriends.any(
                                 (String address) =>
                                     PeerShareCodec.addressesEqual(
                                       address,
@@ -152,7 +249,8 @@ class _RelayMailboxScreen extends ConsumerWidget {
                               ),
                               enabled: !overview.isAutomatic,
                               onChanged: (bool selected) {
-                                final List<String> next = overview.relays
+                                final List<String> next = overview
+                                    .mailboxFriends
                                     .where(
                                       (String a) =>
                                           !PeerShareCodec.addressesEqual(
@@ -349,19 +447,43 @@ class _RelayBlobQuotaTile extends StatelessWidget {
 class _RelayFriendTile extends StatelessWidget {
   const _RelayFriendTile({
     required this.friend,
+    required this.candidate,
     required this.selected,
     required this.enabled,
     required this.onChanged,
   });
 
   final FriendProfile friend;
+
+  /// How good a mailbox the friend makes, as this device has seen it.
+  final RelayMailboxCandidate? candidate;
   final bool selected;
   final bool enabled;
   final ValueChanged<bool> onChanged;
 
+  /// The friend's device kind and how often it answered: "komputer ·
+  /// dostępna przez 92% czasu".
+  String? _mailboxLine() {
+    final RelayMailboxCandidate? c = candidate;
+    if (c == null) {
+      return null;
+    }
+    final double? share = c.answeredShare;
+    final String reach = share == null
+        ? t('jeszcze nie sprawdzona')
+        : t('dostępna przez {percent}% czasu', {
+            'percent': (share * 100).round(),
+          });
+    final String kind = relayDeviceKindLabel(c.deviceClass);
+    return kind.isEmpty ? reach : '$kind · $reach';
+  }
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final RelayMailboxCandidate? c = candidate;
+    final String? mailbox = _mailboxLine();
     return CheckboxListTile.adaptive(
       key: Key('relay-friend-${friend.address}'),
       value: selected,
@@ -371,15 +493,45 @@ class _RelayFriendTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
-        friend.isOnline ? t('online') : friend.lastActivityLabel,
-        style: TextStyle(
-          color: friend.isOnline ? zen.success : zen.textSecondary,
-        ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            friendPresenceLine(friend, now) ?? friend.lastActivityLabel,
+            style: TextStyle(
+              color: switch (friend.presence) {
+                PeerPresence.online => zen.success,
+                PeerPresence.background => zen.tone(ZenTone.network),
+                _ => zen.textSecondary,
+              },
+            ),
+          ),
+          if (mailbox != null)
+            Text(
+              mailbox,
+              key: Key('relay-friend-reach-${friend.address}'),
+              style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
+            ),
+          if (c != null && c.quietSinceMillis > 0)
+            Text(
+              t('Nie odpowiada {time}', {
+                'time': quietForText(c.quietSinceMillis, now),
+              }),
+              style: TextStyle(color: zen.danger, fontSize: 12.5),
+            )
+          else if (isWeakMailbox(c))
+            Text(
+              t('iPhone rzadko jest online — słaba skrzynka'),
+              key: Key('relay-friend-weak-${friend.address}'),
+              style: TextStyle(color: zen.warning, fontSize: 12.5),
+            ),
+        ],
       ),
       secondary: ZenBlobAvatar(
         name: friend.displayLabel,
-        online: friend.isOnline,
+        online: friend.presence == PeerPresence.online,
+        away: friend.presence == PeerPresence.background,
+        showStatus: friend.presence != PeerPresence.hidden,
         size: 40,
       ),
     );

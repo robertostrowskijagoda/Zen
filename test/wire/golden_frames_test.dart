@@ -343,16 +343,17 @@ const String _postWant =
     '"id":"$_ledgerEntryId",'
     '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs="}';
 
-/// The body of a `post_ann` entry: two notices, the second about a post
-/// its author removed.
+/// The body of a `post_ann` entry (before it is sealed for the friends
+/// who may see the writer's friend list): two notices, the second about a
+/// post three steps away its author removed.
 const String _postAnnounceBody =
     '{"items":['
     '{"p":"$_ledgerEntryId",'
     '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs=",'
-    '"t":1790000000000,"r":3,"h":2,"aa":"$_ada","e":1790000600000},'
+    '"t":1790000000000,"h":2,"aa":"$_ada","e":1790000600000},'
     '{"p":"0000000000000000000000000000000000000000000000000000000000000000",'
     '"a":"GvxpjbEpHeAspfmVluqnYhFQfp1F26F6-uU_uKvTpxs=",'
-    '"t":1790000000000,"r":2,"h":2,"x":1}'
+    '"t":1790000000000,"h":3,"x":1}'
     ']}';
 
 Map<String, dynamic> _frame(String json) =>
@@ -438,8 +439,8 @@ void main() {
           PostAnnouncement.fromJson(item)!,
       ];
       expect(items.first.post, _ledgerEntryId);
-      expect(items.first.reach, PostReach.third);
       expect(items.first.hops, 2);
+      expect(items.last.hops, 3);
       expect(items.first.authorAddress, _ada);
       expect(items.first.editMillis, 1790000600000);
       expect(items.last.removed, isTrue);

@@ -354,13 +354,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     );
     // Disappearing messages that expired while the app was closed.
     if (state.disappearingTimers.isNotEmpty) {
-      final int expired = await _disappearingStore.sweep(
-        List<String>.of(state.disappearingTimers.keys),
-      );
-      if (expired > 0) {
-        _bumpTimelineRevision();
-      }
-      await _scheduleDisappearSweep();
+      await sweepDisappearingMessages();
     }
     // The unqueued flush: this already runs inside the queue.
     await _flushPendingSignals();
@@ -689,11 +683,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         }
       }
     }
+    if (await _dropDisappearedCopy(signal)) {
+      // A late copy of a disappearing message that is already gone here.
+      return;
+    }
     if (signal.type == ZenSignalType.message &&
-        (signal.messageId?.trim().isNotEmpty ?? false) &&
         await _timelineHasMessage(
           peerAddress: signal.sender,
-          messageId: signal.messageId!.trim(),
+          messageId: _incomingMessageIdOf(signal),
         )) {
       // A copy of a message already on file (a re-send, or a datagram the
       // mesh delivered twice). Persisting it again only re-sends the delivery
@@ -710,6 +707,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         )) {
       return;
     }
+    // A group message that mentions this person says so (within limits).
+    signal = _withMentionOfSelf(signal, timestamp);
     // Both flags are captured before anything mutates the call state.
     //
     // A repeated invite, offer, or ringing signal for the call already on file is just the
@@ -796,6 +795,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal: signal,
             receivedAtMillis: timestamp,
             friends: state.friends,
+            groups: state.groups,
             privacy: _noticePrivacyFor(signal),
           )
         : null;
@@ -843,6 +843,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
               signal: signal,
               receivedAtMillis: timestamp,
               friends: state.friends,
+              groups: state.groups,
             )
           : null;
       final List<InboxEntry> backgroundAlerts =
@@ -864,6 +865,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                   entry: backgroundEntry,
                   signal: signal,
                   friends: state.friends,
+                  groups: state.groups,
                   privacy: _noticePrivacyFor(signal),
                 ),
               );
@@ -980,12 +982,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         signal: signal,
         receivedAtMillis: timestamp,
         friends: state.friends,
+        groups: state.groups,
       );
       await _presentSystemNotification(
         _systemNotificationFromEntry(
           entry: notifyEntry,
           signal: signal,
           friends: state.friends,
+          groups: state.groups,
           privacy: _noticePrivacyFor(signal),
         ),
       );

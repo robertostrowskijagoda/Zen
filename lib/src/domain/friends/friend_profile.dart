@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum FriendRelationshipStatus {
@@ -24,6 +25,9 @@ final class FriendProfile {
     this.status = FriendRelationshipStatus.none,
     this.isOnline = false,
     this.lastPresenceAtMillis = 0,
+    this.presence = PeerPresence.offline,
+    this.presenceAtMillis = 0,
+    this.lastOpenedAtMillis = 0,
     this.lastMessagePreview = '',
     this.lastActivityLabel = '',
     this.unreadCount = 0,
@@ -44,8 +48,21 @@ final class FriendProfile {
   final int inboxLimitMb;
   final int autoCleanupDays;
   final FriendRelationshipStatus status;
+
+  /// Reachable directly now (any sign of life lately, a ping, a pong, a
+  /// message): what delivery decides by. Not what the person is doing:
+  /// that is [presence].
   final bool isOnline;
   final int lastPresenceAtMillis;
+
+  /// What the friend's Zen is doing, as they announced it (`ping`, `pong`,
+  /// `away`), and when that was last confirmed.
+  final PeerPresence presence;
+  final int presenceAtMillis;
+
+  /// When the friend last had Zen open on the screen, as they told it;
+  /// 0 when not known or they keep it to themselves.
+  final int lastOpenedAtMillis;
   final String lastMessagePreview;
   final String lastActivityLabel;
   final int unreadCount;
@@ -82,6 +99,9 @@ final class FriendProfile {
     FriendRelationshipStatus? status,
     bool? isOnline,
     int? lastPresenceAtMillis,
+    PeerPresence? presence,
+    int? presenceAtMillis,
+    int? lastOpenedAtMillis,
     String? lastMessagePreview,
     String? lastActivityLabel,
     int? unreadCount,
@@ -105,6 +125,9 @@ final class FriendProfile {
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
       lastPresenceAtMillis: lastPresenceAtMillis ?? this.lastPresenceAtMillis,
+      presence: presence ?? this.presence,
+      presenceAtMillis: presenceAtMillis ?? this.presenceAtMillis,
+      lastOpenedAtMillis: lastOpenedAtMillis ?? this.lastOpenedAtMillis,
       lastMessagePreview: lastMessagePreview ?? this.lastMessagePreview,
       lastActivityLabel: lastActivityLabel ?? this.lastActivityLabel,
       unreadCount: unreadCount ?? this.unreadCount,

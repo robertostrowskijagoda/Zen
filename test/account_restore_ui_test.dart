@@ -10,6 +10,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
+import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/account_import_layer.dart';
@@ -24,17 +25,50 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 
 const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 
-/// Backup files at fixed places (no dialogs).
+/// Backup files at fixed places (no dialogs): the default folder is the
+/// one of [path]; [chosen] is what the folder chooser answers (null: the
+/// person cancels).
 final class _Places implements AccountBackupPlaces {
-  _Places(this.path);
+  _Places(this.path, {this.chosen});
 
   final String path;
+  AccountBackupFolder? chosen;
+  int chooserCalls = 0;
+  final List<AccountBackupFolder> written = <AccountBackupFolder>[];
+
+  AccountBackupFolder get defaultPlace =>
+      AccountBackupFolder.directory(File(path).parent.path);
 
   @override
   Future<String?> pick() async => path;
 
   @override
-  Future<String?> target(String name) async => path;
+  Future<AccountBackupFolder> defaultFolder() async => defaultPlace;
+
+  @override
+  Future<AccountBackupFolder?> chooseFolder() async {
+    chooserCalls++;
+    return chosen;
+  }
+
+  @override
+  Future<String> workPath(AccountBackupFolder folder, String name) async {
+    written.add(folder);
+    return folder == defaultPlace ? path : '${folder.path}/$name';
+  }
+
+  @override
+  Future<AccountBackupSaved> deliver(
+    AccountBackupFolder folder,
+    String first,
+    List<String> parts,
+  ) async => AccountBackupSaved(folder: folder, shown: parts, canOpen: true);
+
+  @override
+  Future<void> release(AccountBackupFolder folder, String first) async {}
+
+  @override
+  Future<bool> open(AccountBackupSaved saved) async => true;
 }
 
 /// A device that takes copies, in memory.
@@ -388,5 +422,196 @@ void main() {
     expect(read!.error, isNull);
     expect(read.archive!.seed, isNotNull);
     expect(read.archive!.scope, isNot(contains(AccountScope.films)));
+    // The default folder is named, the finished file is shown and can be
+    // opened.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('account-backup-done')),
+        matching: find.textContaining(path),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('account-backup-open-folder')), findsOneWidget);
+  });
+
+  group('the folder of a backup', () {
+    Future<void> pumpBackup(WidgetTester tester, _Places places) async {
+      tester.view.physicalSize = const Size(900, 3200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        _app(
+          const AccountBackupScreen(),
+          overrides: <Override>[
+            socialHubAutoHydrateProvider.overrideWithValue(false),
+            signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+            ledgerNodeEnabledProvider.overrideWithValue(true),
+            ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+            accountBackupPlacesProvider.overrideWithValue(places),
+            accountBackupCostProvider.overrideWithValue(_light),
+            accountArchiveCollectorProvider.overrideWithValue(
+              (Set<AccountScope> scope, {bool measureOnly = false}) async =>
+                  _copy(scope),
+            ),
+          ],
+        ),
+      );
+      await _real(tester);
+    }
+
+    Future<void> create(WidgetTester tester) async {
+      await tester.enterText(
+        find.byKey(const Key('account-backup-password')),
+        'dobre hasło 1',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-backup-repeat')),
+        'dobre hasło 1',
+      );
+      await tester.ensureVisible(
+        find.byKey(const Key('account-backup-create')),
+      );
+      await tester.tap(find.byKey(const Key('account-backup-create')));
+      for (int i = 0; i < 5; i++) {
+        await _real(tester);
+      }
+    }
+
+    testWidgets('the default one is shown and written to', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final _Places places = _Places('${dir.path}/k.$kAccountBackupExtension');
+      await pumpBackup(tester, places);
+      expect(
+        find.text('${dir.path} (domyślnie)'),
+        findsOneWidget,
+        reason: 'the default folder is named',
+      );
+      await create(tester);
+      expect(places.written.single, places.defaultPlace);
+      expect(File(places.path).existsSync(), isTrue);
+    });
+
+    testWidgets('another one the person chooses is used and shown', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final Directory other = Directory('${dir.path}/inne')..createSync();
+      final _Places places = _Places(
+        '${dir.path}/k.$kAccountBackupExtension',
+        chosen: AccountBackupFolder.directory(other.path),
+      );
+      await pumpBackup(tester, places);
+      await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
+      await _real(tester);
+      expect(find.text(other.path), findsOneWidget);
+      expect(find.textContaining('(domyślnie)'), findsNothing);
+      await create(tester);
+      expect(places.written.single.path, other.path);
+      expect(other.listSync().single.path, endsWith(kAccountBackupExtension));
+      expect(find.textContaining(other.path), findsWidgets);
+      expect(File(places.path).existsSync(), isFalse);
+      // Back to the default.
+      await tester.tap(find.byKey(const Key('account-backup-folder-default')));
+      await _real(tester);
+      expect(find.text('${dir.path} (domyślnie)'), findsOneWidget);
+    });
+
+    testWidgets('a cancelled chooser keeps the default', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final _Places places = _Places('${dir.path}/k.$kAccountBackupExtension');
+      await pumpBackup(tester, places);
+      await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
+      await _real(tester);
+      expect(places.chooserCalls, 1);
+      expect(find.text('${dir.path} (domyślnie)'), findsOneWidget);
+      expect(
+        find.byKey(const Key('account-backup-folder-default')),
+        findsNothing,
+      );
+      await create(tester);
+      expect(places.written.single, places.defaultPlace);
+      expect(File(places.path).existsSync(), isTrue);
+    });
+
+    testWidgets('the passwords are hidden until "Pokaż", both fields at once', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await pumpBackup(
+        tester,
+        _Places('${dir.path}/k.$kAccountBackupExtension'),
+      );
+      bool hidden(String key) =>
+          tester.widget<TextField>(find.byKey(Key(key))).obscureText;
+      expect(hidden('account-backup-password'), isTrue);
+      expect(hidden('account-backup-repeat'), isTrue);
+      expect(find.byTooltip('Pokaż'), findsNWidgets(2));
+
+      await tester.tap(find.byTooltip('Pokaż').first);
+      await tester.pump();
+      expect(hidden('account-backup-password'), isFalse);
+      expect(hidden('account-backup-repeat'), isFalse);
+      expect(find.byTooltip('Ukryj'), findsNWidgets(2));
+
+      await tester.tap(find.byTooltip('Ukryj').last);
+      await tester.pump();
+      expect(hidden('account-backup-password'), isTrue);
+    });
+
+    testWidgets('an error is a live region, scrolled into view below the '
+        'fold', (WidgetTester tester) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await pumpBackup(
+        tester,
+        _Places('${dir.path}/k.$kAccountBackupExtension'),
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-backup-password')),
+        'dobre hasło 1',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-backup-repeat')),
+        'inne hasło 1',
+      );
+      // A short window: the button, and so the message under it, are far
+      // below the first screenful.
+      tester.view.physicalSize = const Size(900, 500);
+      await tester.pump();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('account-backup-create')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(
+        find.byKey(const Key('account-backup-create')),
+      );
+      await tester.tap(find.byKey(const Key('account-backup-create')));
+      await _real(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      final Finder message = find.byKey(const Key('account-backup-message'));
+      expect(message, findsOneWidget);
+      expect(
+        find.descendant(
+          of: message,
+          matching: find.byWidgetPredicate(
+            (Widget w) => w is Semantics && w.properties.liveRegion == true,
+          ),
+        ),
+        findsOneWidget,
+        reason: 'read out when it appears',
+      );
+      final Rect box = tester.getRect(message);
+      expect(box.top, greaterThanOrEqualTo(0));
+      expect(box.bottom, lessThanOrEqualTo(500), reason: 'on screen');
+    });
   });
 }

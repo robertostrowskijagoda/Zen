@@ -827,6 +827,11 @@ class ZenLeafBorder extends _ZenFrameBorder {
 
   final Color vein;
 
+  /// A little air inside the line, so the vein in the long corners does not
+  /// touch what is written there.
+  @override
+  double get inset => width + 3;
+
   @override
   void paintDetails(Canvas canvas, Rect rect) {
     final RRect rr = borderRadius.toRRect(rect).scaleRadii();
@@ -917,7 +922,7 @@ class ZenScallopBorder extends _ZenFrameBorder {
   final double bite;
 
   @override
-  double get inset => bite + width;
+  double get inset => bite + width + 2;
 
   @override
   Path outline(Rect rect) {
@@ -993,7 +998,7 @@ class ZenNotchBorder extends _ZenFrameBorder {
   final double notch;
 
   @override
-  double get inset => width + 2;
+  double get inset => notch + 2;
 
   @override
   Path outline(Rect rect) {

@@ -144,6 +144,26 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     });
   }
 
+  /// Puts [entry] at the top of the inbox, in place of an entry with the
+  /// same id (an update of the same news: "3 nowe posty" after "2 nowe
+  /// posty"). For news that does not come as a signal: friends' new posts.
+  Future<void> putInboxEntry(InboxEntry entry) async {
+    await _enqueueStateWork(() async {
+      state = _withTrimmedInbox(
+        state.copyWith(
+          inbox: _prependInbox(
+            state.inbox
+                .where((InboxEntry e) => e.id != entry.id)
+                .toList(growable: false),
+            entry,
+          ),
+        ),
+        _appSettings,
+      );
+      await _persistState();
+    });
+  }
+
   /// Accepts the invitation from [peerAddress]; they keep the name from
   /// their profile.
   Future<void> acceptFriendRequest({
@@ -1409,15 +1429,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _sendReadReceiptIfNeeded(canonical);
   }
 
+  /// A `ping`, `pong` or `away` from [peerAddress] ([report]: what it said
+  /// about their presence). A ping or pong also says they can be reached
+  /// directly now ([reachable]); an "away" from a device about to stop
+  /// receiving says the opposite.
   Future<void> updatePeerPresence({
     required String peerAddress,
-    required bool isForeground,
+    required PresenceReport report,
+    bool reachable = true,
     int? observedAtMillis,
   }) {
     return _enqueueStateWork(
       () => _updatePeerPresence(
         peerAddress: peerAddress,
-        isForeground: isForeground,
+        report: report,
+        reachable: reachable && report.reachable,
         observedAtMillis: observedAtMillis,
       ),
     );
@@ -1425,30 +1451,49 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
   Future<void> _updatePeerPresence({
     required String peerAddress,
-    required bool isForeground,
+    required PresenceReport report,
+    required bool reachable,
     int? observedAtMillis,
   }) async {
-    // A pong is the most reliable "this peer is up right now" we get.
-    unawaitedLogged(
-      syncGroupInvitesToPeer(peerAddress),
-      context: 'Syncing group invites on presence failed',
-    );
+    if (reachable) {
+      // A pong is the most reliable "this peer is up right now" we get.
+      unawaitedLogged(
+        syncGroupInvitesToPeer(peerAddress),
+        context: 'Syncing group invites on presence failed',
+      );
+    }
     final FriendProfile? friend = state.friendByAddress(peerAddress);
     if (friend == null) {
       return;
     }
     final int timestamp =
         observedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
-    final String label = isForeground ? t('Teraz') : t('W tle');
-    _presenceSeenAt[PeerShareCodec.normalizeAddress(friend.address)] =
-        timestamp;
+    final String key = PeerShareCodec.normalizeAddress(friend.address);
+    final int openedAt = report.lastOpenedAt(timestamp);
+    if (reachable) {
+      _presenceSeenAt[key] = timestamp;
+    }
+    _presenceConfirmedAt[key] = timestamp;
+    _openedAt[key] = openedAt;
     // Most pongs change nothing visible: the friend was online and still
     // is. Those stay in memory; the state (and every screen watching it)
-    // changes only when something shows, or the stored time is old.
-    final bool visible = !friend.isOnline || friend.lastActivityLabel != label;
+    // changes only when something shows, or the stored time is old. The
+    // last opening shows only once they are not online.
+    final bool openedShows =
+        report.presence != PeerPresence.online &&
+        (openedAt - friend.lastOpenedAtMillis).abs() >=
+            const Duration(minutes: 1).inMilliseconds;
+    final bool visible =
+        friend.isOnline != reachable ||
+        friend.presence != report.presence ||
+        (openedAt == 0) != (friend.lastOpenedAtMillis == 0) ||
+        openedShows;
     final bool stale =
-        timestamp - friend.lastPresenceAtMillis >
-        kPresenceStoreEvery.inMilliseconds;
+        timestamp - friend.presenceAtMillis >
+            kPresenceStoreEvery.inMilliseconds ||
+        (reachable &&
+            timestamp - friend.lastPresenceAtMillis >
+                kPresenceStoreEvery.inMilliseconds);
     if (!visible && !stale) {
       return;
     }
@@ -1458,13 +1503,37 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     _putFriend(
       friends,
       friend.copyWith(
-        isOnline: true,
-        lastPresenceAtMillis: timestamp,
-        lastActivityLabel: label,
+        isOnline: reachable,
+        lastPresenceAtMillis: reachable ? timestamp : null,
+        presence: report.presence,
+        presenceAtMillis: timestamp,
+        lastOpenedAtMillis: openedAt,
       ),
     );
     state = state.copyWith(friends: friends);
     _persistSoon();
+  }
+
+  /// Shows nothing more of [peerAddress]'s presence (a weak acquaintance:
+  /// no statuses either way), whatever they showed before.
+  Future<void> hidePeerPresence(String peerAddress) {
+    return _enqueueStateWork(() async {
+      final FriendProfile? friend = state.friendByAddress(peerAddress);
+      if (friend == null ||
+          (friend.presence == PeerPresence.hidden &&
+              friend.lastOpenedAtMillis == 0)) {
+        return;
+      }
+      _openedAt.remove(PeerShareCodec.normalizeAddress(friend.address));
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      _putFriend(
+        friends,
+        friend.copyWith(presence: PeerPresence.hidden, lastOpenedAtMillis: 0),
+      );
+      state = state.copyWith(friends: friends);
+      _persistSoon();
+    });
   }
 
   /// Remembers the Zen version an accepted friend named in a ping or pong.
@@ -1494,14 +1563,26 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     });
   }
 
-  Future<void> decayPresence({required Duration offlineAfter, int? nowMillis}) {
+  /// Friends with no sign of life lately count as offline: "online" after
+  /// [foregroundFor] without one, "w tle" (and being reachable at all)
+  /// after [offlineAfter].
+  Future<void> decayPresence({
+    required Duration offlineAfter,
+    required Duration foregroundFor,
+    int? nowMillis,
+  }) {
     return _enqueueStateWork(
-      () => _decayPresence(offlineAfter: offlineAfter, nowMillis: nowMillis),
+      () => _decayPresence(
+        offlineAfter: offlineAfter,
+        foregroundFor: foregroundFor,
+        nowMillis: nowMillis,
+      ),
     );
   }
 
   Future<void> _decayPresence({
     required Duration offlineAfter,
+    required Duration foregroundFor,
     int? nowMillis,
   }) async {
     if (offlineAfter <= Duration.zero) {
@@ -1514,22 +1595,38 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     for (final MapEntry<String, FriendProfile> entry in friends.entries) {
       final FriendProfile friend = entry.value;
+      final String key = PeerShareCodec.normalizeAddress(friend.address);
       final int seen = max(
         friend.lastPresenceAtMillis,
-        _presenceSeenAt[PeerShareCodec.normalizeAddress(friend.address)] ?? 0,
+        _presenceSeenAt[key] ?? 0,
       );
-      if (!friend.isOnline ||
-          seen <= 0 ||
-          timestamp - seen < offlineAfter.inMilliseconds) {
+      final int confirmed = max(
+        friend.presenceAtMillis,
+        _presenceConfirmedAt[key] ?? 0,
+      );
+      final bool unreachable =
+          friend.isOnline &&
+          seen > 0 &&
+          timestamp - seen >= offlineAfter.inMilliseconds;
+      final PeerPresence presence = presenceAt(
+        presence: friend.presence,
+        presenceAtMillis: confirmed,
+        nowMillis: timestamp,
+        foregroundFor: foregroundFor,
+        backgroundFor: offlineAfter,
+      );
+      if (!unreachable && presence == friend.presence) {
         continue;
       }
       friends[entry.key] = friend.copyWith(
-        isOnline: false,
+        isOnline: unreachable ? false : null,
         lastPresenceAtMillis: seen,
-        lastActivityLabel: _presenceLastSeenLabel(
-          nowMillis: timestamp,
-          lastSeenAtMillis: seen,
-        ),
+        presence: presence,
+        presenceAtMillis: confirmed,
+        // Online until now: they last had Zen open at the last sign.
+        lastOpenedAtMillis: friend.presence == PeerPresence.online
+            ? max(friend.lastOpenedAtMillis, _openedAt[key] ?? 0)
+            : null,
       );
       changed = true;
     }
@@ -1937,13 +2034,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }
 
   /// Sends [text] to a group; as a reply to [replyTo], or marked as
-  /// [forwarded] from another chat.
+  /// [forwarded] from another chat. Its `<@N>` tokens name [mentions]
+  /// (`mentions.dart`): only members of the group are kept, and only those
+  /// the text really names.
   @override
   Future<void> sendGroupMessage({
     required String groupId,
     required String text,
     ChatReply? replyTo,
     bool forwarded = false,
+    List<Mention> mentions = const <Mention>[],
   }) async {
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
@@ -1952,9 +2052,18 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final String trimmed = text.trim();
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
     final String messageId = 'grp-msg-$timestamp-$groupId';
+    // Someone outside the group is never mentioned: such a text goes with
+    // plain names.
+    final bool members = usedMentions(
+      text,
+      mentions,
+    ).every((Mention m) => groupHasMember(group, m.address));
+    final String trimmed =
+        (members ? text : mentionsAsPlainText(text, mentions)).trim();
+    final List<Mention> named = members ? mentions : const <Mention>[];
+    final String said = mentionsAsPlainText(trimmed, named);
 
     await _messageTimelineStore.append(
       'group:$groupId',
@@ -1969,6 +2078,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         deliveryState: ChatMessageDeliveryState.sending,
         reply: replyTo,
         forwarded: forwarded,
+        mentions: named,
       ),
     );
     _bumpTimelineRevision();
@@ -1977,7 +2087,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       state.groups,
     );
     groups[groupId] = group.copyWith(
-      lastMessagePreview: trimmed,
+      lastMessagePreview: said,
       lastActivityLabel: t('Teraz'),
     );
     state = state.copyWith(groups: groups);
@@ -1992,6 +2102,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       extra: <String, dynamic>{
         if (replyTo != null) 're': replyTo.toJson(),
         if (forwarded) 'fwd': true,
+        if (named.isNotEmpty) kMentionsKey: mentionsToJson(named),
       },
     );
   }

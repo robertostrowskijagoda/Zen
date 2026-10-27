@@ -11,6 +11,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -455,6 +456,7 @@ void main() {
       BackgroundCapability capability, {
       Duration ringTimeout = const Duration(seconds: 6),
       LockedNoticeKit? noticeKit,
+      LockedPresenceKit? presenceKit,
       Duration noticeThrottle = const Duration(minutes: 1),
     }) async {
       transport = MemorySignalTransport();
@@ -470,6 +472,7 @@ void main() {
         ringTimeout: ringTimeout,
         mailboxPollInterval: Duration.zero,
         noticeKit: noticeKit,
+        presence: presenceKit,
         noticeThrottle: noticeThrottle,
       );
       await receiver.start();
@@ -563,10 +566,7 @@ void main() {
         hasLength(6),
         reason: 'one at the start and one on each wake',
       );
-      expect(
-        wake.delayOf(wake.live.single),
-        kLockedMailboxPollMaxInterval,
-      );
+      expect(wake.delayOf(wake.live.single), kLockedMailboxPollMaxInterval);
 
       // A message came: more may follow, the mailboxes are asked again soon.
       await receive(_ada, <String, dynamic>{
@@ -649,6 +649,9 @@ void main() {
           _member: 'Marek',
           'group:g1': 'Ekipa',
         },
+        members: <String, Set<String>>{
+          'group:g1': <String>{_ada, _member},
+        },
       );
       LockedNoticeKit kit({
         NotificationPrivacy privacy = NotificationPrivacy.senderAndContent,
@@ -658,6 +661,7 @@ void main() {
         privacy: privacy,
         overrides: overrides,
         names: names.names,
+        members: names.members,
       );
 
       Future<RuntimeSystemNotification> noticeFor(
@@ -697,6 +701,33 @@ void main() {
         expect(notice.title, 'Ekipa');
         expect(notice.body, 'Marek: Kto idzie?');
       });
+
+      test(
+        'a group message names only members, never by the name they sent',
+        () async {
+          // Not a member of the group: only that something came.
+          RuntimeSystemNotification notice = await noticeFor(
+            kit(),
+            _bob,
+            <String, dynamic>{...inGroup, '_rid': 'p3', 'senderName': 'Ada'},
+          );
+          expect(notice.title, 'Nowa wiadomość');
+          expect('${notice.title} ${notice.body}', isNot(contains('Ada')));
+          expect('${notice.title} ${notice.body}', isNot(contains('Kto')));
+          await receiver.stop();
+          // A member the kit has no name for: never the name it chose.
+          notice = await noticeFor(
+            LockedNoticeKit(
+              names: const <String, String>{'group:g1': 'Ekipa', _ada: 'Ada'},
+              members: names.members,
+            ),
+            _member,
+            <String, dynamic>{...inGroup, '_rid': 'p4', 'senderName': 'Ada'},
+          );
+          expect(notice.title, 'Ekipa');
+          expect(notice.body, 'Kontakt Zen: Kto idzie?');
+        },
+      );
 
       test('"Tylko nadawca": who, never what', () async {
         final RuntimeSystemNotification notice = await noticeFor(
@@ -861,7 +892,14 @@ void main() {
     });
 
     test('answers friends\' presence, nobody else\'s', () async {
-      await startReceiver(await publishFor(_masterKey()));
+      final int openedAt = DateTime.now().millisecondsSinceEpoch - 600000;
+      await startReceiver(
+        await publishFor(_masterKey()),
+        presenceKit: LockedPresenceKit(
+          shownTo: const <String>{_ada},
+          lastOpenedAtMillis: openedAt,
+        ),
+      );
       transport.sentSignals.clear();
       await receive(_ada, <String, dynamic>{'type': 'ping'});
       await receive(_stranger, <String, dynamic>{'type': 'ping'});
@@ -869,7 +907,62 @@ void main() {
       expect(transport.sentSignals.single.remoteAddress, _ada);
       expect(transport.sentSignals.single.payload['type'], 'pong');
       expect(transport.sentSignals.single.payload['state'], 'background');
+      // Zen was last open here about ten minutes ago.
+      expect(
+        transport.sentSignals.single.payload['lo'] as int,
+        inInclusiveRange(599, 605),
+      );
       expect(receiver.keptCount, 0);
+    });
+
+    test(
+      'a pong says "w tle" only to friends the presence kit names',
+      () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          presenceKit: const LockedPresenceKit(shownTo: <String>{_bob}),
+        );
+        transport.sentSignals.clear();
+        await receive(_ada, <String, dynamic>{'type': 'ping'});
+        await receive(_bob, <String, dynamic>{'type': 'ping'});
+        final Map<String, dynamic> toAda = transport.sentSignals
+            .singleWhere((s) => s.remoteAddress == _ada)
+            .payload;
+        final Map<String, dynamic> toBob = transport.sentSignals
+            .singleWhere((s) => s.remoteAddress == _bob)
+            .payload;
+        // Ada (say, a weak acquaintance) learns only that the phone answers.
+        expect(toAda['type'], 'pong');
+        expect(toAda.containsKey('state'), isFalse);
+        expect(toAda.containsKey('lo'), isFalse);
+        // Bob sees "w tle"; the last opening is kept to the person.
+        expect(toBob['state'], 'background');
+        expect(toBob.containsKey('lo'), isFalse);
+      },
+    );
+
+    test('without a presence kit a pong says nothing about presence', () async {
+      await startReceiver(await publishFor(_masterKey()));
+      transport.sentSignals.clear();
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(transport.sentSignals.single.payload['type'], 'pong');
+      expect(
+        transport.sentSignals.single.payload.containsKey('state'),
+        isFalse,
+      );
+    });
+
+    test('the presence kit survives its file', () {
+      const LockedPresenceKit kit = LockedPresenceKit(
+        shownTo: <String>{_ada, _bob},
+        lastOpenedAtMillis: 1234,
+      );
+      final LockedPresenceKit back = LockedPresenceKit.fromJson(
+        jsonDecode(jsonEncode(kit.toJson())),
+      )!;
+      expect(back.shownTo, <String>{_ada, _bob});
+      expect(back.lastOpenedAtMillis, 1234);
+      expect(LockedPresenceKit.fromJson(<String, dynamic>{'v': 2}), isNull);
     });
 
     test('answers a friend\'s pings at most every few minutes and keeps '

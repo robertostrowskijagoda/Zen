@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -71,6 +72,21 @@ void main() {
     expect(
       const RuntimePresenceConfig().offlineAfter,
       greaterThan(const RuntimePresenceConfig().pingInterval * 2),
+    );
+    // "w tle" outlasts two answers of a locked phone (one every other
+    // ping): one lost answer is not "offline".
+    expect(
+      const RuntimePresenceConfig().offlineAfter,
+      greaterThan(kPresencePingInterval * 4),
+    );
+    // "Online" expires sooner, but not before two pings went unanswered.
+    expect(
+      const RuntimePresenceConfig().foregroundFor,
+      lessThan(const RuntimePresenceConfig().offlineAfter),
+    );
+    expect(
+      const RuntimePresenceConfig().foregroundFor,
+      greaterThan(kPresencePingInterval * 2),
     );
   });
 
@@ -189,6 +205,10 @@ void main() {
     leave();
     await tester.pump();
     await tester.pump();
+    // Owed again after the round, but an "away" went out lately: this one
+    // goes when kPresenceAwayEvery is over.
+    expect(sent('away'), 1);
+    await tester.pump(kPresenceAwayEvery);
     expect(sent('away'), 2);
   });
 
@@ -211,21 +231,57 @@ void main() {
     );
     await transport.injectIncoming(
       from: _adaAddress,
-      payload: const <String, dynamic>{'type': 'ping'},
+      payload: const <String, dynamic>{
+        'type': 'ping',
+        'state': 'foreground',
+        'lo': 0,
+      },
     );
     await tester.pumpAndSettle();
     FriendProfile ada() =>
         container.read(socialHubControllerProvider).friends[_adaAddress]!;
     expect(ada().isOnline, isTrue);
-    expect(ada().lastActivityLabel, 'Teraz');
+    expect(ada().presence, PeerPresence.online);
+    expect(ada().lastOpenedAtMillis, greaterThan(0));
+    // Presence never takes over the chat list's time of the last message.
+    expect(ada().lastActivityLabel, isEmpty);
 
     await transport.injectIncoming(
       from: _adaAddress,
-      payload: const <String, dynamic>{'type': 'away'},
+      payload: const <String, dynamic>{
+        'type': 'away',
+        'state': 'background',
+        'lo': 0,
+      },
+    );
+    await tester.pumpAndSettle();
+    expect(ada().isOnline, isTrue, reason: 'still reachable in the background');
+    expect(ada().presence, PeerPresence.background);
+
+    // An iPhone leaving the screen stops receiving: offline at once, with
+    // when it was last open.
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{
+        'type': 'away',
+        'state': 'asleep',
+        'lo': 0,
+      },
+    );
+    await tester.pumpAndSettle();
+    expect(ada().isOnline, isFalse);
+    expect(ada().presence, PeerPresence.offline);
+    expect(ada().lastOpenedAtMillis, greaterThan(0));
+
+    // A ping without a state: they do not show presence to this person.
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{'type': 'ping'},
     );
     await tester.pumpAndSettle();
     expect(ada().isOnline, isTrue);
-    expect(ada().lastActivityLabel, 'W tle');
+    expect(ada().presence, PeerPresence.hidden);
+    expect(ada().lastOpenedAtMillis, 0);
   });
 
   testWidgets('runtime signal bridge answers ping and applies pong presence', (
@@ -273,7 +329,9 @@ void main() {
         .friends[_adaAddress]!;
     expect(friend.isOnline, isTrue);
     expect(friend.lastPresenceAtMillis, greaterThan(0));
-    expect(friend.lastActivityLabel, 'Teraz');
+    expect(friend.presence, PeerPresence.online);
+    // No "lo": they keep their last opening to themselves.
+    expect(friend.lastOpenedAtMillis, 0);
   });
 
   testWidgets(

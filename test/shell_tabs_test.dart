@@ -12,6 +12,8 @@ import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -346,12 +348,98 @@ void main() {
     await _pumpApp(tester, security: security);
     expect(find.byKey(const Key('account-menu-button')), findsOneWidget);
     expect(find.byKey(const Key('side-tabs-hide')), findsOneWidget);
+    // Every button has a 44 px hit box and none overlaps another, with the
+    // rail button, the bell, "Mój kod", the lock and the accounts all there.
+    final List<Rect> boxes = <Rect>[
+      for (final Key key in const <Key>[
+        Key('side-tabs-hide'),
+        Key('status-notices'),
+        Key('status-my-code'),
+        Key('side-tabs-lock'),
+        Key('account-menu-button'),
+      ])
+        tester.getRect(find.byKey(key)),
+    ];
+    for (final Rect box in boxes) {
+      expect(box.width, greaterThanOrEqualTo(44));
+      expect(box.height, greaterThanOrEqualTo(44));
+      expect(box.right, lessThanOrEqualTo(320));
+    }
+    for (int i = 0; i < boxes.length; i++) {
+      for (int j = i + 1; j < boxes.length; j++) {
+        expect(boxes[i].overlaps(boxes[j]), isFalse, reason: '$i / $j');
+      }
+    }
+    // The bar has no settings circle and no help button of its own; it is
+    // the settings button itself.
+    expect(find.byKey(const Key('status-health')), findsNothing);
+    expect(find.byKey(const Key('status-settings')), findsNothing);
+    expect(tester.takeException(), isNull);
     // "Zablokuj teraz" locks at once.
     tester
         .widget<IconButton>(find.byKey(const Key('side-tabs-lock')))
         .onPressed!
         .call();
     expect(security.isLocked, isTrue);
+    await _tearDown(tester);
+  });
+
+  testWidgets('the notifications about friends\' posts are switched in the '
+      'settings, with the muted people listed there', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester);
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AppShellScreen)),
+    );
+    await tester.tap(find.byKey(const Key('chats-status-chip')));
+    await _route(tester);
+
+    final Finder posts = find.byKey(const Key('settings-post-notifications'));
+    await tester.ensureVisible(posts);
+    await tester.pump();
+    expect(
+      container.read(appSettingsControllerProvider).postNotifications,
+      isTrue,
+    );
+    await tester.tap(posts);
+    await tester.pump();
+    expect(
+      container.read(appSettingsControllerProvider).postNotifications,
+      isFalse,
+    );
+
+    // Nobody muted yet; a muted person is listed and comes back with one tap.
+    final Finder muted = find.byKey(
+      const Key('settings-nav-muted-post-authors'),
+    );
+    await tester.ensureVisible(muted);
+    await tester.pump();
+    await tester.tap(muted);
+    await _route(tester);
+    expect(find.byKey(const Key('muted-post-authors-empty')), findsOneWidget);
+    await tester.runAsync(
+      () => container
+          .read(appSettingsControllerProvider.notifier)
+          .setPostAuthorMuted('200::1', muted: true),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('muted-post-author-200::1')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('muted-post-author-unmute-200::1')));
+    await tester.runAsync(() => _settle());
+    await tester.pump();
+    expect(find.byKey(const Key('muted-post-author-200::1')), findsNothing);
+    expect(
+      container.read(appSettingsControllerProvider).mutedPostAuthors,
+      isEmpty,
+    );
+    // The wall has no bell of its own: the one in the top bar is enough.
+    expect(find.byKey(const Key('feed-notices')), findsNothing);
+    await tester.pageBack();
+    await _route(tester);
     await _tearDown(tester);
   });
 
@@ -430,7 +518,10 @@ void main() {
             ZenAccountScope.derive('TEST-ACCOUNT', Uint8List(32)),
           ),
         ],
-        child: MaterialApp(theme: ZenTheme.dark(), home: const AppShellScreen()),
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: const AppShellScreen(),
+        ),
       ),
     );
     await tester.runAsync(() => _settle());
@@ -477,44 +568,158 @@ void main() {
     }
   });
 
-  testWidgets('"Nigdy" says what it means in the security settings', (
-    WidgetTester tester,
-  ) async {
-    tester.view.physicalSize = const Size(420, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await _pumpApp(
-      tester,
-      security: MemoryAppSecurityService(
-        hasPassword: true,
-        passwordIterations: 10,
-      ),
-    );
-    await tester.tap(find.byKey(const Key('chats-status-chip')));
-    await _route(tester);
-    final Finder security = find.byKey(const Key('settings-nav-security'));
-    await tester.ensureVisible(security);
-    await tester.pump();
-    await tester.tap(security);
-    await _route(tester);
+  group('"Nigdy" in the security settings', () {
+    Future<void> openSecurity(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('chats-status-chip')));
+      await _route(tester);
+      final Finder security = find.byKey(const Key('settings-nav-security'));
+      await tester.ensureVisible(security);
+      await tester.pump();
+      await tester.tap(security);
+      await _route(tester);
+    }
+
+    Future<void> tapAndSettle(WidgetTester tester, Finder finder) async {
+      await tester.ensureVisible(finder);
+      await tester.pump();
+      await tester.tap(finder);
+      await tester.runAsync(() => _settle());
+      await _route(tester);
+    }
 
     final Finder note = find.byKey(const Key('settings-lock-never-note'));
     final Finder never = find.byKey(const Key('settings-lock-mode-never'));
-    await tester.ensureVisible(never);
-    await tester.pump();
-    expect(note, findsNothing);
-    await tester.tap(never);
-    await tester.pump();
-    expect(note, findsOneWidget);
-    // It names the catch: the password still opens the data after a restart.
-    expect(
-      tester.widget<Text>(note).data,
-      allOf(contains('nie blokuje się sam'), contains('hasło i tak')),
+    final Finder dialog = find.byKey(const Key('settings-never-lock-dialog'));
+    final Finder field = find.byKey(
+      const Key('settings-never-lock-password-field'),
     );
-    await tester.tap(find.byKey(const Key('settings-lock-mode-appClose')));
-    await tester.pump();
-    expect(note, findsNothing);
-    await _tearDown(tester);
+    final Finder confirm = find.byKey(const Key('settings-never-lock-confirm'));
+
+    testWidgets('the password once, after the warning; the note says Zen '
+        'opens without it; another mode takes the key away again', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() async {
+        await security.setPassword('sekret12');
+        await security.setPanicPassword('panika123');
+      });
+      await _pumpApp(tester, security: security);
+      await openSecurity(tester);
+      expect(note, findsNothing);
+
+      // Cancelled: nothing changes.
+      await tapAndSettle(tester, never);
+      expect(dialog, findsOneWidget);
+      expect(
+        find.byKey(const Key('settings-never-lock-panic-note')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+      expect(dialog, findsNothing);
+      expect(security.lockMode, isNot(AppLockMode.never));
+      expect(security.keepsNeverLockKey, isFalse);
+      expect(note, findsNothing);
+
+      // A wrong password keeps nothing.
+      await tapAndSettle(tester, never);
+      await tester.enterText(field, 'zle-haslo');
+      await tapAndSettle(tester, confirm);
+      expect(dialog, findsOneWidget);
+      expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+      expect(security.keepsNeverLockKey, isFalse);
+
+      await tester.enterText(field, 'sekret12');
+      await tapAndSettle(tester, confirm);
+      expect(dialog, findsNothing);
+      expect(security.lockMode, AppLockMode.never);
+      expect(security.keepsNeverLockKey, isTrue);
+      expect(
+        await tester.runAsync(
+          () => security.credentialsStore.read(
+            appSecurityNeverLockMasterKeyStorageKey,
+          ),
+        ),
+        isNotNull,
+      );
+      expect(note, findsOneWidget);
+      expect(
+        tester.widget<Text>(note).data,
+        allOf(
+          contains('otwiera się bez hasła, także po restarcie'),
+          contains('zobaczy Twoje rozmowy'),
+          contains('blokada ekranu telefonu'),
+          contains('Zablokuj teraz'),
+        ),
+      );
+
+      // Changing the security settings still asks for the password.
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-change-password-button')),
+      );
+      expect(
+        find.byKey(const Key('settings-current-password-dialog')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-lock-mode-appClose')),
+      );
+      expect(note, findsNothing);
+      expect(security.lockMode, AppLockMode.appClose);
+      expect(security.keepsNeverLockKey, isFalse);
+      expect(
+        await tester.runAsync(
+          () => security.credentialsStore.read(
+            appSecurityNeverLockMasterKeyStorageKey,
+          ),
+        ),
+        isNull,
+      );
+      await _tearDown(tester);
+    });
+
+    testWidgets('with nothing kept the note names the catch: the password '
+        'still opens the data after a restart', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await _pumpApp(
+        tester,
+        security: MemoryAppSecurityService(
+          hasPassword: true,
+          passwordIterations: 10,
+        ),
+      );
+      // "Nigdy" chosen, but no key kept (locked by hand since, say).
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(AppShellScreen)),
+      );
+      await tester.runAsync(
+        () => container
+            .read(appSettingsControllerProvider.notifier)
+            .setLockMode(AppLockMode.never),
+      );
+      await openSecurity(tester);
+      await tester.ensureVisible(never);
+      await tester.pump();
+      expect(note, findsOneWidget);
+      expect(
+        tester.widget<Text>(note).data,
+        allOf(contains('nie blokuje się sam'), contains('hasło i tak')),
+      );
+      await _tearDown(tester);
+    });
   });
 
   testWidgets('every rail icon has a label for screen readers', (

@@ -18,7 +18,7 @@ enum RuntimeRouteTarget {
   flatDoor,
 
   /// The Tablica with a filter (`zen://feed?f=pyramid`); [rawInput] holds
-  /// the filter's name.
+  /// the filter's name, [postId] the post to show (`&p=<id>`), if any.
   feed,
 
   /// The knocks waiting at the flat's door (`zen://knocks`): the
@@ -28,6 +28,9 @@ enum RuntimeRouteTarget {
   /// "Aktualizacje i Podaj dalej" (`zen://updates`): the notification
   /// about a new version.
   updates,
+
+  /// "Skrzynki offline" (`zen://mailboxes`): a mailbox stopped answering.
+  mailboxes,
 }
 
 @immutable
@@ -41,6 +44,8 @@ final class RuntimeRouteIntent {
     this.autoAcceptCall = false,
     this.acceptToken,
     this.callId,
+    this.postId,
+    this.messageId,
   });
 
   factory RuntimeRouteIntent.inbox({required String id}) {
@@ -64,12 +69,14 @@ final class RuntimeRouteIntent {
     required String id,
     required String groupId,
     String? title,
+    String? messageId,
   }) {
     return RuntimeRouteIntent(
       id: id,
       target: RuntimeRouteTarget.groupConversation,
       peerAddress: groupId,
       title: title,
+      messageId: messageId == null || messageId.isEmpty ? null : messageId,
     );
   }
 
@@ -126,15 +133,23 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.updates);
   }
 
-  /// The Tablica, filtered by [filter] (a name of the feed's filters).
+  /// "Skrzynki offline" (a mailbox that stopped answering).
+  factory RuntimeRouteIntent.mailboxes({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.mailboxes);
+  }
+
+  /// The Tablica, filtered by [filter] (a name of the feed's filters), at
+  /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
     required String id,
     required String filter,
+    String? postId,
   }) {
     return RuntimeRouteIntent(
       id: id,
       target: RuntimeRouteTarget.feed,
       rawInput: filter,
+      postId: postId == null || postId.isEmpty ? null : postId,
     );
   }
 
@@ -163,6 +178,14 @@ final class RuntimeRouteIntent {
   /// later one from the same person. Never persisted.
   final String? callId;
 
+  /// The post a feed route shows (a new post's notification). Never
+  /// persisted.
+  final String? postId;
+
+  /// The message a group route shows (a mention's notification). Never
+  /// persisted.
+  final String? messageId;
+
   /// Whether this route may answer [ringingCallId]: a route that names a
   /// call answers only that call; one without a call id (older routes)
   /// only by its token, as before.
@@ -182,6 +205,8 @@ final class RuntimeRouteIntent {
       autoAcceptCall: true,
       acceptToken: acceptToken,
       callId: callId,
+      postId: postId,
+      messageId: messageId,
     );
   }
 
@@ -198,6 +223,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.feed => t('Otwórz Tablicę'),
     RuntimeRouteTarget.flatKnocks => t('Otwórz Sąsiadów'),
     RuntimeRouteTarget.updates => t('Aktualizuj'),
+    RuntimeRouteTarget.mailboxes => t('Wybierz skrzynkę'),
   };
 }
 
@@ -206,14 +232,21 @@ String buildInboxRouteKey() => 'zen://inbox';
 /// "Aktualizacje i Podaj dalej" (a new version's notification).
 String buildUpdatesRouteKey() => 'zen://updates';
 
+/// "Skrzynki offline" (a mailbox that stopped answering).
+String buildMailboxesRouteKey() => 'zen://mailboxes';
+
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
 
-/// The Tablica on [filter] (`zen://feed?f=pyramid`).
-String buildFeedRouteKey(String filter) => Uri(
+/// The Tablica on [filter] (`zen://feed?f=pyramid`), at the post [postId]
+/// when given (`zen://feed?f=all&p=<id>`).
+String buildFeedRouteKey(String filter, {String? postId}) => Uri(
   scheme: 'zen',
   host: 'feed',
-  queryParameters: <String, String>{'f': filter},
+  queryParameters: <String, String>{
+    'f': filter,
+    if (postId != null && postId.isNotEmpty) 'p': postId,
+  },
 ).toString();
 
 String buildConversationRouteKey({required String peerAddress, String? title}) {
@@ -228,15 +261,23 @@ String buildConversationRouteKey({required String peerAddress, String? title}) {
   ).toString();
 }
 
-String buildGroupRouteKey({required String groupId, String? title}) {
+/// The group chat [groupId]; at the message [messageId] when given
+/// (`&m=<id>`: a mention's notification).
+String buildGroupRouteKey({
+  required String groupId,
+  String? title,
+  String? messageId,
+}) {
   final String? trimmedTitle = title?.trim();
+  final Map<String, String> query = <String, String>{
+    if (trimmedTitle != null && trimmedTitle.isNotEmpty) 'title': trimmedTitle,
+    if (messageId != null && messageId.isNotEmpty) 'm': messageId,
+  };
   return Uri(
     scheme: 'zen',
     host: 'group',
     pathSegments: <String>[groupId],
-    queryParameters: trimmedTitle == null || trimmedTitle.isEmpty
-        ? null
-        : <String, String>{'title': trimmedTitle},
+    queryParameters: query.isEmpty ? null : query,
   ).toString();
 }
 
@@ -318,10 +359,14 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   if (uri.host == 'updates') {
     return RuntimeRouteIntent.updates(id: id);
   }
+  if (uri.host == 'mailboxes') {
+    return RuntimeRouteIntent.mailboxes(id: id);
+  }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(
       id: id,
       filter: uri.queryParameters['f'] ?? '',
+      postId: uri.queryParameters['p'],
     );
   }
   if (uri.host == 'call' && uri.pathSegments.isNotEmpty) {
@@ -355,6 +400,7 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
       id: id,
       groupId: uri.pathSegments.first,
       title: uri.queryParameters['title'],
+      messageId: uri.queryParameters['m'],
     );
   }
   // `zen://m/CODE`: a flat's door code (the sticker page's "Otwórz w Zen").

@@ -51,7 +51,21 @@
   aware: whoever already read it may remember it, and a modified app can
   ignore the deletion and keep a copy.
 - **Forwarding** passes a text or a file to a friend or a group, marked
-  *Forwarded*. Disappearing messages cannot be forwarded.
+  *Forwarded*. Disappearing messages cannot be forwarded. Mentions in a
+  forwarded message become plain names.
+- **Mentions in groups.** Type **@** in a group chat and pick a member from
+  the list under the field (only members of that group are offered, and a
+  message can mention only members). The mention shows highlighted; tap it
+  for the person's mini-profile. A mention is kept as a reference to the
+  member next to the text, so it shows their current name. The person
+  mentioned gets the group message's notification as a mention ("Ada
+  mentioned you"), in its own notification slot, and an entry in the
+  notification list that opens the chat at that message. Their phone
+  checks that the sender is a member of the group; one sender's mentions
+  are announced at most 5 times in 10 minutes, after that they notify like
+  any other message. The group's privacy level applies as for any message
+  (at *Notice only* a mention says only "New message"). Editing a
+  message keeps its mentions (it adds nobody).
 
 Reactions, edits and deletions travel like messages (queue, mailboxes) to
 everyone in the chat and to your other devices, without notifications.
@@ -99,16 +113,51 @@ of waiting messages; when it is full, a new message is marked not sent and
 you can try again once friends have picked up what waits.
 
 **Which friends keep your mail.** A mailbox is only useful when it is
-online while you are not. Each device tells its friends whether it
-usually stays online (a computer with Zen in the tray; a phone does not:
-a locked phone takes only its own mail, to save the battery). Zen then picks, in this
-order: friends (not casual friends) with such a device seen in the last few
-days, close friends before friends, then whoever was seen most recently. A
-chosen mailbox stays, unless it has been silent for 3 days while someone
-fresher is around, or a friend with an always-online device appears (then
-the mailbox seen longest ago is swapped). One computer with Zen in the tray
-can be the mailbox for a whole group of friends;
-*Invite* says so too.
+online while you are not. Each device tells its friends what kind of device
+it is: a computer with Zen in the tray (online whenever it is on), an
+Android phone (its background service keeps friends' mail even while Zen is
+locked), an iPhone with *receive in the background* on, or an iPhone
+without it (online only while Zen is open). Zen also notices how often each
+friend's device actually answers when it is asked for mail or handed mail
+for someone else, counted by the hour, so a phone that is off for a night
+loses little. It then picks, in this order: devices that have not gone
+quiet, friends before casual friends, the devices most likely to be online
+(computers and Android phones before iPhones, corrected by how they really
+answered), close friends before friends, then whoever was seen most
+recently. One device per friend: if a friend has a computer and an iPhone,
+their computer keeps your mail.
+
+Zen changes your mailboxes rarely, because every change makes your friends
+leave your mail somewhere else. A free place (a mailbox that is no longer
+your friend) is filled at once. Otherwise at most one mailbox changes per
+day, and never all of them at once: one that has not answered for 3 days
+while your device kept asking makes way for a friend whose device answers,
+and one that is online only now and then makes way for a much better one (an
+iPhone for a computer or an Android phone). One computer with Zen in the
+tray can be the mailbox for a whole group of friends; *Invite* says so too.
+
+**When a mailbox stops answering.** If a mailbox has not answered for 3 days
+and none of your other friends' devices is good enough to take its place
+(say all of them are iPhones), or you chose your mailboxes by hand, Zen
+tells you: a card on the chats list and an entry in the notifications say
+*Mailbox {name} has not answered for {time} — choose another*. Tapping it
+opens **Settings → Offline mailboxes**, where each friend shows the kind of
+device and how much of the time it was available, and an iPhone without
+*receive in the background* is marked as a weak mailbox.
+
+**Friends with several devices, or a new phone.** Each of your devices has
+its own mailboxes and its own key, and a message to a friend goes to every
+device of theirs, each copy sealed for that device and waiting in that
+device's own mailboxes. Your chat counts the friend once: the message is
+delivered as soon as any of their devices has it, and a group's *delivered d
+of n* counts people. When a friend moves to a new phone, the new phone tells
+your device its mailboxes and your messages wait there from then on; their
+old phone, once silent for 3 days, stops being your mailbox and their new
+phone takes its place. Mailboxes you chose by hand name friends, not
+devices, so they follow a friend to their new phone, and they are the same
+on all your own devices (a new phone starts with your choice). Unlinking a
+lost phone (**Settings → Privacy and security → Devices**) stops everything
+going there at once.
 
 ### iPhone
 
@@ -123,14 +172,19 @@ iOS lets Zen run in the background only briefly. On an iPhone:
   after you leave it; after that a message to someone offline waits on the
   iPhone (*Waiting on your iPhone, recipient offline*) until the next check
   or until you open Zen again;
-- all of this works only while Zen is unlocked: with the lock *After leaving
-  the app* it stops when Zen locks;
-- **Settings → Background work** shows when iOS last woke Zen and has
-  **Keep receiving in the background**: Zen plays a silent sound so that iOS
-  does not suspend it, and messages and calls arrive at once — at a clear
-  battery cost ([details](../IOS_BACKGROUND.md));
+- a locked Zen receives too: messages wait encrypted until you unlock, and
+  their notifications show at most the start of a message;
+- **Settings → Background work** (and a step of the first-run setup) lets
+  you choose how Zen is woken: **automatically by iOS** (a few times a day,
+  almost no battery), a **Shortcuts automation every hour** (the action
+  *Check Zen messages*; iOS may show a short banner each run) and a
+  **silent sound for receiving at once** (messages and calls arrive at
+  once — at a clear battery cost). It also checks the iPhone's settings Zen
+  needs: Background App Refresh, Low Power Mode off, notifications, and not
+  swiping Zen away ([details](../IOS_BACKGROUND.md));
 - friends pick an iPhone as their mailbox only after devices that stay
-  online.
+  online, and their picker marks it as a weak mailbox; with *receive in the
+  background* on, an iPhone tells them so and counts as a better one.
 
 Chats show this once on an iPhone (**Got it** closes it), and *Why isn't it
 working?* lists it. It works best when someone in your group of friends
@@ -223,10 +277,19 @@ then, and offers *Retry* when saving failed.
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.
-- **Presence.** Zen tells friends it is there only while it is on the
-  screen: when you open it, every few minutes while it stays open, and
-  "leaving" when it goes to the background. The chat header shows *online
-  now*, *in the background*, or after a week of silence *online N days
-  ago* (after a month: *over a month ago*).
+- **Presence.** Friends see one of three states, as a dot on the avatar
+  in the chat list and in the chat header: *online* (a dot in the theme's
+  "success" colour that pulses briefly when it lights up: Zen is open on
+  their screen), *in the background* (a still dot in the theme's "warning"
+  colour: Zen is hidden or the phone locked, but it still receives) and
+  *offline* (an empty ring). The
+  header also says when they last opened Zen ("5 min ago", "3 h ago",
+  "2 days ago") while they are not online. An iPhone that iOS suspends
+  shows as offline, not in the background, unless it keeps receiving
+  (*Keep receiving in the background*). Zen tells this only by the way:
+  when you open it, with its few pings while it stays open, with its
+  answers to friends' pings, and "leaving" when it goes to the background.
+  A weak acquaintance sees none of it; *Settings → Privacy and security →
+  Show when I last opened the app* hides the time from everyone.
 
 [Back to the guide](README.md)

@@ -159,8 +159,10 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
       return t('Łączenie…');
     }
     final int seconds =
-        ((_now().millisecondsSinceEpoch - s.startedAtMillis) ~/ 1000)
-            .clamp(0, 86400);
+        ((_now().millisecondsSinceEpoch - s.startedAtMillis) ~/ 1000).clamp(
+          0,
+          86400,
+        );
     final String mm = (seconds ~/ 60).toString().padLeft(2, '0');
     final String ss = (seconds % 60).toString().padLeft(2, '0');
     return '$mm:$ss';

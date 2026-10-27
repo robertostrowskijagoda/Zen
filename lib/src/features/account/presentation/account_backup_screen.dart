@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
+import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
@@ -62,12 +64,61 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   int _done = 0;
   int _total = 0;
   String? _message;
-  List<String>? _written;
+  AccountBackupSaved? _saved;
+  bool _obscure = true;
+
+  /// Where the backup goes: [_default] until the person chooses another.
+  AccountBackupFolder? _default;
+  AccountBackupFolder? _chosen;
+  bool _choosing = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(_measure());
+    unawaited(_loadDefaultFolder());
+  }
+
+  Future<void> _loadDefaultFolder() async {
+    try {
+      final AccountBackupFolder folder = await ref
+          .read(accountBackupPlacesProvider)
+          .defaultFolder();
+      if (mounted) {
+        setState(() => _default = folder);
+      }
+    } on Object catch (error) {
+      logZenWarning('Finding the default backup folder failed: $error');
+    }
+  }
+
+  /// "Wybierz folder": a cancelled chooser keeps what was there.
+  Future<void> _chooseFolder() async {
+    setState(() => _choosing = true);
+    try {
+      final AccountBackupFolder? folder = await ref
+          .read(accountBackupPlacesProvider)
+          .chooseFolder();
+      if (folder != null && mounted) {
+        setState(() => _chosen = folder);
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Choosing the backup folder failed', error, stackTrace);
+      if (mounted) {
+        setState(() => _message = t('Nie udało się wybrać folderu.'));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _choosing = false);
+      }
+    }
+  }
+
+  Future<void> _openFolder(AccountBackupSaved saved) async {
+    final bool opened = await ref.read(accountBackupPlacesProvider).open(saved);
+    if (!opened && mounted) {
+      setState(() => _message = t('Nie udało się otworzyć folderu.'));
+    }
   }
 
   @override
@@ -147,16 +198,26 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     )) {
       return;
     }
-    final String? first = await ref
-        .read(accountBackupPlacesProvider)
-        .target(accountBackupFileName(DateTime.now()));
-    if (first == null || !mounted) {
+    final AccountBackupPlaces places = ref.read(accountBackupPlacesProvider);
+    final AccountBackupFolder folder;
+    try {
+      folder = _chosen ?? _default ?? await places.defaultFolder();
+    } on Object catch (error, stackTrace) {
+      logZenError('Finding the backup folder failed', error, stackTrace);
+      node.identity.lock();
+      if (mounted) {
+        setState(() => _message = t('Nie udało się znaleźć folderu na kopię.'));
+      }
+      return;
+    }
+    if (!mounted) {
       node.identity.lock();
       return;
     }
     setState(() {
       _busy = true;
       _message = null;
+      _saved = null;
       _done = 0;
       _total = 0;
     });
@@ -165,10 +226,12 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
         ..._scope,
         AccountScope.keys,
       });
-      final List<String> paths = await writeAccountBackup(
+      _saved = await saveAccountBackup(
+        places: places,
+        folder: folder,
+        name: accountBackupFileName(DateTime.now()),
         build: build,
         password: password,
-        first: first,
         cost: ref.read(accountBackupCostProvider),
         progress: (int done, int total) {
           if (mounted) {
@@ -179,7 +242,6 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
           }
         },
       );
-      _written = paths;
     } on Object catch (error, stackTrace) {
       logZenError('Writing the account backup failed', error, stackTrace);
       _message = t('Nie udało się zapisać kopii. Sprawdź miejsce na dysku.');
@@ -191,13 +253,23 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     }
   }
 
+  /// "Pokaż" / "Ukryj" for the password fields.
+  Widget _visibilityToggle() => IconButton(
+    tooltip: _obscure ? t('Pokaż') : t('Ukryj'),
+    onPressed: () => setState(() => _obscure = !_obscure),
+    icon: Icon(
+      _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final List<String>? written = _written;
+    final AccountBackupSaved? saved = _saved;
+    final AccountBackupFolder? folder = _chosen ?? _default;
     return Scaffold(
       key: const Key('account-backup-screen'),
-      appBar: AppBar(title: Text(t('Kopia całego konta (plik)'))),
+      appBar: ZenSectionBar(title: t('Kopia całego konta (plik)')),
       body: SafeArea(
         top: false,
         child: SelectionArea(
@@ -243,28 +315,69 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                 key: const Key('account-backup-size'),
                 style: TextStyle(color: zen.textMuted, fontSize: 13),
               ),
+              ZenSection(t('Gdzie zapisać')),
+              ZenCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      folder == null
+                          ? t('Szukam folderu…')
+                          : _chosen == null
+                          ? t('{folder} (domyślnie)', <String, Object?>{
+                              'folder': folder.label,
+                            })
+                          : folder.label,
+                      key: const Key('account-backup-folder'),
+                      style: const TextStyle(height: 1.4),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      key: const Key('account-backup-folder-choose'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      onPressed: _busy || _choosing
+                          ? null
+                          : () => unawaited(_chooseFolder()),
+                      icon: const Icon(Icons.folder_open_rounded),
+                      label: Text(t('Wybierz folder')),
+                    ),
+                    if (_chosen != null)
+                      TextButton(
+                        key: const Key('account-backup-folder-default'),
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _chosen = null),
+                        child: Text(t('Użyj domyślnego folderu')),
+                      ),
+                  ],
+                ),
+              ),
               ZenSection(t('Hasło kopii')),
               TextField(
                 key: const Key('account-backup-password'),
                 controller: _password,
-                obscureText: true,
+                obscureText: _obscure,
                 enableIMEPersonalizedLearning: false,
                 enabled: !_busy,
                 decoration: InputDecoration(
                   labelText: t('Hasło'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: _visibilityToggle(),
                 ),
               ),
               const SizedBox(height: 8),
               TextField(
                 key: const Key('account-backup-repeat'),
                 controller: _repeat,
-                obscureText: true,
+                obscureText: _obscure,
                 enableIMEPersonalizedLearning: false,
                 enabled: !_busy,
                 decoration: InputDecoration(
                   labelText: t('Powtórz hasło'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: _visibilityToggle(),
                 ),
               ),
               const SizedBox(height: 8),
@@ -295,32 +408,43 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                 ),
               if (_message != null) ...<Widget>[
                 const SizedBox(height: 10),
-                Text(
+                _BackupMessage(
                   _message!,
                   key: const Key('account-backup-message'),
-                  style: TextStyle(color: zen.danger),
+                  color: zen.danger,
                 ),
               ],
-              if (written != null) ...<Widget>[
+              if (saved != null) ...<Widget>[
                 const SizedBox(height: 12),
                 ZenInfo(
                   key: const Key('account-backup-done'),
                   icon: Icons.check_circle_outline_rounded,
                   tone: zen.success,
                   title: t('Kopia gotowa'),
-                  text: written.length == 1
+                  text: saved.shown.length == 1
                       ? t(
-                          'Zapisana w: {path}. Przenieś ją w bezpieczne miejsce '
-                          '(komputer, pendrive) — usunięcie aplikacji może '
-                          'usunąć jej folder.',
-                          <String, Object?>{'path': written.single},
+                          'Zapisana w: {path}. Skopiuj ją w bezpieczne miejsce '
+                          '(komputer, pendrive).',
+                          <String, Object?>{'path': saved.shown.single},
                         )
                       : t(
                           'Zapisana w częściach: {paths}. Trzymaj je razem — '
                           'do przywrócenia potrzebne są wszystkie.',
-                          <String, Object?>{'paths': written.join(', ')},
+                          <String, Object?>{'paths': saved.shown.join(', ')},
                         ),
                 ),
+                if (saved.canOpen) ...<Widget>[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    key: const Key('account-backup-open-folder'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: () => unawaited(_openFolder(saved)),
+                    icon: const Icon(Icons.folder_open_rounded),
+                    label: Text(t('Otwórz folder')),
+                  ),
+                ],
               ],
             ],
           ),
@@ -353,6 +477,7 @@ class _AccountBackupRestoreScreenState
   bool _busy = false;
   String? _message;
   bool _good = false;
+  bool _obscure = true;
 
   @override
   void dispose() {
@@ -428,13 +553,22 @@ class _AccountBackupRestoreScreenState
     }
   }
 
+  /// "Pokaż" / "Ukryj" for the password fields.
+  Widget _visibilityToggle() => IconButton(
+    tooltip: _obscure ? t('Pokaż') : t('Ukryj'),
+    onPressed: () => setState(() => _obscure = !_obscure),
+    icon: Icon(
+      _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final List<String>? parts = _parts;
     return Scaffold(
       key: const Key('account-backup-restore-screen'),
-      appBar: AppBar(title: Text(t('Mam kopię'))),
+      appBar: ZenSectionBar(title: t('Mam kopię')),
       body: SafeArea(
         top: false,
         child: SelectionArea(
@@ -479,12 +613,13 @@ class _AccountBackupRestoreScreenState
                       TextField(
                         key: const Key('account-restore-password'),
                         controller: _password,
-                        obscureText: true,
+                        obscureText: _obscure,
                         enableIMEPersonalizedLearning: false,
                         enabled: !_busy,
                         decoration: InputDecoration(
                           labelText: t('Hasło kopii'),
                           prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: _visibilityToggle(),
                         ),
                         onSubmitted: (_) => unawaited(_restore()),
                       ),
@@ -508,13 +643,10 @@ class _AccountBackupRestoreScreenState
                     ],
                     if (_message != null) ...<Widget>[
                       const SizedBox(height: 10),
-                      Text(
+                      _BackupMessage(
                         _message!,
                         key: const Key('account-restore-message'),
-                        style: TextStyle(
-                          color: _good ? zen.success : zen.danger,
-                          height: 1.4,
-                        ),
+                        color: _good ? zen.success : zen.danger,
                       ),
                     ],
                   ],
@@ -557,6 +689,58 @@ class _AccountBackupRestoreScreenState
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A result line under a button: read out when it appears (a live region)
+/// and scrolled into view, so an error is not left below the screen.
+class _BackupMessage extends StatefulWidget {
+  const _BackupMessage(this.text, {required this.color, super.key});
+
+  final String text;
+  final Color color;
+
+  @override
+  State<_BackupMessage> createState() => _BackupMessageState();
+}
+
+class _BackupMessageState extends State<_BackupMessage> {
+  @override
+  void initState() {
+    super.initState();
+    _show();
+  }
+
+  @override
+  void didUpdateWidget(_BackupMessage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _show();
+    }
+  }
+
+  void _show() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(
+          Scrollable.ensureVisible(
+            context,
+            duration: const Duration(milliseconds: 150),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      child: Text(
+        widget.text,
+        style: TextStyle(color: widget.color, height: 1.4),
       ),
     );
   }

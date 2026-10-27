@@ -6,13 +6,29 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.provider.DocumentsContract
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.IOException
 
 /**
  * Small system actions (`zen/system`): open the dialer with a number (the
@@ -26,6 +42,18 @@ import io.flutter.plugin.common.MethodChannel
  * between Zen's own icon and name and a neutral notes one (two
  * activity-aliases, exactly one enabled). `soundsSilenced` tells
  * whether the phone keeps quiet (Zen's in-app sounds follow it).
+ *
+ * Account backup files (account_backup_places.dart): `exportToDownloads`
+ * {paths, name} copies the written parts into the Downloads folder through
+ * the media store (Android 10+, no storage permission) and answers
+ * {names, uris} (null before Android 10); `pickFolder` opens the system's
+ * folder chooser and answers {tree, label} (null when cancelled, or when
+ * the screen went away meanwhile); `exportToFolder` {tree, paths, name}
+ * copies the parts into that folder and answers {names, uris};
+ * `openDownloads` and `openFolder` {tree} show them. The first part is
+ * named [name], part n `<first>.n` (after any rename the system did).
+ * `deleteDocument` {uri} deletes such a copy again (exported_files.dart,
+ * the panic password): true when it went.
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -103,6 +131,43 @@ object ZenSystemBridge {
                             )
                             result.success(true)
                         }
+                        "exportToDownloads" -> {
+                            val paths = call.argument<List<String>>("paths") ?: emptyList()
+                            val name = call.argument<String>("name") ?: ""
+                            // The work outlives the screen; the Activity stays out of it.
+                            val context = activity.applicationContext
+                            inBackground(result) { exportToDownloads(context, paths, name) }
+                        }
+                        "pickFolder" -> pickFolder(activity, result)
+                        "exportToFolder" -> {
+                            val tree = call.argument<String>("tree") ?: ""
+                            val paths = call.argument<List<String>>("paths") ?: emptyList()
+                            val name = call.argument<String>("name") ?: ""
+                            val context = activity.applicationContext
+                            inBackground(result) { exportToFolder(context, tree, paths, name) }
+                        }
+                        "deleteDocument" -> {
+                            val uri = call.argument<String>("uri") ?: ""
+                            val context = activity.applicationContext
+                            inBackground(result) { deleteDocument(context, uri) }
+                        }
+                        "openDownloads" -> result.success(
+                            showFolder(activity, Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)),
+                        )
+                        "openFolder" -> {
+                            val tree = Uri.parse(call.argument<String>("tree") ?: "")
+                            result.success(
+                                showFolder(
+                                    activity,
+                                    Intent(Intent.ACTION_VIEW)
+                                        .setDataAndType(
+                                            treeDocument(tree),
+                                            DocumentsContract.Document.MIME_TYPE_DIR,
+                                        )
+                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                ),
+                            )
+                        }
                         "setDisguise" -> result.success(
                             setDisguise(activity, call.argument<Boolean>("enabled") ?: false),
                         )
@@ -113,6 +178,228 @@ object ZenSystemBridge {
                     result.success(false)
                 }
             }
+    }
+
+    private var folderPickSerial = 0
+
+    /** Runs [work] off the main thread and answers its map (null on failure). */
+    private fun inBackground(
+        result: MethodChannel.Result,
+        work: () -> Map<String, Any>?,
+    ) {
+        Thread {
+            val answer = try {
+                work()
+            } catch (error: Exception) {
+                Log.w(TAG, "A backup file action failed", error)
+                null
+            }
+            Handler(Looper.getMainLooper()).post { result.success(answer) }
+        }.start()
+    }
+
+    private fun showFolder(activity: FragmentActivity, intent: Intent): Boolean =
+        try {
+            activity.startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
+
+    /**
+     * The system's folder chooser: {tree, label}, or null when cancelled.
+     * The access to the folder is kept, so the panic password can still
+     * delete the copies there after a restart. Should the Activity go away
+     * while the chooser is open (a configuration change, the system
+     * reclaiming it), the answer is null at once rather than never.
+     */
+    private fun pickFolder(activity: FragmentActivity, result: MethodChannel.Result) {
+        var launcher: ActivityResultLauncher<Uri?>? = null
+        var observer: LifecycleEventObserver? = null
+        var answered = false
+        fun answer(value: Map<String, Any>?) {
+            if (answered) {
+                return
+            }
+            answered = true
+            observer?.let { activity.lifecycle.removeObserver(it) }
+            launcher?.unregister()
+            result.success(value)
+        }
+        val registered = activity.activityResultRegistry.register(
+            "zen_backup_folder_${folderPickSerial++}",
+            object : ActivityResultContracts.OpenDocumentTree() {
+                override fun createIntent(context: Context, input: Uri?): Intent =
+                    super.createIntent(context, input).addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                    )
+            },
+        ) { uri ->
+            if (uri == null) {
+                answer(null)
+                return@register
+            }
+            try {
+                activity.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (error: SecurityException) {
+                Log.w(TAG, "The chosen folder's access is not kept", error)
+            }
+            answer(
+                mapOf(
+                    "tree" to uri.toString(),
+                    "label" to (displayName(activity, treeDocument(uri)) ?: ""),
+                ),
+            )
+        }
+        launcher = registered
+        val watcher = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                answer(null)
+            }
+        }
+        observer = watcher
+        activity.lifecycle.addObserver(watcher)
+        registered.launch(null)
+    }
+
+    /** Deletes a backup copy at the content address [uri]; true when it went. */
+    private fun deleteDocument(context: Context, uri: String): Map<String, Any> {
+        val target = Uri.parse(uri)
+        if (target.scheme != "content") {
+            return mapOf("deleted" to false)
+        }
+        val resolver = context.contentResolver
+        val deleted = try {
+            if (DocumentsContract.isDocumentUri(context, target)) {
+                // A folder the person picked.
+                DocumentsContract.deleteDocument(resolver, target)
+            } else {
+                // Downloads, through the media store.
+                resolver.delete(target, null, null) > 0
+            }
+        } catch (_: java.io.FileNotFoundException) {
+            // Deleted by the person already.
+            false
+        }
+        return mapOf("deleted" to deleted)
+    }
+
+    private fun treeDocument(tree: Uri): Uri =
+        DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+
+    private fun displayName(context: Context, uri: Uri): String? =
+        try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { if (it.moveToFirst()) it.getString(0) else null }
+        } catch (_: Exception) {
+            null
+        }
+
+    /** The part [index] (from 0) of a backup whose first part ended up as [first]. */
+    private fun partName(first: String, index: Int) =
+        if (index == 0) first else "$first.${index + 1}"
+
+    private fun copyInto(context: Context, source: String, target: Uri) {
+        context.contentResolver.openOutputStream(target, "w")?.use { out ->
+            File(source).inputStream().use { it.copyTo(out) }
+        } ?: throw IOException("Cannot write $target")
+    }
+
+    /**
+     * Copies the backup [paths] into Downloads through the media store; null
+     * before Android 10 (Dart keeps the app's own folder then). A part that
+     * fails takes the earlier ones with it.
+     */
+    private fun exportToDownloads(
+        context: Context,
+        paths: List<String>,
+        name: String,
+    ): Map<String, Any>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || paths.isEmpty()) {
+            return null
+        }
+        return exportToDownloadsQ(context, paths, name)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun exportToDownloadsQ(
+        context: Context,
+        paths: List<String>,
+        name: String,
+    ): Map<String, Any> {
+        val resolver = context.contentResolver
+        val made = ArrayList<Uri>()
+        val names = ArrayList<String>()
+        try {
+            paths.forEachIndexed { index, source ->
+                val values = ContentValues().apply {
+                    put(
+                        MediaStore.Downloads.DISPLAY_NAME,
+                        partName(names.firstOrNull() ?: name, index),
+                    )
+                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IOException("Cannot create the file in Downloads")
+                made.add(uri)
+                copyInto(context, source, uri)
+                resolver.update(
+                    uri,
+                    ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                    null,
+                    null,
+                )
+                names.add(displayName(context, uri) ?: partName(name, index))
+            }
+        } catch (error: Exception) {
+            made.forEach { runCatching { resolver.delete(it, null, null) } }
+            throw error
+        }
+        return mapOf("names" to names, "uris" to made.map { it.toString() })
+    }
+
+    /** Copies the backup [paths] into the folder behind [tree]. */
+    private fun exportToFolder(
+        context: Context,
+        tree: String,
+        paths: List<String>,
+        name: String,
+    ): Map<String, Any> {
+        val parent = treeDocument(Uri.parse(tree))
+        val made = ArrayList<Uri>()
+        val names = ArrayList<String>()
+        try {
+            paths.forEachIndexed { index, source ->
+                val uri = DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parent,
+                    "application/octet-stream",
+                    partName(names.firstOrNull() ?: name, index),
+                ) ?: throw IOException("Cannot create the file in the folder")
+                made.add(uri)
+                copyInto(context, source, uri)
+                names.add(displayName(context, uri) ?: partName(name, index))
+            }
+        } catch (error: Exception) {
+            made.forEach {
+                runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) }
+            }
+            throw error
+        }
+        return mapOf("names" to names, "uris" to made.map { it.toString() })
     }
 
     private fun alias(activity: FragmentActivity, name: String) =

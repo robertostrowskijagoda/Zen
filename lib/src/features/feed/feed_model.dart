@@ -13,6 +13,7 @@ import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 /// Longest post text accepted (longer ones from others are cut).
 const int kMaxPostChars = 5000;
@@ -34,19 +35,20 @@ Map<String, dynamic> deletePostBody(String postId) => <String, dynamic>{
 
 /// Body of an edit of [postId] (validated like a new post). With [images]
 /// the post's photos and videos are replaced too (`img`, even when empty);
-/// without, they stay as they were. Who sees the post and how far it goes
-/// stay as the post said.
+/// without, they stay as they were.
 Map<String, dynamic> editPostBody(
   String postId,
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>>? images,
+  List<Mention> mentions = const <Mention>[],
 }) => <String, dynamic>{
   ...newPostBody(
     text,
     audience: audience,
     images: images ?? const <Map<String, dynamic>>[],
-  )..remove(kPostReachKey),
+    mentions: mentions,
+  ),
   'img': ?images,
   'post': postId,
 };
@@ -285,16 +287,18 @@ FeedComment? feedCommentFrom(
   if (said.trim().isEmpty && images.isEmpty) {
     return null;
   }
+  final String kept = said.length > kMaxCommentChars
+      ? said.substring(0, kMaxCommentChars)
+      : said;
   return FeedComment(
     id: e.id,
     authorLabel: authorLabel,
-    text: said.length > kMaxCommentChars
-        ? said.substring(0, kMaxCommentChars)
-        : said,
+    text: kept,
     millis: e.hlc.millis,
     authorAddress: authorAddress,
     account: account,
     images: images,
+    mentions: mentionsFromJson(e.body[kMentionsKey]),
   );
 }
 
@@ -310,12 +314,16 @@ final class FeedComment {
     this.hiddenByAuthor = false,
     this.avatar,
     this.images = const <MediaRef>[],
+    this.mentions = const <Mention>[],
   });
 
   final String id;
   final String authorLabel;
   final String text;
   final int millis;
+
+  /// The people [text] mentions (its `<@N>` tokens point into this list).
+  final List<Mention> mentions;
 
   /// The author's device address when they are a friend ('' otherwise):
   /// a report of the comment names its author.
@@ -345,6 +353,7 @@ final class FeedComment {
     hiddenByAuthor: true,
     avatar: avatar,
     images: images,
+    mentions: mentions,
   );
 }
 
@@ -435,12 +444,15 @@ String? likeSummary(FeedPost post) {
 /// Body of a comment on [postId] (validated, trimmed). With [mini] the
 /// writer's mini-profile goes along, signed with the comment. [images]
 /// are references of stored pictures (`storeMedia`), at most
-/// [kMaxCommentImages]; a comment may be pictures alone.
+/// [kMaxCommentImages]; a comment may be pictures alone. The `<@N>`
+/// tokens of [text] name [mentions] (`mentions.dart`); only those the
+/// text names are kept.
 Map<String, dynamic> commentBody(
   String postId,
   String text, {
   MiniProfileTag? mini,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
+  List<Mention> mentions = const <Mention>[],
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -470,7 +482,25 @@ Map<String, dynamic> commentBody(
     'post': postId,
     'text': trimmed,
     if (images.isNotEmpty) 'img': images,
+    ..._mentionsOf(trimmed, mentions),
   }, mini);
+}
+
+/// The `men` of a body whose text is [text]: the mentions it really names
+/// (nothing when none).
+Map<String, dynamic> _mentionsOf(String text, List<Mention> mentions) {
+  if (mentions.isEmpty) {
+    return const <String, dynamic>{};
+  }
+  // Tokens keep their indices: the list goes as far as the last one used.
+  final List<Mention> used = usedMentions(text, mentions);
+  if (used.isEmpty) {
+    return const <String, dynamic>{};
+  }
+  final int last = mentions.lastIndexWhere(used.contains);
+  return <String, dynamic>{
+    kMentionsKey: mentionsToJson(mentions.sublist(0, last + 1)),
+  };
 }
 
 @immutable
@@ -492,9 +522,9 @@ final class FeedPost {
     this.audience = Audience.public,
     this.images = const <MediaRef>[],
     this.likes = const <FeedLiker>[],
-    this.reach = PostReach.friends,
     this.degree = 1,
     this.via = const <String>[],
+    this.mentions = const <Mention>[],
     int? likeTotal,
     int? commentTotal,
     int? sortMillis,
@@ -546,12 +576,9 @@ final class FeedPost {
   /// Who may read it (only public posts can be reshared).
   final Audience audience;
 
-  /// How far its author let it go (`post_reach.dart`).
-  final PostReach reach;
-
   /// Steps of friendship between this account and the author as the post
   /// reached it: 1 for friends, followed people and reshares, 2 or 3 for a
-  /// post passed on by notices.
+  /// post passed on by notices (`post_reach.dart`).
   final int degree;
 
   /// The friends whose notices brought the post ("przez …"), by name; empty
@@ -560,6 +587,9 @@ final class FeedPost {
 
   /// Shown with "edytowano": the text is a later version.
   final bool edited;
+
+  /// The people [text] mentions (its `<@N>` tokens point into this list).
+  final List<Mention> mentions;
 
   /// The signed post itself (what a reshare carries).
   final LogEntry? entry;
@@ -592,9 +622,9 @@ final class FeedPost {
     images: images,
     sortMillis: sortMillis,
     likes: likes,
-    reach: reach,
     degree: degree,
     via: via,
+    mentions: mentions,
     likeTotal: likeTotal,
     commentTotal: commentTotal,
   );
@@ -636,13 +666,14 @@ Set<String> likedPosts(Iterable<LogEntry> acts) {
 /// then sealed with [LedgerNode.seal] before it is written.
 ///
 /// [images] are references from [storeMedia]; a post with photos may have
-/// no text. [reach] says how far a public post goes; any other audience is
-/// sealed for friends and goes no further.
+/// no text. A public post may be passed on up to three steps from its
+/// author (`post_reach.dart`); any other audience is sealed for friends
+/// and goes no further.
 Map<String, dynamic> newPostBody(
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
-  PostReach reach = kDefaultPostReach,
+  List<Mention> mentions = const <Mention>[],
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -672,7 +703,7 @@ Map<String, dynamic> newPostBody(
     'text': trimmed,
     'aud': audience.name,
     if (images.isNotEmpty) 'img': images,
-    if (audience == Audience.public) kPostReachKey: reach.hops,
+    ..._mentionsOf(trimmed, mentions),
   };
 }
 
@@ -711,7 +742,7 @@ FeedPost? _postFrom(
     entry: entry,
     audience: audienceByName(b['aud']) ?? Audience.public,
     images: images,
-    reach: reachOfBody(b),
+    mentions: mentionsFromJson(b[kMentionsKey]),
   );
 }
 
@@ -790,18 +821,46 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
     audience: post.audience,
     images: images,
     edited: true,
-    reach: post.reach,
     degree: post.degree,
     via: post.via,
     authorAddress: post.authorAddress,
     sortMillis: post.sortMillis,
+    mentions: mentionsFromJson(edit[kMentionsKey]),
   );
 }
 
-/// Posts friends' notices brought from two or three steps away whose
-/// content [held] has and whose author let them go that far, unless
-/// already [shown] or [deleted]; labelled with the friends who passed them
-/// on.
+/// The posts of direct friends only, with edits applied and removed ones
+/// left out: no own posts, no followed accounts, no reshares and nothing
+/// passed on from further away. [nameOf] as in [buildFeed]. Unordered.
+/// What the notifications about new posts look at (`post_notifier.dart`).
+List<FeedPost> friendPosts(
+  LedgerNode node, {
+  required String Function(String address) nameOf,
+}) {
+  final Set<String> deleted = <String>{};
+  final Set<String> accounts = <String>{};
+  final List<FeedPost> posts = <FeedPost>[];
+  node.friendAccounts.forEach((String address, String account) {
+    if (account == node.account || !accounts.add(account)) {
+      return;
+    }
+    posts.addAll(
+      _postsOf(
+        node.entriesOf(ofAccount: account),
+        isOwn: false,
+        authorLabel: nameOf(address),
+        deleted: deleted,
+        bodyOf: node.bodyOf,
+      ),
+    );
+  });
+  return posts;
+}
+
+/// Public posts friends' notices brought from two or three steps away
+/// whose content [held] has, unless already [shown] or [deleted]; labelled
+/// with the friends who passed them on. How far the reader looks is
+/// applied when the wall is shown (`composeFeed`).
 List<FeedPost> _announced(
   LedgerNode node, {
   required HeldPosts held,
@@ -828,7 +887,7 @@ List<FeedPost> _announced(
         h.author != a.author ||
         shown.contains(a.post) ||
         deleted.contains(a.post) ||
-        h.reach.hops < a.hops) {
+        !isPublicPost(entry.body)) {
       continue;
     }
     final LedgerProfile? profile = h.authorProfile;
@@ -852,7 +911,7 @@ List<FeedPost> _announced(
           entry: entry,
           authorAddress: profile?.address ?? a.authorAddress,
           images: post.images,
-          reach: post.reach,
+          mentions: post.mentions,
           degree: a.hops,
           via: <String>[
             for (final String friend in a.via)
@@ -973,7 +1032,7 @@ List<FeedPost> buildFeed(
             entry: b.$1,
             authorAddress: profile?.address ?? '',
             images: post.images,
-            reach: post.reach,
+            mentions: post.mentions,
             sortMillis: b.$3,
           ),
         );
@@ -1112,6 +1171,7 @@ List<FeedPost> buildFeed(
             account: c.account,
             avatar: c.avatar,
             images: c.images,
+            mentions: c.mentions,
           ),
         );
       }

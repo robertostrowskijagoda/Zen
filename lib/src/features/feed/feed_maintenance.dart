@@ -4,26 +4,47 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/feed/post_mentions.dart';
+import 'package:zen/src/features/feed/post_notifier.dart';
 import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/shell/shell_location.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// What the wall does in the background: system notifications about
-/// reactions to your posts, posts passed on beyond friends and the storage
-/// limits.
+/// What the wall does in the background: notifications about reactions to
+/// your posts, about friends' new posts and about mentions, posts passed on
+/// beyond friends and the storage limits.
 final class FeedMaintenance {
-  FeedMaintenance({required this.node, required this.notifier, this.reach});
+  FeedMaintenance({
+    required this.node,
+    required this.notifier,
+    this.posts,
+    this.reach,
+    this.mentions,
+  });
 
   final LedgerNode node;
   final ReactionSystemNotifier notifier;
 
+  /// Announces friends' new posts.
+  final FriendPostNotifier? posts;
+
   /// Passes posts on beyond friends and fetches those passed on to us.
   final PostReachService? reach;
+
+  /// Tells people of their mentions in this account's posts and comments,
+  /// and this person of theirs.
+  final PostMentionService? mentions;
 
   Timer? _first;
 
@@ -37,6 +58,8 @@ final class FeedMaintenance {
   /// shortly after the start (the ledger is read from disk by then).
   void start() {
     notifier.start();
+    posts?.start();
+    mentions?.start();
     unawaitedLogged(
       reach?.start() ?? Future<void>.value(),
       context: 'Posty dalszych znajomych',
@@ -51,6 +74,7 @@ final class FeedMaintenance {
   /// [kStorageRetentionInterval].
   void minute(int minute) {
     reach?.minute(minute);
+    posts?.minute();
     if (minute % kStorageRetentionInterval.inMinutes == 0) {
       unawaited(enforceLimits());
     }
@@ -86,38 +110,103 @@ final class FeedMaintenance {
     _disposed = true;
     _first?.cancel();
     notifier.dispose();
+    posts?.dispose();
+    mentions?.dispose();
   }
 }
 
 /// The wall's background duties, or `null` while the ledger is off.
-final Provider<FeedMaintenance?> feedMaintenanceProvider =
-    Provider<FeedMaintenance?>((Ref ref) {
-      final LedgerNode? node = ref.watch(ledgerNodeProvider);
-      if (node == null) {
-        return null;
-      }
-      final FeedMaintenance maintenance = FeedMaintenance(
-        node: node,
-        reach: ref.watch(postReachProvider),
-        notifier: ReactionSystemNotifier(
-          node: node,
-          nameOf: (String address) {
-            final SocialHubState social = ref.read(socialHubControllerProvider);
-            final FriendProfile? friend = social.friendByAddress(address);
-            return friend == null ? address : social.nameFor(friend);
-          },
-          notify: (RuntimeSystemNotification notification) async {
-            await ref
-                .read(runtimeSystemNotificationServiceProvider)
-                .show(notification);
-          },
-          shouldNotify: () =>
-              !ref.read(socialHubControllerProvider).lifecycle.isFocused,
+final Provider<FeedMaintenance?>
+feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
+  final LedgerNode? node = ref.watch(ledgerNodeProvider);
+  if (node == null) {
+    return null;
+  }
+  String nameOf(String address) {
+    final SocialHubState social = ref.read(socialHubControllerProvider);
+    final FriendProfile? friend = social.friendByAddress(address);
+    return friend == null ? address : social.nameFor(friend);
+  }
+
+  Future<void> notify(RuntimeSystemNotification notification) async {
+    await ref.read(runtimeSystemNotificationServiceProvider).show(notification);
+  }
+
+  bool focused() => ref.read(socialHubControllerProvider).lifecycle.isFocused;
+
+  // While this device shares its screen in a call, never more than who
+  // wrote (as for messages).
+  NotificationPrivacy shared(NotificationPrivacy level) =>
+      screenShareHidesNotifications.value
+      ? level.atLeast(NotificationPrivacy.senderOnly)
+      : level;
+
+  NotificationPrivacy friendPrivacy(String address) => shared(
+    ref
+        .read(socialHubControllerProvider)
+        .notificationPrivacyFor(
+          address,
+          global: ref.read(appSettingsControllerProvider).notificationPrivacy,
         ),
-      );
-      ref.onDispose(maintenance.dispose);
-      return maintenance;
-    });
+  );
+  final PostReachService? reach = ref.watch(postReachProvider);
+
+  final FeedMaintenance maintenance = FeedMaintenance(
+    node: node,
+    reach: reach,
+    mentions: PostMentionService(
+      node: node,
+      nameOf: nameOf,
+      notify: notify,
+      addToInbox: (InboxEntry entry) =>
+          ref.read(socialHubControllerProvider.notifier).putInboxEntry(entry),
+      shouldNotify: () => !focused(),
+      privacyOf: friendPrivacy,
+      privacy: () =>
+          shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
+      // On a friend list shared with this phone: a friend of a friend.
+      friendOfFriend: (String address) {
+        final String a = PeerShareCodec.normalizeAddress(address);
+        for (final Map<String, String> list
+            in ref.read(meetServiceProvider).book.friendLists.values) {
+          final String? name = list[a];
+          if (name != null) {
+            return name;
+          }
+        }
+        return null;
+      },
+      held: reach,
+    ),
+    notifier: ReactionSystemNotifier(
+      node: node,
+      nameOf: nameOf,
+      notify: notify,
+      shouldNotify: () => !focused(),
+    ),
+    posts: FriendPostNotifier(
+      node: node,
+      nameOf: nameOf,
+      notify: notify,
+      dismissSlot: (String slot) =>
+          ref.read(runtimeSystemNotificationServiceProvider).dismissSlot(slot),
+      addToInbox: (InboxEntry entry) =>
+          ref.read(socialHubControllerProvider.notifier).putInboxEntry(entry),
+      shouldNotify: () => !focused(),
+      lookingAtFeed: () {
+        final ShellLocation at = ref.read(shellLocationProvider).current;
+        return focused() && at.tab == 'feed' && at.place == null;
+      },
+      announces: (String address) =>
+          ref.read(appSettingsControllerProvider).announcesPostsOf(address),
+      privacyOf: friendPrivacy,
+      privacy: () =>
+          shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
+    ),
+  );
+  ref.onDispose(maintenance.dispose);
+  return maintenance;
+});
 
 /// How full the limits are, and what they deleted since the app started.
 final class StorageReport {

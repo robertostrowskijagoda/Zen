@@ -65,11 +65,17 @@ Contact: see section 13.
   days and can be cleared at any time.
 - **Settings, the lock password hash parameters, the panic password** and
   similar.
-- **Diagnostic log:** a rolling text file (`zen-diagnostics.log`, trimmed to
-  about 128 KB) with technical messages. Folder paths are shortened in it.
-  You can read it in Settings. It is **never sent anywhere automatically**. If
-  you copy or send it to someone (for example when reporting a bug), that is
-  your choice - check it first.
+- **Diagnostic log:** rolling text files (`zen-diagnostics-ui.log` and, on
+  Android, `zen-diagnostics-svc.log` for the background service; each kept
+  to at most about 1 MB) with technical messages, and technical numbers:
+  when the background work woke the phone and for how long, how the app was
+  ended, how much memory the network node used, how many peers it had and
+  how much data passed. Those numbers are counts and sizes only, never a
+  message, a name, an address or a file name. Folder paths are shortened in
+  the messages. You can read the log, and save it as a file, in Settings. It
+  is **never sent anywhere automatically**. If you copy or send it to
+  someone (for example when reporting a bug), that is your choice - check it
+  first.
 
 Almost everything above is stored encrypted (AES-256-GCM, with a master key
 protected by a key derived from your password with Argon2id and, where
@@ -98,7 +104,7 @@ Everything below is sent device to device over the Yggdrasil network.
 | You do this | Who receives what |
 |---|---|
 | Send a friend request | The other person: your Zen address, display name and the note you wrote. |
-| Be a friend | Friends can see your profile (name, status, bio, avatar), when you are online / in the foreground (presence pings every ~45 s while the app runs), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
+| Be a friend | Friends can see your profile (name, status, bio, avatar), whether Zen is open on your screen, in the background or offline, and when you last opened it (carried by the presence pings, every 2.5 min while Zen is on the screen, and their answers; not shown to a weak acquaintance; the time can be turned off in Settings), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
 | Like, comment or write to someone who is not your friend | The author of the post and the friends who passed it on get your signed like or comment together with a small signed copy of your profile (name and photo). A first message to a non-friend (only if their settings allow it) carries the same. |
 | Chat | The recipient: message text, attachments, timestamps, typing indicator, delivery and read receipts, disappearing-message timers. |
 | Groups | Every member (up to 256) gets each message. Members learn the group's member list. |
@@ -217,10 +223,13 @@ another Zen user.
   when you download Zen or open that page, under GitHub's own policy. An invite
   code in a link is placed after `#` and is therefore not sent to the server by
   your browser. Zen itself (except the store build) asks GitHub's API for the
-  latest release about 20 seconds after start and every 12 hours, and
-  downloads the release file (and its `SHA256SUMS`) when you press
-  "Update"; GitHub then sees your IP address and the user agent "Zen" and
-  which release file you fetched, nothing else (no account, token or device
+  latest release about 20 seconds after start and then at most once an hour
+  (on Android also every few hours while the app is closed and receives in
+  the background), fetches the short note about a newer version and its
+  signature (`whats-new.json`, `SHA256SUMS.sig`), and downloads the release
+  file (and its `SHA256SUMS`) when you press "Update"; GitHub then sees
+  your IP address and the user agent "Zen" and which release file you
+  fetched, nothing else (no account, token or device
   id). If GitHub cannot be reached, the app says so. Zen checks the downloaded
   file against the release's checksums (and, on Android, against its own
   signing certificate) before it installs it.

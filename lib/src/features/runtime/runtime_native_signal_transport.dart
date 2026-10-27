@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
@@ -870,11 +871,35 @@ final class RuntimeNodeRuntime extends ChangeNotifier
 
   RuntimeTransportSnapshot get snapshot => _snapshot;
 
+  /// Another process runs this identity's node (the Android background
+  /// service): [start] does nothing until [releaseFromService]. Two nodes
+  /// on one key split what friends send between them, and the one in a
+  /// locked app drops its share.
+  bool _heldByService = false;
+
+  /// Whether [start] waits for the service to let go of the node.
+  bool get heldByService => _heldByService;
+
+  /// From now on [start] does nothing (a node already up stays up: the
+  /// caller stops it). Before anything may start the node: the background
+  /// bridge does this before it knows the service let go.
+  void holdForService() {
+    _heldByService = true;
+  }
+
+  /// The service confirmed it runs no node: [start] works again.
+  void releaseFromService() {
+    _heldByService = false;
+  }
+
   @override
   Stream<SignalTransportFrame> get frames => _frames.stream;
 
   @override
   Future<void> start() {
+    if (_heldByService) {
+      return Future<void>.value();
+    }
     if (_previewMode) {
       if (_snapshot.serviceRunning) {
         return Future<void>.value();
@@ -1316,7 +1341,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   await pins.restore();
   pins.start();
   final RuntimeTransportSnapshot initialSnapshot = _snapshotFromNodeInfo(
-    startResult,
+    _sampled(startResult),
   );
   final SignalPayloadCompressor doorCompressor = ZstdSignalPayloadCompressor();
   return RuntimeNodeSession(
@@ -1335,11 +1360,14 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
       onStop: () async {
         await pins.stop();
         bridge.stopNode(handle);
+        ZenTechLog.nodeStopped(handle);
       },
     ),
     snapshot: initialSnapshot,
+    // The technical log samples the node from these reads (no wake of its
+    // own).
     refreshSnapshot: () async =>
-        _snapshotFromNodeInfo(bridge.getNodeInfo(handle)),
+        _snapshotFromNodeInfo(_sampled(bridge.getNodeInfo(handle))),
     addPeer: (String uri) => bridge.addPeer(handle, uri),
     removePeer: (String uri) => bridge.removePeer(handle, uri),
     startDoor: (String seedHex) =>
@@ -1596,6 +1624,11 @@ String _readNodeAddress(Map<String, dynamic> payload) {
     return trimmed;
   }
   return PeerShareCodec.normalizeAddress(trimmed);
+}
+
+Map<String, dynamic> _sampled(Map<String, dynamic> info) {
+  ZenTechLog.node(info);
+  return info;
 }
 
 RuntimeTransportSnapshot _snapshotFromNodeInfo(Map<String, dynamic> payload) {

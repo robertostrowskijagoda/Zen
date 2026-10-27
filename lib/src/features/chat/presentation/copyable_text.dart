@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 
 /// One entry of a message's long-press menu.
 @immutable
@@ -60,13 +62,17 @@ Future<void> showChatContextMenu(
 
 /// Text that can be copied from a long-press / right-click menu. Used for
 /// chat bubbles and comments. With [onReport] the menu also has "Zgłoś"
-/// — for what others wrote; [actions] come first (react, reply, …).
+/// — for what others wrote; [actions] come first (react, reply, …). The
+/// tokens of [mentions] in [text] show as tappable names ([MentionText]);
+/// a copy has "@name" in their place.
 class CopyableText extends StatelessWidget {
   const CopyableText(
     this.text, {
     required this.style,
     this.onReport,
     this.actions = const <ChatMenuItem>[],
+    this.mentions = const <Mention>[],
+    this.mentionColor,
     super.key,
   });
 
@@ -74,6 +80,10 @@ class CopyableText extends StatelessWidget {
   final TextStyle style;
   final VoidCallback? onReport;
   final List<ChatMenuItem> actions;
+  final List<Mention> mentions;
+
+  /// The colour of the mentions (the accent when `null`).
+  final Color? mentionColor;
 
   Future<void> _menu(BuildContext context, Offset at) =>
       showChatContextMenu(context, at, <ChatMenuItem>[
@@ -84,7 +94,8 @@ class CopyableText extends StatelessWidget {
           label: t('Kopiuj'),
           // Like every other copy from the app: cleared from the clipboard
           // after a minute, unless something else was copied.
-          onSelected: () => unawaited(copyWithExpiry(text)),
+          onSelected: () =>
+              unawaited(copyWithExpiry(mentionsAsPlainText(text, mentions))),
         ),
         if (onReport != null)
           ChatMenuItem(
@@ -101,6 +112,13 @@ class CopyableText extends StatelessWidget {
         unawaited(_menu(context, d.globalPosition)),
     onSecondaryTapDown: (TapDownDetails d) =>
         unawaited(_menu(context, d.globalPosition)),
-    child: Text(text, style: style),
+    child: mentions.isEmpty
+        ? Text(text, style: style)
+        : MentionText(
+            text,
+            mentions: mentions,
+            style: style,
+            mentionColor: mentionColor,
+          ),
   );
 }

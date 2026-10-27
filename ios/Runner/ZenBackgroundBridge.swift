@@ -2,6 +2,7 @@ import AVFoundation
 import BackgroundTasks
 import Flutter
 import UIKit
+import UserNotifications
 
 /// Time to run while Zen is off the screen (`zen/background`).
 ///
@@ -15,14 +16,27 @@ import UIKit
 ///    away, in Low Power Mode or with "Background App Refresh" off; and a
 ///    longer one while the phone charges (`BGProcessingTask`). Dart asks the
 ///    mailboxes for what they hold then (ios_background.dart);
-///  - opt-in ("Odbieraj w tle cały czas"): a silent sound keeps the app
-///    running (the `audio` background mode) for as long as it plays.
+///  - opt-in ("Cichy dźwięk — odbiór na bieżąco"): a silent sound keeps the app
+///    running (the `audio` background mode) for as long as it plays;
+///  - "Sprawdź wiadomości Zen", a Shortcuts action (ZenCheckIntent.swift),
+///    which a Shortcuts automation can run every hour.
 ///
-/// Dart calls `configure` {ready, keepAlive} → status and `status` →
-/// status. `ready`: the core runs and the app is unlocked; nothing runs in
-/// the background otherwise (a locked app cannot store what comes in).
-/// This side calls `catchUp` {seconds} → Bool (false: Zen could not check).
-/// Everything runs on the main thread.
+/// Dart calls `configure` {ready, keepAlive} → status, `status` → status,
+/// `nodeFree` (answers once no engine without a screen runs a node),
+/// `openSettings` (Zen's page in Settings) and `openShortcuts`. `ready`:
+/// Zen can receive in the background now — the unlocked app runs, or, while
+/// Zen is locked, its locked receiver (ios_background.dart); nothing runs
+/// in the background otherwise. This side calls `catchUp` {seconds} → Bool
+/// (false: Zen could not check).
+///
+/// When iOS starts Zen from scratch for a task or a Shortcuts run there is
+/// no scene and so no Flutter engine: the check then runs in an engine of
+/// its own without a screen (`zenIosBackgroundMain` in
+/// ios_locked_receiver.dart, the locked receiver with only the background
+/// key). It is told to stop as soon as Zen comes to the screen, and let go
+/// only once it answered `done`, which it sends after its node stopped: the
+/// app's node waits for that (`nodeFree`), one node per identity. Everything
+/// runs on the main thread.
 final class ZenBackgroundBridge {
   static let shared = ZenBackgroundBridge()
 
@@ -44,6 +58,12 @@ final class ZenBackgroundBridge {
   private static let lastRunAtKey = "zen.background.lastRunAt"
   private static let lastRunResultKey = "zen.background.lastRunResult"
   private static let runsKey = "zen.background.runs"
+  private static let lastShortcutAtKey = "zen.background.lastShortcutAt"
+  private static let shortcutRunsKey = "zen.background.shortcutRuns"
+
+  /// The Dart entry point of a check without a screen, and its library.
+  private static let headlessEntrypoint = "zenIosBackgroundMain"
+  private static let headlessLibrary = "package:zen/src/features/runtime/ios_locked_receiver.dart"
 
   static func register(with messenger: FlutterBinaryMessenger) {
     shared.attach(messenger)
@@ -56,6 +76,16 @@ final class ZenBackgroundBridge {
   private var finishing: UIBackgroundTaskIdentifier = .invalid
   private let keepAlive = SilentKeepAlive()
   private var observers: [NSObjectProtocol] = []
+
+  /// The engine without a screen while it runs a check, and who waits for
+  /// its answer.
+  private var headless: FlutterEngine?
+  private var headlessChannel: FlutterMethodChannel?
+  private var headlessWaiting: [(Bool) -> Void] = []
+
+  /// The app's engine waiting to start its node (`nodeFree`) until the
+  /// engine without a screen stopped its own.
+  private var nodeFreeWaiting: [FlutterResult] = []
 
   private init() {}
 
@@ -96,6 +126,9 @@ final class ZenBackgroundBridge {
   }
 
   private func attach(_ messenger: FlutterBinaryMessenger) {
+    // The app's own engine is up: one without a screen lets go of the node
+    // (the app's node waits for that through `nodeFree`).
+    stopHeadless()
     let channel = FlutterMethodChannel(name: "zen/background", binaryMessenger: messenger)
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self = self else {
@@ -114,13 +147,47 @@ final class ZenBackgroundBridge {
       ready = arguments?["ready"] as? Bool ?? false
       keepAliveWanted = arguments?["keepAlive"] as? Bool ?? false
       if !ready {
-        // Locked (or the core stopped): let iOS freeze the app now.
+        // Nothing can receive now (no app, no locked receiver): let iOS
+        // freeze the app now.
         endFinishing()
       }
       updateKeepAlive()
       result(status())
+    case "nodeFree":
+      // One node per identity: the app's node starts once the engine
+      // without a screen stopped its node and was let go.
+      guard headless != nil else {
+        result(true)
+        return
+      }
+      nodeFreeWaiting.append(result)
+      stopHeadless()
     case "status":
-      result(status())
+      // Whether notifications are allowed comes asynchronously.
+      UNUserNotificationCenter.current().getNotificationSettings { settings in
+        let notifications: String
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+          notifications = "allowed"
+        case .denied:
+          notifications = "denied"
+        case .notDetermined:
+          notifications = "notDetermined"
+        @unknown default:
+          notifications = "unknown"
+        }
+        DispatchQueue.main.async {
+          var status = self.status()
+          status["notifications"] = notifications
+          result(status)
+        }
+      }
+    case "openSettings":
+      openLink(UIApplication.openSettingsURLString)
+      result(nil)
+    case "openShortcuts":
+      openLink("shortcuts://")
+      result(nil)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -139,6 +206,9 @@ final class ZenBackgroundBridge {
   }
 
   private func enteredForeground() {
+    // A check without a screen lets go before the app's engine wants the
+    // node.
+    stopHeadless()
     guard inBackground else {
       return
     }
@@ -197,13 +267,6 @@ final class ZenBackgroundBridge {
 
   private func run(_ task: BGTask, seconds: Int) {
     schedule()
-    // iOS may launch Zen from scratch for a task: then no scene, no Flutter
-    // and no Dart run, and there is nothing to do.
-    guard ready, let channel = channel else {
-      remember("notReady")
-      task.setTaskCompleted(success: false)
-      return
-    }
     var done = false
     let finish: (String, Bool) -> Void = { [weak self] outcome, success in
       guard !done else {
@@ -213,12 +276,142 @@ final class ZenBackgroundBridge {
       self?.remember(outcome)
       task.setTaskCompleted(success: success)
     }
-    task.expirationHandler = {
-      DispatchQueue.main.async { finish("expired", false) }
+    task.expirationHandler = { [weak self] in
+      DispatchQueue.main.async {
+        self?.stopHeadless()
+        finish("expired", false)
+      }
     }
-    channel.invokeMethod("catchUp", arguments: ["seconds": seconds]) { result in
-      let checked = (result as? Bool) ?? false
+    check(seconds: seconds) { checked in
       finish(checked ? "done" : "skipped", checked)
+    }
+  }
+
+  /// One background check: in the app's engine when there is one (Dart
+  /// checks unlocked, or with the locked receiver), otherwise in an engine
+  /// without a screen.
+  func check(seconds: Int, completion: @escaping (Bool) -> Void) {
+    if let channel = channel {
+      channel.invokeMethod("catchUp", arguments: ["seconds": seconds]) { result in
+        completion((result as? Bool) ?? false)
+      }
+      return
+    }
+    runHeadless(seconds: seconds, completion: completion)
+  }
+
+  /// "Sprawdź wiadomości Zen" from Shortcuts: a check with time of its own,
+  /// counted for the settings page.
+  func checkFromShortcut(seconds: Int, completion: @escaping (Bool) -> Void) {
+    let defaults = UserDefaults.standard
+    defaults.set(
+      Date().timeIntervalSince1970 * 1000, forKey: ZenBackgroundBridge.lastShortcutAtKey)
+    defaults.set(
+      defaults.integer(forKey: ZenBackgroundBridge.shortcutRunsKey) + 1,
+      forKey: ZenBackgroundBridge.shortcutRunsKey)
+    var extra: UIBackgroundTaskIdentifier = .invalid
+    var done = false
+    let finish: (Bool) -> Void = { checked in
+      guard !done else {
+        return
+      }
+      done = true
+      if extra != .invalid {
+        UIApplication.shared.endBackgroundTask(extra)
+        extra = .invalid
+      }
+      completion(checked)
+    }
+    extra = UIApplication.shared.beginBackgroundTask(withName: "zen.shortcut") { [weak self] in
+      self?.stopHeadless()
+      finish(false)
+    }
+    check(seconds: seconds, completion: finish)
+  }
+
+  // MARK: A check without a screen
+
+  private func runHeadless(seconds: Int, completion: @escaping (Bool) -> Void) {
+    headlessWaiting.append(completion)
+    guard headless == nil else {
+      // One check at a time; this one shares its answer.
+      return
+    }
+    let engine = FlutterEngine(name: "zen.background", project: nil, allowHeadlessExecution: true)
+    let channel = FlutterMethodChannel(
+      name: "zen/background/headless", binaryMessenger: engine.binaryMessenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "done" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let checked = (call.arguments as? [String: Any])?["checked"] as? Bool ?? false
+      result(nil)
+      self?.endHeadless(checked)
+    }
+    headless = engine
+    headlessChannel = channel
+    let started = engine.run(
+      withEntrypoint: ZenBackgroundBridge.headlessEntrypoint,
+      libraryURI: ZenBackgroundBridge.headlessLibrary,
+      initialRoute: nil,
+      entrypointArgs: [String(seconds)])
+    guard started else {
+      NSLog("Zen: the background engine did not start")
+      endHeadless(false)
+      return
+    }
+    // The plugins Dart needs there: the keychain, the files, notifications.
+    GeneratedPluginRegistrant.register(with: engine)
+    // Dart answers within its budget; this only covers an engine that does
+    // not: the check ends unchecked, and the engine is told to stop.
+    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds + 15)) {
+      [weak self, weak engine] in
+      guard let self = self, let engine = engine, self.headless === engine else {
+        return
+      }
+      NSLog("Zen: the background engine did not answer in time")
+      self.answerHeadlessWaiting(false)
+      self.stopHeadless()
+    }
+  }
+
+  /// Asks the engine without a screen to let go of the node now; it answers
+  /// `done` within moments, once its node stopped. It is not let go before:
+  /// its node would keep running without anything to stop it, holding the
+  /// identity the app's node needs.
+  private func stopHeadless() {
+    guard headless != nil else {
+      return
+    }
+    headlessChannel?.invokeMethod("stop", arguments: nil)
+  }
+
+  private func endHeadless(_ checked: Bool) {
+    headlessChannel?.setMethodCallHandler(nil)
+    headlessChannel = nil
+    headless?.destroyContext()
+    headless = nil
+    answerHeadlessWaiting(checked)
+    let nodeWaiting = nodeFreeWaiting
+    nodeFreeWaiting = []
+    nodeWaiting.forEach { $0(true) }
+  }
+
+  private func answerHeadlessWaiting(_ checked: Bool) {
+    let waiting = headlessWaiting
+    headlessWaiting = []
+    waiting.forEach { $0(checked) }
+  }
+
+  private func openLink(_ link: String) {
+    guard let url = URL(string: link) else {
+      return
+    }
+    UIApplication.shared.open(url, options: [:]) { opened in
+      if !opened {
+        NSLog("Zen: \(link) did not open")
+      }
     }
   }
 
@@ -249,6 +442,8 @@ final class ZenBackgroundBridge {
       "lastRunAt": Int(defaults.double(forKey: ZenBackgroundBridge.lastRunAtKey)),
       "lastRunResult": defaults.string(forKey: ZenBackgroundBridge.lastRunResultKey) ?? "",
       "runs": defaults.integer(forKey: ZenBackgroundBridge.runsKey),
+      "lastShortcutAt": Int(defaults.double(forKey: ZenBackgroundBridge.lastShortcutAtKey)),
+      "shortcutRuns": defaults.integer(forKey: ZenBackgroundBridge.shortcutRunsKey),
     ]
   }
 }

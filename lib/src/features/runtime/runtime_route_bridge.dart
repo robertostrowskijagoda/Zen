@@ -181,14 +181,21 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         }
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (BuildContext context) =>
-                GroupConversationScreen(groupId: groupId, groupName: title),
+            builder: (BuildContext context) => GroupConversationScreen(
+              groupId: groupId,
+              groupName: title,
+              // A mention's notification: at the message.
+              initialMessageId: intent.messageId,
+            ),
           ),
         );
         break;
       case RuntimeRouteTarget.feed:
-        // The pyramid's posts' notification: the Tablica on that filter.
-        openFeed(FeedFilter.parse(intent.rawInput));
+        // The pyramid's posts' notification: the Tablica on that filter;
+        // a new post's notification: the Tablica at that post. Whatever
+        // screen the app was left on would otherwise cover it.
+        Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+        openFeed(FeedFilter.parse(intent.rawInput), postId: intent.postId);
         break;
       case RuntimeRouteTarget.flatDoor:
         // A door sticker's link: the neighbours section, then the knock
@@ -212,6 +219,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.updates:
         // "Jest nowa wersja Zen": where "Aktualizuj" is.
         unawaited(UpdatesScreen.open(context));
+        break;
+      case RuntimeRouteTarget.mailboxes:
+        // "Skrzynka … nie odpowiada": the picker, to choose another.
+        unawaited(openRelayMailboxScreen(context));
         break;
     }
     _handledIntentId = handledId;

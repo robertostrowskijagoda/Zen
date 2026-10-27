@@ -3,14 +3,22 @@
 //
 //   dart run tool/release.dart check
 //       Do the app and .github/workflows/release.yml agree on the file
-//       names (and the version in pubspec.yaml and app_version.dart)?
+//       names (and the version in pubspec.yaml and app_version.dart)? Is
+//       the "### What's new" note under "## Unreleased" of CHANGELOG.md,
+//       when there is one, as the app takes it?
+//   dart run tool/release.dart whats-new [--version 1.12.0] [--out FILE]
+//       The "### What's new" note of that version in CHANGELOG.md (without
+//       --version: of "Unreleased", under the version of pubspec.yaml) as
+//       whats-new.json, the file the app shows with the update notice;
+//       release.yml makes it for every tag.
 //   dart run tool/release.dart pinned
 //       Does the app pin its release keys (kReleaseMaintainers,
 //       kOfficialApkCertificatesSha256)? CI runs it for every tag build.
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
 //       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
 //       [--allow-unpinned-native]
-//       Clean tree, the app pins its release keys (kReleaseMaintainers,
+//       Clean tree, a valid "### What's new" note under "## Unreleased",
+//       the app pins its release keys (kReleaseMaintainers,
 //       kOfficialApkCertificatesSha256; --allow-unpinned-keys only for a
 //       test release), the native builds pin what they download (Gradle's
 //       distributionSha256Sum, ios/ and macos/Podfile.lock,
@@ -38,7 +46,8 @@ Future<void> main(List<String> args) async {
   if (args.isEmpty) {
     stderr.writeln(
       'Usage: dart run tool/release.dart check | pinned | prepare <x.y.z> | '
-      'verify <folder> --version <x.y.z>',
+      'verify <folder> --version <x.y.z> | '
+      'whats-new [--version <x.y.z>] [--out <file>]',
     );
     exitCode = 64;
     return;
@@ -53,6 +62,8 @@ Future<void> main(List<String> args) async {
         exitCode = await _prepare(args.skip(1).toList()) ? 0 : 1;
       case 'verify':
         exitCode = await _verify(args.skip(1).toList()) ? 0 : 1;
+      case 'whats-new':
+        exitCode = _whatsNew(args.skip(1).toList()) ? 0 : 1;
       default:
         stderr.writeln('Unknown command: ${args.first}');
         exitCode = 64;
@@ -78,6 +89,7 @@ List<String> _positional(List<String> args) {
         '--build',
         '--version',
         '--github-json',
+        '--out',
       }.contains(args[i])) {
         i++;
       }
@@ -127,6 +139,7 @@ List<String> _check() {
     'lib/src/features/update/github_release.dart',
     'lib/src/features/update/release.dart',
     'lib/src/features/update/sha256_sums.dart',
+    'lib/src/features/update/whats_new.dart',
   ].map((String p) => File(p).readAsStringSync()).join('\n');
   for (final String name in <String>[
     'Zen-arm64-v8a.apk',
@@ -137,6 +150,7 @@ List<String> _check() {
     'Zen-macOS.zip',
     kSignedSumsAsset,
     kSumsAsset,
+    kWhatsNewAsset,
   ]) {
     if (!app.contains(name)) {
       out.add(
@@ -164,7 +178,46 @@ List<String> _check() {
       !appVersion.contains('kAppBuild = $build;')) {
     out.add('app_version.dart is not $version+$build as pubspec.yaml');
   }
+  // A note already written for the next release is as the app takes it
+  // (prepare requires one).
+  out.addAll(
+    whatsNewSection(
+      File('CHANGELOG.md').readAsStringSync(),
+      required: false,
+    ).problems,
+  );
   return out;
+}
+
+/// `whats-new`: the note of `--version` (else of "Unreleased") as
+/// whats-new.json, into `--out` or on stdout.
+bool _whatsNew(List<String> args) {
+  final String? version = _option(args, 'version');
+  if (version != null && !kVersionPattern.hasMatch(version)) {
+    throw const FormatException('Give --version x.y.z');
+  }
+  final (
+    :Map<String, List<String>> lines,
+    :List<String> problems,
+  ) = whatsNewSection(
+    File('CHANGELOG.md').readAsStringSync(),
+    version: version,
+  );
+  // Only problems are reported: the file itself may go to stdout.
+  if (problems.isNotEmpty && !_report("What's new", problems)) {
+    return false;
+  }
+  final String json = whatsNewJson(
+    version ?? pubspecVersion(File('pubspec.yaml').readAsStringSync()).$1,
+    lines,
+  );
+  final String? out = _option(args, 'out');
+  if (out == null) {
+    stdout.write(json);
+  } else {
+    File(out).writeAsStringSync(json);
+  }
+  return true;
 }
 
 Future<ProcessResult> _run(
@@ -231,6 +284,24 @@ Future<bool> _prepare(List<String> args) async {
   if ((tags.stdout as String).trim().isNotEmpty) {
     stderr.writeln('The tag $tag already exists.');
     return false;
+  }
+
+  // 1b. The short note the app shows with the update notice; release.yml
+  // makes whats-new.json of it, which the signature covers.
+  final ({Map<String, List<String>> lines, List<String> problems}) note =
+      whatsNewSection(File('CHANGELOG.md').readAsStringSync());
+  if (!_report("What's new", note.problems)) {
+    stderr.writeln(
+      'Write 1 to 3 short lines under "$kWhatsNewHeading" in "## Unreleased" '
+      'of CHANGELOG.md: "- [en] …", and "- [pl] …" (docs/RELEASES.md, '
+      "section 3.5).",
+    );
+    return false;
+  }
+  for (final MapEntry<String, List<String>> e in note.lines.entries) {
+    for (final String line in e.value) {
+      stdout.writeln("What's new [${e.key}]: $line");
+    }
   }
 
   // 2. The app pins the keys its updates are checked with; without them

@@ -19,6 +19,7 @@ SocialHubState _applySignal(
     signal: signal,
     receivedAtMillis: receivedAtMillis,
     friends: current.friends,
+    groups: current.groups,
   );
 
   switch (signal.type) {
@@ -298,7 +299,10 @@ SocialHubState _applySignal(
         groups[groupId] = existing.copyWith(
           lastMessagePreview: _clipText(
             chatPreviewLine(
-              signal.content ?? t('Nowa wiadomość grupowa'),
+              mentionsAsPlainText(
+                signal.content ?? t('Nowa wiadomość grupowa'),
+                signalMentions(signal),
+              ),
               type: signal.messageType,
               fileName: signal.fileName,
               mimeType: signal.mimeType,
@@ -314,6 +318,14 @@ SocialHubState _applySignal(
                   signal.sender: senderName,
                 },
         );
+        // Like a 1:1 message: the in-app list tells of it unless the group
+        // is open (an invitation not answered yet tells nothing).
+        if (!isGroupOpen && !existing.isInvitePending) {
+          return current.copyWith(
+            groups: groups,
+            inbox: _prependInbox(current.inbox, inboxEntry),
+          );
+        }
       }
       return current.copyWith(groups: groups);
     case ZenSignalType.groupLeave:
@@ -634,16 +646,23 @@ int _estimateInboxEntryBytes(InboxEntry entry) {
 /// otherwise its text.
 String? _signalPreviewText(ZenSignal signal) => signalNoticePreview(signal);
 
+/// The in-app list's entry about [signal]. Group messages name their
+/// sender as [_groupSenderLabel] does and their group by the name this
+/// device keeps for it ([groups]).
 InboxEntry _buildInboxEntry({
   required ZenSignal signal,
   required int receivedAtMillis,
   Map<String, FriendProfile>? friends,
+  Map<String, GroupProfile>? groups,
 }) {
-  final String label = _resolvedPeerLabel(
-    address: signal.sender,
-    displayName: signal.displayName,
-    knownName: friends?[signal.sender]?.displayLabel,
-  );
+  final String label = signal.type == ZenSignalType.groupMessage
+      ? _groupSenderLabel(signal, friends)
+      : _resolvedPeerLabel(
+          address: signal.sender,
+          displayName: signal.displayName,
+          knownName: friends?[signal.sender]?.displayLabel,
+        );
+  final String groupName = _groupNameOf(signal, groups);
   return switch (signal.type) {
     ZenSignalType.friendRequest => InboxEntry.fromEvents(
       id: 'friend-request-$receivedAtMillis-${signal.sender}',
@@ -842,11 +861,31 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
+    // A mention of this person: its own entry, at the message.
+    ZenSignalType.groupMessage when signalMentionsYou(signal) =>
+      InboxEntry.fromEvents(
+        id: 'group-mention-$receivedAtMillis-${signal.sender}',
+        type: InboxEntryType.mention,
+        title: SocialEventText('inbox.mention', <String, String>{
+          'name': label,
+        }),
+        body: SocialEventText('inbox.groupMention.body', <String, String>{
+          'group': groupName,
+        }),
+        bodyText: _signalPreviewText(signal),
+        createdAtMillis: receivedAtMillis,
+        routeKey: buildGroupRouteKey(
+          groupId: signal.groupId ?? 'grp-${signal.sender}',
+          title: groupName,
+          messageId: signal.messageId,
+        ),
+        peerAddress: signal.sender,
+      ),
     ZenSignalType.groupMessage => InboxEntry.fromEvents(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
       title: SocialEventText('inbox.groupMessage', <String, String>{
-        'group': signal.groupName ?? '',
+        'group': groupName,
         'name': label,
       }),
       body: const SocialEventText('inbox.groupMessage.body'),
@@ -854,7 +893,7 @@ InboxEntry _buildInboxEntry({
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
-        title: signal.groupName,
+        title: groupName,
       ),
       peerAddress: signal.sender,
     ),
@@ -862,13 +901,13 @@ InboxEntry _buildInboxEntry({
       id: 'group-call-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
       title: SocialEventText('inbox.groupCall', <String, String>{
-        'group': signal.groupName ?? '',
+        'group': groupName,
       }),
       body: const SocialEventText('inbox.groupCall.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
-        title: signal.groupName,
+        title: groupName,
       ),
       peerAddress: signal.sender,
     ),
@@ -1019,11 +1058,17 @@ RuntimeNotification? _foregroundNotificationForSignal({
   required ZenSignal signal,
   required int receivedAtMillis,
   Map<String, FriendProfile>? friends,
+  required Map<String, GroupProfile>? groups,
   required NotificationPrivacy privacy,
 }) {
   if (!_isUserFacingSignal(signal.type)) {
     // Receipts, typing, presence and membership bookkeeping would only
     // surface as a meaningless "Nowe zdarzenie" banner.
+    return null;
+  }
+  if (signal.type == ZenSignalType.groupMessage &&
+      _noticeGroupOf(signal, groups) == null) {
+    // Not from a member of a joined group: no banner as that group.
     return null;
   }
   if (signal.type == ZenSignalType.friendAccept ||
@@ -1041,12 +1086,18 @@ RuntimeNotification? _foregroundNotificationForSignal({
     signal: signal,
     receivedAtMillis: receivedAtMillis,
     friends: friends,
+    groups: groups,
   );
   // A chat message's banner tells no more than its notification would
   // (at "Nadawca i treść" it stays as the inbox entry has it).
   final NoticeText? chat = privacy == NotificationPrivacy.senderAndContent
       ? null
-      : _chatNoticeText(signal: signal, friends: friends, privacy: privacy);
+      : _chatNoticeText(
+          signal: signal,
+          friends: friends,
+          groups: groups,
+          privacy: privacy,
+        );
   return RuntimeNotification(
     id: entry.id,
     title: chat?.title ?? entry.title,
@@ -1059,25 +1110,48 @@ RuntimeNotification? _foregroundNotificationForSignal({
 
 /// What the notification about the chat message [signal] says at
 /// [privacy]; `null` for anything that is not a chat message.
+///
+/// A group message names its sender as [_groupSenderLabel] does, in the
+/// group as this device keeps it ([groups]); one from anyone who is not a
+/// member of a joined group says only that something came.
 NoticeText? _chatNoticeText({
   required ZenSignal signal,
   required NotificationPrivacy privacy,
   Map<String, FriendProfile>? friends,
+  required Map<String, GroupProfile>? groups,
 }) {
   if (signal.type != ZenSignalType.message &&
       signal.type != ZenSignalType.groupMessage) {
     return null;
   }
+  if (signal.type == ZenSignalType.message) {
+    return messageNoticeText(
+      level: privacy,
+      sender: _resolvedPeerLabel(
+        address: signal.sender,
+        displayName: signal.displayName,
+        knownName: friends?[signal.sender]?.displayLabel,
+      ),
+      preview: _signalPreviewText(signal),
+    );
+  }
+  final GroupProfile? group = _noticeGroupOf(signal, groups);
+  if (group == null) {
+    return messageNoticeText(level: NotificationPrivacy.generic, sender: '');
+  }
+  final String sender = _groupSenderLabel(signal, friends);
+  if (signalMentionsYou(signal)) {
+    return mentionNoticeText(
+      level: privacy,
+      sender: sender,
+      group: group.name,
+      preview: _signalPreviewText(signal),
+    );
+  }
   return messageNoticeText(
     level: privacy,
-    sender: _resolvedPeerLabel(
-      address: signal.sender,
-      displayName: signal.displayName,
-      knownName: friends?[signal.sender]?.displayLabel,
-    ),
-    group: signal.type == ZenSignalType.groupMessage
-        ? (signal.groupName ?? '')
-        : null,
+    sender: sender,
+    group: group.name,
     preview: _signalPreviewText(signal),
   );
 }
@@ -1086,6 +1160,7 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   required InboxEntry entry,
   required ZenSignal signal,
   Map<String, FriendProfile>? friends,
+  required Map<String, GroupProfile>? groups,
   required NotificationPrivacy privacy,
 }) {
   final String senderLabel = _resolvedPeerLabel(
@@ -1098,6 +1173,7 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   final NoticeText? chat = _chatNoticeText(
     signal: signal,
     friends: friends,
+    groups: groups,
     privacy: privacy,
   );
 
@@ -1112,9 +1188,8 @@ RuntimeSystemNotification _systemNotificationFromEntry({
       final String kind = _callKindLabel(signal.content);
       body = t('Przychodzące połączenie {kind}...', {'kind': kind});
     case ZenSignalType.groupCallInvite:
-      title = (signal.groupName != null && signal.groupName!.trim().isNotEmpty)
-          ? signal.groupName!.trim()
-          : t('Połączenie grupowe');
+      final String groupName = _groupNameOf(signal, groups).trim();
+      title = groupName.isNotEmpty ? groupName : t('Połączenie grupowe');
       body = t('Trwa połączenie grupowe.');
     default:
       title = entry.title;
@@ -1262,6 +1337,9 @@ String? _notificationDedupKeyForSignal(ZenSignal signal) {
     ZenSignalType.groupLeave ||
     ZenSignalType.groupInviteAck => 'group:${signal.groupId ?? sender}',
     ZenSignalType.message => 'message:$sender',
+    // A mention stands apart from the group's other messages.
+    ZenSignalType.groupMessage when signalMentionsYou(signal) =>
+      'group-mention:${signal.groupId ?? sender}',
     ZenSignalType.groupMessage => 'group-message:${signal.groupId ?? sender}',
     ZenSignalType.callInvite ||
     ZenSignalType.callOffer ||
@@ -1340,25 +1418,68 @@ String? _backgroundAlertDedupKeyForEntry(InboxEntry entry) {
 }
 
 String _labelFor(ZenSignal signal, {Map<String, FriendProfile>? friends}) {
-  String? knownName = friends?[signal.sender]?.displayLabel;
-  if (knownName == null && friends != null) {
-    final String normalized = PeerShareCodec.normalizeAddress(signal.sender);
-    knownName = friends[normalized]?.displayLabel;
-    if (knownName == null) {
-      for (final MapEntry<String, FriendProfile> entry in friends.entries) {
-        if (PeerShareCodec.addressesEqual(entry.key, signal.sender)) {
-          knownName = entry.value.displayLabel;
-          break;
-        }
-      }
-    }
-  }
   return _resolvedPeerLabel(
     address: signal.sender,
     displayName: signal.displayName,
-    knownName: knownName,
+    knownName: _friendIn(friends, signal.sender)?.displayLabel,
   );
 }
+
+/// The entry for [address] in [friends], whatever its status.
+FriendProfile? _friendIn(Map<String, FriendProfile>? friends, String address) {
+  if (friends == null) {
+    return null;
+  }
+  final FriendProfile? direct =
+      friends[address] ?? friends[PeerShareCodec.normalizeAddress(address)];
+  if (direct != null) {
+    return direct;
+  }
+  for (final MapEntry<String, FriendProfile> entry in friends.entries) {
+    if (PeerShareCodec.addressesEqual(entry.key, address)) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+/// The joined group in [groups] that the group message [signal] may be told
+/// about as: only one its sender is a member of. Anyone may claim to write
+/// in a group, so a message from anyone else is never told about as that
+/// group.
+GroupProfile? _noticeGroupOf(
+  ZenSignal signal,
+  Map<String, GroupProfile>? groups,
+) {
+  final GroupProfile? group = groups?[signal.groupId ?? ''];
+  if (group == null || group.isInvitePending) {
+    return null;
+  }
+  return groupHasMember(group, signal.sender) ||
+          PeerShareCodec.addressesEqual(group.createdById, signal.sender)
+      ? group
+      : null;
+}
+
+/// Who wrote a group message, as its notices and inbox entries name them:
+/// a friend by the name this person gave them, any other member as
+/// "Kontakt Zen". The name a member gives itself (in the message, and so in
+/// the group's member names) is never shown as if it were known.
+String _groupSenderLabel(
+  ZenSignal signal,
+  Map<String, FriendProfile>? friends,
+) {
+  final FriendProfile? friend = _friendIn(friends, signal.sender);
+  return friend != null && friend.status == FriendRelationshipStatus.accepted
+      ? friend.displayLabel
+      : t('Kontakt Zen');
+}
+
+/// The name of the group [signal] belongs to: the one this device keeps
+/// for it, not one the sender put in the message (that is used only for a
+/// group this device does not have).
+String _groupNameOf(ZenSignal signal, Map<String, GroupProfile>? groups) =>
+    groups?[signal.groupId ?? '']?.name ?? signal.groupName ?? '';
 
 String _resolvedPeerLabel({
   required String address,
@@ -1442,26 +1563,6 @@ String _activityLabelForMillis(int sentAtMillis) {
     return t('Wczoraj');
   }
   return ZenFormat.dayMonth(sentAt);
-}
-
-String _presenceLastSeenLabel({
-  required int nowMillis,
-  required int lastSeenAtMillis,
-}) {
-  final int deltaMillis = nowMillis <= lastSeenAtMillis
-      ? 0
-      : nowMillis - lastSeenAtMillis;
-  final Duration delta = Duration(milliseconds: deltaMillis);
-  if (delta < const Duration(minutes: 1)) {
-    return t('Przed chwila');
-  }
-  if (delta < const Duration(hours: 1)) {
-    return t('{count} min temu', {'count': delta.inMinutes});
-  }
-  if (delta < const Duration(days: 1)) {
-    return t('{count} h temu', {'count': delta.inHours});
-  }
-  return t('{count} d temu', {'count': delta.inDays});
 }
 
 List<InboxEntry> _removeEntriesForPeer(

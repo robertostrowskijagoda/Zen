@@ -794,7 +794,11 @@ void main() {
 
     test('not allowed: the settings open and the person is told', () async {
       answer(false);
-      expect(await requestInstallPermission(), contains('Zezwól Zen'));
+      final String? said = await requestInstallPermission();
+      expect(said, contains('Zezwól Zen'));
+      // It names the button the updates screen has: "Aktualizuj".
+      expect(said, contains('„Aktualizuj”'));
+      expect(said, isNot(contains('Zainstaluj')));
       expect(calls, <String>['canInstall', 'openInstallSettings']);
     });
 

@@ -16,6 +16,7 @@ import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
+import 'package:zen/src/features/update/newer_versions.dart';
 import 'package:zen/src/features/update/presentation/friends_version_banner.dart';
 
 const String _ada = '200:1111:2222:3333:4444:5555:6666:7777';

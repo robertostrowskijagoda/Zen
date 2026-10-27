@@ -6,8 +6,9 @@
 # Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
 # Zen-Linux-x64.flatpak,
 # Zen-macOS.zip (universal), Zen-unsigned.ipa (the iOS workflow),
-# LICENSES-GO.txt, LICENSE, NOTICE, THIRD_PARTY_NOTICES.md, SHA256SUMS of
-# all of them and
+# LICENSES-GO.txt, LICENSE, NOTICE, THIRD_PARTY_NOTICES.md, whats-new.json
+# (the short note from CHANGELOG.md the app shows with the update notice),
+# SHA256SUMS of all of them and
 # SHA256SUMS.sig (SHA256SUMS signed with the release signing key), and
 # attaches them to a draft release of that tag. Every build job uploads its
 # files as an artifact; the checksums job gathers them and writes SHA256SUMS,
@@ -710,6 +711,27 @@ jobs:
           name: Zen-unsigned-ipa
           path: dist
 
+      # The short note the app shows with the update notice: the "### What's
+      # new" part of this version in CHANGELOG.md (tool/release.dart
+      # prepare requires it). Made before SHA256SUMS, so SHA256SUMS.sig
+      # signs it with every other file.
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: What's new
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          flutter pub get --enforce-lockfile
+          dart run tool/release.dart whats-new --version "${TAG#v}" \
+            --out dist/whats-new.json
+          cat dist/whats-new.json
+
       - name: Licenses and SHA256SUMS
         run: |
           export LC_ALL=C
@@ -878,8 +900,14 @@ jobs:
               exit 1
             fi
           else
+            notes="Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS), their signature (SHA256SUMS.sig) and the signing certificate fingerprint before installing."
+            # The note the app shows (whats-new.json), in English, on top.
+            if [ -s dist/whats-new.json ]; then
+              news=$(jq -r '.lines.en[] | "- " + .' dist/whats-new.json)
+              notes=$(printf "What's new:\n%s\n\n%s" "$news" "$notes")
+            fi
             gh release create "$TAG" --draft --title "$TAG" \
-              --notes "Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS), their signature (SHA256SUMS.sig) and the signing certificate fingerprint before installing." \
+              --notes "$notes" \
               --repo "$GITHUB_REPOSITORY"
           fi
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"

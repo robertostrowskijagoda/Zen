@@ -3,8 +3,9 @@ part of 'app_shell_screen.dart';
 /// Thin top bar with the live connection status in terminal style (mono,
 /// pulsing dot). Tapping it opens the settings screen — there is no
 /// separate settings tab anymore. With the rail ([onToggleRail]) its first
-/// button shows or hides the rail; "Mój kod" and, once there is a password,
-/// "Zablokuj teraz" sit next to the account menu.
+/// button shows or hides the rail; the bell, "Mój kod" and, once there is a
+/// password, "Zablokuj teraz" sit next to the account menu. Every button has
+/// a 44 px hit box, the icons stay 20 px.
 class _StatusBar extends ConsumerWidget {
   const _StatusBar({this.railHidden = false, this.onToggleRail});
 
@@ -17,6 +18,10 @@ class _StatusBar extends ConsumerWidget {
     final AppShellState state = ref.watch(appShellControllerProvider);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
     final VoidCallback? toggleRail = onToggleRail;
+    final double width = MediaQuery.sizeOf(context).width;
+    final bool offline =
+        state.health == ServiceHealth.failed ||
+        state.health == ServiceHealth.stopped;
     final int unreadCount = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState s) => s.acceptedFriends.fold<int>(
@@ -25,41 +30,68 @@ class _StatusBar extends ConsumerWidget {
         ),
       ),
     );
+    final Widget status = state.isConnecting
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  t('Łączę'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              ZenAnimatedDots(color: zen.textPrimary, size: 3),
+            ],
+          )
+        : Text(
+            state.connectionLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: zen.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          );
     return Material(
       color: zen.surfaceSunk,
       // For a screen reader the bar is the settings button (its own buttons
-      // — the rail, help, lock, accounts — are read on their own).
+      // — the rail, help, bell, code, lock, accounts — are read on their
+      // own).
       child: Semantics(
         button: true,
+        label: t('Ustawienia'),
         child: InkWell(
           key: const Key('chats-status-chip'),
+          excludeFromSemantics: true,
           onTap: () => _openSettingsScreen(context),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Padding(
                 padding: EdgeInsetsDirectional.fromSTEB(
-                  toggleRail == null ? 16 : 6,
-                  6,
-                  10,
-                  6,
+                  toggleRail == null ? 16 : 4,
+                  2,
+                  4,
+                  2,
                 ),
                 child: Row(
                   children: <Widget>[
                     if (toggleRail != null) ...<Widget>[
-                      IconButton(
+                      _barButton(
                         key: Key(
                           railHidden ? 'side-tabs-show' : 'side-tabs-hide',
                         ),
                         tooltip: railHidden
                             ? t('Pokaż pasek')
                             : t('Ukryj pasek'),
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
-                        ),
-                        padding: EdgeInsets.zero,
                         onPressed: toggleRail,
                         // Points away from the rail's edge to show it, towards
                         // it to hide it; mirrored here, not by the icon font.
@@ -78,45 +110,37 @@ class _StatusBar extends ConsumerWidget {
                       ),
                       const SizedBox(width: 4),
                     ],
-                    ZenStatusDot(on: state.isConnected, size: 7),
+                    // Offline (stopped or failed): a red dot; connecting
+                    // keeps the ring. Why it does not work: "Dlaczego nie działa?" in Ustawienia
+                    // (the bar opens the settings).
+                    offline
+                        ? SizedBox.square(
+                            key: const Key('status-offline-dot'),
+                            dimension: 13,
+                            child: Center(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: zen.danger,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const SizedBox.square(dimension: 7),
+                              ),
+                            ),
+                          )
+                        : ZenStatusDot(on: state.isConnected, size: 7),
                     const SizedBox(width: 8),
-                    // Takes the free room: a long label in another language
-                    // wraps instead of pushing the buttons off the bar.
+                    // Takes the free room; one line, cut with an ellipsis
+                    // when it is not enough.
                     Expanded(
                       child: Align(
                         alignment: AlignmentDirectional.centerStart,
-                        child: state.isConnecting
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Flexible(
-                                    child: Text(
-                                      t('Łączę'),
-                                      style: TextStyle(
-                                        color: zen.textPrimary,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  ZenAnimatedDots(
-                                    color: zen.textPrimary,
-                                    size: 3,
-                                  ),
-                                ],
-                              )
-                            : Text(
-                                state.connectionLabel,
-                                style: TextStyle(
-                                  color: zen.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                        child: status,
                       ),
                     ),
-                    if (unreadCount > 0) ...<Widget>[
+                    // Left out on a narrow phone: the bell next to it counts
+                    // the unread chats as well and the status label needs
+                    // the room.
+                    if (unreadCount > 0 && width >= 480) ...<Widget>[
                       ZenNeonFlicker(
                         color: zen.textPrimary,
                         glowRadius: 0,
@@ -139,36 +163,12 @@ class _StatusBar extends ConsumerWidget {
                       ),
                       const SizedBox(width: 8),
                     ],
-                    if (!state.isConnected) ...<Widget>[
-                      // Not connected: "Dlaczego nie działa?".
-                      IconButton(
-                        key: const Key('status-health'),
-                        tooltip: t('Dlaczego nie działa?'),
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
-                        ),
-                        padding: EdgeInsets.zero,
-                        onPressed: () => unawaited(HealthScreen.open(context)),
-                        icon: Icon(
-                          Icons.help_outline_rounded,
-                          size: 20,
-                          color: zen.warning,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                    ],
+                    // Messages, invitations and reactions, newest first.
+                    const _NoticesBell(),
                     // Your own code (QR and invite code), one tap away.
-                    IconButton(
+                    _barButton(
                       key: const Key('status-my-code'),
                       tooltip: t('Mój kod'),
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 36,
-                      ),
-                      padding: EdgeInsets.zero,
                       onPressed: () => _openInviteTab(context, ref),
                       icon: Icon(
                         Icons.qr_code_2_rounded,
@@ -182,44 +182,20 @@ class _StatusBar extends ConsumerWidget {
                       listenable: security,
                       builder: (BuildContext context, Widget? _) =>
                           security.canQuickLock
-                          ? Padding(
-                              padding: const EdgeInsetsDirectional.only(end: 4),
-                              child: IconButton(
-                                key: const Key('side-tabs-lock'),
-                                tooltip: t('Zablokuj teraz'),
-                                visualDensity: VisualDensity.compact,
-                                constraints: const BoxConstraints(
-                                  minWidth: 36,
-                                  minHeight: 36,
-                                ),
-                                padding: EdgeInsets.zero,
-                                onPressed: () => _lockNow(ref, security),
-                                icon: Icon(
-                                  Icons.lock_outline_rounded,
-                                  size: 20,
-                                  color: zen.textSecondary,
-                                ),
+                          ? _barButton(
+                              key: const Key('side-tabs-lock'),
+                              tooltip: t('Zablokuj teraz'),
+                              onPressed: () => _lockNow(ref, security),
+                              icon: Icon(
+                                Icons.lock_outline_rounded,
+                                size: 20,
+                                color: zen.textSecondary,
                               ),
                             )
                           : const SizedBox.shrink(),
                     ),
                     // Your avatar: the account menu (switch, add).
                     const AccountMenuButton(),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.all(7),
-                      decoration: BoxDecoration(
-                        color: zen.surfaceRaised,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: zen.outlineSoft),
-                      ),
-                      child: Icon(
-                        Icons.tune_rounded,
-                        size: 18,
-                        color: zen.textSecondary,
-                        semanticLabel: t('Ustawienia'),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -230,6 +206,24 @@ class _StatusBar extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// An icon button of the top bar: a 44 px hit box around the 20 px icon.
+Widget _barButton({
+  required Key key,
+  required String tooltip,
+  required VoidCallback onPressed,
+  required Widget icon,
+}) {
+  return IconButton(
+    key: key,
+    tooltip: tooltip,
+    visualDensity: VisualDensity.standard,
+    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+    padding: EdgeInsets.zero,
+    onPressed: onPressed,
+    icon: icon,
+  );
 }
 
 /// "Zablokuj teraz": locks the app; an additional account goes back to the
@@ -311,11 +305,6 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final AppShellState shellState = ref.watch(appShellControllerProvider);
-    final List<InboxEntry> backgroundAlerts = ref.watch(
-      socialHubControllerProvider.select(
-        (SocialHubState state) => state.backgroundAlerts,
-      ),
-    );
     final List<InboxEntry> inbox = ref.watch(
       socialHubControllerProvider.select((SocialHubState state) => state.inbox),
     );
@@ -384,25 +373,13 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
               (_selectedFilter != _ChatFilter.unread || g.unreadCount > 0),
         )
         .toList(growable: false);
-    final Set<String> backgroundAlertIds = backgroundAlerts
-        .map((InboxEntry entry) => entry.id)
-        .toSet();
-    final Set<String> backgroundAlertKeys = backgroundAlerts
-        .map((InboxEntry entry) => '${entry.type.name}:${entry.peerAddress}')
-        .toSet();
+    // Only what waits for an answer: invitations keep their card (with
+    // Dołącz / Odrzuć). Everything else is in the notification list (bell).
     final List<InboxEntry> actionableInbox = inbox
         .where(
           (InboxEntry item) =>
-              item.type != InboxEntryType.message &&
-              item.type != InboxEntryType.callInvite &&
-              // Invitations keep their card (with Dołącz / Odrzuć) even when
-              // they also arrived as a background alert.
-              (item.type == InboxEntryType.groupInvite ||
-                  item.type == InboxEntryType.friendRequest ||
-                  (!backgroundAlertIds.contains(item.id) &&
-                      !backgroundAlertKeys.contains(
-                        '${item.type.name}:${item.peerAddress}',
-                      ))),
+              item.type == InboxEntryType.groupInvite ||
+              item.type == InboxEntryType.friendRequest,
         )
         .toList(growable: false);
     return Scaffold(
@@ -512,17 +489,16 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       ),
                     ),
                   ),
-                if (backgroundAlerts.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                    child: _BackgroundAlertsBanner(alerts: backgroundAlerts),
-                  ),
                 // A sideloaded iPhone build: its signature runs out soon.
                 const SigningExpiryBanner(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
                 // iPhone: receives only while Zen is open (one-time card).
                 const IPhoneDeliveryNotice(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // A mailbox stopped answering and needs replacing.
+                const _RelayQuietCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
                 // Enough friends for the recovery circle and none yet.
@@ -892,7 +868,7 @@ class _SettingsScreen extends ConsumerWidget {
                         caption: t(
                           'Na ekranie blokady, w zasłonce i w historii '
                           'powiadomień systemu. Rozmowa może mieć własny '
-                          'poziom (menu rozmowy → Powiadomienia).',
+                          'poziom (menu rozmowy → Treść powiadomień).',
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -962,6 +938,23 @@ class _SettingsScreen extends ConsumerWidget {
                     subtitle: settings.groupInviteFrom.label,
                     pageTitle: t('Zaproszenia do grup'),
                     pageChildren: const <Widget>[GroupInviteFromTile()],
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-show-last-opened'),
+                    icon: Icons.history_toggle_off_rounded,
+                    tone: ZenTone.privacy,
+                    title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
+                    subtitle: t(
+                      'Znajomi widzą, czy masz Zen otwarty, w tle czy '
+                      'offline, a przy tym, kiedy ostatnio go otwierałeś. '
+                      'Słabi znajomi nie widzą żadnego z tych statusów.',
+                    ),
+                    value: settings.showLastOpened,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setShowLastOpened(value),
+                    ),
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-stranger-messages'),
@@ -1048,6 +1041,38 @@ class _SettingsScreen extends ConsumerWidget {
                           .read(appSettingsControllerProvider.notifier)
                           .setInAppSounds(value),
                     ),
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-post-notifications'),
+                    icon: Icons.article_outlined,
+                    tone: ZenTone.communication,
+                    title: t('Powiadomienia o nowych postach znajomych'),
+                    subtitle: t(
+                      'Posty znajomych znajomych nie powiadamiają. Jedną '
+                      'osobę wyciszysz w menu jej posta albo rozmowy.',
+                    ),
+                    value: settings.postNotifications,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setPostNotifications(value),
+                    ),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-muted-post-authors'),
+                    icon: Icons.notifications_off_outlined,
+                    tone: ZenTone.communication,
+                    title: t('Wyciszone osoby'),
+                    subtitle: settings.mutedPostAuthors.isEmpty
+                        ? t('Nikogo nie wyciszono')
+                        : tn(
+                            settings.mutedPostAuthors.length,
+                            one: 'Bez powiadomień o postach: {n} osoba',
+                            few: 'Bez powiadomień o postach: {n} osoby',
+                            many: 'Bez powiadomień o postach: {n} osób',
+                          ),
+                    pageTitle: t('Wyciszone osoby'),
+                    pageChildren: const <Widget>[_MutedPostAuthorsSection()],
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-storage-limits'),
@@ -1534,11 +1559,7 @@ class _RelayNavTile extends ConsumerWidget {
           subtitle: overview.relays.isEmpty
               ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać')
               : '$mailboxes · $mode',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) => const _RelayMailboxScreen(),
-            ),
-          ),
+          onTap: () => unawaited(openRelayMailboxScreen(context)),
         );
       },
     );
@@ -2504,126 +2525,6 @@ class _TechInfoSection extends StatelessWidget {
   }
 }
 
-class _BackgroundAlertsBanner extends ConsumerStatefulWidget {
-  const _BackgroundAlertsBanner({required this.alerts});
-
-  final List<InboxEntry> alerts;
-
-  @override
-  ConsumerState<_BackgroundAlertsBanner> createState() =>
-      _BackgroundAlertsBannerState();
-}
-
-class _BackgroundAlertsBannerState
-    extends ConsumerState<_BackgroundAlertsBanner> {
-  bool _collapsed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    final List<InboxEntry> alerts = widget.alerts;
-    final InboxEntry latest = alerts.first;
-    final RuntimeRouteIntent? launchIntent = runtimeRouteIntentFromRouteKey(
-      id: latest.id,
-      routeKey: latest.routeKey,
-    );
-    return _Panel(
-      key: const Key('background-alert-banner'),
-      accentTone: zen.warning,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              ZenIconBadge(
-                icon: Icons.notifications_active_outlined,
-                tone: zen.warning,
-                size: 36,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  t('Powiadomienia ({count})', {'count': alerts.length}),
-                  style: TextStyle(
-                    color: zen.textPrimary,
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              IconButton(
-                key: const Key('background-alert-collapse-button'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  setState(() {
-                    _collapsed = !_collapsed;
-                  });
-                },
-                icon: Icon(
-                  _collapsed
-                      ? Icons.expand_more_rounded
-                      : Icons.expand_less_rounded,
-                ),
-                tooltip: _collapsed ? t('Rozwiń') : t('Zwiń'),
-              ),
-              IconButton(
-                key: const Key('background-alert-clear-button'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  ref
-                      .read(socialHubControllerProvider.notifier)
-                      .clearBackgroundAlerts();
-                },
-                icon: const Icon(Icons.close_rounded),
-                tooltip: t('Wyczyść powiadomienia'),
-              ),
-            ],
-          ),
-          if (!_collapsed) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(
-              latest.displayTitle,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 14.5,
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              latest.displayBody,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: zen.textSecondary,
-                fontSize: 13.5,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              key: const Key('background-alert-open-button'),
-              onPressed: () {
-                ref
-                    .read(socialHubControllerProvider.notifier)
-                    .requestLaunchFromRouteKey(latest.routeKey);
-              },
-              icon: Icon(
-                launchIntent?.target == RuntimeRouteTarget.conversation
-                    ? Icons.chat_bubble_outline_rounded
-                    : Icons.notifications_none_rounded,
-                size: 18,
-              ),
-              label: Text(launchIntent?.actionLabel ?? t('Otwórz')),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _AddFriendCallout extends StatelessWidget {
   const _AddFriendCallout();
 
@@ -3389,10 +3290,13 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
 /// battery managers kill that service after the app is swiped away, and
 /// Android 12+ refuses to let it restart itself from the background. The
 /// result the user sees is a missed call and no notification.
-/// Entry point to the shared on-device log.
+/// Entry point to the shared on-device log (with the technical log's
+/// lines: wakes, modes, the node's numbers, how Android ended the app).
 ///
 /// The foreground service isolate runs with no UI and no debugger attached, so
-/// when background delivery breaks this is the only way to see where.
+/// when background delivery breaks this is the only way to see where. The
+/// screen shows the latest [_shownEntries] entries; the saved file holds
+/// them all.
 class _DiagnosticsScreen extends StatefulWidget {
   const _DiagnosticsScreen();
 
@@ -3400,8 +3304,12 @@ class _DiagnosticsScreen extends StatefulWidget {
   State<_DiagnosticsScreen> createState() => _DiagnosticsScreenState();
 }
 
+/// How many of the latest entries the screen shows.
+const int _shownEntries = 500;
+
 class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   String? _contents;
+  int _total = 0;
 
   @override
   void initState() {
@@ -3410,11 +3318,39 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _reload() async {
-    final String contents = await ZenDiagnosticsLog.read();
+    final List<String> entries = await ZenDiagnosticsLog.entries();
     if (!mounted) {
       return;
     }
-    setState(() => _contents = contents);
+    final List<String> shown = entries.length > _shownEntries
+        ? entries.sublist(entries.length - _shownEntries)
+        : entries;
+    setState(() {
+      _total = entries.length;
+      _contents = shown.join('\n');
+    });
+  }
+
+  Future<void> _save() async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      final String? path = await saveDiagnosticsLog();
+      if (path != null) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              t('Zapisano bez szyfrowania: {path}', {'path': path}),
+            ),
+          ),
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Saving the diagnostics log failed', error, stackTrace);
+      // What went wrong is in the log above, not in the snackbar.
+      messenger.showSnackBar(
+        SnackBar(content: Text(t('Nie udało się zapisać pliku.'))),
+      );
+    }
   }
 
   Future<void> _copy() async {
@@ -3428,6 +3364,36 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _clear() async {
+    final bool sure =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext dialog) => AlertDialog(
+            key: const Key('diagnostics-clear-dialog'),
+            scrollable: true,
+            title: Text(t('Wyczyścić dziennik?')),
+            content: Text(
+              t(
+                'Wpisy znikną bezpowrotnie. Wcześniej zapisany plik '
+                'zostanie.',
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialog).pop(false),
+                child: Text(t('Anuluj')),
+              ),
+              FilledButton(
+                key: const Key('diagnostics-clear-confirm'),
+                onPressed: () => Navigator.of(dialog).pop(true),
+                child: Text(t('Wyczyść')),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!sure) {
+      return;
+    }
     await ZenDiagnosticsLog.clear();
     await _reload();
   }
@@ -3437,8 +3403,8 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
     final ZenColors zen = ZenColors.of(context);
     final String? contents = _contents;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(t('Dziennik diagnostyczny')),
+      appBar: ZenSectionBar(
+        title: t('Diagnostyka'),
         actions: <Widget>[
           IconButton(
             key: const Key('diagnostics-reload'),
@@ -3453,12 +3419,6 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
             tooltip: t('Wyczyść'),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('diagnostics-copy'),
-        onPressed: contents == null || contents.isEmpty ? null : _copy,
-        icon: const Icon(Icons.copy_all_rounded),
-        label: Text(t('Kopiuj')),
       ),
       body: SafeArea(
         top: false,
@@ -3484,24 +3444,68 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
               )
             : Scrollbar(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: zen.surfaceSunk,
-                      borderRadius: context.zenRadius(18),
-                      border: Border.all(color: zen.outlineSoft),
-                    ),
-                    child: SelectableText(
-                      contents,
-                      style: zen.mono(
-                        color: zen.textSecondary,
-                        size: 11.5,
-                        height: 1.45,
-                        letterSpacing: 0,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      // Said before the button, not after the snackbar.
+                      ZenInfo(
+                        icon: Icons.warning_amber_rounded,
+                        tone: zen.warning,
+                        text: t(
+                          'Plik z dziennikiem zapisuje się bez szyfrowania. '
+                          'Przed wysłaniem go komuś sprawdź, co zawiera.',
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          FilledButton.icon(
+                            key: const Key('diagnostics-copy'),
+                            onPressed: _copy,
+                            icon: const Icon(Icons.copy_all_rounded, size: 18),
+                            label: Text(t('Kopiuj')),
+                          ),
+                          OutlinedButton.icon(
+                            key: const Key('diagnostics-save'),
+                            onPressed: _save,
+                            icon: const Icon(Icons.save_alt_rounded, size: 18),
+                            label: Text(t('Zapisz plik')),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (_total > _shownEntries)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            t(
+                              'Ostatnie {shown} z {total} wpisów. Cały dziennik jest w zapisanym pliku.',
+                              {'shown': _shownEntries, 'total': _total},
+                            ),
+                            style: TextStyle(color: zen.textSecondary),
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: zen.surfaceSunk,
+                          borderRadius: context.zenRadius(18),
+                          border: Border.all(color: zen.outlineSoft),
+                        ),
+                        child: SelectableText(
+                          contents,
+                          style: zen.mono(
+                            color: zen.textSecondary,
+                            size: 11.5,
+                            height: 1.45,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -3870,6 +3874,80 @@ Future<void> _openBlockedFriendsScreen(BuildContext context) {
       builder: (BuildContext context) => const _BlockedFriendsScreen(),
     ),
   );
+}
+
+/// The people whose new posts are not announced ("Wycisz posty tej
+/// osoby"), each with a way back.
+class _MutedPostAuthorsSection extends ConsumerWidget {
+  const _MutedPostAuthorsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final List<String> muted = ref
+        .watch(
+          appSettingsControllerProvider.select(
+            (AppSettings s) => s.mutedPostAuthors,
+          ),
+        )
+        .toList(growable: false);
+    final SocialHubState social = ref.watch(socialHubControllerProvider);
+    if (muted.isEmpty) {
+      return ZenEmpty(
+        key: const Key('muted-post-authors-empty'),
+        icon: Icons.notifications_none_rounded,
+        title: t('Nikogo nie wyciszono'),
+        text: t(
+          'Osobę, której posty mają nie powiadamiać, wyciszysz w menu jej '
+          'posta albo rozmowy.',
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ZenInfo(
+          icon: Icons.notifications_off_outlined,
+          tone: zen.textSecondary,
+          text: t('Ich posty nadal są na Tablicy, tylko bez powiadomień.'),
+        ),
+        const SizedBox(height: 6),
+        for (final String address in muted)
+          ZenCard(
+            key: Key('muted-post-author-$address'),
+            padding: const EdgeInsetsDirectional.fromSTEB(14, 8, 8, 8),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    switch (social.friendByAddress(address)) {
+                      final FriendProfile friend => social.nameFor(friend),
+                      _ => address,
+                    },
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: Key('muted-post-author-unmute-$address'),
+                  onPressed: () => unawaited(
+                    ref
+                        .read(appSettingsControllerProvider.notifier)
+                        .setPostAuthorMuted(address, muted: false),
+                  ),
+                  child: Text(t('Włącz')),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _BlockedFriendsScreen extends ConsumerWidget {

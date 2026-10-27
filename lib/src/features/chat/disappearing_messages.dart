@@ -34,6 +34,48 @@ int sanitizeDisappearSeconds(Object? raw) {
   return raw.clamp(60, kMaxDisappearSeconds);
 }
 
+/// How long a disappeared message is remembered after it expired: the
+/// longest a mailbox keeps a copy (two weeks, see `RelayEngine.messageTtl`)
+/// and a day for clocks that differ. A copy can only be on its way that long.
+const Duration kDisappearedMemory = Duration(days: 15);
+
+/// The most disappeared messages remembered (the oldest go first).
+const int kMaxDisappearedMessages = 2000;
+
+/// How a disappeared message is remembered: `<conversation key>|<id>`.
+String disappearedMessageKey(String key, String id) => '$key|$id';
+
+/// [remembered] (key → when the message expired) with message [id] of
+/// conversation [key] added, less what no copy can reach any more and the
+/// oldest past [kMaxDisappearedMessages].
+Map<String, int> rememberDisappeared(
+  Map<String, int> remembered, {
+  required String key,
+  required String id,
+  required int expiredAtMillis,
+  required int nowMillis,
+}) {
+  final int forgetBefore = nowMillis - kDisappearedMemory.inMilliseconds;
+  final Map<String, int> next = <String, int>{
+    for (final MapEntry<String, int> e in remembered.entries)
+      if (e.value >= forgetBefore) e.key: e.value,
+  };
+  next[disappearedMessageKey(key, id)] = expiredAtMillis;
+  if (next.length > kMaxDisappearedMessages) {
+    final List<MapEntry<String, int>> oldestFirst = next.entries.toList()
+      ..sort(
+        (MapEntry<String, int> a, MapEntry<String, int> b) =>
+            a.value.compareTo(b.value),
+      );
+    for (final MapEntry<String, int> e in oldestFirst.take(
+      next.length - kMaxDisappearedMessages,
+    )) {
+      next.remove(e.key);
+    }
+  }
+  return next;
+}
+
 /// The timeline store with disappearing messages:
 ///
 /// * a new message in a conversation with a timer gets its expiry (now +
@@ -146,6 +188,15 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
       removed += expired.length;
     }
     return removed;
+  }
+
+  /// Whether message [id] of [key] expired but is still on file (hidden,
+  /// not swept yet).
+  Future<bool> holdsExpired(String key, String id) async {
+    final int now = _now();
+    return (await delegate.load(
+      key,
+    )).any((ChatMessage m) => m.id == id && m.isExpiredAt(now));
   }
 
   /// When the next message in [keys] expires, if any does.

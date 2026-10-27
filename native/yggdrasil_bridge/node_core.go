@@ -38,7 +38,11 @@ func withNode(handle C.int, fn func(*bridgeNode) *C.char) *C.char {
 	if !ok {
 		return responseError(fmt.Errorf("node handle %d does not exist", int(handle)))
 	}
-	return fn(value.(*bridgeNode))
+	node := value.(*bridgeNode)
+	// Whether anyone still uses the node (node_identity.go).
+	node.touch()
+	defer node.touch()
+	return fn(node)
 }
 
 func createNode(configJSON string) (*bridgeNode, error) {
@@ -54,6 +58,18 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	if err := cfg.UnmarshalHJSON([]byte(configJSON)); err != nil {
 		return nil, err
 	}
+	// One node per identity in this process (node_identity.go).
+	identity, err := claimNodeIdentity(nodeIdentityKey(cfg))
+	if err != nil {
+		logger.Warnf("not starting a second node with this identity: another one still runs in this process")
+		return nil, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			identity.release()
+		}
+	}()
 	ensureDefaultRuntimeConfig(cfg)
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
@@ -194,9 +210,17 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		peerGuards:     peerGuards,
 		phonePeers:     phonePeers,
 		power:          power,
+		identity:       identity,
 	}
+	started = true
 	if phonePeers != nil {
 		go node.watchPhonePeers()
+	}
+	if isPhoneOS() {
+		// Strangers' traffic through the phone (transit_guard.go).
+		node.transitGuard = &transitGuard{}
+		node.transitStop = make(chan struct{})
+		node.startTransitWatch()
 	}
 	if power != nil {
 		if power.onBattery {

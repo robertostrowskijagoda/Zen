@@ -538,12 +538,21 @@ class ZenHairline extends StatelessWidget {
   }
 }
 
-/// Online (a green dot) or not (a ring). Still: it pulses briefly only when
-/// it turns on, so a screen full of online friends draws nothing.
+/// Online (a green filled dot), in the background ([away]: a blue ring
+/// with a dot in it) or not (an empty grey ring). Still: it pulses briefly
+/// only when it turns on, so a screen full of online friends draws nothing.
 class ZenStatusDot extends StatefulWidget {
-  const ZenStatusDot({super.key, required this.on, this.size = 6});
+  const ZenStatusDot({
+    super.key,
+    required this.on,
+    this.away = false,
+    this.size = 6,
+  });
 
   final bool on;
+
+  /// Not on the screen but reachable ("w tle"); [on] wins.
+  final bool away;
   final double size;
 
   @override
@@ -577,13 +586,42 @@ class _ZenStatusDotState extends State<ZenStatusDot> {
         pulseOnStart: _turnedOn > 0,
       );
     }
+    if (widget.away) {
+      // A blue ring with a dot in it: between the filled green dot and the
+      // grey empty ring, by shape and by colour (for those who cannot tell
+      // green from amber, too).
+      final Color away = zen.tone(ZenTone.network);
+      return SizedBox.square(
+        dimension: size + 6,
+        child: Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: away),
+            ),
+            child: SizedBox.square(
+              dimension: size,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: away,
+                  ),
+                  child: SizedBox.square(dimension: size / 2),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox.square(
       dimension: size + 6,
       child: Center(
         child: DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: zen.outlineStrong),
+            border: Border.all(color: zen.textMuted),
           ),
           child: SizedBox.square(dimension: size),
         ),
@@ -597,6 +635,7 @@ class ZenBlobAvatar extends StatelessWidget {
     super.key,
     required this.name,
     this.online = false,
+    this.away = false,
     this.size = 44,
     this.glyph,
     this.image,
@@ -605,6 +644,9 @@ class ZenBlobAvatar extends StatelessWidget {
 
   final String name;
   final bool online;
+
+  /// In the background ("w tle"): the dot says so ([ZenStatusDot.away]).
+  final bool away;
 
   /// The online dot (not for your own avatar).
   final bool showStatus;
@@ -683,15 +725,21 @@ class ZenBlobAvatar extends StatelessWidget {
           ),
           if (showStatus)
             PositionedDirectional(
-              end: -2,
-              bottom: -2,
+              end: -4,
+              bottom: -4,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: zen.background,
                   shape: BoxShape.circle,
-                  border: Border.all(color: zen.background, width: 2),
+                  border: Border.all(color: zen.background, width: 1),
                 ),
-                child: ZenStatusDot(on: online, size: 6),
+                // 9 px on a list avatar (6 is too small to tell the shapes
+                // apart), 7 on the small ones.
+                child: ZenStatusDot(
+                  on: online,
+                  away: away,
+                  size: size >= 36 ? 9 : 7,
+                ),
               ),
             ),
         ],

@@ -3,18 +3,19 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -465,7 +466,8 @@ String backgroundContactsSignature(SocialHubState state) {
   return parts.join('|');
 }
 
-/// The Android background service while the app is locked or gone:
+/// The Android background service while the app is locked or gone, and an
+/// iPhone's locked Zen while iOS lets it run (ios_locked_receiver.dart):
 /// it holds no master key, only the [BackgroundCapability].
 ///
 /// * Frames from contacts (and, within a small budget, what a stranger
@@ -473,9 +475,10 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   the inbox; a reliable one is acknowledged (`rly_ack`) only once it is
 ///   on the disk, so nothing the sender drops is lost. The app opens and
 ///   merges them after unlock.
-/// * Presence: a ping from a contact gets a pong ("background"), so
-///   friends deliver directly instead of through mailboxes. It pings no
-///   one itself.
+/// * Presence: a ping from a contact gets a pong, so friends deliver
+///   directly instead of through mailboxes; to the friends who may see it
+///   the pong also says "w tle" and when Zen was last open
+///   ([LockedPresenceKit]). It pings no one itself.
 /// * Its own mailboxes are asked for held mail (`rly_poll`); each envelope
 ///   is kept once (also when it came directly before, or the app already
 ///   took it: `taken`) and confirmed to whoever handed it over, so it is
@@ -498,9 +501,11 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   need the master key. (Outgoing retries go from the outbox kit,
 ///   `LockedOutbox`.)
 /// * Notifications say what kind of thing came (a message, an alarm, a
-///   call); a chat message also who wrote it and what, as far as the
-///   notification privacy level of its conversation allows and the
-///   [LockedNoticeKit] knows the name. Nothing else is readable here.
+///   call); a chat message also who wrote it and the start of what
+///   ([kLockedNoticePreviewChars]), as far as the notification privacy
+///   level of its conversation allows and the [LockedNoticeKit] knows the
+///   name. A message is read here only in memory, for that; it is kept
+///   only sealed. Nothing else is readable here.
 final class LockedReceiver {
   LockedReceiver({
     required SignalTransport transport,
@@ -512,6 +517,7 @@ final class LockedReceiver {
     LockedKnockWatch? knocks,
     LockedMailbox? mailbox,
     LockedNoticeKit? noticeKit,
+    LockedPresenceKit? presence,
     Set<String> taken = const <String>{},
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
@@ -529,6 +535,7 @@ final class LockedReceiver {
        _knocks = knocks,
        _mailbox = mailbox,
        _noticeKit = noticeKit ?? const LockedNoticeKit(),
+       _presence = presence ?? const LockedPresenceKit(),
        _taken = taken,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -554,6 +561,10 @@ final class LockedReceiver {
   /// What a message's notice may say (without a kit: only that it came).
   final LockedNoticeKit _noticeKit;
 
+  /// What a pong may say about this phone (without a kit: only that it
+  /// answers).
+  final LockedPresenceKit _presence;
+
   /// [LockedMailboxKit.takenTag]s of what the app already took before it
   /// locked: a copy of one is confirmed, never kept or told about again.
   final Set<String> _taken;
@@ -576,7 +587,7 @@ final class LockedReceiver {
 
   /// A contact's pings get a pong at most this often: friends ping only
   /// while Zen is on their screen, and a pong every other ping keeps this
-  /// phone "in the background" for them (kPresenceOfflineAfter).
+  /// phone reachable, "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
   final Map<String, int> _pongedAt = <String, int>{};
 
@@ -701,7 +712,7 @@ final class LockedReceiver {
     final Object? rawRid = frame.payload[kReliableIdKey];
     final String id = rawRid is String && rawRid.isNotEmpty
         ? 'd|$from|$rawRid'
-        : 'd|$from|${_payloadHash(frame.payload)}';
+        : 'd|$from|${frameContentHash(frame.payload)}';
     if (_kept.contains(id)) {
       return;
     }
@@ -796,6 +807,10 @@ final class LockedReceiver {
     }
   }
 
+  /// Asks every mailbox for what it holds now, outside the beat (an
+  /// iPhone's background wake, which may be the only moment for it).
+  Future<void> pollMailboxes() => _pollMailboxes();
+
   Future<void> _pollMailboxes() async {
     for (final String mailbox in _capability.mailboxes) {
       if (!_running) {
@@ -837,7 +852,8 @@ final class LockedReceiver {
         _pongedAt[from] = at;
         await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
-          'state': 'background',
+          if (kind == BackgroundContactKind.friend)
+            ..._presence.pongFields(from, at),
           if (kind == BackgroundContactKind.friend) ...versionHello(),
         });
       }
@@ -939,7 +955,7 @@ final class LockedReceiver {
     }
     final String id = rid != null
         ? 'r|$from|$rid'
-        : 'h|$from|${_payloadHash(frame.payload)}';
+        : 'h|$from|${frameContentHash(frame.payload)}';
     if (_kept.contains(id) ||
         (rid != null &&
             _taken.contains(LockedMailboxKit.takenTag(from, rid)))) {
@@ -993,11 +1009,6 @@ final class LockedReceiver {
 
   Future<void> _acknowledge(String to, String rid) =>
       _sendQuietly(to, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
-
-  /// What a frame without a reliable id is told apart by: its payload, not
-  /// the moment it arrived (a repeat arrives later).
-  static String _payloadHash(Map<String, dynamic> payload) =>
-      crypto.sha256.convert(utf8.encode(jsonEncode(payload))).toString();
 
   /// Mail held for this phone, from one of its mailboxes or straight from a
   /// sender's locked outbox. Each envelope counts as its payload would

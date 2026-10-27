@@ -353,6 +353,60 @@ class _Paragraph extends StatelessWidget {
   }
 }
 
+/// The thanks: Yggdrasil first and Scarlet second, in bold, then everyone
+/// else whose work Zen stands on.
+class _Thanks extends StatelessWidget {
+  const _Thanks();
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final TextStyle bold = TextStyle(
+      color: zen.textPrimary,
+      fontWeight: FontWeight.w800,
+    );
+    return ZenCard(
+      child: Text.rich(
+        key: const Key('about-thanks'),
+        TextSpan(
+          style: TextStyle(
+            color: zen.textSecondary,
+            fontSize: 14.5,
+            height: 1.5,
+          ),
+          children: <InlineSpan>[
+            TextSpan(text: t('Sieć Yggdrasil'), style: bold),
+            TextSpan(
+              text: t(
+                ' — otwarta, szyfrowana sieć, po której Zen łączy ludzi bez '
+                'serwerów. Bez niej Zena by nie było.',
+              ),
+            ),
+            const TextSpan(text: '\n\n'),
+            TextSpan(text: 'Scarlet', style: bold),
+            TextSpan(
+              text: t(
+                ' — dzięki niemu Zen da się prosto zainstalować na iPhonie '
+                'bez sklepu.',
+              ),
+            ),
+            const TextSpan(text: '\n\n'),
+            TextSpan(
+              text: t(
+                'Zen stoi też na pracy wielu innych ludzi, którzy dzielą się '
+                'kodem za darmo: Flutter i Dart, Go, WebRTC, biblioteki '
+                'szyfrujące, czcionki i ikony. Dziękuję im wszystkim — ich '
+                'licencje są na liście „Licencje”. Dziękuję też każdemu, kto '
+                'zgłasza błędy, tłumaczy i podaje Zen dalej.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// A link row: what it is and where it goes; opens the browser (or copies
 /// the address).
 class _LinkTile extends StatelessWidget {
@@ -710,12 +764,26 @@ class _UpdatesPage extends StatelessWidget {
         ZenSection(t('Dlaczego nie ma Zen w sklepach')),
         _Paragraph(
           t(
-            'Zen celowo nie jest w Google Play ani w App Store. Sklep może w '
-            'każdej chwili usunąć aplikację albo zażądać zmian — a Zen ma być '
-            'niezależny, także od wielkich firm i od polityki. Sklepy wymagają '
-            'też firmy, opłat i zgody na swoje zasady, a Zen tworzy jedna '
-            'osoba, za darmo. Przy okazji nikt, nawet sklep, nie wie, że '
-            'masz Zen.\n\n'
+            'Głównym powodem są wymagania prawne i regulaminy sklepów, '
+            'których Zen z założenia nie spełnia:\n'
+            '• moderacja: sklepy wymagają, żeby twórca sam przeglądał '
+            'zgłoszenia i usuwał treści i konta, a w Zen nie ma serwera ani '
+            'nikogo pośrodku, kto mógłby to robić;\n'
+            '• waluta i portfel piramidy: usługi finansowe i kryptowaluty '
+            'wymagają w sklepach firmy i licencji finansowych;\n'
+            '• płatne bramy: opłaty za cyfrowe usługi w aplikacji muszą iść '
+            'przez płatności sklepu, z jego prowizją 15–30%;\n'
+            '• randki: wymagają weryfikacji wieku i zespołu moderacji;\n'
+            '• samodzielne aktualizacje i praca w tle: Google Play zabrania '
+            'aktualizowania się aplikacji spoza sklepu, a App Store mocno '
+            'ogranicza działanie w tle;\n'
+            '• tożsamość twórcy: sklepy publikują dane twórcy i wymagają '
+            'formalności (m.in. deklaracji szyfrowania).\n\n'
+            'Do tego dochodzą koszty: App Store to 99 USD rocznie, Google Play '
+            '25 USD jednorazowo, a licencje i obsługa prawna liczone są w '
+            'tysiącach. Zen tworzy jedna osoba, za darmo. Sklep mógłby też w '
+            'każdej chwili usunąć aplikację albo zażądać zmian, a Zen ma być '
+            'niezależny. Przy okazji nikt, nawet sklep, nie wie, że masz Zen.\n\n'
             'Dlatego Zen pobierasz z oficjalnej strony projektu na GitHubie '
             'albo dostajesz od znajomego („Podaj dalej”).',
           ),
@@ -887,15 +955,7 @@ class _LicencesPage extends StatelessWidget {
           ),
         ),
         ZenSection(t('Podziękowania')),
-        _Paragraph(
-          t(
-            'Zen stoi na pracy wielu ludzi, którzy dzielą się kodem za darmo: '
-            'sieci Yggdrasil, Flutter i Dart, Go, WebRTC, biblioteki '
-            'szyfrujące, czcionki i ikony. Dziękuję im wszystkim — ich '
-            'licencje są na liście „Licencje”. Dziękuję też każdemu, kto '
-            'zgłasza błędy, tłumaczy i podaje Zen dalej.',
-          ),
-        ),
+        const _Thanks(),
         _LinkTile(
           icon: Icons.lan_rounded,
           tone: zenTone(zen, 0),

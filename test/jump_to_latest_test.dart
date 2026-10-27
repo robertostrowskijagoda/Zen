@@ -185,6 +185,18 @@ void main() {
       expect(_position(tester).pixels, pixels);
       expect(find.byKey(const Key(_jumpBadge)), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
+      // A 44 px target that says the count to a screen reader.
+      expect(
+        tester.getSize(find.byKey(const Key(_jumpButton))).shortestSide,
+        greaterThanOrEqualTo(44),
+      );
+      final SemanticsHandle semantics = tester.ensureSemantics();
+      await tester.pump();
+      expect(
+        find.bySemanticsLabel('Przewiń na sam dół: 3 nowe wiadomości'),
+        findsOneWidget,
+      );
+      semantics.dispose();
 
       await tester.tap(find.byKey(const Key(_jumpButton)));
       await tester.pumpAndSettle();

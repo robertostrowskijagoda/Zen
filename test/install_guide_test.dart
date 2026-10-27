@@ -15,15 +15,22 @@ void main() {
       expect(installStepsFor(s), isNotEmpty, reason: s.name);
       expect(installNotesFor(s), isNotEmpty, reason: s.name);
     }
+    // iPhone: the Scarlet way, as short as the install page's.
+    final List<InstallStep> iphone = installStepsFor(InstallSystem.iphone);
+    expect(iphone.length, lessThanOrEqualTo(4));
+    expect(iphone.first.text, contains('usescarlet.com'));
     expect(
-      installStepsFor(InstallSystem.iphone).length,
-      inInclusiveRange(6, 8),
+      iphone.map((InstallStep s) => s.text).join(' '),
+      allOf(contains('Sideload IPA'), contains('VPN i zarządzanie')),
+    );
+    expect(
+      installNotesFor(InstallSystem.iphone).join(' '),
+      contains('SideStore'),
     );
     expect(
       kInstallPageUrl,
       startsWith('https://robertostrowskijagoda.github.io/Zen/'),
     );
-    expect(kSideStoreSourceUrl, endsWith('/apps.json'));
     expect(
       installStepsFor(InstallSystem.linux).map((InstallStep s) => s.command),
       contains('sudo apt install ./Zen-Linux-x64.deb'),
@@ -71,20 +78,12 @@ void main() {
     expect(pictures[0], pictures[1]);
     expect(pictures[0], isNot(pictures[2]));
     expect(find.byKey(const Key('install-steps-android')), findsOneWidget);
-    expect(find.byKey(const Key('install-copy-source')), findsNothing);
 
     await tester.tap(find.byKey(const Key('install-system-iphone')));
     await tester.pump();
     expect(find.byKey(const Key('install-steps-iphone')), findsOneWidget);
-    // The source address comes after the eight illustrated steps: the
-    // list builds it once it is scrolled to.
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('install-copy-source')),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.byKey(const Key('install-copy-source')), findsOneWidget);
-    expect(find.text(kSideStoreSourceUrl), findsOneWidget);
+    expect(find.textContaining('usescarlet.com'), findsOneWidget);
+    expect(find.textContaining('Sideload IPA'), findsOneWidget);
 
     await tester.scrollUntilVisible(
       find.byKey(const Key('install-system-linux')),

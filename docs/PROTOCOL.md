@@ -40,6 +40,23 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and
   "bridge" announcements in the ledger (`lg_bridges`).
+- Transit on phones (`transit_guard.go`) [V]: every Yggdrasil node forwards,
+  and ironwood weighs links by latency, so a phone on the same Wi-Fi as a
+  computer bridge can become the cheapest way for the bridge's strangers'
+  traffic to its own public peers. A phone estimates the traffic that only
+  passes through it (`traffic_meter.go`, every 10 s over 30-s windows):
+  what came in on one peering and went out on another, beyond its own
+  packets and what its end-to-end sessions carried, so junk sent to the
+  phone and the answers to it do not count. After three windows in a row
+  above 64 KiB/s, or with transit while the last hour's is above 32 MiB, it
+  keeps a single way to the mesh for 30 minutes: the friends' bridges when
+  one is up (they are never set aside), otherwise one public peer, or one
+  device nearby when no public peer is up. Holds double for each further
+  hold within a day (at most 6 hours) only when the transit crossed between
+  a peering nearby and a public one, as a home computer routing through the
+  phone does; then transit that comes back holds again after one window.
+  When a hold ends the phone takes its other public peers and local links
+  back. Its own packets (signals, call media) never count as transit.
 
 ### 1.2 Signal datagrams [V]
 
@@ -269,10 +286,37 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `ping` | optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. A friend counts as offline after 7 min without an answer (`kPresenceOfflineAfter`). Not answered unless the sender is a friend or group member. |
-| `pong` | `state` (`"foreground"` or other), hello fields, version fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`). |
-| `away` | - | Sent when the app leaves the screen ("leaving"); the receiver shows the friend as in the background. Never mailboxed; ignored by a locked phone. |
+| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
+| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
+| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence, at most once every 5 min (`kPresenceAwayEvery`): one held back goes out when that time is over, unless Zen is back on the screen by then. Never mailboxed; ignored by a locked phone. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
+
+Presence fields ride on the frames above; nothing is sent only for them.
+They go only to accepted friends who may see statuses (not to a friend at
+the "weak acquaintance" level, and never to group members or strangers); to
+anyone else a `ping` or `pong` carries neither field.
+
+- `state`: `"foreground"` (Zen is on the sender's screen), `"background"`
+  (off the screen but still receiving: Android's background service, a
+  computer's tray, an iPhone with the keep-alive) or `"asleep"` (off the
+  screen and about to stop receiving: an iPhone iOS suspends). A frame
+  without `state` says nothing about presence; the receiver shows none.
+- `lo`: seconds since Zen was last open on the sender's screen (0 while it
+  is open). Left out when the sender turned off "show when I last opened
+  the app", or does not know (a computer that started in the tray).
+
+The receiver shows *online* for `"foreground"`, *in the background* for
+`"background"`, and *offline* for `"asleep"` or when the state expires:
+*online* after 6 min without a new frame (`kPresenceForegroundFor`: a
+friend on the screen pings every 2 min 30 s and answers at once, and says
+`away` when it leaves), *in the background* after 12 min
+(`kPresenceOfflineAfter`: a locked phone answers about every 5 min, as it
+answers one contact at most every 4 min). The receiver keeps the last
+opening (receive time minus `lo`) and shows it while the friend is not
+online. A locked Android phone takes `state` and `lo` for its pongs from a
+presence kit the app writes, sealed with the background key, whenever Zen
+leaves the screen (`presence-kit.zenbg`: the friends who may see presence
+and when Zen was last open).
 
 ### 2.2 Friends and profile
 
@@ -485,8 +529,8 @@ Only between friends (lanterns and what travels back also across opened gates), 
 ### 2.9 Relay mailboxes (`rly_*`)
 
 See 3.2. Types: `rly_ack`, `rly_announce`, `rly_announce_ack`, `rly_deposit`,
-`rly_deposit_ack`, `rly_poll`, `rly_mail`, `rly_mail_ack`, `rly_purge`,
-`rly_sync`, `rly_sync_want`. Anything starting with `rly_` is consumed by the
+`rly_deposit_ack`, `rly_poll`, `rly_here`, `rly_mail`, `rly_mail_ack`,
+`rly_purge`, `rly_sync`, `rly_sync_want`. Anything starting with `rly_` is consumed by the
 relay engine and never reaches the app layer.
 
 ### 2.10 Ledger (`lg_*`)
@@ -494,13 +538,31 @@ relay engine and never reaches the app layer.
 See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 `lg_sibling`, `lg_heads`, `lg_want`, `lg_entries`, `lg_revoke`, `lg_cert_want`,
 `lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`,
-`lg_post_want`, `lg_post`.
+`lg_post_want`, `lg_post`, `lg_mention`.
 
 `lg_push` {`entries`} is the only reliable ledger frame: a device's new
 entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
 in batches of at most 30 KB and 10 an hour per friend, through the reliable
 queue to friends who are offline, so they wait in those friends'
 mailboxes. The receiver takes them like `lg_entries`, with the same checks.
+
+`lg_mention` {`e`, `p`?} is reliable too: the notice to a person
+mentioned in a post, an edit or a comment. `e` is that signed entry and
+`p` the post a comment or an edit belongs to, each with its device
+certificate. A mention is a token `<@N>` in the
+text, N indexing the body's `men` list of {`d` address, `a` account?,
+`n` name?} (at most 20). The receiver checks the signatures, that a token
+names its address or account, that the post is held or carried and signed
+by its author, and that the writer may mention it (its own post, a friend,
+it reacted to that post, or the sending address is on a friend list
+shared with it); it announces each mention once, at most 10 an hour per
+writer, 20 an hour from people who are not friends and 5 an hour from them
+under one post, counted on the disk across restarts. It names the writer
+only by the name it gave a friend or the name on a friend's shared list;
+anyone else is "someone", and the notification then says only that
+somebody mentioned it. Group messages
+carry `men` the same way; the receiver announces a mention only from a
+member of the group.
 
 ### 2.11 Pyramid (`pyr_*`)
 
@@ -654,8 +716,8 @@ still inflate it; it is a rough guide only.
   every 4 h; any sign of life of the recipient, and a restart or 10 minutes
   of silence, start over. TTL 14 days (`messageTtl`).
 - Reactions, edits and deletions (`msg_react`, `msg_edit`, `msg_delete`),
-  group board posts (`group_post`), `lg_push`, `date_key` and `date_intro*`
-  are reliable too.
+  group board posts (`group_post`), `lg_push`, `lg_mention`, `date_key` and
+  `date_intro*` are reliable too.
 - Calls, typing, presence and file chunks are not reliable.
 
 ### 3.2 Mailboxes (store and forward) [V]
@@ -667,16 +729,57 @@ relays.
 - `rly_announce` {`pk` (X25519 public key, base64url), `pq` (hybrid
   ML-KEM-768 + X25519 public key, 1216 bytes, base64url), `relays` (<=6
   addresses), `v` (monotonic version), `tk` (deposit token), `dk` (deposit key,
-  only to the recipient's relays), `on` (true when the device usually stays
-  online: a computer with Zen in the tray or an Android phone with the
-  background service; absent on iPhone)} -> `rly_announce_ack {v}`. Only
-  accepted from friends (and group members when sharing is on).
-- **Choosing relays** (`RelayEngine.rankRelays`): first friends (not casual
-  friends) whose announcement had `on` and who were seen in the last days,
-  then close friends before friends, then the most recently seen. A chosen
-  relay stays unless it was not seen for `staleRelayAfter` (3 days) while a
-  fresher one exists, or a friend with `on` appears and the relay has none
-  (then the relay seen longest ago is swapped). Checked on every `tick()`.
+  only to the recipient's relays), `dc` (what kind of device it is:
+  `pc` a computer with Zen in the tray, `android` an Android phone with the
+  background service, `ios_on` an iPhone with "keep receiving in the
+  background" on, `ios` an iPhone without it; absent when unknown)} ->
+  `rly_announce_ack {v}`. A change of kind (the iPhone keep-alive switched)
+  bumps `v` and is announced like a new relay set; there is no periodic
+  traffic of its own. Only accepted from friends, at any device of their
+  account, and from group members when sharing is on.
+- **How mailboxes answer** (`RelayReach`, per device, never per friend): a
+  device counts the asks that want an answer (its own polls of its mailboxes,
+  deposits with friends' mailboxes for others) and whether anything at all
+  came back from that device. Counted by the hour: an hour in which a device
+  was asked is one sample, answered if anything came from it in that hour.
+  Samples fade with a half-life of 3 days (`reachHalfLife`). Periodic polls
+  carry `p: true`; a mailbox with nothing to hand over answers them with
+  `rly_here {}` (the locked Android service too), polls sent on a sign of
+  life carry no `p` and get no answer. Kept only for friends' devices.
+- **Mailbox quality** of a device: (answered hours + 24 x prior) / (hours +
+  24), where the prior comes from `dc`: computer 0.9, Android 0.8, iPhone
+  with keep-alive 0.45, iPhone 0.15, unknown 0.35 (`RelayDeviceClass`).
+- **Choosing relays** (`RelayEngine.rankRelays`), best first: a device that
+  has not gone quiet; not a weak acquaintance; higher quality (in steps of
+  0.1); close friends before friends; the most recently seen. One device per
+  friend: the best of a friend's devices (their computer rather than their
+  iPhone, the phone they moved to). Empty places (a mailbox stopped being a
+  friend) are filled at once. Otherwise at most one mailbox is replaced per
+  `mailboxChangeSpacing` (1 day) and never several at once:
+  - a mailbox has **gone quiet** when it was not heard from for
+    `staleRelayAfter` (3 days) while this device kept asking it in vain for
+    at least `quietObservedFor` (12 h; a device that was offline itself does
+    not make its mailboxes quiet). A device never asked is quiet when it was
+    not seen for 3 days (the friend's own presence counts only when the
+    device is their only one). A quiet mailbox is replaced by the best
+    device that is not quiet if its quality is at least 0.3
+    (`kMinMailboxQuality`; an iPhone nobody has seen answer is not);
+  - a mailbox that answers now is replaced by a device at least 0.35 better
+    (`kMailboxQualityGap`; an iPhone by a computer or an Android phone, a
+    phone that is mostly off by one that is mostly on), never by a weak
+    acquaintance.
+- **Quiet mailboxes the person must replace** (`RelayOverview.quiet`): a quiet
+  mailbox with no device good enough to take its place, or any quiet
+  mailbox while the mailboxes are chosen by hand. The app shows a card on the
+  chats list and, once per quiet spell, a notification entry ("Skrzynka
+  {name} nie odpowiada od {time} — wybierz inną", route `zen://mailboxes`)
+  that opens the picker. The picker shows each friend's device kind and the
+  share of time it answered, and warns about an iPhone without the
+  keep-alive.
+- **Hand-picked mailboxes** name friends, not devices: each is served by one
+  of the friend's devices (the one serving already unless it went quiet).
+  The choice is the same on all the account's devices (account state domain
+  `relay`: `{auto, manual}`); an automatic choice is each device's own.
 - **Outbox:** a queued payload of 4 KB or more is stored in its own file
   (`relay/out/<id>`, written once before the state, removed with the item);
   the queue holds at most 32 MB of payloads (`kRelayOutboxMaxBytes`), beyond
@@ -685,9 +788,30 @@ relays.
   **Envelope**: `{id, s (sender), r (recipient), c (created ms), x (expires
   ms), q (hybrid KEM ciphertext, 1120 bytes), n (12-byte nonce), b
   (ciphertext+tag)}`, all base64url; sealing in section 4 ("Mailboxes").
-- `rly_poll` (recipient asks a relay) -> `rly_mail {items:[envelope...]}`
-  (batches up to ~6 KB). Recipient answers `rly_mail_ack {ids}`; it also tells
-  other relays with `rly_purge {ids}`.
+- `rly_poll {p?}` (recipient asks a relay) -> `rly_mail {items:[envelope...]}`
+  (batches up to ~6 KB), or `rly_here {}` when nothing is held and `p` was
+  set. Recipient answers `rly_mail_ack {ids}`; it also tells other relays
+  with `rly_purge {ids}`.
+- **Accounts with several devices** (a second phone, a computer, the phone
+  an account moved to). Every device has its own mailbox key, its own
+  mailboxes and its own announcement, and mail is sealed for one device: a
+  mailbox hands each device only its own envelopes, so a lost or replaced
+  phone's key opens nothing for the others. The account routing sends what
+  the app sends to a friend to every device of the friend's account, so a
+  sender queues one copy per device and deposits each with that device's
+  mailboxes; each device collects and confirms its own copy, and the app
+  takes the friend's other devices' frames as the friend's. Delivery is
+  tracked per person (`RelayTrackedMessage`): a message is delivered to a
+  friend once any of their devices confirms it (the copies for their other
+  devices still go), and fails only when it expired for every device of
+  theirs; group counts ("d of n") count people. A friend's other devices are
+  accepted as friends for announcements, deposits and as mailboxes (they
+  come from the ledger, `AccountDeviceDirectory`); an unlinked device is
+  none of these, and the account's other devices stand in for it, also when
+  it is the address the app knows the friend by. When a friend moves to a new
+  phone, the new phone announces its own mailboxes to the friends, who
+  deposit there from then on; the old phone, once quiet for 3 days, stops
+  being anyone's mailbox and the friend's new phone takes its place.
 - `rly_sync {r, ids, t (tombstones), all}` and `rly_sync_want {r, ids}` keep
   co-relays in step.
 - Limits: payloads up to 48 KB, 300 messages / 100 per sender / 2 MB per
@@ -702,7 +826,15 @@ relays.
   `rly_poll`, `rly_mail_ack`, `rly_purge`, `rly_sync` and `rly_sync_want`
   by the same rules, and writes what it holds back to a file of its own,
   which the app merges after unlock (`relay_engine_locked.dart`).
-  Attachments (`rly_bput`...) wait for the unlock.
+  Attachments (`rly_bput`...) wait for the unlock. A locked iPhone runs the
+  same receiver whenever iOS lets Zen run (a background check, a Shortcuts
+  run, the keep-alive; docs/IOS_BACKGROUND.md), so it answers the same
+  frames then.
+- **What a locked phone reads.** It keeps every frame sealed to the inbox
+  key (hybrid ML-KEM-768 + X25519, derived from the master key; only its
+  public half is with the receiver) and reads a chat message only in
+  memory, for a notification of at most 80 characters as the conversation's
+  notification level allows (docs/SECURITY_MODEL.md, "The locked phone").
 - **Mail for a locked phone** (`rly_mail` to the locked service) is kept
   envelope by envelope, keyed like the direct payload (`sender|id`): a copy
   that came already, directly or from another mailbox, or that the app
@@ -803,23 +935,30 @@ A signed, append-only, per-device **log** for each **space**.
   author counts) and `film_pass` (a public film passed on to friends of
   friends: the signed film with its certificate, like a reshare); in
   `acts` also `post_ann` (notices of posts passed on beyond friends, below).
-- **Post reach** [P]: a public post's body has `reach` (1 friends, 2 friends
-  of friends, 3 one step further); any other audience never goes past
-  friends. A friend of the author writes a `post_ann` entry {`items`: [{`p`
-  post id, `a` author account, `t` post time, `r` reach, `h` steps from the
-  author of the entry's readers (2 or 3, <= `r`), `aa`? author address from
-  their public profile, `e`? newest edit time, `x`? 1 when removed}]} (<= 100
-  items; each post once, again when `e`/`x` change; <= 10 posts per author
-  and 300 items per day). A reader fetches the post with `lg_post_want`
-  {`id`, `a`} from the friends who passed it on or from the author, and gets
-  `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?} (each part a
-  signed entry with its certificate; `del` the author's tombstone instead of
-  the post). The post is taken only if asked for, signed by `a`, public and
-  with `reach` >= the steps it came. A reader two steps away passes it on (as
-  `h` 3) only for `reach` 3 and once it holds the post. Friends are served
-  any held post that may go one step further; anyone else only the asked
-  device's own posts with `reach` >= 2 (10 asks a minute per address, 200
-  in all). Notices only about posts from the last 30 days.
+- **Post reach** [P]: a public post (`aud` `public`, not sealed) may be
+  passed on up to 3 steps of friendship from its author; the post carries no
+  reach of its own, and any other audience never goes past friends. Each
+  reader picks how far it looks (1, 2 or 3 steps, 2 by default, kept on the
+  device) and fetches only posts that near. A friend of the author writes a
+  `post_ann` entry whose body {`items`: [{`p` post id, `a` author account,
+  `t` post time, `h` steps from the author of the entry's readers (2 or 3),
+  `aa`? author address from their public profile, `e`? newest edit time,
+  `x`? 1 when removed}]} is sealed (Audience encryption, below) for the
+  audience that matches the writer's friend-list setting: everyone → `all`,
+  friends at level "Znajomy" and up → `mid`, close friends → `close`; with
+  the list shown on request only or to nobody no `post_ann` is written
+  (<= 100 items; each post once per audience, again when `e`/`x` change; <=
+  10 posts per author and 300 items per day). A reader fetches the post with
+  `lg_post_want` {`id`, `a`} from the friends who passed it on or from the
+  author, and gets `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?}
+  (each part a signed entry with its certificate; `del` the author's
+  tombstone instead of the post). The post is taken only if asked for,
+  signed by `a` and public. A reader two steps away that looks at least two
+  steps far passes it on (as `h` 3) once it holds the post; nothing goes
+  past `h` 3. Friends are served any held public post held fewer than 3
+  steps from its author; anyone else only the asked device's own public
+  posts (10 asks a minute per address, 200 in all). Notices only about
+  posts from the last 30 days.
 - **Audience encryption**: bodies for non-public audiences are
   `{aud, kid, n, c}` sealed with ChaCha20-Poly1305 under a 32-byte audience key,
   AAD `"<account>|<kid>"`; keys are handed to friends in `lg_keys` according to

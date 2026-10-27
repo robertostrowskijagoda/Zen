@@ -170,6 +170,24 @@ func (r *peerRotation) check(dialled []string, up func(string) bool) ([]string, 
 		}
 		out = append(out, peer)
 	}
+	if filled := r.fill(out); len(filled) > len(out) {
+		out = filled
+		changed = true
+	}
+	if !changed {
+		return dialled, false
+	}
+	return out, true
+}
+
+// fill is dialled with candidates of the pool added until there are target
+// (all of the pool when it has fewer).
+func (r *peerRotation) fill(dialled []string) []string {
+	used := make(map[string]bool, len(dialled))
+	for _, peer := range dialled {
+		used[peer] = true
+	}
+	out := append([]string(nil), dialled...)
 	for len(out) < r.target {
 		candidate, ok := r.candidate(used)
 		if !ok {
@@ -177,12 +195,8 @@ func (r *peerRotation) check(dialled []string, up func(string) bool) ([]string, 
 		}
 		used[candidate] = true
 		out = append(out, candidate)
-		changed = true
 	}
-	if !changed {
-		return dialled, false
-	}
-	return out, true
+	return out
 }
 
 // candidate is the next peer of the pool that is not dialled already.

@@ -1,18 +1,21 @@
 import 'package:flutter/foundation.dart';
 
 /// The chips over the Tablica: „Wszystko · Znajomi · 2. stopień ·
-/// 3. stopień · Przyjaciele · Piramida · Kraj”.
+/// 3. stopień · Przyjaciele · Piramida · Kraj”. „Znajomi”, „2. stopień”
+/// and „3. stopień” also say how far the reader looks ([depth]): kept on
+/// the device, it holds under „Wszystko” too.
 enum FeedFilter {
-  /// Friends' posts and the pyramid's important ones, by time.
+  /// Friends' posts (and from further away as far as the reader looks)
+  /// and the pyramid's important ones, by time.
   all,
 
   /// Friends' and followed people's posts (and friends' reshares) only.
   friends,
 
-  /// Posts of friends of friends, passed on by friends' notices.
+  /// Also posts of friends of friends, passed on by friends' notices.
   second,
 
-  /// Posts three steps away, passed on the same way.
+  /// Also posts three steps away, passed on the same way.
   third,
 
   /// Posts of the friends marked "Przyjaciel" only.
@@ -23,6 +26,15 @@ enum FeedFilter {
 
   /// The national section (only here, never under [all]).
   national;
+
+  /// How far a reader who picked this looks, in steps of friendship from
+  /// the authors; `null` for a chip that leaves it as it was.
+  int? get depth => switch (this) {
+    FeedFilter.friends => 1,
+    FeedFilter.second => 2,
+    FeedFilter.third => 3,
+    _ => null,
+  };
 
   /// [name] read back; [all] for anything else.
   static FeedFilter parse(String? name) => FeedFilter.values.firstWhere(
@@ -37,12 +49,20 @@ final ValueNotifier<FeedFilter?> feedFilterRequest = ValueNotifier<FeedFilter?>(
   null,
 );
 
+/// A post another part of the app asked the Tablica to show (a tap on a
+/// new post's notification): the screen scrolls to it and sets this back to
+/// null.
+final ValueNotifier<String?> feedPostRequest = ValueNotifier<String?>(null);
+
 /// Bumped with every [openFeed]: the shell switches to the Tablica.
 final ValueNotifier<int> feedOpenRequest = ValueNotifier<int>(0);
 
 /// Shows the Tablica with [filter] on (the Pyramid's „Otwórz na Tablicy”,
-/// a tap on the pyramid's notification).
-void openFeed(FeedFilter filter) {
+/// a tap on the pyramid's notification), at the post [postId] when given.
+void openFeed(FeedFilter filter, {String? postId}) {
   feedFilterRequest.value = filter;
+  if (postId != null && postId.isNotEmpty) {
+    feedPostRequest.value = postId;
+  }
   feedOpenRequest.value++;
 }

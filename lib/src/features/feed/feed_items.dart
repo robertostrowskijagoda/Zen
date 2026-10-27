@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 
 /// One card of the Tablica: a friend's post, a pyramid post, an open
@@ -73,12 +74,14 @@ typedef _Timed = ({int at, FeedItem item});
 /// What the Tablica shows under [filter]:
 /// - every filter starts with the alarms in force;
 /// - „Wszystko”: the open referenda, then one timeline, newest first, of
-///   [wall] and the pyramid's important posts (the top, the line up) —
-///   never the national section nor one's own pyramid posts;
+///   the posts of [wall] at most [depth] steps away ([FeedPost.degree];
+///   how far the reader looks) and the pyramid's important posts (the
+///   top, the line up) — never the national section nor one's own pyramid
+///   posts;
 /// - „Znajomi”: the posts of [wall] of friends and followed people (and
 ///   friends' reshares);
-/// - „2. stopień” / „3. stopień”: the posts of [wall] friends' notices
-///   brought from two or three steps away ([FeedPost.degree]);
+/// - „2. stopień” / „3. stopień”: those and the posts of [wall] friends'
+///   notices brought from up to two or three steps away, in one timeline;
 /// - „Przyjaciele”: the posts of [wall] whose author [isClose] says is a
 ///   close friend ("Przyjaciel"; none without [isClose]);
 /// - „Piramida”: the referenda, then the pyramid's posts as §22.1 orders
@@ -90,6 +93,7 @@ List<FeedItem> composeFeed(
   required List<FeedPost> wall,
   required PyramidFeed pyramid,
   bool Function(FeedPost post)? isClose,
+  int depth = kDefaultFeedDepth,
 }) {
   final Set<String> seen = <String>{};
   final List<FeedItem> out = <FeedItem>[];
@@ -111,23 +115,17 @@ List<FeedItem> composeFeed(
     case FeedFilter.all:
       final List<_Timed> timeline = <_Timed>[
         for (final FeedPost p in wall)
-          (at: p.sortMillis, item: FeedFriendItem(p)),
+          if (p.degree <= depth) (at: p.sortMillis, item: FeedFriendItem(p)),
         for (final PyrFeedPost p in pyramid.important)
           (at: p.at, item: FeedPyramidItem(p)),
       ]..sort((_Timed a, _Timed b) => b.at.compareTo(a.at));
       for (final _Timed x in timeline) {
         add(x.item);
       }
-    case FeedFilter.friends:
+    case FeedFilter.friends || FeedFilter.second || FeedFilter.third:
+      final int far = filter.depth!;
       for (final FeedPost p in wall) {
-        if (p.degree <= 1) {
-          add(FeedFriendItem(p));
-        }
-      }
-    case FeedFilter.second || FeedFilter.third:
-      final int degree = filter == FeedFilter.second ? 2 : 3;
-      for (final FeedPost p in wall) {
-        if (p.degree == degree) {
+        if (p.degree <= far) {
           add(FeedFriendItem(p));
         }
       }

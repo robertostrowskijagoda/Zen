@@ -309,7 +309,13 @@ final class LockedMailbox {
       case 'rly_deposit':
         changed = await _deposit(from, payload['env']) || changed;
       case 'rly_poll':
-        await _push(from);
+        // A friend checking whether its mailbox is there: nothing to hand
+        // over, so a word that it is (see `RelayReach`).
+        if (!await _push(from) &&
+            payload[kRelayProbeKey] == true &&
+            _isFriend(from)) {
+          await _send(from, const <String, dynamic>{'type': kRelayHereType});
+        }
       case 'rly_mail_ack':
       case 'rly_purge':
         changed = _dropDelivered(from, payload['ids']) || changed;
@@ -405,11 +411,12 @@ final class LockedMailbox {
     return true;
   }
 
-  /// Everything held for [recipient], in size-bounded batches.
-  Future<void> _push(String recipient) async {
+  /// Everything held for [recipient], in size-bounded batches; false when
+  /// there was nothing.
+  Future<bool> _push(String recipient) async {
     final Map<String, Map<String, dynamic>>? held = _held[recipient];
     if (held == null || held.isEmpty) {
-      return;
+      return false;
     }
     List<Map<String, dynamic>> batch = <Map<String, dynamic>>[];
     int bytes = 0;
@@ -436,6 +443,7 @@ final class LockedMailbox {
         'items': batch,
       });
     }
+    return true;
   }
 
   /// Drops what [recipient] confirmed and remembers it as delivered; only

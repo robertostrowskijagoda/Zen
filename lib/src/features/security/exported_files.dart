@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
@@ -19,10 +21,13 @@ const String kExportedFilesDeviceStorageKey = 'zen_rewrite_exported_files_all';
 const int kMaxRememberedDeviceExports = 256;
 
 /// Files Zen wrote outside its own folders on purpose: a saved copy of an
-/// attachment, an exported recording, a door sticker, a downloaded update.
-/// They are plain files by design, so the panic password deletes them as
-/// well. The list lives in the system's secure storage: the lock screen can
-/// read it, a look at the disk cannot.
+/// attachment, an exported recording, a door sticker, a downloaded update,
+/// a backup. They are plain files by design, so the panic password deletes
+/// them as well. Most are paths; what Android wrote for Zen (a backup in
+/// Downloads or in a folder the person picked) is a content address, which
+/// only the system can delete ([deleteDocument]). The list lives in the
+/// system's secure storage: the lock screen can read it, a look at the disk
+/// cannot.
 ///
 /// Two lists: the account's own (in its entries of the secret store — for
 /// an additional account under a keyed name, so it says nothing about the
@@ -141,9 +146,36 @@ final class ExportedFilesIndex {
     return deleted;
   }
 
+  /// Deletes what Android wrote at a content address (`content://…`);
+  /// true when it went. Tests replace it.
+  @visibleForTesting
+  static Future<bool> Function(String uri) deleteDocument = _deleteDocument;
+
+  static Future<bool> _deleteDocument(String uri) async {
+    try {
+      final Object? out = await const MethodChannel(
+        'zen/system',
+      ).invokeMethod<Object?>('deleteDocument', <String, Object>{'uri': uri});
+      return out is Map && out['deleted'] == true;
+    } on MissingPluginException {
+      // Not where the app's own bridge runs.
+      return false;
+    }
+  }
+
   static Future<int> _deleteFiles(Iterable<String> paths) async {
     int deleted = 0;
     for (final String path in paths) {
+      if (path.startsWith('content://')) {
+        try {
+          if (await deleteDocument(path)) {
+            deleted++;
+          }
+        } on Object catch (error) {
+          logZenWarning('Deleting an exported copy failed: $error');
+        }
+        continue;
+      }
       try {
         final File file = File(path);
         if (await file.exists()) {

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 enum ChatMessageDirection { incoming, outgoing, system }
 
@@ -112,6 +113,7 @@ final class ChatMessage {
     this.forwarded = false,
     this.pendingMedia,
     this.attachmentUnavailable = false,
+    this.mentions = const <Mention>[],
   });
 
   final String id;
@@ -157,6 +159,13 @@ final class ChatMessage {
   /// still has it (a recovered conversation, a file the account's other
   /// device lost). Not the same as a file still on its way.
   final bool attachmentUnavailable;
+
+  /// The people the text mentions (its `<@N>` tokens point into this list,
+  /// `mentions.dart`).
+  final List<Mention> mentions;
+
+  /// [text] with "@name" in place of each mention (previews, copies).
+  String get plainText => mentionsAsPlainText(text, mentions);
 
   bool get isEdited => editedAtMillis != null;
 
@@ -215,6 +224,7 @@ final class ChatMessage {
     bool? forwarded,
     Object? pendingMedia = _chatMessageUnset,
     bool? attachmentUnavailable,
+    List<Mention>? mentions,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -282,6 +292,7 @@ final class ChatMessage {
             ),
       attachmentUnavailable:
           attachmentUnavailable ?? this.attachmentUnavailable,
+      mentions: mentions ?? this.mentions,
     );
   }
 
@@ -312,6 +323,7 @@ Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
     if (m.forwarded) 'fwd': true,
     'pm': ?m.pendingMedia,
     if (m.attachmentUnavailable) 'nf': true,
+    if (m.mentions.isNotEmpty) kMentionsKey: mentionsToJson(m.mentions),
   };
   return out.isEmpty ? null : out;
 }
@@ -343,6 +355,7 @@ ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
     forwarded: json['fwd'] == true,
     pendingMedia: pending is Map ? Map<String, dynamic>.from(pending) : null,
     attachmentUnavailable: json['nf'] == true,
+    mentions: mentionsFromJson(json[kMentionsKey]),
   );
 }
 

@@ -5,12 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
@@ -118,16 +122,16 @@ class FirstRunSetupScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     key: const Key('first-run-setup-screen'),
-    appBar: AppBar(title: Text(t('Konfiguracja startowa'))),
+    appBar: ZenSectionBar(title: t('Konfiguracja startowa')),
     body: const SafeArea(top: false, child: FirstRunSetupFlow()),
   );
 }
 
-enum _SetupStep { lock, notifications, gates, animations, permissions }
+enum _SetupStep { lock, notifications, iphone, gates, animations, permissions }
 
-/// The steps one by one: when Zen locks, what notifications say, the
-/// gates, the animations and (from Ustawienia; on the first start the gate
-/// shows it next) the permissions. Every answer is saved at once, so
+/// The steps one by one: when Zen locks, what notifications say, on an
+/// iPhone how iOS is to wake Zen, the gates, the animations and (from
+/// Ustawienia; on the first start the gate shows it next) the permissions. Every answer is saved at once, so
 /// skipping keeps what is set (the defaults on the first start).
 class FirstRunSetupFlow extends ConsumerStatefulWidget {
   const FirstRunSetupFlow({this.firstStart = false, super.key});
@@ -139,17 +143,61 @@ class FirstRunSetupFlow extends ConsumerStatefulWidget {
   ConsumerState<FirstRunSetupFlow> createState() => _FirstRunSetupFlowState();
 }
 
-class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
+class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
+    with WidgetsBindingObserver {
   int _index = 0;
   bool _finishing = false;
+
+  /// Saving "setup done" failed: said above the buttons, tried again with
+  /// them.
+  bool _failed = false;
+
+  /// The setup shows because of an update, not on a first start: a setup
+  /// was gone through before (an older revision), or the account is older
+  /// than the revisions (its permissions step or account card were
+  /// answered). Decided once, when it opens: finishing changes the revision.
+  late final bool _afterUpdate;
+
+  @override
+  void initState() {
+    super.initState();
+    final AppSettings settings = ref.read(appSettingsControllerProvider);
+    _afterUpdate =
+        widget.firstStart &&
+        (settings.setupRevision > 0 ||
+            settings.permissionsSetupDone ||
+            settings.accountSecureOffered);
+    if (widget.firstStart) {
+      // The first start is no route (the gate shows it instead of the app),
+      // so the system's Back reaches it only this way.
+      WidgetsBinding.instance.addObserver(this);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (_index == 0 || _finishing) {
+      return false;
+    }
+    setState(() => _index -= 1);
+    return true;
+  }
 
   /// The steps shown here, and how many the setup has in all (on the first
   /// start the permissions step follows as a stage of its own).
   (List<_SetupStep>, int) _steps() {
     final bool permissions = ref.watch(permissionsPlatformProvider).hasAnything;
+    final bool iphone = ref.watch(iosBackgroundBridgeEnabledProvider);
     final List<_SetupStep> here = <_SetupStep>[
       _SetupStep.lock,
       _SetupStep.notifications,
+      if (iphone) _SetupStep.iphone,
       _SetupStep.gates,
       _SetupStep.animations,
       if (permissions && !widget.firstStart) _SetupStep.permissions,
@@ -172,16 +220,20 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
     if (_finishing) {
       return;
     }
-    setState(() => _finishing = true);
+    setState(() {
+      _finishing = true;
+      _failed = false;
+    });
     try {
       // The gate goes on to the next step as soon as this is set.
-      await ref
-          .read(appSettingsControllerProvider.notifier)
-          .setFirstRunSetupDone(true);
+      await ref.read(appSettingsControllerProvider.notifier).setSetupDone();
     } on Object catch (error, stack) {
       logZenError('Zapis ustawień', error, stack);
       if (mounted) {
-        setState(() => _finishing = false);
+        setState(() {
+          _finishing = false;
+          _failed = true;
+        });
       }
     }
   }
@@ -193,74 +245,111 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
     final int index = _index.clamp(0, steps.length - 1);
     final _SetupStep step = steps[index];
     final bool last = index == steps.length - 1;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Expanded(
-          child: step == _SetupStep.permissions
-              ? const PermissionsPanel()
-              : ListView(
-                  key: Key('first-run-step-${step.name}'),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  children: <Widget>[
-                    if (widget.firstStart && index == 0) _welcome(zen),
-                    Text(
-                      t('Krok {n} z {total}', {'n': index + 1, 'total': total}),
-                      key: const Key('first-run-step-count'),
-                      style: zen.label(color: zen.textMuted),
-                    ),
-                    const SizedBox(height: 6),
-                    ..._body(zen, step),
-                  ],
-                ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-          child: Row(
-            children: <Widget>[
-              if (index > 0)
-                TextButton(
-                  key: const Key('first-run-back'),
-                  onPressed: () => setState(() => _index = index - 1),
-                  child: Text(t('Wstecz')),
-                )
-              else
-                TextButton(
-                  key: const Key('first-run-skip'),
-                  onPressed: _finishing ? null : () => unawaited(_finish()),
-                  child: Text(t('Pomiń')),
-                ),
-              const Spacer(),
-              FilledButton(
-                key: const Key('first-run-next'),
-                style: FilledButton.styleFrom(minimumSize: const Size(140, 48)),
-                onPressed: _finishing
-                    ? null
-                    : last
-                    ? () => unawaited(_finish())
-                    : () => setState(() => _index = index + 1),
-                child: Text(
-                  last && !(widget.firstStart && total > steps.length)
-                      ? t('Gotowe')
-                      : t('Dalej'),
-                ),
-              ),
-            ],
+    // The system's Back goes to the previous step, not out of the setup
+    // (on the first step it does what it did before).
+    return PopScope(
+      canPop: index == 0,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop && !_finishing) {
+          setState(() => _index = index - 1);
+        }
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          LinearProgressIndicator(
+            key: const Key('first-run-progress'),
+            value: (index + 1) / total,
+            minHeight: 3,
+            backgroundColor: zen.surfaceSunk,
+            color: zen.accent,
           ),
-        ),
-        if (widget.firstStart)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Text(
-              t(
-                'Wszystko zmienisz później: Ustawienia → Ponownie przeprowadź '
-                'konfigurację.',
+          Expanded(
+            child: step == _SetupStep.permissions
+                ? const PermissionsPanel()
+                : ListView(
+                    key: Key('first-run-step-${step.name}'),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                    children: <Widget>[
+                      if (widget.firstStart && index == 0)
+                        _afterUpdate ? _updateNote(zen) : _welcome(zen),
+                      Text(
+                        t('Krok {n} z {total}', {
+                          'n': index + 1,
+                          'total': total,
+                        }),
+                        key: const Key('first-run-step-count'),
+                        style: zen.label(color: zen.textMuted),
+                      ),
+                      const SizedBox(height: 6),
+                      ..._body(zen, step),
+                      if (widget.firstStart) ...<Widget>[
+                        const SizedBox(height: 16),
+                        Text(
+                          t(
+                            'Wszystko zmienisz później: Ustawienia → '
+                            'Ponownie przeprowadź konfigurację.',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: zen.textMuted, fontSize: 12),
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+          if (_failed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Text(
+                t('Nie udało się zapisać. Spróbuj ponownie.'),
+                key: const Key('first-run-error'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.danger, fontSize: 13),
               ),
-              textAlign: TextAlign.center,
-              style: TextStyle(color: zen.textMuted, fontSize: 12),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Row(
+              children: <Widget>[
+                if (index > 0)
+                  TextButton(
+                    key: const Key('first-run-back'),
+                    onPressed: _finishing
+                        ? null
+                        : () => setState(() => _index = index - 1),
+                    child: Text(t('Wstecz')),
+                  ),
+                const Spacer(),
+                FilledButton(
+                  key: const Key('first-run-next'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(140, 48),
+                  ),
+                  onPressed: _finishing
+                      ? null
+                      : last
+                      ? () => unawaited(_finish())
+                      : () => setState(() => _index = index + 1),
+                  child: Text(
+                    last && !(widget.firstStart && total > steps.length)
+                        ? t('Gotowe')
+                        : t('Dalej'),
+                  ),
+                ),
+              ],
             ),
           ),
-      ],
+          // On every step, so nobody is held in the setup.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: TextButton(
+              key: const Key('first-run-skip'),
+              onPressed: _finishing ? null : () => unawaited(_finish()),
+              child: Text(t('Pomiń konfigurację')),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -283,10 +372,23 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
         text: t(
           'Powiadomienia widać na ekranie blokady i zostają w historii '
           'systemu. Rozmowa może mieć własny poziom (menu rozmowy → '
-          'Powiadomienia).',
+          'Treść powiadomień).',
         ),
       ),
       const ZenCard(child: NotificationPrivacySettingChoice()),
+    ],
+    _SetupStep.iphone => <Widget>[
+      ZenHero(
+        title: t('Jak iPhone ma budzić Zen?'),
+        icon: Icons.phone_iphone_rounded,
+        text: t(
+          'iOS usypia Zen zaraz po wyjściu z aplikacji. Wiadomości czekają '
+          'wtedy u znajomych, a Zen odbiera je, gdy się obudzi. Wybierz '
+          'sposoby budzenia — możesz łączyć kilka.',
+        ),
+      ),
+      const IosWakeOptions(),
+      const ZenCard(child: IosSettingsChecklist()),
     ],
     _SetupStep.gates => <Widget>[
       ZenHero(
@@ -309,6 +411,14 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow> {
     ],
     _SetupStep.permissions => const <Widget>[],
   };
+
+  /// After an update: why the setup is back (the answers are the current
+  /// settings).
+  Widget _updateNote(ZenColors zen) => ZenInfo(
+    key: const Key('first-run-update-note'),
+    icon: Icons.update_rounded,
+    text: t('Po aktualizacji: sprawdź te ustawienia — niektóre są nowe.'),
+  );
 
   /// First start only: the welcome above the first step.
   Widget _welcome(ZenColors zen) => ZenCard(

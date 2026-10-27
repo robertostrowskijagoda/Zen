@@ -601,11 +601,20 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
             ),
             child: _ChatRow(
               highlight: hasUnread,
-              avatar: ZenBlobAvatar(
-                name: conversation.name,
-                size: 50,
-                online: conversation.isOnline && !pending,
-                image: peerAvatarImage(conversation.avatarPath),
+              avatar: Semantics(
+                label: pending ? null : _presenceSemantics(conversation),
+                child: ZenBlobAvatar(
+                  name: conversation.name,
+                  size: 50,
+                  online: conversation.isOnline && !pending,
+                  away:
+                      conversation.presence == PeerPresence.background &&
+                      !pending,
+                  // A friend who does not show presence gets no dot.
+                  showStatus:
+                      pending || conversation.presence != PeerPresence.hidden,
+                  image: peerAvatarImage(conversation.avatarPath),
+                ),
               ),
               name: conversation.name,
               nickname: conversation.nickname,
@@ -617,7 +626,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                   ? Row(
                       children: <Widget>[
                         Text(
-                          t('Pisze...'),
+                          t('Pisze…'),
                           style: TextStyle(
                             color: zen.accent,
                             fontSize: 13.5,
@@ -722,6 +731,9 @@ void _showConversationActionSheet(
   final bool pending =
       conversation.status == FriendRelationshipStatus.pendingOutgoing;
   final bool online = conversation.isOnline && !pending;
+  final bool away =
+      conversation.presence == PeerPresence.background && !pending;
+  final String? presence = pending ? null : _presenceSemantics(conversation);
 
   showModalBottomSheet<void>(
     context: context,
@@ -744,6 +756,9 @@ void _showConversationActionSheet(
                     name: conversation.name,
                     size: 52,
                     online: online,
+                    away: away,
+                    showStatus:
+                        pending || conversation.presence != PeerPresence.hidden,
                     image: peerAvatarImage(conversation.avatarPath),
                   ),
                   const SizedBox(width: 14),
@@ -762,20 +777,34 @@ void _showConversationActionSheet(
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 6),
-                        ZenPill(
-                          text: pending
-                              ? t('Zaproszenie wysłane')
-                              : (conversation.isOnline
-                                    ? t('Dostępny')
-                                    : t('Offline')),
-                          tone: pending
-                              ? zen.warning
-                              : (conversation.isOnline
-                                    ? zen.success
-                                    : zen.textMuted),
-                          icon: pending ? Icons.schedule_rounded : Icons.circle,
-                        ),
+                        if (pending || presence != null) ...<Widget>[
+                          const SizedBox(height: 6),
+                          ZenPill(
+                            text: pending
+                                ? t('Zaproszenie wysłane')
+                                : presence!,
+                            tone: pending
+                                ? zen.warning
+                                : online
+                                ? zen.success
+                                : away
+                                ? zen.tone(ZenTone.network)
+                                : zen.textMuted,
+                            icon: pending
+                                ? Icons.schedule_rounded
+                                : online
+                                ? Icons.circle
+                                : away
+                                ? Icons.adjust_rounded
+                                : Icons.circle_outlined,
+                          ),
+                        ],
+                        // What the friend uses, as their devices
+                        // announced it.
+                        if (!pending) ...<Widget>[
+                          const SizedBox(height: 6),
+                          FriendDeviceKinds(address: conversation.address),
+                        ],
                       ],
                     ),
                   ),
@@ -1407,10 +1436,25 @@ ConversationPreview _conversationFromFriend(
         ? t('Teraz')
         : friend.lastActivityLabel,
     unreadCount: friend.unreadCount,
-    isOnline: friend.isOnline,
+    presence: friend.status == FriendRelationshipStatus.accepted
+        ? friend.presence
+        : PeerPresence.hidden,
+    lastOpenedAtMillis: friend.lastOpenedAtMillis,
     isTyping: friend.isTyping,
   );
 }
+
+/// What a chat's presence dot says, in words: "w sieci", "w tle · ostatnio
+/// otwierał(a) 5 min temu", …; `null` for a friend who does not show it.
+String? _presenceSemantics(ConversationPreview conversation) =>
+    friendPresenceLine(
+      FriendProfile(
+        address: conversation.address,
+        presence: conversation.presence,
+        lastOpenedAtMillis: conversation.lastOpenedAtMillis,
+      ),
+      DateTime.now().millisecondsSinceEpoch,
+    );
 
 Color _shellStatusAccent(ZenColors zen, AppShellState state) {
   if (state.health == ServiceHealth.failed ||
@@ -1434,6 +1478,9 @@ IconData _inboxIcon(InboxEntryType type) {
     InboxEntryType.friendRejected => Icons.person_off_outlined,
     InboxEntryType.friendCancelled => Icons.event_busy_outlined,
     InboxEntryType.groupInvite => Icons.group_add_outlined,
+    InboxEntryType.post => Icons.article_outlined,
+    InboxEntryType.mention => Icons.alternate_email_rounded,
+    InboxEntryType.mailbox => Icons.markunread_mailbox_outlined,
   };
 }
 
@@ -1448,6 +1495,9 @@ Color _inboxTone(ZenColors zen, InboxEntryType type) {
     InboxEntryType.friendRejected => zen.warning,
     InboxEntryType.friendCancelled => zen.textMuted,
     InboxEntryType.groupInvite => zen.tone(ZenTone.people),
+    InboxEntryType.post => zen.tone(ZenTone.people),
+    InboxEntryType.mention => zen.tone(ZenTone.communication),
+    InboxEntryType.mailbox => zen.warning,
   };
 }
 

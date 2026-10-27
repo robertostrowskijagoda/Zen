@@ -162,6 +162,10 @@ final class SocialEventText {
       }),
       'inbox.groupMessage' => '${group.isEmpty ? t('Grupa') : group}: $name',
       'inbox.groupMessage.body' => t('Nowa wiadomość w grupie.'),
+      'inbox.mention' => t('{name} wspomniał(a) o Tobie', {'name': name}),
+      'inbox.groupMention.body' => t('W grupie {group}', {
+        'group': group.isEmpty ? t('Grupa') : group,
+      }),
       'inbox.groupCall' => t('Połączenie grupowe: {group}', {
         'group': group.isEmpty ? t('Grupa') : group,
       }),

@@ -6,7 +6,7 @@
 ## Install
 
 The easiest way is the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**:
-it recognises your system and shows only its few steps (English and Polish).
+it recognises your system and links one page per system with the few steps, pictures and the download (21 languages).
 Zen is not in the app stores; everything comes from
 [GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest)
 or from a friend.
@@ -14,7 +14,7 @@ or from a friend.
 | System | How | Steps |
 |---|---|---|
 | Android | `Zen-arm64-v8a.apk` for most phones (`Zen-armeabi-v7a.apk` for older 32-bit phones, `Zen-x86_64.apk` for Chromebooks and emulators), straight from the page | download, open, **Install** |
-| iPhone (iOS 15+) | **SideStore**, with the "Add Zen source" link | 8 short steps, a computer once |
+| iPhone (iOS 15+) | **Scarlet**, an on-device installer, with `Zen-unsigned.ipa` | 4 short steps, no computer |
 | Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack (a folder `Zen`), run `Zen\zen.exe` (the Visual C++ runtime is inside) |
 | macOS 12+ | `Zen-macOS.zip` | drag to Applications; first launch: **Privacy & Security → Open Anyway** |
 | Linux x64 / arm64 | `.deb`, Flatpak (x64), `.tar.gz` | one command; Ubuntu 22.04, Debian 12, Mint 21 or newer (glibc 2.35+), elsewhere the Flatpak |
@@ -26,19 +26,19 @@ Smart App Control settings → Off), which lowers protection for the whole
 computer.
 
 **iPhone in short.** An iPhone app cannot install other apps, so Zen goes
-through SideStore. Once, with a computer and a cable: install
-**LocalDevVPN** from the App Store, run **iloader** on the computer to put
-SideStore on the phone, turn on **Developer Mode** and trust your Apple ID.
-Then, on the phone, add the Zen source
-(`https://robertostrowskijagoda.github.io/Zen/apps.json`, one tap on the
-install page) and tap **Install**. With a free Apple ID the signature
-**expires after 7 days**: once a week turn on LocalDevVPN, open SideStore
-and tap **Refresh** (your data stays). Zen reminds you in Chats 2 days
-before. A free Apple ID allows 3 such apps at a time (SideStore counts).
-On iPhone Zen receives and sends at once only while it is open (see
-[Chats](chats-and-delivery.md#iphone)).
-AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
-Zen yet.
+through a signing app on the phone, **Scarlet**: install Scarlet from its
+own website, trust its certificate (**Settings → General → VPN & Device
+Management**), download `Zen-unsigned.ipa` from the install page and install
+it with Scarlet (hold the download arrow, **Sideload IPA**). Scarlet signs
+Zen with a certificate it provides; Apple can revoke such certificates, and
+then Zen stops opening until you install it again the same way: make a full
+account copy first, since keeping the data is not verified. Zen's own
+encryption does not depend on that certificate. **SideStore** and **AltStore
+Classic** (add the Zen source, with a free Apple ID: the signature expires
+after 7 days) and Sideloadly (from a computer) still work. On iPhone Zen
+receives and sends at once only while it is open (see
+[Chats](chats-and-delivery.md#iphone)). AltStore PAL (EU) takes only apps
+notarized by Apple, so it can't install Zen yet.
 
 **Helping a friend.** In Zen: **Settings** (tap the top bar) **→ Invite →
 Friend doesn't have Zen?** On
@@ -57,7 +57,8 @@ to the install page and the same steps for every system.
    unlocks Zen here. You can also unlock with biometrics. *No password* is
    possible for the default account, but not recommended.
 3. **Setup.** A few questions, each with a sensible default, that you can
-   skip: when Zen locks itself (with what *Never* really means), what
+   skip: when Zen locks itself (with what *Never* really means; choosing it
+   asks for the password you have just set once more), what
    notifications say (*Sender and content*, *Sender only* or *Notice
    only*), whether your gates are open for free or need your consent, and
    the animations. *Settings → Run the setup again* asks them all again.
@@ -97,6 +98,12 @@ cleared after 60 seconds).
 - **Lock now** sits in the top bar once you have a password.
 - Zen locks itself after a while in the background (Settings → Privacy and
   security).
+- With *Auto-lock* set to *Never* (it takes your password once), Zen opens
+  without the password even after a restart: anyone holding your unlocked
+  phone sees your chats. **Lock now** still locks it, restarts included:
+  from then on every start asks for the password until you choose *Never*
+  again (it takes your password once more). The emergency wipe password
+  works only on that lock screen.
 - An **emergency wipe password** typed on the lock screen quietly erases
   the data instead of opening it (Settings → Security). It is not the
   alarm's *duress PIN*, which erases nothing.
@@ -185,9 +192,9 @@ doing anything: conversations with their photos, videos, files and voice
 messages; friends and groups; your profile with its photos; posts, the
 gallery and the films you published, with all their files (not only the
 ones opened on that device); the account's settings; your dating profile;
-meetings, plans, events and circles; the pyramid; and a copy of your
-household (the household itself runs on one phone — its door — and the
-copy is there for a recovery). Changes travel sealed for the account's
+meetings, plans, events and circles; the pyramid; the offline mailboxes
+you chose by hand; and a copy of your household (the household itself runs
+on one phone — its door — and the copy is there for a recovery). Changes travel sealed for the account's
 devices only. When two devices change the same thing, the later change
 wins on both (each change carries a counter, so the order of arrival does
 not matter); different changes are merged. Files travel on Wi-Fi or a

@@ -9,6 +9,7 @@ import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
@@ -47,6 +48,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'inboxText',
     'peerVersions',
     'groups',
+    'presence',
   ];
 
   /// Keys of the JSON document a newer build added: written back as read,
@@ -230,6 +232,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, int> disappearedMessages = <String, int>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
     final Map<String, String> peerAppVersions = <String, String>{};
@@ -313,6 +316,28 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      // Friends' presence: [state, confirmed at, last opened at].
+      final Object? presence = decoded['presence'];
+      if (presence is Map) {
+        for (final MapEntry<dynamic, dynamic> e in presence.entries) {
+          final FriendProfile? friend = friends[e.key];
+          final Object? v = e.value;
+          if (friend != null &&
+              v is List &&
+              v.length == 3 &&
+              v.every((Object? x) => x is int)) {
+            friends[friend.address] = friend.copyWith(
+              presence: enumAt(
+                PeerPresence.values,
+                v[0] as int,
+                PeerPresence.offline,
+              ),
+              presenceAtMillis: v[1] as int,
+              lastOpenedAtMillis: v[2] as int,
+            );
+          }
+        }
+      }
       profileSentVersion =
           (decoded['profileSentVersion'] as num?)?.toInt() ?? 0;
       final Object? callAcceptToken = decoded['callAcceptToken'];
@@ -324,6 +349,14 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         for (final MapEntry<dynamic, dynamic> e in timers.entries) {
           if (e.key is String && e.value is int && (e.value as int) >= 0) {
             disappearingTimers[e.key as String] = e.value as int;
+          }
+        }
+      }
+      final Object? gone = decoded['disappeared'];
+      if (gone is Map) {
+        for (final MapEntry<dynamic, dynamic> e in gone.entries) {
+          if (e.key is String && e.value is int) {
+            disappearedMessages[e.key as String] = e.value as int;
           }
         }
       }
@@ -407,6 +440,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      disappearedMessages: disappearedMessages,
       notificationPrivacy: notificationPrivacy,
       peerAppVersions: peerAppVersions,
     );
@@ -571,11 +605,23 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           for (final PeerPublicProfile peer in state.peerProfiles.values)
             peer.toJson(),
         ],
+        'presence': <String, List<int>>{
+          for (final FriendProfile friend in state.friends.values)
+            if (friend.presence != PeerPresence.offline ||
+                friend.presenceAtMillis != 0 ||
+                friend.lastOpenedAtMillis != 0)
+              friend.address: <int>[
+                friend.presence.index,
+                friend.presenceAtMillis,
+                friend.lastOpenedAtMillis,
+              ],
+        },
         'profileSentVersion': state.profileSentVersion,
         // Read by the other isolate to check the route the native call card
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        'disappeared': state.disappearedMessages,
         'notifyPrivacy': <String, String>{
           for (final MapEntry<String, NotificationPrivacy> e
               in state.notificationPrivacy.entries)
@@ -685,6 +731,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      disappearedMessages: Map<String, int>.from(state.disappearedMessages),
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,
       ),

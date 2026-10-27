@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/feature_flags.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -23,6 +24,7 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -41,10 +43,13 @@ import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
+import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
+import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/films/presentation/films_screen.dart';
 import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
@@ -68,6 +73,8 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/relay/iphone_delivery_notice.dart';
+import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
+import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -80,6 +87,7 @@ import 'package:zen/src/features/security/device_integrity.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/diagnostics_log_file.dart';
 import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
@@ -105,6 +113,7 @@ import 'package:zen/src/features/update/presentation/signing_expiry_banner.dart'
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
+part 'app_shell_screen_notifications.dart';
 part 'app_shell_screen_views.dart';
 part 'app_shell_screen_settings_security.dart';
 part 'app_shell_screen_widgets.dart';
@@ -171,7 +180,7 @@ final class AppShellState {
     if (isConnected) {
       return t('Połączono');
     }
-    return t('Łączę...');
+    return t('Łączę…');
   }
 
   String get healthSummary => switch (health) {
@@ -282,7 +291,8 @@ final class ConversationPreview {
     required this.lastMessage,
     required this.timeLabel,
     required this.unreadCount,
-    required this.isOnline,
+    this.presence = PeerPresence.offline,
+    this.lastOpenedAtMillis = 0,
     this.isTyping = false,
     this.avatarPath,
     this.nickname = '',
@@ -300,8 +310,15 @@ final class ConversationPreview {
   final String lastMessage;
   final String timeLabel;
   final int unreadCount;
-  final bool isOnline;
+
+  /// What the friend's Zen is doing ([PeerPresence.hidden]: they do not
+  /// show it), and when it was last open there (0: not known).
+  final PeerPresence presence;
+  final int lastOpenedAtMillis;
   final bool isTyping;
+
+  /// Zen is open on their screen now.
+  bool get isOnline => presence == PeerPresence.online;
 }
 
 class AppShellScreen extends ConsumerWidget {

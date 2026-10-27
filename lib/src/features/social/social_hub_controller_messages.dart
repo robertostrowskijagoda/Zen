@@ -567,9 +567,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             if (attachmentByteCount > 0) {
               stored = await _persistIncomingAttachmentFile(
                 peerAddress: signal.sender,
-                messageId: signal.messageId?.trim().isNotEmpty == true
-                    ? signal.messageId!.trim()
-                    : 'incoming-$timestamp-${signal.sender}',
+                messageId: _incomingMessageIdOf(signal),
                 bytes: attachmentBytes,
                 type: signal.messageType ?? ChatMessageType.file,
                 mimeType: signal.mimeType,
@@ -589,9 +587,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             return;
           }
         }
-        final String messageId = signal.messageId?.trim().isNotEmpty == true
-            ? signal.messageId!.trim()
-            : 'incoming-$timestamp-${signal.sender}';
+        final String messageId = _incomingMessageIdOf(signal);
         await _adoptDisappearTimerOf(signal, timestamp);
         final bool exists = await _timelineHasMessage(
           peerAddress: signal.sender,
@@ -1182,6 +1178,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         .send(remoteAddress: peerAddress, payload: payload);
   }
 
+  @override
   Future<void> _sendMessageAck({
     required String peerAddress,
     required String messageId,
@@ -1386,6 +1383,23 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       );
     }
   }
+}
+
+/// The id of a friend's chat message: its own, else one made from what it
+/// says (who wrote it, when, the text) — the same for every copy, however
+/// late one comes, as the locked receiver tells such frames apart.
+String _incomingMessageIdOf(ZenSignal signal) {
+  final String? own = signal.messageId?.trim();
+  if (own != null && own.isNotEmpty) {
+    return own;
+  }
+  final String hash = frameContentHash(<String, dynamic>{
+    'from': signal.sender,
+    'at': signal.sentAtMillis,
+    'text': signal.content,
+    'file': signal.fileName,
+  });
+  return 'incoming-$hash';
 }
 
 /// Display time of an incoming message: the sender's own timestamp, as long as

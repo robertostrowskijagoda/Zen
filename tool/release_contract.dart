@@ -35,12 +35,19 @@ const String kSumsAsset = 'SHA256SUMS';
 /// The maintainers' signature of [kSumsAsset] (kSignedSumsAssetName).
 const String kSignedSumsAsset = 'SHA256SUMS.sig';
 
+/// The short note about what is new in the version (kWhatsNewAssetName in
+/// lib/src/features/update/whats_new.dart), made from CHANGELOG.md by
+/// `tool/release.dart whats-new` and listed in SHA256SUMS like every file.
+const String kWhatsNewAsset = 'whats-new.json';
+
 /// Files a release may lack without breaking an update: the Windows ARM64
-/// build is not required yet (release.yml), and the signature exists only
-/// when the signing key is set up (required once the app pins a key).
+/// build is not required yet (release.yml), the signature exists only
+/// when the signing key is set up (required once the app pins a key), and
+/// without the note the notice shows the version alone.
 const Set<String> kOptionalAssets = <String>{
   'Zen-Windows-arm64.zip',
   kSignedSumsAsset,
+  kWhatsNewAsset,
 };
 
 /// Every file name the app or the install page relies on.
@@ -49,6 +56,7 @@ List<String> get kContractAssets => <String>[
   kIpaAsset,
   kSumsAsset,
   kSignedSumsAsset,
+  kWhatsNewAsset,
 ];
 
 /// A release file name as the app accepts it (`_safeAssetName`).
@@ -97,6 +105,9 @@ Set<String> workflowAssetNames(String releaseYml, {String iosYml = ''}) {
   }
   if (body.contains('/SHA256SUMS.sig')) {
     names.add(kSignedSumsAsset);
+  }
+  if (body.contains('dist/$kWhatsNewAsset')) {
+    names.add(kWhatsNewAsset);
   }
   if (iosYml.contains(kIpaAsset) && body.contains(kIpaAsset)) {
     names.add(kIpaAsset);
@@ -354,6 +365,10 @@ Future<List<String>> verifyReleaseFolder(
   } else if (requireSignature) {
     out.add('$kSignedSumsAsset is missing');
   }
+  final File note = File('${dir.path}/$kWhatsNewAsset');
+  if (note.existsSync()) {
+    out.addAll(whatsNewProblems(note.readAsStringSync(), version: version));
+  }
   return out;
 }
 
@@ -473,6 +488,174 @@ String moveUnreleased(String changelog, String version, DateTime date) {
   return '${changelog.substring(0, at)}\n$heading\n\n'
       '## $version — $day\n'
       '${changelog.substring(at + heading.length + 2)}';
+}
+
+/// The heading, inside a version's part of CHANGELOG.md, of the short note
+/// the app shows with the update notice (docs/RELEASES.md, "What's new").
+const String kWhatsNewHeading = "### What's new";
+
+/// Most lines of the note per language (kMaxWhatsNewLines).
+const int kMaxWhatsNewLines = 3;
+
+/// Most characters of one line (kMaxWhatsNewLineLength).
+const int kMaxWhatsNewLineLength = 160;
+
+/// The language every note has; the app falls back to it.
+const String kWhatsNewFallbackLanguage = 'en';
+
+/// A line of the note: `- [en] Text` (a two-letter language code).
+final RegExp _whatsNewLine = RegExp(r'^- \[([a-z]{2})\] (.*)$');
+
+/// What a line of the note must not hold, exactly as the app refuses it
+/// (isPlainWhatsNewLine): control characters, invisible format marks,
+/// links or anything that looks like a domain, Markdown or HTML.
+final RegExp _notPlainWhatsNew = RegExp(
+  r'[\u0000-\u001f\u007f-\u009f\u2028\u2029*`<>\[\]]|\p{Cf}|://|www\.'
+  r'|https?:|[\p{L}\p{N}_-]\.\p{L}{2,}',
+  caseSensitive: false,
+  unicode: true,
+);
+
+/// Why [text] cannot be a line of the note, or null when it can.
+String? whatsNewLineProblem(String text) {
+  if (text.isEmpty || text.trim() != text) {
+    return 'is empty or starts or ends with a space';
+  }
+  if (text.length > kMaxWhatsNewLineLength) {
+    return 'has ${text.length} characters (at most $kMaxWhatsNewLineLength)';
+  }
+  if (_notPlainWhatsNew.hasMatch(text)) {
+    return 'is not plain text (no links or domains, invisible marks, *, `, '
+        '<, >, [ or ])';
+  }
+  return null;
+}
+
+/// The "### What's new" note of [version]'s part of [changelog] (null:
+/// "## Unreleased"): language code → lines, in order, and what is wrong
+/// with it. Every non-empty line of the note is `- [xx] Text`; English is
+/// required (1 to [kMaxWhatsNewLines] lines), other languages optional
+/// with the same limit. [required]: a missing note is a problem too.
+({Map<String, List<String>> lines, List<String> problems}) whatsNewSection(
+  String changelog, {
+  String? version,
+  bool required = true,
+}) {
+  final String part = version ?? 'Unreleased';
+  final List<String> rows = const LineSplitter().convert(changelog);
+  final int start = rows.indexWhere(
+    (String r) =>
+        r == '## $part' || (version != null && r.startsWith('## $version ')),
+  );
+  final Map<String, List<String>> lines = <String, List<String>>{};
+  final List<String> problems = <String>[];
+  if (start < 0) {
+    return (
+      lines: lines,
+      problems: <String>['CHANGELOG.md has no "## $part" part'],
+    );
+  }
+  int at = start + 1;
+  while (at < rows.length &&
+      !rows[at].startsWith('## ') &&
+      rows[at].trim() != kWhatsNewHeading) {
+    at++;
+  }
+  if (at >= rows.length || rows[at].startsWith('## ')) {
+    if (required) {
+      problems.add('"## $part" in CHANGELOG.md has no "$kWhatsNewHeading"');
+    }
+    return (lines: lines, problems: problems);
+  }
+  for (at++; at < rows.length && !rows[at].startsWith('#'); at++) {
+    final String row = rows[at].trimRight();
+    if (row.trim().isEmpty) {
+      continue;
+    }
+    final RegExpMatch? m = _whatsNewLine.firstMatch(row);
+    if (m == null) {
+      problems.add('$kWhatsNewHeading: "$row" is not "- [en] Text"');
+      continue;
+    }
+    final String text = m.group(2)!;
+    final String? problem = whatsNewLineProblem(text);
+    if (problem != null) {
+      problems.add('$kWhatsNewHeading: "$text" $problem');
+      continue;
+    }
+    (lines[m.group(1)!] ??= <String>[]).add(text);
+  }
+  final List<String>? english = lines[kWhatsNewFallbackLanguage];
+  if (english == null || english.isEmpty) {
+    problems.add(
+      '$kWhatsNewHeading of "$part" has no English line '
+      '("- [$kWhatsNewFallbackLanguage] …")',
+    );
+  }
+  lines.forEach((String language, List<String> list) {
+    if (list.length > kMaxWhatsNewLines) {
+      problems.add(
+        '$kWhatsNewHeading of "$part" has ${list.length} [$language] lines '
+        '(at most $kMaxWhatsNewLines)',
+      );
+    }
+  });
+  return (lines: lines, problems: problems);
+}
+
+/// The text of [kWhatsNewAsset] for [version] with [lines] (as the app
+/// reads it, WhatsNew.fromJson).
+String whatsNewJson(String version, Map<String, List<String>> lines) {
+  final String json = jsonEncode(<String, Object?>{
+    't': 'zen_whats_new',
+    'app': 'zen',
+    'version': version,
+    'lines': lines,
+  });
+  return '$json\n';
+}
+
+/// What is wrong with the text of a [kWhatsNewAsset] for [version].
+List<String> whatsNewProblems(String text, {required String version}) {
+  final Object? json;
+  try {
+    json = jsonDecode(text);
+  } on FormatException catch (e) {
+    return <String>['$kWhatsNewAsset is not JSON: ${e.message}'];
+  }
+  if (json is! Map ||
+      json['t'] != 'zen_whats_new' ||
+      json['app'] != 'zen' ||
+      json['lines'] is! Map) {
+    return <String>['$kWhatsNewAsset is not a "zen_whats_new" note of "zen"'];
+  }
+  final List<String> out = <String>[
+    if (json['version'] != version)
+      '$kWhatsNewAsset is the note of ${json['version']}, not $version',
+  ];
+  final Map<dynamic, dynamic> lines = json['lines'] as Map<dynamic, dynamic>;
+  if (lines[kWhatsNewFallbackLanguage] is! List) {
+    out.add('$kWhatsNewAsset has no English lines');
+  }
+  lines.forEach((Object? language, Object? list) {
+    if (language is! String ||
+        !RegExp(r'^[a-z]{2}$').hasMatch(language) ||
+        list is! List ||
+        list.isEmpty ||
+        list.length > kMaxWhatsNewLines) {
+      out.add('$kWhatsNewAsset: the lines of "$language" are malformed');
+      return;
+    }
+    for (final Object? line in list) {
+      final String? problem = line is String
+          ? whatsNewLineProblem(line)
+          : 'is not text';
+      if (problem != null) {
+        out.add('$kWhatsNewAsset: "$line" $problem');
+      }
+    }
+  });
+  return out;
 }
 
 /// The entries of `const List<String> [name] = <String>[...];` in [source]

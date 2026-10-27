@@ -11,6 +11,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 // Pictures in comments (under posts and films): photos and GIFs, up to
 // [kMaxCommentImages] in one comment. They travel exactly like a post's
@@ -111,14 +112,15 @@ void checkCommentPictures(List<CommentPicture> pictures) {
 
 /// Writes a comment on [postId] (a post or a film) with [text] and
 /// [pictures] (made ready with [commentPicture]): the pictures are stored
-/// sealed first and named by the entry. Throws [ArgumentError] for an
-/// empty or too long comment, or too many pictures (nothing is stored
-/// then).
+/// sealed first and named by the entry. The `<@N>` tokens of [text] name
+/// [mentions]. Throws [ArgumentError] for an empty or too long comment, or
+/// too many pictures (nothing is stored then).
 Future<LogEntry> publishComment(
   LedgerNode node,
   String postId,
   String text, {
   List<CommentPicture> pictures = const <CommentPicture>[],
+  List<Mention> mentions = const <Mention>[],
 }) async {
   checkCommentPictures(pictures);
   // The text is checked before any file is stored.
@@ -136,7 +138,13 @@ Future<LogEntry> publishComment(
     }
     return await node.publish(
       kCommentKind,
-      commentBody(postId, text, mini: ownMiniProfile(node), images: refs),
+      commentBody(
+        postId,
+        text,
+        mini: ownMiniProfile(node),
+        images: refs,
+        mentions: mentions,
+      ),
       spaceKind: 'acts',
       blobs: mediaIds(refs),
     );

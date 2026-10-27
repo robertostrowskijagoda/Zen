@@ -27,23 +27,29 @@ aligned for phones with 16 KB memory pages. Details:
 ## How Zen updates itself
 
 - Every build except the store build asks GitHub for the latest release
-  20 seconds after it starts and then every 12 hours. GitHub sees your IP
-  address and the name "Zen", nothing else.
-- When there is a newer version, a bar says so. **Update** downloads the
+  20 seconds after it starts, when you come back to it and every hour while
+  it is open, whenever an hour has passed since the last look. On Android,
+  while Zen receives in the background, it also looks every few hours while
+  the app is closed. When a friend's Zen is newer than yours, Zen looks at
+  once. GitHub sees your IP address and the name "Zen", nothing else.
+- When there is a newer version, a quiet notification (once per version)
+  and a bar say so, with a few lines about what is new in it. **Update**
+  downloads the
   file for your system (on Android the APK for your phone's processor type)
   and checks it against the release's `SHA256SUMS`;
   on Android also that it is signed with the same certificate as the
   installed app. Then the system installer asks (Android), or a helper
   swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
   Zen's folder is not writable (Program Files, `/opt`) the file is saved to
-  Downloads. On iPhone there is only the bar; SideStore installs the update
-  from the Zen source (below).
+  Downloads. On iPhone there is only the bar; install the update the way you
+  installed Zen (Scarlet: download the new `Zen-unsigned.ipa` from the install
+  page; SideStore: the Zen source, below).
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
 - **When GitHub limits requests** (it allows only so many an hour from one
   address), Zen says so and shows when it tries again: as late as GitHub
-  asks, otherwise after 15 minutes, then 30, 60 and longer, up to 12 hours.
+  asks, otherwise after 15 minutes, then 30, then an hour.
   An unchanged answer costs nothing (Zen sends what it saw last time). If
   the repository has no published release (deleted or blocked), the card
   says so instead of "up to date"; a newer version can still come from a
@@ -65,7 +71,7 @@ aligned for phones with 16 KB memory pages. Details:
 
 GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 (steps for every system, the downloads, the Android signing certificate
-fingerprint) and **`apps.json`**, a SideStore / AltStore source. Both are
+fingerprint; one recommended way and its own page for each system) and **`apps.json`**, a SideStore / AltStore source. Both are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
 version, date, size and checksum, and the permissions read from that very
@@ -105,7 +111,8 @@ already.
   on only as a link (never as an APK) and has no launcher disguise. Because
   the store signs it, it also skips the check of its own signing
   certificate.
-- On iPhone Zen updates through SideStore (the source above), not by itself.
+- On iPhone Zen updates through the signer you installed it with (Scarlet: a new
+  file from the install page; SideStore: the source above), not by itself.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it

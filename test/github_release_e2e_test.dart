@@ -12,6 +12,12 @@ import 'package:zen/src/features/update/release.dart';
 import '../tool/release_contract.dart';
 import '../tool/zen_release.dart' as tool;
 
+/// The note of the release (CHANGELOG.md, "### What's new").
+final Map<String, List<String>> _whatsNew = <String, List<String>>{
+  'en': <String>['Messages reach you while Zen is closed.'],
+  'pl': <String>['Wiadomości docierają przy zamkniętym Zen.'],
+};
+
 /// A release folder made the way .github/workflows/release.yml makes it:
 /// every file the workflow writes, SHA256SUMS in `sha256sum` format
 /// (sorted, two spaces) and SHA256SUMS.sig from the release tool's
@@ -26,7 +32,7 @@ Future<Directory> _buildRelease(
   final Set<String> names = workflowAssetNames(
     File('.github/workflows/release.yml').readAsStringSync(),
     iosYml: File('.github/workflows/ios.yml').readAsStringSync(),
-  )..removeAll(<String>[kSumsAsset, kSignedSumsAsset]);
+  )..removeAll(<String>[kSumsAsset, kSignedSumsAsset, kWhatsNewAsset]);
   for (final String name in <String>[
     ...names,
     'LICENSE',
@@ -35,6 +41,10 @@ Future<Directory> _buildRelease(
   ]) {
     File('${dist.path}/$name').writeAsStringSync('$name of Zen $version\n');
   }
+  // As `tool/release.dart whats-new` writes it from CHANGELOG.md.
+  File(
+    '${dist.path}/$kWhatsNewAsset',
+  ).writeAsStringSync(whatsNewJson(version, _whatsNew));
   final List<String> files =
       dist
           .listSync()
@@ -217,6 +227,7 @@ void main() {
         asset,
       );
       expect(s.installState, GithubInstallState.done, reason: asset);
+      expect(s.whatsNew?.lines, _whatsNew, reason: asset);
       expect(installer.installed, hasLength(1), reason: asset);
       expect(
         installer.installed.single,

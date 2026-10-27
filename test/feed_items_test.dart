@@ -77,26 +77,43 @@ void main() {
     expect(ids(FeedFilter.friends, member), <String>['f1', 'f2']);
   });
 
-  test('„2. stopień” and „3. stopień”: posts passed on from that far; '
-      '„Znajomi” leaves them out, „Wszystko” keeps them in time', () {
+  test('„Znajomi”, „2. stopień” and „3. stopień” look one, two or three '
+      'steps far, in time; „Wszystko” as far as the reader looks', () {
     final List<FeedPost> mixed = <FeedPost>[
       friend('near', 50),
       friend('second', 40, degree: 2),
       friend('third', 30, degree: 3),
       friend('near2', 20),
     ];
-    List<String> shown(FeedFilter f) => <String>[
+    List<String> shown(FeedFilter f, {int depth = 2}) => <String>[
       for (final FeedItem i in composeFeed(
         f,
         wall: mixed,
         pyramid: PyramidFeed.empty,
+        depth: depth,
       ))
         i.id,
     ];
     expect(shown(FeedFilter.friends), <String>['near', 'near2']);
-    expect(shown(FeedFilter.second), <String>['second']);
-    expect(shown(FeedFilter.third), <String>['third']);
-    expect(shown(FeedFilter.all), <String>['near', 'second', 'third', 'near2']);
+    expect(shown(FeedFilter.second), <String>['near', 'second', 'near2']);
+    expect(shown(FeedFilter.third), <String>[
+      'near',
+      'second',
+      'third',
+      'near2',
+    ]);
+    expect(shown(FeedFilter.all), <String>['near', 'second', 'near2']);
+    expect(shown(FeedFilter.all, depth: 1), <String>['near', 'near2']);
+    expect(shown(FeedFilter.all, depth: 3), <String>[
+      'near',
+      'second',
+      'third',
+      'near2',
+    ]);
+    expect(FeedFilter.friends.depth, 1);
+    expect(FeedFilter.second.depth, 2);
+    expect(FeedFilter.third.depth, 3);
+    expect(FeedFilter.all.depth, isNull);
     expect(FeedFilter.parse('second'), FeedFilter.second);
   });
 

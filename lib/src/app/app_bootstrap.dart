@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
@@ -20,6 +21,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -319,6 +321,7 @@ final class ZenBootstrapper {
       source: 'ui',
     );
     logZenMessage('App bootstrap running.');
+    unawaited(ZenTechLog.noteExits());
     final AppSecurityService appSecurityService =
         await _runCriticalStep<AppSecurityService>(
           'init security',
@@ -412,6 +415,16 @@ final class ZenBootstrapper {
               ? BackgroundKeyProtector(
                   appSecurityService.credentialsStore,
                   createKey: true,
+                )
+              // An iPhone: the locked receiver runs the node while Zen is
+              // locked, in this process; the app's node waits until it let
+              // go (one node per identity).
+              : Platform.isIOS
+              ? IosNodeGate.protector(
+                  BackgroundKeyProtector(
+                    appSecurityService.credentialsStore,
+                    createKey: true,
+                  ),
                 )
               : Platform.isWindows || Platform.isLinux || Platform.isMacOS
               // A computer: under the background key only while

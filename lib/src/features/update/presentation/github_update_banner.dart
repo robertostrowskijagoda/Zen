@@ -52,7 +52,13 @@ class GithubUpdateBanner extends ConsumerWidget {
                     'version': newer.version,
                   }),
                   onClose: service.installing ? null : service.dismissNewer,
-                  child: _UpdateProgress(service: service, compact: true),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _WhatsNewLines(lines: service.whatsNewLines),
+                      _UpdateProgress(service: service, compact: true),
+                    ],
+                  ),
                 ),
               if (showUnreachable)
                 _BannerTile(
@@ -128,6 +134,57 @@ class _BannerTile extends StatelessWidget {
             ],
           ),
           ?child,
+        ],
+      ),
+    );
+  }
+}
+
+/// The release's short note ("what's new"), a line each: plain text, no
+/// links, each line cut after two rows. Nothing without one.
+class _WhatsNewLines extends StatelessWidget {
+  const _WhatsNewLines({required this.lines, this.title = false});
+
+  final List<String> lines;
+
+  /// On the updates screen: under a "Co nowego" heading.
+  final bool title;
+
+  @override
+  Widget build(BuildContext context) {
+    if (lines.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final ZenColors zen = ZenColors.of(context);
+    final TextStyle style = TextStyle(
+      color: zen.textSecondary,
+      fontSize: 13,
+      height: 1.35,
+    );
+    return Padding(
+      key: const Key('github-whats-new'),
+      padding: const EdgeInsetsDirectional.only(top: 6, end: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (title)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                t('Co nowego'),
+                style: style.copyWith(
+                  color: zen.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          for (final String line in lines)
+            Text(
+              '• $line',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
         ],
       ),
     );
@@ -375,7 +432,10 @@ class GithubUpdateCard extends ConsumerWidget {
                       ),
                     ],
                   ),
-                  if (newer != null) _UpdateProgress(service: service),
+                  if (newer != null) ...<Widget>[
+                    _WhatsNewLines(lines: service.whatsNewLines, title: true),
+                    _UpdateProgress(service: service),
+                  ],
                   if (newer != null &&
                       service.state == GithubCheckState.unreachable)
                     ZenInfo(
@@ -426,15 +486,17 @@ class GithubUpdateCard extends ConsumerWidget {
                       service.verifiesAuthorSignature
                           ? t(
                               'Zen sprawdza najnowsze wydanie na github.com '
-                              'co 12 godzin, na Androidzie także w tle, i '
-                              'o nowej wersji powiadamia raz. Pobrany plik '
+                              'przy starcie i co godzinę, na Androidzie '
+                              'także w tle co kilka godzin, i o nowej '
+                              'wersji powiadamia raz. Pobrany plik '
                               'instaluje dopiero po sprawdzeniu podpisu '
                               'autora i zgodności z SHA256SUMS wydania.',
                             )
                           : t(
                               'Zen sprawdza najnowsze wydanie na github.com '
-                              'co 12 godzin, na Androidzie także w tle, i '
-                              'o nowej wersji powiadamia raz. Pobrany plik '
+                              'przy starcie i co godzinę, na Androidzie '
+                              'także w tle co kilka godzin, i o nowej '
+                              'wersji powiadamia raz. Pobrany plik '
                               'instaluje dopiero po zgodności z SHA256SUMS '
                               'wydania.',
                             ),

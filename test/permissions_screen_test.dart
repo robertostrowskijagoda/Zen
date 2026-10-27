@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/permissions/presentation/vendor_battery_help.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
 
 /// An Android-like phone without Bluetooth (so no meeting service is
 /// needed): location, exact alarms and battery are the steps under test.
@@ -181,6 +183,56 @@ void main() {
     await _open(tester, _Platform(manufacturer: 'xiaomi'), textScale: 1.3);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('an iPhone: what its Settings must allow, as iOS says it now', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    int opened = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          permissionsPlatformProvider.overrideWithValue(
+            const NoPermissionsPlatform(),
+          ),
+          iosBackgroundBridgeEnabledProvider.overrideWithValue(true),
+          iosBackgroundStatusReaderProvider.overrideWithValue(
+            () async => const IosBackgroundStatus(
+              refresh: IosBackgroundRefresh.denied,
+              lowPower: true,
+              notifications: IosNotifications.allowed,
+            ),
+          ),
+          iosOpenZenSettingsProvider.overrideWithValue(() async => opened++),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: const PermissionsScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('permissions-row-iphone')), findsOneWidget);
+    expect(find.text('Nic do ustawienia'), findsNothing);
+    String pillOf(String row) => tester
+        .widget<ZenPill>(
+          find.descendant(
+            of: find.byKey(Key(row)),
+            matching: find.byType(ZenPill),
+          ),
+        )
+        .text;
+    expect(pillOf('ios-check-refresh'), 'Do zmiany');
+    expect(pillOf('ios-check-low-power'), 'Do zmiany');
+    expect(pillOf('ios-check-notifications'), 'Gotowe');
+    expect(find.byKey(const Key('ios-check-app-switcher')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ios-check-open-settings')));
+    await tester.pump();
+    expect(opened, 1);
   });
 
   test('vendors are told apart by the manufacturer name', () {

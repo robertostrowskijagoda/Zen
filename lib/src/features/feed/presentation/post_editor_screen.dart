@@ -13,7 +13,6 @@ import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
-import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
@@ -22,6 +21,8 @@ import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/presentation/mention_field.dart';
 
 /// A photo, video or recording ready to go into a post.
 @immutable
@@ -51,23 +52,21 @@ final class DraftMedia {
 }
 
 /// What the editor hands over for publishing: [text] with `{{media:N}}`
-/// lines where the N-th of [media] goes.
+/// lines where the N-th of [media] goes, and `<@N>` tokens where the N-th
+/// of [mentions] is mentioned.
 @immutable
 final class PostDraft {
   const PostDraft({
     required this.text,
     required this.audience,
     this.media = const <DraftMedia>[],
-    this.reach = PostReach.friends,
+    this.mentions = const <Mention>[],
   });
 
   final String text;
   final Audience audience;
   final List<DraftMedia> media;
-
-  /// How far the post goes ([PostReach.friends] for anything but a public
-  /// post).
-  final PostReach reach;
+  final List<Mention> mentions;
 }
 
 /// Publishes a draft; returns an error message ('' = stay quietly), or null
@@ -125,12 +124,6 @@ DraftMedia audioDraft(Uint8List bytes, {String name = '', int? durationMs}) {
 /// Videos are shared as they are (no re-encoding on the phone), so they
 /// are kept small enough to travel between friends.
 const int kMaxVideoBytes = 50 * 1024 * 1024;
-
-const Map<PostReach, IconData> kReachIcons = <PostReach, IconData>{
-  PostReach.friends: Icons.person_rounded,
-  PostReach.friendsOfFriends: Icons.group_work_rounded,
-  PostReach.third: Icons.hub_rounded,
-};
 
 const Map<Audience, IconData> kAudienceIcons = <Audience, IconData>{
   Audience.public: Icons.public_rounded,
@@ -323,8 +316,8 @@ String sizeLabel(int bytes) => bytes >= 1024 * 1024
 sealed class _Block {}
 
 final class _TextBlock extends _Block {
-  _TextBlock(String text)
-    : controller = RichTextController(text: text),
+  _TextBlock(String text, [List<MentionSpan> mentions = const <MentionSpan>[]])
+    : controller = (RichTextController(text: text)..mentionSpans = mentions),
       focus = FocusNode();
 
   final RichTextController controller;
@@ -346,14 +339,16 @@ final class _MediaBlock extends _Block {
 /// videos placed exactly where the cursor is. A preview shows the post as
 /// friends will see it. Also edits an existing post ([editing]): its text,
 /// photos and videos ([initialMedia], placed by the `{{media:N}}` lines of
-/// [initialText]); who sees it stays as it was.
+/// [initialText]); who sees it stays as it was. "@" offers
+/// [mentionCandidates] to mention.
 class PostEditorScreen extends StatefulWidget {
   const PostEditorScreen({
     required this.onSubmit,
     this.initialText = '',
+    this.initialMentions = const <Mention>[],
+    this.mentionCandidates,
     this.initialMedia = const <DraftMedia>[],
     this.initialAudience = Audience.public,
-    this.initialReach = kDefaultPostReach,
     this.editing = false,
     this.pickPhotos,
     this.pickVideos,
@@ -365,11 +360,15 @@ class PostEditorScreen extends StatefulWidget {
 
   final PostSubmit onSubmit;
   final String initialText;
+
+  /// The people [initialText]'s tokens mention (an edited post).
+  final List<Mention> initialMentions;
+
+  /// Who the post may mention (`post_mentions.dart`); no suggestions when
+  /// `null`.
+  final List<MentionCandidate> Function()? mentionCandidates;
   final List<DraftMedia> initialMedia;
   final Audience initialAudience;
-
-  /// How far a public post goes (picked next to who sees it).
-  final PostReach initialReach;
   final bool editing;
 
   /// Override the pickers (tests).
@@ -388,9 +387,10 @@ class PostEditorScreen extends StatefulWidget {
     BuildContext context, {
     required PostSubmit onSubmit,
     String initialText = '',
+    List<Mention> initialMentions = const <Mention>[],
+    List<MentionCandidate> Function()? mentionCandidates,
     List<DraftMedia> initialMedia = const <DraftMedia>[],
     Audience initialAudience = Audience.public,
-    PostReach initialReach = kDefaultPostReach,
     bool editing = false,
     PhotoSource? pickPhotos,
     VideoSource? pickVideos,
@@ -404,9 +404,10 @@ class PostEditorScreen extends StatefulWidget {
           builder: (BuildContext context) => PostEditorScreen(
             onSubmit: onSubmit,
             initialText: initialText,
+            initialMentions: initialMentions,
+            mentionCandidates: mentionCandidates,
             initialMedia: initialMedia,
             initialAudience: initialAudience,
-            initialReach: initialReach,
             editing: editing,
             pickPhotos: pickPhotos,
             pickVideos: pickVideos,
@@ -437,12 +438,31 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final List<_Block> out = <_Block>[];
     final List<String> lines = <String>[];
     final Set<int> used = <int>{};
+    // Mentions are edited as "@name"; each block takes those of its lines.
+    final ({String text, List<MentionSpan> spans}) shown = decodeMentions(
+      widget.initialText,
+      widget.initialMentions,
+    );
+    int at = 0;
+    int blockStart = 0;
     void text() {
-      out.add(_TextBlock(lines.join('\n')));
+      final String joined = lines.join('\n');
+      out.add(
+        _TextBlock(joined, <MentionSpan>[
+          for (final MentionSpan s in shown.spans)
+            if (s.start >= blockStart && s.end <= blockStart + joined.length)
+              s.shifted(-blockStart),
+        ]),
+      );
       lines.clear();
     }
 
-    for (final String line in widget.initialText.split('\n')) {
+    for (final String line in shown.text.split('\n')) {
+      final int lineStart = at;
+      at += line.length + 1;
+      if (lines.isEmpty) {
+        blockStart = lineStart;
+      }
       final List<int> ref = referencedMedia(line);
       final int? i = ref.isEmpty ? null : ref.first;
       if (i != null &&
@@ -468,7 +488,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 
   late Audience _audience = widget.initialAudience;
-  late PostReach _reach = widget.initialReach;
 
   /// A voice message being recorded, and since when.
   VoiceMessageRecorder? _recording;
@@ -535,21 +554,43 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   int get _room => kMaxPostImages - _media.length - _processing;
 
   /// The post as text, media as `{{media:N}}` lines.
-  String get _source {
-    final List<String> parts = <String>[];
+  String get _source => _written.text;
+
+  /// The post as written ("@name" for mentions) and where its mentions are.
+  ({String text, List<MentionSpan> spans}) get _written {
+    final StringBuffer out = StringBuffer();
+    final List<MentionSpan> spans = <MentionSpan>[];
     int n = 0;
     for (final _Block b in _blocks) {
+      final String piece;
+      List<MentionSpan> own = const <MentionSpan>[];
       switch (b) {
         case _TextBlock(:final RichTextController controller):
-          final String t = controller.text.trimRight();
-          if (t.trim().isNotEmpty) {
-            parts.add(t);
+          piece = controller.text.trimRight();
+          if (piece.trim().isEmpty) {
+            continue;
           }
+          own = controller.mentionSpans;
         case _MediaBlock():
-          parts.add(mediaToken(n++));
+          piece = mediaToken(n++);
       }
+      if (out.isNotEmpty) {
+        out.write('\n');
+      }
+      final int start = out.length;
+      out.write(piece);
+      spans.addAll(<MentionSpan>[
+        for (final MentionSpan s in own)
+          if (s.end <= piece.length) s.shifted(start),
+      ]);
     }
-    return parts.join('\n');
+    return (text: out.toString(), spans: spans);
+  }
+
+  /// What is published: tokens in place of the mentions, and the list.
+  ({String text, List<Mention> mentions}) get _stored {
+    final ({String text, List<MentionSpan> spans}) w = _written;
+    return encodeMentions(w.text, w.spans, keep: widget.initialMentions);
   }
 
   bool get _mediaChanged {
@@ -589,11 +630,17 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final String after = text
         .substring(cut)
         .replaceFirst(RegExp(r'^\s*\n'), '');
+    // The mentions after the cut go along with their text.
+    final int afterStart = text.length - after.length;
+    final List<MentionSpan> moved = <MentionSpan>[
+      for (final MentionSpan s in _active.controller.mentionSpans)
+        if (s.start >= afterStart) s.shifted(-afterStart),
+    ];
     _active.controller.value = TextEditingValue(
       text: before,
       selection: TextSelection.collapsed(offset: before.length),
     );
-    final _TextBlock next = _TextBlock(after);
+    final _TextBlock next = _TextBlock(after, moved);
     _watch(next);
     setState(() {
       _blocks.insertAll(at + 1, <_Block>[_MediaBlock(media), next]);
@@ -617,11 +664,20 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           _blocks[at] is _TextBlock) {
         final _TextBlock a = _blocks[at - 1] as _TextBlock;
         final _TextBlock b = _blocks.removeAt(at) as _TextBlock;
+        final String head = a.controller.text.trimRight();
         final String joined = <String>[
-          a.controller.text.trimRight(),
+          head,
           b.controller.text,
         ].where((String s) => s.isNotEmpty).join('\n');
+        final int bStart = joined.length - b.controller.text.length;
+        final List<MentionSpan> spans = <MentionSpan>[
+          for (final MentionSpan s in a.controller.mentionSpans)
+            if (s.end <= head.length) s,
+          for (final MentionSpan s in b.controller.mentionSpans)
+            s.shifted(bStart),
+        ];
         a.controller.text = joined;
+        a.controller.mentionSpans = spans;
         if (identical(_active, b)) {
           _active = a;
         }
@@ -1036,76 +1092,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     }
   }
 
-  /// "Jak daleko?": only a public post goes past friends.
-  Future<void> _chooseReach() async {
-    final PostReach? picked = await showModalBottomSheet<PostReach>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (BuildContext context) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    t('Jak daleko ma dotrzeć?'),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-                child: Text(
-                  t(
-                    'Dalej niż do znajomych idzie tylko zapowiedź posta. '
-                    'Treść pobiera się od Ciebie albo od znajomych, którzy '
-                    'ją mają. Każdy widzi, przez kogo post do niego dotarł.',
-                  ),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: ZenColors.of(context).textSecondary,
-                  ),
-                ),
-              ),
-              for (final PostReach r in PostReach.values)
-                ListTile(
-                  key: Key('post-reach-${r.name}'),
-                  leading: ZenIconBadge(
-                    icon: kReachIcons[r]!,
-                    tone: r == _reach
-                        ? ZenColors.of(context).accent
-                        : ZenColors.of(context).textSecondary,
-                    size: 38,
-                  ),
-                  title: Text(r.label),
-                  subtitle: Text(r.hint),
-                  trailing: r == _reach
-                      ? Icon(
-                          Icons.check_circle_rounded,
-                          color: ZenColors.of(context).accent,
-                        )
-                      : null,
-                  onTap: () => Navigator.of(context).pop(r),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (picked != null && mounted) {
-      setState(() => _reach = picked);
-    }
-  }
-
   Future<void> _close() async {
     if (!_dirty || _submitting) {
       Navigator.of(context).pop(false);
@@ -1145,12 +1131,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       _submitting = true;
       _error = null;
     });
+    final ({String text, List<Mention> mentions}) stored = _stored;
     final String? error = await widget.onSubmit(
       PostDraft(
-        text: _source,
+        text: stored.text,
         audience: _audience,
         media: List<DraftMedia>.unmodifiable(_media),
-        reach: _audience == Audience.public ? _reach : PostReach.friends,
+        mentions: stored.mentions,
       ),
     );
     if (!mounted) {
@@ -1270,44 +1257,59 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       children: <Widget>[
         for (final _Block b in _blocks)
           switch (b) {
-            _TextBlock() => TextField(
-              key: identical(b, _blocks.first) ? const Key('post-text') : null,
-              controller: b.controller,
-              focusNode: b.focus,
-              enableIMEPersonalizedLearning: false,
-              // GIFs and stickers from the keyboard (Android) go in like
-              // pasted pictures; iPhone keyboards copy them to the
-              // clipboard ("Wklej obrazek" in the field's menu).
-              contentInsertionConfiguration: ContentInsertionConfiguration(
-                onContentInserted: (KeyboardInsertedContent content) {
-                  final Uint8List? data = content.data;
-                  if (data != null && data.isNotEmpty) {
-                    unawaited(
-                      _addTransferred(<TransferItem>[
-                        TransferItem(name: 'klawiatura', bytes: data),
-                      ]),
-                    );
-                  }
-                },
-              ),
-              contextMenuBuilder: picturePasteMenu(_addTransferred),
-              keyboardType: TextInputType.multiline,
-              textCapitalization: TextCapitalization.sentences,
-              minLines: onlyOne ? 6 : 1,
-              maxLines: null,
-              style: style,
-              decoration: InputDecoration(
-                hintText: widget.editing || !identical(b, _blocks.first)
-                    ? null
-                    : t('Co słychać? Podziel się czymś ze znajomymi…'),
-                hintStyle: style.copyWith(color: zen.textMuted),
-                filled: false,
-                isDense: true,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              ),
+            _TextBlock() => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                TextField(
+                  key: identical(b, _blocks.first)
+                      ? const Key('post-text')
+                      : null,
+                  controller: b.controller,
+                  focusNode: b.focus,
+                  enableIMEPersonalizedLearning: false,
+                  // GIFs and stickers from the keyboard (Android) go in like
+                  // pasted pictures; iPhone keyboards copy them to the
+                  // clipboard ("Wklej obrazek" in the field's menu).
+                  contentInsertionConfiguration: ContentInsertionConfiguration(
+                    onContentInserted: (KeyboardInsertedContent content) {
+                      final Uint8List? data = content.data;
+                      if (data != null && data.isNotEmpty) {
+                        unawaited(
+                          _addTransferred(<TransferItem>[
+                            TransferItem(name: 'klawiatura', bytes: data),
+                          ]),
+                        );
+                      }
+                    },
+                  ),
+                  contextMenuBuilder: picturePasteMenu(_addTransferred),
+                  keyboardType: TextInputType.multiline,
+                  textCapitalization: TextCapitalization.sentences,
+                  minLines: onlyOne ? 6 : 1,
+                  maxLines: null,
+                  style: style,
+                  decoration: InputDecoration(
+                    hintText: widget.editing || !identical(b, _blocks.first)
+                        ? null
+                        : t('Co słychać?'),
+                    hintStyle: style.copyWith(color: zen.textMuted),
+                    filled: false,
+                    isDense: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+                // "@" in the block being written offers whom to mention.
+                if (identical(b, _active) && widget.mentionCandidates != null)
+                  MentionSuggestions(
+                    controller: b.controller,
+                    candidates: widget.mentionCandidates!,
+                    padding: const EdgeInsets.only(bottom: 6),
+                  ),
+              ],
             ),
             _MediaBlock(:final DraftMedia media) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1579,49 +1581,42 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 12),
-                                // The pills wrap under each other when
-                                // they do not fit side by side.
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(
-                                        t('Ty'),
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 15,
-                                          color: zen.textPrimary,
-                                        ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      t('Ty'),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                        color: zen.textPrimary,
                                       ),
-                                      const SizedBox(height: 4),
-                                      Wrap(
-                                        spacing: 6,
-                                        runSpacing: 6,
-                                        children: <Widget>[
-                                          _AudiencePill(
-                                            audience: _audience,
-                                            onTap: widget.editing
-                                                ? null
-                                                : () => unawaited(
-                                                    _chooseAudience(),
-                                                  ),
-                                          ),
-                                          if (_audience == Audience.public)
-                                            _ReachPill(
-                                              reach: _reach,
-                                              onTap: widget.editing
-                                                  ? null
-                                                  : () => unawaited(
-                                                      _chooseReach(),
-                                                    ),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _AudiencePill(
+                                      audience: _audience,
+                                      onTap: widget.editing
+                                          ? null
+                                          : () => unawaited(_chooseAudience()),
+                                    ),
+                                  ],
                                 ),
                               ],
+                            ),
+                            // Who will see it, said next to where it is
+                            // written (a public post is the default).
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                kAudienceHints[_audience]!,
+                                key: const Key('post-audience-hint'),
+                                style: TextStyle(
+                                  color: _audience == Audience.public
+                                      ? zen.textSecondary
+                                      : zen.textMuted,
+                                  fontSize: 12.5,
+                                ),
+                              ),
                             ),
                             const SizedBox(height: 6),
                             if (_preview)
@@ -1634,7 +1629,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                         style: TextStyle(color: zen.textMuted),
                                       )
                                     : RichPostBody(
-                                        source: source,
+                                        source: _stored.text,
+                                        mentions: _stored.mentions,
                                         mediaCount: media.length,
                                         fontSize: 16,
                                         mediaBuilder: (BuildContext c, int i) =>
@@ -1731,53 +1727,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ReachPill extends StatelessWidget {
-  const _ReachPill({required this.reach, this.onTap});
-
-  final PostReach reach;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    return Material(
-      color: zen.surfaceSunk,
-      shape: StadiumBorder(side: BorderSide(color: zen.outlineSoft)),
-      child: InkWell(
-        key: const Key('post-reach'),
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(10, 5, 6, 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(kReachIcons[reach], size: 15, color: zen.textPrimary),
-              const SizedBox(width: 6),
-              Text(
-                reach.label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: zen.textPrimary,
-                ),
-              ),
-              if (onTap != null)
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: 20,
-                  color: zen.textSecondary,
-                )
-              else
-                const SizedBox(width: 6),
-            ],
           ),
         ),
       ),

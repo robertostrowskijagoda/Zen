@@ -83,6 +83,18 @@ type bridgeNode struct {
 	// transit estimate (traffic_meter.go).
 	traffic     ownTraffic
 	peerTraffic peerTrafficMeter
+	// A phone's limit on strangers' traffic passing through it and the
+	// peerings it set aside while it holds (transit_guard.go); nil guard on
+	// computers.
+	transitGuard    *transitGuard
+	transitHold     *transitHold
+	transitHoldMu   sync.Mutex
+	transitStop     chan struct{}
+	transitStopOnce sync.Once
+	// The node's key, held while it runs, and when the app last called on
+	// the node (node_identity.go); nil in tests that build a node by hand.
+	identity *nodeIdentityClaim
+	lastCall atomic.Int64
 }
 
 type configSummary struct {

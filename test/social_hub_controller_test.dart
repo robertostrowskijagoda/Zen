@@ -8,6 +8,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
@@ -4623,54 +4624,58 @@ void main() {
     },
   );
 
-  test(
-    'presence decay marks stale peers offline and keeps last seen label',
-    () async {
-      final MemorySocialSnapshotStore snapshotStore =
-          MemorySocialSnapshotStore();
-      final ProviderContainer container = ProviderContainer(
-        overrides: [
-          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-          socialSnapshotStoreProvider.overrideWithValue(snapshotStore),
-          messageTimelineStoreProvider.overrideWithValue(
-            MemoryMessageTimelineStore(),
+  test('presence decay marks stale peers offline and keeps when they were last '
+      'open', () async {
+    final MemorySocialSnapshotStore snapshotStore = MemorySocialSnapshotStore();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(snapshotStore),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            friends: const <String, FriendProfile>{
+              'ada.ygg': FriendProfile(
+                address: 'ada.ygg',
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.accepted,
+                isOnline: true,
+                lastPresenceAtMillis: 10,
+                presence: PeerPresence.online,
+                presenceAtMillis: 10,
+                lastOpenedAtMillis: 10,
+                lastActivityLabel: '08:41',
+              ),
+            },
           ),
-          socialHubSeedProvider.overrideWithValue(
-            SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                  isOnline: true,
-                  lastPresenceAtMillis: 10,
-                  lastActivityLabel: 'Teraz',
-                ),
-              },
-            ),
-          ),
-        ],
-      );
-      addTearDown(container.dispose);
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
 
-      await container
-          .read(socialHubControllerProvider.notifier)
-          .decayPresence(
-            offlineAfter: const Duration(milliseconds: 20),
-            nowMillis: 40,
-          );
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .decayPresence(
+          offlineAfter: const Duration(milliseconds: 20),
+          foregroundFor: const Duration(milliseconds: 10),
+          nowMillis: 40,
+        );
 
-      final FriendProfile friend = container
-          .read(socialHubControllerProvider)
-          .friends['ada.ygg']!;
-      expect(friend.isOnline, isFalse);
-      expect(friend.lastActivityLabel, 'Przed chwila');
-      expect(
-        (await snapshotStore.load())!.friends['ada.ygg']!.lastActivityLabel,
-        'Przed chwila',
-      );
-    },
-  );
+    final FriendProfile friend = container
+        .read(socialHubControllerProvider)
+        .friends['ada.ygg']!;
+    expect(friend.isOnline, isFalse);
+    expect(friend.presence, PeerPresence.offline);
+    expect(friend.lastOpenedAtMillis, 10);
+    // The chat list keeps the time of the last message.
+    expect(friend.lastActivityLabel, '08:41');
+    final FriendProfile stored =
+        (await snapshotStore.load())!.friends['ada.ygg']!;
+    expect(stored.presence, PeerPresence.offline);
+    expect(stored.lastOpenedAtMillis, 10);
+  });
 
   test(
     'inbox entries can be dismissed individually and cleared in bulk',

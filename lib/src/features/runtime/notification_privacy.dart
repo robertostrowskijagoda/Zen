@@ -12,6 +12,7 @@ import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -62,11 +63,71 @@ NoticeText messageNoticeText({
   );
 }
 
+/// What the notification about a mention says at [level]: [sender]
+/// mentioned this person in the group chat [group] when that is not `null`
+/// ('' for a group without a name), else in a post or a comment;
+/// [preview] is what they wrote.
+///
+/// * [NotificationPrivacy.senderAndContent]: who and what ("Ada
+///   wspomniał(a) o Tobie" / "Hej @Bob!"; in a group "Ekipa" / "Ada
+///   wspomniał(a) o Tobie: Hej @Bob!").
+/// * [NotificationPrivacy.senderOnly]: who, never what.
+/// * [NotificationPrivacy.generic]: in a group what any message says ("Nowa
+///   wiadomość"), elsewhere only "Ktoś wspomniał o Tobie", and
+///   [genericBody].
+NoticeText mentionNoticeText({
+  required NotificationPrivacy level,
+  required String sender,
+  String? group,
+  String? preview,
+  String? genericBody,
+}) {
+  final String body = genericBody ?? t('Otwórz Zen, aby zobaczyć szczegóły.');
+  if (level == NotificationPrivacy.generic) {
+    return group == null
+        ? (title: t('Ktoś wspomniał o Tobie'), body: body)
+        : messageNoticeText(
+            level: level,
+            sender: sender,
+            genericBody: genericBody,
+          );
+  }
+  final String? text = level == NotificationPrivacy.senderAndContent
+      ? preview?.trim()
+      : null;
+  final bool hasText = text != null && text.isNotEmpty;
+  final String said = t('{name} wspomniał(a) o Tobie', {'name': sender});
+  if (group == null) {
+    return (title: said, body: hasText ? text : body);
+  }
+  return (
+    title: group.trim().isNotEmpty ? group.trim() : t('Wiadomość grupowa'),
+    body: hasText ? '$said: $text' : said,
+  );
+}
+
+/// The key of the mark a group message gets on this device when it
+/// mentions this person and may say so ([signalMentionsYou]). Set only
+/// here, after the checks (never read from what came over the wire).
+const String kMentionsYouKey = 'mentionsYou';
+
+/// Whether [signal] was found to mention this person (see
+/// [kMentionsYouKey]).
+bool signalMentionsYou(ZenSignal signal) =>
+    signal.chatExtras?[kMentionsYouKey] == true;
+
+/// The people a chat or group message [signal] mentions.
+List<Mention> signalMentions(ZenSignal signal) =>
+    mentionsFromJson(signal.chatExtras?[kMentionsKey]);
+
 /// What [signal] says in a notice or an inbox entry: for a message with an
 /// attachment only the label of its type (never the caption or file name),
-/// otherwise its text.
+/// otherwise its text (mentions as "@name").
 String? signalNoticePreview(ZenSignal signal) {
-  final String? content = signal.content;
+  final String? raw = signal.content;
+  final String? content = raw == null
+      ? null
+      : mentionsAsPlainText(raw, signalMentions(signal));
   final ChatMessageType? type = signal.messageType;
   if (content == null && (type == null || type == ChatMessageType.text)) {
     return null;
@@ -77,6 +138,23 @@ String? signalNoticePreview(ZenSignal signal) {
     fileName: signal.fileName,
     mimeType: signal.mimeType,
   );
+}
+
+/// The most characters of a message the locked background receiver puts in
+/// a notice. It reads an incoming message only in memory, to say this
+/// much; the whole message goes into the sealed inbox, which only the
+/// unlocked app opens (docs/SECURITY_MODEL.md).
+const int kLockedNoticePreviewChars = 80;
+
+/// [text] cut to [max] characters (whole characters, not UTF-16 halves),
+/// with "…" when anything was cut.
+String shortNoticePreview(String text, {int max = kLockedNoticePreviewChars}) {
+  final String trimmed = text.trim();
+  final List<int> runes = trimmed.runes.toList(growable: false);
+  if (runes.length <= max) {
+    return trimmed;
+  }
+  return '${String.fromCharCodes(runes.take(max - 1)).trimRight()}…';
 }
 
 /// The per-conversation key of the group chat [groupId] (the 1:1 chat's
@@ -93,28 +171,40 @@ String conversationKeyOfSignal(ZenSignal signal) {
       : signal.sender;
 }
 
-/// What the locked background receiver needs to tell who wrote (and what)
-/// in its notifications: the level ([privacy]) and the conversations'
+/// What the locked background receiver (Android's service, an iPhone's
+/// background wakes) needs to tell who wrote (and at most
+/// [kLockedNoticePreviewChars] of what) in its notifications: the level
+/// ([privacy]) and the conversations'
 /// own levels ([overrides]); and the names ([names]: by normalized address
-/// and by group key) of only those conversations whose level shows the
-/// sender. Sealed with the background key, like the other kits; the app
-/// writes it whenever any of it changes ([lockedNoticeKitOf]).
+/// and by group key) and the members ([members]: by group key) of only
+/// those conversations whose level shows the sender. Sealed with the
+/// background key, like the other kits; the app writes it whenever any of
+/// it changes ([lockedNoticeKitOf]).
 ///
 /// A conversation the kit has no name for is told about without one: so is
-/// everything from strangers and everything without a kit.
+/// everything from strangers, a group message from anyone the kit does not
+/// list as a member of that group, and everything without a kit. A name
+/// the sender gave itself is never shown: only the names this person gave
+/// their friends.
 @immutable
 final class LockedNoticeKit {
   const LockedNoticeKit({
     this.privacy = AppSettings.defaultNotificationPrivacy,
     this.overrides = const <String, NotificationPrivacy>{},
     this.names = const <String, String>{},
+    this.members = const <String, Set<String>>{},
   });
 
   final NotificationPrivacy privacy;
   final Map<String, NotificationPrivacy> overrides;
   final Map<String, String> names;
 
-  /// The most names and levels a kit holds.
+  /// The normalized addresses of each group's members (a friend's other
+  /// devices among them), by group key.
+  final Map<String, Set<String>> members;
+
+  /// The most names and levels a kit holds, and the most members of all
+  /// its groups together.
   static const int maxEntries = 2000;
 
   NotificationPrivacy levelOf(String key) => overrides[key] ?? privacy;
@@ -148,17 +238,21 @@ final class LockedNoticeKit {
     if (level == NotificationPrivacy.generic || known == null) {
       return generic;
     }
+    // Anyone may claim to write in a group: only its members are told
+    // about by name, and only by the name this person gave them.
+    if (inGroup && !(members[key]?.contains(sender) ?? false)) {
+      return generic;
+    }
     final String senderName = inGroup
-        ? (names[sender] ??
-              (sanitizePeerName(signal.displayName).isNotEmpty
-                  ? sanitizePeerName(signal.displayName)
-                  : t('Kontakt Zen')))
+        ? (names[sender] ?? t('Kontakt Zen'))
         : known;
+    final String? preview = signalNoticePreview(signal);
     return messageNoticeText(
       level: level,
       sender: senderName,
       group: inGroup ? known : null,
-      preview: signalNoticePreview(signal),
+      // Never the whole message: the notice stays in the system's history.
+      preview: preview == null ? null : shortNoticePreview(preview),
       genericBody: genericBody,
     );
   }
@@ -172,6 +266,11 @@ final class LockedNoticeKit {
           e.key: e.value.name,
       },
     if (names.isNotEmpty) 'n': names,
+    if (members.isNotEmpty)
+      'm': <String, List<String>>{
+        for (final MapEntry<String, Set<String>> e in members.entries)
+          e.key: e.value.toList(growable: false),
+      },
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -191,6 +290,28 @@ final class LockedNoticeKit {
         key is String && key.isNotEmpty && key.length <= 300;
     final Object? o = json['o'];
     final Object? n = json['n'];
+    final Object? m = json['m'];
+    int memberCount = 0;
+    final Map<String, Set<String>> members = <String, Set<String>>{};
+    if (m is Map) {
+      for (final MapEntry<dynamic, dynamic> e in m.entries.take(maxEntries)) {
+        final Object? list = e.value;
+        if (!fits(e.key) || list is! List) {
+          continue;
+        }
+        final Set<String> group = <String>{};
+        for (final Object? address in list) {
+          if (memberCount >= maxEntries) {
+            break;
+          }
+          if (fits(address)) {
+            group.add(address as String);
+            memberCount += 1;
+          }
+        }
+        members[e.key as String] = group;
+      }
+    }
     return LockedNoticeKit(
       // An unreadable level says the least.
       privacy: level(json['p']) ?? NotificationPrivacy.generic,
@@ -206,13 +327,17 @@ final class LockedNoticeKit {
             if (fits(e.key) && e.value is String)
               e.key as String: sanitizePeerName(e.value as String),
       },
+      members: members,
     );
   }
 }
 
 /// The kit for [state] with the global level [privacy]: each friend's and
-/// each joined group's own level, and the names of those whose level shows
-/// who wrote. A friend's other devices ([directory]) count as the friend.
+/// each joined group's own level, and the names (and a group's members) of
+/// those whose level shows who wrote. A friend's other devices
+/// ([directory]) count as the friend. The names group members gave
+/// themselves stay out: a member who is not a friend is told about without
+/// a name.
 LockedNoticeKit lockedNoticeKitOf(
   SocialHubState state, {
   required NotificationPrivacy privacy,
@@ -222,6 +347,8 @@ LockedNoticeKit lockedNoticeKitOf(
   final Map<String, NotificationPrivacy> overrides =
       <String, NotificationPrivacy>{};
   final Map<String, String> names = <String, String>{};
+  final Map<String, Set<String>> members = <String, Set<String>>{};
+  int memberCount = 0;
   Iterable<String> devicesOf(String address) {
     final String? account = directory?.accountOf(address);
     return <String>{
@@ -264,18 +391,24 @@ LockedNoticeKit lockedNoticeKitOf(
       continue;
     }
     names[key] = group.name;
-    group.memberNames.forEach((String address, String name) {
-      final String member = normal(address);
-      if (member.isNotEmpty && name.trim().isNotEmpty) {
-        names.putIfAbsent(member, () => name);
-      }
-    });
+    final Set<String> listed = <String>{};
     for (final String member in group.memberAddresses) {
+      for (final String device in devicesOf(member)) {
+        if (device.isNotEmpty &&
+            memberCount < LockedNoticeKit.maxEntries &&
+            listed.add(device)) {
+          memberCount += 1;
+        }
+      }
+      // Only a friend's name was given here: someone whose request still
+      // waits named themselves.
       final FriendProfile? friend = state.friendByAddress(member);
-      if (friend != null) {
+      if (friend != null &&
+          friend.status == FriendRelationshipStatus.accepted) {
         names[normal(member)] = friend.displayLabel;
       }
     }
+    members[key] = listed;
   }
   return LockedNoticeKit(
     privacy: privacy,
@@ -285,6 +418,7 @@ LockedNoticeKit lockedNoticeKitOf(
             names.entries.take(LockedNoticeKit.maxEntries),
           )
         : names,
+    members: members,
   );
 }
 

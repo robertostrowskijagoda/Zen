@@ -12,12 +12,14 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
+import 'package:zen/src/features/update/newer_versions.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/share_app_server.dart';
 import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_notice.dart';
 import 'package:zen/src/features/update/update_service.dart';
+import 'package:zen/src/features/update/whats_new.dart';
 
 /// What the last look at GitHub's newest release found.
 enum GithubCheckState {
@@ -70,9 +72,11 @@ bool githubUpdatesEnabledFor({
 
 /// Looks at the project's newest GitHub release whenever the last look
 /// (here or in the Android background service, [noticeStore]) is
-/// [checkEvery] old: at start, when the app comes back, and while it runs.
+/// [checkEvery] old: at start, when the app comes back, and while it runs;
+/// and at once when a friend says they run a newer Zen ([hintNewer]).
 /// A newer release is announced once with a system notification
-/// ([notifications]). On the person's "Aktualizuj" it downloads this platform's
+/// ([notifications]), with the release's short note ([whatsNew]) when it
+/// has one. On the person's "Aktualizuj" it downloads this platform's
 /// file, checks it against the release's `SHA256SUMS` and, once this build
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
@@ -96,6 +100,7 @@ final class GithubUpdateService extends ChangeNotifier {
     this.beforeDownload,
     bool Function()? internetWorks,
     DateTime Function()? now,
+    String Function()? language,
     UpdateNoticeStore? noticeStore,
     this.notifications,
     this.currentVersion = kAppVersion,
@@ -109,6 +114,7 @@ final class GithubUpdateService extends ChangeNotifier {
        _download = download ?? downloadGithubAsset,
        _internetWorks = internetWorks ?? (() => true),
        _now = now ?? DateTime.now,
+       _language = language ?? (() => ZenI18n.code),
        noticeStore = noticeStore ?? MemoryUpdateNoticeStore();
 
   final GithubUpdateInstaller installer;
@@ -149,9 +155,19 @@ final class GithubUpdateService extends ChangeNotifier {
   final GithubDownloader _download;
   final bool Function() _internetWorks;
   final DateTime Function() _now;
+  final String Function() _language;
 
   GithubCheckState _state = GithubCheckState.unknown;
   GithubRelease? _latest;
+
+  /// The note of [newer] (null: none, or not fetched yet), and the version
+  /// it was last fetched for (once per version, whatever came of it).
+  WhatsNew? _whatsNew;
+  String? _whatsNewTriedFor;
+
+  /// The newest version a friend named that made this isolate ask GitHub
+  /// at once ([hintNewer]).
+  String? _hinted;
   String? _error;
   DateTime? _checkedAt;
   int _unreachableInARow = 0;
@@ -203,6 +219,17 @@ final class GithubUpdateService extends ChangeNotifier {
     final GithubRelease? r = _latest;
     return r != null && r.isNewerThan(currentVersion) ? r : null;
   }
+
+  /// The short note of [newer] (whats_new.dart), when the release has one
+  /// that holds up and it was fetched.
+  WhatsNew? get whatsNew {
+    final WhatsNew? note = _whatsNew;
+    return note != null && note.version == newer?.version ? note : null;
+  }
+
+  /// [whatsNew] in the app's language (else in English); empty without one.
+  List<String> get whatsNewLines =>
+      whatsNew?.linesFor(_language()) ?? const <String>[];
 
   /// Whether "Aktualizuj" can download and install here (not on iOS, and
   /// only when the release has this platform's file).
@@ -291,6 +318,40 @@ final class GithubUpdateService extends ChangeNotifier {
       await check();
     }
     _armNext();
+  }
+
+  /// A friend said they run [version] (their own claim, unsigned): when it
+  /// is newer than anything known here, GitHub is asked now rather than at
+  /// the next due check, which tells whether that version is really
+  /// published (and announces it). Once per version (a newer one asks
+  /// again), never while a check runs and not within [confirmAfter] of the
+  /// last attempt. [signed]: a release of [version] that enough
+  /// maintainers signed came from friends (update_service.dart): already
+  /// verified, it is announced at once as well.
+  Future<void> hintNewer(String version, {bool signed = false}) async {
+    if (_disposed ||
+        !isValidAppVersion(version) ||
+        compareAppVersions(version, newer?.version ?? currentVersion) <= 0) {
+      return;
+    }
+    final RuntimeSystemNotificationService? notices = notifications;
+    if (signed && notices != null) {
+      await announceUpdateOnce(
+        store: noticeStore,
+        notices: notices,
+        version: version,
+        nowMillis: _now().millisecondsSinceEpoch,
+      );
+    }
+    final String? hinted = _hinted;
+    final DateTime? tried = _triedAt;
+    if (_checking != null ||
+        (hinted != null && compareAppVersions(version, hinted) <= 0) ||
+        (tried != null && _now().difference(tried) < confirmAfter)) {
+      return;
+    }
+    _hinted = version;
+    await check();
   }
 
   /// The next [checkIfDue]: when the last answer turns [checkEvery] old.
@@ -396,23 +457,51 @@ final class GithubUpdateService extends ChangeNotifier {
   }
 
   /// GitHub gave a real answer: kept for the Android background service
-  /// (which then waits [checkEvery] before it asks), and a newer version
-  /// announced, once.
+  /// (which then waits before it asks), and a newer version announced,
+  /// once, with its note.
   Future<void> _keepAnswer() async {
     final int now = _now().millisecondsSinceEpoch;
-    final String? found = newer?.version;
+    final GithubRelease? release = newer;
+    final String? found = release?.version;
     await noticeStore.update(
       (UpdateNoticeState s) => s.answered(at: now, newest: found),
     );
+    if (release == null) {
+      return;
+    }
+    // The banner at once; its note when it comes.
+    _notify();
+    await _fetchWhatsNew(release);
     final RuntimeSystemNotificationService? notices = notifications;
-    if (found != null && notices != null) {
+    if (notices != null) {
       await announceUpdateOnce(
         store: noticeStore,
         notices: notices,
-        version: found,
+        version: release.version,
         nowMillis: now,
+        whatsNew: whatsNewLines,
       );
     }
+  }
+
+  /// Fetches the note of [release] once per version (a note that does not
+  /// hold up is logged and left out; the banner shows the version alone).
+  Future<void> _fetchWhatsNew(GithubRelease release) async {
+    if (_whatsNewTriedFor == release.version) {
+      return;
+    }
+    _whatsNewTriedFor = release.version;
+    try {
+      _whatsNew = await fetchWhatsNew(
+        release,
+        fetchText: _fetchSums,
+        maintainers: releaseKeys,
+      );
+    } on Object catch (e) {
+      _whatsNew = null;
+      logZenWarning('Co nowego w wersji ${release.version}: $e');
+    }
+    _notify();
   }
 
   /// GitHub gave a real answer: no retry pending.
@@ -672,6 +761,19 @@ final Provider<GithubUpdateService?> githubUpdateServiceProvider =
       final AppLifecycleListener lifecycle = AppLifecycleListener(
         onResume: () => unawaited(service.checkIfDue()),
       );
+      // A friend runs a newer Zen: GitHub is asked now; a release signed by
+      // the maintainers that came from friends is announced at once.
+      ref
+        ..listen<String?>(friendsNewerVersionProvider, (_, String? version) {
+          if (version != null) {
+            unawaited(service.hintNewer(version));
+          }
+        })
+        ..listen<String?>(signedNewerVersionProvider, (_, String? version) {
+          if (version != null) {
+            unawaited(service.hintNewer(version, signed: true));
+          }
+        }, fireImmediately: true);
       ref.onDispose(() {
         lifecycle.dispose();
         service.dispose();

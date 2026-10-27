@@ -124,47 +124,114 @@ void main() {
     expect(find.text('aplikacja'), findsOneWidget);
   });
 
-  testWidgets('a cold start with a password asks for it whatever the mode: '
-      'the password is what opens the data key', (WidgetTester tester) async {
-    final MemorySecurityCredentialsStore store =
-        MemorySecurityCredentialsStore();
-    final LocalAppSecurityService first = LocalAppSecurityService(
-      credentialsStore: store,
-      passwordIterations: 10,
-    );
-    await first.initialize(settings: const AppSettings());
-    await first.setPassword('haslo-do-testu');
-
+  group('a cold start with a password', () {
     const AppSettings never = AppSettings(lockMode: AppLockMode.never);
-    final LocalAppSecurityService restarted = LocalAppSecurityService(
-      credentialsStore: store,
-      passwordIterations: 10,
-    );
-    await restarted.initialize(settings: never);
-    // The master key exists on disk only wrapped by the password: without
-    // it (or the hardware-sealed copy) there is nothing to open the data with.
-    expect(restarted.isLocked, isTrue);
-    expect(await restarted.currentEncryptionKey(), isNull);
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          appSettingsStoreProvider.overrideWithValue(
-            MemoryAppSettingsStore(never),
+    Future<void> pumpStarted(
+      WidgetTester tester,
+      AppSecurityService security,
+      AppSettings settings,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appSettingsStoreProvider.overrideWithValue(
+              MemoryAppSettingsStore(settings),
+            ),
+            appSecurityServiceProvider.overrideWithValue(security),
+          ],
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            builder: (BuildContext context, Widget? child) =>
+                AppSecurityGate(child: child!),
+            home: const Scaffold(body: Text('aplikacja')),
           ),
-          appSecurityServiceProvider.overrideWithValue(restarted),
-        ],
-        child: MaterialApp(
-          theme: ZenTheme.dark(),
-          builder: (BuildContext context, Widget? child) =>
-              AppSecurityGate(child: child!),
-          home: const Scaffold(body: Text('aplikacja')),
         ),
-      ),
-    );
-    await tester.pump();
-    expect(find.byKey(const Key('app-unlock-password-field')), findsOneWidget);
-    expect(find.text('aplikacja'), findsNothing);
+      );
+      await tester.pump();
+    }
+
+    testWidgets('"Nigdy" with the key kept opens without the password', (
+      WidgetTester tester,
+    ) async {
+      final MemorySecurityCredentialsStore store =
+          MemorySecurityCredentialsStore();
+      final LocalAppSecurityService first = LocalAppSecurityService(
+        credentialsStore: store,
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() async {
+        await first.initialize(settings: const AppSettings());
+        await first.setPassword('haslo-do-testu');
+        await first.applySettings(never);
+        expect(await first.keepMasterKeyForNeverLock('haslo-do-testu'), isTrue);
+      });
+
+      final LocalAppSecurityService restarted = LocalAppSecurityService(
+        credentialsStore: store,
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() => restarted.initialize(settings: never));
+      expect(restarted.isLocked, isFalse);
+
+      await pumpStarted(tester, restarted, never);
+      expect(find.text('aplikacja'), findsOneWidget);
+      expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
+
+      // Locked by hand: the lock screen, with the panic password there,
+      // once the kept copy is gone.
+      restarted.lock();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const Key('app-unlock-password-field')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('another mode, or "Nigdy" without the key kept, asks for '
+        'it: the password is what opens the data key', (
+      WidgetTester tester,
+    ) async {
+      final MemorySecurityCredentialsStore store =
+          MemorySecurityCredentialsStore();
+      final LocalAppSecurityService first = LocalAppSecurityService(
+        credentialsStore: store,
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() async {
+        await first.initialize(settings: const AppSettings());
+        await first.setPassword('haslo-do-testu');
+        await first.applySettings(never);
+        expect(await first.keepMasterKeyForNeverLock('haslo-do-testu'), isTrue);
+        // Leaving "Nigdy" drops the copy.
+        await first.applySettings(const AppSettings());
+      });
+
+      for (final AppSettings settings in <AppSettings>[
+        never,
+        const AppSettings(),
+      ]) {
+        final LocalAppSecurityService restarted = LocalAppSecurityService(
+          credentialsStore: store,
+          passwordIterations: 10,
+        );
+        await tester.runAsync(() => restarted.initialize(settings: settings));
+        // The master key exists on disk only wrapped by the password:
+        // without it (or the hardware-sealed copy) there is nothing to open
+        // the data with.
+        expect(restarted.isLocked, isTrue);
+        expect(await restarted.currentEncryptionKey(), isNull);
+
+        await pumpStarted(tester, restarted, settings);
+        expect(
+          find.byKey(const Key('app-unlock-password-field')),
+          findsOneWidget,
+        );
+        expect(find.text('aplikacja'), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    });
   });
 
   testWidgets(

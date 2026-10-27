@@ -59,6 +59,9 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _core = ref.read(zenCoreProvider);
+    // An iPhone: answers background checks from the start, also while Zen
+    // is locked.
+    ref.read(iosBackgroundHostProvider);
   }
 
   @override
@@ -166,8 +169,8 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                     child: TestHarnessBridge(
                       child: AlarmWatcher(
                         child: RuntimeRouteBridge(
-                          // Android: what the locked service's message
-                          // notices may say.
+                          // Android and iPhone: what the locked
+                          // receiver's message notices may say.
                           child: LockedNoticeKitBridge(
                             // After a restore: its progress and what came
                             // back.

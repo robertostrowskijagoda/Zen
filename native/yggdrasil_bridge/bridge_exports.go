@@ -95,40 +95,54 @@ func YggStartNode(configJSON *C.char) *C.char {
 		return responseError(err)
 	}
 	handle := nextHandle.Add(1)
+	node.touch()
 	nodes.Store(handle, node)
+	node.identity.running(handle, node)
 	return responseOK(normalizeNodeState(handle, node))
 }
 
 //export YggStopNode
 func YggStopNode(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		node.stopDoor()
-		_, _ = node.setMailboxDoors(nil)
-		node.stopLocalLinks()
-		node.closeAllRelays()
-		node.stopLeafMonitor()
-		node.stopPeerProbeMonitor()
-		node.stopPeerNudge()
-		if node.phonePeers != nil {
-			node.phonePeers.stopWatch()
+		if err := node.shutdown(int32(handle)); err != nil {
+			return responseError(err)
 		}
-		if node.power != nil {
-			node.power.stopWatch()
-		}
-		for _, guard := range node.peerGuards {
-			guard.close()
-		}
-		if node.multicast != nil {
-			if err := node.multicast.Stop(); err != nil {
-				return responseError(err)
-			}
-		}
-		node.core.Stop()
-		nodes.Delete(int32(handle))
-		// Wakes the app's thread blocked in YggWaitSignal.
-		node.signalInbox.close()
 		return responseOK(map[string]any{"stopped": true})
 	})
+}
+
+// shutdown stops everything the node runs, then the node itself, and lets
+// its handle and its key go.
+func (node *bridgeNode) shutdown(handle int32) error {
+	node.stopDoor()
+	_, _ = node.setMailboxDoors(nil)
+	node.stopLocalLinks()
+	node.closeAllRelays()
+	node.stopLeafMonitor()
+	node.stopPeerProbeMonitor()
+	node.stopPeerNudge()
+	if node.phonePeers != nil {
+		node.phonePeers.stopWatch()
+	}
+	node.stopTransitWatch()
+	if node.power != nil {
+		node.power.stopWatch()
+	}
+	for _, guard := range node.peerGuards {
+		guard.close()
+	}
+	if node.multicast != nil {
+		if err := node.multicast.Stop(); err != nil {
+			return err
+		}
+	}
+	node.core.Stop()
+	nodes.Delete(handle)
+	// The key is free for the next node only now that this one is down.
+	node.identity.release()
+	// Wakes the app's thread blocked in YggWaitSignal.
+	node.signalInbox.close()
+	return nil
 }
 
 //export YggGetNodeInfo
@@ -200,6 +214,8 @@ func YggAddPeer(handle C.int, peerURI *C.char) *C.char {
 			// A computer on battery: dialled once it is plugged in.
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
+		// A friend's bridge is dialled also while a phone holds
+		// (transit_guard.go never sets bridges aside).
 		if err := node.core.AddPeer(parsed, ""); err != nil {
 			return responseError(err)
 		}

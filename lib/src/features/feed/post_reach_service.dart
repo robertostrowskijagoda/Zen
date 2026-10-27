@@ -8,8 +8,11 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_reach.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/meet_book.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -28,8 +31,9 @@ const int kPostAsksPerMinuteStranger = 10;
 const int kPostAsksPerMinuteStrangers = 200;
 
 /// Passes posts on beyond friends (`post_reach.dart`): writes this
-/// account's notices, fetches the posts friends' notices name, and hands
-/// out the posts it holds to those who ask.
+/// account's notices, fetches the posts friends' notices name as far as
+/// this account looks ([depth]), and hands out the posts it holds to those
+/// who ask.
 ///
 /// The fetched posts stay on this device (at most [kMaxHeldPosts], for
 /// [kReachWindow]), so its friends can fetch them from it while their
@@ -37,6 +41,7 @@ const int kPostAsksPerMinuteStrangers = 200;
 final class PostReachService implements HeldPosts {
   PostReachService({
     required this.node,
+    this.noticeAudience = _defaultNoticeAudience,
     this.delay = const Duration(seconds: 20),
     this.minGap = const Duration(minutes: 10),
     this.retryAfter = const Duration(minutes: 10),
@@ -44,6 +49,13 @@ final class PostReachService implements HeldPosts {
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final LedgerNode node;
+
+  /// Who may read this account's notices now: the friends who may see its
+  /// friend list ([noticeAudienceFor]); `null` passes nothing on.
+  final Audience? Function() noticeAudience;
+
+  static Audience? _defaultNoticeAudience() =>
+      noticeAudienceFor(FriendListAudience.friends);
 
   /// Quiet time after news before a round.
   final Duration delay;
@@ -59,6 +71,14 @@ final class PostReachService implements HeldPosts {
 
   final Map<String, HeldPost> _held = <String, HeldPost>{};
 
+  int _depth = kDefaultFeedDepth;
+
+  /// [setDepth] was called (before what was kept was read, it wins).
+  bool _depthPicked = false;
+
+  /// What was kept on the device has been read.
+  bool _loaded = false;
+
   /// Post id → what was asked: when, for how many steps, of whom.
   final Map<String, ({int at, int hops, String author})> _asked =
       <String, ({int at, int hops, String author})>{};
@@ -68,6 +88,7 @@ final class PostReachService implements HeldPosts {
   StreamSubscription<SignalTransportFrame>? _frames;
   StreamSubscription<LogEntry>? _added;
   StreamSubscription<String>? _greeted;
+  StreamSubscription<void>? _opened;
   Timer? _timer;
   Future<void>? _started;
   bool _stopped = false;
@@ -76,8 +97,37 @@ final class PostReachService implements HeldPosts {
   /// Something came while a round ran: another one follows.
   bool _again = false;
 
-  /// Fires when a fetched post came or changed.
+  /// Fires when a fetched post came or changed, or [depth] did.
   Stream<void> get changes => _changes.stream;
+
+  /// How far this account looks, in steps of friendship from the authors
+  /// (1 … [kMaxReachHops]; kept on the device, [kDefaultFeedDepth] at
+  /// first). Only posts that near are fetched. Notices go one step further
+  /// only from someone who looks at least two steps far: they pass on what
+  /// they fetched for themselves (and hold, so their friends can fetch it
+  /// from them), nothing fetched only for others.
+  int get depth => _depth;
+
+  /// Looks [depth] steps far from now on.
+  Future<void> setDepth(int depth) async {
+    final int d = depth.clamp(1, kMaxReachHops);
+    // Picked before what was kept was read: it wins and is written.
+    final bool early = !_depthPicked && !_loaded;
+    _depthPicked = true;
+    if ((d == _depth && !early) || _stopped) {
+      return;
+    }
+    if (d != _depth) {
+      _depth = d;
+      _changes.add(null);
+    }
+    // What was kept is read first, so writing does not lose it.
+    await start();
+    if (!_stopped) {
+      schedule(Duration.zero);
+      await _save();
+    }
+  }
 
   @override
   HeldPost? heldPost(String id) => _held[id];
@@ -98,6 +148,12 @@ final class PostReachService implements HeldPosts {
       return;
     }
     await _load();
+    _loaded = true;
+    if (_stopped) {
+      return;
+    }
+    // How far this account looks is known now: the wall follows.
+    _changes.add(null);
     _frames = node.transport.frames.listen(
       (SignalTransportFrame f) =>
           unawaitedLogged(handle(f), context: 'Posty dalszych znajomych'),
@@ -112,6 +168,8 @@ final class PostReachService implements HeldPosts {
       );
       schedule();
     });
+    // Notices sealed for friends who see the list open once keys come.
+    _opened = node.openedChanges.listen((_) => schedule());
     unawaitedLogged(round(), context: 'Posty dalszych znajomych');
   }
 
@@ -122,6 +180,7 @@ final class PostReachService implements HeldPosts {
     await _frames?.cancel();
     await _added?.cancel();
     await _greeted?.cancel();
+    await _opened?.cancel();
     await _changes.close();
   }
 
@@ -179,11 +238,15 @@ final class PostReachService implements HeldPosts {
   }
 
   /// Asks the friends who passed a post on, and its author, for the posts
-  /// friends' notices name that are not here (or changed since).
+  /// friends' notices name that are not here (or changed since), as far as
+  /// this account looks.
   void askMissing() {
     final int now = _now();
     int asked = 0;
     for (final AnnouncedPost a in announcedPosts(node, nowMillis: now).values) {
+      if (a.hops > _depth) {
+        continue;
+      }
       final HeldPost? h = _held[a.post];
       if (h != null &&
           (h.author != a.author ||
@@ -230,16 +293,23 @@ final class PostReachService implements HeldPosts {
     return out.take(6).toList();
   }
 
-  /// Writes a notice entry with what is new to pass on (at most one entry
+  /// Writes a notice entry with what is new to pass on, sealed for the
+  /// friends who may see this account's friend list (at most one entry
   /// every [minGap]). Returns how many posts it named.
   Future<int> passOn() async {
     if (_stopped || !node.isReady || node.isSuspended) {
+      return 0;
+    }
+    final Audience? audience = noticeAudience();
+    if (audience == null || audience == Audience.public) {
       return 0;
     }
     final int now = _now();
     final List<PostAnnouncement> items = announcementsToPass(
       node,
       held: heldPost,
+      audience: audience,
+      passFurther: _depth >= kMaxReachHops - 1,
       nowMillis: now,
     );
     if (items.isEmpty) {
@@ -260,7 +330,7 @@ final class PostReachService implements HeldPosts {
     }
     await node.publish(
       kPostAnnounceKind,
-      announceBody(items),
+      await node.seal(audience, announceBody(items)),
       spaceKind: 'acts',
     );
     return items.length;
@@ -283,9 +353,9 @@ final class PostReachService implements HeldPosts {
     return true;
   }
 
-  /// Someone asks for a post: friends get any post this device holds that
-  /// may go one step past it; anyone else only this account's own posts
-  /// whose reach goes past friends.
+  /// Someone asks for a post: friends get any public post this device
+  /// holds that may go one step past it; anyone else only this account's
+  /// own public posts.
   void _onWant(String from, Map<String, dynamic> payload) {
     final ({String id, String author})? want = readPostWant(payload);
     if (want == null) {
@@ -331,7 +401,7 @@ final class PostReachService implements HeldPosts {
         final Map<String, dynamic>? del = certified(tomb);
         return del == null ? null : postAnswerFrame(id, author, tombstone: del);
       }
-      if (post == null || reachOfBody(post.body).hops < 2) {
+      if (post == null || !isPublicPost(post.body)) {
         return null;
       }
       final Map<String, dynamic>? entry = certified(post);
@@ -356,8 +426,8 @@ final class PostReachService implements HeldPosts {
         tombstone: h.tombstone!.toCertifiedJson(),
       );
     }
-    // Only one step past this account, as far as the author let it go.
-    if (h.hops + 1 > h.reach.hops) {
+    // Only one step past this account, never beyond three steps.
+    if (h.hops >= kMaxReachHops) {
       return null;
     }
     return postAnswerFrame(
@@ -409,7 +479,10 @@ final class PostReachService implements HeldPosts {
   }
 
   /// Fetches the photos and videos of [h] (when automatic download is on)
-  /// from [from] and whoever else may have them.
+  /// from friends only: [from] when it is one, and the others who may have
+  /// them. Never by itself from the author or anyone else who is not a
+  /// friend (who would learn when this device looked, and could hand it any
+  /// file): the text is shown, a photo then waits for a friend who has it.
   void _fetchFiles(HeldPost h, String from) {
     if (!node.autoDownloadMedia()) {
       return;
@@ -419,9 +492,8 @@ final class PostReachService implements HeldPosts {
       return;
     }
     final List<String> sources = <String>[
-      from,
+      if (node.isFriendAddress(from)) from,
       for (final String address in node.friendAccounts.keys) address,
-      if (h.authorProfile?.address case final String a when a.isNotEmpty) a,
     ];
     for (final String id in ids) {
       node.blobs
@@ -499,6 +571,13 @@ final class PostReachService implements HeldPosts {
               FormatAge.readable) {
         return;
       }
+      final Object? depth = json['depth'];
+      if (!_depthPicked &&
+          depth is int &&
+          depth >= 1 &&
+          depth <= kMaxReachHops) {
+        _depth = depth;
+      }
       final Object? posts = json['posts'];
       if (posts is! List) {
         return;
@@ -520,6 +599,7 @@ final class PostReachService implements HeldPosts {
       utf8.encode(
         jsonEncode(
           withFormatVersion(<String, Object?>{
+            'depth': _depth,
             'posts': <Map<String, dynamic>>[
               for (final HeldPost h in _held.values) h.toJson(),
             ],
@@ -537,7 +617,13 @@ final Provider<PostReachService?> postReachProvider =
       if (node == null) {
         return null;
       }
-      final PostReachService reach = PostReachService(node: node);
+      final PostReachService reach = PostReachService(
+        node: node,
+        // Notices go only to friends who may see the friend list.
+        noticeAudience: () => noticeAudienceFor(
+          ref.read(meetServiceProvider).book.friendListAudience,
+        ),
+      );
       ref.onDispose(
         () =>
             unawaitedLogged(reach.stop(), context: 'Posty dalszych znajomych'),

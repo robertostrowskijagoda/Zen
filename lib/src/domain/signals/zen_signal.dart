@@ -1,6 +1,15 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 
 import 'package:zen/src/domain/messages/chat_message.dart';
+
+/// What a frame without its own id is told apart by: its content, not the
+/// moment it arrived (a repeat arrives later). Used wherever such frames are
+/// kept once: the locked receiver's inbox and the chat timelines.
+String frameContentHash(Map<String, dynamic> content) =>
+    crypto.sha256.convert(utf8.encode(jsonEncode(content))).toString();
 
 enum ZenSignalType {
   ack,
@@ -153,9 +162,17 @@ final class ZenSignal {
     if (sender == this.sender) {
       return this;
     }
+    return _copy(sender: sender);
+  }
+
+  /// This signal carrying [chatExtras] instead.
+  ZenSignal withChatExtras(Map<String, dynamic>? chatExtras) =>
+      _copy(chatExtras: chatExtras);
+
+  ZenSignal _copy({String? sender, Object? chatExtras = _unset}) {
     return ZenSignal(
       type: type,
-      sender: sender,
+      sender: sender ?? this.sender,
       callId: callId,
       messageId: messageId,
       routeKey: routeKey,
@@ -185,7 +202,11 @@ final class ZenSignal {
       cameraOn: cameraOn,
       disappearSeconds: disappearSeconds,
       miniProfile: miniProfile,
-      chatExtras: chatExtras,
+      chatExtras: identical(chatExtras, _unset)
+          ? this.chatExtras
+          : chatExtras as Map<String, dynamic>?,
     );
   }
 }
+
+const Object _unset = Object();

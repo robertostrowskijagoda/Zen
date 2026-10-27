@@ -199,6 +199,39 @@ The store variant: `flutter run --flavor appStoreOnly` (or
 `--dart-define=ZEN_STORE=true`) — the update service is off, "Pass it on"
 shows a link dialog, and the manifest has no `REQUEST_INSTALL_PACKAGES`.
 
+### 3.1 The technical log after an incident
+
+Logcat keeps only an hour or two, and a release build writes almost nothing
+there. Zen keeps its own log on the phone: errors and warnings, and `TECH`
+lines with every wake of the background work (`beat` with each job's time,
+`wake`), mode changes (`app`, `background`, `receive-only`, `parked`),
+handovers between the app and the service, service start and stop, how
+Android ended earlier runs (`exit`, Android 11 on: low memory, ANR, crash
+and so on) and the node's numbers every 5 minutes while it runs (`node`: Go
+heap and goroutines, peers by count, traffic rates, public and local bytes,
+transit and the transit guard's holds). Nothing in it names a person, a
+message, an address or a file. Each isolate (`ui`, `svc`) writes its own
+`zen-diagnostics-<isolate>.log` in the account's data folder and sets it
+aside as `.log.1` at 512 KB, so the log covers several days.
+
+Right after an incident (an ANR, a killed service, a night of traffic):
+
+1. **Any build:** Settings → Advanced → Diagnostics → save (the arrow
+   icon). The whole log, both isolates in time order, is written to
+   `Android/data/com.roj.zen/files/Zen/zen-dziennik-<date>-<time>.txt`;
+   copy it over USB or
+   `adb pull /sdcard/Android/data/com.roj.zen/files/Zen/`.
+2. **Debug builds only**, without touching the phone (each isolate's
+   older file first; for an account other than the first, the files are in
+   `files/accounts/<id>/`):
+
+   ```
+   adb exec-out run-as com.roj.zen sh -c "cd files; cat zen-diagnostics-svc.log.1 zen-diagnostics-svc.log 2>/dev/null" > zen-svc.txt
+   adb exec-out run-as com.roj.zen sh -c "cd files; cat zen-diagnostics-ui.log.1 zen-diagnostics-ui.log 2>/dev/null" > zen-ui.txt
+   ```
+3. Take a bug report at once as well (`adb bugreport`): it has the ANR
+   traces and the exit records the log only names.
+
 ## 4. Visual audit (`tool/ui_tour/ui_audit_test.dart`)
 
 ```
