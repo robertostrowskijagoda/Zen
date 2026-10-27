@@ -29,6 +29,8 @@ import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';

@@ -3038,7 +3038,7 @@ void main() {
       tester.element(find.byType(AppShellScreen)),
     );
 
-    await tester.tap(find.text('Mój kod'));
+    await tester.tap(find.byKey(const Key('status-my-code')));
     await tester.pumpAndSettle();
     expect(find.text('OTRZYMANO ZAPROSZENIE'), findsNothing);
 

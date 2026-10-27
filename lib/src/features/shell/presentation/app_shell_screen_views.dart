@@ -3,8 +3,8 @@ part of 'app_shell_screen.dart';
 /// Thin top bar with the live connection status in terminal style (mono,
 /// pulsing dot). Tapping it opens the settings screen — there is no
 /// separate settings tab anymore. With the rail ([onToggleRail]) its first
-/// button shows or hides the rail; "Zablokuj teraz" sits next to the
-/// account menu once there is a password.
+/// button shows or hides the rail; "Mój kod" and, once there is a password,
+/// "Zablokuj teraz" sit next to the account menu.
 class _StatusBar extends ConsumerWidget {
   const _StatusBar({this.railHidden = false, this.onToggleRail});
 
@@ -159,7 +159,25 @@ class _StatusBar extends ConsumerWidget {
                       ),
                       const SizedBox(width: 4),
                     ],
-                    // Lock now, one tap away (only once there is a password).
+                    // Your own code (QR and invite code), one tap away.
+                    IconButton(
+                      key: const Key('status-my-code'),
+                      tooltip: t('Mój kod'),
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => _openInviteTab(context, ref),
+                      icon: Icon(
+                        Icons.qr_code_2_rounded,
+                        size: 20,
+                        color: zen.textSecondary,
+                      ),
+                    ),
+                    // The only place that locks now, one tap away (only once
+                    // there is a password).
                     ListenableBuilder(
                       listenable: security,
                       builder: (BuildContext context, Widget? _) =>
@@ -175,7 +193,7 @@ class _StatusBar extends ConsumerWidget {
                                   minHeight: 36,
                                 ),
                                 padding: EdgeInsets.zero,
-                                onPressed: security.lock,
+                                onPressed: () => _lockNow(ref, security),
                                 icon: Icon(
                                   Icons.lock_outline_rounded,
                                   size: 20,
@@ -185,7 +203,7 @@ class _StatusBar extends ConsumerWidget {
                             )
                           : const SizedBox.shrink(),
                     ),
-                    // Your avatar: the account menu (switch, add, lock).
+                    // Your avatar: the account menu (switch, add).
                     const AccountMenuButton(),
                     const SizedBox(width: 8),
                     Container(
@@ -214,6 +232,16 @@ class _StatusBar extends ConsumerWidget {
   }
 }
 
+/// "Zablokuj teraz": locks the app; an additional account goes back to the
+/// default account's lock screen instead (its own would show that it exists).
+void _lockNow(WidgetRef ref, AppSecurityService security) {
+  if (!ref.read(zenAccountProvider).isDefault) {
+    unawaited(returnToDefaultZenAccount(ref));
+    return;
+  }
+  security.lock();
+}
+
 Future<void> _openSettingsScreen(BuildContext context) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -222,8 +250,8 @@ Future<void> _openSettingsScreen(BuildContext context) {
   );
 }
 
-/// Shows your QR code and invite code ("Zaproś", also at the top of the
-/// settings) on a page of its own.
+/// Shows your QR code and invite code ("Mój kod" in the top bar, also "Zaproś"
+/// at the top of the settings) on a page of its own.
 void _openInviteTab(BuildContext context, WidgetRef ref) {
   unawaited(
     Navigator.of(context).push(
@@ -374,24 +402,8 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       ))),
         )
         .toList(growable: false);
-    final bool plainMessenger = !ref.watch(ledgerNodeEnabledProvider);
     return Scaffold(
-      appBar: ZenSectionBar(
-        title: t('Czaty'),
-        actions: <Widget>[
-          // With the rail, the code is under Ustawienia → Zaproś.
-          if (plainMessenger)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(end: 8),
-              child: TextButton.icon(
-                key: const Key('chats-my-code'),
-                onPressed: () => _openInviteTab(context, ref),
-                icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-                label: Text(t('Mój kod')),
-              ),
-            ),
-        ],
-      ),
+      appBar: ZenSectionBar(title: t('Czaty')),
       body: Column(
         children: <Widget>[
           Expanded(
@@ -1696,7 +1708,7 @@ class _BridgeHostStatusCard extends StatelessWidget {
 }
 
 /// At the very top of the settings while there is no app password: offers
-/// to set one. Once there is one, "Zablokuj teraz" lives on the left rail.
+/// to set one. Once there is one, "Zablokuj teraz" is in the top bar.
 class _QuickLockPanel extends ConsumerWidget {
   const _QuickLockPanel();
 
@@ -1707,11 +1719,10 @@ class _QuickLockPanel extends ConsumerWidget {
     return AnimatedBuilder(
       animation: security,
       builder: (BuildContext context, Widget? child) {
-        final bool canLock = security.canQuickLock;
-        if (canLock) {
+        if (security.canQuickLock) {
           return const SizedBox.shrink();
         }
-        final Color tone = canLock ? zen.accent : zen.warning;
+        final Color tone = zen.warning;
         return Container(
           decoration: BoxDecoration(
             borderRadius: context.zenRadius(26),
@@ -1735,9 +1746,7 @@ class _QuickLockPanel extends ConsumerWidget {
               Row(
                 children: <Widget>[
                   ZenIconBadge(
-                    icon: canLock
-                        ? Icons.lock_outline_rounded
-                        : Icons.lock_open_rounded,
+                    icon: Icons.lock_open_rounded,
                     tone: tone,
                     size: 46,
                   ),
@@ -1757,9 +1766,7 @@ class _QuickLockPanel extends ConsumerWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          canLock
-                              ? t('Jedno kliknięcie blokuje dostęp natychmiast.')
-                              : t('Ustaw hasło, aby włączyć szybką blokadę.'),
+                          t('Ustaw hasło, aby włączyć szybką blokadę.'),
                           style: TextStyle(
                             color: zen.textSecondary,
                             fontSize: 13.5,
@@ -1778,10 +1785,6 @@ class _QuickLockPanel extends ConsumerWidget {
                   minimumSize: const Size.fromHeight(48),
                 ),
                 onPressed: () async {
-                  if (canLock) {
-                    security.lock();
-                    return;
-                  }
                   final String? password = await _showPasswordDialog(
                     context,
                     title: t('Ustaw hasło aplikacji'),
@@ -1800,11 +1803,8 @@ class _QuickLockPanel extends ConsumerWidget {
                     }
                   }
                 },
-                icon: Icon(
-                  canLock ? Icons.lock_rounded : Icons.password_rounded,
-                  size: 18,
-                ),
-                label: Text(canLock ? t('Zablokuj teraz') : t('Ustaw hasło')),
+                icon: const Icon(Icons.password_rounded, size: 18),
+                label: Text(t('Ustaw hasło')),
               ),
             ],
           ),
