@@ -198,6 +198,12 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	if phonePeers != nil {
 		go node.watchPhonePeers()
 	}
+	if isPhoneOS() {
+		// Strangers' traffic through the phone (transit_guard.go).
+		node.transitGuard = &transitGuard{}
+		node.transitStop = make(chan struct{})
+		node.startTransitWatch()
+	}
 	if power != nil {
 		if power.onBattery {
 			// The full list stays in power for when it is plugged in again.

@@ -112,6 +112,7 @@ func YggStopNode(handle C.int) *C.char {
 		if node.phonePeers != nil {
 			node.phonePeers.stopWatch()
 		}
+		node.stopTransitWatch()
 		if node.power != nil {
 			node.power.stopWatch()
 		}
@@ -200,6 +201,11 @@ func YggAddPeer(handle C.int, peerURI *C.char) *C.char {
 			// A computer on battery: dialled once it is plugged in.
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
+		if node.deferDuringTransitHold(uri) {
+			// A phone keeping a single peering (transit_guard.go):
+			// dialled once the hold ends.
+			return responseOK(normalizeNodeState(int32(handle), node))
+		}
 		if err := node.core.AddPeer(parsed, ""); err != nil {
 			return responseError(err)
 		}
@@ -221,6 +227,10 @@ func YggRemovePeer(handle C.int, peerURI *C.char) *C.char {
 		}
 		if node.forgetBridgeAside(uri) {
 			// Set aside on battery, never dialled.
+			return responseOK(normalizeNodeState(int32(handle), node))
+		}
+		if node.forgetDuringTransitHold(uri) {
+			// Set aside by a transit hold, not dialled now.
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
 		if err := node.core.RemovePeer(parsed, ""); err != nil {

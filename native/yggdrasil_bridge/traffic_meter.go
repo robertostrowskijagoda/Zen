@@ -20,7 +20,8 @@ import (
 // the peerings carried in each direction, removes the node's own packets
 // (with room for the mesh's headers) and Yggdrasil's own upkeep, and calls
 // what is left in both directions alike transit. An estimate, for
-// diagnostics (the app's log, normalizeNodeState's "traffic").
+// diagnostics (the app's log, normalizeNodeState's "traffic") and for a
+// phone's limit on it (transit_guard.go).
 const (
 	// Mesh headers around one of the node's own packets on a peering
 	// (keys, path, session and link framing), counted generously so an
@@ -115,6 +116,7 @@ type peerTrafficMeter struct {
 	windowBase  trafficTotals
 	// Transit since the node started, and over the last whole window.
 	transitBytes  uint64
+	transitLast   uint64
 	transitRate   uint64
 	transitWindow time.Duration
 }
@@ -179,6 +181,7 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 	}
 	transit := estimateTransit(meter.windowBase, totals, len(peers), elapsed)
 	meter.transitBytes += transit
+	meter.transitLast = transit
 	meter.transitRate = uint64(float64(transit) / elapsed.Seconds())
 	meter.transitWindow = elapsed
 	meter.windowStart = now
@@ -221,13 +224,30 @@ func (meter *peerTrafficMeter) snapshot() map[string]any {
 	}
 }
 
+// lastTransit is the transit of the last whole window, in bytes.
+func (meter *peerTrafficMeter) lastTransit() uint64 {
+	meter.mu.Lock()
+	defer meter.mu.Unlock()
+	return meter.transitLast
+}
+
 // sampleTraffic feeds the meter with the node's peerings now; a phone logs
-// a window with unusual transit.
+// a window with unusual transit, and its transit guard (transit_guard.go)
+// takes every window.
 func (node *bridgeNode) sampleTraffic() {
-	rate, ended := node.peerTraffic.sample(node.core.GetPeers(), &node.traffic, time.Now())
-	if ended && isPhoneOS() && rate >= phoneTransitNotice && node.logger != nil {
+	node.sampleTrafficAt(time.Now())
+}
+
+func (node *bridgeNode) sampleTrafficAt(now time.Time) {
+	node.checkTransitHold(now)
+	rate, ended := node.peerTraffic.sample(node.core.GetPeers(), &node.traffic, now)
+	if !ended {
+		return
+	}
+	if (isPhoneOS() || node.transitGuard != nil) && rate >= phoneTransitNotice && node.logger != nil {
 		node.logger.Warnf("about %d B/s of others' mesh traffic passed through this node", rate)
 	}
+	node.observeTransit(now, node.peerTraffic.lastTransit(), rate)
 }
 
 // trafficState is the node's traffic for diagnostics: bytes over its
@@ -250,6 +270,9 @@ func (node *bridgeNode) trafficState() map[string]any {
 	state["ownRelayRxBytes"] = own.relayRx.Load()
 	state["ownRelayTxBytes"] = own.relayTx.Load()
 	state["ownOtherRxBytes"] = own.otherRx.Load()
+	if node.transitGuard != nil {
+		state["transitGuard"] = node.transitGuardState(time.Now())
+	}
 	node.doorMu.Lock()
 	host := node.doorHost
 	node.doorMu.Unlock()
