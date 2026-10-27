@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
@@ -34,22 +35,39 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
   String? _handledIntentId;
 
   @override
-  Widget build(BuildContext context) {
-    final RuntimeRouteIntent? pendingLaunchIntent = ref.watch(
+  void initState() {
+    super.initState();
+    // Followed here, not with `ref.watch` in build: this bridge lives in the
+    // app's first screen, and a watch pauses while another screen covers it.
+    // The app is often left on a chat, and a tapped notification then did
+    // nothing until the person went back - and opened its chat only then.
+    ref.listenManual<RuntimeRouteIntent?>(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.pendingLaunchIntent,
       ),
+      (RuntimeRouteIntent? previous, RuntimeRouteIntent? next) =>
+          _schedule(next),
+      fireImmediately: true,
     );
-    if (pendingLaunchIntent != null &&
-        pendingLaunchIntent.id != _scheduledIntentId &&
-        pendingLaunchIntent.id != _handledIntentId) {
-      _scheduledIntentId = pendingLaunchIntent.id;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _handlePendingIntent(pendingLaunchIntent);
-      });
-    }
-    return widget.child;
   }
+
+  void _schedule(RuntimeRouteIntent? intent) {
+    if (intent == null ||
+        intent.id == _scheduledIntentId ||
+        intent.id == _handledIntentId) {
+      return;
+    }
+    _scheduledIntentId = intent.id;
+    WidgetsBinding.instance
+      ..addPostFrameCallback((_) {
+        _handlePendingIntent(intent);
+      })
+      // Nothing else may be drawing (the screen on top did not change).
+      ..ensureVisualUpdate();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 
   Future<void> _handlePendingIntent(RuntimeRouteIntent intent) async {
     if (!mounted) {
@@ -65,25 +83,24 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
     }
     switch (intent.target) {
       case RuntimeRouteTarget.inbox:
-        // Inbox entries live at the top of the single chats list, so there
-        // is nothing to navigate to — the entries are already visible.
+        // Inbox entries live at the top of the chats list, and so do the
+        // conversations with something new. The locked service's notices
+        // ("Nowa wiadomość") all come here: whatever screen the app was
+        // left on, it may say nothing of what came.
+        _showChats();
         break;
       case RuntimeRouteTarget.conversation:
-        final String peerAddress = intent.peerAddress!;
-        final SocialHubState socialState = ref.read(
-          socialHubControllerProvider,
-        );
-        // The title in a route is whatever the link said - `zen://` links
-        // can come from any web page or app. Only the app's own name for the
-        // peer is shown; someone it does not know gets their share code
-        // (the screen marks them as a stranger), never a name a link chose.
-        final String title =
-            socialState.friendByAddress(peerAddress)?.displayLabel ??
-            PeerShareCodec.displayNameForAddress(peerAddress);
+        final ({String address, String title}) chat =
+            runtimeRouteConversationOf(
+              intent.peerAddress!,
+              ref.read(socialHubControllerProvider),
+            );
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (BuildContext context) =>
-                ConversationScreen(peerAddress: peerAddress, title: title),
+            builder: (BuildContext context) => ConversationScreen(
+              peerAddress: chat.address,
+              title: chat.title,
+            ),
           ),
         );
         break;
@@ -96,8 +113,9 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
             session != null &&
             PeerShareCodec.addressesEqual(session.peerAddress, peerAddress);
         if (!matchesCall) {
-          // The call is gone (missed, cancelled, or already torn down), so
-          // there is nothing to open.
+          // The call is gone (missed, cancelled, or already torn down): the
+          // chats list, where the conversation tells what happened.
+          _showChats();
           break;
         }
         final bool ringingIncoming =
@@ -155,6 +173,7 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
           // A group this device has since left or declined, or an invitation
           // not answered yet: that one waits in the inbox at the top of the
           // chats list, and tapping its notification is not consent to join.
+          _showChats();
           break;
         }
         if (!mounted) {
@@ -198,4 +217,32 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
     _handledIntentId = handledId;
     _scheduledIntentId = null;
   }
+
+  /// Back to the chats list from wherever the app was left (screens opened
+  /// over it, another tab of the rail).
+  void _showChats() {
+    Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+    openShellTab('chats');
+  }
+}
+
+/// The conversation a route to [peerAddress] opens: the friend's own entry
+/// when the address is one of theirs (the chat is kept under it, so another
+/// spelling of the address would open an empty chat), with the app's own
+/// name for them. The title in a route is whatever the link said - `zen://`
+/// links can come from any web page or app - so it is never shown; someone
+/// the app does not know gets their share code (the screen marks them as a
+/// stranger).
+@visibleForTesting
+({String address, String title}) runtimeRouteConversationOf(
+  String peerAddress,
+  SocialHubState state,
+) {
+  final FriendProfile? friend = state.friendByAddress(peerAddress);
+  return (
+    address: friend?.address ?? PeerShareCodec.normalizeAddress(peerAddress),
+    title:
+        friend?.displayLabel ??
+        PeerShareCodec.displayNameForAddress(peerAddress),
+  );
 }

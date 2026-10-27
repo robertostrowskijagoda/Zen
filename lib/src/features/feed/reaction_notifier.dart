@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 
 /// Id prefix of the system notifications about reactions. The title of such
@@ -137,5 +139,7 @@ RuntimeSystemNotification reactionNotification(
     createdAtMillis: createdAtMillis,
     category: RuntimeSystemNotificationCategory.social,
     slotKey: '$kReactionNoticeIdPrefix${n.postId}',
+    // A tap opens the Tablica, where the post and its reactions are.
+    routeKey: buildFeedRouteKey(FeedFilter.all.name),
   );
 }
