@@ -624,13 +624,13 @@ void main() {
             presence: presence,
             lastOpenedAtMillis: opened,
           );
-      expect(friendPresenceLine(friend(PeerPresence.online), now), 'online');
+      expect(friendPresenceLine(friend(PeerPresence.online), now), 'w sieci');
       expect(
         friendPresenceLine(
           friend(PeerPresence.online, opened: now - _hour),
           now,
         ),
-        'online',
+        'w sieci',
       );
       expect(
         friendPresenceLine(
@@ -647,7 +647,10 @@ void main() {
         ),
         'ostatnio otwierał(a) 2 godz. temu',
       );
-      expect(friendPresenceLine(friend(PeerPresence.offline), now), 'offline');
+      expect(
+        friendPresenceLine(friend(PeerPresence.offline), now),
+        'poza siecią',
+      );
       expect(
         friendPresenceLine(
           friend(PeerPresence.hidden, opened: now - _hour),
@@ -709,7 +712,7 @@ void main() {
         base.copyWith(presence: PeerPresence.online, presenceAtMillis: now),
       );
       await tester.pumpAndSettle();
-      expect(subtitle(tester), 'online');
+      expect(subtitle(tester), 'w sieci');
       expect(headerDot(tester).on, isTrue);
 
       await pumpConversation(
@@ -828,23 +831,35 @@ void main() {
           .map((DecoratedBox box) => box.decoration)
           .whereType<BoxDecoration>();
 
-      await pumpDot(false, true);
-      final BoxDecoration away = boxes().single;
-      expect(away.color, isNotNull, reason: '"w tle" is a filled dot');
-      expect(away.border, isNull);
+      // Online: a filled green dot, no ring.
+      await pumpDot(true, false);
+      expect(
+        boxes().where((BoxDecoration b) => b.border != null),
+        isEmpty,
+        reason: 'online is filled',
+      );
+      final Color? onColor = boxes().first.color;
+      expect(onColor, isNotNull);
 
+      // "w tle": a ring with a dot in it, in a colour of its own.
+      await pumpDot(false, true);
+      final List<BoxDecoration> away = boxes().toList();
+      expect(away, hasLength(2));
+      expect(away.where((BoxDecoration b) => b.border != null), hasLength(1));
+      final BoxDecoration awayDot = away.singleWhere(
+        (BoxDecoration b) => b.color != null,
+      );
+      expect(awayDot.color, isNot(onColor), reason: 'not the green of online');
+
+      // Offline: an empty grey ring.
       await pumpDot(false, false);
       final BoxDecoration off = boxes().single;
-      expect(off.color, isNull, reason: 'offline is a ring');
+      expect(off.color, isNull, reason: 'offline is an empty ring');
       expect(off.border, isNotNull);
 
+      // Online wins over "w tle".
       await pumpDot(true, true);
       expect(boxes().where((BoxDecoration b) => b.border != null), isEmpty);
-      expect(
-        boxes().every((BoxDecoration b) => b.color != away.color),
-        isTrue,
-        reason: 'online wins and has its own colour',
-      );
     });
   });
 }

@@ -29,12 +29,12 @@ class AnimationsChoice extends StatelessWidget {
         Wrap(
           key: const Key('settings-animations-choice'),
           spacing: 8,
-          runSpacing: 8,
+          runSpacing: 0,
           children: <Widget>[
             for (final AppAnimations mode in AppAnimations.values)
               ChoiceChip(
                 key: Key('settings-animations-${mode.name}'),
-                showCheckmark: false,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
                 label: Text(mode.label),
                 selected: value == mode,
                 onSelected: (_) => onChanged(mode),

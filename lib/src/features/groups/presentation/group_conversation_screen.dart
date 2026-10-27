@@ -792,7 +792,7 @@ class _GroupConversationScreenState
                     children: <Widget>[
                       const Icon(Icons.notifications_none_rounded, size: 18),
                       const SizedBox(width: 8),
-                      Text(t('Powiadomienia')),
+                      Text(t('Treść powiadomień')),
                     ],
                   ),
                 ),

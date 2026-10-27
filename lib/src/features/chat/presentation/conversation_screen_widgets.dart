@@ -228,14 +228,14 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-notification-privacy-menu'),
           value: _ConversationMenuAction.notificationPrivacy,
-          child: Text(t('Powiadomienia')),
+          child: Text(t('Treść powiadomień')),
         ),
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-post-notifications-menu'),
           value: _ConversationMenuAction.postNotifications,
           child: Text(
             postsMuted
-                ? t('Powiadamiaj o postach tej osoby')
+                ? t('Włącz powiadomienia o postach tej osoby')
                 : t('Wycisz posty tej osoby'),
           ),
         ),

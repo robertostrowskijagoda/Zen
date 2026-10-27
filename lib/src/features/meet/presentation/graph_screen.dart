@@ -2576,7 +2576,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           (IntentKind.custom, t('własny status')),
         ])
           _LegendDot(color: intentTone(zen, k), label: label),
-        _LegendDot(color: zen.success, label: t('online'), small: true),
+        _LegendDot(color: zen.success, label: t('w sieci'), small: true),
         _LegendTag(
           key: const Key('graph-legend-open'),
           color: zenTone(zen, 4),

@@ -65,17 +65,17 @@ String? lastOpenedLabel(int lastOpenedMillis, int nowMillis) {
   );
 }
 
-/// The short name of [presence]: "online", "w tle", "offline"; `null` for
+/// The short name of [presence]: "w sieci", "w tle", "poza siecią"; `null` for
 /// a friend who does not show it.
 String? presenceStateLabel(PeerPresence presence) => switch (presence) {
-  PeerPresence.online => t('online'),
+  PeerPresence.online => t('w sieci'),
   PeerPresence.background => t('w tle'),
-  PeerPresence.offline => t('offline'),
+  PeerPresence.offline => t('poza siecią'),
   PeerPresence.hidden => null,
 };
 
 /// What a friend's chat header says about their presence at [nowMillis]:
-/// "online"; "w tle · ostatnio otwierał(a) 5 min temu"; offline, when Zen
+/// "w sieci"; "w tle · ostatnio otwierał(a) 5 min temu"; offline, when Zen
 /// was last open there (or, without that, since when they are quiet); and
 /// `null` for a friend who does not show it.
 String? friendPresenceLine(FriendProfile friend, int nowMillis) {

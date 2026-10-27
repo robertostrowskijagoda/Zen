@@ -3,6 +3,13 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
+/// The revision of the first-start setup. Bump it when a release adds or
+/// changes a setting the person should confirm: the setup then shows once
+/// more on the next start, filled in with the current values and with a note
+/// that it follows an update. This stands in for migrations — nothing is
+/// rewritten behind the person's back.
+const int kSetupRevision = 1;
+
 enum AppLockMode {
   never,
   background,
@@ -10,7 +17,7 @@ enum AppLockMode {
   systemRestart;
 
   String get label => switch (this) {
-    AppLockMode.never => t('Nigdy'),
+    AppLockMode.never => t('Nigdy (bez hasła)'),
     AppLockMode.background => t('Po wyjściu z aplikacji'),
     AppLockMode.appClose => t('Przy zamknięciu aplikacji'),
     AppLockMode.systemRestart => t('Przy restarcie telefonu'),
@@ -62,7 +69,7 @@ enum AppAnimations {
       'Gdy aplikacja jest schowana, stoją.',
     ),
     AppAnimations.system => t(
-      'Tła i efekty stoją, gdy w systemie włączone jest „Usuń animacje”.',
+      'Tła i efekty stoją, gdy system ogranicza ruch albo wyłącza animacje.',
     ),
     AppAnimations.off => t('Żadnych ruchomych teł ani efektów.'),
   };
@@ -85,7 +92,7 @@ enum NotificationPrivacy {
   String get label => switch (this) {
     NotificationPrivacy.senderAndContent => t('Nadawca i treść'),
     NotificationPrivacy.senderOnly => t('Tylko nadawca'),
-    NotificationPrivacy.generic => t('Tylko informacja'),
+    NotificationPrivacy.generic => t('Bez nadawcy i treści'),
   };
 
   /// One line under the choice: what a notification shows.
@@ -422,7 +429,7 @@ final class AppSettings {
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
-    this.firstRunSetupDone = false,
+    this.setupRevision = 0,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
     this.paperBackupDone = false,
@@ -536,10 +543,14 @@ final class AppSettings {
   /// settings (Sieć i usługa).
   final bool bridgeEnabled;
 
-  /// The first-start setup (the lock, notifications, gates, animations)
-  /// was gone through or skipped: it is not shown again (Ustawienia opens
-  /// it again).
-  final bool firstRunSetupDone;
+  /// The [kSetupRevision] of the setup (the lock, notifications, gates,
+  /// animations) this person last went through or skipped; 0: never. The
+  /// setup shows again while it is lower than [kSetupRevision] (Ustawienia
+  /// opens it any time).
+  final int setupRevision;
+
+  /// The setup is due: never shown, or a release asked for it again.
+  bool get setupPending => setupRevision < kSetupRevision;
 
   /// The first-start step "Uprawnienia i Bluetooth" was gone
   /// through: it is not shown again (it stays under Ustawienia).
@@ -651,7 +662,7 @@ final class AppSettings {
     bool? allowNoAppPassword,
     bool? disguiseIcon,
     bool? bridgeEnabled,
-    bool? firstRunSetupDone,
+    int? setupRevision,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
     bool? paperBackupDone,
@@ -692,7 +703,7 @@ final class AppSettings {
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
-      firstRunSetupDone: firstRunSetupDone ?? this.firstRunSetupDone,
+      setupRevision: setupRevision ?? this.setupRevision,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
@@ -737,7 +748,7 @@ final class AppSettings {
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
-    'firstRunSetupDone': firstRunSetupDone,
+    'setupRevision': setupRevision,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
     'paperBackupDone': paperBackupDone,
@@ -802,7 +813,7 @@ final class AppSettings {
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
-      firstRunSetupDone: pick<bool>('firstRunSetupDone'),
+      setupRevision: pick<int>('setupRevision'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
       paperBackupDone: pick<bool>('paperBackupDone'),

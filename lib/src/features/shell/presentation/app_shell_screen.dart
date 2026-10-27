@@ -74,6 +74,7 @@ import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/relay/iphone_delivery_notice.dart';
 import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
+import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -179,7 +180,7 @@ final class AppShellState {
     if (isConnected) {
       return t('Połączono');
     }
-    return t('Łączę...');
+    return t('Łączę…');
   }
 
   String get healthSummary => switch (health) {

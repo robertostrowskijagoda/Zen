@@ -626,7 +626,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                   ? Row(
                       children: <Widget>[
                         Text(
-                          t('Pisze...'),
+                          t('Pisze…'),
                           style: TextStyle(
                             color: zen.accent,
                             fontSize: 13.5,
@@ -788,12 +788,22 @@ void _showConversationActionSheet(
                                 : online
                                 ? zen.success
                                 : away
-                                ? zen.warning
+                                ? zen.tone(ZenTone.network)
                                 : zen.textMuted,
                             icon: pending
                                 ? Icons.schedule_rounded
-                                : Icons.circle,
+                                : online
+                                ? Icons.circle
+                                : away
+                                ? Icons.adjust_rounded
+                                : Icons.circle_outlined,
                           ),
+                        ],
+                        // What the friend uses, as their devices
+                        // announced it.
+                        if (!pending) ...<Widget>[
+                          const SizedBox(height: 6),
+                          FriendDeviceKinds(address: conversation.address),
                         ],
                       ],
                     ),
@@ -1434,7 +1444,7 @@ ConversationPreview _conversationFromFriend(
   );
 }
 
-/// What a chat's presence dot says, in words: "online", "w tle · ostatnio
+/// What a chat's presence dot says, in words: "w sieci", "w tle · ostatnio
 /// otwierał(a) 5 min temu", …; `null` for a friend who does not show it.
 String? _presenceSemantics(ConversationPreview conversation) =>
     friendPresenceLine(

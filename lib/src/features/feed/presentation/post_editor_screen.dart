@@ -1292,7 +1292,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                   decoration: InputDecoration(
                     hintText: widget.editing || !identical(b, _blocks.first)
                         ? null
-                        : t('Co słychać? Podziel się czymś ze znajomymi…'),
+                        : t('Co słychać?'),
                     hintStyle: style.copyWith(color: zen.textMuted),
                     filled: false,
                     isDense: true,
@@ -1602,6 +1602,21 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                   ],
                                 ),
                               ],
+                            ),
+                            // Who will see it, said next to where it is
+                            // written (a public post is the default).
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                kAudienceHints[_audience]!,
+                                key: const Key('post-audience-hint'),
+                                style: TextStyle(
+                                  color: _audience == Audience.public
+                                      ? zen.textSecondary
+                                      : zen.textMuted,
+                                  fontSize: 12.5,
+                                ),
+                              ),
                             ),
                             const SizedBox(height: 6),
                             if (_preview)

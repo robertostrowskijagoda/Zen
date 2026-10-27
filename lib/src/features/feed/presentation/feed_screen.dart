@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
@@ -32,7 +33,6 @@ import 'package:zen/src/features/feed/presentation/mutual_friends.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
 import 'package:zen/src/features/feed/presentation/pyramid_feed_card.dart';
-import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/presentation/video_autoplay.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
@@ -318,6 +318,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final AppSettingsController settings = ref.read(
       appSettingsControllerProvider.notifier,
     );
+    // The global switch off leaves nothing to mute: say so.
+    if (!ref.read(appSettingsControllerProvider).postNotifications) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t(
+              'Powiadomienia o nowych postach znajomych są wyłączone w '
+              'Ustawieniach.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     for (final String address in addresses) {
       await settings.setPostAuthorMuted(address, muted: muted);
     }
@@ -1193,7 +1207,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       appBar: ZenSectionBar(
         title: t('Tablica'),
         actions: <Widget>[
-          const ReactionNoticesButton(),
           if (node != null)
             Padding(
               padding: const EdgeInsetsDirectional.only(end: 8),
@@ -1490,7 +1503,7 @@ String postTimeLabel(int millis, {bool withYear = false}) {
 /// "Co słychać?" at the top of the wall; opens the post editor.
 /// „Wszystko · Znajomi · 2. stopień · 3. stopień · Przyjaciele · Piramida ·
 /// Kraj” over the list.
-class _FilterChips extends StatelessWidget {
+class _FilterChips extends StatefulWidget {
   const _FilterChips({
     required this.filters,
     required this.selected,
@@ -1500,6 +1513,82 @@ class _FilterChips extends StatelessWidget {
   final List<FeedFilter> filters;
   final FeedFilter selected;
   final ValueChanged<FeedFilter> onSelect;
+
+  @override
+  State<_FilterChips> createState() => _FilterChipsState();
+}
+
+class _FilterChipsState extends State<_FilterChips> {
+  /// Where each chip is, to bring the selected one into view (the row
+  /// scrolls sideways and a filter restored from before may be off screen).
+  final Map<FeedFilter, GlobalKey> _chipKeys = <FeedFilter, GlobalKey>{};
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _showSelected();
+  }
+
+  @override
+  void didUpdateWidget(_FilterChips oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      _showSelected();
+    }
+  }
+
+  void _showSelected() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final RenderObject? chip = _chipKeys[widget.selected]?.currentContext
+          ?.findRenderObject();
+      if (!mounted || chip == null || !_scroll.hasClients) {
+        return;
+      }
+      // Only this row scrolls (not the page around it).
+      final RenderAbstractViewport viewport = RenderAbstractViewport.of(chip);
+      // As little as it takes for the chip to be fully in view.
+      final double atStart = viewport.getOffsetToReveal(chip, 0).offset;
+      final double atEnd = viewport.getOffsetToReveal(chip, 1).offset;
+      final double now = _scroll.position.pixels;
+      final double? target = now > atStart
+          ? atStart
+          : now < atEnd
+          ? atEnd
+          : null;
+      if (target == null) {
+        return;
+      }
+      unawaited(
+        _scroll.animateTo(
+          target.clamp(
+            _scroll.position.minScrollExtent,
+            _scroll.position.maxScrollExtent,
+          ),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        ),
+      );
+    });
+  }
+
+  /// What the farther filters mean (a long press on the chip, and under the
+  /// chips while one is chosen).
+  String? _explanation(FeedFilter f) => switch (f) {
+    FeedFilter.second => t(
+      'Znajomi znajomych: posty dotarły do Ciebie przez jednego znajomego.',
+    ),
+    FeedFilter.third => t(
+      'Trzeci stopień: posty dotarły do Ciebie przez dwie osoby.',
+    ),
+    _ => null,
+  };
 
   String _label(FeedFilter f) => switch (f) {
     FeedFilter.all => t('Wszystko'),
@@ -1513,23 +1602,49 @@ class _FilterChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      key: const Key('feed-filters'),
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: <Widget>[
-          for (final FeedFilter f in filters)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(end: 8),
-              child: ChoiceChip(
-                key: Key('feed-filter-${f.name}'),
-                label: Text(_label(f)),
-                selected: f == selected,
-                onSelected: (bool _) => onSelect(f),
-              ),
+    final ZenColors zen = ZenColors.of(context);
+    final String? explanation = _explanation(widget.selected);
+    Widget chip(FeedFilter f) => ChoiceChip(
+      key: Key('feed-filter-${f.name}'),
+      label: Text(_label(f)),
+      selected: f == widget.selected,
+      onSelected: (bool _) => widget.onSelect(f),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SingleChildScrollView(
+          key: const Key('feed-filters'),
+          controller: _scroll,
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: <Widget>[
+              for (final FeedFilter f in widget.filters)
+                Padding(
+                  key: _chipKeys.putIfAbsent(f, GlobalKey.new),
+                  padding: const EdgeInsetsDirectional.only(end: 8),
+                  child: switch (_explanation(f)) {
+                    final String hint => Tooltip(
+                      message: hint,
+                      triggerMode: TooltipTriggerMode.longPress,
+                      child: chip(f),
+                    ),
+                    _ => chip(f),
+                  },
+                ),
+            ],
+          ),
+        ),
+        if (explanation != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              explanation,
+              key: const Key('feed-filter-explanation'),
+              style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -1780,6 +1895,18 @@ class _PostCard extends StatelessWidget {
                                   size: 13,
                                   color: zen.textMuted,
                                 ),
+                                if (postsMuted) ...<Widget>[
+                                  const SizedBox(width: 5),
+                                  Icon(
+                                    Icons.notifications_off_outlined,
+                                    key: Key('feed-muted-${post.id}'),
+                                    size: 13,
+                                    color: zen.textMuted,
+                                    semanticLabel: t(
+                                      'Bez powiadomień o postach tej osoby',
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ],
@@ -1824,51 +1951,50 @@ class _PostCard extends StatelessWidget {
                     'mute' => onMutePosts,
                     _ => onReport,
                   })?.call(),
-                  itemBuilder: (BuildContext context) =>
-                      <PopupMenuEntry<String>>[
-                        if (onEdit != null)
-                          PopupMenuItem<String>(
-                            value: 'edit',
-                            child: ListTile(
-                              leading: const Icon(Icons.edit_outlined),
-                              title: Text(t('Edytuj')),
-                            ),
+                  itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                    if (onEdit != null)
+                      PopupMenuItem<String>(
+                        value: 'edit',
+                        child: ListTile(
+                          leading: const Icon(Icons.edit_outlined),
+                          title: Text(t('Edytuj')),
+                        ),
+                      ),
+                    if (onDelete != null)
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: ListTile(
+                          leading: const Icon(Icons.delete_outline_rounded),
+                          title: Text(t('Usuń')),
+                        ),
+                      ),
+                    if (onMutePosts != null)
+                      PopupMenuItem<String>(
+                        key: Key('feed-mute-posts-${post.id}'),
+                        value: 'mute',
+                        child: ListTile(
+                          leading: Icon(
+                            postsMuted
+                                ? Icons.notifications_active_outlined
+                                : Icons.notifications_off_outlined,
                           ),
-                        if (onDelete != null)
-                          PopupMenuItem<String>(
-                            value: 'delete',
-                            child: ListTile(
-                              leading: const Icon(Icons.delete_outline_rounded),
-                              title: Text(t('Usuń')),
-                            ),
+                          title: Text(
+                            postsMuted
+                                ? t('Włącz powiadomienia o postach tej osoby')
+                                : t('Wycisz posty tej osoby'),
                           ),
-                        if (onMutePosts != null)
-                          PopupMenuItem<String>(
-                            key: Key('feed-mute-posts-${post.id}'),
-                            value: 'mute',
-                            child: ListTile(
-                              leading: Icon(
-                                postsMuted
-                                    ? Icons.notifications_active_outlined
-                                    : Icons.notifications_off_outlined,
-                              ),
-                              title: Text(
-                                postsMuted
-                                    ? t('Powiadamiaj o postach tej osoby')
-                                    : t('Wycisz posty tej osoby'),
-                              ),
-                            ),
-                          ),
-                        if (onReport != null)
-                          PopupMenuItem<String>(
-                            key: Key('feed-report-${post.id}'),
-                            value: 'report',
-                            child: ListTile(
-                              leading: const Icon(Icons.flag_outlined),
-                              title: Text(t('Zgłoś')),
-                            ),
-                          ),
-                      ],
+                        ),
+                      ),
+                    if (onReport != null)
+                      PopupMenuItem<String>(
+                        key: Key('feed-report-${post.id}'),
+                        value: 'report',
+                        child: ListTile(
+                          leading: const Icon(Icons.flag_outlined),
+                          title: Text(t('Zgłoś')),
+                        ),
+                      ),
+                  ],
                 )
               else
                 const SizedBox(width: 8),
@@ -1896,8 +2022,17 @@ class _PostCard extends StatelessWidget {
                     _Pill(
                       key: Key('feed-via-${post.id}'),
                       icon: Icons.alt_route_rounded,
-                      text: t('przez {names}', {'names': post.via.join(', ')}),
+                      text: post.via.length <= 2
+                          ? t('przez {names}', {'names': post.via.join(', ')})
+                          : tn(
+                              post.via.length - 1,
+                              one: 'przez {name} i {n} inną osobę',
+                              few: 'przez {name} i {n} inne osoby',
+                              many: 'przez {name} i {n} innych osób',
+                              args: <String, Object?>{'name': post.via.first},
+                            ),
                       tone: zen.tone(ZenTone.people),
+                      maxLines: 2,
                     ),
                   if (post.audience != Audience.public)
                     _Pill(
@@ -2158,11 +2293,18 @@ class _Initials extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({super.key, required this.icon, required this.text, this.tone});
+  const _Pill({
+    super.key,
+    required this.icon,
+    required this.text,
+    this.tone,
+    this.maxLines = 1,
+  });
 
   final IconData icon;
   final String text;
   final Color? tone;
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -2182,7 +2324,7 @@ class _Pill extends StatelessWidget {
           Flexible(
             child: Text(
               text,
-              maxLines: 1,
+              maxLines: maxLines,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: t,

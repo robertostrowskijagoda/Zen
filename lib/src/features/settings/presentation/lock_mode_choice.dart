@@ -83,7 +83,7 @@ class LockModeSettingChoice extends ConsumerWidget {
         Wrap(
           key: const Key('settings-lock-mode-dropdown'),
           spacing: 8,
-          runSpacing: 8,
+          runSpacing: 0,
           children: <Widget>[
             for (final AppLockMode mode in AppLockMode.values)
               ChoiceChip(
@@ -94,7 +94,7 @@ class LockModeSettingChoice extends ConsumerWidget {
                   AppLockMode.appClose => Icons.close_rounded,
                   AppLockMode.systemRestart => Icons.restart_alt_rounded,
                 }, size: 18),
-                showCheckmark: false,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
                 label: Text(mode.label),
                 selected: settings.lockMode == mode,
                 onSelected: (_) => unawaited(
@@ -158,7 +158,7 @@ class LockModeSettingChoice extends ConsumerWidget {
           Wrap(
             key: const Key('settings-lock-delay-choices'),
             spacing: 8,
-            runSpacing: 8,
+            runSpacing: 0,
             children: <Widget>[
               for (final (int sec, String label) in <(int, String)>[
                 (5, t('{seconds} s', {'seconds': 5})),
@@ -170,6 +170,7 @@ class LockModeSettingChoice extends ConsumerWidget {
               ])
                 ChoiceChip(
                   key: Key('settings-lock-delay-$sec'),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
                   label: Text(label),
                   selected: settings.backgroundLockDelaySeconds == sec,
                   onSelected: (_) =>
@@ -186,7 +187,7 @@ class LockModeSettingChoice extends ConsumerWidget {
           const SizedBox(height: 12),
           Text(
             t(
-              'Po 5 minutach w tle Zen tylko odbiera — tak '
+              'Po 5 minutach w tle Zen tylko odbiera wiadomości — tak '
               'oszczędza baterię, także bez blokady.',
             ),
             key: const Key('settings-lock-battery-note'),

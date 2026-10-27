@@ -174,9 +174,17 @@ class _NoticesBell extends ConsumerWidget {
       final int count = entries + reactionCount;
       return IconButton(
         key: const Key('status-notices'),
-        tooltip: t('Powiadomienia'),
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        // The tooltip is also what a screen reader says: with the count.
+        tooltip: count > 0
+            ? tn(
+                count,
+                one: 'Powiadomienia: {n} nowe',
+                few: 'Powiadomienia: {n} nowe',
+                many: 'Powiadomienia: {n} nowych',
+              )
+            : t('Powiadomienia'),
+        visualDensity: VisualDensity.standard,
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         padding: EdgeInsets.zero,
         onPressed: () => unawaited(_openNotifications(context)),
         icon: Badge(
@@ -238,9 +246,18 @@ class _NotificationsScreenState extends ConsumerState<_NotificationsScreen> {
   final Set<String> _folded = <String>{};
   int _markedUpTo = 0;
 
+  /// Removals still to be taken back with "Cofnij": the rows are hidden at
+  /// once, the inbox follows when the time is up (or the page closes).
+  final List<_PendingRemoval> _pending = <_PendingRemoval>[];
+  late final SocialHubController _hub;
+
+  /// How long "Cofnij" stays.
+  static const Duration _undoFor = Duration(seconds: 5);
+
   @override
   void initState() {
     super.initState();
+    _hub = ref.read(socialHubControllerProvider.notifier);
     _seenBefore = ref
         .read(appSettingsControllerProvider)
         .notificationsSeenMillis;
@@ -290,23 +307,108 @@ class _NotificationsScreenState extends ConsumerState<_NotificationsScreen> {
     }
   }
 
-  void _dismiss(_NoticeItem item) {
-    setState(() => _gone.addAll(<String>[item.id, ...item.ids]));
-    final SocialHubController hub = ref.read(
-      socialHubControllerProvider.notifier,
-    );
-    for (final String id in item.ids) {
-      unawaited(hub.dismissInboxEntry(id));
+  @override
+  void dispose() {
+    // What was not taken back goes now.
+    for (final _PendingRemoval removal in List<_PendingRemoval>.of(_pending)) {
+      _commit(removal);
     }
+    super.dispose();
+  }
+
+  void _dismiss(_NoticeItem item) {
+    _removeWithUndo(<_NoticeItem>[item], t('Usunięto powiadomienie'));
   }
 
   void _clearAll(List<_NoticeItem> items) {
+    _removeWithUndo(items, t('Wyczyszczono powiadomienia'), everything: true);
+  }
+
+  /// Hides [items] and offers "Cofnij" for a few seconds; the inbox is
+  /// changed only after that.
+  void _removeWithUndo(
+    List<_NoticeItem> items,
+    String message, {
+    bool everything = false,
+  }) {
+    final _PendingRemoval removal = _PendingRemoval(
+      items,
+      everything: everything,
+    );
+    removal.timer = Timer(_undoFor, () => _commit(removal));
+    _pending.add(removal);
     setState(() {
       for (final _NoticeItem item in items) {
         _gone.addAll(<String>[item.id, ...item.ids]);
       }
     });
-    unawaited(ref.read(socialHubControllerProvider.notifier).clearInbox());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const Key('notifications-undo'),
+          content: Text(message),
+          duration: _undoFor,
+          action: SnackBarAction(
+            key: const Key('notifications-undo-action'),
+            label: t('Cofnij'),
+            onPressed: () => _undo(removal),
+          ),
+        ),
+      );
+  }
+
+  void _undo(_PendingRemoval removal) {
+    if (!_pending.remove(removal)) {
+      return;
+    }
+    removal.timer?.cancel();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      for (final _NoticeItem item in removal.items) {
+        _gone.removeAll(<String>[item.id, ...item.ids]);
+      }
+    });
+  }
+
+  void _commit(_PendingRemoval removal) {
+    if (!_pending.remove(removal)) {
+      return;
+    }
+    removal.timer?.cancel();
+    if (removal.everything) {
+      // (The page may close with the app: no hub to tell then.)
+      unawaited(_hub.clearInbox().catchError((Object _) {}));
+      return;
+    }
+    for (final _NoticeItem item in removal.items) {
+      for (final String id in item.ids) {
+        unawaited(_hub.dismissInboxEntry(id).catchError((Object _) {}));
+      }
+    }
+  }
+
+  /// What a swiped row uncovers: shaped like the row's panel.
+  Widget _swipeBackground(
+    BuildContext context,
+    ZenColors zen,
+    AlignmentGeometry alignment,
+  ) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: zen.surfaceSunk,
+        borderRadius: context.zenRadius(22),
+      ),
+      child: Align(
+        alignment: alignment,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Icon(Icons.delete_outline_rounded, color: zen.textMuted),
+        ),
+      ),
+    );
   }
 
   static String _dayKey(DateTime day) => '${day.year}-${day.month}-${day.day}';
@@ -409,35 +511,23 @@ class _NotificationsScreenState extends ConsumerState<_NotificationsScreen> {
                             child: Dismissible(
                               key: Key('notice-${item.id}'),
                               onDismissed: (_) => _dismiss(item),
-                              background: ColoredBox(
-                                color: zen.surfaceSunk,
-                                child: Align(
-                                  alignment: AlignmentDirectional.centerStart,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: zen.textMuted,
-                                    ),
-                                  ),
-                                ),
+                              background: _swipeBackground(
+                                context,
+                                zen,
+                                AlignmentDirectional.centerStart,
                               ),
-                              secondaryBackground: ColoredBox(
-                                color: zen.surfaceSunk,
-                                child: Align(
-                                  alignment: AlignmentDirectional.centerEnd,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: zen.textMuted,
-                                    ),
-                                  ),
-                                ),
+                              secondaryBackground: _swipeBackground(
+                                context,
+                                zen,
+                                AlignmentDirectional.centerEnd,
                               ),
                               child: _NoticeRow(
                                 item: item,
-                                isNew: item.millis > _seenBefore,
+                                // Reactions are a digest taken when the page
+                                // opens: no real time, nothing "new".
+                                isNew:
+                                    item.reaction == null &&
+                                    item.millis > _seenBefore,
                                 onTap: () => _open(item),
                                 onDismiss: () => _dismiss(item),
                               ),
@@ -450,6 +540,17 @@ class _NotificationsScreenState extends ConsumerState<_NotificationsScreen> {
       ),
     );
   }
+}
+
+/// Rows removed from the list that "Cofnij" can still bring back.
+class _PendingRemoval {
+  _PendingRemoval(this.items, {required this.everything});
+
+  final List<_NoticeItem> items;
+
+  /// "Wyczyść wszystko": the inbox is cleared as a whole.
+  final bool everything;
+  Timer? timer;
 }
 
 class _NoticeDayHeader extends StatelessWidget {
@@ -554,13 +655,17 @@ class _NoticeRow extends StatelessWidget {
                     ),
                   ),
                 ],
-                const SizedBox(height: 4),
-                Text(
-                  ZenFormat.time(
-                    DateTime.fromMillisecondsSinceEpoch(item.millis),
+                // A reaction row has no time of its own (the digest knows
+                // only when the post was written).
+                if (item.reaction == null) ...<Widget>[
+                  const SizedBox(height: 4),
+                  Text(
+                    ZenFormat.time(
+                      DateTime.fromMillisecondsSinceEpoch(item.millis),
+                    ),
+                    style: zen.mono(color: zen.textMuted, size: 10.5),
                   ),
-                  style: zen.mono(color: zen.textMuted, size: 10.5),
-                ),
+                ],
               ],
             ),
           ),
@@ -578,13 +683,14 @@ class _NoticeRow extends StatelessWidget {
               ),
             ),
           SizedBox(
-            width: 32,
-            height: 32,
+            width: 44,
+            height: 44,
             child: IconButton(
               key: Key('notice-dismiss-${item.id}'),
               tooltip: t('Usuń powiadomienie'),
               padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
+              visualDensity: VisualDensity.standard,
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               iconSize: 18,
               color: zen.textMuted,
               icon: const Icon(Icons.close_rounded),

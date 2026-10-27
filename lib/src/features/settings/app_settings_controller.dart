@@ -212,9 +212,9 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(showLastOpened: value));
   }
 
-  /// The first-start setup was gone through or skipped.
-  Future<void> setFirstRunSetupDone(bool value) async {
-    await _save(state.copyWith(firstRunSetupDone: value));
+  /// The setup (as of [kSetupRevision]) was gone through or skipped.
+  Future<void> setSetupDone() async {
+    await _save(state.copyWith(setupRevision: kSetupRevision));
   }
 
   /// The first-start permissions step is done.

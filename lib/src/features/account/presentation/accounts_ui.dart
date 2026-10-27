@@ -44,18 +44,25 @@ class AccountMenuButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final UserProfile profile = ref.watch(userProfileControllerProvider);
+    // The avatar is [size], the hit box at least 44 px.
     return Semantics(
       button: true,
       label: t('Konta'),
       child: InkResponse(
         key: const Key('account-menu-button'),
         radius: size * 0.75,
+        containedInkWell: false,
         onTap: () => unawaited(showZenAccountMenu(context)),
-        child: ZenBlobAvatar(
-          name: profile.displayName,
-          size: size,
-          showStatus: false,
-          image: peerAvatarImage(profile.avatarPath),
+        child: SizedBox.square(
+          dimension: size < 44 ? 44 : size,
+          child: Center(
+            child: ZenBlobAvatar(
+              name: profile.displayName,
+              size: size,
+              showStatus: false,
+              image: peerAvatarImage(profile.avatarPath),
+            ),
+          ),
         ),
       ),
     );

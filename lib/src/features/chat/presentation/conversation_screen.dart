@@ -17,7 +17,6 @@ import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -362,7 +361,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             Text(
-                              t('pisze...'),
+                              t('pisze…'),
                               style: TextStyle(
                                 color: zen.accent,
                                 fontSize: 12.5,
@@ -376,14 +375,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       else
                         Row(
                           children: <Widget>[
-                            if (showsPresence) ...<Widget>[
-                              ZenStatusDot(
-                                on: presence == PeerPresence.online,
-                                away: presence == PeerPresence.background,
-                                size: 6,
-                              ),
-                              const SizedBox(width: 4),
-                            ],
+                            // The state is the dot on the avatar and these
+                            // words (a second dot here would say it twice).
                             Flexible(
                               child: Text(
                                 <String>[
@@ -395,15 +388,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     conversationSubtitle,
                                 ].join(' · '),
                                 key: const Key('conversation-subtitle'),
-                                maxLines: 1,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: !showsPresence
                                       ? zen.textSecondary
                                       : switch (presence) {
                                           PeerPresence.online => zen.success,
-                                          PeerPresence.background =>
-                                            zen.warning,
+                                          PeerPresence.background => zen.tone(
+                                            ZenTone.network,
+                                          ),
                                           _ => zen.textSecondary,
                                         },
                                   fontSize: 12.5,
@@ -569,23 +563,47 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   );
                   return;
                 case _ConversationMenuAction.postNotifications:
-                  // The global switch off leaves nothing to mute here.
                   final AppSettingsController settings = ref.read(
                     appSettingsControllerProvider.notifier,
                   );
+                  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(
+                    context,
+                  );
+                  // The global switch off leaves nothing to mute here: say
+                  // so instead of turning it on behind the person's back.
                   if (!ref
                       .read(appSettingsControllerProvider)
                       .postNotifications) {
-                    await settings.setPostNotifications(true);
-                    await settings.setPostAuthorMuted(
-                      friend?.address ?? widget.peerAddress,
-                      muted: false,
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          t(
+                            'Powiadomienia o nowych postach znajomych są '
+                            'wyłączone w Ustawieniach.',
+                          ),
+                        ),
+                      ),
                     );
                     return;
                   }
                   await settings.setPostAuthorMuted(
                     friend?.address ?? widget.peerAddress,
                     muted: !postsMuted,
+                  );
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        postsMuted
+                            ? t('Znów powiadomimy o nowych postach: {name}.', {
+                                'name': conversationTitle,
+                              })
+                            : t(
+                                'Bez powiadomień o nowych postach: {name}. '
+                                'Posty nadal są na Tablicy.',
+                                {'name': conversationTitle},
+                              ),
+                      ),
+                    ),
                   );
                   return;
                 case _ConversationMenuAction.blockFriend:

@@ -348,12 +348,98 @@ void main() {
     await _pumpApp(tester, security: security);
     expect(find.byKey(const Key('account-menu-button')), findsOneWidget);
     expect(find.byKey(const Key('side-tabs-hide')), findsOneWidget);
+    // Every button has a 44 px hit box and none overlaps another, with the
+    // rail button, the bell, "Mój kod", the lock and the accounts all there.
+    final List<Rect> boxes = <Rect>[
+      for (final Key key in const <Key>[
+        Key('side-tabs-hide'),
+        Key('status-notices'),
+        Key('status-my-code'),
+        Key('side-tabs-lock'),
+        Key('account-menu-button'),
+      ])
+        tester.getRect(find.byKey(key)),
+    ];
+    for (final Rect box in boxes) {
+      expect(box.width, greaterThanOrEqualTo(44));
+      expect(box.height, greaterThanOrEqualTo(44));
+      expect(box.right, lessThanOrEqualTo(320));
+    }
+    for (int i = 0; i < boxes.length; i++) {
+      for (int j = i + 1; j < boxes.length; j++) {
+        expect(boxes[i].overlaps(boxes[j]), isFalse, reason: '$i / $j');
+      }
+    }
+    // The bar has no settings circle and no help button of its own; it is
+    // the settings button itself.
+    expect(find.byKey(const Key('status-health')), findsNothing);
+    expect(find.byKey(const Key('status-settings')), findsNothing);
+    expect(tester.takeException(), isNull);
     // "Zablokuj teraz" locks at once.
     tester
         .widget<IconButton>(find.byKey(const Key('side-tabs-lock')))
         .onPressed!
         .call();
     expect(security.isLocked, isTrue);
+    await _tearDown(tester);
+  });
+
+  testWidgets('the notifications about friends\' posts are switched in the '
+      'settings, with the muted people listed there', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester);
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AppShellScreen)),
+    );
+    await tester.tap(find.byKey(const Key('chats-status-chip')));
+    await _route(tester);
+
+    final Finder posts = find.byKey(const Key('settings-post-notifications'));
+    await tester.ensureVisible(posts);
+    await tester.pump();
+    expect(
+      container.read(appSettingsControllerProvider).postNotifications,
+      isTrue,
+    );
+    await tester.tap(posts);
+    await tester.pump();
+    expect(
+      container.read(appSettingsControllerProvider).postNotifications,
+      isFalse,
+    );
+
+    // Nobody muted yet; a muted person is listed and comes back with one tap.
+    final Finder muted = find.byKey(
+      const Key('settings-nav-muted-post-authors'),
+    );
+    await tester.ensureVisible(muted);
+    await tester.pump();
+    await tester.tap(muted);
+    await _route(tester);
+    expect(find.byKey(const Key('muted-post-authors-empty')), findsOneWidget);
+    await tester.runAsync(
+      () => container
+          .read(appSettingsControllerProvider.notifier)
+          .setPostAuthorMuted('200::1', muted: true),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('muted-post-author-200::1')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('muted-post-author-unmute-200::1')));
+    await tester.runAsync(() => _settle());
+    await tester.pump();
+    expect(find.byKey(const Key('muted-post-author-200::1')), findsNothing);
+    expect(
+      container.read(appSettingsControllerProvider).mutedPostAuthors,
+      isEmpty,
+    );
+    // The wall has no bell of its own: the one in the top bar is enough.
+    expect(find.byKey(const Key('feed-notices')), findsNothing);
+    await tester.pageBack();
+    await _route(tester);
     await _tearDown(tester);
   });
 

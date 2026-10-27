@@ -112,8 +112,9 @@ List<String> iosShortcutSteps() => <String>[
   t('Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.'),
   t('Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.'),
   t(
-    'Powtórz dla kolejnych godzin (na przykład co godzinę od 7 do 23): '
-    'każda godzina to osobna automatyzacja.',
+    'Powtórz dla kolejnych godzin: każda godzina to osobna automatyzacja. '
+    'Co godzinę od 7 do 23 to około 17 automatyzacji; przy co trzeciej '
+    'godzinie wystarczy sześć.',
   ),
 ];
 
@@ -299,7 +300,7 @@ class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
     );
     final IosBackgroundStatus? s = status;
     final ButtonStyle buttonStyle = FilledButton.styleFrom(
-      minimumSize: const Size(0, 38),
+      minimumSize: const Size(0, 44),
       padding: const EdgeInsets.symmetric(horizontal: 14),
     );
     return Column(
@@ -397,6 +398,9 @@ class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
                   if (!_stepsOpen)
                     TextButton(
                       key: const Key('ios-wake-shortcut-how'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 44),
+                      ),
                       onPressed: () => setState(() => _stepsOpen = true),
                       child: Text(t('Jak to ustawić?')),
                     ),
@@ -423,10 +427,13 @@ class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
             'Wyraźnie szybciej wyczerpuje baterię.',
           ),
           on: keepAlive,
-          trailing: Switch.adaptive(
-            key: const Key('settings-ios-keep-alive-switch'),
-            value: keepAlive,
-            onChanged: (bool value) => unawaited(_setKeepAlive(value)),
+          trailing: Semantics(
+            label: t('Cichy dźwięk — odbiór na bieżąco'),
+            child: Switch.adaptive(
+              key: const Key('settings-ios-keep-alive-switch'),
+              value: keepAlive,
+              onChanged: (bool value) => unawaited(_setKeepAlive(value)),
+            ),
           ),
         ),
       ],
@@ -569,6 +576,7 @@ class _IosSettingsChecklistState extends _IosStatusState<IosSettingsChecklist> {
         const SizedBox(height: 12),
         FilledButton.tonal(
           key: const Key('ios-check-open-settings'),
+          style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
           onPressed: () => unawaited(ref.read(iosOpenZenSettingsProvider)()),
           child: Text(t('Otwórz ustawienia Zen w iOS')),
         ),

@@ -259,17 +259,22 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Drugie'), findsNothing);
-    expect(
-      container
-          .read(socialHubControllerProvider)
-          .inbox
-          .map((InboxEntry e) => e.id),
-      <String>['one', 'three'],
-    );
+    // Hidden at once, gone from the inbox when the time for "Cofnij" is up.
+    expect(find.byKey(const Key('notifications-undo-action')), findsOneWidget);
+    List<String> inboxIds() => container
+        .read(socialHubControllerProvider)
+        .inbox
+        .map((InboxEntry e) => e.id)
+        .toList();
+    expect(inboxIds(), <String>['one', 'two', 'three']);
+    await tester.pump(const Duration(seconds: 6));
+    expect(inboxIds(), <String>['one', 'three']);
 
     await tester.tap(find.byKey(const Key('notice-dismiss-three')));
     await tester.pumpAndSettle();
     expect(find.text('Trzecie'), findsNothing);
+    await tester.pump(const Duration(seconds: 6));
+    expect(inboxIds(), <String>['one']);
 
     await tester.tap(find.text('Pierwsze'));
     await tester.pumpAndSettle();
@@ -312,7 +317,59 @@ void main() {
     await tester.tap(find.byKey(const Key('notifications-clear-all')));
     await tester.pumpAndSettle();
     expect(find.text('Brak powiadomień'), findsOneWidget);
+    // "Cofnij" brings everything back; left alone, it is cleared for good.
+    await tester.tap(find.byKey(const Key('notifications-undo-action')));
+    await tester.pumpAndSettle();
+    expect(find.text('B'), findsOneWidget);
+    expect(container.read(socialHubControllerProvider).inbox, hasLength(2));
+
+    await tester.tap(find.byKey(const Key('notifications-clear-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('Brak powiadomień'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
     expect(container.read(socialHubControllerProvider).inbox, isEmpty);
+  });
+
+  testWidgets('every button of the top bar has a 44 px hit box on the '
+      'smallest phone, with "Mój kod" and the status in view', (
+    WidgetTester tester,
+  ) async {
+    addTearDown(tester.view.reset);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    await _pumpApp(
+      tester,
+      security: MemoryAppSecurityService(
+        hasPassword: true,
+        passwordIterations: 10,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    final List<Rect> boxes = <Rect>[];
+    for (final Key key in const <Key>[
+      _bell,
+      Key('status-my-code'),
+      Key('side-tabs-lock'),
+      Key('account-menu-button'),
+    ]) {
+      final Rect box = tester.getRect(find.byKey(key));
+      expect(box.width, greaterThanOrEqualTo(44), reason: '$key');
+      expect(box.height, greaterThanOrEqualTo(44), reason: '$key');
+      expect(box.right, lessThanOrEqualTo(320), reason: '$key');
+      boxes.add(box);
+    }
+    // No two hit boxes overlap.
+    for (int i = 0; i < boxes.length; i++) {
+      for (int j = i + 1; j < boxes.length; j++) {
+        expect(boxes[i].overlaps(boxes[j]), isFalse, reason: '$i / $j');
+      }
+    }
+    // The status still has room, and there is exactly one bell (the wall
+    // has none of its own).
+    expect(find.byKey(const Key('chats-status-chip')), findsOneWidget);
+    expect(find.byKey(const Key('status-health')), findsNothing);
+    expect(find.byKey(const Key('feed-notices')), findsNothing);
+    expect(find.byKey(_bell), findsOneWidget);
   });
 
   testWidgets('the top bar and the list fit the smallest phone', (

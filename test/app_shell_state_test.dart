@@ -23,7 +23,7 @@ void main() {
 
     expect(state.isConnected, isFalse);
     expect(state.isConnecting, isTrue);
-    expect(state.connectionLabel, 'Łączę...');
+    expect(state.connectionLabel, 'Łączę…');
   });
 
   test('stopped and failed nodes are offline, not connecting', () {

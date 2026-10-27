@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
@@ -64,6 +65,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   int _total = 0;
   String? _message;
   AccountBackupSaved? _saved;
+  bool _obscure = true;
 
   /// Where the backup goes: [_default] until the person chooses another.
   AccountBackupFolder? _default;
@@ -251,6 +253,15 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     }
   }
 
+  /// "Pokaż" / "Ukryj" for the password fields.
+  Widget _visibilityToggle() => IconButton(
+    tooltip: _obscure ? t('Pokaż') : t('Ukryj'),
+    onPressed: () => setState(() => _obscure = !_obscure),
+    icon: Icon(
+      _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -258,7 +269,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     final AccountBackupFolder? folder = _chosen ?? _default;
     return Scaffold(
       key: const Key('account-backup-screen'),
-      appBar: AppBar(title: Text(t('Kopia całego konta (plik)'))),
+      appBar: ZenSectionBar(title: t('Kopia całego konta (plik)')),
       body: SafeArea(
         top: false,
         child: SelectionArea(
@@ -347,24 +358,26 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
               TextField(
                 key: const Key('account-backup-password'),
                 controller: _password,
-                obscureText: true,
+                obscureText: _obscure,
                 enableIMEPersonalizedLearning: false,
                 enabled: !_busy,
                 decoration: InputDecoration(
                   labelText: t('Hasło'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: _visibilityToggle(),
                 ),
               ),
               const SizedBox(height: 8),
               TextField(
                 key: const Key('account-backup-repeat'),
                 controller: _repeat,
-                obscureText: true,
+                obscureText: _obscure,
                 enableIMEPersonalizedLearning: false,
                 enabled: !_busy,
                 decoration: InputDecoration(
                   labelText: t('Powtórz hasło'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: _visibilityToggle(),
                 ),
               ),
               const SizedBox(height: 8),
@@ -395,10 +408,10 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                 ),
               if (_message != null) ...<Widget>[
                 const SizedBox(height: 10),
-                Text(
+                _BackupMessage(
                   _message!,
                   key: const Key('account-backup-message'),
-                  style: TextStyle(color: zen.danger),
+                  color: zen.danger,
                 ),
               ],
               if (saved != null) ...<Widget>[
@@ -464,6 +477,7 @@ class _AccountBackupRestoreScreenState
   bool _busy = false;
   String? _message;
   bool _good = false;
+  bool _obscure = true;
 
   @override
   void dispose() {
@@ -539,13 +553,22 @@ class _AccountBackupRestoreScreenState
     }
   }
 
+  /// "Pokaż" / "Ukryj" for the password fields.
+  Widget _visibilityToggle() => IconButton(
+    tooltip: _obscure ? t('Pokaż') : t('Ukryj'),
+    onPressed: () => setState(() => _obscure = !_obscure),
+    icon: Icon(
+      _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final List<String>? parts = _parts;
     return Scaffold(
       key: const Key('account-backup-restore-screen'),
-      appBar: AppBar(title: Text(t('Mam kopię'))),
+      appBar: ZenSectionBar(title: t('Mam kopię')),
       body: SafeArea(
         top: false,
         child: SelectionArea(
@@ -590,12 +613,13 @@ class _AccountBackupRestoreScreenState
                       TextField(
                         key: const Key('account-restore-password'),
                         controller: _password,
-                        obscureText: true,
+                        obscureText: _obscure,
                         enableIMEPersonalizedLearning: false,
                         enabled: !_busy,
                         decoration: InputDecoration(
                           labelText: t('Hasło kopii'),
                           prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: _visibilityToggle(),
                         ),
                         onSubmitted: (_) => unawaited(_restore()),
                       ),
@@ -619,13 +643,10 @@ class _AccountBackupRestoreScreenState
                     ],
                     if (_message != null) ...<Widget>[
                       const SizedBox(height: 10),
-                      Text(
+                      _BackupMessage(
                         _message!,
                         key: const Key('account-restore-message'),
-                        style: TextStyle(
-                          color: _good ? zen.success : zen.danger,
-                          height: 1.4,
-                        ),
+                        color: _good ? zen.success : zen.danger,
                       ),
                     ],
                   ],
@@ -668,6 +689,58 @@ class _AccountBackupRestoreScreenState
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A result line under a button: read out when it appears (a live region)
+/// and scrolled into view, so an error is not left below the screen.
+class _BackupMessage extends StatefulWidget {
+  const _BackupMessage(this.text, {required this.color, super.key});
+
+  final String text;
+  final Color color;
+
+  @override
+  State<_BackupMessage> createState() => _BackupMessageState();
+}
+
+class _BackupMessageState extends State<_BackupMessage> {
+  @override
+  void initState() {
+    super.initState();
+    _show();
+  }
+
+  @override
+  void didUpdateWidget(_BackupMessage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _show();
+    }
+  }
+
+  void _show() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(
+          Scrollable.ensureVisible(
+            context,
+            duration: const Duration(milliseconds: 150),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      child: Text(
+        widget.text,
+        style: TextStyle(color: widget.color, height: 1.4),
       ),
     );
   }

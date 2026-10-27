@@ -2990,14 +2990,14 @@ void main() {
       await tester.pumpAndSettle();
 
       // On conversation card
-      expect(find.text('Pisze...'), findsOneWidget);
+      expect(find.text('Pisze…'), findsOneWidget);
 
       // Open conversation screen
       await tester.tap(find.byKey(const Key('conversation-card-ada.ygg')));
       await tester.pumpAndSettle();
 
       // In header and typing bubble
-      expect(find.text('pisze...'), findsOneWidget);
+      expect(find.text('pisze…'), findsOneWidget);
       expect(
         find.byKey(const Key('conversation-typing-bubble')),
         findsOneWidget,

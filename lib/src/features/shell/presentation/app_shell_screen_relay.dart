@@ -501,7 +501,7 @@ class _RelayFriendTile extends StatelessWidget {
             style: TextStyle(
               color: switch (friend.presence) {
                 PeerPresence.online => zen.success,
-                PeerPresence.background => zen.warning,
+                PeerPresence.background => zen.tone(ZenTone.network),
                 _ => zen.textSecondary,
               },
             ),

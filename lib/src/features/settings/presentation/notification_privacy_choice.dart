@@ -39,20 +39,20 @@ class NotificationPrivacyChoice extends StatelessWidget {
         Wrap(
           key: const Key('notification-privacy-choice'),
           spacing: 8,
-          runSpacing: 8,
+          runSpacing: 0,
           children: <Widget>[
             if (global != null)
               ChoiceChip(
                 key: const Key('notification-privacy-global'),
-                showCheckmark: false,
-                label: Text(t('Jak globalnie')),
+                materialTapTargetSize: MaterialTapTargetSize.padded,
+                label: Text(t('Jak w ustawieniach')),
                 selected: value == null,
                 onSelected: (_) => onChanged(null),
               ),
             for (final NotificationPrivacy level in NotificationPrivacy.values)
               ChoiceChip(
                 key: Key('notification-privacy-${level.name}'),
-                showCheckmark: false,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
                 label: Text(level.label),
                 selected: value == level,
                 onSelected: (_) => onChanged(level),
@@ -115,7 +115,7 @@ Future<void> showConversationNotificationPrivacyDialog(
     context: context,
     builder: (BuildContext context) => AlertDialog(
       key: const Key('conversation-notification-privacy-dialog'),
-      title: Text(t('Powiadomienia z tej rozmowy')),
+      title: Text(t('Treść powiadomień z tej rozmowy')),
       scrollable: true,
       content: Consumer(
         builder: (BuildContext context, WidgetRef ref, Widget? child) {
