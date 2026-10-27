@@ -223,10 +223,19 @@ then, and offers *Retry* when saving failed.
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.
-- **Presence.** Zen tells friends it is there only while it is on the
-  screen: when you open it, every few minutes while it stays open, and
-  "leaving" when it goes to the background. The chat header shows *online
-  now*, *in the background*, or after a week of silence *online N days
-  ago* (after a month: *over a month ago*).
+- **Presence.** Friends see one of three states, as a dot on the avatar
+  in the chat list and in the chat header: *online* (a dot in the theme's
+  "success" colour that pulses briefly when it lights up: Zen is open on
+  their screen), *in the background* (a still dot in the theme's "warning"
+  colour: Zen is hidden or the phone locked, but it still receives) and
+  *offline* (an empty ring). The
+  header also says when they last opened Zen ("5 min ago", "3 h ago",
+  "2 days ago") while they are not online. An iPhone that iOS suspends
+  shows as offline, not in the background, unless it keeps receiving
+  (*Keep receiving in the background*). Zen tells this only by the way:
+  when you open it, with its few pings while it stays open, with its
+  answers to friends' pings, and "leaving" when it goes to the background.
+  A weak acquaintance sees none of it; *Settings → Privacy and security →
+  Show when I last opened the app* hides the time from everyone.
 
 [Back to the guide](README.md)

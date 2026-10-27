@@ -279,10 +279,37 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `ping` | optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. A friend counts as offline after 7 min without an answer (`kPresenceOfflineAfter`). Not answered unless the sender is a friend or group member. |
-| `pong` | `state` (`"foreground"` or other), hello fields, version fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`). |
-| `away` | - | Sent when the app leaves the screen ("leaving"); the receiver shows the friend as in the background. Never mailboxed; ignored by a locked phone. |
+| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
+| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`). |
+| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence. Never mailboxed; ignored by a locked phone. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
+
+Presence fields ride on the frames above; nothing is sent only for them.
+They go only to accepted friends who may see statuses (not to a friend at
+the "weak acquaintance" level, and never to group members or strangers); to
+anyone else a `ping` or `pong` carries neither field.
+
+- `state`: `"foreground"` (Zen is on the sender's screen), `"background"`
+  (off the screen but still receiving: Android's background service, a
+  computer's tray, an iPhone with the keep-alive) or `"asleep"` (off the
+  screen and about to stop receiving: an iPhone iOS suspends). A frame
+  without `state` says nothing about presence; the receiver shows none.
+- `lo`: seconds since Zen was last open on the sender's screen (0 while it
+  is open). Left out when the sender turned off "show when I last opened
+  the app", or does not know (a computer that started in the tray).
+
+The receiver shows *online* for `"foreground"`, *in the background* for
+`"background"`, and *offline* for `"asleep"` or when the state expires:
+*online* after 6 min without a new frame (`kPresenceForegroundFor`: a
+friend on the screen pings every 2 min 30 s and answers at once, and says
+`away` when it leaves), *in the background* after 12 min
+(`kPresenceOfflineAfter`: a locked phone answers about every 5 min, as it
+answers one contact at most every 4 min). The receiver keeps the last
+opening (receive time minus `lo`) and shows it while the friend is not
+online. A locked Android phone takes `state` and `lo` for its pongs from a
+presence kit the app writes, sealed with the background key, whenever Zen
+leaves the screen (`presence-kit.zenbg`: the friends who may see presence
+and when Zen was last open).
 
 ### 2.2 Friends and profile
 

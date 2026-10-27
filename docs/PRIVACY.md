@@ -98,7 +98,7 @@ Everything below is sent device to device over the Yggdrasil network.
 | You do this | Who receives what |
 |---|---|
 | Send a friend request | The other person: your Zen address, display name and the note you wrote. |
-| Be a friend | Friends can see your profile (name, status, bio, avatar), when you are online / in the foreground (presence pings every ~45 s while the app runs), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
+| Be a friend | Friends can see your profile (name, status, bio, avatar), whether Zen is open on your screen, in the background or offline, and when you last opened it (carried by the presence pings, every 2.5 min while Zen is on the screen, and their answers; not shown to a weak acquaintance; the time can be turned off in Settings), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
 | Like, comment or write to someone who is not your friend | The author of the post and the friends who passed it on get your signed like or comment together with a small signed copy of your profile (name and photo). A first message to a non-friend (only if their settings allow it) carries the same. |
 | Chat | The recipient: message text, attachments, timestamps, typing indicator, delivery and read receipts, disappearing-message timers. |
 | Groups | Every member (up to 256) gets each message. Members learn the group's member list. |
