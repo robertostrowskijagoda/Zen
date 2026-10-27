@@ -142,125 +142,128 @@ class AccountRestoreInfoScreen extends StatelessWidget {
     return Scaffold(
       key: const Key('account-restore-info'),
       appBar: AppBar(title: Text(t('Co da się odzyskać i jak'))),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            Text(
-              t(
-                'Konto wraca na kilka sposobów. Najwięcej daje drugie '
-                'urządzenie albo plik kopii całego konta; krąg odzyskiwania i '
-                'klucz pomogą, gdy nie masz żadnego z nich.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              Text(
+                t(
+                  'Konto wraca na kilka sposobów. Najwięcej daje drugie '
+                  'urządzenie albo plik kopii całego konta; krąg odzyskiwania i '
+                  'klucz pomogą, gdy nie masz żadnego z nich.',
+                ),
+                style: TextStyle(color: zen.textSecondary, height: 1.4),
               ),
-              style: TextStyle(color: zen.textSecondary, height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            ZenCard(
-              padding: const EdgeInsets.all(8),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Table(
-                  key: const Key('account-restore-table'),
-                  defaultColumnWidth: const IntrinsicColumnWidth(),
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  border: TableBorder(
-                    horizontalInside: BorderSide(color: zen.outlineSoft),
-                  ),
-                  children: <TableRow>[
-                    TableRow(
-                      children: <Widget>[
-                        head(''),
-                        for (final AccountRestoreMethod m
-                            in AccountRestoreMethod.values)
-                          head(accountRestoreMethodLabel(m)),
-                      ],
+              const SizedBox(height: 12),
+              ZenCard(
+                padding: const EdgeInsets.all(8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Table(
+                    key: const Key('account-restore-table'),
+                    defaultColumnWidth: const IntrinsicColumnWidth(),
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    border: TableBorder(
+                      horizontalInside: BorderSide(color: zen.outlineSoft),
                     ),
-                    for (final AccountRestoreRow r in rows)
+                    children: <TableRow>[
                       TableRow(
                         children: <Widget>[
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 8,
-                            ),
-                            child: Text(
-                              r.label,
-                              style: TextStyle(color: zen.textPrimary),
-                            ),
-                          ),
+                          head(''),
                           for (final AccountRestoreMethod m
                               in AccountRestoreMethod.values)
-                            cell(r.cells[m] ?? _no),
+                            head(accountRestoreMethodLabel(m)),
                         ],
                       ),
-                  ],
+                      for (final AccountRestoreRow r in rows)
+                        TableRow(
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 8,
+                              ),
+                              child: Text(
+                                r.label,
+                                style: TextStyle(color: zen.textPrimary),
+                              ),
+                            ),
+                            for (final AccountRestoreMethod m
+                                in AccountRestoreMethod.values)
+                              cell(r.cells[m] ?? _no),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              t('✓ wraca · ~ częściowo (patrz uwaga) · – nie wraca'),
-              style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-            ),
-            for (final MapEntry<int, String> n in notes.entries)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '${n.key}. ${n.value}',
-                  style: TextStyle(color: zen.textSecondary, height: 1.35),
+              const SizedBox(height: 8),
+              Text(
+                t('✓ wraca · ~ częściowo (patrz uwaga) · – nie wraca'),
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
+              for (final MapEntry<int, String> n in notes.entries)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '${n.key}. ${n.value}',
+                    style: TextStyle(color: zen.textSecondary, height: 1.35),
+                  ),
+                ),
+              ZenSection(t('Jak')),
+              _Way(
+                icon: Icons.devices_rounded,
+                title: t('Inne urządzenie'),
+                text: t(
+                  'Urządzenia jednego konta mają na bieżąco to samo: rozmowy z '
+                  'plikami i nagraniami, znajomych, profil i zdjęcia, posty, '
+                  'galerię, filmy, ustawienia konta, randki, spotkania i '
+                  'kółka, piramidę, a także kopię mieszkania. Pliki idą przez '
+                  'Wi-Fi (przez dane komórkowe, gdy „Media tylko przez Wi-Fi” '
+                  'jest wyłączone). Na starym urządzeniu: Konto i '
+                  'odzyskiwanie → Dodaj drugie urządzenie lub przenieś konto; '
+                  'na nowym: '
+                  'Odzyskaj z innego urządzenia i zeskanuj kod. Przerwane '
+                  'przenoszenie wznowisz od miejsca, w którym stanęło.',
                 ),
               ),
-            ZenSection(t('Jak')),
-            _Way(
-              icon: Icons.devices_rounded,
-              title: t('Inne urządzenie'),
-              text: t(
-                'Urządzenia jednego konta mają na bieżąco to samo: rozmowy z '
-                'plikami i nagraniami, znajomych, profil i zdjęcia, posty, '
-                'galerię, filmy, ustawienia konta, randki, spotkania i '
-                'kółka, piramidę, a także kopię mieszkania. Pliki idą przez '
-                'Wi-Fi (przez dane komórkowe, gdy „Media tylko przez Wi-Fi” '
-                'jest wyłączone). Na starym urządzeniu: Konto i '
-                'odzyskiwanie → Dodaj drugie urządzenie lub przenieś konto; '
-                'na nowym: '
-                'Odzyskaj z innego urządzenia i zeskanuj kod. Przerwane '
-                'przenoszenie wznowisz od miejsca, w którym stanęło.',
+              _Way(
+                icon: Icons.save_alt_rounded,
+                title: t('Kopia całego konta (plik)'),
+                text: t(
+                  'Konto i odzyskiwanie → Utwórz kopię całego konta. Wybierasz, co '
+                  'ma się w niej znaleźć; plik jest zaszyfrowany hasłem, '
+                  'którego nikt poza Tobą nie zna — bez hasła nie otworzy go '
+                  'nikt, także Ty. Przywracasz przez „Mam kopię”.',
+                ),
               ),
-            ),
-            _Way(
-              icon: Icons.save_alt_rounded,
-              title: t('Kopia całego konta (plik)'),
-              text: t(
-                'Konto i odzyskiwanie → Utwórz kopię całego konta. Wybierasz, co '
-                'ma się w niej znaleźć; plik jest zaszyfrowany hasłem, '
-                'którego nikt poza Tobą nie zna — bez hasła nie otworzy go '
-                'nikt, także Ty. Przywracasz przez „Mam kopię”.',
+              _Way(
+                icon: Icons.groups_2_outlined,
+                title: t('Krąg odzyskiwania'),
+                text: t(
+                  'Osoby z kręgu oddają kawałki klucza: z hasłem konta po '
+                  '24 h, bez hasła po 7 dniach. Potem z ich kopii wracają '
+                  'znajomi, grupy, profil, ustawienia i reszta z tabeli.',
+                ),
               ),
-            ),
-            _Way(
-              icon: Icons.groups_2_outlined,
-              title: t('Krąg odzyskiwania'),
-              text: t(
-                'Osoby z kręgu oddają kawałki klucza: z hasłem konta po '
-                '24 h, bez hasła po 7 dniach. Potem z ich kopii wracają '
-                'znajomi, grupy, profil, ustawienia i reszta z tabeli.',
+              _Way(
+                icon: Icons.history_edu_rounded,
+                title: t('Kartka z kluczem i plik klucza'),
+                text: t(
+                  'Przywracają samo konto, od razu i bez niczyjej pomocy. '
+                  'Kto ma kartkę albo plik z hasłem, ma konto — trzymaj je '
+                  'bezpiecznie.',
+                ),
               ),
-            ),
-            _Way(
-              icon: Icons.history_edu_rounded,
-              title: t('Kartka z kluczem i plik klucza'),
-              text: t(
-                'Przywracają samo konto, od razu i bez niczyjej pomocy. '
-                'Kto ma kartkę albo plik z hasłem, ma konto — trzymaj je '
-                'bezpiecznie.',
+              const SizedBox(height: 8),
+              ZenInfo(
+                icon: Icons.timer_off_outlined,
+                text: t('Znikające wiadomości nie wracają nigdy.'),
               ),
-            ),
-            const SizedBox(height: 8),
-            ZenInfo(
-              icon: Icons.timer_off_outlined,
-              text: t('Znikające wiadomości nie wracają nigdy.'),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

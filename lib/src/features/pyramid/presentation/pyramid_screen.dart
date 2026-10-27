@@ -278,7 +278,10 @@ class PyramidScreen extends ConsumerWidget {
           return Scaffold(
             key: const Key('pyramid-screen'),
             appBar: ZenSectionBar(title: t('Piramida')),
-            body: SelectionArea(child: _JoinView(pyr: pyr)),
+            body: SafeArea(
+              top: false,
+              child: SelectionArea(child: _JoinView(pyr: pyr)),
+            ),
           );
         }
         if (s.rulesTooNew != null) {
@@ -338,15 +341,18 @@ class PyramidScreen extends ConsumerWidget {
               ],
               tabs: tabs,
             ),
-            body: SelectionArea(
-              child: TabBarView(
-                children: <Widget>[
-                  _MeTab(pyr: pyr, s: s, me: me),
-                  _VotesTab(pyr: pyr, s: s, me: me),
-                  PyramidWallet(pyr: pyr, s: s, me: me),
-                  if (power) PyramidPower(pyr: pyr, s: s, me: me),
-                  _HistoryTab(s: s, me: me),
-                ],
+            body: SafeArea(
+              top: false,
+              child: SelectionArea(
+                child: TabBarView(
+                  children: <Widget>[
+                    _MeTab(pyr: pyr, s: s, me: me),
+                    _VotesTab(pyr: pyr, s: s, me: me),
+                    PyramidWallet(pyr: pyr, s: s, me: me),
+                    if (power) PyramidPower(pyr: pyr, s: s, me: me),
+                    _HistoryTab(s: s, me: me),
+                  ],
+                ),
               ),
             ),
           ),

@@ -791,171 +791,178 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
           ],
         ),
-        body: SelectionArea(
-          child: NestedScrollView(
-            headerSliverBuilder: (BuildContext context, bool scrolled) =>
-                <Widget>[
-                  SliverToBoxAdapter(child: header),
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _TabsHeader(
-                      color: zen.background,
-                      line: zen.outlineSoft,
-                      tabs: TabBar(
-                        isScrollable: true,
-                        tabAlignment: TabAlignment.center,
-                        labelPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
+        body: SafeArea(
+          top: false,
+          child: SelectionArea(
+            child: NestedScrollView(
+              headerSliverBuilder: (BuildContext context, bool scrolled) =>
+                  <Widget>[
+                    SliverToBoxAdapter(child: header),
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _TabsHeader(
+                        color: zen.background,
+                        line: zen.outlineSoft,
+                        tabs: TabBar(
+                          isScrollable: true,
+                          tabAlignment: TabAlignment.center,
+                          labelPadding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                          ),
+                          tabs: <Widget>[
+                            Tab(text: t('Posty')),
+                            Tab(
+                              key: const Key('profile-tab-media'),
+                              text: t('Zdjęcia'),
+                            ),
+                            Tab(
+                              key: const Key('profile-tab-films'),
+                              text: t('Filmy'),
+                            ),
+                            Tab(text: t('Podziękowania')),
+                            Tab(
+                              key: const Key('profile-tab-info'),
+                              text: t('Informacje'),
+                            ),
+                          ],
                         ),
-                        tabs: <Widget>[
-                          Tab(text: t('Posty')),
-                          Tab(
-                            key: const Key('profile-tab-media'),
-                            text: t('Zdjęcia'),
-                          ),
-                          Tab(
-                            key: const Key('profile-tab-films'),
-                            text: t('Filmy'),
-                          ),
-                          Tab(text: t('Podziękowania')),
-                          Tab(
-                            key: const Key('profile-tab-info'),
-                            text: t('Informacje'),
-                          ),
-                        ],
                       ),
                     ),
-                  ),
-                ],
-            body: account == null
-                ? ListView(
-                    padding: readableInsets(context),
-                    children: <Widget>[
-                      ZenEmpty(
-                        icon: Icons.sync_rounded,
-                        title: t('Profil jeszcze się synchronizuje…'),
-                        text: t(
-                          'To potrwa chwilę — posty, galeria i '
-                          'podziękowania pojawią się same.',
+                  ],
+              body: account == null
+                  ? ListView(
+                      padding: readableInsets(context),
+                      children: <Widget>[
+                        ZenEmpty(
+                          icon: Icons.sync_rounded,
+                          title: t('Profil jeszcze się synchronizuje…'),
+                          text: t(
+                            'To potrwa chwilę — posty, galeria i '
+                            'podziękowania pojawią się same.',
+                          ),
                         ),
-                      ),
-                    ],
-                  )
-                : TabBarView(
-                    children: <Widget>[
-                      ListView(
-                        key: const Key('profile-posts'),
-                        padding: readableInsets(context, bottom: 32),
-                        children: <Widget>[
-                          // The person's price list in the pyramid.
-                          PyramidPriceList(address: other, own: _isOwn),
-                          if (posts.isEmpty)
-                            ZenEmpty(
-                              icon: Icons.article_outlined,
-                              tone: zenTone(zen, 0),
-                              title: t('Brak postów.'),
-                              text: _isOwn
-                                  ? t(
-                                      'Napisz coś na Tablicy — Twoje posty '
-                                      'zbiorą się tutaj.',
-                                    )
-                                  : t(
-                                      'Ta osoba nie opublikowała jeszcze nic, '
-                                      'co możesz zobaczyć.',
-                                    ),
-                            ),
-                          for (final FeedPost p in posts)
-                            if (isContentHidden(
-                              banned,
-                              p.text,
-                              id: p.id,
-                              revealed: _revealed,
-                              mine: mine,
-                            ))
-                              HiddenContentPlaceholder(
-                                key: Key('profile-hidden-${p.id}'),
-                                byMe: !isContentBanned(banned, id: p.id),
-                                onShow: () {
-                                  showHiddenAnyway(ref, id: p.id);
-                                  setState(() => _revealed.add(p.id));
-                                },
-                              )
-                            else
-                              _ProfilePost(
-                                post: p,
-                                node: node,
-                                onEdit: _isOwn && node != null && p.isOwn
-                                    ? () => unawaited(_editPost(node, p))
-                                    : null,
-                                onDelete: _isOwn && node != null && p.isOwn
-                                    ? () => unawaited(_deletePost(node, p))
-                                    : null,
-                                onReport: _isOwn || p.isOwn
-                                    ? null
-                                    : () => unawaited(
-                                        reportContent(
-                                          context,
-                                          ref,
-                                          authorAddress: other,
-                                          text: p.text,
-                                          header: t(
-                                            'Post na profilu — {name}',
-                                            {'name': name},
-                                          ),
-                                          contentId: p.id,
-                                          deleteLocal:
-                                              node == null || p.images.isEmpty
-                                              ? null
-                                              : () => deletePostMediaLocally(
-                                                  node,
-                                                  p.images,
-                                                ),
-                                        ),
+                      ],
+                    )
+                  : TabBarView(
+                      children: <Widget>[
+                        ListView(
+                          key: const Key('profile-posts'),
+                          padding: readableInsets(context, bottom: 32),
+                          children: <Widget>[
+                            // The person's price list in the pyramid.
+                            PyramidPriceList(address: other, own: _isOwn),
+                            if (posts.isEmpty)
+                              ZenEmpty(
+                                icon: Icons.article_outlined,
+                                tone: zenTone(zen, 0),
+                                title: t('Brak postów.'),
+                                text: _isOwn
+                                    ? t(
+                                        'Napisz coś na Tablicy — Twoje posty '
+                                        'zbiorą się tutaj.',
+                                      )
+                                    : t(
+                                        'Ta osoba nie opublikowała jeszcze nic, '
+                                        'co możesz zobaczyć.',
                                       ),
                               ),
-                        ],
-                      ),
-                      mediaTab(
-                        const Key('profile-media'),
-                        photos,
-                        isFilm: false,
-                      ),
-                      mediaTab(const Key('profile-films'), films, isFilm: true),
-                      ListView(
-                        key: const Key('profile-thanks-list'),
-                        padding: readableInsets(context, bottom: 32),
-                        children: <Widget>[
-                          if (thanks.isEmpty)
-                            ZenEmpty(
-                              icon: Icons.volunteer_activism_outlined,
-                              tone: zenTone(zen, 5),
-                              title: t('Jeszcze nikt nie podziękował.'),
-                              text: t(
-                                'Podziękowania od znajomych za pomoc '
-                                'i dobre gesty zbierają się tutaj.',
+                            for (final FeedPost p in posts)
+                              if (isContentHidden(
+                                banned,
+                                p.text,
+                                id: p.id,
+                                revealed: _revealed,
+                                mine: mine,
+                              ))
+                                HiddenContentPlaceholder(
+                                  key: Key('profile-hidden-${p.id}'),
+                                  byMe: !isContentBanned(banned, id: p.id),
+                                  onShow: () {
+                                    showHiddenAnyway(ref, id: p.id);
+                                    setState(() => _revealed.add(p.id));
+                                  },
+                                )
+                              else
+                                _ProfilePost(
+                                  post: p,
+                                  node: node,
+                                  onEdit: _isOwn && node != null && p.isOwn
+                                      ? () => unawaited(_editPost(node, p))
+                                      : null,
+                                  onDelete: _isOwn && node != null && p.isOwn
+                                      ? () => unawaited(_deletePost(node, p))
+                                      : null,
+                                  onReport: _isOwn || p.isOwn
+                                      ? null
+                                      : () => unawaited(
+                                          reportContent(
+                                            context,
+                                            ref,
+                                            authorAddress: other,
+                                            text: p.text,
+                                            header: t(
+                                              'Post na profilu — {name}',
+                                              {'name': name},
+                                            ),
+                                            contentId: p.id,
+                                            deleteLocal:
+                                                node == null || p.images.isEmpty
+                                                ? null
+                                                : () => deletePostMediaLocally(
+                                                    node,
+                                                    p.images,
+                                                  ),
+                                          ),
+                                        ),
+                                ),
+                          ],
+                        ),
+                        mediaTab(
+                          const Key('profile-media'),
+                          photos,
+                          isFilm: false,
+                        ),
+                        mediaTab(
+                          const Key('profile-films'),
+                          films,
+                          isFilm: true,
+                        ),
+                        ListView(
+                          key: const Key('profile-thanks-list'),
+                          padding: readableInsets(context, bottom: 32),
+                          children: <Widget>[
+                            if (thanks.isEmpty)
+                              ZenEmpty(
+                                icon: Icons.volunteer_activism_outlined,
+                                tone: zenTone(zen, 5),
+                                title: t('Jeszcze nikt nie podziękował.'),
+                                text: t(
+                                  'Podziękowania od znajomych za pomoc '
+                                  'i dobre gesty zbierają się tutaj.',
+                                ),
                               ),
+                            for (final ThanksCard c in thanks)
+                              _ThanksTile(card: c),
+                          ],
+                        ),
+                        ListView(
+                          key: const Key('profile-info'),
+                          padding: readableInsets(context, bottom: 32),
+                          children: <Widget>[
+                            _ProfileInfo(
+                              own: _isOwn ? me : null,
+                              status: status,
+                              nationalities: _isOwn
+                                  ? me.nationalities
+                                  : view?.nationalities ?? const <String>[],
+                              friends: friendCount,
+                              followers: followerCount,
                             ),
-                          for (final ThanksCard c in thanks)
-                            _ThanksTile(card: c),
-                        ],
-                      ),
-                      ListView(
-                        key: const Key('profile-info'),
-                        padding: readableInsets(context, bottom: 32),
-                        children: <Widget>[
-                          _ProfileInfo(
-                            own: _isOwn ? me : null,
-                            status: status,
-                            nationalities: _isOwn
-                                ? me.nationalities
-                                : view?.nationalities ?? const <String>[],
-                            friends: friendCount,
-                            followers: followerCount,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                          ],
+                        ),
+                      ],
+                    ),
+            ),
           ),
         ),
       ),

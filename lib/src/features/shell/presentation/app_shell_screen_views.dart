@@ -3869,32 +3869,35 @@ class _BlockedFriendsScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('blocked-friends-screen'),
       appBar: AppBar(title: Text(t('Zablokowani użytkownicy'))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          if (blockedFriends.isEmpty)
-            ZenEmpty(
-              icon: Icons.verified_user_outlined,
-              tone: zen.success,
-              title: t('Brak zablokowanych użytkowników.'),
-              text: t(
-                'Osoby, które zablokujesz, trafią tutaj. Możesz je w każdej '
-                'chwili odblokować.',
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            if (blockedFriends.isEmpty)
+              ZenEmpty(
+                icon: Icons.verified_user_outlined,
+                tone: zen.success,
+                title: t('Brak zablokowanych użytkowników.'),
+                text: t(
+                  'Osoby, które zablokujesz, trafią tutaj. Możesz je w każdej '
+                  'chwili odblokować.',
+                ),
+              )
+            else ...<Widget>[
+              ZenInfo(
+                icon: Icons.block_rounded,
+                tone: zen.danger,
+                text: t(
+                  'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić.',
+                ),
               ),
-            )
-          else ...<Widget>[
-            ZenInfo(
-              icon: Icons.block_rounded,
-              tone: zen.danger,
-              text: t(
-                'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić.',
-              ),
-            ),
-            const SizedBox(height: 6),
-            for (final FriendProfile friend in blockedFriends)
-              _BlockedFriendRow(friend: friend),
+              const SizedBox(height: 6),
+              for (final FriendProfile friend in blockedFriends)
+                _BlockedFriendRow(friend: friend),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

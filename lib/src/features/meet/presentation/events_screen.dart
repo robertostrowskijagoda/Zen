@@ -82,66 +82,69 @@ class _EventsScreenState extends ConsumerState<EventsScreen> {
         icon: const Icon(Icons.add_rounded),
         label: Text(t('Nowe')),
       ),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: events,
-          builder: (BuildContext context, Widget? _) {
-            final int now = events.now;
-            final List<MeetEvent> list = events.events
-                .where((MeetEvent e) => e.startsAt > now - 12 * 3600 * 1000)
-                .toList();
-            // Past ones stay a month: their shared album and thank-you cards.
-            final List<MeetEvent> past = events.events.reversed
-                .where(
-                  (MeetEvent e) =>
-                      e.startsAt <= now - 12 * 3600 * 1000 && !e.cancelled,
-                )
-                .toList();
-            if (list.isEmpty && past.isEmpty) {
-              return ListView(
-                children: <Widget>[
-                  ZenEmpty(
-                    icon: Icons.celebration_rounded,
-                    title: t('Nie ma jeszcze wydarzeń'),
-                    text: t(
-                      'Zorganizuj coś — zaproszenie trafi tylko do ludzi '
-                      'połączonych z Tobą przez znajomych.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: events,
+            builder: (BuildContext context, Widget? _) {
+              final int now = events.now;
+              final List<MeetEvent> list = events.events
+                  .where((MeetEvent e) => e.startsAt > now - 12 * 3600 * 1000)
+                  .toList();
+              // Past ones stay a month: their shared album and thank-you cards.
+              final List<MeetEvent> past = events.events.reversed
+                  .where(
+                    (MeetEvent e) =>
+                        e.startsAt <= now - 12 * 3600 * 1000 && !e.cancelled,
+                  )
+                  .toList();
+              if (list.isEmpty && past.isEmpty) {
+                return ListView(
+                  children: <Widget>[
+                    ZenEmpty(
+                      icon: Icons.celebration_rounded,
+                      title: t('Nie ma jeszcze wydarzeń'),
+                      text: t(
+                        'Zorganizuj coś — zaproszenie trafi tylko do ludzi '
+                        'połączonych z Tobą przez znajomych.',
+                      ),
                     ),
-                  ),
-                ],
-              );
-            }
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-              children: <Widget>[
-                for (final MeetEvent e in list)
-                  _EventCard(
-                    key: Key('event-${e.id}'),
-                    event: e,
-                    status: e.isMine
-                        ? t('Organizujesz · gości: {count}', {
-                            'count': e.goingCount,
-                          })
-                        : events.myGuest(e)?.status.label ?? t('Zaproszenie'),
-                    onTap: () => unawaited(EventScreen.open(context, e.id)),
-                  ),
-                if (past.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Minione'), top: list.isEmpty ? 4 : 20),
-                  for (final MeetEvent e in past)
+                  ],
+                );
+              }
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                children: <Widget>[
+                  for (final MeetEvent e in list)
                     _EventCard(
                       key: Key('event-${e.id}'),
                       event: e,
-                      status: events.photos(e.id).isEmpty
-                          ? t('Już było')
-                          : t('Już było · zdjęcia: {count}', {
-                              'count': events.photos(e.id).length,
-                            }),
+                      status: e.isMine
+                          ? t('Organizujesz · gości: {count}', {
+                              'count': e.goingCount,
+                            })
+                          : events.myGuest(e)?.status.label ?? t('Zaproszenie'),
                       onTap: () => unawaited(EventScreen.open(context, e.id)),
                     ),
+                  if (past.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Minione'), top: list.isEmpty ? 4 : 20),
+                    for (final MeetEvent e in past)
+                      _EventCard(
+                        key: Key('event-${e.id}'),
+                        event: e,
+                        status: events.photos(e.id).isEmpty
+                            ? t('Już było')
+                            : t('Już było · zdjęcia: {count}', {
+                                'count': events.photos(e.id).length,
+                              }),
+                        onTap: () => unawaited(EventScreen.open(context, e.id)),
+                      ),
+                  ],
                 ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -335,204 +338,207 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(t('Nowe wydarzenie'))),
-      body: SelectionArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            TextField(
-              key: const Key('event-title'),
-              controller: _title,
-              maxLength: 100,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: t('Nazwa'),
-                hintText: t('np. Grill u mnie w sobotę'),
-              ),
-            ),
-            ZenSection(t('Rodzaj'), top: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final EventKind k in EventKind.values)
-                  if (k != EventKind.table || _kind == EventKind.table)
-                    ChoiceChip(
-                      key: Key('event-kind-${k.name}'),
-                      avatar: Icon(eventKindIcon(k), size: 18),
-                      label: Text(k.label),
-                      selected: _kind == k,
-                      onSelected: (_) => setState(() => _kind = k),
-                    ),
-              ],
-            ),
-            if (_kind != EventKind.table)
-              ZenInfo(
-                title: t('Chcesz poznać nowych ludzi?'),
-                icon: Icons.dinner_dining_rounded,
-                text: t(
-                  'Stół na sześć to kolacja, na którą aplikacja sama zaprasza '
-                  '5 osób: znajomych Twoich znajomych, którzy też chcą tak '
-                  'poznawać ludzi. Każdy przy stole jest połączony z Tobą przez '
-                  'kogoś, kogo znasz — nikt nie jest zupełnie obcy.',
-                ),
-                tone: zenTone(zen, 3),
-              )
-            else
-              ZenInfo(
-                title: t('Stół na sześć'),
-                icon: Icons.dinner_dining_rounded,
-                text: t(
-                  'Kolacja dla 6 osób: Ty i 5 gości, których aplikacja dobiera '
-                  'sama spośród znajomych Twoich znajomych.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              TextField(
+                key: const Key('event-title'),
+                controller: _title,
+                maxLength: 100,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: t('Nazwa'),
+                  hintText: t('np. Grill u mnie w sobotę'),
                 ),
               ),
-            if (_kind != EventKind.table)
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  key: const Key('event-open-table'),
-                  onPressed: () => unawaited(TableScreen.open(context)),
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                  label: Text(t('Załóż Stół na sześć')),
-                ),
+              ZenSection(t('Rodzaj'), top: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final EventKind k in EventKind.values)
+                    if (k != EventKind.table || _kind == EventKind.table)
+                      ChoiceChip(
+                        key: Key('event-kind-${k.name}'),
+                        avatar: Icon(eventKindIcon(k), size: 18),
+                        label: Text(k.label),
+                        selected: _kind == k,
+                        onSelected: (_) => setState(() => _kind = k),
+                      ),
+                ],
               ),
-            ZenSection(t('Kiedy i gdzie'), top: 12),
-            ZenGroup(
-              children: <Widget>[
-                ListTile(
-                  leading: const Icon(Icons.schedule_rounded),
-                  title: Text(eventDate(_at.millisecondsSinceEpoch)),
-                  trailing: const Icon(Icons.edit_calendar_rounded),
-                  onTap: () => unawaited(_pickDate()),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _place,
-              maxLength: 200,
-              decoration: InputDecoration(
-                labelText: t('Gdzie'),
-                prefixIcon: const Icon(Icons.place_outlined),
-              ),
-            ),
-            TextField(
-              controller: _desc,
-              minLines: 2,
-              maxLines: 5,
-              maxLength: 2000,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: t('Opis (nie trzeba)')),
-            ),
-            ZenSection(t('Kto może przyjść'), top: 4),
-            Wrap(
-              key: const Key('event-reach'),
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final EventReach r in EventReach.values)
-                  ChoiceChip(
-                    key: Key('event-reach-${r.name}'),
-                    label: Text(r.label),
-                    selected: _reach == r,
-                    onSelected: (_) => setState(() => _reach = r),
+              if (_kind != EventKind.table)
+                ZenInfo(
+                  title: t('Chcesz poznać nowych ludzi?'),
+                  icon: Icons.dinner_dining_rounded,
+                  text: t(
+                    'Stół na sześć to kolacja, na którą aplikacja sama zaprasza '
+                    '5 osób: znajomych Twoich znajomych, którzy też chcą tak '
+                    'poznawać ludzi. Każdy przy stole jest połączony z Tobą przez '
+                    'kogoś, kogo znasz — nikt nie jest zupełnie obcy.',
                   ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              switch (_reach) {
-                EventReach.selected => t(
-                  'Tylko osoby, które zaznaczysz niżej.',
-                ),
-                EventReach.close => t('Tylko Twoi przyjaciele.'),
-                EventReach.friends => t('Wszyscy Twoi znajomi.'),
-                EventReach.friendsOfFriends => t(
-                  'Twoi znajomi i ich znajomi. Na liście gości zobaczysz, kto '
-                  'kogo przyprowadził. Znajomi znajomych widzą tylko imiona '
-                  'gości, adresy dopiero z biletem.',
-                ),
-                EventReach.twoSteps => t(
-                  'Znajomi, ich znajomi i znajomi tamtych. Każdy gość jest '
-                  'połączony z Tobą łańcuchem znajomych.',
-                ),
-              },
-              style: TextStyle(
-                color: zen.textSecondary,
-                fontSize: 13.5,
-                height: 1.35,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _capacity,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: t('Ile osób najwyżej'),
-                helperText: t('Razem z Tobą. Puste = bez limitu.'),
-                prefixIcon: const Icon(Icons.groups_2_outlined),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ZenGroup(
-              children: <Widget>[
-                SwitchListTile(
-                  value: _plusOne,
-                  title: Text(t('Goście mogą prosić o „+1”')),
-                  subtitle: Text(t('O każdej osobie decydujesz Ty.')),
-                  onChanged: (bool v) => setState(() => _plusOne = v),
-                ),
-              ],
-            ),
-            if (_reach == EventReach.selected) ...<Widget>[
-              ZenSection(
-                t('Kogo zapraszasz ({count})', {'count': _invite.length}),
-                top: 16,
-              ),
-              if (friends.isEmpty)
-                Text(
-                  t('Nie masz jeszcze znajomych w aplikacji.'),
-                  style: TextStyle(color: zen.textSecondary),
+                  tone: zenTone(zen, 3),
                 )
               else
-                ZenGroup(
-                  children: <Widget>[
-                    for (final FriendProfile f in friends)
-                      CheckboxListTile(
-                        value: _invite.contains(f.address),
-                        title: Text(social.nameFor(f)),
-                        onChanged: (bool? v) => setState(() {
-                          if (v ?? false) {
-                            _invite.add(f.address);
-                          } else {
-                            _invite.remove(f.address);
-                          }
-                        }),
-                      ),
-                  ],
+                ZenInfo(
+                  title: t('Stół na sześć'),
+                  icon: Icons.dinner_dining_rounded,
+                  text: t(
+                    'Kolacja dla 6 osób: Ty i 5 gości, których aplikacja dobiera '
+                    'sama spośród znajomych Twoich znajomych.',
+                  ),
                 ),
-            ],
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              key: const Key('event-create'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
+              if (_kind != EventKind.table)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    key: const Key('event-open-table'),
+                    onPressed: () => unawaited(TableScreen.open(context)),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                    label: Text(t('Załóż Stół na sześć')),
+                  ),
+                ),
+              ZenSection(t('Kiedy i gdzie'), top: 12),
+              ZenGroup(
+                children: <Widget>[
+                  ListTile(
+                    leading: const Icon(Icons.schedule_rounded),
+                    title: Text(eventDate(_at.millisecondsSinceEpoch)),
+                    trailing: const Icon(Icons.edit_calendar_rounded),
+                    onTap: () => unawaited(_pickDate()),
+                  ),
+                ],
               ),
-              onPressed:
-                  _busy ||
-                      (_reach == EventReach.selected && _invite.isEmpty) ||
-                      (_reach == EventReach.close &&
-                          ref
-                              .read(meetServiceProvider)
-                              .host
-                              .closeFriends()
-                              .isEmpty)
-                  ? null
-                  : () => unawaited(_create()),
-              icon: const Icon(Icons.send_rounded),
-              label: Text(t('Zaproś')),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: _place,
+                maxLength: 200,
+                decoration: InputDecoration(
+                  labelText: t('Gdzie'),
+                  prefixIcon: const Icon(Icons.place_outlined),
+                ),
+              ),
+              TextField(
+                controller: _desc,
+                minLines: 2,
+                maxLines: 5,
+                maxLength: 2000,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(labelText: t('Opis (nie trzeba)')),
+              ),
+              ZenSection(t('Kto może przyjść'), top: 4),
+              Wrap(
+                key: const Key('event-reach'),
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final EventReach r in EventReach.values)
+                    ChoiceChip(
+                      key: Key('event-reach-${r.name}'),
+                      label: Text(r.label),
+                      selected: _reach == r,
+                      onSelected: (_) => setState(() => _reach = r),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                switch (_reach) {
+                  EventReach.selected => t(
+                    'Tylko osoby, które zaznaczysz niżej.',
+                  ),
+                  EventReach.close => t('Tylko Twoi przyjaciele.'),
+                  EventReach.friends => t('Wszyscy Twoi znajomi.'),
+                  EventReach.friendsOfFriends => t(
+                    'Twoi znajomi i ich znajomi. Na liście gości zobaczysz, kto '
+                    'kogo przyprowadził. Znajomi znajomych widzą tylko imiona '
+                    'gości, adresy dopiero z biletem.',
+                  ),
+                  EventReach.twoSteps => t(
+                    'Znajomi, ich znajomi i znajomi tamtych. Każdy gość jest '
+                    'połączony z Tobą łańcuchem znajomych.',
+                  ),
+                },
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13.5,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _capacity,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: t('Ile osób najwyżej'),
+                  helperText: t('Razem z Tobą. Puste = bez limitu.'),
+                  prefixIcon: const Icon(Icons.groups_2_outlined),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ZenGroup(
+                children: <Widget>[
+                  SwitchListTile(
+                    value: _plusOne,
+                    title: Text(t('Goście mogą prosić o „+1”')),
+                    subtitle: Text(t('O każdej osobie decydujesz Ty.')),
+                    onChanged: (bool v) => setState(() => _plusOne = v),
+                  ),
+                ],
+              ),
+              if (_reach == EventReach.selected) ...<Widget>[
+                ZenSection(
+                  t('Kogo zapraszasz ({count})', {'count': _invite.length}),
+                  top: 16,
+                ),
+                if (friends.isEmpty)
+                  Text(
+                    t('Nie masz jeszcze znajomych w aplikacji.'),
+                    style: TextStyle(color: zen.textSecondary),
+                  )
+                else
+                  ZenGroup(
+                    children: <Widget>[
+                      for (final FriendProfile f in friends)
+                        CheckboxListTile(
+                          value: _invite.contains(f.address),
+                          title: Text(social.nameFor(f)),
+                          onChanged: (bool? v) => setState(() {
+                            if (v ?? false) {
+                              _invite.add(f.address);
+                            } else {
+                              _invite.remove(f.address);
+                            }
+                          }),
+                        ),
+                    ],
+                  ),
+              ],
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                key: const Key('event-create'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed:
+                    _busy ||
+                        (_reach == EventReach.selected && _invite.isEmpty) ||
+                        (_reach == EventReach.close &&
+                            ref
+                                .read(meetServiceProvider)
+                                .host
+                                .closeFriends()
+                                .isEmpty)
+                    ? null
+                    : () => unawaited(_create()),
+                icon: const Icon(Icons.send_rounded),
+                label: Text(t('Zaproś')),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -652,358 +658,362 @@ class EventScreen extends ConsumerWidget {
                 ),
             ],
           ),
-          body: SelectionArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                if (e.cancelled)
-                  ZenInfo(
-                    icon: Icons.event_busy_rounded,
-                    tone: zen.danger,
-                    title: t('Wydarzenie odwołane'),
-                    text: t('Organizator odwołał to spotkanie.'),
-                  ),
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    borderRadius: context.zenRadius(26),
-                    gradient: LinearGradient(
-                      colors: <Color>[
-                        Color.alphaBlend(
-                          tone.withValues(alpha: 0.26),
-                          zen.surface,
-                        ),
-                        Color.alphaBlend(
-                          zen.accentSecondary.withValues(alpha: 0.08),
-                          zen.surface,
-                        ),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+          body: SafeArea(
+            top: false,
+            child: SelectionArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  if (e.cancelled)
+                    ZenInfo(
+                      icon: Icons.event_busy_rounded,
+                      tone: zen.danger,
+                      title: t('Wydarzenie odwołane'),
+                      text: t('Organizator odwołał to spotkanie.'),
                     ),
-                    border: Border.all(color: tone.withValues(alpha: 0.30)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          ZenIconBadge(
-                            icon: eventKindIcon(e.kind),
-                            tone: tone,
-                            size: 48,
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      borderRadius: context.zenRadius(26),
+                      gradient: LinearGradient(
+                        colors: <Color>[
+                          Color.alphaBlend(
+                            tone.withValues(alpha: 0.26),
+                            zen.surface,
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Text(
-                              e.title,
-                              style: zen.display(
-                                color: zen.textPrimary,
-                                size: 22,
-                                weight: FontWeight.w600,
+                          Color.alphaBlend(
+                            zen.accentSecondary.withValues(alpha: 0.08),
+                            zen.surface,
+                          ),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      border: Border.all(color: tone.withValues(alpha: 0.30)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            ZenIconBadge(
+                              icon: eventKindIcon(e.kind),
+                              tone: tone,
+                              size: 48,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                e.title,
+                                style: zen.display(
+                                  color: zen.textPrimary,
+                                  size: 22,
+                                  weight: FontWeight.w600,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          ZenPill(text: e.kind.label, tone: tone),
-                          ZenPill(
-                            text: e.reach.label,
-                            tone: zen.textSecondary,
-                            icon: Icons.share_rounded,
-                          ),
-                          if (past && !e.cancelled)
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            ZenPill(text: e.kind.label, tone: tone),
                             ZenPill(
-                              text: t('Już było'),
-                              tone: zen.textMuted,
-                              icon: Icons.history_rounded,
+                              text: e.reach.label,
+                              tone: zen.textSecondary,
+                              icon: Icons.share_rounded,
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      _EventFact(
-                        icon: Icons.schedule_rounded,
-                        text: eventDate(e.startsAt),
-                      ),
-                      if (e.place.isNotEmpty)
-                        _EventFact(icon: Icons.place_outlined, text: e.place),
-                      _EventFact(
-                        icon: Icons.person_outline_rounded,
-                        text: t('organizuje {name}', {
-                          'name': e.isMine ? t('Ty') : e.organizerName,
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-                if (e.description.isNotEmpty)
-                  ZenCard(
-                    child: Text(
-                      e.description,
-                      style: TextStyle(
-                        color: zen.textPrimary,
-                        fontSize: 14.5,
-                        height: 1.45,
-                      ),
+                            if (past && !e.cancelled)
+                              ZenPill(
+                                text: t('Już było'),
+                                tone: zen.textMuted,
+                                icon: Icons.history_rounded,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _EventFact(
+                          icon: Icons.schedule_rounded,
+                          text: eventDate(e.startsAt),
+                        ),
+                        if (e.place.isNotEmpty)
+                          _EventFact(icon: Icons.place_outlined, text: e.place),
+                        _EventFact(
+                          icon: Icons.person_outline_rounded,
+                          text: t('organizuje {name}', {
+                            'name': e.isMine ? t('Ty') : e.organizerName,
+                          }),
+                        ),
+                      ],
                     ),
                   ),
-                ZenCard(
-                  child: Row(
-                    children: <Widget>[
-                      Column(
-                        children: <Widget>[
-                          Text(
-                            '$knownTotal',
-                            style: zen.display(color: tone, size: 32),
-                          ),
-                          Text(
-                            t('znasz'),
-                            style: zen.label(color: zen.textMuted),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          e.capacity > 0
-                              ? t(
-                                  'Będzie {count} z {capacity} osób, znasz {known}.',
-                                  {
-                                    'count': going.length + 1,
-                                    'capacity': e.capacity,
-                                    'known': knownTotal,
-                                  },
-                                )
-                              : tn(
-                                  going.length + 1,
-                                  one: 'Będzie {n} osoba, znasz {known}.',
-                                  few: 'Będą {n} osoby, znasz {known}.',
-                                  many: 'Będzie {n} osób, znasz {known}.',
-                                  args: {'known': knownTotal},
-                                ),
-                          key: const Key('event-known'),
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            height: 1.35,
-                          ),
+                  if (e.description.isNotEmpty)
+                    ZenCard(
+                      child: Text(
+                        e.description,
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontSize: 14.5,
+                          height: 1.45,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                if (!e.isMine && !e.cancelled && !past) ...<Widget>[
-                  ZenSection(t('Twoja odpowiedź')),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      for (final (GuestStatus s, IconData icon)
-                          in <(GuestStatus, IconData)>[
-                            (
-                              GuestStatus.going,
-                              Icons.check_circle_outline_rounded,
-                            ),
-                            (GuestStatus.maybe, Icons.help_outline_rounded),
-                            (GuestStatus.declined, Icons.cancel_outlined),
-                          ])
-                        ChoiceChip(
-                          key: Key('event-rsvp-${s.name}'),
-                          showCheckmark: false,
-                          avatar: Icon(icon, size: 18),
-                          label: Text(s.label),
-                          selected: mine?.status == s,
-                          onSelected: (_) => unawaited(events.rsvp(e.id, s)),
-                        ),
-                    ],
-                  ),
-                  if (e.isFull &&
-                      mine?.status != GuestStatus.going) ...<Widget>[
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: ZenPill(
-                        text: t('Brak miejsc.'),
-                        tone: zen.warning,
-                        icon: Icons.event_seat_rounded,
-                      ),
                     ),
-                  ],
-                  if (e.askForPlusOne &&
-                      mine?.status == GuestStatus.going) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: TextButton.icon(
-                        key: const Key('event-plus1'),
-                        onPressed: () =>
-                            unawaited(_askPlusOne(context, ref, e)),
-                        icon: const Icon(Icons.person_add_alt_1_rounded),
-                        label: Text(t('Chcę kogoś przyprowadzić')),
-                      ),
-                    ),
-                  ],
-                ],
-                if (ticket != null &&
-                    mine?.status == GuestStatus.going &&
-                    !e.cancelled) ...<Widget>[
-                  ZenSection(t('Twój bilet')),
                   ZenCard(
-                    tone: tone,
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
+                    child: Row(
                       children: <Widget>[
-                        Text(
-                          t('Pokaż przy wejściu'),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: zen.textSecondary,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _LiveTicketCode(
-                          // A new ticket (e.g. just pinned) starts afresh.
-                          key: ValueKey<String>('ticket-${ticket.signature}'),
-                          events: events,
-                          eventId: e.id,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          ticket.name,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        if (events.ticketPinned(e.id)) ...<Widget>[
-                          ZenPill(
-                            key: const Key('event-ticket-pinned'),
-                            text: t('Przypięty do tego telefonu'),
-                            tone: zen.success,
-                            icon: Icons.lock_rounded,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            t(
-                              'Kod zmienia się co 20 s — zrzut ekranu nikogo '
-                              'innego nie wpuści.',
+                        Column(
+                          children: <Widget>[
+                            Text(
+                              '$knownTotal',
+                              style: zen.display(color: tone, size: 32),
                             ),
-                            textAlign: TextAlign.center,
+                            Text(
+                              t('znasz'),
+                              style: zen.label(color: zen.textMuted),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            e.capacity > 0
+                                ? t(
+                                    'Będzie {count} z {capacity} osób, znasz {known}.',
+                                    {
+                                      'count': going.length + 1,
+                                      'capacity': e.capacity,
+                                      'known': knownTotal,
+                                    },
+                                  )
+                                : tn(
+                                    going.length + 1,
+                                    one: 'Będzie {n} osoba, znasz {known}.',
+                                    few: 'Będą {n} osoby, znasz {known}.',
+                                    many: 'Będzie {n} osób, znasz {known}.',
+                                    args: {'known': knownTotal},
+                                  ),
+                            key: const Key('event-known'),
                             style: TextStyle(
-                              color: zen.textSecondary,
-                              fontSize: 13,
+                              color: zen.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
                               height: 1.35,
                             ),
                           ),
-                        ] else ...<Widget>[
-                          ZenPill(
-                            text: t('Bilet bez przypięcia'),
-                            tone: zen.warning,
-                            icon: Icons.lock_open_rounded,
-                          ),
-                          const SizedBox(height: 4),
-                          TextButton.icon(
-                            key: const Key('event-ticket-pin'),
-                            onPressed: () =>
-                                unawaited(events.rsvp(e.id, GuestStatus.going)),
-                            icon: const Icon(Icons.push_pin_outlined),
-                            label: Text(t('Przypnij do tego telefonu')),
-                          ),
-                        ],
+                        ),
                       ],
                     ),
                   ),
-                ],
-                _AfterEvent(events: events, event: e, tone: tone),
-                ZenSection(t('Goście ({count})', {'count': e.guests.length})),
-                if (e.guests.isEmpty)
-                  ZenCard(
-                    child: Text(
-                      t('Jeszcze nikt nie odpowiedział.'),
-                      style: TextStyle(color: zen.textSecondary),
-                    ),
-                  )
-                else
-                  ZenCard(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Column(
+                  if (!e.isMine && !e.cancelled && !past) ...<Widget>[
+                    ZenSection(t('Twoja odpowiedź')),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: <Widget>[
-                        for (final (int i, EventGuest g)
-                            in e.guests.values.indexed) ...<Widget>[
-                          if (i > 0)
-                            Divider(
-                              height: 1,
-                              indent: 16,
-                              endIndent: 16,
-                              color: zen.outlineSoft,
-                            ),
-                          _GuestRow(
-                            icon: g.checkedIn
-                                ? Icons.how_to_reg_rounded
-                                : friendOf(g) != null
-                                ? Icons.person_rounded
-                                : Icons.person_outline_rounded,
-                            tone: g.checkedIn
-                                ? zen.success
-                                : switch (g.status) {
-                                    GuestStatus.going => tone,
-                                    GuestStatus.requested => zen.warning,
-                                    GuestStatus.declined => zen.textMuted,
-                                    _ => zen.textSecondary,
-                                  },
-                            name: nameOf(g.address),
-                            details: <String>[
-                              g.status.label,
-                              if (chain(g).isNotEmpty) chain(g),
-                              if (g.plusOnes > 0)
-                                t('+{count} bez pytania', {
-                                  'count': g.plusOnes,
-                                }),
-                            ].join(' · '),
-                            trailing: e.isMine
-                                ? _organizerActions(context, events, e, g)
-                                : null,
-                            below:
-                                !e.isMine &&
-                                    past &&
-                                    g.address != me &&
-                                    !g.address.startsWith('#') &&
-                                    !myFriends.contains(g.address) &&
-                                    g.status == GuestStatus.going
-                                ? FilledButton.tonalIcon(
-                                    style: FilledButton.styleFrom(
-                                      minimumSize: const Size(0, 36),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                      ),
-                                    ),
-                                    onPressed: () =>
-                                        unawaited(_metAt(context, ref, g, e)),
-                                    icon: const Icon(
-                                      Icons.handshake_outlined,
-                                      size: 18,
-                                    ),
-                                    label: Text(t('Poznaliśmy się')),
-                                  )
-                                : null,
+                        for (final (GuestStatus s, IconData icon)
+                            in <(GuestStatus, IconData)>[
+                              (
+                                GuestStatus.going,
+                                Icons.check_circle_outline_rounded,
+                              ),
+                              (GuestStatus.maybe, Icons.help_outline_rounded),
+                              (GuestStatus.declined, Icons.cancel_outlined),
+                            ])
+                          ChoiceChip(
+                            key: Key('event-rsvp-${s.name}'),
+                            showCheckmark: false,
+                            avatar: Icon(icon, size: 18),
+                            label: Text(s.label),
+                            selected: mine?.status == s,
+                            onSelected: (_) => unawaited(events.rsvp(e.id, s)),
                           ),
-                        ],
                       ],
                     ),
-                  ),
-              ],
+                    if (e.isFull &&
+                        mine?.status != GuestStatus.going) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: ZenPill(
+                          text: t('Brak miejsc.'),
+                          tone: zen.warning,
+                          icon: Icons.event_seat_rounded,
+                        ),
+                      ),
+                    ],
+                    if (e.askForPlusOne &&
+                        mine?.status == GuestStatus.going) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: TextButton.icon(
+                          key: const Key('event-plus1'),
+                          onPressed: () =>
+                              unawaited(_askPlusOne(context, ref, e)),
+                          icon: const Icon(Icons.person_add_alt_1_rounded),
+                          label: Text(t('Chcę kogoś przyprowadzić')),
+                        ),
+                      ),
+                    ],
+                  ],
+                  if (ticket != null &&
+                      mine?.status == GuestStatus.going &&
+                      !e.cancelled) ...<Widget>[
+                    ZenSection(t('Twój bilet')),
+                    ZenCard(
+                      tone: tone,
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        children: <Widget>[
+                          Text(
+                            t('Pokaż przy wejściu'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: zen.textSecondary,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _LiveTicketCode(
+                            // A new ticket (e.g. just pinned) starts afresh.
+                            key: ValueKey<String>('ticket-${ticket.signature}'),
+                            events: events,
+                            eventId: e.id,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            ticket.name,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: zen.textPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (events.ticketPinned(e.id)) ...<Widget>[
+                            ZenPill(
+                              key: const Key('event-ticket-pinned'),
+                              text: t('Przypięty do tego telefonu'),
+                              tone: zen.success,
+                              icon: Icons.lock_rounded,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              t(
+                                'Kod zmienia się co 20 s — zrzut ekranu nikogo '
+                                'innego nie wpuści.',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
+                            ),
+                          ] else ...<Widget>[
+                            ZenPill(
+                              text: t('Bilet bez przypięcia'),
+                              tone: zen.warning,
+                              icon: Icons.lock_open_rounded,
+                            ),
+                            const SizedBox(height: 4),
+                            TextButton.icon(
+                              key: const Key('event-ticket-pin'),
+                              onPressed: () => unawaited(
+                                events.rsvp(e.id, GuestStatus.going),
+                              ),
+                              icon: const Icon(Icons.push_pin_outlined),
+                              label: Text(t('Przypnij do tego telefonu')),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                  _AfterEvent(events: events, event: e, tone: tone),
+                  ZenSection(t('Goście ({count})', {'count': e.guests.length})),
+                  if (e.guests.isEmpty)
+                    ZenCard(
+                      child: Text(
+                        t('Jeszcze nikt nie odpowiedział.'),
+                        style: TextStyle(color: zen.textSecondary),
+                      ),
+                    )
+                  else
+                    ZenCard(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        children: <Widget>[
+                          for (final (int i, EventGuest g)
+                              in e.guests.values.indexed) ...<Widget>[
+                            if (i > 0)
+                              Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                                color: zen.outlineSoft,
+                              ),
+                            _GuestRow(
+                              icon: g.checkedIn
+                                  ? Icons.how_to_reg_rounded
+                                  : friendOf(g) != null
+                                  ? Icons.person_rounded
+                                  : Icons.person_outline_rounded,
+                              tone: g.checkedIn
+                                  ? zen.success
+                                  : switch (g.status) {
+                                      GuestStatus.going => tone,
+                                      GuestStatus.requested => zen.warning,
+                                      GuestStatus.declined => zen.textMuted,
+                                      _ => zen.textSecondary,
+                                    },
+                              name: nameOf(g.address),
+                              details: <String>[
+                                g.status.label,
+                                if (chain(g).isNotEmpty) chain(g),
+                                if (g.plusOnes > 0)
+                                  t('+{count} bez pytania', {
+                                    'count': g.plusOnes,
+                                  }),
+                              ].join(' · '),
+                              trailing: e.isMine
+                                  ? _organizerActions(context, events, e, g)
+                                  : null,
+                              below:
+                                  !e.isMine &&
+                                      past &&
+                                      g.address != me &&
+                                      !g.address.startsWith('#') &&
+                                      !myFriends.contains(g.address) &&
+                                      g.status == GuestStatus.going
+                                  ? FilledButton.tonalIcon(
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(0, 36),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                        ),
+                                      ),
+                                      onPressed: () =>
+                                          unawaited(_metAt(context, ref, g, e)),
+                                      icon: const Icon(
+                                        Icons.handshake_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(t('Poznaliśmy się')),
+                                    )
+                                  : null,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
