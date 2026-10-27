@@ -290,6 +290,10 @@ enterprise certificates get revoked and hand your app to strangers —
 
 ### Mac, Linux
 
+The same steps, in short, with the download buttons:
+**[install page → Mac](https://robertostrowskijagoda.github.io/Zen/install/#macos)** and
+**[install page → Linux](https://robertostrowskijagoda.github.io/Zen/install/#linux)**.
+
 The Linux and Mac builds are made by GitHub Actions together with the
 other release files; they are not signed and have not yet been checked on many
 real computers, so they may have bugs.
