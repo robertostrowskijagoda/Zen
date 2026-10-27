@@ -44,11 +44,18 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   and ironwood weighs links by latency, so a phone on the same Wi-Fi as a
   computer bridge can become the cheapest way for the bridge's strangers'
   traffic to its own public peers. A phone estimates the traffic that only
-  passes through it (`traffic_meter.go`, every 10 s over 30-s windows);
-  above 64 KiB/s in a window, or 32 MiB within an hour, it keeps a single
-  peering (one public peer, or one device nearby when no public peer is up)
-  for 30 minutes, doubled for each further hold within a day (at most
-  6 hours), then takes its other peers, friends' bridges and local links
+  passes through it (`traffic_meter.go`, every 10 s over 30-s windows):
+  what came in on one peering and went out on another, beyond its own
+  packets and what its end-to-end sessions carried, so junk sent to the
+  phone and the answers to it do not count. After three windows in a row
+  above 64 KiB/s, or with transit while the last hour's is above 32 MiB, it
+  keeps a single way to the mesh for 30 minutes: the friends' bridges when
+  one is up (they are never set aside), otherwise one public peer, or one
+  device nearby when no public peer is up. Holds double for each further
+  hold within a day (at most 6 hours) only when the transit crossed between
+  a peering nearby and a public one, as a home computer routing through the
+  phone does; then transit that comes back holds again after one window.
+  When a hold ends the phone takes its other public peers and local links
   back. Its own packets (signals, call media) never count as transit.
 
 ### 1.2 Signal datagrams [V]

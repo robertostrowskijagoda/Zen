@@ -14,18 +14,44 @@ import (
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
 
-func TestOneFastWindowOfTransitStartsAHold(t *testing.T) {
+// windowAt is the transit of one window at rate (bytes per second).
+func windowAt(rate uint64, crossed bool) transitEstimate {
+	return transitEstimate{bytes: rate * uint64(trafficWindow/time.Second), rate: rate, crossed: crossed}
+}
+
+// untilHold feeds the guard windows of estimate from now on until it holds;
+// returns the hold, how many windows it took and when the last one ended.
+func untilHold(t *testing.T, guard *transitGuard, now time.Time, estimate transitEstimate) (time.Duration, int, time.Time) {
+	t.Helper()
+	for windows := 1; windows <= 10; windows++ {
+		now = now.Add(trafficWindow)
+		if hold := guard.observe(now, estimate); hold > 0 {
+			return hold, windows, now
+		}
+	}
+	t.Fatal("no hold after 10 windows")
+	return 0, 0, now
+}
+
+func TestTransitOverSeveralWindowsStartsAHold(t *testing.T) {
 	var guard transitGuard
 	now := time.Unix(1000, 0)
-	if hold := guard.observe(now, 30*1024, 1024); hold != 0 {
+	if hold := guard.observe(now, windowAt(1024, false)); hold != 0 {
 		t.Fatalf("a trickle of transit is no reason to hold, got %s", hold)
 	}
-	// What the phone carried that night: about 930 kB/s for a window.
+	// What the phone carried that night: about 930 kB/s.
+	fast := windowAt(930_000, false)
+	for i := 1; i < transitConfirmWindows; i++ {
+		now = now.Add(trafficWindow)
+		if hold := guard.observe(now, fast); hold != 0 {
+			t.Fatalf("window %d alone starts a hold of %s", i, hold)
+		}
+	}
 	now = now.Add(trafficWindow)
-	if hold := guard.observe(now, 930_000*30, 930_000); hold != transitHoldBase {
+	if hold := guard.observe(now, fast); hold != transitHoldBase {
 		t.Fatalf("hold %s, want %s", hold, transitHoldBase)
 	}
-	if hold := guard.observe(now.Add(trafficWindow), 0, 0); hold != 0 {
+	if hold := guard.observe(now.Add(trafficWindow), transitEstimate{}); hold != 0 {
 		t.Fatal("no second hold while one runs")
 	}
 	if guard.due(now.Add(transitHoldBase - time.Second)) {
@@ -39,18 +65,35 @@ func TestOneFastWindowOfTransitStartsAHold(t *testing.T) {
 	}
 }
 
+// A burst, however fast, that does not last starts nothing.
+func TestAShortBurstStartsNoHold(t *testing.T) {
+	var guard transitGuard
+	now := time.Unix(1000, 0)
+	for range 5 {
+		for i := 1; i < transitConfirmWindows; i++ {
+			now = now.Add(trafficWindow)
+			if hold := guard.observe(now, windowAt(1<<20, true)); hold != 0 {
+				t.Fatalf("a burst of %d windows held for %s", i, hold)
+			}
+		}
+		now = now.Add(trafficWindow)
+		if hold := guard.observe(now, transitEstimate{}); hold != 0 {
+			t.Fatal("a quiet window holds")
+		}
+	}
+}
+
 func TestSlowTransitIsStoppedByTheHoursBudget(t *testing.T) {
 	var guard transitGuard
 	now := time.Unix(1000, 0)
 	// Under the rate limit, window after window.
-	const rate = 40 * 1024
+	slow := windowAt(40*1024, false)
 	var passed uint64
 	for i := 0; i < 240; i++ {
 		now = now.Add(trafficWindow)
-		bytes := uint64(rate * trafficWindow / time.Second)
-		passed += bytes
-		if hold := guard.observe(now, bytes, rate); hold > 0 {
-			if passed < phoneTransitHourBudget || passed > phoneTransitHourBudget+bytes {
+		passed += slow.bytes
+		if hold := guard.observe(now, slow); hold > 0 {
+			if passed < phoneTransitHourBudget || passed > phoneTransitHourBudget+transitConfirmWindows*slow.bytes {
 				t.Fatalf("hold after %d bytes, budget %d", passed, phoneTransitHourBudget)
 			}
 			return
@@ -61,8 +104,8 @@ func TestSlowTransitIsStoppedByTheHoursBudget(t *testing.T) {
 
 func TestAQuietPhoneOverTheHoursBudgetDoesNotHold(t *testing.T) {
 	var guard transitGuard
-	now := time.Unix(1000, 0)
-	hold := guard.observe(now, phoneTransitHourBudget, phoneTransitRateLimit-1)
+	over := transitEstimate{bytes: phoneTransitHourBudget, rate: phoneTransitRateLimit - 1, crossed: true}
+	hold, _, now := untilHold(t, &guard, time.Unix(1000, 0), over)
 	if hold != transitHoldBase {
 		t.Fatalf("the hour's budget used up starts a hold, got %s", hold)
 	}
@@ -70,11 +113,12 @@ func TestAQuietPhoneOverTheHoursBudgetDoesNotHold(t *testing.T) {
 	if !guard.due(now) {
 		t.Fatal("hold not over")
 	}
-	// Still within the hour of that window, but nothing passes now.
-	if hold := guard.observe(now.Add(trafficWindow), 0, 0); hold != 0 {
+	// Still within the hour of those windows, but nothing passes now.
+	if hold := guard.observe(now.Add(trafficWindow), transitEstimate{}); hold != 0 {
 		t.Fatal("no transit now, no hold")
 	}
-	if hold := guard.observe(now.Add(2*trafficWindow), 1000, 33); hold != 2*transitHoldBase {
+	again := transitEstimate{bytes: 1000, rate: 33, crossed: true}
+	if hold := guard.observe(now.Add(2*trafficWindow), again); hold != 2*transitHoldBase {
 		t.Fatalf("transit again within that hour: hold %s", hold)
 	}
 }
@@ -82,54 +126,82 @@ func TestAQuietPhoneOverTheHoursBudgetDoesNotHold(t *testing.T) {
 func TestHoldsGrowWhileTransitComesBackAndAreForgotten(t *testing.T) {
 	var guard transitGuard
 	now := time.Unix(1000, 0)
+	home := windowAt(1<<20, true)
 	want := []time.Duration{30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 6 * time.Hour, 6 * time.Hour}
 	for i, expected := range want {
-		hold := guard.observe(now, 10<<20, 1<<20)
+		hold, windows, end := untilHold(t, &guard, now, home)
 		if hold != expected {
 			t.Fatalf("hold %d: %s, want %s", i+1, hold, expected)
 		}
-		now = now.Add(hold)
+		// The first hold waits for the windows in a row; transit that
+		// comes back after one that crossed holds at once.
+		wantWindows := 1
+		if i == 0 {
+			wantWindows = transitConfirmWindows
+		}
+		if windows != wantWindows {
+			t.Fatalf("hold %d after %d windows, want %d", i+1, windows, wantWindows)
+		}
+		now = end.Add(hold)
 		if !guard.due(now) {
 			t.Fatal("hold not over")
 		}
 	}
 	now = now.Add(transitHoldMemory + time.Minute)
-	if hold := guard.observe(now, 10<<20, 1<<20); hold != transitHoldBase {
-		t.Fatalf("after a quiet day the hold is short again, got %s", hold)
+	hold, windows, _ := untilHold(t, &guard, now, home)
+	if hold != transitHoldBase || windows != transitConfirmWindows {
+		t.Fatalf("after a quiet day the hold is short again, got %s after %d windows", hold, windows)
 	}
 }
 
-// The episode of the logs: for 55 minutes about 930 kB/s came in and went
-// out again. With the guard, a phone that keeps routing for the home
-// computer passes at most two windows of it before it is a leaf for the
-// rest of the episode.
+// Transit that never crossed between a peering nearby and a public one
+// (all a stranger far away can send) holds for transitHoldBase at most,
+// each time after the windows in a row.
+func TestHoldsDoNotGrowWithoutCrossing(t *testing.T) {
+	var guard transitGuard
+	now := time.Unix(1000, 0)
+	for i := range 6 {
+		hold, windows, end := untilHold(t, &guard, now, windowAt(1<<20, false))
+		if hold != transitHoldBase || windows != transitConfirmWindows {
+			t.Fatalf("hold %d: %s after %d windows", i+1, hold, windows)
+		}
+		now = end.Add(hold)
+		if !guard.due(now) {
+			t.Fatal("hold not over")
+		}
+	}
+}
+
+// The episode of the logs: for 55 minutes about 930 kB/s came in from the
+// home computer and went out again to the public peers. With the guard, a
+// phone that keeps routing for it passes a few windows of it before it
+// holds for the rest of the episode.
 func TestTheNightOfTheEpisodeIsBounded(t *testing.T) {
 	var guard transitGuard
-	const rate = 930_000
+	home := windowAt(930_000, true)
 	start := time.Unix(1000, 0)
 	end := start.Add(55 * time.Minute)
-	window := uint64(rate * trafficWindow / time.Second)
 	var passed, unguarded uint64
 	holding := false
 	for now := start.Add(trafficWindow); !now.After(end); now = now.Add(trafficWindow) {
-		unguarded += window
+		unguarded += home.bytes
 		if guard.due(now) {
 			holding = false
 		}
 		if holding {
-			// One peering: nobody's shortcut.
-			guard.observe(now, 0, 0)
+			// One way to the mesh: nobody's shortcut.
+			guard.observe(now, transitEstimate{})
 			continue
 		}
-		passed += window
-		if guard.observe(now, window, rate) > 0 {
+		passed += home.bytes
+		if guard.observe(now, home) > 0 {
 			holding = true
 		}
 	}
-	if passed > 2*window {
-		t.Fatalf("passed %d bytes, want at most %d", passed, 2*window)
+	if passed > (transitConfirmWindows+1)*home.bytes {
+		t.Fatalf("passed %d bytes, want at most %d", passed, (transitConfirmWindows+1)*home.bytes)
 	}
-	if unguarded < 3_000_000_000 || passed*50 > unguarded {
+	if unguarded < 3_000_000_000 || passed*25 > unguarded {
 		t.Fatalf("unguarded %d, guarded %d", unguarded, passed)
 	}
 }
@@ -160,7 +232,7 @@ func TestAHoldKeepsAPublicPeerThatIsUpOrElseADeviceNearby(t *testing.T) {
 	}
 }
 
-func TestPeersTheAppAddsDuringAHoldWaitForItsEnd(t *testing.T) {
+func TestAHoldNeverSetsFriendsBridgesAside(t *testing.T) {
 	pool := testPool(6)
 	keeper := newPhonePeerKeeper(pool, 4)
 	bridge := "tls://[200::b1]:443"
@@ -171,33 +243,66 @@ func TestPeersTheAppAddsDuringAHoldWaitForItsEnd(t *testing.T) {
 	node.configMu.Unlock()
 	node.transitGuard = &transitGuard{}
 
+	// The bridge is not up: the phone keeps one public peer beside it.
 	node.beginTransitHold(transitHoldBase, 1<<20)
 	if got := node.dialledPublicPeers(); len(got) != 1 || got[0] != pool[0] {
 		t.Fatalf("holding: dials %v, want only %s", got, pool[0])
 	}
-	if peers := node.configSnapshot().Peers; len(peers) != 1 {
-		t.Fatalf("holding: friends' bridges set aside, peers %v", peers)
+	if extras := node.configuredExtras(); len(extras) != 1 || extras[0] != bridge {
+		t.Fatalf("holding: the friend's bridge was set aside, extras %v", extras)
 	}
-	other := "tls://[200::b2]:443"
-	if !node.deferDuringTransitHold(other) {
-		t.Fatal("a bridge added while holding waits")
-	}
-	if !node.forgetDuringTransitHold(bridge) {
-		t.Fatal("a bridge removed while holding is forgotten")
+	if state := node.transitGuardState(time.Now()); state["setAside"] != 3 || state["onBridges"] != false {
+		t.Fatalf("holding: %v", state)
 	}
 
 	node.endTransitHold()
 	if got := node.dialledPublicPeers(); len(got) != 4 {
 		t.Fatalf("after the hold: %d public peers, want 4", len(got))
 	}
-	peers := node.configSnapshot().Peers
-	hasOther, hasBridge := false, false
-	for _, peer := range peers {
-		hasOther = hasOther || peer == other
-		hasBridge = hasBridge || peer == bridge
+	if extras := node.configuredExtras(); len(extras) != 1 || extras[0] != bridge {
+		t.Fatalf("after the hold: extras %v", extras)
 	}
-	if !hasOther || hasBridge {
-		t.Fatalf("after the hold: peers %v", peers)
+}
+
+// With a friend's bridge up the phone goes through the bridges alone; when
+// none is up any more it dials one public peer again.
+func TestAHoldGoesThroughAFriendsBridgeThatIsUp(t *testing.T) {
+	bridgeCore, bridge := listeningCore(t)
+	pool := testPool(6)
+	keeper := newPhonePeerKeeper(pool, 4)
+	node := testNode(t, keeper.dialled)
+	node.phonePeers = keeper
+	node.transitGuard = &transitGuard{}
+	parsed, _ := url.Parse(bridge)
+	if err := node.core.AddPeer(parsed, ""); err != nil {
+		t.Fatal(err)
+	}
+	node.updateConfiguredPeer(bridge, true)
+	waitForPeer(t, node.core, bridgeCore.PublicKey(), true)
+
+	node.beginTransitHold(transitHoldBase, 1<<20)
+	if got := node.dialledPublicPeers(); len(got) != 0 {
+		t.Fatalf("holding on a bridge: dials %v", got)
+	}
+	if state := node.transitGuardState(time.Now()); state["onBridges"] != true {
+		t.Fatalf("holding: %v", state)
+	}
+	node.checkTransitHold(time.Now())
+	if got := node.dialledPublicPeers(); len(got) != 0 {
+		t.Fatalf("the bridge is up: dials %v", got)
+	}
+
+	// The bridge goes down.
+	if err := node.core.RemovePeer(parsed, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitForPeer(t, node.core, bridgeCore.PublicKey(), false)
+	node.checkTransitHold(time.Now())
+	if got := node.dialledPublicPeers(); len(got) != 1 {
+		t.Fatalf("no bridge up: dials %v, want one public peer", got)
+	}
+	if extras := node.configuredExtras(); len(extras) != 1 || extras[0] != bridge {
+		t.Fatalf("the bridge stays configured, extras %v", extras)
 	}
 }
 
@@ -259,8 +364,8 @@ func listeningCore(t *testing.T) (*core.Core, string) {
 // A phone dials two peers that have no other way to each other, so all
 // their traffic goes through it, as strangers' traffic went through the
 // phone between the home computer and its public peers. The guard sees
-// the transit and the phone keeps one peering: nothing passes any more.
-// When the hold ends it dials both again.
+// the transit over several windows and the phone keeps one peering:
+// nothing passes any more. When the hold ends it dials both again.
 func TestAPhoneBetweenTwoPeersStopsCarryingTheirTraffic(t *testing.T) {
 	coreA, uriA := listeningCore(t)
 	coreB, uriB := listeningCore(t)
@@ -317,12 +422,17 @@ func TestAPhoneBetweenTwoPeersStopsCarryingTheirTraffic(t *testing.T) {
 
 	start := time.Now()
 	node.sampleTrafficAt(start)
-	if !sendUntil(received.Load()+3<<20, 30*time.Second) {
-		t.Fatal("A's traffic did not reach B")
-	}
-	node.sampleTrafficAt(start.Add(trafficWindow))
-	if state := node.transitGuardState(start.Add(trafficWindow)); state["holding"] != true {
-		t.Fatalf("3 MB through the phone in a window and no hold: %v", node.peerTraffic.snapshot())
+	held := start
+	for i := 1; i <= transitConfirmWindows; i++ {
+		if !sendUntil(received.Load()+3<<20, 30*time.Second) {
+			t.Fatal("A's traffic did not reach B")
+		}
+		held = start.Add(time.Duration(i) * trafficWindow)
+		node.sampleTrafficAt(held)
+		holding := node.transitGuardState(held)["holding"] == true
+		if holding != (i == transitConfirmWindows) {
+			t.Fatalf("3 MB through the phone in each of %d windows, holding %v: %v", i, holding, node.peerTraffic.snapshot())
+		}
 	}
 	kept := node.dialledPublicPeers()
 	if len(kept) != 1 {
@@ -346,7 +456,7 @@ func TestAPhoneBetweenTwoPeersStopsCarryingTheirTraffic(t *testing.T) {
 		t.Fatalf("%d bytes still went through the holding phone", got-before)
 	}
 
-	node.sampleTrafficAt(start.Add(trafficWindow + transitHoldBase))
+	node.sampleTrafficAt(held.Add(transitHoldBase))
 	waitForPeer(t, node.core, coreA.PublicKey(), true)
 	waitForPeer(t, node.core, coreB.PublicKey(), true)
 }

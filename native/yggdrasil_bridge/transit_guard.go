@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/url"
 	"sync"
 	"time"
 )
@@ -17,21 +16,33 @@ import (
 // it was about 0.6-0.9 MB/s in and as much out for most of an hour.
 //
 // The guard takes the transit estimate of every window (traffic_meter.go).
-// A window above phoneTransitRateLimit, or transit in the last hour above
-// phoneTransitHourBudget, makes the phone keep a single peering for a
-// while: a node with one peering is nobody's shortcut. It keeps one public
-// peer (or, with none up, one device nearby), sets aside its other public
-// peers, friends' bridges and links nearby, and takes them back when the
-// hold ends. What a friend nearby sends or gets through the phone itself
-// is no transit (local_link_traffic.go), and the link to a friend the
-// phone talks with stays through a hold. Holds grow (transitHoldBase, doubled for every hold within
-// transitHoldMemory, at most transitHoldMax), so a home that keeps routing
-// through the phone costs at most a window or two of transit per hold.
+// transitConfirmWindows windows in a row above phoneTransitRateLimit, or
+// with transit while the last hour's is above phoneTransitHourBudget, make
+// the phone keep fewer peerings for a while: a node with one way to the
+// mesh is nobody's shortcut. The friends' bridges the app configured stay:
+// with one of them up the phone drops its public peers, otherwise it keeps
+// one public peer (or, with none up, one device nearby); it sets aside its
+// other public peers and links nearby, and takes them back when the hold
+// ends. What a friend nearby sends or gets through the phone itself is no
+// transit (local_link_traffic.go), and the link to a friend the phone talks
+// with stays through a hold.
+//
+// Holds grow (transitHoldBase, doubled for every hold within
+// transitHoldMemory, at most transitHoldMax) only when the transit crossed
+// between a peering nearby and a public one, as a home computer routing
+// through the phone does; a stranger far away who sends the phone traffic
+// cannot make that up, so what such a one can start is a hold of
+// transitHoldBase now and then. After a hold like that, transit that comes
+// back starts the next one within a window, so a home that keeps routing
+// through the phone costs a few windows of transit for the first hold and
+// one for each further one.
 const (
 	// How often a phone samples its peerings for the guard; a window is
 	// trafficWindow long.
 	transitWatchInterval = 10 * time.Second
-	// Transit over one window that starts a hold, bytes per second.
+	// Windows in a row over the limits that start a hold.
+	transitConfirmWindows = 3
+	// Transit over a window that counts towards a hold, bytes per second.
 	phoneTransitRateLimit = 64 * 1024
 	// Transit within the last hour that starts a hold, bytes.
 	phoneTransitHourBudget = 32 << 20
@@ -57,9 +68,15 @@ type transitGuard struct {
 	spans []transitSpan
 	// The hold running now ends at holdUntil (zero: none).
 	holdUntil time.Time
-	// Holds within transitHoldMemory of each other, and the last one.
-	recent   int
-	lastHold time.Time
+	// Windows in a row over the limits, and whether any of them crossed
+	// (traffic_meter.go).
+	streak        int
+	streakCrossed bool
+	// Holds that grew within transitHoldMemory of each other, the last
+	// hold, and whether its transit crossed.
+	recent      int
+	lastHold    time.Time
+	lastCrossed bool
 	// Holds and transit since the node started, for diagnostics.
 	holds       int
 	lastRate    uint64
@@ -85,13 +102,14 @@ func (guard *transitGuard) hourBytesLocked() uint64 {
 	return total
 }
 
-// observe takes a window that ended at now with bytes of transit at rate
-// (bytes per second). It returns how long a hold that starts now lasts, or
-// 0 when none starts (no reason, or one runs already).
-func (guard *transitGuard) observe(now time.Time, bytes, rate uint64) time.Duration {
+// observe takes the transit of a window that ended at now. It returns how
+// long a hold that starts now lasts, or 0 when none starts (no reason yet,
+// or one runs already).
+func (guard *transitGuard) observe(now time.Time, estimate transitEstimate) time.Duration {
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
 	guard.pruneLocked(now)
+	bytes, rate := estimate.bytes, estimate.rate
 	if bytes > 0 {
 		guard.spans = append(guard.spans, transitSpan{at: now, bytes: bytes})
 		guard.totalBytes += bytes
@@ -105,17 +123,37 @@ func (guard *transitGuard) observe(now time.Time, bytes, rate uint64) time.Durat
 	// quiet now.
 	overHour := bytes > 0 && guard.hourBytesLocked() >= phoneTransitHourBudget
 	if !overRate && !overHour {
+		guard.streak = 0
+		guard.streakCrossed = false
 		return 0
 	}
+	guard.streak++
+	guard.streakCrossed = guard.streakCrossed || estimate.crossed
 	if !guard.lastHold.IsZero() && now.Sub(guard.lastHold) > transitHoldMemory {
 		guard.recent = 0
+		guard.lastCrossed = false
 	}
+	needed := transitConfirmWindows
+	if guard.lastCrossed {
+		// The home computer that routed through the phone before, back
+		// at it.
+		needed = 1
+	}
+	if guard.streak < needed {
+		return 0
+	}
+	crossed := guard.streakCrossed
+	guard.streak = 0
+	guard.streakCrossed = false
 	hold := transitHoldBase
-	for i := 0; i < guard.recent && hold < transitHoldMax; i++ {
-		hold *= 2
+	if crossed {
+		for i := 0; i < guard.recent && hold < transitHoldMax; i++ {
+			hold *= 2
+		}
+		hold = min(hold, transitHoldMax)
+		guard.recent++
 	}
-	hold = min(hold, transitHoldMax)
-	guard.recent++
+	guard.lastCrossed = crossed
 	guard.holds++
 	guard.lastHold = now
 	guard.lastRate = rate
@@ -168,14 +206,17 @@ type transitLink struct {
 // transitHold is what a phone set aside while it holds.
 type transitHold struct {
 	// The public peer kept, or the device nearby kept (its mesh address);
-	// at most one of them is set.
+	// at most one of them is set, and neither while the phone goes through
+	// a friend's bridge.
 	keepPublic string
 	keepLink   string
-	// How many public peers the phone dialled before.
-	target int
-	// Configured peers other than public ones (friends' bridges, devices
-	// on the LAN) taken out, and ones the app added meanwhile.
-	extras []string
+	// A friend's bridge was up when the hold began: the bridges are the
+	// phone's way to the mesh, with no public peer, while one stays up.
+	onBridges bool
+	// How many public peers the phone dialled before, and how many of them
+	// it set aside.
+	target   int
+	setAside int
 }
 
 // chooseTransitKeep picks the one peering a holding phone keeps: the first
@@ -232,19 +273,20 @@ func (node *bridgeNode) stopTransitWatch() {
 
 // observeTransit hands a window's transit to the guard and starts a hold
 // when it says so.
-func (node *bridgeNode) observeTransit(now time.Time, bytes, rate uint64) {
+func (node *bridgeNode) observeTransit(now time.Time, estimate transitEstimate) {
 	guard := node.transitGuard
 	if guard == nil {
 		return
 	}
-	if hold := guard.observe(now, bytes, rate); hold > 0 {
-		node.beginTransitHold(hold, rate)
+	if hold := guard.observe(now, estimate); hold > 0 {
+		node.beginTransitHold(hold, estimate.rate)
 	}
 }
 
-// checkTransitHold ends a hold that ran out, and keeps a hold that kept a
-// device nearby from leaving the phone with no peering once that link is
-// gone: it then dials one public peer instead.
+// checkTransitHold ends a hold that ran out, and keeps a hold from leaving
+// the phone with no way to the mesh: once the device nearby it kept is
+// gone, or no friend's bridge it went through is up any more, it dials one
+// public peer instead.
 func (node *bridgeNode) checkTransitHold(now time.Time) {
 	guard := node.transitGuard
 	if guard == nil {
@@ -254,21 +296,37 @@ func (node *bridgeNode) checkTransitHold(now time.Time) {
 		node.endTransitHold()
 		return
 	}
-	keepLink, held := node.transitHoldLink()
-	if !held || keepLink == "" {
-		return
-	}
-	manager := node.existingLocalLinks()
-	if manager != nil && manager.hasLink(keepLink) {
-		return
-	}
 	node.transitHoldMu.Lock()
-	if node.transitHold != nil {
-		node.transitHold.keepLink = ""
+	state := node.transitHold
+	var keepLink string
+	var onBridges bool
+	if state != nil {
+		keepLink, onBridges = state.keepLink, state.onBridges
 	}
 	node.transitHoldMu.Unlock()
-	if manager != nil {
-		manager.hold("")
+	switch {
+	case state == nil:
+		return
+	case keepLink != "":
+		manager := node.existingLocalLinks()
+		if manager != nil && manager.hasLink(keepLink) {
+			return
+		}
+		node.transitHoldMu.Lock()
+		state.keepLink = ""
+		node.transitHoldMu.Unlock()
+		if manager != nil {
+			manager.hold("")
+		}
+	case onBridges:
+		if node.bridgeUp(node.upPeers()) {
+			return
+		}
+		node.transitHoldMu.Lock()
+		state.onBridges = false
+		node.transitHoldMu.Unlock()
+	default:
+		return
 	}
 	if keeper := node.phonePeers; keeper != nil {
 		keeper.mu.Lock()
@@ -292,7 +350,8 @@ func (node *bridgeNode) transitHoldLink() (string, bool) {
 	return node.transitHold.keepLink, true
 }
 
-// configuredExtras are the configured peers that are not public ones.
+// configuredExtras are the configured peers that are not public ones: the
+// friends' bridges the app chose.
 func (node *bridgeNode) configuredExtras() []string {
 	node.configMu.RLock()
 	defer node.configMu.RUnlock()
@@ -305,7 +364,19 @@ func (node *bridgeNode) configuredExtras() []string {
 	return extras
 }
 
-// beginTransitHold makes the phone keep a single peering for hold.
+// bridgeUp reports whether one of the friends' bridges is up.
+func (node *bridgeNode) bridgeUp(up map[string]bool) bool {
+	for _, bridge := range node.configuredExtras() {
+		if up[peerURIBase(bridge)] {
+			return true
+		}
+	}
+	return false
+}
+
+// beginTransitHold makes the phone keep a single way to the mesh for hold:
+// the friends' bridges when one is up, else one public peer or one device
+// nearby. The bridges are never set aside.
 func (node *bridgeNode) beginTransitHold(hold time.Duration, rate uint64) {
 	// The manager's lock is never taken under transitHoldMu
 	// (localLinkManager takes them the other way round).
@@ -313,8 +384,11 @@ func (node *bridgeNode) beginTransitHold(hold time.Duration, rate uint64) {
 	if manager := node.existingLocalLinks(); manager != nil {
 		links = manager.linkedDevices()
 	}
-	keepPublic, keepLink := chooseTransitKeep(node.dialledPublicPeers(), links, node.upPeers())
-	state := &transitHold{keepPublic: keepPublic, keepLink: keepLink, extras: node.configuredExtras()}
+	up := node.upPeers()
+	state := &transitHold{onBridges: node.bridgeUp(up)}
+	if !state.onBridges {
+		state.keepPublic, state.keepLink = chooseTransitKeep(node.dialledPublicPeers(), links, up)
+	}
 	node.transitHoldMu.Lock()
 	if node.transitHold != nil {
 		node.transitHoldMu.Unlock()
@@ -325,30 +399,32 @@ func (node *bridgeNode) beginTransitHold(hold time.Duration, rate uint64) {
 
 	if keeper := node.phonePeers; keeper != nil {
 		keeper.mu.Lock()
-		state.target = keeper.rotation.target
+		target := keeper.rotation.target
 		keeper.rotation.target = 0
 		var after []string
-		if keepPublic != "" {
+		if state.keepPublic != "" {
 			keeper.rotation.target = 1
-			after = []string{keepPublic}
+			after = []string{state.keepPublic}
 		}
 		before := keeper.dialled
 		keeper.dialled = after
 		keeper.mu.Unlock()
+		node.transitHoldMu.Lock()
+		state.target = target
+		state.setAside = len(before) - len(after)
+		node.transitHoldMu.Unlock()
 		node.swapPublicPeers(before, after)
 	}
-	for _, uri := range state.extras {
-		if parsed, err := url.Parse(uri); err == nil {
-			_ = node.core.RemovePeer(parsed, "")
-		}
-		node.updateConfiguredPeer(uri, false)
-	}
 	if manager := node.existingLocalLinks(); manager != nil {
-		manager.hold(keepLink)
+		manager.hold(state.keepLink)
 	}
 	if node.logger != nil {
-		node.logger.Warnf("about %d B/s of others' mesh traffic passed through this node; one peering only for %s",
-			rate, hold)
+		way := "one peering"
+		if state.onBridges {
+			way = "friends' bridges only"
+		}
+		node.logger.Warnf("about %d B/s of others' mesh traffic passed through this node; %s for %s",
+			rate, way, hold)
 	}
 }
 
@@ -370,15 +446,6 @@ func (node *bridgeNode) endTransitHold() {
 		keeper.mu.Unlock()
 		node.swapPublicPeers(before, after)
 	}
-	for _, uri := range state.extras {
-		parsed, err := url.Parse(uri)
-		if err != nil {
-			continue
-		}
-		if err := node.core.AddPeer(parsed, ""); err == nil {
-			node.updateConfiguredPeer(uri, true)
-		}
-	}
 	if manager := node.existingLocalLinks(); manager != nil {
 		manager.release()
 	}
@@ -387,42 +454,15 @@ func (node *bridgeNode) endTransitHold() {
 	}
 }
 
-// deferDuringTransitHold keeps a peer the app adds while the phone holds
-// for when the hold ends; reports whether it did.
-func (node *bridgeNode) deferDuringTransitHold(uri string) bool {
-	node.transitHoldMu.Lock()
-	defer node.transitHoldMu.Unlock()
-	state := node.transitHold
-	if state == nil {
-		return false
-	}
-	state.extras, _ = withoutPeer(state.extras, uri)
-	state.extras = append(state.extras, uri)
-	return true
-}
-
-// forgetDuringTransitHold drops a peer the app removes from what a hold set
-// aside; reports whether it was there (and so not dialled).
-func (node *bridgeNode) forgetDuringTransitHold(uri string) bool {
-	node.transitHoldMu.Lock()
-	defer node.transitHoldMu.Unlock()
-	state := node.transitHold
-	if state == nil {
-		return false
-	}
-	var found bool
-	state.extras, found = withoutPeer(state.extras, uri)
-	return found
-}
-
 // transitGuardState is the guard and the hold, for trafficState.
 func (node *bridgeNode) transitGuardState(now time.Time) map[string]any {
 	state := node.transitGuard.snapshot(now)
 	node.transitHoldMu.Lock()
 	if hold := node.transitHold; hold != nil {
 		state["holding"] = true
-		state["setAside"] = len(hold.extras)
+		state["setAside"] = hold.setAside
 		state["keepsLink"] = hold.keepLink != ""
+		state["onBridges"] = hold.onBridges
 	} else {
 		state["holding"] = false
 	}

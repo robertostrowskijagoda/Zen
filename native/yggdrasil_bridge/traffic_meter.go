@@ -22,6 +22,15 @@ import (
 // what is left in both directions alike transit. An estimate, for
 // diagnostics (the app's log, normalizeNodeState's "traffic") and for a
 // phone's limit on it (transit_guard.go).
+//
+// Anyone on the mesh can send this node packets it drops (junk that does
+// not open, packets ipv6rwc refuses), and ironwood answers some of them
+// (a session init back): bytes in and out that are not the node's own as
+// the packet loop counts them, yet no transit either. So the node's own
+// traffic is also taken from its end-to-end sessions (everything that
+// opened, whatever ipv6rwc made of it), and transit is at most what came in
+// on one peering while another one sent as much: junk and the answers to it
+// travel over the same peering.
 const (
 	// Mesh headers around one of the node's own packets on a peering
 	// (keys, path, session and link framing), counted generously so an
@@ -90,10 +99,16 @@ func (node *bridgeNode) writeMesh(packet []byte, relay bool) error {
 	return nil
 }
 
-// trafficLink is what a peering had carried when it was last looked at.
+// trafficLink is what a peering (or a session) had carried when it was last
+// looked at.
 type trafficLink struct {
 	rx, tx uint64
 	uptime time.Duration
+}
+
+// trafficDelta is what came in and went out since a moment before.
+type trafficDelta struct {
+	rx, tx uint64
 }
 
 // trafficTotals are byte counts since the node started.
@@ -101,8 +116,22 @@ type trafficTotals struct {
 	peerRx, peerTx             uint64
 	ownRx, ownTx               uint64
 	ownPacketsRx, ownPacketsTx uint64
+	// What the node's end-to-end sessions carried (payloads that opened).
+	sessionRx, sessionTx uint64
 	// A friend's own traffic over a local link, passed on.
 	friend uint64
+}
+
+// transitEstimate is the transit of a window that ended.
+type transitEstimate struct {
+	bytes uint64
+	// Bytes per second.
+	rate uint64
+	// Most of it could have come in on a peering nearby (a device on the
+	// LAN, a friend's bridge) and gone out to a public peer, or the other way
+	// round: what a home computer routing through the phone looks like, and
+	// what a stranger far away cannot make up.
+	crossed bool
 }
 
 // peerTrafficMeter adds up what the node's peerings carried, also of
@@ -111,30 +140,53 @@ type trafficTotals struct {
 type peerTrafficMeter struct {
 	mu    sync.Mutex
 	links map[string]trafficLink
+	// The node's sessions as last seen, by key, and what all of them carried
+	// since the node started.
+	sessions             map[string]trafficLink
+	sessionRx, sessionTx uint64
 	// Bytes over public peerings and over local ones (devices nearby, the
 	// LAN, loopback) since the node started.
 	publicRx, publicTx uint64
 	localRx, localTx   uint64
-	// The window that is being measured: when it started and the totals
-	// then.
+	// The window that is being measured: when it started, the totals then,
+	// and what each peering carried in it (by peering, and nearby or far).
 	windowStart time.Time
 	windowBase  trafficTotals
-	// Transit since the node started, and over the last whole window.
+	windowLinks map[string]trafficDelta
+	windowNear  trafficDelta
+	windowFar   trafficDelta
+	// Transit since the node started, and the rate over the last whole
+	// window.
 	transitBytes  uint64
-	transitLast   uint64
 	transitRate   uint64
 	transitWindow time.Duration
 }
 
-// sample takes in the peerings as GetPeers lists them now and the node's
-// own totals. It returns the transit rate of a window that ended now (and
-// true), or false while the window runs.
-func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, now time.Time) (uint64, bool) {
+// counterDelta is what a counter that may have started again (a new
+// connection or session under the same name) added since last.
+func counterDelta(last trafficLink, rx, tx uint64, uptime time.Duration) (uint64, uint64) {
+	if rx < last.rx || tx < last.tx || uptime < last.uptime {
+		last = trafficLink{}
+	}
+	return rx - last.rx, tx - last.tx
+}
+
+// sample takes in the peerings as GetPeers lists them now, the sessions as
+// GetSessions does and the node's own totals; near tells a peering nearby
+// (nil: only local addresses). It returns the transit of a window that ended
+// now (and true), or false while the window runs.
+func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, sessions []core.SessionInfo, own *ownTraffic, near func(uri string) bool, now time.Time) (transitEstimate, bool) {
 	ownRx, ownTx, ownPacketsRx, ownPacketsTx := own.totals()
+	if near == nil {
+		near = isLocalPeerURI
+	}
 	meter.mu.Lock()
 	defer meter.mu.Unlock()
 	if meter.links == nil {
 		meter.links = make(map[string]trafficLink)
+	}
+	if meter.windowLinks == nil {
+		meter.windowLinks = make(map[string]trafficDelta)
 	}
 	seen := make(map[string]bool, len(peers))
 	for _, peer := range peers {
@@ -143,16 +195,7 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 			key = "in|" + key
 		}
 		seen[key] = true
-		last, known := meter.links[key]
-		if known && (peer.RXBytes < last.rx || peer.TXBytes < last.tx || peer.Uptime < last.uptime) {
-			// The same address, a new connection.
-			known = false
-		}
-		if !known {
-			last = trafficLink{}
-		}
-		rx := peer.RXBytes - last.rx
-		tx := peer.TXBytes - last.tx
+		rx, tx := counterDelta(meter.links[key], peer.RXBytes, peer.TXBytes, peer.Uptime)
 		if isLocalPeerURI(peer.URI) {
 			meter.localRx += rx
 			meter.localTx += tx
@@ -160,6 +203,16 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 			meter.publicRx += rx
 			meter.publicTx += tx
 		}
+		window := meter.windowLinks[key]
+		window.rx += rx
+		window.tx += tx
+		meter.windowLinks[key] = window
+		group := &meter.windowFar
+		if near(peer.URI) {
+			group = &meter.windowNear
+		}
+		group.rx += rx
+		group.tx += tx
 		meter.links[key] = trafficLink{rx: peer.RXBytes, tx: peer.TXBytes, uptime: peer.Uptime}
 	}
 	for key := range meter.links {
@@ -167,6 +220,7 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 			delete(meter.links, key)
 		}
 	}
+	meter.sampleSessionsLocked(sessions)
 	totals := trafficTotals{
 		peerRx:       meter.publicRx + meter.localRx,
 		peerTx:       meter.publicTx + meter.localTx,
@@ -174,39 +228,96 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, own *ownTraffic, no
 		ownTx:        ownTx,
 		ownPacketsRx: ownPacketsRx,
 		ownPacketsTx: ownPacketsTx,
+		sessionRx:    meter.sessionRx,
+		sessionTx:    meter.sessionTx,
 		friend:       own.friendForwarded.Load(),
 	}
 	if meter.windowStart.IsZero() {
-		meter.windowStart = now
-		meter.windowBase = totals
-		return 0, false
+		meter.startWindowLocked(now, totals)
+		return transitEstimate{}, false
 	}
 	elapsed := now.Sub(meter.windowStart)
 	if elapsed < trafficWindow {
-		return 0, false
+		return transitEstimate{}, false
 	}
 	transit := estimateTransit(meter.windowBase, totals, len(peers), elapsed)
+	transit = min(transit, crossLinkBound(meter.windowLinks))
+	crossing := min(meter.windowNear.rx, meter.windowFar.tx) + min(meter.windowFar.rx, meter.windowNear.tx)
+	estimate := transitEstimate{
+		bytes:   transit,
+		rate:    uint64(float64(transit) / elapsed.Seconds()),
+		crossed: transit > 0 && 2*min(crossing, transit) >= transit,
+	}
 	meter.transitBytes += transit
-	meter.transitLast = transit
-	meter.transitRate = uint64(float64(transit) / elapsed.Seconds())
+	meter.transitRate = estimate.rate
 	meter.transitWindow = elapsed
+	meter.startWindowLocked(now, totals)
+	return estimate, true
+}
+
+func (meter *peerTrafficMeter) startWindowLocked(now time.Time, totals trafficTotals) {
 	meter.windowStart = now
 	meter.windowBase = totals
-	return meter.transitRate, true
+	clear(meter.windowLinks)
+	meter.windowNear = trafficDelta{}
+	meter.windowFar = trafficDelta{}
+}
+
+// sampleSessionsLocked adds what the node's sessions carried since the last
+// sample.
+func (meter *peerTrafficMeter) sampleSessionsLocked(sessions []core.SessionInfo) {
+	if meter.sessions == nil {
+		meter.sessions = make(map[string]trafficLink)
+	}
+	seen := make(map[string]bool, len(sessions))
+	for _, session := range sessions {
+		key := string(session.Key)
+		seen[key] = true
+		rx, tx := counterDelta(meter.sessions[key], session.RXBytes, session.TXBytes, session.Uptime)
+		meter.sessionRx += rx
+		meter.sessionTx += tx
+		meter.sessions[key] = trafficLink{rx: session.RXBytes, tx: session.TXBytes, uptime: session.Uptime}
+	}
+	for key := range meter.sessions {
+		if !seen[key] {
+			delete(meter.sessions, key)
+		}
+	}
 }
 
 // estimateTransit is the traffic that went both in and out over the
-// peerings between before and after, beyond the node's own packets, the
-// upkeep of links peerings over elapsed and what friends nearby sent or
-// got through the node themselves (each such packet came in on one
-// peering and went out on another, so it is taken from both).
+// peerings between before and after, beyond the node's own packets (as the
+// packet loop or the sessions counted them, whichever saw more), the upkeep
+// of links peerings over elapsed and what friends nearby sent or got
+// through the node themselves (each such packet came in on one peering and
+// went out on another, so it is taken from both).
 func estimateTransit(before, after trafficTotals, links int, elapsed time.Duration) uint64 {
 	upkeep := uint64(links) * trafficLinkUpkeep * uint64(elapsed/time.Second)
 	friend := after.friend - before.friend
+	ownRx := max(after.ownRx-before.ownRx, after.sessionRx-before.sessionRx)
+	ownTx := max(after.ownTx-before.ownTx, after.sessionTx-before.sessionTx)
 	in := remainder(after.peerRx-before.peerRx,
-		after.ownRx-before.ownRx+(after.ownPacketsRx-before.ownPacketsRx)*trafficPacketOverhead+upkeep+friend)
+		ownRx+(after.ownPacketsRx-before.ownPacketsRx)*trafficPacketOverhead+upkeep+friend)
 	out := remainder(after.peerTx-before.peerTx,
-		after.ownTx-before.ownTx+(after.ownPacketsTx-before.ownPacketsTx)*trafficPacketOverhead+upkeep+friend)
+		ownTx+(after.ownPacketsTx-before.ownPacketsTx)*trafficPacketOverhead+upkeep+friend)
+	return min(in, out)
+}
+
+// crossLinkBound is the most that can have passed through: every byte of
+// transit came in on one peering and left on another, so what came in on a
+// peering counts only up to what the other peerings sent, and the other way
+// round. Junk sent to the node and what it answers stay on one peering.
+func crossLinkBound(links map[string]trafficDelta) uint64 {
+	var rx, tx uint64
+	for _, link := range links {
+		rx += link.rx
+		tx += link.tx
+	}
+	var in, out uint64
+	for _, link := range links {
+		in += min(link.rx, tx-link.tx)
+		out += min(link.tx, rx-link.rx)
+	}
 	return min(in, out)
 }
 
@@ -233,13 +344,6 @@ func (meter *peerTrafficMeter) snapshot() map[string]any {
 	}
 }
 
-// lastTransit is the transit of the last whole window, in bytes.
-func (meter *peerTrafficMeter) lastTransit() uint64 {
-	meter.mu.Lock()
-	defer meter.mu.Unlock()
-	return meter.transitLast
-}
-
 // sampleTraffic feeds the meter with the node's peerings now; a phone logs
 // a window with unusual transit, and its transit guard (transit_guard.go)
 // takes every window.
@@ -249,14 +353,26 @@ func (node *bridgeNode) sampleTraffic() {
 
 func (node *bridgeNode) sampleTrafficAt(now time.Time) {
 	node.checkTransitHold(now)
-	rate, ended := node.peerTraffic.sample(node.core.GetPeers(), &node.traffic, now)
+	estimate, ended := node.peerTraffic.sample(node.core.GetPeers(), node.core.GetSessions(), &node.traffic, node.nearPeers(), now)
 	if !ended {
 		return
 	}
-	if (isPhoneOS() || node.transitGuard != nil) && rate >= phoneTransitNotice && node.logger != nil {
-		node.logger.Warnf("about %d B/s of others' mesh traffic passed through this node", rate)
+	if (isPhoneOS() || node.transitGuard != nil) && estimate.rate >= phoneTransitNotice && node.logger != nil {
+		node.logger.Warnf("about %d B/s of others' mesh traffic passed through this node", estimate.rate)
 	}
-	node.observeTransit(now, node.peerTraffic.lastTransit(), rate)
+	node.observeTransit(now, estimate)
+}
+
+// nearPeers tells the peerings nearby: local addresses (devices nearby, the
+// LAN) and the friends' bridges the app configured.
+func (node *bridgeNode) nearPeers() func(uri string) bool {
+	bridges := make(map[string]bool)
+	for _, extra := range node.configuredExtras() {
+		bridges[peerURIBase(extra)] = true
+	}
+	return func(uri string) bool {
+		return isLocalPeerURI(uri) || bridges[peerURIBase(uri)]
+	}
 }
 
 // trafficState is the node's traffic for diagnostics: bytes over its
