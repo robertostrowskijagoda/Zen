@@ -95,6 +95,8 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # Also when the check above fails: that file is the one to commit.
+        if: always()
         with:
           name: podfile-lock-ios
           path: ios/Podfile.lock
