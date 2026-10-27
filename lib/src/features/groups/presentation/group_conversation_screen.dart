@@ -31,6 +31,8 @@ import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/shell/presentation/remembered_place.dart';
+import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -64,6 +66,17 @@ class _GroupConversationScreenState
 
   final TextEditingController _composerController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
+
+  /// Where the chat was scrolled to when the app was closed.
+  late final ChatScrollMemory _scrollMemory = ChatScrollMemory(
+    location: ref.read(shellLocationProvider),
+    place: ShellPlace.groupChat(widget.groupId),
+    scroll: _scrollController,
+    bubbleKeys: _bubbleKeys,
+    reversed: true,
+  );
+  bool _scrollMemoryUsed = false;
   bool _messageEntrancePlayed = false;
 
   /// "Tablica" tab (posts pinned to the group) instead of the chat.
@@ -79,7 +92,6 @@ class _GroupConversationScreenState
   /// A message just jumped to from a reply: outlined for a moment.
   String? _highlightId;
   Timer? _highlightTimer;
-  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
 
@@ -298,10 +310,17 @@ class _GroupConversationScreenState
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scrollMemory.attach(context);
+  }
+
+  @override
   void dispose() {
     _highlightTimer?.cancel();
     _socialHub.leaveGroupConversation(widget.groupId);
     _composerController.dispose();
+    _scrollMemory.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -844,6 +863,21 @@ class _GroupConversationScreenState
                             <String, ChatMessage>{
                               for (final ChatMessage m in messages) m.id: m,
                             };
+                        if (!_scrollMemoryUsed) {
+                          _scrollMemoryUsed = true;
+                          if (_scrollMemory.hasAnchor) {
+                            // The chat was closed with the app: back at the
+                            // message it was scrolled to.
+                            final List<String> ids = <String>[
+                              for (final ChatMessage m in messages) m.id,
+                            ];
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) {
+                                _scrollMemory.restore(ids);
+                              }
+                            });
+                          }
+                        }
                         // Reversed, so the chat opens at the newest message and new
                         // ones appear without the user having to scroll down.
                         return ListView.builder(

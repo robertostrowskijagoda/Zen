@@ -245,7 +245,10 @@ void _lockNow(WidgetRef ref, AppSecurityService security) {
 Future<void> _openSettingsScreen(BuildContext context) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (BuildContext context) => const _SettingsScreen(),
+      builder: (BuildContext context) => const RememberedPlace(
+        place: ShellPlace.settings,
+        child: _SettingsScreen(),
+      ),
     ),
   );
 }

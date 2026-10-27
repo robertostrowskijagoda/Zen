@@ -52,6 +52,8 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/shell/presentation/remembered_place.dart';
+import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
@@ -89,6 +91,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   final TextEditingController _composerController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
+
+  /// Where the conversation was scrolled to when the app was closed.
+  late final ChatScrollMemory _scrollMemory = ChatScrollMemory(
+    location: ref.read(shellLocationProvider),
+    place: ShellPlace.peerChat(widget.peerAddress),
+    scroll: _scrollController,
+    bubbleKeys: _bubbleKeys,
+  );
   late final SocialHubController _socialHubController;
   VoiceMessageRecorder? _voiceRecorder;
   Timer? _recordingTicker;
@@ -106,7 +117,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   /// A message just jumped to from a reply: outlined for a moment.
   String? _highlightId;
   Timer? _highlightTimer;
-  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
 
@@ -178,6 +188,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scrollMemory.attach(context);
+  }
+
   void _onComposerChanged() {
     final String text = _composerController.text.trim();
     if (text.isNotEmpty) {
@@ -217,6 +233,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       unawaited(voiceRecorder.cancel());
     }
     _composerController.dispose();
+    _scrollMemory.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -648,7 +665,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               Expanded(
                 child: messages.when(
                   data: (List<ChatMessage> thread) {
-                    _scheduleScrollToBottom(thread.length);
+                    _scheduleScrollToBottom(thread);
                     final bool animateEntrance =
                         !_messageEntrancePlayed && thread.isNotEmpty;
                     if (thread.isNotEmpty) {
@@ -1158,13 +1175,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
-  void _scheduleScrollToBottom(int messageCount) {
-    if (_lastRenderedMessageCount == messageCount) {
+  void _scheduleScrollToBottom(List<ChatMessage> thread) {
+    if (_lastRenderedMessageCount == thread.length) {
       return;
     }
-    _lastRenderedMessageCount = messageCount;
+    _lastRenderedMessageCount = thread.length;
+    final List<String>? remembered = _scrollMemory.hasAnchor
+        ? <String>[for (final ChatMessage m in thread) m.id]
+        : null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+      // The conversation was closed with the app: back where it was.
+      if (remembered != null && _scrollMemory.restore(remembered)) {
         return;
       }
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
