@@ -612,19 +612,38 @@ final class UpdateService extends ChangeNotifier {
 
 const MethodChannel _appUpdateChannel = MethodChannel('zen/app_update');
 
-/// Opens the system installer for [path] (Android). The person confirms in
-/// the system dialog.
-Future<String> installApk(String path) async {
+/// Whether Zen may install apps (Android: "install unknown apps"). Null
+/// when it may; otherwise opens the system settings for the person to allow
+/// it and returns what to tell them (or why that cannot be done).
+Future<String?> requestInstallPermission() async {
   try {
     final bool allowed =
         await _appUpdateChannel.invokeMethod<bool>('canInstall') ?? false;
-    if (!allowed) {
-      await _appUpdateChannel.invokeMethod<void>('openInstallSettings');
-      return t(
-        'Zezwól Zen na instalowanie aplikacji, wróć i naciśnij '
-        '„Zainstaluj” jeszcze raz.',
-      );
+    if (allowed) {
+      return null;
     }
+    await _appUpdateChannel.invokeMethod<void>('openInstallSettings');
+    return t(
+      'Zezwól Zen na instalowanie aplikacji, wróć i naciśnij '
+      '„Zainstaluj” jeszcze raz.',
+    );
+  } on MissingPluginException {
+    return t('Instalowanie nie działa na tym urządzeniu.');
+  } on PlatformException catch (error) {
+    return t('Instalacja nie udała się: {reason}', {
+      'reason': error.message ?? error.code,
+    });
+  }
+}
+
+/// Opens the system installer for [path] (Android). The person confirms in
+/// the system dialog.
+Future<String> installApk(String path) async {
+  final String? blocked = await requestInstallPermission();
+  if (blocked != null) {
+    return blocked;
+  }
+  try {
     final String? result = await _appUpdateChannel.invokeMethod<String>(
       'install',
       <String, Object>{'path': path},
