@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.13.0 — 27.10.2026
+
 ### What's new
 - [en] Messages reach you even when Zen is closed or locked: your trusted friends' phones keep them for you like mailboxes.
 - [en] See whether a friend has Zen open, in the background or offline, and find your notifications in a list behind the bell.
