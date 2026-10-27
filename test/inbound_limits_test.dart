@@ -780,7 +780,10 @@ void main() {
         final MemoryRuntimeSystemNotificationService shade =
             MemoryRuntimeSystemNotificationService();
         final PrivacyRedactingNotificationService service =
-            PrivacyRedactingNotificationService(shade, hideContent: () => true);
+            PrivacyRedactingNotificationService(
+              shade,
+              privacy: () => NotificationPrivacy.senderOnly,
+            );
 
         await service.show(
           notification(RuntimeSystemNotificationCategory.social),
@@ -809,16 +812,16 @@ void main() {
         'off, stays as it is', () async {
       final MemoryRuntimeSystemNotificationService shade =
           MemoryRuntimeSystemNotificationService();
-      bool hide = true;
+      NotificationPrivacy level = NotificationPrivacy.senderOnly;
       final PrivacyRedactingNotificationService service =
-          PrivacyRedactingNotificationService(shade, hideContent: () => hide);
+          PrivacyRedactingNotificationService(shade, privacy: () => level);
 
       await service.show(
         notification(RuntimeSystemNotificationCategory.message, redacted: true),
       );
       expect(shade.activeNotifications.single.body, 'Tajna treść');
 
-      hide = false;
+      level = NotificationPrivacy.senderAndContent;
       await service.show(
         notification(RuntimeSystemNotificationCategory.social),
       );

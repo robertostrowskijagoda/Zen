@@ -85,6 +85,7 @@ final class LocalLinksController {
   bool _lan = true;
   Set<LocalLinkTransport> _enabled = const <LocalLinkTransport>{};
   List<LocalLinkPeer> _peers = const <LocalLinkPeer>[];
+  LocalNearbyAdverts? _nearby;
   bool? _lockHeld;
   int _generation = 0;
   Future<void> _transportWork = Future<void>.value();
@@ -152,6 +153,19 @@ final class LocalLinksController {
     unawaited(_applyTransports());
   }
 
+  /// "W pobliżu" on the local networks: what this device shows there and
+  /// whether it looks around (`null`: neither). Goes with the LAN's
+  /// beacons, so only while the LAN setting is on.
+  void setNearby(LocalNearbyAdverts? nearby) {
+    if (nearby == _nearby) {
+      return;
+    }
+    _nearby = nearby;
+    if (_running) {
+      _push();
+    }
+  }
+
   /// Friends or devices changed: new secrets for the bridge.
   Future<void> refreshPeers() async {
     final int generation = ++_generation;
@@ -181,9 +195,16 @@ final class LocalLinksController {
             ? kLocalLinkActiveBeaconSeconds
             : kLocalLinkIdleBeaconSeconds,
         peers: _peers,
+        nearby: _nearby,
       ),
     );
-    unawaited(_lock(_lan && _foreground && _peers.isNotEmpty));
+    // Looking around nearby also needs to hear the others' beacons.
+    unawaited(
+      _lock(
+        _lan &&
+            ((_foreground && _peers.isNotEmpty) || _nearby?.looking == true),
+      ),
+    );
   }
 
   Future<void> _lock(bool held) async {
@@ -313,6 +334,17 @@ final class LocalLinkPairing {
   }
 }
 
+/// What "W pobliżu" shows and looks for on the local networks (set by the
+/// nearby service, `meet_providers.dart`); kept apart from the controller,
+/// which is made again when the ledger changes.
+final Provider<ValueNotifier<LocalNearbyAdverts?>> localNearbyProvider =
+    Provider<ValueNotifier<LocalNearbyAdverts?>>((Ref ref) {
+      final ValueNotifier<LocalNearbyAdverts?> nearby =
+          ValueNotifier<LocalNearbyAdverts?>(null);
+      ref.onDispose(nearby.dispose);
+      return nearby;
+    });
+
 final Provider<LocalLinksController> localLinksControllerProvider =
     Provider<LocalLinksController>((Ref ref) {
       final LedgerNode? ledger = ref.watch(ledgerNodeProvider);
@@ -324,6 +356,12 @@ final Provider<LocalLinksController> localLinksControllerProvider =
         transports: platformLocalLinks(),
       );
       pairing.onChanged = () => unawaited(controller.refreshPeers());
+      final ValueNotifier<LocalNearbyAdverts?> nearby = ref.read(
+        localNearbyProvider,
+      );
+      void onNearby() => controller.setNearby(nearby.value);
+      onNearby();
+      nearby.addListener(onNearby);
       ref.listen<AppSettings>(appSettingsControllerProvider, (
         AppSettings? previous,
         AppSettings next,
@@ -356,6 +394,7 @@ final Provider<LocalLinksController> localLinksControllerProvider =
             ],
           ];
       ref.onDispose(() {
+        nearby.removeListener(onNearby);
         for (final StreamSubscription<void> s in subscriptions) {
           unawaited(s.cancel());
         }

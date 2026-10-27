@@ -278,7 +278,10 @@ class PyramidScreen extends ConsumerWidget {
           return Scaffold(
             key: const Key('pyramid-screen'),
             appBar: ZenSectionBar(title: t('Piramida')),
-            body: SelectionArea(child: _JoinView(pyr: pyr)),
+            body: SafeArea(
+              top: false,
+              child: SelectionArea(child: _JoinView(pyr: pyr)),
+            ),
           );
         }
         if (s.rulesTooNew != null) {
@@ -338,15 +341,18 @@ class PyramidScreen extends ConsumerWidget {
               ],
               tabs: tabs,
             ),
-            body: SelectionArea(
-              child: TabBarView(
-                children: <Widget>[
-                  _MeTab(pyr: pyr, s: s, me: me),
-                  _VotesTab(pyr: pyr, s: s, me: me),
-                  PyramidWallet(pyr: pyr, s: s, me: me),
-                  if (power) PyramidPower(pyr: pyr, s: s, me: me),
-                  _HistoryTab(s: s, me: me),
-                ],
+            body: SafeArea(
+              top: false,
+              child: SelectionArea(
+                child: TabBarView(
+                  children: <Widget>[
+                    _MeTab(pyr: pyr, s: s, me: me),
+                    _VotesTab(pyr: pyr, s: s, me: me),
+                    PyramidWallet(pyr: pyr, s: s, me: me),
+                    if (power) PyramidPower(pyr: pyr, s: s, me: me),
+                    _HistoryTab(s: s, me: me),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1327,7 +1333,7 @@ class _MeTab extends StatelessWidget {
                               t('członek'),
                             if (s.members[k] case final PyrMember m)
                               pyrAgeText(m.birthYear, pyr.now),
-                            ?pyrVoteText(s, k, pyr.now),
+                            ?pyrVoteText(s, k, pyr.now, cell: cell),
                           ].join(' · '),
                           style: TextStyle(
                             color: s.occupant[cell] == k
@@ -1355,7 +1361,7 @@ class _MeTab extends StatelessWidget {
                               ),
                             if (s.cellmates(k).contains(me) &&
                                 s.canVote(me, pyr.now) &&
-                                !s.canVote(k, pyr.now))
+                                !s.metWith(me, k, pyr.now))
                               PopupMenuItem<String>(
                                 value: 'known',
                                 child: Text(t('Poznaliśmy się (daje głos)')),
@@ -1390,7 +1396,17 @@ class _MeTab extends StatelessWidget {
           if (s.vacant.contains(cell))
             _vacant(
               zen,
-              t('Miejsce szefa jest wolne'),
+              switch (s.autoFillOf(cell)) {
+                (final int at, final String k) => t(
+                  'Miejsce szefa jest wolne. {date} zajmie je samoczynnie '
+                  '{name} (dłużej na swoim poziomie)',
+                  <String, Object?>{
+                    'date': pyrDate(at).split(' ').first,
+                    'name': s.members[k]?.name ?? '?',
+                  },
+                ),
+                null => t('Miejsce szefa jest wolne'),
+              },
               PyrPath.children(cell).contains(s.pathOf(me))
                   ? TextButton(
                       onPressed: () => unawaited(pyr.proposeFill(cell, me)),
@@ -2011,9 +2027,16 @@ class _MeTab extends StatelessWidget {
 }
 
 /// A member's vote in words, for their cell: "poznany(-a) przez Ola",
-/// "głos od 12.11.2026", or null when they simply vote (14 days in, or the
-/// founder).
-String? pyrVoteText(PyramidState s, String key, int nowMs) {
+/// "głos od 12.11.2026", "głos w komórce od 12.11.2026" (new in [cell],
+/// nobody there known yet), or null when they simply vote (14 days in, or
+/// the founder).
+String? pyrVoteText(PyramidState s, String key, int nowMs, {String? cell}) {
+  final int? inCell = cell == null ? null : s.cellVoteFrom(key, cell, nowMs);
+  if (inCell != null) {
+    return t('głos w komórce od {date}', <String, Object?>{
+      'date': pyrDate(inCell).split(' ').first,
+    });
+  }
   final List<String> by = s.knownByOf(key);
   if (by.isNotEmpty) {
     return t('poznany(-a) przez {names}', <String, Object?>{

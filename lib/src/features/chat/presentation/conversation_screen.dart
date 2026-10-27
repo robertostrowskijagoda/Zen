@@ -33,6 +33,7 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
@@ -51,7 +52,10 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/shell/presentation/remembered_place.dart';
+import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
@@ -89,6 +93,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   final TextEditingController _composerController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
+
+  /// Where the conversation was scrolled to when the app was closed.
+  late final ChatScrollMemory _scrollMemory = ChatScrollMemory(
+    location: ref.read(shellLocationProvider),
+    place: ShellPlace.peerChat(widget.peerAddress),
+    scroll: _scrollController,
+    bubbleKeys: _bubbleKeys,
+  );
   late final SocialHubController _socialHubController;
   VoiceMessageRecorder? _voiceRecorder;
   Timer? _recordingTicker;
@@ -106,7 +119,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   /// A message just jumped to from a reply: outlined for a moment.
   String? _highlightId;
   Timer? _highlightTimer;
-  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
 
@@ -178,6 +190,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scrollMemory.attach(context);
+  }
+
   void _onComposerChanged() {
     final String text = _composerController.text.trim();
     if (text.isNotEmpty) {
@@ -217,6 +235,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       unawaited(voiceRecorder.cancel());
     }
     _composerController.dispose();
+    _scrollMemory.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -263,6 +282,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final bool hasMessages = messages.asData?.value.isNotEmpty ?? false;
     final int messageCount = messages.asData?.value.length ?? 0;
+    final int incomingCount =
+        messages.asData?.value
+            .where((ChatMessage m) => !m.isOutgoing && !m.isSystem)
+            .length ??
+        0;
     final int disappearSeconds = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) =>
@@ -520,6 +544,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     );
                   }
                   return;
+                case _ConversationMenuAction.notificationPrivacy:
+                  await showConversationNotificationPrivacyDialog(
+                    context,
+                    conversationKey: friend?.address ?? widget.peerAddress,
+                  );
+                  return;
                 case _ConversationMenuAction.blockFriend:
                   await _handleConversationAction(
                     () => _socialHubController.blockFriend(
@@ -646,185 +676,207 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               if (isStrangerConversation(friend, widget.peerAddress))
                 StrangerChatBanner(address: widget.peerAddress, friend: friend),
               Expanded(
-                child: messages.when(
-                  data: (List<ChatMessage> thread) {
-                    _scheduleScrollToBottom(thread.length);
-                    final bool animateEntrance =
-                        !_messageEntrancePlayed && thread.isNotEmpty;
-                    if (thread.isNotEmpty) {
-                      _messageEntrancePlayed = true;
-                    }
-                    return thread.isEmpty && friend?.isTyping != true
-                        ? ListView(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-                            children: <Widget>[
-                              ZenEmpty(
-                                icon: Icons.forum_outlined,
-                                title: t('Brak wiadomości'),
-                                text: t(
-                                  'Zacznij rozmowę bez czekania na '
-                                  'synchronizację tła.',
-                                ),
+                child: JumpToLatest(
+                  controller: _scrollController,
+                  reversed: false,
+                  incomingCount: incomingCount,
+                  child: messages.when(
+                    data: (List<ChatMessage> thread) {
+                      _scheduleScrollToBottom(thread);
+                      final bool animateEntrance =
+                          !_messageEntrancePlayed && thread.isNotEmpty;
+                      if (thread.isNotEmpty) {
+                        _messageEntrancePlayed = true;
+                      }
+                      return thread.isEmpty && friend?.isTyping != true
+                          ? ListView(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                16,
+                                20,
                               ),
-                            ],
-                          )
-                        : ListView.separated(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                            itemBuilder: (BuildContext context, int index) {
-                              if (index == thread.length) {
-                                return _TypingBubble(
-                                  key: const Key('conversation-typing-bubble'),
-                                  name: friend?.displayLabel ?? t('Kontakt'),
-                                );
-                              }
-                              final ChatMessage message = thread[index];
-                              final ChatReply? reply = message.reply;
-                              final ChatMessage? replyOriginal = reply == null
-                                  ? null
-                                  : thread
-                                        .where(
-                                          (ChatMessage m) =>
-                                              m.id == reply.messageId,
-                                        )
-                                        .firstOrNull;
-                              // Reactions, replies, edits and the rest are
-                              // for friends' chats.
-                              final bool extras =
-                                  friend?.status ==
-                                  FriendRelationshipStatus.accepted;
-                              final bool startsNewDay =
-                                  index == 0 ||
-                                  !_isSameDay(
-                                    thread[index - 1].sentAtMillis,
-                                    message.sentAtMillis,
-                                  );
-                              // Stagger from the newest bubble up — those are
-                              // the ones visible when the conversation opens.
-                              final int fromEnd = thread.length - 1 - index;
-                              return Column(
-                                children: <Widget>[
-                                  if (startsNewDay)
-                                    _DaySeparator(
-                                      key: Key(
-                                        'day-separator-${message.sentAtMillis}',
-                                      ),
-                                      millis: message.sentAtMillis,
+                              children: <Widget>[
+                                ZenEmpty(
+                                  icon: Icons.forum_outlined,
+                                  title: t('Brak wiadomości'),
+                                  text: t(
+                                    'Zacznij rozmowę bez czekania na '
+                                    'synchronizację tła.',
+                                  ),
+                                ),
+                              ],
+                            )
+                          : ListView.separated(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.fromLTRB(
+                                12,
+                                12,
+                                12,
+                                16,
+                              ),
+                              itemBuilder: (BuildContext context, int index) {
+                                if (index == thread.length) {
+                                  return _TypingBubble(
+                                    key: const Key(
+                                      'conversation-typing-bubble',
                                     ),
-                                  if (hiddenByMe.hides(id: message.id))
-                                    HiddenContentPlaceholder(
-                                      key: Key(
-                                        'conversation-hidden-${message.id}',
+                                    name: friend?.displayLabel ?? t('Kontakt'),
+                                  );
+                                }
+                                final ChatMessage message = thread[index];
+                                final ChatReply? reply = message.reply;
+                                final ChatMessage? replyOriginal = reply == null
+                                    ? null
+                                    : thread
+                                          .where(
+                                            (ChatMessage m) =>
+                                                m.id == reply.messageId,
+                                          )
+                                          .firstOrNull;
+                                // Reactions, replies, edits and the rest are
+                                // for friends' chats.
+                                final bool extras =
+                                    friend?.status ==
+                                    FriendRelationshipStatus.accepted;
+                                final bool startsNewDay =
+                                    index == 0 ||
+                                    !_isSameDay(
+                                      thread[index - 1].sentAtMillis,
+                                      message.sentAtMillis,
+                                    );
+                                // Stagger from the newest bubble up — those are
+                                // the ones visible when the conversation opens.
+                                final int fromEnd = thread.length - 1 - index;
+                                return Column(
+                                  children: <Widget>[
+                                    if (startsNewDay)
+                                      _DaySeparator(
+                                        key: Key(
+                                          'day-separator-${message.sentAtMillis}',
+                                        ),
+                                        millis: message.sentAtMillis,
                                       ),
-                                      byMe: true,
-                                      compact: true,
-                                      onShow: () =>
-                                          showHiddenAnyway(ref, id: message.id),
-                                    )
-                                  else
-                                    KeyedSubtree(
-                                      key: _bubbleKey(message.id),
-                                      child: _MessageBubble(
-                                        message: message,
-                                        conversationKey: widget.peerAddress,
-                                        highlighted: _highlightId == message.id,
-                                        actions: extras
-                                            ? chatMessageActions(
-                                                context,
-                                                ref,
-                                                message: message,
-                                                conversationKey:
-                                                    widget.peerAddress,
-                                                onReply: () =>
-                                                    _startReply(message),
-                                              )
-                                            : const <ChatMenuItem>[],
-                                        replyOriginal: replyOriginal,
-                                        replySenderLabel: reply == null
-                                            ? ''
-                                            : _nameOf(
-                                                replyOriginal == null
-                                                    ? reply.sender
-                                                    : (replyOriginal.isOutgoing
-                                                          ? 'self'
-                                                          : replyOriginal
-                                                                .sender),
-                                              ),
-                                        onJumpToReply: reply == null
-                                            ? null
-                                            : () => unawaited(
-                                                _jumpToMessage(
-                                                  reply.messageId,
-                                                  thread,
+                                    if (hiddenByMe.hides(id: message.id))
+                                      HiddenContentPlaceholder(
+                                        key: Key(
+                                          'conversation-hidden-${message.id}',
+                                        ),
+                                        byMe: true,
+                                        compact: true,
+                                        onShow: () => showHiddenAnyway(
+                                          ref,
+                                          id: message.id,
+                                        ),
+                                      )
+                                    else
+                                      KeyedSubtree(
+                                        key: _bubbleKey(message.id),
+                                        child: _MessageBubble(
+                                          message: message,
+                                          conversationKey: widget.peerAddress,
+                                          highlighted:
+                                              _highlightId == message.id,
+                                          actions: extras
+                                              ? chatMessageActions(
+                                                  context,
+                                                  ref,
+                                                  message: message,
+                                                  conversationKey:
+                                                      widget.peerAddress,
+                                                  onReply: () =>
+                                                      _startReply(message),
+                                                )
+                                              : const <ChatMenuItem>[],
+                                          replyOriginal: replyOriginal,
+                                          replySenderLabel: reply == null
+                                              ? ''
+                                              : _nameOf(
+                                                  replyOriginal == null
+                                                      ? reply.sender
+                                                      : (replyOriginal
+                                                                .isOutgoing
+                                                            ? 'self'
+                                                            : replyOriginal
+                                                                  .sender),
                                                 ),
-                                              ),
-                                        onToggleReaction: extras
-                                            ? (String emoji) => unawaited(
-                                                _socialHubController
-                                                    .reactToMessage(
-                                                      conversationKey:
-                                                          widget.peerAddress,
+                                          onJumpToReply: reply == null
+                                              ? null
+                                              : () => unawaited(
+                                                  _jumpToMessage(
+                                                    reply.messageId,
+                                                    thread,
+                                                  ),
+                                                ),
+                                          onToggleReaction: extras
+                                              ? (String emoji) => unawaited(
+                                                  _socialHubController
+                                                      .reactToMessage(
+                                                        conversationKey:
+                                                            widget.peerAddress,
+                                                        messageId: message.id,
+                                                        emoji: emoji,
+                                                      ),
+                                                )
+                                              : null,
+                                          nameOf: _nameOf,
+                                          entranceDelay:
+                                              animateEntrance &&
+                                                  fromEnd <
+                                                      _entranceStaggerLimit
+                                              ? Duration(
+                                                  milliseconds: 30 * fromEnd,
+                                                )
+                                              : null,
+                                          onReport: () => unawaited(
+                                            reportContent(
+                                              context,
+                                              ref,
+                                              authorAddress: widget.peerAddress,
+                                              text: message.text,
+                                              header: t('Wiadomość od {name}', {
+                                                'name': conversationTitle,
+                                              }),
+                                              contentId: message.id,
+                                              deleteLocal: () async {
+                                                await ref
+                                                    .read(
+                                                      socialHubControllerProvider
+                                                          .notifier,
+                                                    )
+                                                    .deleteMessageLocally(
+                                                      key: widget.peerAddress,
                                                       messageId: message.id,
-                                                      emoji: emoji,
-                                                    ),
-                                              )
-                                            : null,
-                                        nameOf: _nameOf,
-                                        entranceDelay:
-                                            animateEntrance &&
-                                                fromEnd < _entranceStaggerLimit
-                                            ? Duration(
-                                                milliseconds: 30 * fromEnd,
-                                              )
-                                            : null,
-                                        onReport: () => unawaited(
-                                          reportContent(
-                                            context,
-                                            ref,
-                                            authorAddress: widget.peerAddress,
-                                            text: message.text,
-                                            header: t('Wiadomość od {name}', {
-                                              'name': conversationTitle,
-                                            }),
-                                            contentId: message.id,
-                                            deleteLocal: () async {
-                                              await ref
-                                                  .read(
-                                                    socialHubControllerProvider
-                                                        .notifier,
-                                                  )
-                                                  .deleteMessageLocally(
-                                                    key: widget.peerAddress,
-                                                    messageId: message.id,
-                                                  );
-                                            },
+                                                    );
+                                              },
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                ],
-                              );
-                            },
-                            separatorBuilder:
-                                (BuildContext context, int index) {
-                                  return const SizedBox(height: 6);
-                                },
-                            itemCount:
-                                thread.length +
-                                (friend?.isTyping == true ? 1 : 0),
-                          );
-                  },
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (Object error, StackTrace stackTrace) {
-                    return Center(
-                      child: Text(
-                        t('Nie udało się wczytać rozmowy.'),
-                        style: TextStyle(color: zen.warning),
-                      ),
-                    );
-                  },
+                                  ],
+                                );
+                              },
+                              separatorBuilder:
+                                  (BuildContext context, int index) {
+                                    return const SizedBox(height: 6);
+                                  },
+                              itemCount:
+                                  thread.length +
+                                  (friend?.isTyping == true ? 1 : 0),
+                            );
+                    },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (Object error, StackTrace stackTrace) {
+                      return Center(
+                        child: Text(
+                          t('Nie udało się wczytać rozmowy.'),
+                          style: TextStyle(color: zen.warning),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
               DecoratedBox(
@@ -1158,13 +1210,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
-  void _scheduleScrollToBottom(int messageCount) {
-    if (_lastRenderedMessageCount == messageCount) {
+  void _scheduleScrollToBottom(List<ChatMessage> thread) {
+    if (_lastRenderedMessageCount == thread.length) {
       return;
     }
-    _lastRenderedMessageCount = messageCount;
+    final bool first = _lastRenderedMessageCount < 0;
+    _lastRenderedMessageCount = thread.length;
+    // Someone reading further up is not pulled down by what comes in (the
+    // button below the list counts it); their own message does.
+    if (!first &&
+        thread.isNotEmpty &&
+        !thread.last.isOutgoing &&
+        !JumpToLatest.isNearLatest(_scrollController)) {
+      return;
+    }
+    final List<String>? remembered = _scrollMemory.hasAnchor
+        ? <String>[for (final ChatMessage m in thread) m.id]
+        : null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+      // The conversation was closed with the app: back where it was.
+      if (remembered != null && _scrollMemory.restore(remembered)) {
         return;
       }
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);

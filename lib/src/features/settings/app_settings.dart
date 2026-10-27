@@ -34,6 +34,79 @@ enum AppThemeMode {
   };
 }
 
+/// Whether the decorative animations (moving theme backgrounds, pulsing
+/// dots, animated avatars) play (Ustawienia → Wygląd → Animacje).
+enum AppAnimations {
+  /// Always, whatever the system's "remove animations" says. They still
+  /// rest while the app or the screen is not shown.
+  always,
+
+  /// As the system asks: still when it has "remove animations" (reduced
+  /// motion) on.
+  system,
+
+  /// Never.
+  off;
+
+  String get label => switch (this) {
+    AppAnimations.always => t('Włączone'),
+    AppAnimations.system => t('Zgodnie z systemem'),
+    AppAnimations.off => t('Wyłączone'),
+  };
+
+  /// One line under the choice: what it does.
+  String get description => switch (this) {
+    AppAnimations.always => t(
+      'Tła i efekty ruszają się zawsze, także gdy system wyłącza animacje. '
+      'Gdy aplikacja jest schowana, stoją.',
+    ),
+    AppAnimations.system => t(
+      'Tła i efekty stoją, gdy w systemie włączone jest „Usuń animacje”.',
+    ),
+    AppAnimations.off => t('Żadnych ruchomych teł ani efektów.'),
+  };
+}
+
+/// How much a notification about a conversation tells: on the lock screen,
+/// in the shade and in the system's notification history (Ustawienia →
+/// Prywatność, and per conversation). Calls and alarms always say who it
+/// is: without that they could not be answered.
+enum NotificationPrivacy {
+  /// Who wrote and a short preview of what (the default).
+  senderAndContent,
+
+  /// Who wrote, never what.
+  senderOnly,
+
+  /// Only that something came ("Nowa wiadomość").
+  generic;
+
+  String get label => switch (this) {
+    NotificationPrivacy.senderAndContent => t('Nadawca i treść'),
+    NotificationPrivacy.senderOnly => t('Tylko nadawca'),
+    NotificationPrivacy.generic => t('Tylko informacja'),
+  };
+
+  /// One line under the choice: what a notification shows.
+  String get description => switch (this) {
+    NotificationPrivacy.senderAndContent => t(
+      'Kto napisał i początek wiadomości.',
+    ),
+    NotificationPrivacy.senderOnly => t(
+      'Kto napisał, bez treści — treść nie trafia do historii powiadomień '
+      'systemu.',
+    ),
+    NotificationPrivacy.generic => t(
+      'Tylko „Nowa wiadomość”, bez nadawcy i treści. Połączenia i alarmy '
+      'nadal mówią, kto dzwoni.',
+    ),
+  };
+
+  /// The more private of this and [other].
+  NotificationPrivacy atLeast(NotificationPrivacy other) =>
+      other.index > index ? other : this;
+}
+
 /// Groups the accent themes into the sections the picker lists them under.
 enum AppThemeFamily {
   neutral,
@@ -220,7 +293,12 @@ enum AppPalette {
   comic,
   steam,
   holo,
-  volcano;
+  volcano,
+  herbarium,
+  sweets,
+  cinema,
+  blueprint,
+  leather;
 
   String get label => switch (this) {
     AppPalette.classic => t('Klasyczny'),
@@ -250,6 +328,11 @@ enum AppPalette {
     AppPalette.steam => t('Mosiądz i para'),
     AppPalette.holo => t('Hologram'),
     AppPalette.volcano => t('Wulkan'),
+    AppPalette.herbarium => t('Zielnik'),
+    AppPalette.sweets => t('Cukiernia'),
+    AppPalette.cinema => t('Kino'),
+    AppPalette.blueprint => t('Rysunek techniczny'),
+    AppPalette.leather => t('Skóra i nić'),
   };
 
   String get tagline => switch (this) {
@@ -282,6 +365,13 @@ enum AppPalette {
     AppPalette.steam => t('nity, sepia, obracające się zębatki'),
     AppPalette.holo => t('tęczowy połysk, matowe szkło'),
     AppPalette.volcano => t('żar, pęknięcia, unoszące się iskry'),
+    AppPalette.herbarium => t('szałwia i papier, listki w kształcie ramek'),
+    AppPalette.sweets => t('róż i mięta, faliste brzegi, bąbelki'),
+    AppPalette.cinema => t('czerwony aksamit, złoto, bilety z wycięciem'),
+    AppPalette.blueprint => t(
+      'błękit i biel, siatka kreślarska, znaczniki w rogach',
+    ),
+    AppPalette.leather => t('brąz i krem, szwy zamiast ramek'),
   };
 }
 
@@ -318,16 +408,18 @@ final class AppSettings {
     this.themeMode = defaultThemeMode,
     this.accentTheme = defaultAccentTheme,
     this.palette = defaultPalette,
+    this.animations = defaultAnimations,
     this.gifApiKey = '',
     this.gifSearch = true,
     this.autoDownloadMedia = true,
     this.mediaOnlyOnWifi = false,
-    this.hideNotificationContent = true,
+    this.notificationPrivacy = defaultNotificationPrivacy,
     this.inAppSounds = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
+    this.firstRunSetupDone = false,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
     this.paperBackupDone = false,
@@ -338,6 +430,7 @@ final class AppSettings {
     this.wifiDirect = false,
     this.bluetoothLinks = false,
     this.multipeerLinks = false,
+    this.keepReceivingInBackground = false,
     this.seenTips = const <String>{},
   });
 
@@ -354,6 +447,9 @@ final class AppSettings {
   static const AppThemeMode defaultThemeMode = AppThemeMode.system;
   static const AppAccentTheme defaultAccentTheme = AppAccentTheme.graphite;
   static const AppPalette defaultPalette = AppPalette.classic;
+  static const AppAnimations defaultAnimations = AppAnimations.always;
+  static const NotificationPrivacy defaultNotificationPrivacy =
+      NotificationPrivacy.senderAndContent;
 
   final int inboxLimitMb;
   final int autoCleanupDays;
@@ -364,6 +460,10 @@ final class AppSettings {
   /// The accent of the [AppPalette.classic] palette.
   final AppAccentTheme accentTheme;
   final AppPalette palette;
+
+  /// Whether the decorative animations play (on by default, whatever the
+  /// system's "remove animations" says).
+  final AppAnimations animations;
 
   /// The user's own Klipy key; empty means the app's shared key is used.
   final String gifApiKey;
@@ -388,9 +488,10 @@ final class AppSettings {
   bool allowsAutoDownload({required bool onUnmetered}) =>
       autoDownloadMedia && (!mediaOnlyOnWifi || onUnmetered);
 
-  /// Notifications say only "Nowa wiadomość", so message text never lands
-  /// in the system's notification history. On by default.
-  final bool hideNotificationContent;
+  /// How much notifications tell (who wrote and what, by default). A
+  /// conversation may have its own level
+  /// (`SocialHubState.notificationPrivacy`).
+  final NotificationPrivacy notificationPrivacy;
 
   /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
   /// connects or ends; on Windows and Linux also the notification sounds
@@ -415,6 +516,11 @@ final class AppSettings {
   /// and not advertised; it can be switched off at the bottom of the
   /// settings (Sieć i usługa).
   final bool bridgeEnabled;
+
+  /// The first-start setup (the lock, notifications, gates, animations)
+  /// was gone through or skipped: it is not shown again (Ustawienia opens
+  /// it again).
+  final bool firstRunSetupDone;
 
   /// The first-start step "Uprawnienia i Bluetooth" was gone
   /// through: it is not shown again (it stays under Ustawienia).
@@ -461,6 +567,11 @@ final class AppSettings {
   /// Connectivity between nearby Apple devices. Off by default.
   final bool multipeerLinks;
 
+  /// iPhone: "Odbieraj w tle cały czas" — a silent sound keeps Zen running
+  /// off the screen, so messages and calls come at once. Off by default: it
+  /// costs a lot of battery (docs/IOS_BACKGROUND.md).
+  final bool keepReceivingInBackground;
+
   /// One-time cards and reminders already shown or dismissed, by id (see
   /// `ZenTips`): a card shows until its id is here.
   final Set<String> seenTips;
@@ -500,16 +611,18 @@ final class AppSettings {
     AppThemeMode? themeMode,
     AppAccentTheme? accentTheme,
     AppPalette? palette,
+    AppAnimations? animations,
     String? gifApiKey,
     bool? gifSearch,
     bool? autoDownloadMedia,
     bool? mediaOnlyOnWifi,
-    bool? hideNotificationContent,
+    NotificationPrivacy? notificationPrivacy,
     bool? inAppSounds,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
     bool? bridgeEnabled,
+    bool? firstRunSetupDone,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
     bool? paperBackupDone,
@@ -520,6 +633,7 @@ final class AppSettings {
     bool? wifiDirect,
     bool? bluetoothLinks,
     bool? multipeerLinks,
+    bool? keepReceivingInBackground,
     Set<String>? seenTips,
   }) {
     return AppSettings(
@@ -534,17 +648,18 @@ final class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       accentTheme: accentTheme ?? this.accentTheme,
       palette: palette ?? this.palette,
+      animations: animations ?? this.animations,
       gifApiKey: normalizeGifApiKey(gifApiKey ?? this.gifApiKey),
       gifSearch: gifSearch ?? this.gifSearch,
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
       mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
-      hideNotificationContent:
-          hideNotificationContent ?? this.hideNotificationContent,
+      notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       inAppSounds: inAppSounds ?? this.inAppSounds,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
+      firstRunSetupDone: firstRunSetupDone ?? this.firstRunSetupDone,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
@@ -556,6 +671,8 @@ final class AppSettings {
       wifiDirect: wifiDirect ?? this.wifiDirect,
       bluetoothLinks: bluetoothLinks ?? this.bluetoothLinks,
       multipeerLinks: multipeerLinks ?? this.multipeerLinks,
+      keepReceivingInBackground:
+          keepReceivingInBackground ?? this.keepReceivingInBackground,
       seenTips: seenTips ?? this.seenTips,
     );
   }
@@ -570,16 +687,18 @@ final class AppSettings {
     'themeMode': themeMode.name,
     'accentTheme': accentTheme.name,
     'palette': palette.name,
+    'animations': animations.name,
     'gifApiKey': gifApiKey,
     'gifSearch': gifSearch,
     'autoDownloadMedia': autoDownloadMedia,
     'mediaOnlyOnWifi': mediaOnlyOnWifi,
-    'hideNotificationContent': hideNotificationContent,
+    'notificationPrivacy': notificationPrivacy.name,
     'inAppSounds': inAppSounds,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
+    'firstRunSetupDone': firstRunSetupDone,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
     'paperBackupDone': paperBackupDone,
@@ -590,6 +709,7 @@ final class AppSettings {
     'wifiDirect': wifiDirect,
     'bluetoothLinks': bluetoothLinks,
     'multipeerLinks': multipeerLinks,
+    'keepReceivingInBackground': keepReceivingInBackground,
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
   };
 
@@ -617,16 +737,21 @@ final class AppSettings {
       themeMode: byName(AppThemeMode.values, 'themeMode'),
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       palette: byName(AppPalette.values, 'palette'),
+      animations: byName(AppAnimations.values, 'animations'),
       gifApiKey: pick<String>('gifApiKey'),
       gifSearch: pick<bool>('gifSearch'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
       mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi'),
-      hideNotificationContent: pick<bool>('hideNotificationContent'),
+      notificationPrivacy: byName(
+        NotificationPrivacy.values,
+        'notificationPrivacy',
+      ),
       inAppSounds: pick<bool>('inAppSounds'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
+      firstRunSetupDone: pick<bool>('firstRunSetupDone'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
       paperBackupDone: pick<bool>('paperBackupDone'),
@@ -637,6 +762,7 @@ final class AppSettings {
       wifiDirect: pick<bool>('wifiDirect'),
       bluetoothLinks: pick<bool>('bluetoothLinks'),
       multipeerLinks: pick<bool>('multipeerLinks'),
+      keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       seenTips: switch (json['seenTips']) {
         final List<dynamic> ids => ids.whereType<String>().toSet(),
         _ => null,

@@ -39,8 +39,10 @@ func (node *bridgeNode) stopLocalLinks() {
 // it looks for them on the local networks:
 //
 //	{"Lan": true, "BeaconSeconds": 10,
-//	 "Peers": [{"Address": "200:…", "Secret": "<64 hex>", "Own": false}]}
+//	 "Peers": [{"Address": "200:…", "Secret": "<64 hex>", "Own": false}],
+//	 "Nearby": {"Start": slot, "Adverts": "<hex>", "Looking": false}}
 //
+// "Nearby" (people nearby on the LAN, lan_nearby.go) may be left out.
 // Returns the status (YggGetLocalLinksJson).
 //
 //export YggSetLocalLinksJson
@@ -58,7 +60,7 @@ func YggSetLocalLinksJson(handle C.int, payload *C.char) *C.char {
 
 // YggGetLocalLinksJson: {"lan": {"on", "running", "interfaces", "error"?},
 // "peers": n, "links": [{"id", "transport", "address", "remote", "own",
-// "since", "up"}]}.
+// "since", "up"}], "nearby": [{"advert", "at"}]}.
 //
 //export YggGetLocalLinksJson
 func YggGetLocalLinksJson(handle C.int) *C.char {

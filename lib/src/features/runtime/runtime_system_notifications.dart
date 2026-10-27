@@ -10,6 +10,7 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -31,11 +32,17 @@ List buildRuntimeSystemNotificationProviderOverrides({
             FlutterLocalRuntimeSystemNotificationService(
               soundEffects: ref.read(zenSoundEffectsProvider),
             ),
-        // Read on every post, so flipping the setting applies at once.
-        // Also while this device shares its screen in a call.
-        hideContent: () =>
-            ref.read(appSettingsControllerProvider).hideNotificationContent ||
-            screenShareHidesNotifications.value,
+        // Read on every post, so changing the setting applies at once.
+        // While this device shares its screen in a call, never more than
+        // who wrote.
+        privacy: () {
+          final NotificationPrivacy level = ref
+              .read(appSettingsControllerProvider)
+              .notificationPrivacy;
+          return screenShareHidesNotifications.value
+              ? level.atLeast(NotificationPrivacy.senderOnly)
+              : level;
+        },
       ),
     ),
   ];
@@ -52,6 +59,9 @@ enum RuntimeSystemNotificationCategory {
 
   /// A friend's alarm: loudest, full screen, cannot be missed.
   alarm,
+
+  /// A new version of Zen: quiet, once per version.
+  update,
 }
 
 /// Whether [notification] comes from the neighbours section (its posts'
@@ -70,7 +80,8 @@ ZenSound? zenSoundFor(RuntimeSystemNotification notification) {
     RuntimeSystemNotificationCategory.message => ZenSound.message,
     RuntimeSystemNotificationCategory.social =>
       isNeighboursNotification(notification) ? ZenSound.knock : ZenSound.social,
-    RuntimeSystemNotificationCategory.transfer => null,
+    RuntimeSystemNotificationCategory.transfer ||
+    RuntimeSystemNotificationCategory.update => null,
   };
 }
 
@@ -112,8 +123,9 @@ final class RuntimeSystemNotification {
   /// How many events this notification stands for.
   final int stackCount;
 
-  /// True when the poster already applied the "no content" setting itself
-  /// (and kept what it deliberately shows, such as who wrote).
+  /// True when the poster already applied the notification privacy level
+  /// itself (a chat message: the level of its own conversation), so the
+  /// central redaction leaves its text alone.
   final bool contentRedacted;
 
   /// This notification with its text replaced by [body] (and no stacked
@@ -211,29 +223,31 @@ abstract interface class RuntimeSystemNotificationService {
   Future<void> clear();
 }
 
-/// Applies the "Powiadomienia bez treści" setting to every notification the
-/// app posts, whoever posts it.
+/// Applies the notification privacy level ([NotificationPrivacy]) to every
+/// notification the app posts, whoever posts it.
 ///
 /// Features post straight to the notification service (dating, the meet
-/// services, the pyramid...), and only the chat used to honour the setting,
-/// so their text still reached the shade and the lock screen. Here, with
-/// the setting on (the default), the body of every message, social and
-/// transfer notification is replaced by a generic line; the title (who or
-/// what it is about) stays, as it always did for chat messages — except
-/// where the title itself tells too much ("X idzie na randkę", "Odpowiedź:
-/// {pytanie}", "Zaproszenie: {wydarzenie}"): dating, questions, events,
-/// introductions and the pyramid get a generic title too. Calls and
-/// alarms are left alone: the ringing UI must say who calls, and an alarm
-/// has to be readable at a glance.
+/// services, the pyramid...), so the level is applied here, not by each of
+/// them. At "Nadawca i treść" (the default) everything shows as posted. At
+/// "Tylko nadawca" the body of every message, social and transfer
+/// notification is replaced by a generic line; the title (who or what it
+/// is about) stays — except where the title itself tells too much ("X idzie
+/// na randkę", "Odpowiedź: {pytanie}", "Zaproszenie: {wydarzenie}"):
+/// dating, questions, events, introductions and the pyramid get a generic
+/// title too. At "Tylko informacja" every title goes as well. Chat messages
+/// come already in the form their conversation's level asks for
+/// ([RuntimeSystemNotification.contentRedacted]). Calls and alarms are left
+/// alone: the ringing UI must say who calls, and an alarm has to be
+/// readable at a glance.
 final class PrivacyRedactingNotificationService
     implements RuntimeSystemNotificationService {
   PrivacyRedactingNotificationService(
     this.delegate, {
-    required bool Function() hideContent,
-  }) : _hideContent = hideContent;
+    required NotificationPrivacy Function() privacy,
+  }) : _privacy = privacy;
 
   final RuntimeSystemNotificationService delegate;
-  final bool Function() _hideContent;
+  final NotificationPrivacy Function() _privacy;
 
   /// Ids (see the features' `notify` calls) of the posts whose title alone
   /// gives away what they are about: dating (`date-`), questions (`ask-`),
@@ -266,7 +280,7 @@ final class PrivacyRedactingNotificationService
   /// Title shown instead of one that tells too much (see [hidesTitle]).
   static String get genericTitle => t('Nowe powiadomienie');
 
-  /// Whether, with the setting on, [notification] loses its title too.
+  /// Whether, at "Tylko nadawca", [notification] loses its title too.
   static bool hidesTitle(RuntimeSystemNotification notification) {
     final String id = notification.id;
     return _revealingTitleIdPrefixes.any(
@@ -278,26 +292,31 @@ final class PrivacyRedactingNotificationService
   /// [notification] as the shade may show it right now.
   RuntimeSystemNotification redact(RuntimeSystemNotification notification) {
     if (notification.category == RuntimeSystemNotificationCategory.call ||
-        notification.category == RuntimeSystemNotificationCategory.alarm ||
-        !_shouldHide()) {
+        notification.category == RuntimeSystemNotificationCategory.alarm) {
       return notification;
     }
-    final bool hideTitle = hidesTitle(notification);
-    if (notification.contentRedacted && !hideTitle) {
+    final NotificationPrivacy level = _level();
+    if (level == NotificationPrivacy.senderAndContent) {
+      return notification;
+    }
+    final bool revealingTitle = hidesTitle(notification);
+    if (notification.contentRedacted && !revealingTitle) {
       return notification;
     }
     return notification.withRedactedBody(
       genericBodyFor(notification.category),
-      title: hideTitle ? genericTitle : null,
+      title: revealingTitle || level == NotificationPrivacy.generic
+          ? genericTitle
+          : null,
     );
   }
 
-  bool _shouldHide() {
+  NotificationPrivacy _level() {
     try {
-      return _hideContent();
+      return _privacy();
     } catch (_) {
       // Settings not readable (yet): err on the private side.
-      return true;
+      return NotificationPrivacy.generic;
     }
   }
 
@@ -468,6 +487,7 @@ final class FlutterLocalRuntimeSystemNotificationService
   static const String _callChannelId = 'zen_calls_v4';
   static const String _alarmChannelId = 'zen_alarm_v2';
   static const String _transferChannelId = 'zen_transfers';
+  static const String _updateChannelId = 'zen_updates';
 
   /// Android's FLAG_INSISTENT: the sound repeats until the notification is
   /// opened or cancelled (a friend's alarm).
@@ -544,6 +564,15 @@ final class FlutterLocalRuntimeSystemNotificationService
         enableVibration: false,
         showBadge: false,
       ),
+      AndroidNotificationChannel(
+        _updateChannelId,
+        t('Aktualizacje'),
+        description: t('Nowa wersja Zen, raz na wersję.'),
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ),
     ];
   }
 
@@ -553,6 +582,12 @@ final class FlutterLocalRuntimeSystemNotificationService
     RuntimeSystemNotification notification,
   ) {
     final String id = switch (zenSoundFor(notification)) {
+      // Silent like a transfer, but a channel of its own (which a person
+      // may switch off without losing anything else).
+      null
+          when notification.category ==
+              RuntimeSystemNotificationCategory.update =>
+        _updateChannelId,
       ZenSound.alarm => _alarmChannelId,
       ZenSound.ringtone => _callChannelId,
       ZenSound.knock => _neighboursChannelId,
@@ -616,8 +651,18 @@ final class FlutterLocalRuntimeSystemNotificationService
       return false;
     }
     final String slotKey = notification.slotKey ?? notification.id;
-    final RuntimeSystemNotification? previous =
-        _activeNotificationsBySlot[slotKey];
+    RuntimeSystemNotification? previous = _activeNotificationsBySlot[slotKey];
+    if (previous != null &&
+        notification.createdAtMillis - previous.createdAtMillis >=
+            _shadeCheckAfter.inMilliseconds &&
+        !await _stillInShade(slotKey)) {
+      // Swiped away or opened from the shade: what it said was seen. Stacked
+      // onto it, the next message would bring the old one back as well ("2
+      // nowe wiadomości" for one).
+      _activeNotificationsBySlot.remove(slotKey);
+      _lastAlertAtBySlot.remove(slotKey);
+      previous = null;
+    }
     if (_isRedundantRingingRepost(previous, notification)) {
       // Already on screen and unchanged: re-posting it would only re-fire the
       // ringtone and the full-screen intent.
@@ -687,6 +732,33 @@ final class FlutterLocalRuntimeSystemNotificationService
         );
         return false;
       }
+    }
+  }
+
+  /// An entry posted this recently is not looked for in the shade yet (the
+  /// system may not list it at once).
+  static const Duration _shadeCheckAfter = Duration(seconds: 3);
+
+  /// Whether the notification of [slotKey] is still in the shade. Android
+  /// tells (the person may have swiped it away or opened it); elsewhere, or
+  /// when asking fails, it counts as still there.
+  Future<bool> _stillInShade(String slotKey) async {
+    try {
+      await _ensureInitialized();
+      final AndroidFlutterLocalNotificationsPlugin? android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      if (android == null) {
+        return true;
+      }
+      final int id = slotKey.hashCode & 0x7fffffff;
+      return (await android.getActiveNotifications()).any(
+        (ActiveNotification active) => active.id == id,
+      );
+    } on Object catch (error) {
+      logZenWarning('Reading the notifications on screen failed: $error');
+      return true;
     }
   }
 
@@ -888,10 +960,12 @@ final class FlutterLocalRuntimeSystemNotificationService
         isAlarm ||
         notification.category == RuntimeSystemNotificationCategory.call;
     final bool isRinging = notification.isRingingCall;
+    final bool isUpdate =
+        notification.category == RuntimeSystemNotificationCategory.update;
     final DarwinNotificationDetails darwin = DarwinNotificationDetails(
       presentAlert: true,
       presentBanner: true,
-      presentSound: true,
+      presentSound: !isUpdate,
       presentBadge: true,
       sound: sound?.appleFileName,
       categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
@@ -908,8 +982,16 @@ final class FlutterLocalRuntimeSystemNotificationService
         largeIcon: fallback
             ? null
             : const DrawableResourceAndroidBitmap('ic_launcher'),
-        importance: isCall ? Importance.max : Importance.high,
-        priority: isCall ? Priority.max : Priority.high,
+        importance: isCall
+            ? Importance.max
+            : isUpdate
+            ? Importance.low
+            : Importance.high,
+        priority: isCall
+            ? Priority.max
+            : isUpdate
+            ? Priority.low
+            : Priority.high,
         category: isAlarm
             ? AndroidNotificationCategory.alarm
             : isCall
@@ -999,7 +1081,9 @@ final class FlutterLocalRuntimeSystemNotificationService
             : null,
         subtitle: channel.name,
         // Zen plays its own sound instead (see [_playOwnSound]).
-        audio: _playsOwnSounds ? WindowsNotificationAudio.silent() : null,
+        audio: _playsOwnSounds || isUpdate
+            ? WindowsNotificationAudio.silent()
+            : null,
       ),
       iOS: darwin,
       macOS: darwin,
@@ -1007,7 +1091,7 @@ final class FlutterLocalRuntimeSystemNotificationService
         urgency: isCall
             ? LinuxNotificationUrgency.critical
             : LinuxNotificationUrgency.normal,
-        suppressSound: _playsOwnSounds,
+        suppressSound: _playsOwnSounds || isUpdate,
       ),
     );
   }
@@ -1142,6 +1226,24 @@ final class _RuntimeSystemNotificationsBridgeState
   @override
   void initState() {
     super.initState();
+    // Followed here, not with `ref.watch` in build: this bridge lives in the
+    // app's first screen, and a watch pauses while another screen covers it
+    // (the app is often left on a chat). Coming back to Zen there must
+    // still clear what the shade shows, or the next message would be
+    // stacked onto ones already read.
+    ref.listenManual<bool>(
+      socialHubControllerProvider.select((state) => state.lifecycle.isFocused),
+      (bool? previous, bool isFocused) {
+        if (_initialized && isFocused && !_lastFocused) {
+          unawaitedLogged(
+            ref.read(runtimeSystemNotificationServiceProvider).clear(),
+            context: 'Clearing focused system notifications failed',
+          );
+        }
+        _lastFocused = isFocused;
+      },
+      fireImmediately: true,
+    );
     unawaitedLogged(
       _initialize(),
       context: 'Runtime system notifications bridge initialization failed',
@@ -1161,18 +1263,6 @@ final class _RuntimeSystemNotificationsBridgeState
       socialHubControllerProvider.select(_callSoundStateOf),
       _onCallSoundState,
     );
-    final bool isFocused = ref.watch(
-      socialHubControllerProvider.select((state) => state.lifecycle.isFocused),
-    );
-    if (_initialized && isFocused && !_lastFocused) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaitedLogged(
-          ref.read(runtimeSystemNotificationServiceProvider).clear(),
-          context: 'Clearing focused system notifications failed',
-        );
-      });
-    }
-    _lastFocused = isFocused;
     return widget.child;
   }
 

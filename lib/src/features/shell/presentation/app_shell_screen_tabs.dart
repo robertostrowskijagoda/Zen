@@ -210,11 +210,20 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
 
   static const String _railKey = 'ui/rail_hidden';
 
+  late final ShellLocationController _location = ref.read(
+    shellLocationProvider,
+  );
+
+  /// Where a tab's list is put back to (the place the app was closed at).
+  final Map<String, ScrollRestore> _scrollRestore = <String, ScrollRestore>{};
+
   @override
   void initState() {
     super.initState();
+    _location.startOn(_shellTabs[_startTab].id);
     _shellTabRequest.addListener(_onTabRequest);
     feedOpenRequest.addListener(_onFeedRequest);
+    unawaited(_restoreLocation());
     // The rail remembers whether it was hidden last time.
     unawaited(
       ref
@@ -276,10 +285,119 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     if (index == _index) {
       return;
     }
+    _location.selectTab(_shellTabs[index].id);
     setState(() {
       _index = index;
       _visited.add(index);
     });
+  }
+
+  /// Goes back to where the app was closed: its tab, the list scrolled as it
+  /// was, and the conversation or page that was open. Only the shell is built
+  /// after the app is unlocked, so nothing shows before the lock screen. A
+  /// notification or a link that opens a screen comes first, and so does
+  /// anything the user did meanwhile; a page that is gone leaves the tab.
+  Future<void> _restoreLocation() async {
+    final SocialHubController hub = ref.read(
+      socialHubControllerProvider.notifier,
+    );
+    bool launchIntent =
+        ref.read(socialHubControllerProvider).pendingLaunchIntent != null;
+    final ProviderSubscription<bool> watch = ref.listenManual<bool>(
+      socialHubControllerProvider.select(
+        (SocialHubState s) => s.pendingLaunchIntent != null,
+      ),
+      (bool? previous, bool next) => launchIntent = launchIntent || next,
+    );
+    final int mark = _location.changeCount;
+    ShellLocation? saved;
+    try {
+      // The stored launch intent is part of what hydration brings back.
+      final List<Object?> both = await Future.wait<Object?>(<Future<Object?>>[
+        hub.whenHydrated,
+        _location.restorePoint(),
+      ]);
+      saved = both[1] as ShellLocation?;
+    } on Object {
+      saved = null;
+    } finally {
+      watch.close();
+    }
+    if (!mounted ||
+        saved == null ||
+        launchIntent ||
+        _location.changeCount != mark) {
+      _location.restoreDone();
+      return;
+    }
+    final ShellLocation last = saved;
+    final int tab = _shellTabs.indexWhere((_ShellTab t) => t.id == last.tab);
+    if (tab >= 0 &&
+        _railShows(
+          ref.read(featureFlagsProvider),
+          ref.read(nearbyTabShownProvider),
+          last.tab,
+        )) {
+      setState(() {
+        _scrollRestore[last.tab] = ScrollRestore(last.tabScroll);
+      });
+      _select(tab);
+    }
+    final ShellPlace? place = last.place;
+    if (place != null) {
+      await _openRememberedPlace(place);
+    }
+    // The page asked for its own memory when it was built.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _location.restoreDone(),
+    );
+  }
+
+  /// Opens the page [place] names; nothing happens when it is gone (the
+  /// conversation was deleted, the group left or not joined yet).
+  Future<void> _openRememberedPlace(ShellPlace place) async {
+    final SocialHubState hub = ref.read(socialHubControllerProvider);
+    final NavigatorState navigator = Navigator.of(context);
+    final Widget page;
+    switch (place.kind) {
+      case ShellPlace.peerChatKind:
+        final FriendProfile? friend = hub.friendByAddress(place.id);
+        if (friend == null) {
+          // Someone who is not a friend (a message request): there while
+          // their messages are kept.
+          final List<ChatMessage> thread = await ref
+              .read(messageTimelineStoreProvider)
+              .load(place.id);
+          if (!mounted || thread.isEmpty) {
+            return;
+          }
+        }
+        page = ConversationScreen(
+          peerAddress: place.id,
+          title:
+              friend?.displayLabel ??
+              PeerShareCodec.displayNameForAddress(place.id),
+        );
+      case ShellPlace.groupChatKind:
+        final GroupProfile? group = hub.groups[place.id];
+        if (group == null || group.isInvitePending) {
+          return;
+        }
+        page = GroupConversationScreen(
+          groupId: place.id,
+          groupName: group.name.trim().isNotEmpty ? group.name : t('Grupa'),
+        );
+      case ShellPlace.settingsKind:
+        unawaited(_openSettingsScreen(context));
+        return;
+      default:
+        return;
+    }
+    unawaited(
+      navigator.push(
+        MaterialPageRoute<void>(builder: (BuildContext context) => page),
+      ),
+    );
   }
 
   Widget _page(int index) => switch (_shellTabs[index].id) {
@@ -355,7 +473,19 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
                                         key: Key(
                                           'tab-page-${_shellTabs[i].id}',
                                         ),
-                                        child: _ReadableWidth(child: _page(i)),
+                                        child: _ReadableWidth(
+                                          child: ScrollMemory(
+                                            restore:
+                                                _scrollRestore[_shellTabs[i]
+                                                    .id],
+                                            onScrolled: (double offset) =>
+                                                _location.tabScrolled(
+                                                  _shellTabs[i].id,
+                                                  offset,
+                                                ),
+                                            child: _page(i),
+                                          ),
+                                        ),
                                       )
                                     : const SizedBox.shrink(),
                             ],

@@ -6,6 +6,7 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
@@ -337,6 +338,12 @@ Future<int> relayReactions(
       final LogEntry? film = LogEntry.fromJson(e.body['film']);
       if (film != null && film.id == fid) {
         postsAuthor[fid] = film.account;
+      }
+    } else if (e.kind == kPostAnnounceKind && e.account == node.account) {
+      // Posts passed on to friends of friends: what they say goes back
+      // towards the author the same way.
+      for (final PostAnnouncement a in announcementsIn(e)) {
+        postsAuthor.putIfAbsent(a.post, () => a.author);
       }
     }
   }

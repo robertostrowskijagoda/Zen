@@ -20,9 +20,11 @@ bool showIPhoneDeliveryNotice(AppSettings settings, {bool? iPhone}) {
   return ios && !settings.seenTips.contains(kIPhoneDeliveryTip);
 }
 
-/// A one-time card on an iPhone: iOS does not let Zen receive in the
-/// background, so messages arrive while Zen is open or wait with friends'
-/// devices that stay online (a computer, Android).
+/// A one-time card on an iPhone: iOS lets Zen receive in the background only
+/// now and then, for a moment (or all the time with the battery-hungry
+/// keep-alive, ios_background.dart), so messages mostly arrive while Zen is
+/// open or wait with friends' devices that stay online (a computer,
+/// Android).
 class IPhoneDeliveryNotice extends ConsumerWidget {
   const IPhoneDeliveryNotice({
     super.key,
@@ -52,13 +54,16 @@ class IPhoneDeliveryNotice extends ConsumerWidget {
           children: <Widget>[
             ZenInfo(
               icon: Icons.phone_iphone_rounded,
-              title: t('iPhone odbiera tylko przy otwartym Zen'),
+              title: t('iPhone odbiera na bieżąco tylko przy otwartym Zen'),
               text: t(
-                'iOS nie pozwala Zen działać w tle. Wiadomości dochodzą, gdy '
-                'Zen jest otwarty, a do tego czasu czekają u nadawcy albo w '
-                'skrzynkach u Twoich znajomych. Najlepiej działa, gdy ktoś z '
-                'Twoich znajomych ma Zen na komputerze albo na Androidzie — '
-                'jego urządzenie przechowa wiadomości dla Ciebie.',
+                'iOS usypia Zen poza aplikacją. Co jakiś czas budzi go na '
+                'chwilę i Zen sprawdza wtedy skrzynki u Twoich znajomych, ale '
+                'kiedy, decyduje system. Do tego czasu wiadomości czekają u '
+                'nadawcy albo w skrzynkach u znajomych. Najlepiej działa, gdy '
+                'ktoś z Twoich znajomych ma Zen na komputerze albo na '
+                'Androidzie — jego urządzenie przechowa wiadomości dla Ciebie. '
+                'Stałe odbieranie w tle włączysz w Ustawieniach → Praca w tle '
+                '(zużywa więcej baterii).',
               ),
             ),
             Align(

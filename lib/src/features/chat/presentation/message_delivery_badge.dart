@@ -99,8 +99,9 @@ String messageDeliveryLabel(MessageDeliveryStatus status) {
   );
 }
 
-/// This device is an iPhone: it sends (and retries) only while Zen is open,
-/// never in the background, and the texts say so.
+/// This device is an iPhone: it sends (and retries) while Zen is open and
+/// only in the short moments iOS gives it in the background, and the texts
+/// say so.
 bool get messageDeliveryOnIPhone =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 

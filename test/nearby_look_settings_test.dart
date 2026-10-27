@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,6 +10,7 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 
 /// A radio that does nothing (no Bluetooth needed for reminders).
 final class _Radio implements NearbyRadio {
@@ -163,4 +165,101 @@ void main() {
     expect(await locked.remindIfDue(), 0);
     await locked.stop();
   });
+
+  test('a reminder\'s wake hands back the future of the reminder, so the '
+      'phone sleeps again once it is shown', () async {
+    final _Wake wake = _Wake();
+    ZenWake.platform = wake;
+    addTearDown(() {
+      ZenWake.platform = const TimerWakePlatform();
+      ZenWake.resetForTest();
+    });
+    int clock = DateTime(2026, 9, 30, 18).millisecondsSinceEpoch;
+    final int remindAt = DateTime(2026, 9, 30, 19).millisecondsSinceEpoch;
+    final int howAt = DateTime(2026, 10, 1, 22).millisecondsSinceEpoch;
+    final MemoryRuntimeSystemNotificationService notices =
+        MemoryRuntimeSystemNotificationService();
+    final LockedNearby locked = LockedNearby(
+      kit: NearbyKit(
+        createdAt: clock,
+        self: 'bob',
+        reminders: <LockedReminder>[
+          LockedReminder(
+            id: 'circle-remind-x-2026-10-01',
+            at: remindAt,
+            title: 'Jutro obiad: Czwartki',
+            body: 'O 19:00 gotuje a1.',
+            slot: 'circle:x',
+          ),
+          LockedReminder(
+            id: 'circle-how-x-2026-10-01',
+            at: howAt,
+            title: 'Jak było? Czwartki',
+            body: '…',
+            slot: 'circle:x',
+          ),
+        ],
+      ),
+      radio: _Radio(),
+      keep: (SignalTransportFrame _) async => true,
+      notices: notices,
+      now: () => clock,
+    );
+    await locked.start();
+    final (Duration, FutureOr<void> Function()) first = wake.reminders.single;
+    expect(first.$1, Duration(milliseconds: remindAt - clock));
+
+    clock = remindAt + 1000;
+    final FutureOr<void> work = first.$2();
+    expect(work, isA<Future<void>>(), reason: 'the wake waits for it');
+    await work;
+    expect(notices.activeNotifications.single.title, contains('Jutro obiad'));
+    // Then the next one's alarm.
+    expect(wake.reminders, hasLength(2));
+    expect(wake.reminders.last.$1, Duration(milliseconds: howAt - clock));
+    await locked.stop();
+  });
+}
+
+/// Records the reminders' alarms instead of setting them.
+final class _Wake implements ZenWakePlatform {
+  final List<(Duration, FutureOr<void> Function())> reminders =
+      <(Duration, FutureOr<void> Function())>[];
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) {
+    if (name == 'reminder') {
+      reminders.add((delay, fire));
+    }
+    return _Alarm();
+  }
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {}
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {}
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+}
+
+final class _Alarm implements WakeTimer {
+  bool _cancelled = false;
+
+  @override
+  bool get isActive => !_cancelled;
+
+  @override
+  void cancel() => _cancelled = true;
 }

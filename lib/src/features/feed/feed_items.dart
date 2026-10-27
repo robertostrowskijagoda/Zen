@@ -55,12 +55,14 @@ final class FeedAlarmItem extends FeedItem {
 }
 
 /// The chips the Tablica shows for [pyramid]: „Wszystko”, „Znajomi”,
-/// „Przyjaciele” and „Kraj” always (the countries followed there are
-/// picked in it); „Piramida” only when there is something of it (always
-/// for a member).
+/// „2. stopień”, „3. stopień”, „Przyjaciele” and „Kraj” always (the
+/// countries followed there are picked in it); „Piramida” only when there
+/// is something of it (always for a member).
 List<FeedFilter> feedFiltersFor(PyramidFeed pyramid) => <FeedFilter>[
   FeedFilter.all,
   FeedFilter.friends,
+  FeedFilter.second,
+  FeedFilter.third,
   FeedFilter.close,
   if (pyramid.showsPyramid) FeedFilter.pyramid,
   FeedFilter.national,
@@ -73,7 +75,10 @@ typedef _Timed = ({int at, FeedItem item});
 /// - „Wszystko”: the open referenda, then one timeline, newest first, of
 ///   [wall] and the pyramid's important posts (the top, the line up) —
 ///   never the national section nor one's own pyramid posts;
-/// - „Znajomi”: [wall] only;
+/// - „Znajomi”: the posts of [wall] of friends and followed people (and
+///   friends' reshares);
+/// - „2. stopień” / „3. stopień”: the posts of [wall] friends' notices
+///   brought from two or three steps away ([FeedPost.degree]);
 /// - „Przyjaciele”: the posts of [wall] whose author [isClose] says is a
 ///   close friend ("Przyjaciel"; none without [isClose]);
 /// - „Piramida”: the referenda, then the pyramid's posts as §22.1 orders
@@ -115,7 +120,16 @@ List<FeedItem> composeFeed(
       }
     case FeedFilter.friends:
       for (final FeedPost p in wall) {
-        add(FeedFriendItem(p));
+        if (p.degree <= 1) {
+          add(FeedFriendItem(p));
+        }
+      }
+    case FeedFilter.second || FeedFilter.third:
+      final int degree = filter == FeedFilter.second ? 2 : 3;
+      for (final FeedPost p in wall) {
+        if (p.degree == degree) {
+          add(FeedFriendItem(p));
+        }
       }
     case FeedFilter.close:
       for (final FeedPost p in wall) {

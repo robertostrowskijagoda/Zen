@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -23,6 +25,8 @@ import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.spec.MGF1ParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import javax.crypto.Cipher
 import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
@@ -48,6 +52,17 @@ object ZenSecurityBridge {
     private const val TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     private const val PREFS = "zen_secure_window"
     private const val PREF_SECURE = "secure"
+    private const val SECURE_WINDOW_CHANNEL = "zen/secure_window"
+    private const val KEYVAULT_CHANNEL = "zen/keyvault"
+    private const val INTEGRITY_CHANNEL = "zen/integrity"
+
+    private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * The integrity check reads files under /proc and asks the package
+     * manager about a dozen apps: never on the main thread.
+     */
+    private val checks = Executors.newSingleThreadExecutor { Thread(it, "zen-integrity") }
 
     private val oaep = OAEPParameterSpec(
         "SHA-256",
@@ -62,7 +77,7 @@ object ZenSecurityBridge {
         // its settings are loaded, but a recent-apps preview or a screenshot
         // could be taken before that.
         applySecure(activity, wasSecure(activity))
-        MethodChannel(messenger, "zen/secure_window").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, SECURE_WINDOW_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setSecure" -> {
                     // While "Blokuj zrzuty i nagrywanie ekranu" is on, Dart keeps the
@@ -77,7 +92,7 @@ object ZenSecurityBridge {
                 else -> result.notImplemented()
             }
         }
-        MethodChannel(messenger, "zen/keyvault").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, KEYVAULT_CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
                     "available" -> result.success(available(activity))
@@ -110,11 +125,43 @@ object ZenSecurityBridge {
                 result.error("vault", error.message, null)
             }
         }
-        MethodChannel(messenger, "zen/integrity").setMethodCallHandler { call, result ->
+        val app = activity.applicationContext
+        MethodChannel(messenger, INTEGRITY_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
-                "check" -> result.success(integrity(activity))
+                "check" -> {
+                    // The main thread's own stack (hooks show in it, not in
+                    // the worker's), taken here; the rest on the worker.
+                    val mainStack = Throwable().stackTrace
+                    try {
+                        checks.execute {
+                            val found = try {
+                                integrity(app, mainStack)
+                            } catch (error: Exception) {
+                                Log.w(TAG, "The integrity check failed", error)
+                                null
+                            }
+                            main.post {
+                                if (found != null) {
+                                    result.success(found)
+                                } else {
+                                    result.error("integrity", "check failed", null)
+                                }
+                            }
+                        }
+                    } catch (error: RejectedExecutionException) {
+                        result.error("integrity", error.message, null)
+                    }
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /** [engine] is going away: its handlers (they hold the Activity) go with it. */
+    fun unregister(engine: FlutterEngine) {
+        val messenger = engine.dartExecutor.binaryMessenger
+        for (name in listOf(SECURE_WINDOW_CHANNEL, KEYVAULT_CHANNEL, INTEGRITY_CHANNEL)) {
+            messenger.setMessageHandler(name, null)
         }
     }
 
@@ -289,7 +336,8 @@ object ZenSecurityBridge {
         }
     }
 
-    private fun integrity(activity: FragmentActivity): Map<String, Any> {
+    /** Worker thread ([checks]): file reads and package manager calls. */
+    private fun integrity(context: Context, mainStack: Array<StackTraceElement>): Map<String, Any> {
         val reasons = mutableListOf<String>()
         val suPaths = listOf(
             "/system/bin/su", "/system/xbin/su", "/sbin/su", "/system/su",
@@ -313,10 +361,10 @@ object ZenSecurityBridge {
         for (pkg in rootApps) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    activity.packageManager.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+                    context.packageManager.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
                 } else {
                     @Suppress("DEPRECATION")
-                    activity.packageManager.getPackageInfo(pkg, 0)
+                    context.packageManager.getPackageInfo(pkg, 0)
                 }
                 reasons.add("app:$pkg")
             } catch (_: PackageManager.NameNotFoundException) {
@@ -333,7 +381,7 @@ object ZenSecurityBridge {
             reasons.add("frida")
         }
         val debuggable =
-            (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val rooted = reasons.isNotEmpty()
         // Inside this process right now (each check on its own: one failing
         // read says nothing about the others).
@@ -345,7 +393,7 @@ object ZenSecurityBridge {
             if (FRIDA_MARKS.any { lower.contains(it) }) tamper.add("frida-loaded")
             if (HOOK_MARKS.any { lower.contains(it) }) tamper.add("hooks")
         }
-        if (!tamper.contains("hooks") && xposedLoaded()) tamper.add("hooks")
+        if (!tamper.contains("hooks") && xposedLoaded(mainStack)) tamper.add("hooks")
         if (fridaPortOpen()) tamper.add("frida-port")
         val emulator = looksLikeEmulator()
         if (emulator) reasons.add("emulator")
@@ -385,8 +433,11 @@ object ZenSecurityBridge {
         return line.substringAfter(':').trim().toIntOrNull()?.let { it != 0 } ?: false
     }
 
-    /** Xposed's bridge class reachable from the app's class loader. */
-    private fun xposedLoaded(): Boolean {
+    /**
+     * Xposed's bridge class reachable from the app's class loader, or its
+     * frames in the main thread's stack ([mainStack]).
+     */
+    private fun xposedLoaded(mainStack: Array<StackTraceElement>): Boolean {
         val bridge = try {
             Class.forName("de.robv.android.xposed.XposedBridge", false, ClassLoader.getSystemClassLoader())
             true
@@ -394,7 +445,7 @@ object ZenSecurityBridge {
             false
         }
         return bridge ||
-            Throwable().stackTrace.any { it.className.contains("xposed", ignoreCase = true) }
+            mainStack.any { it.className.contains("xposed", ignoreCase = true) }
     }
 
     /** Frida's server listening on its default port (27042) on this device. */

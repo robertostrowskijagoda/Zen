@@ -9,6 +9,9 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -16,6 +19,9 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Zen and the phone's sleep, on `zen/power` and `zen/power/events`.
@@ -36,6 +42,12 @@ import io.flutter.plugin.common.MethodChannel
  *  - only a call holds the phone (and Wi-Fi) awake for as long as it runs
  *    ([holdForCall]).
  * Every hold has a time limit, so a mistake never keeps the phone awake.
+ *
+ * The alarms arrive on a thread of their own ([wakeHandler]), never on the
+ * main thread: a busy main thread must not hold the broadcast up (Android
+ * ends a process whose broadcast waits too long). There only the hold is
+ * taken; Dart hears the wake on the main thread, and a Kotlin task runs on
+ * [taskExecutor].
  */
 object ZenPower {
     private const val TAG = "ZenPower"
@@ -53,6 +65,12 @@ object ZenPower {
     /** How long the service may take to start a node once the app is gone. */
     private const val APP_GONE_HOLD_MS = 30_000L
 
+    /**
+     * The longest a Kotlin task keeps its broadcast open; past it the
+     * broadcast ends anyway (the task still finishes under its hold).
+     */
+    private const val TASK_BROADCAST_LIMIT_MS = 10_000L
+
     /** One engine listening. Touched on the main thread only. */
     private class Client(val engine: FlutterEngine, val background: Boolean) {
         var sink: EventChannel.EventSink? = null
@@ -60,14 +78,27 @@ object ZenPower {
 
     private val clients = ArrayList<Client>()
 
-    /** Timed holds by tag, and when each ends (elapsed realtime). */
+    /**
+     * Timed holds by tag, and when each ends (elapsed realtime). Touched
+     * from the main, wake and task threads: only under this object's lock.
+     */
     private val locks = HashMap<String, PowerManager.WakeLock>()
     private val holdUntil = HashMap<String, Long>()
     private var callWifiLock: WifiManager.WifiLock? = null
     private var receiver: BroadcastReceiver? = null
 
-    /** Alarms handled here in Kotlin (the nearby token's change). */
+    /** Alarms handled here in Kotlin (the nearby token's change); under its own lock. */
     private val nativeAlarms = HashMap<String, () -> Unit>()
+
+    private val main = Handler(Looper.getMainLooper())
+
+    /** Where the alarms arrive: it only takes holds and hands work on. */
+    private val wakeHandler: Handler by lazy {
+        Handler(HandlerThread("zen-wake").apply { start() }.looper)
+    }
+
+    /** Kotlin wake tasks (Bluetooth calls that can block), one at a time. */
+    private val taskExecutor = Executors.newSingleThreadExecutor { Thread(it, "zen-wake-task") }
 
     fun register(engine: FlutterEngine, context: Context, background: Boolean) {
         val app = context.applicationContext
@@ -168,7 +199,8 @@ object ZenPower {
         }
     }
 
-    /** Holds the phone awake for [ms] under [tag] (the longest hold wins). */
+    /** Holds the phone awake for [ms] under [tag] (the longest hold wins). Any thread. */
+    @Synchronized
     fun hold(context: Context, tag: String, ms: Long) {
         if (ms <= 0) {
             return
@@ -189,6 +221,7 @@ object ZenPower {
         }
     }
 
+    @Synchronized
     fun release(tag: String) {
         holdUntil.remove(tag)
         val lock = locks[tag] ?: return
@@ -205,6 +238,7 @@ object ZenPower {
      * Ends [tag]'s hold in [ms] instead of at its old limit (the work is
      * done; what it set off gets a moment). Nothing when it is not held.
      */
+    @Synchronized
     fun releaseAfter(tag: String, ms: Long) {
         val lock = locks[tag] ?: return
         try {
@@ -239,6 +273,7 @@ object ZenPower {
      * then also has the microphone/camera type).
      */
     @Suppress("DEPRECATION")
+    @Synchronized
     fun holdForCall(context: Context, on: Boolean) {
         if (!on) {
             release("call")
@@ -313,14 +348,20 @@ object ZenPower {
     }
 
     fun cancel(context: Context, id: String) {
-        nativeAlarms.remove(id)
+        synchronized(nativeAlarms) {
+            nativeAlarms.remove(id)
+        }
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val pending = pendingIntent(context, id, 0, create = false) ?: return
         alarms.cancel(pending)
         pending.cancel()
     }
 
-    /** Like [schedule], but [task] runs here (main thread) instead of in Dart. */
+    /**
+     * Like [schedule], but [task] runs here instead of in Dart, on the wake
+     * task thread (not the main thread), under a hold tagged with [id] that
+     * ends as soon as the task does.
+     */
     fun scheduleNative(
         context: Context,
         id: String,
@@ -329,8 +370,10 @@ object ZenPower {
         holdMs: Long,
         task: () -> Unit,
     ) {
-        nativeAlarms[id] = task
-        schedule(context, id, delayMs, exact, holdMs)
+        synchronized(nativeAlarms) {
+            nativeAlarms[id] = task
+        }
+        schedule(context, id, delayMs, exact, holdMs, tag = id)
     }
 
     private fun pendingIntent(
@@ -353,10 +396,13 @@ object ZenPower {
         return PendingIntent.getBroadcast(context, 0, intent, flags)
     }
 
+    /** Registered once per process, from whichever thread schedules first. */
+    @Synchronized
     private fun ensureReceiver(context: Context) {
         if (receiver != null) {
             return
         }
+        val app = context.applicationContext
         val wake = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 if (intent?.action != ACTION_WAKE) {
@@ -364,19 +410,23 @@ object ZenPower {
                 }
                 val id = intent.data?.schemeSpecificPart ?: return
                 onWake(
-                    context.applicationContext,
+                    app,
                     id,
                     intent.getLongExtra(EXTRA_HOLD_MS, 0),
                     intent.getStringExtra(EXTRA_TAG),
+                    goAsync(),
                 )
             }
         }
         val filter = IntentFilter(ACTION_WAKE).apply { addDataScheme(WAKE_SCHEME) }
         try {
+            // Delivered on the wake thread, not the main thread.
             ContextCompat.registerReceiver(
-                context.applicationContext,
+                app,
                 wake,
                 filter,
+                null,
+                wakeHandler,
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
             receiver = wake
@@ -385,20 +435,66 @@ object ZenPower {
         }
     }
 
-    private fun onWake(context: Context, id: String, holdMs: Long, tag: String?) {
-        // First the hold: the phone may fall asleep again right after this.
-        // Under the alarm's own tag, which Dart releases once its work is
-        // done (one alarm's end never cuts another's work short).
-        hold(context, tag ?: "wake", holdMs.coerceAtLeast(3_000))
-        val native = nativeAlarms.remove(id)
-        if (native != null) {
-            try {
-                native()
-            } catch (error: Exception) {
-                Log.w(TAG, "A wake task failed", error)
+    /** On the wake thread: the hold, then the work handed on. Never blocks. */
+    private fun onWake(
+        context: Context,
+        id: String,
+        holdMs: Long,
+        tag: String?,
+        broadcast: BroadcastReceiver.PendingResult?,
+    ) {
+        val finished = AtomicBoolean(false)
+        val finish = Runnable {
+            if (finished.compareAndSet(false, true)) {
+                try {
+                    broadcast?.finish()
+                } catch (error: Exception) {
+                    Log.w(TAG, "Ending a wake broadcast failed", error)
+                }
             }
-            return
         }
+        try {
+            // First the hold: the phone may fall asleep again right after
+            // this. Under the alarm's own tag, which Dart releases once its
+            // work is done (one alarm's end never cuts another's work short).
+            val holdTag = tag ?: "wake"
+            hold(context, holdTag, holdMs.coerceAtLeast(3_000))
+            val native = synchronized(nativeAlarms) { nativeAlarms.remove(id) }
+            if (native == null) {
+                // Event sinks belong to the main thread.
+                main.post { deliverWake(id) }
+                finish.run()
+                return
+            }
+            // The broadcast stays open while the task runs (the process
+            // keeps a receiver's priority), but never past the limit.
+            wakeHandler.postDelayed(finish, TASK_BROADCAST_LIMIT_MS)
+            taskExecutor.execute {
+                try {
+                    native()
+                } catch (error: Exception) {
+                    Log.w(TAG, "A wake task failed", error)
+                } finally {
+                    // The task's own tag (see [scheduleNative]): nothing
+                    // else waits under it.
+                    if (tag != null) {
+                        release(tag)
+                    }
+                    wakeHandler.removeCallbacks(finish)
+                    finish.run()
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            Log.w(TAG, "A wake task could not start", error)
+            finish.run()
+        } catch (error: Exception) {
+            Log.w(TAG, "A wake failed", error)
+            finish.run()
+        }
+    }
+
+    /** Main thread: every engine hears the wake with [id]. */
+    private fun deliverWake(id: String) {
         for (client in clients.toList()) {
             try {
                 client.sink?.success(mapOf("type" to "wake", "id" to id))

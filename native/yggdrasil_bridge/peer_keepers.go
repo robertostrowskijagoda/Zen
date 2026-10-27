@@ -56,6 +56,7 @@ func (node *bridgeNode) watchPhonePeers() {
 			return
 		case <-ticker.C:
 		}
+		node.sampleTraffic()
 		up := node.upPeers()
 		keeper.mu.Lock()
 		before := keeper.dialled

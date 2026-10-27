@@ -134,6 +134,30 @@ final class LocalLinkInfo {
   }
 }
 
+/// A "people nearby" advert heard on a local network while looking around
+/// (native/yggdrasil_bridge/lan_nearby.go): a token and its hint, as over
+/// Bluetooth, and when it was heard (milliseconds since the epoch).
+@immutable
+final class LocalNearbyHeard {
+  const LocalNearbyHeard({required this.advert, required this.at});
+
+  final Uint8List advert;
+  final int at;
+
+  static LocalNearbyHeard? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? advert = json['advert'];
+    final Object? at = json['at'];
+    final Uint8List? bytes = advert is String ? _unhex(advert) : null;
+    if (bytes == null || bytes.isEmpty || at is! int) {
+      return null;
+    }
+    return LocalNearbyHeard(advert: bytes, at: at);
+  }
+}
+
 /// The bridge's local links (YggGetLocalLinksJson).
 @immutable
 final class LocalLinksStatus {
@@ -144,6 +168,7 @@ final class LocalLinksStatus {
     this.lanError,
     this.peerCount = 0,
     this.links = const <LocalLinkInfo>[],
+    this.nearby = const <LocalNearbyHeard>[],
   });
 
   /// Nothing known (no node, or before the first answer).
@@ -163,6 +188,10 @@ final class LocalLinksStatus {
   final int peerCount;
   final List<LocalLinkInfo> links;
 
+  /// People nearby heard on the local networks lately, while looking
+  /// around.
+  final List<LocalNearbyHeard> nearby;
+
   /// Links whose peering is up.
   List<LocalLinkInfo> get upLinks =>
       links.where((LocalLinkInfo l) => l.up).toList(growable: false);
@@ -172,6 +201,7 @@ final class LocalLinksStatus {
     final Map<dynamic, dynamic> lanMap = lan is Map ? lan : const {};
     final Object? interfaces = lanMap['interfaces'];
     final Object? links = json['links'];
+    final Object? nearby = json['nearby'];
     final Object? peers = json['peers'];
     final Object? error = lanMap['error'];
     return LocalLinksStatus(
@@ -187,6 +217,13 @@ final class LocalLinksStatus {
               links.map(LocalLinkInfo.fromJson).whereType<LocalLinkInfo>(),
             )
           : const <LocalLinkInfo>[],
+      nearby: nearby is List
+          ? List<LocalNearbyHeard>.unmodifiable(
+              nearby
+                  .map(LocalNearbyHeard.fromJson)
+                  .whereType<LocalNearbyHeard>(),
+            )
+          : const <LocalNearbyHeard>[],
     );
   }
 }

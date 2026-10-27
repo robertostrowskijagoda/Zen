@@ -109,17 +109,60 @@ final class LocalLinkPeer {
   };
 }
 
+/// "People nearby" on the local networks (native/yggdrasil_bridge/
+/// lan_nearby.go): the same adverts as over Bluetooth (token and hint, 20
+/// bytes per slot from [firstSlot] on; the bridge shows the one of the slot
+/// it is in and nothing once they are over), and whether this device looks
+/// around now (then it hears the adverts of others and asks them to
+/// answer).
+@immutable
+final class LocalNearbyAdverts {
+  const LocalNearbyAdverts({
+    required this.firstSlot,
+    this.adverts,
+    this.looking = false,
+  });
+
+  final int firstSlot;
+
+  /// `null`: not shown.
+  final Uint8List? adverts;
+  final bool looking;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'Start': firstSlot,
+    'Adverts': _hex(adverts ?? const <int>[]),
+    'Looking': looking,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is LocalNearbyAdverts &&
+      other.firstSlot == firstSlot &&
+      other.looking == looking &&
+      listEquals(other.adverts, adverts);
+
+  @override
+  int get hashCode => Object.hash(
+    firstSlot,
+    looking,
+    adverts == null ? null : Object.hashAll(adverts!),
+  );
+}
+
 /// The settings the bridge reads (YggSetLocalLinksJson).
 String localLinksSettingsJson({
   required bool lan,
   required int beaconSeconds,
   required List<LocalLinkPeer> peers,
+  LocalNearbyAdverts? nearby,
 }) => jsonEncode(<String, Object>{
   'Lan': lan,
   'BeaconSeconds': beaconSeconds,
   'Peers': <Map<String, Object>>[
     for (final LocalLinkPeer peer in peers) peer.toJson(),
   ],
+  if (nearby != null) 'Nearby': nearby.toJson(),
 });
 
 String _hex(List<int> bytes) =>

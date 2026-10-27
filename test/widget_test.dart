@@ -555,8 +555,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
-      // Locking tears down the whole navigator, so the shell comes back on
-      // the chats page regardless of where the lock happened.
+      // Locking tears down the whole navigator; the shell is built again and
+      // goes back to the place it was left at (here the chats).
       expect(find.byKey(const Key('chats-tab-body')), findsOneWidget);
     },
   );
@@ -3038,7 +3038,7 @@ void main() {
       tester.element(find.byType(AppShellScreen)),
     );
 
-    await tester.tap(find.text('Mój kod'));
+    await tester.tap(find.byKey(const Key('status-my-code')));
     await tester.pumpAndSettle();
     expect(find.text('OTRZYMANO ZAPROSZENIE'), findsNothing);
 

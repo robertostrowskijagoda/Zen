@@ -35,7 +35,7 @@ install page) and tap **Install**. With a free Apple ID the signature
 **expires after 7 days**: once a week turn on LocalDevVPN, open SideStore
 and tap **Refresh** (your data stays). Zen reminds you in Chats 2 days
 before. A free Apple ID allows 3 such apps at a time (SideStore counts).
-On iPhone Zen receives and sends only while it is open (see
+On iPhone Zen receives and sends at once only while it is open (see
 [Chats](chats-and-delivery.md#iphone)).
 AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
 Zen yet.
@@ -56,7 +56,12 @@ to the install page and the same steps for every system.
 2. **The app password.** It encrypts everything Zen keeps on this device and
    unlocks Zen here. You can also unlock with biometrics. *No password* is
    possible for the default account, but not recommended.
-3. **Permissions.** On top: notifications, Bluetooth (on, and visible
+3. **Setup.** A few questions, each with a sensible default, that you can
+   skip: when Zen locks itself (with what *Never* really means), what
+   notifications say (*Sender and content*, *Sender only* or *Notice
+   only*), whether your gates are open for free or need your consent, and
+   the animations. *Settings → Run the setup again* asks them all again.
+   **Permissions** come last. On top: notifications, Bluetooth (on, and visible
    nearby), full-screen alerts and not being put to sleep. Microphone,
    camera, location and exact alarms sit folded under *More permissions
    (optional)*: Zen asks for them the first time a feature needs them.

@@ -15,6 +15,8 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/meet/locked_nearby.dart';
+import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
@@ -100,6 +102,11 @@ void main() {
         ]),
       );
       expect(runtime.snapshot.serviceRunning, isTrue);
+      // The heartbeats say where the app is: the parked service's watchdog
+      // wakes the phone only while it is off screen.
+      expect(service.onScreenBeats.first, isTrue);
+      await tester.pump(kAndroidBackgroundHeartbeatInterval);
+      expect(service.onScreenBeats.last, isFalse);
 
       security.lock();
       await tester.pump();
@@ -137,6 +144,25 @@ void main() {
       expect(vault.drainCount, 0);
     },
   );
+
+  test('the parked service wakes the phone for its watchdog only while the '
+      'app is off screen, and rarely otherwise', () {
+    expect(
+      standbyWatchdogEvery(appOnScreen: false),
+      kAndroidStandbyWatchdogEvery,
+    );
+    expect(
+      standbyWatchdogEvery(appOnScreen: true),
+      greaterThanOrEqualTo(const Duration(minutes: 15)),
+    );
+    // Off screen it is short-lived: the app hands the node over after
+    // kAndroidReceiveOnlyAfter, and the watchdog ends with that.
+    expect(
+      kAndroidReceiveOnlyAfter.inMinutes ~/
+          kAndroidStandbyWatchdogEvery.inMinutes,
+      lessThanOrEqualTo(5),
+    );
+  });
 
   test('long in the background the app drops to receive-only', () {
     final DateTime left = DateTime(2026, 10, 22, 12);
@@ -513,9 +539,53 @@ void main() {
       final AndroidBackgroundBootstrapPayload? back =
           AndroidBackgroundBootstrapPayload.fromData(payload.toData());
       expect(back?.settings.inboxLimitMb, 91);
+      expect(back?.settings.lanDiscoveryOn, isTrue);
       expect(payload.toData().containsKey('encryptionKey'), isFalse);
+      final AndroidBackgroundBootstrapPayload? noLan =
+          AndroidBackgroundBootstrapPayload.fromData(
+            const AndroidBackgroundBootstrapPayload(
+              settings: AppSettings(lanDiscovery: false),
+            ).toData(),
+          );
+      expect(noLan?.settings.lanDiscoveryOn, isFalse);
     },
   );
+
+  test('the locked service shows the nearby kit\'s tokens on the shared '
+      'Wi-Fi, with no devices to link with, only when shown and allowed', () {
+    final Uint8List adverts = Uint8List.fromList(
+      List<int>.generate(2 * kNearbyAdvertBytes, (int i) => i),
+    );
+    final NearbyKit kit = NearbyKit(
+      createdAt: 1,
+      self: 'bob',
+      visible: true,
+      firstSlot: 2950000,
+      adverts: adverts,
+    );
+    final Map<String, dynamic> json =
+        jsonDecode(lockedLocalLinksJson(kit, lan: true)!)
+            as Map<String, dynamic>;
+    expect(json['Lan'], isTrue);
+    expect(json['Peers'], isEmpty);
+    final Map<String, dynamic> nearby = json['Nearby'] as Map<String, dynamic>;
+    expect(nearby['Start'], 2950000);
+    expect(nearby['Looking'], isFalse);
+    expect(
+      nearby['Adverts'],
+      adverts.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(),
+    );
+    expect(lockedLocalLinksJson(kit, lan: false), isNull, reason: 'LAN off');
+    expect(lockedLocalLinksJson(null, lan: true), isNull, reason: 'no kit');
+    expect(
+      lockedLocalLinksJson(
+        const NearbyKit(createdAt: 1, self: 'bob'),
+        lan: true,
+      ),
+      isNull,
+      reason: 'not shown nearby',
+    );
+  });
 
   test(
     'the locked background runtime notice is throttled by its suppression key',
@@ -793,12 +863,16 @@ final class _FakeAndroidBackgroundServiceController
 
   int heartbeatCount = 0;
 
+  /// Whether the app said it is on screen, heartbeat by heartbeat.
+  final List<bool> onScreenBeats = <bool>[];
+
   @override
   Future<void> initialize() async {}
 
   @override
-  void sendHeartbeat() {
+  void sendHeartbeat({required bool onScreen}) {
     heartbeatCount += 1;
+    onScreenBeats.add(onScreen);
   }
 
   @override

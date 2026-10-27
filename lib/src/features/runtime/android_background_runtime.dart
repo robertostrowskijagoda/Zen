@@ -37,11 +37,14 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
+import 'package:zen/src/features/relay/locked_mailbox_writer.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
@@ -58,6 +61,7 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/update/background_update_check.dart';
 
 /// The quiet channel of the background service (minimum importance).
 const String kAndroidBackgroundChannelId = 'zen_background_quiet';
@@ -191,8 +195,32 @@ const Duration kAndroidBackgroundHeartbeatInterval = Duration(seconds: 5);
 /// "appGone", when the app's engine goes).
 const Duration kAndroidBackgroundHeartbeatTimeout = Duration(seconds: 20);
 
-/// How often the parked service wakes the phone to look at the heartbeats.
+/// How often the parked service wakes the phone to look at the heartbeats
+/// while the app is off screen.
+///
+/// The watchdog is what notices, with the screen off, that the app went
+/// silent (a handoff that failed, an engine gone without "appGone"), and
+/// its wake lets the app's own timers run too. That stretch is short: after
+/// [kAndroidReceiveOnlyAfter] in the background the app hands the node over
+/// and the watchdog ends.
 const Duration kAndroidStandbyWatchdogEvery = Duration(minutes: 1);
+
+/// How often the parked service looks while the app says it is on screen.
+///
+/// The screen is on then and the phone awake, so the service's repeat event
+/// (every [kAndroidBackgroundHeartbeatInterval], no alarm) looks at the
+/// heartbeats; this wake only backs up a lost "off screen" heartbeat, and
+/// it never wakes the phone in Doze.
+const Duration kAndroidStandbyWatchdogOnScreenEvery = Duration(minutes: 15);
+
+/// How often the parked service wakes the phone for its watchdog, given
+/// whether the app last said it is on screen.
+Duration standbyWatchdogEvery({required bool appOnScreen}) => appOnScreen
+    ? kAndroidStandbyWatchdogOnScreenEvery
+    : kAndroidStandbyWatchdogEvery;
+
+/// Key of the heartbeat's "the app is on screen" flag.
+const String _kHeartbeatOnScreenKey = 'onScreen';
 
 /// After this long in the background, unlocked or not, the app hands the
 /// node to the service's receive-only mode, whatever the lock setting: no
@@ -427,6 +455,8 @@ final class AndroidBackgroundBootstrapPayload {
       'autoCleanupDays': settings.autoCleanupDays,
       'lockMode': settings.lockMode.index,
       'backgroundLockDelaySeconds': settings.backgroundLockDelaySeconds,
+      // Whether the locked phone may show itself on the shared Wi-Fi.
+      'lanDiscovery': settings.lanDiscoveryOn,
       'mode': mode.name,
     };
   }
@@ -452,6 +482,7 @@ final class AndroidBackgroundBootstrapPayload {
         backgroundLockDelaySeconds:
             (data['backgroundLockDelaySeconds'] as num?)?.toInt() ??
             AppSettings.defaultBackgroundLockDelaySeconds,
+        lanDiscovery: data['lanDiscovery'] as bool?,
       ),
       // A payload without a mode (the on-disk fallback used when the
       // service restarts itself with no app around) means "own the node".
@@ -468,8 +499,10 @@ abstract interface class AndroidBackgroundServiceController {
 
   Future<bool> isRunning();
 
-  /// Signals the parked task isolate that the app is still running.
-  void sendHeartbeat();
+  /// Signals the parked task isolate that the app is still running, and
+  /// whether it is [onScreen] (the service's watchdog then wakes the phone
+  /// far less often).
+  void sendHeartbeat({required bool onScreen});
 
   /// Makes sure the foreground service exists and drives it to
   /// [AndroidBackgroundBootstrapPayload.mode].
@@ -496,7 +529,7 @@ final class NoopAndroidBackgroundServiceController
   Future<bool> isRunning() async => false;
 
   @override
-  void sendHeartbeat() {}
+  void sendHeartbeat({required bool onScreen}) {}
 
   @override
   Future<bool> start(
@@ -526,13 +559,14 @@ final class FlutterForegroundAndroidBackgroundServiceController
   /// Tells the parked service the app is still here. Silence is the signal
   /// that the UI isolate is gone and the service has to own the node again.
   @override
-  void sendHeartbeat() {
+  void sendHeartbeat({required bool onScreen}) {
     if (!Platform.isAndroid || !_initialized) {
       return;
     }
     try {
       FlutterForegroundTask.sendDataToTask(<String, Object?>{
         'type': _kRuntimeHeartbeatType,
+        _kHeartbeatOnScreenKey: onScreen,
       });
     } catch (error, stackTrace) {
       logZenError(
@@ -838,6 +872,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   bool _isObserving = false;
   Timer? _heartbeatTimer;
 
+  /// Wakes the phone for the drop to receive-only (see
+  /// [_planReceiveOnlyWake]).
+  WakeTimer? _receiveOnlyWake;
+
   /// Since when the app is in the background (wall clock: the time that
   /// counts here passes while the phone sleeps too); `null` on screen.
   DateTime? _backgroundSince;
@@ -889,6 +927,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// Keeps the outbox kit (this device's queue, sealed for its recipients)
   /// in step for the locked service.
   LockedOutboxKitWriter? _outboxKitWriter;
+
+  /// Keeps the mailbox kit (this device as a mailbox for friends) in step
+  /// for the locked service, and takes over what the service held.
+  LockedMailboxKitWriter? _mailboxKitWriter;
 
   @override
   void initState() {
@@ -942,12 +984,15 @@ final class _AndroidBackgroundRuntimeBridgeState
     _security = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _cancelReceiveOnlyWake();
     _drainRetry?.cancel();
     _drainRetry = null;
     _lockedKitsTimer?.cancel();
     _lockedKitsTimer = null;
     _outboxKitWriter?.detach();
     _outboxKitWriter = null;
+    _mailboxKitWriter?.detach();
+    _mailboxKitWriter = null;
     _kitMeet?.removeListener(_onMeetChanged);
     _kitMeet = null;
     _kitNeighbors?.removeListener(_onKitSourceChanged);
@@ -972,7 +1017,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       _heartbeatTimer = null;
       return;
     }
-    ref.read(androidBackgroundServiceControllerProvider).sendHeartbeat();
+    _sendHeartbeat();
     if (_heartbeatTimer != null) {
       return;
     }
@@ -980,13 +1025,53 @@ final class _AndroidBackgroundRuntimeBridgeState
       if (!mounted) {
         return;
       }
-      ref.read(androidBackgroundServiceControllerProvider).sendHeartbeat();
+      _sendHeartbeat();
       // Frames stop while the app is off screen, so a deferred handoff has no
       // rebuild to ride on; this tick is what eventually runs it.
       if (ref.read(socialHubControllerProvider).lifecycle.isBackgroundLike) {
         _scheduleSync();
       }
     });
+  }
+
+  /// The heartbeat, with whether the app is on screen: the parked service
+  /// wakes the phone for its watchdog only while it is not.
+  void _sendHeartbeat() {
+    ref
+        .read(androidBackgroundServiceControllerProvider)
+        .sendHeartbeat(
+          onScreen: !ref
+              .read(socialHubControllerProvider)
+              .lifecycle
+              .isBackgroundLike,
+        );
+  }
+
+  /// Wakes the phone when the app has been [kAndroidReceiveOnlyAfter] in
+  /// the background, so it hands the node over on time even with the
+  /// screen off (the app's timers stand still while the phone sleeps).
+  void _planReceiveOnlyWake(DateTime since, DateTime now, Duration after) {
+    if (_receiveOnlyWake != null) {
+      return;
+    }
+    final Duration left = after - now.difference(since);
+    _receiveOnlyWake = ZenWake.after(
+      'receive-only',
+      // A moment past the threshold: the sync must find it reached.
+      (left.isNegative ? Duration.zero : left) + const Duration(seconds: 1),
+      () async {
+        _receiveOnlyWake = null;
+        if (mounted) {
+          await _runSyncLoop();
+        }
+      },
+      hold: const Duration(seconds: 10),
+    );
+  }
+
+  void _cancelReceiveOnlyWake() {
+    _receiveOnlyWake?.cancel();
+    _receiveOnlyWake = null;
   }
 
   /// Holds the phone and Wi-Fi awake exactly while a call runs (the only
@@ -1028,6 +1113,11 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     // `RuntimeLifecycleBridge` is an ancestor, so it has already published the
     // new lifecycle snapshot by the time this runs.
+    if (_heartbeatTimer != null) {
+      // On or off screen: the parked service hears it now, before the
+      // phone may fall asleep, and sets its watchdog for it.
+      _sendHeartbeat();
+    }
     _scheduleSync();
   }
 
@@ -1107,7 +1197,8 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   /// The locked service keeps delivering this device's queue from the
-  /// outbox kit: written whenever the queue changes, and before handoff.
+  /// outbox kit, and keeps being a mailbox for friends from the mailbox kit:
+  /// both written whenever they change, and before handoff.
   void _attachOutboxKitWriter() {
     final RelayEngine? relay = ref.read(relayEngineProvider);
     if (relay == null || _outboxKitWriter != null) {
@@ -1126,6 +1217,18 @@ final class _AndroidBackgroundRuntimeBridgeState
         credentials: credentials,
         createKey: true,
       ).write(json),
+    )..attach();
+    _mailboxKitWriter = LockedMailboxKitWriter(
+      engine: relay,
+      write: (Object? json) => lockedMailboxKitFile(
+        supportDirectory: support,
+        credentials: credentials,
+        createKey: true,
+      ).write(json),
+      readHeld: () => lockedMailboxHeldFile(
+        supportDirectory: support,
+        credentials: credentials,
+      ).read(),
     )..attach();
   }
 
@@ -1184,17 +1287,22 @@ final class _AndroidBackgroundRuntimeBridgeState
       // kAndroidReceiveOnlyAfter it hands the node to the service's
       // receive-only mode anyway, whatever the lock setting ("Nigdy" and
       // long delays too): everything else the core does costs battery.
+      final Duration after = ref.read(androidReceiveOnlyAfterProvider);
       if (shouldDropToReceiveOnly(
         backgroundSince: since,
         now: now,
-        after: ref.read(androidReceiveOnlyAfterProvider),
+        after: after,
       )) {
+        _cancelReceiveOnlyWake();
         logZenMessage('Long in the background: the service only receives.');
         await _handoffToReceiver();
+      } else if (!_handoffActive) {
+        _planReceiveOnlyWake(since, now, after);
       }
       return;
     }
     _backgroundSince = null;
+    _cancelReceiveOnlyWake();
     await _restoreForegroundRuntime();
   }
 
@@ -1224,6 +1332,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     _handoffInFlight = true;
     _inboxDrained = false;
+    _cancelReceiveOnlyWake();
     // The phone may be asleep but for the alarm that woke it: it stays
     // awake until the service runs the node.
     unawaited(ZenWake.hold(const Duration(seconds: 45), tag: 'handoff'));
@@ -1249,6 +1358,9 @@ final class _AndroidBackgroundRuntimeBridgeState
     // keep delivering.
     final Future<void> outboxKitWritten =
         _outboxKitWriter?.flush() ?? Future<void>.value();
+    // The mail it holds for friends, and whom it holds it for.
+    final Future<void> mailboxKitWritten =
+        _mailboxKitWriter?.flush() ?? Future<void>.value();
     // The service is about to own the node; a heartbeat from here on would
     // only keep it parked.
     _heartbeatTimer?.cancel();
@@ -1261,6 +1373,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       await kitWritten;
       await lockedKitsWritten;
       await outboxKitWritten;
+      await mailboxKitWritten;
       // Saved and closed: nothing writes the ledger while the app is locked.
       await ledger?.suspend();
       final bool coreWasRunning = core.isStarted;
@@ -1325,6 +1438,11 @@ final class _AndroidBackgroundRuntimeBridgeState
         return;
       }
       _handoffActive = false;
+      // What the service took in and handed out as a mailbox for friends.
+      await _mailboxKitWriter?.takeHeld();
+      if (!mounted) {
+        return;
+      }
     }
     // The node is free (or never was taken): the ledger comes back.
     if (!serviceOwnsNode || parked) {
@@ -1758,6 +1876,26 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 }
 
+/// The local links of the locked service's node: "people nearby" on the
+/// shared network from the nearby [kit]'s tokens (the same the radio shows,
+/// one per slot), so a locked phone shown nearby is seen on the same Wi-Fi
+/// too. No devices to link with (that takes the ledger), so it sends no
+/// beacons of its own and only answers phones that look around there.
+/// `null`: nothing to show, or Wi-Fi discovery is off ([lan]).
+@visibleForTesting
+String? lockedLocalLinksJson(NearbyKit? kit, {required bool lan}) {
+  final Uint8List? adverts = kit?.adverts;
+  if (!lan || kit == null || !kit.visible || adverts == null) {
+    return null;
+  }
+  return localLinksSettingsJson(
+    lan: true,
+    beaconSeconds: kLocalLinkIdleBeaconSeconds,
+    peers: const <LocalLinkPeer>[],
+    nearby: LocalNearbyAdverts(firstSlot: kit.firstSlot, adverts: adverts),
+  );
+}
+
 /// The service's node while the app is locked or gone: the mesh
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
@@ -1861,12 +1999,34 @@ final class _LockedReceiverSession {
         credentials: credentials,
       ).read(),
     );
+    // Who wrote (and what) a message's notice may say.
+    final LockedNoticeKit? noticeKit = LockedNoticeKit.fromJson(
+      await lockedNoticeKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
     // What this device still had to send, sealed for each recipient.
     final LockedOutboxKit? outboxKit = LockedOutboxKit.fromJson(
       await lockedOutboxKitFile(
         supportDirectory: () async => support,
         credentials: credentials,
       ).read(),
+    );
+    // This device as a mailbox for friends: the app's kit and what this
+    // service held in earlier runs, together.
+    final BackgroundKitFile heldFile = lockedMailboxHeldFile(
+      supportDirectory: () async => support,
+      credentials: credentials,
+    );
+    final LockedMailboxKit? mailboxKit = LockedMailboxKit.merge(
+      LockedMailboxKit.fromJson(
+        await lockedMailboxKitFile(
+          supportDirectory: () async => support,
+          credentials: credentials,
+        ).read(),
+      ),
+      LockedMailboxKit.fromJson(await heldFile.read()),
     );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
@@ -1877,6 +2037,14 @@ final class _LockedReceiverSession {
         fallbackPollInterval: const Duration(seconds: 2),
       ),
     );
+    // Shown nearby on the shared Wi-Fi too (safe before the node is up).
+    final String? localLinks = lockedLocalLinksJson(
+      nearbyKit,
+      lan: payload.settings.lanDiscoveryOn,
+    );
+    if (localLinks != null) {
+      runtime.setLocalLinks(localLinks);
+    }
     if (doorKit != null && !doorKit.isEmpty) {
       // Safe before the node is up: the doors come up with it. Knocks wait
       // in the inbox; only the door key is here, never the flat's keys.
@@ -1911,6 +2079,22 @@ final class _LockedReceiverSession {
         notices: notices,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
+        noticeKit: noticeKit,
+        mailbox: mailboxKit == null || mailboxKit.isEmpty
+            ? null
+            : LockedMailbox(
+                transport: runtime,
+                kit: mailboxKit,
+                isFriend: (String address) =>
+                    capability.kindOf(address) == BackgroundContactKind.friend,
+                isContact: (String address) =>
+                    capability.kindOf(address) ==
+                        BackgroundContactKind.friend ||
+                    capability.kindOf(address) ==
+                        BackgroundContactKind.groupMember,
+                save: (LockedMailboxKit held) => heldFile.write(held.toJson()),
+              ),
+        taken: mailboxKit?.taken ?? const <String>{},
         alarm: kit == null
             ? null
             : LockedAlarm(
@@ -2051,6 +2235,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// Wakes the phone now and then while parked, to look at the heartbeats.
   WakeTimer? _watchdog;
 
+  /// The app's last heartbeat said it is on screen.
+  bool _appOnScreen = false;
+
   /// The app's engine went away (ZenPower "appGone").
   StreamSubscription<void>? _appGone;
 
@@ -2077,6 +2264,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// A shortcut that came while no node ran here: answered once one does
   /// (within [kAlarmShortcutMaxDelay]).
   DateTime? _pendingPowerAlarmAt;
+
+  /// The look at GitHub for a new version while the app is closed.
+  BackgroundUpdateCheck? _updateCheck;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -2109,6 +2299,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         );
     _request(payload);
     await _transitions;
+    if (!_destroyed) {
+      _updateCheck ??= startBackgroundUpdateCheck(notices: _readyNotices);
+    }
   }
 
   @override
@@ -2127,6 +2320,16 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (data is Map<Object?, Object?> &&
         data['type'] == _kRuntimeHeartbeatType) {
       _noteAppAlive();
+      final bool onScreen = data[_kHeartbeatOnScreenKey] == true;
+      if (onScreen != _appOnScreen) {
+        _appOnScreen = onScreen;
+        if (_watchdog != null) {
+          // Parked: the watchdog comes as often as the app's place needs.
+          _watchdog?.cancel();
+          _watchdog = null;
+          _syncWatchdog(AndroidBackgroundRuntimeMode.standby);
+        }
+      }
       return;
     }
     if (data is Map<Object?, Object?> &&
@@ -2184,21 +2387,34 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       ..start();
   }
 
-  /// While parked, an alarm now and then wakes the phone to look at the
+  /// While parked, a wake on the shared beat now and then looks at the
   /// heartbeats (and lets the app's own timers run); none while this
-  /// service runs the node.
+  /// service runs the node. With the app on screen the phone is awake
+  /// anyway and the repeat event looks: the wake is rare then and never
+  /// comes in Doze ([standbyWatchdogEvery]).
   void _syncWatchdog(AndroidBackgroundRuntimeMode mode) {
     if (mode == AndroidBackgroundRuntimeMode.standby && !_destroyed) {
-      _watchdog ??= ZenWake.every(
+      _watchdog ??= ZenWake.beat(
         'watchdog',
-        kAndroidStandbyWatchdogEvery,
-        _checkStandbyWatchdog,
-        hold: const Duration(seconds: 5),
+        standbyWatchdogEvery(appOnScreen: _appOnScreen),
+        _watchOnWake,
+        hold: kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 3),
+        whileIdle: !_appOnScreen,
       );
     } else {
       _watchdog?.cancel();
       _watchdog = null;
     }
+  }
+
+  /// A watchdog wake: the app gets one heartbeat's time to report in (its
+  /// timers stood still while the phone slept, like the service's clock),
+  /// then the heartbeats are looked at and the phone may sleep again.
+  Future<void> _watchOnWake() async {
+    await Future<void>.delayed(
+      kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 1),
+    );
+    _checkStandbyWatchdog();
   }
 
   @override
@@ -2209,6 +2425,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _destroyed = true;
+    _updateCheck?.stop();
+    _updateCheck = null;
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
     await _appGone?.cancel();
     _appGone = null;

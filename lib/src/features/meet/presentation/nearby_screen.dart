@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/meet/presentation/encounters_section.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
@@ -96,9 +97,12 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       _state = state;
       _loaded = true;
     });
-    if (scan && state['permitted'] == true && state['enabled'] == true) {
-      // Low power: the list fills a little slower, the battery lasts.
-      await _nearby.startScanning(lowPower: true);
+    if (scan) {
+      // A full scan, for as long as this screen is on screen (a look in
+      // the background lasts a few seconds every few minutes, so the list
+      // would stay empty). The shared network is looked at too, also with
+      // Bluetooth off or not allowed.
+      await _nearby.startScanning();
       final MeetService meet = ref.read(meetServiceProvider);
       if (meet.book.nearbyVisible && !_nearby.visible) {
         await _nearby.setVisible(true);
@@ -201,282 +205,306 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     return Scaffold(
       key: const Key('nearby-screen'),
       appBar: ZenSectionBar(title: t('Osoby w pobliżu')),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: _nearby,
-          builder: (BuildContext context, Widget? _) {
-            if (!_android && !_desktop) {
-              return Center(
-                child: SingleChildScrollView(
-                  child: ZenEmpty(
-                    icon: Icons.phone_android_rounded,
-                    tone: tone,
-                    title: t('Nie na tym urządzeniu'),
-                    text: t(
-                      'Osoby w pobliżu działają na Androidzie i na komputerach '
-                      'z Bluetooth LE. Na iPhonie ich nie ma.',
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: _nearby,
+            builder: (BuildContext context, Widget? _) {
+              if (!_android && !_desktop) {
+                return Center(
+                  child: SingleChildScrollView(
+                    child: ZenEmpty(
+                      icon: Icons.phone_android_rounded,
+                      tone: tone,
+                      title: t('Nie na tym urządzeniu'),
+                      text: t(
+                        'Osoby w pobliżu działają na Androidzie i na komputerach '
+                        'z Bluetooth LE. Na iPhonie ich nie ma.',
+                      ),
                     ),
                   ),
-                ),
-              );
-            }
-            if (!_loaded) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (_state['supported'] != true) {
-              return Center(
-                child: SingleChildScrollView(
-                  child: ZenEmpty(
-                    icon: Icons.bluetooth_disabled_rounded,
-                    tone: zen.warning,
-                    title: t('Brak Bluetooth LE'),
-                    text: _desktop
-                        ? t(
-                            'W pobliżu nie działa na tym komputerze: nie ma '
-                            'Bluetooth LE albo Zen nie może go używać.',
-                          )
-                        : t('Ten telefon nie ma Bluetooth LE.'),
+                );
+              }
+              if (!_loaded) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (_state['supported'] != true) {
+                return Center(
+                  child: SingleChildScrollView(
+                    child: ZenEmpty(
+                      icon: Icons.bluetooth_disabled_rounded,
+                      tone: zen.warning,
+                      title: t('Brak Bluetooth LE'),
+                      text: _desktop
+                          ? t(
+                              'W pobliżu nie działa na tym komputerze: nie ma '
+                              'Bluetooth LE albo Zen nie może go używać.',
+                            )
+                          : t('Ten telefon nie ma Bluetooth LE.'),
+                    ),
                   ),
-                ),
-              );
-            }
-            final List<NearbyPerson> people = _nearby.people;
-            final List<NearbySession> sessions = _nearby.sessions;
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                ZenHero(
-                  title: t('Ludzie obok Ciebie'),
-                  icon: Icons.radar_rounded,
-                  tone: tone,
-                  text: t(
-                    'Zobacz, kto z Zen jest teraz blisko — znajomych z imieniem, '
-                    'resztę pod pseudonimem. Możesz napisać jedną wiadomość na '
-                    'start.',
-                  ),
-                ),
-                if (_desktop)
-                  ZenInfo(
-                    key: const Key('nearby-desktop'),
-                    icon: Icons.computer_rounded,
+                );
+              }
+              final List<NearbyPerson> people = _nearby.people;
+              final List<NearbySession> sessions = _nearby.sessions;
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  ZenHero(
+                    title: t('Ludzie obok Ciebie'),
+                    icon: Icons.radar_rounded,
                     tone: tone,
-                    text: _state['canAdvertise'] == false
-                        ? t(
-                            'Ten komputer tylko rozgląda się: widzi telefony '
-                            'obok, ale sam się nie pokazuje (system na to nie '
-                            'pozwala). Pisać do ludzi obok można z telefonu.',
-                          )
-                        : t(
-                            'Komputer pokazuje się i rozgląda jak telefon, '
-                            'dopóki Zen działa (także w zasobniku). Pisać do '
-                            'ludzi obok można z telefonu.',
-                          ),
+                    text: t(
+                      'Zobacz, kto z Zen jest teraz blisko — znajomych z imieniem, '
+                      'resztę pod pseudonimem. Możesz napisać jedną wiadomość na '
+                      'start.',
+                    ),
                   ),
-                if (_state['permitted'] != true)
-                  ZenCard(
-                    tone: zen.warning,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            ZenIconBadge(
-                              icon: Icons.bluetooth_rounded,
-                              tone: zen.warning,
-                              size: 40,
+                  if (_desktop)
+                    ZenInfo(
+                      key: const Key('nearby-desktop'),
+                      icon: Icons.computer_rounded,
+                      tone: tone,
+                      text: _state['canAdvertise'] == false
+                          ? t(
+                              'Ten komputer tylko rozgląda się: widzi telefony '
+                              'obok, ale sam się nie pokazuje (system na to nie '
+                              'pozwala). Pisać do ludzi obok można z telefonu.',
+                            )
+                          : t(
+                              'Komputer pokazuje się i rozgląda jak telefon, '
+                              'dopóki Zen działa (także w zasobniku). Pisać do '
+                              'ludzi obok można z telefonu.',
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    t('Zezwól na Bluetooth'),
-                                    style: TextStyle(
-                                      color: zen.textPrimary,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 15.5,
+                    ),
+                  if (_state['permitted'] != true)
+                    ZenCard(
+                      tone: zen.warning,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              ZenIconBadge(
+                                icon: Icons.bluetooth_rounded,
+                                tone: zen.warning,
+                                size: 40,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      t('Zezwól na Bluetooth'),
+                                      style: TextStyle(
+                                        color: zen.textPrimary,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15.5,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    t(
-                                      'Żeby widzieć ludzi obok i być widocznym. '
-                                      'Zen nie używa tego do ustalania, gdzie '
-                                      'jesteś.',
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      t(
+                                        'Żeby widzieć ludzi obok i być widocznym. '
+                                        'Zen nie używa tego do ustalania, gdzie '
+                                        'jesteś.',
+                                      ),
+                                      style: TextStyle(
+                                        color: zen.textSecondary,
+                                        fontSize: 13.5,
+                                        height: 1.35,
+                                      ),
                                     ),
-                                    style: TextStyle(
-                                      color: zen.textSecondary,
-                                      fontSize: 13.5,
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            key: const Key('nearby-allow'),
+                            onPressed: () => unawaited(_allow()),
+                            icon: const Icon(Icons.check_rounded),
+                            label: Text(t('Zezwól')),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_state['enabled'] != true)
+                    ZenCard(
+                      tone: zen.warning,
+                      child: Row(
+                        children: <Widget>[
+                          ZenIconBadge(
+                            icon: Icons.bluetooth_disabled_rounded,
+                            tone: zen.warning,
+                            size: 40,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              t('Włącz Bluetooth'),
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15.5,
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          key: const Key('nearby-allow'),
-                          onPressed: () => unawaited(_allow()),
-                          icon: const Icon(Icons.check_rounded),
-                          label: Text(t('Zezwól')),
-                        ),
-                      ],
-                    ),
-                  )
-                else if (_state['enabled'] != true)
-                  ZenCard(
-                    tone: zen.warning,
-                    child: Row(
-                      children: <Widget>[
-                        ZenIconBadge(
-                          icon: Icons.bluetooth_disabled_rounded,
-                          tone: zen.warning,
-                          size: 40,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            t('Włącz Bluetooth'),
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15.5,
-                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton.tonal(
-                          key: const Key('nearby-enable-bluetooth'),
-                          onPressed: () => unawaited(_enableBluetooth()),
-                          child: Text(t('Włącz')),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 4),
-                ZenGroup(
-                  children: <Widget>[
-                    SwitchListTile(
-                      key: const Key('nearby-visible'),
-                      value: meet.book.nearbyVisible,
-                      title: Text(t('Widoczny(-a) w pobliżu')),
-                      subtitle: Text(
-                        t(
-                          'Znajomi widzą Cię z imieniem, inni jako „{name}” '
-                          '(zmienia się co 10 minut, więc nikt Cię nie wyśledzi). '
-                          'Telefon nadaje oszczędnie cały czas, także przy '
-                          'zamkniętym albo zablokowanym Zen — do tygodnia od '
-                          'ostatniego odblokowania.',
-                          {'name': _nearby.myPseudonym},
-                        ),
+                          const SizedBox(width: 8),
+                          FilledButton.tonal(
+                            key: const Key('nearby-enable-bluetooth'),
+                            onPressed: () => unawaited(_enableBluetooth()),
+                            child: Text(t('Włącz')),
+                          ),
+                        ],
                       ),
-                      onChanged: (bool v) => unawaited(_setVisible(v)),
+                    )
+                  else if (nearbyNeedsLocationOn(_state))
+                    // Android 11 and older: Bluetooth scans hear nobody while
+                    // location is off (the network still works).
+                    ZenInfo(
+                      key: const Key('nearby-location-off'),
+                      icon: Icons.location_off_rounded,
+                      tone: zen.warning,
+                      title: t('Włącz lokalizację'),
+                      text: t(
+                        'Na tym telefonie Bluetooth nie znajdzie nikogo, gdy '
+                        'lokalizacja jest wyłączona. Zen nie sprawdza przez '
+                        'nią, gdzie jesteś.',
+                      ),
                     ),
-                    // The setting lives in the meeting book, not in the radio.
-                    ListenableBuilder(
-                      listenable: meet,
-                      builder: (BuildContext context, Widget? _) => SwitchListTile(
-                        key: const Key('nearby-background-scan'),
-                        value: meet.book.nearbyBackgroundScan,
-                        title: Text(t('Rozglądaj się też w tle')),
+                  const SizedBox(height: 4),
+                  ZenGroup(
+                    children: <Widget>[
+                      SwitchListTile(
+                        key: const Key('nearby-visible'),
+                        value: meet.book.nearbyVisible,
+                        title: Text(t('Widoczny(-a) w pobliżu')),
                         subtitle: Text(
                           t(
-                            'Co kilka minut telefon na kilka sekund oszczędnie '
-                            'sprawdza, czy obok są znajomi, i zapisuje ich w '
-                            '„Mijani”. Działa też przy zamkniętym Zen; nie przy '
-                            'baterii poniżej 15%, w oszczędzaniu baterii ani we '
-                            'śnie telefonu. Pełne szukanie tylko na tym ekranie.',
+                            'Znajomi widzą Cię z imieniem, inni jako „{name}” '
+                            '(zmienia się co 10 minut, więc nikt Cię nie wyśledzi). '
+                            'Telefon nadaje oszczędnie cały czas, także przy '
+                            'zamkniętym albo zablokowanym Zen — do tygodnia od '
+                            'ostatniego odblokowania. W tej samej sieci Wi-Fi '
+                            'też Cię widać.',
+                            {'name': _nearby.myPseudonym},
                           ),
                         ),
-                        onChanged: (bool v) =>
-                            unawaited(meet.setNearbyBackgroundScan(v)),
+                        onChanged: (bool v) => unawaited(_setVisible(v)),
                       ),
-                    ),
-                    // How often and how long, with what it costs.
-                    NearbyLookSettingsTile(meet: meet),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(4, 20, 0, 8),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          t('W POBLIŻU'),
-                          style: zen.label(color: zen.textMuted),
+                      // The setting lives in the meeting book, not in the radio.
+                      ListenableBuilder(
+                        listenable: meet,
+                        builder: (BuildContext context, Widget? _) => SwitchListTile(
+                          key: const Key('nearby-background-scan'),
+                          value: meet.book.nearbyBackgroundScan,
+                          title: Text(t('Rozglądaj się też w tle')),
+                          subtitle: Text(
+                            t(
+                              'Co kilka minut telefon na kilka sekund oszczędnie '
+                              'sprawdza, czy obok są znajomi, i zapisuje ich w '
+                              '„Mijani”. Działa też przy zamkniętym Zen; nie przy '
+                              'baterii poniżej 15%, w oszczędzaniu baterii ani we '
+                              'śnie telefonu. Pełne szukanie tylko na tym ekranie.',
+                            ),
+                          ),
+                          onChanged: (bool v) =>
+                              unawaited(meet.setNearbyBackgroundScan(v)),
                         ),
                       ),
-                      if (_nearby.scanning)
-                        ZenPill(
-                          text: t('Szukam'),
-                          tone: zen.success,
-                          icon: Icons.radar_rounded,
-                        )
-                      else
-                        ZenPill(
-                          text: t('Nie szukam'),
-                          tone: zen.textMuted,
-                          icon: Icons.pause_rounded,
-                        ),
+                      // How often and how long, with what it costs.
+                      NearbyLookSettingsTile(meet: meet),
                     ],
                   ),
-                ),
-                if (people.isEmpty)
-                  ZenEmpty(
-                    icon: _nearby.scanning
-                        ? Icons.radar_rounded
-                        : Icons.bluetooth_searching_rounded,
-                    tone: tone,
-                    title: _nearby.scanning
-                        ? t('Nikogo jeszcze nie widać')
-                        : t('Nie szukam'),
-                    text: _nearby.scanning
-                        ? t('Szukam… Nikogo z Zen jeszcze nie widać.')
-                        : t('Nie szukam (brak Bluetooth albo zgody).'),
-                  ),
-                for (final NearbyPerson p in people)
-                  _personTile(meet, p, zen, tone),
-                if (_nearby.blockedCount > 0)
-                  ZenTile(
-                    key: const Key('nearby-blocked'),
-                    icon: Icons.block_rounded,
-                    tone: zen.textMuted,
-                    title: tn(
-                      _nearby.blockedCount,
-                      one: 'Zablokowana {n} osoba z pobliża',
-                      few: 'Zablokowane {n} osoby z pobliża',
-                      many: 'Zablokowanych {n} osób z pobliża',
-                    ),
-                    trailing: TextButton(
-                      key: const Key('nearby-unblock'),
-                      onPressed: () => unawaited(_nearby.unblockAll()),
-                      child: Text(t('Odblokuj')),
+                  Padding(
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 20, 0, 8),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            t('W POBLIŻU'),
+                            style: zen.label(color: zen.textMuted),
+                          ),
+                        ),
+                        if (_nearby.looking)
+                          ZenPill(
+                            text: t('Szukam'),
+                            tone: zen.success,
+                            icon: Icons.radar_rounded,
+                          )
+                        else
+                          ZenPill(
+                            text: t('Nie szukam'),
+                            tone: zen.textMuted,
+                            icon: Icons.pause_rounded,
+                          ),
+                      ],
                     ),
                   ),
-                if (sessions.isNotEmpty) ...<Widget>[
-                  ZenSection(t('Rozmowy z pobliża')),
-                  for (final NearbySession s in sessions)
+                  if (people.isEmpty)
+                    ZenEmpty(
+                      icon: _nearby.looking
+                          ? Icons.radar_rounded
+                          : Icons.bluetooth_searching_rounded,
+                      tone: tone,
+                      title: _nearby.looking
+                          ? t('Nikogo jeszcze nie widać')
+                          : t('Nie szukam'),
+                      text: _nearby.scanning
+                          ? t('Szukam… Nikogo z Zen jeszcze nie widać.')
+                          : _nearby.looking
+                          // Bluetooth off or not allowed: the same Wi-Fi only.
+                          ? t(
+                              'Szukam tylko w tej samej sieci Wi-Fi. Włącz '
+                              'Bluetooth, żeby widzieć też ludzi obok.',
+                            )
+                          : t('Nie szukam (brak Bluetooth albo zgody).'),
+                    ),
+                  for (final NearbyPerson p in people)
+                    _personTile(meet, p, zen, tone),
+                  if (_nearby.blockedCount > 0)
                     ZenTile(
-                      icon: Icons.forum_rounded,
-                      tone: zenTone(zen, 5),
-                      title: s.pseudonym,
-                      subtitle: s.lines.isEmpty ? null : s.lines.last.text,
-                      onTap: () =>
-                          unawaited(NearbyChatScreen.open(context, s.id)),
+                      key: const Key('nearby-blocked'),
+                      icon: Icons.block_rounded,
+                      tone: zen.textMuted,
+                      title: tn(
+                        _nearby.blockedCount,
+                        one: 'Zablokowana {n} osoba z pobliża',
+                        few: 'Zablokowane {n} osoby z pobliża',
+                        many: 'Zablokowanych {n} osób z pobliża',
+                      ),
+                      trailing: TextButton(
+                        key: const Key('nearby-unblock'),
+                        onPressed: () => unawaited(_nearby.unblockAll()),
+                        child: Text(t('Odblokuj')),
+                      ),
                     ),
+                  if (sessions.isNotEmpty) ...<Widget>[
+                    ZenSection(t('Rozmowy z pobliża')),
+                    for (final NearbySession s in sessions)
+                      ZenTile(
+                        icon: Icons.forum_rounded,
+                        tone: zenTone(zen, 5),
+                        title: s.pseudonym,
+                        subtitle: s.lines.isEmpty ? null : s.lines.last.text,
+                        onTap: () =>
+                            unawaited(NearbyChatScreen.open(context, s.id)),
+                      ),
+                  ],
+                  ListenableBuilder(
+                    listenable: meet,
+                    builder: (BuildContext context, Widget? _) =>
+                        _encountersSection(meet),
+                  ),
                 ],
-                ListenableBuilder(
-                  listenable: meet,
-                  builder: (BuildContext context, Widget? _) =>
-                      _encountersSection(meet),
-                ),
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -519,10 +547,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         tone: zen.success,
         title: meet.host.nameOf(friend),
         subtitle: met
-            ? t('{distance} · spotkani osobiście', {
-                'distance': nearbyDistance(p.rssi),
-              })
-            : nearbyDistance(p.rssi),
+            ? t('{distance} · spotkani osobiście', {'distance': p.distance})
+            : p.distance,
         // Being near is only a hint: the meeting is signed when confirmed.
         trailing: met
             ? Icon(Icons.verified_rounded, color: zen.success)
@@ -546,7 +572,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     // Badges: what this phone knows of the stranger, nothing more.
     final List<NearbySession> talks = _nearby.sessionsWith(p.token).toList();
     final List<String> badges = <String>[
-      nearbyDistance(p.rssi),
+      p.distance,
       if (talks.any((NearbySession s) => !s.startedByMe && !s.iAnswered))
         t('napisał(a) do Ciebie')
       else if (talks.any((NearbySession s) => s.startedByMe && !s.theyWrote))
@@ -560,8 +586,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       tone: tone,
       title: p.pseudonym,
       subtitle: badges.join(' · '),
-      // A computer cannot write to anyone nearby (no GATT there).
-      trailing: _state['canWave'] == false && talks.isEmpty
+      // A computer cannot write to anyone nearby (no GATT there), and
+      // nobody is written to over the shared network (a hello goes over
+      // Bluetooth only).
+      trailing:
+          (_state['canWave'] == false || !p.overBluetooth) && talks.isEmpty
           ? null
           : FilledButton.tonal(
               // Already talking: the conversation opens instead of a new hello.

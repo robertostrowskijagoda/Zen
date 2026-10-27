@@ -1,0 +1,427 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/domain/signals/signal_queue_store.dart';
+import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
+import 'package:zen/src/features/runtime/runtime_notification_center.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/social/social_snapshot_store.dart';
+
+// What a chat message's notification says at each level ("Nadawca i
+// treść", "Tylko nadawca", "Tylko informacja"), the global level against a
+// conversation's own, and what the locked background receiver is given to
+// say the same.
+
+const String _ada = 'ada.ygg';
+const String _bob = 'bob.ygg';
+const String _groupId = 'grp-1';
+
+const LifecycleSnapshot _background = LifecycleSnapshot(
+  visibility: AppVisibilityState.background,
+  generation: 1,
+  capturedAtMillis: 0,
+);
+const LifecycleSnapshot _focused = LifecycleSnapshot(
+  visibility: AppVisibilityState.foregroundFocused,
+  generation: 1,
+  capturedAtMillis: 0,
+);
+
+ZenSignal _direct(String id) => ZenSignal(
+  type: ZenSignalType.message,
+  sender: _ada,
+  displayName: 'Ada',
+  messageId: id,
+  content: 'Tajny plan',
+);
+
+ZenSignal _inGroup(String id) => ZenSignal(
+  type: ZenSignalType.groupMessage,
+  sender: _ada,
+  displayName: 'Ada',
+  groupId: _groupId,
+  groupName: 'Ekipa',
+  messageId: id,
+  content: 'Tajny plan',
+);
+
+SocialHubState _seed(
+  LifecycleSnapshot lifecycle, {
+  Map<String, NotificationPrivacy> own = const <String, NotificationPrivacy>{},
+}) => SocialHubState.empty(lifecycle: lifecycle).copyWith(
+  friends: const <String, FriendProfile>{
+    _ada: FriendProfile(
+      address: _ada,
+      displayName: 'Ada',
+      status: FriendRelationshipStatus.accepted,
+    ),
+    _bob: FriendProfile(
+      address: _bob,
+      displayName: 'Bob',
+      status: FriendRelationshipStatus.accepted,
+    ),
+  },
+  groups: const <String, GroupProfile>{
+    _groupId: GroupProfile(
+      id: _groupId,
+      name: 'Ekipa',
+      createdById: _ada,
+      createdAtMillis: 0,
+      memberAddresses: <String>[_ada, _bob],
+    ),
+  },
+  notificationPrivacy: own,
+);
+
+/// The app as it runs: the hub posts through the central redaction, which
+/// reads the same setting.
+({ProviderContainer container, MemoryRuntimeSystemNotificationService shade})
+_boot({
+  required NotificationPrivacy global,
+  Map<String, NotificationPrivacy> own = const <String, NotificationPrivacy>{},
+  LifecycleSnapshot lifecycle = _background,
+  RuntimeNotificationCenter? center,
+  MemorySocialSnapshotStore? snapshots,
+}) {
+  final MemoryRuntimeSystemNotificationService shade =
+      MemoryRuntimeSystemNotificationService();
+  late final ProviderContainer container;
+  container = ProviderContainer(
+    overrides: [
+      ...buildAppSettingsProviderOverrides(
+        store: MemoryAppSettingsStore(),
+        initialState: AppSettings(notificationPrivacy: global),
+        hydrationEnabled: false,
+      ),
+      signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+      socialSnapshotStoreProvider.overrideWithValue(
+        snapshots ?? MemorySocialSnapshotStore(),
+      ),
+      messageTimelineStoreProvider.overrideWithValue(
+        MemoryMessageTimelineStore(),
+      ),
+      runtimeSystemNotificationServiceProvider.overrideWithValue(
+        PrivacyRedactingNotificationService(
+          shade,
+          privacy: () =>
+              container.read(appSettingsControllerProvider).notificationPrivacy,
+        ),
+      ),
+      if (center != null)
+        runtimeNotificationCenterProvider.overrideWithValue(center),
+      socialHubSeedProvider.overrideWithValue(_seed(lifecycle, own: own)),
+    ],
+  );
+  addTearDown(container.dispose);
+  return (container: container, shade: shade);
+}
+
+Future<RuntimeSystemNotification> _shown(
+  ZenSignal signal, {
+  required NotificationPrivacy global,
+  Map<String, NotificationPrivacy> own = const <String, NotificationPrivacy>{},
+}) async {
+  final (:container, :shade) = _boot(global: global, own: own);
+  await container
+      .read(socialHubControllerProvider.notifier)
+      .receiveSignal(signal, receivedAtMillis: 1000);
+  return shade.activeNotifications.single;
+}
+
+void main() {
+  group('a chat message\'s notification', () {
+    test('"Nadawca i treść" (the default): who and what', () async {
+      expect(
+        const AppSettings().notificationPrivacy,
+        NotificationPrivacy.senderAndContent,
+      );
+      RuntimeSystemNotification n = await _shown(
+        _direct('m-1'),
+        global: NotificationPrivacy.senderAndContent,
+      );
+      expect(n.title, 'Ada');
+      expect(n.body, 'Tajny plan');
+      n = await _shown(
+        _inGroup('g-1'),
+        global: NotificationPrivacy.senderAndContent,
+      );
+      expect(n.title, 'Ekipa');
+      expect(n.body, 'Ada: Tajny plan');
+    });
+
+    test('"Tylko nadawca": who, never what', () async {
+      RuntimeSystemNotification n = await _shown(
+        _direct('m-1'),
+        global: NotificationPrivacy.senderOnly,
+      );
+      expect(n.title, 'Ada');
+      expect(n.body, 'Nowa wiadomość');
+      n = await _shown(_inGroup('g-1'), global: NotificationPrivacy.senderOnly);
+      expect(n.title, 'Ekipa');
+      expect(n.body, 'Ada wysłał(a) wiadomość');
+    });
+
+    test('"Tylko informacja": neither who nor what', () async {
+      for (final ZenSignal signal in <ZenSignal>[
+        _direct('m-1'),
+        _inGroup('g-1'),
+      ]) {
+        final RuntimeSystemNotification n = await _shown(
+          signal,
+          global: NotificationPrivacy.generic,
+        );
+        expect(n.title, 'Nowa wiadomość');
+        expect('${n.title} ${n.body}', isNot(contains('Ada')));
+        expect('${n.title} ${n.body}', isNot(contains('Ekipa')));
+        expect('${n.title} ${n.body}', isNot(contains('Tajny')));
+      }
+    });
+
+    test(
+      'a conversation\'s own level beats the global one, both ways',
+      () async {
+        RuntimeSystemNotification n = await _shown(
+          _direct('m-1'),
+          global: NotificationPrivacy.generic,
+          own: const <String, NotificationPrivacy>{
+            _ada: NotificationPrivacy.senderAndContent,
+          },
+        );
+        expect(n.title, 'Ada');
+        expect(n.body, 'Tajny plan');
+
+        n = await _shown(
+          _inGroup('g-1'),
+          global: NotificationPrivacy.senderAndContent,
+          own: const <String, NotificationPrivacy>{
+            'group:$_groupId': NotificationPrivacy.generic,
+          },
+        );
+        expect(n.title, 'Nowa wiadomość');
+        expect(n.body, isNot(contains('Tajny')));
+
+        // The group's own level is not Ada's 1:1 chat's.
+        n = await _shown(
+          _direct('m-2'),
+          global: NotificationPrivacy.senderAndContent,
+          own: const <String, NotificationPrivacy>{
+            'group:$_groupId': NotificationPrivacy.generic,
+          },
+        );
+        expect(n.body, 'Tajny plan');
+      },
+    );
+
+    test('the in-app banner tells as much as the notification', () async {
+      final MemoryRuntimeNotificationCenter center =
+          MemoryRuntimeNotificationCenter();
+      final (:container, shade: _) = _boot(
+        global: NotificationPrivacy.generic,
+        lifecycle: _focused,
+        center: center,
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(_direct('m-1'), receivedAtMillis: 1000);
+      final RuntimeNotification banner = center.activeNotifications.single;
+      expect(banner.title, 'Nowa wiadomość');
+      expect('${banner.title} ${banner.body}', isNot(contains('Tajny')));
+      expect('${banner.title} ${banner.body}', isNot(contains('Ada')));
+    });
+  });
+
+  group('a conversation\'s own level', () {
+    test(
+      'is kept with the conversations and "Jak globalnie" removes it',
+      () async {
+        final MemorySocialSnapshotStore snapshots = MemorySocialSnapshotStore();
+        final (:container, shade: _) = _boot(
+          global: NotificationPrivacy.senderAndContent,
+          snapshots: snapshots,
+        );
+        final SocialHubController hub = container.read(
+          socialHubControllerProvider.notifier,
+        );
+        await hub.setConversationNotificationPrivacy(
+          _ada,
+          NotificationPrivacy.senderOnly,
+        );
+        await hub.setConversationNotificationPrivacy(
+          'group:$_groupId',
+          NotificationPrivacy.generic,
+        );
+        SocialHubState state = container.read(socialHubControllerProvider);
+        expect(
+          state.ownNotificationPrivacyOf(_ada),
+          NotificationPrivacy.senderOnly,
+        );
+        expect(
+          state.notificationPrivacyFor(
+            _bob,
+            global: NotificationPrivacy.senderAndContent,
+          ),
+          NotificationPrivacy.senderAndContent,
+        );
+        expect(
+          (await snapshots.load())!.notificationPrivacy['group:$_groupId'],
+          NotificationPrivacy.generic,
+        );
+
+        await hub.setConversationNotificationPrivacy(_ada, null);
+        state = container.read(socialHubControllerProvider);
+        expect(state.ownNotificationPrivacyOf(_ada), isNull);
+        expect((await snapshots.load())!.notificationPrivacy.keys, <String>[
+          'group:$_groupId',
+        ]);
+      },
+    );
+
+    test('survives the snapshot file', () async {
+      final Directory dir = await Directory.systemTemp.createTemp(
+        'zen-notify-privacy-',
+      );
+      addTearDown(() => dir.delete(recursive: true));
+      final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          dir,
+          codec: BinaryCodec(compressor: const _Plain()),
+        ),
+      );
+      await store.save(
+        _seed(
+          _background,
+          own: const <String, NotificationPrivacy>{
+            _ada: NotificationPrivacy.generic,
+            'group:$_groupId': NotificationPrivacy.senderOnly,
+          },
+        ),
+      );
+      final SocialHubState loaded = (await FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          dir,
+          codec: BinaryCodec(compressor: const _Plain()),
+        ),
+      ).load())!;
+      expect(loaded.notificationPrivacy, <String, NotificationPrivacy>{
+        _ada: NotificationPrivacy.generic,
+        'group:$_groupId': NotificationPrivacy.senderOnly,
+      });
+    });
+  });
+
+  group('the locked receiver\'s notice kit', () {
+    test('names only the conversations whose level shows who wrote', () {
+      final LockedNoticeKit kit = lockedNoticeKitOf(
+        _seed(
+          _background,
+          own: const <String, NotificationPrivacy>{
+            _bob: NotificationPrivacy.generic,
+          },
+        ),
+        privacy: NotificationPrivacy.senderOnly,
+      );
+      expect(kit.privacy, NotificationPrivacy.senderOnly);
+      expect(kit.names[_ada], 'Ada');
+      expect(kit.names['group:$_groupId'], 'Ekipa');
+      expect(kit.overrides[_bob], NotificationPrivacy.generic);
+      expect(kit.levelOf(_bob), NotificationPrivacy.generic);
+
+      // Nothing shows who: no names at all.
+      final LockedNoticeKit quiet = lockedNoticeKitOf(
+        _seed(_background),
+        privacy: NotificationPrivacy.generic,
+      );
+      expect(quiet.names, isEmpty);
+    });
+
+    test(
+      'reads back what it wrote, and an unreadable level says the least',
+      () {
+        final LockedNoticeKit kit = lockedNoticeKitOf(
+          _seed(
+            _background,
+            own: const <String, NotificationPrivacy>{
+              'group:$_groupId': NotificationPrivacy.senderAndContent,
+            },
+          ),
+          privacy: NotificationPrivacy.senderOnly,
+        );
+        final LockedNoticeKit back = LockedNoticeKit.fromJson(kit.toJson())!;
+        expect(back.privacy, kit.privacy);
+        expect(back.overrides, kit.overrides);
+        expect(back.names, kit.names);
+        expect(LockedNoticeKit.fromJson(<String, dynamic>{'v': 2}), isNull);
+        expect(
+          LockedNoticeKit.fromJson(<String, dynamic>{
+            'v': 1,
+            'p': '?',
+          })!.privacy,
+          NotificationPrivacy.generic,
+        );
+      },
+    );
+
+    test('a message\'s notice per level', () {
+      final LockedNoticeKit kit = lockedNoticeKitOf(
+        _seed(
+          _background,
+          own: const <String, NotificationPrivacy>{
+            _bob: NotificationPrivacy.generic,
+          },
+        ),
+        privacy: NotificationPrivacy.senderAndContent,
+      );
+      NoticeText notice(String from, Map<String, dynamic> payload) =>
+          kit.messageNotice(from: from, payload: payload, genericBody: '…');
+      expect(
+        notice(_ada, <String, dynamic>{'type': 'message', 'text': 'Hej'}),
+        (title: 'Ada', body: 'Hej'),
+      );
+      expect(
+        notice(_bob, <String, dynamic>{'type': 'message', 'text': 'Hej'}),
+        (title: 'Nowa wiadomość', body: '…'),
+      );
+      expect(
+        notice(_bob, <String, dynamic>{
+          'type': 'group_message',
+          'groupId': _groupId,
+          'text': 'Hej',
+        }),
+        (title: 'Ekipa', body: 'Bob: Hej'),
+      );
+      // A photo: only its type, never the caption.
+      expect(
+        notice(_ada, <String, dynamic>{
+          'type': 'message',
+          'text': 'podpis',
+          'messageType': 'image',
+          'attachmentData': 'AAAA',
+        }).body,
+        isNot(contains('podpis')),
+      );
+    });
+  });
+}
+
+final class _Plain implements BinaryCompressor {
+  const _Plain();
+
+  @override
+  Future<Uint8List?> compress(Uint8List payload, int level) async => payload;
+
+  @override
+  Future<Uint8List?> decompress(Uint8List payload) async => payload;
+}

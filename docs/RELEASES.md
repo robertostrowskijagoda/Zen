@@ -753,8 +753,9 @@ changes are planned.
   stores; AltStore PAL works in both with the same package.
 - **In every iOS channel:** no persistent background connection; notifications
   about messages and calls would need a server sending APNs (PushKit +
-  CallKit) — Zen has none by design, so on iPhone it receives only while it is
-  open; self-update and "Pass it on" are impossible. The Enterprise program
+  CallKit) — Zen has none by design, so on iPhone it receives at once only
+  while it is open (otherwise at short background checks iOS allows, or with
+  an opt-in keep-alive: [IOS_BACKGROUND.md](IOS_BACKGROUND.md)); self-update and "Pass it on" are impossible. The Enterprise program
   and "signers" using corporate certificates — no.
 
 ### 6.4 Costs and entity

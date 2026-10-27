@@ -508,10 +508,16 @@ void main() {
       AppPalette.player,
       AppPalette.phosphor,
       AppPalette.pearl,
+      AppPalette.herbarium,
+      AppPalette.blueprint,
+      AppPalette.leather,
       // The wild looks: every effect, header and transition style.
       for (final AppPalette p in ZenThemeCategory.wild.palettes) p,
     ]) {
       final ZenLook look = ZenLook.forPalette(palette);
+      // A fresh tree for each: the tab rail would otherwise tween from the
+      // previous look's decoration (a rounded one to an underline).
+      await tester.pumpWidget(const SizedBox.shrink());
       await _pumpLook(tester, palette);
       // Flicker-on, breathing glow, the drifting field, the sweep, the
       // cursor and the backdrop.

@@ -57,8 +57,9 @@ get it back if a later gate fails. A step waits at most a day for a consent.
 Long routes are shown shortened ("You → Ana → … 4 … → Ola"), with a progress
 bar while the way is opening.
 
-**Defaults:** a free gate asks for the gatekeeper's consent; a paid one
-opens as soon as it is paid.
+**Defaults:** gates are open for free: whoever asks is introduced at once
+(the first-start setup offers *With my consent* instead, where you approve
+each request). A paid gate opens as soon as it is paid.
 
 ## Message prices
 

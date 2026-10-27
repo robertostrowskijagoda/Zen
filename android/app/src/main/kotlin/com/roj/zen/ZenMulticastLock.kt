@@ -16,11 +16,20 @@ import io.flutter.plugin.common.MethodChannel
  */
 object ZenMulticastLock {
     private const val TAG = "ZenMulticast"
+    private const val CHANNEL = "zen/multicast"
     private var lock: WifiManager.MulticastLock? = null
+
+    /**
+     * [engine] is going away: its handler goes with it. The lock itself
+     * stays as it is (the other engine may hold it).
+     */
+    fun unregister(engine: FlutterEngine) {
+        engine.dartExecutor.binaryMessenger.setMessageHandler(CHANNEL, null)
+    }
 
     fun register(engine: FlutterEngine, context: Context) {
         val appContext = context.applicationContext
-        MethodChannel(engine.dartExecutor.binaryMessenger, "zen/multicast")
+        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "setHeld" -> result.success(

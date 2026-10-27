@@ -28,6 +28,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
+import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/chat/attachment_transfer_runner.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
@@ -48,6 +49,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
@@ -398,6 +400,19 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   AppSecurityService get _security => ref.read(appSecurityServiceProvider);
 
   AppSettings get _appSettings => ref.read(appSettingsControllerProvider);
+
+  /// How much a notification about [signal]'s conversation tells: its own
+  /// level, else the setting; while this device shares its screen in a
+  /// call, never more than who wrote.
+  NotificationPrivacy _noticePrivacyFor(ZenSignal signal) {
+    final NotificationPrivacy level = state.notificationPrivacyFor(
+      conversationKeyOfSignal(signal),
+      global: _appSettings.notificationPrivacy,
+    );
+    return screenShareHidesNotifications.value
+        ? level.atLeast(NotificationPrivacy.senderOnly)
+        : level;
+  }
 
   SocialSnapshotStore get _snapshotStore =>
       ref.read(socialSnapshotStoreProvider);
@@ -1154,10 +1169,14 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     String? displayName,
   });
 
+  /// Replaces message [messageId] in the conversation with [peerAddress]
+  /// by what [build] makes of it, or adds it: at the end, or — [byTime] —
+  /// by its send time (history that may be older than what is here).
   Future<void> _upsertTimelineMessage({
     required String peerAddress,
     required String messageId,
     required ChatMessage Function(ChatMessage? existing) build,
+    bool byTime = false,
   });
 
   /// A system line in the conversation with [peerAddress]: [event] (shown

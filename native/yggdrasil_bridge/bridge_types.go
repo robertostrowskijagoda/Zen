@@ -77,6 +77,12 @@ type bridgeNode struct {
 	// Signals go unsealed: only tests that drive doors (which speak no
 	// session layer) from the main node's signal path set it.
 	pqPlain bool
+	// Bounds of signalPartials (a door's are tighter, door_node.go).
+	partialLimits signalPartialLimits
+	// The node's own packets and what its peerings carried, for the
+	// transit estimate (traffic_meter.go).
+	traffic     ownTraffic
+	peerTraffic peerTrafficMeter
 }
 
 type configSummary struct {
@@ -124,7 +130,9 @@ type relayState struct {
 	sourceVerdicts map[string]bool
 	// Which local sockets may use the relay (relay_admission.go).
 	admission relayAdmission
-	mu        sync.Mutex
+	// Bytes in pendingPackets.
+	pendingBytes int
+	mu           sync.Mutex
 }
 
 type leafPeerMonitor struct {
@@ -180,6 +188,9 @@ const (
 	signalInboxCapacity = 2048
 	signalTTL           = 90 * time.Second
 	maxRelayBacklog     = 256
+	// Most bytes a relay holds in pendingPackets (a datagram may be up to
+	// 64 KiB).
+	maxRelayBacklogBytes = 512 * 1024
 	// Largest signal text, after base64 and zstd. It is kRuntimeSignalMaxBytes
 	// in lib/src/features/runtime/runtime_signal_codec.dart, the most a Zen
 	// sender ever puts in one signal (the bridge compresses only when that

@@ -52,6 +52,7 @@ func startPacketLoop(node *bridgeNode) {
 			consecutiveErrors = 0
 
 			source, port, payload, ok := parseYggPacket(buffer[:count])
+			node.traffic.received(port, count)
 			if !ok {
 				continue
 			}

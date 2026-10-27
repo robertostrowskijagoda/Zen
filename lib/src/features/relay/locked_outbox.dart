@@ -156,6 +156,7 @@ final class LockedOutbox {
       Duration(minutes: 30),
       Duration(hours: 1),
     ],
+    this.heldEvery = const Duration(hours: 3),
     this.sightingThrottle = const Duration(minutes: 1),
     this.maxMailBatchBytes = 6 * 1024,
   }) : _transport = transport,
@@ -169,8 +170,14 @@ final class LockedOutbox {
   final SignalTransport _transport;
   final int Function() _now;
 
-  /// Waits between rounds; the last one repeats.
+  /// Waits between rounds; the last one repeats. The long ones are
+  /// multiples of the mailbox poll's period, so their rounds ride its wakes.
   final List<Duration> schedule;
+
+  /// The wait at least, once every payload sits in one of its recipient's
+  /// mailboxes: they hand it over the moment the recipient shows up (and a
+  /// sighting here sends it at once too), so the rounds only back that up.
+  final Duration heldEvery;
 
   /// A recipient that shows up gets its mail at most this often.
   final Duration sightingThrottle;
@@ -180,7 +187,7 @@ final class LockedOutbox {
   final Map<String, Set<String>> _depositedTo = <String, Set<String>>{};
   final Map<String, int> _lastSentTo = <String, int>{};
   StreamSubscription<SignalTransportFrame>? _subscription;
-  WakeTimer? _timer;
+  BeatTimer? _timer;
   int _round = 0;
   bool _running = false;
 
@@ -208,23 +215,49 @@ final class LockedOutbox {
     _subscription = null;
   }
 
+  /// The rounds go on the shared beat: the long waits share the wakes of
+  /// the mailbox polls instead of waking the phone on their own, and a
+  /// wake lasts only as long as its round's sends.
   void _schedule() {
     if (!_running || _pending.isEmpty) {
       return;
     }
-    final Duration wait = schedule.isEmpty
+    final Duration wait = nextWait;
+    final BeatTimer? timer = _timer;
+    if (timer == null) {
+      _timer = ZenWake.beat(
+        'locked-outbox',
+        wait,
+        _roundOnWake,
+        hold: const Duration(seconds: 10),
+      );
+    } else if (timer.every != wait) {
+      timer.setEvery(wait);
+    }
+  }
+
+  /// How long the next round waits.
+  @visibleForTesting
+  Duration get nextWait {
+    final Duration step = schedule.isEmpty
         ? const Duration(hours: 1)
         : schedule[min(_round, schedule.length - 1)];
-    _timer?.cancel();
-    // An alarm: the round runs also while the phone sleeps, which stays
-    // awake for the sends.
-    _timer = ZenWake.after('locked-outbox', wait, () {
-      _round++;
-      unawaitedLogged(
-        runRound().whenComplete(_schedule),
-        context: 'Locked outbox round failed',
-      );
-    }, hold: const Duration(seconds: 20));
+    return _allHeld && step < heldEvery ? heldEvery : step;
+  }
+
+  /// Every payload sits in at least one of its recipient's mailboxes.
+  bool get _allHeld => _pending.values.every(
+    (LockedOutboxItem item) => _depositedTo[item.id]?.isNotEmpty ?? false,
+  );
+
+  Future<void> _roundOnWake() async {
+    _round++;
+    try {
+      await runRound();
+    } on Object catch (error, stackTrace) {
+      logZenError('Locked outbox round failed', error, stackTrace);
+    }
+    _schedule();
   }
 
   /// One round: every payload to its recipient and to the mailboxes that
@@ -258,6 +291,9 @@ final class LockedOutbox {
         _depositedTo.remove(item.id);
         if (_pending.isEmpty) {
           _timer?.cancel();
+          _timer = null;
+        } else {
+          _schedule();
         }
       }
       return;
@@ -266,6 +302,7 @@ final class LockedOutbox {
       final LockedOutboxItem? item = _pending[frame.payload['id']];
       if (item != null && item.mailboxes.contains(from)) {
         _depositedTo[item.id]?.add(from);
+        _schedule();
       }
       return;
     }

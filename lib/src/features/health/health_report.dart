@@ -74,7 +74,8 @@ class HealthInputs {
   final String? errorMessage;
   final bool isAndroid;
 
-  /// An iPhone or iPad: iOS never lets Zen receive in the background.
+  /// An iPhone or iPad: iOS lets Zen receive in the background only now and
+  /// then (or with the keep-alive, ios_background.dart).
   final bool isIPhone;
 
   /// The always-on service (Android); `null` = not known.
@@ -251,9 +252,11 @@ HealthItem _iPhoneBackground() => HealthItem(
   level: HealthLevel.warn,
   title: t('Praca w tle'),
   detail: t(
-    'iPhone odbiera tylko przy otwartym Zen — iOS nie pozwala działać '
-    'w tle. Do tego czasu wiadomości czekają u nadawców albo w skrzynkach '
-    'u znajomych. Pomaga znajomy z Zen na komputerze albo na Androidzie.',
+    'iPhone odbiera na bieżąco tylko przy otwartym Zen. W tle iOS czasem '
+    'budzi Zen na chwilę, żeby sprawdził skrzynki u znajomych — kiedy, '
+    'decyduje system. Pomaga znajomy z Zen na komputerze albo na Androidzie. '
+    'Stałe odbieranie w tle włączysz w Ustawieniach → Praca w tle (zużywa '
+    'więcej baterii).',
   ),
 );
 

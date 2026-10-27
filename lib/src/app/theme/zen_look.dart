@@ -66,6 +66,22 @@ enum ZenBorderStyle {
 
   /// A thin line shimmering in all colours (iridescent).
   sheen,
+
+  /// A line with a row of stitches inside it, like sewn leather.
+  stitch,
+
+  /// A leaf: two opposite corners deeply rounded, the others nearly
+  /// square.
+  leaf,
+
+  /// Little round scallops along the edge, like a doily.
+  scallop,
+
+  /// A ticket: a half circle bitten out of the middle of each side.
+  notch,
+
+  /// A drawing board: heavier corner marks and a ruler along the top.
+  blueprint,
 }
 
 /// What lifts raised things (the main button, menus, highlighted cards).
@@ -203,7 +219,7 @@ enum ZenBackdrop {
   /// Monitor scan lines with a slow rolling band.
   scanlines,
 
-  /// Still, soft blooms of colour (behind glass panels).
+  /// Soft blooms of colour drifting slowly (behind glass panels).
   aurora,
 
   /// Dense columns of signs running down, a few glitching.
@@ -247,6 +263,18 @@ enum ZenBackdrop {
 
   /// Brushed metal.
   brushed,
+
+  /// Leaves and petals sinking slowly down.
+  petals,
+
+  /// Soft bubbles rising, like fizz in a glass.
+  bubbles,
+
+  /// A drawing board's grid drifting slowly, with crosshair marks.
+  blueprint,
+
+  /// Two projector beams swaying over drifting dust.
+  spotlight,
 }
 
 /// What stands next to the title of a main section ([ZenSectionBar]).
@@ -528,7 +556,12 @@ final class ZenLook extends ThemeExtension<ZenLook> {
       ZenBorderStyle.rivets ||
       ZenBorderStyle.filigree ||
       ZenBorderStyle.window ||
-      ZenBorderStyle.sheen => BorderSide(
+      ZenBorderStyle.sheen ||
+      ZenBorderStyle.stitch ||
+      ZenBorderStyle.leaf ||
+      ZenBorderStyle.scallop ||
+      ZenBorderStyle.notch ||
+      ZenBorderStyle.blueprint => BorderSide(
         color: tone != null
             ? tone.withValues(alpha: 0.35)
             : flat
@@ -584,6 +617,26 @@ final class ZenLook extends ThemeExtension<ZenLook> {
           zen.accentTertiary,
           zen.accent,
         ],
+      ),
+      ZenBorderStyle.stitch => ZenStitchBorder(
+        borderRadius: r,
+        color: tone ?? zen.outlineStrong,
+        thread: (tone ?? zen.accentSecondary).withValues(alpha: 0.85),
+      ),
+      ZenBorderStyle.leaf => ZenLeafBorder.of(
+        radius: this.radius(radius),
+        color: tone?.withValues(alpha: 0.6) ?? zen.outline,
+        vein: tone ?? zen.accent.withValues(alpha: 0.75),
+      ),
+      ZenBorderStyle.scallop => ZenScallopBorder(
+        color: tone?.withValues(alpha: 0.75) ?? zen.outlineStrong,
+      ),
+      ZenBorderStyle.notch => ZenNotchBorder(
+        borderRadius: r,
+        color: tone?.withValues(alpha: 0.8) ?? zen.outlineStrong,
+      ),
+      ZenBorderStyle.blueprint => ZenBlueprintBorder(
+        color: tone?.withValues(alpha: 0.85) ?? zen.outlineStrong,
       ),
       ZenBorderStyle.none ||
       ZenBorderStyle.hairline ||
@@ -796,6 +849,48 @@ final class ZenLook extends ThemeExtension<ZenLook> {
           zen.accent,
         ],
       ),
+      // A sheet keeps a plain top edge; the frames with a shape of their
+      // own come back on dialogs and menus.
+      ZenBorderStyle.stitch =>
+        topOnly
+            ? RoundedRectangleBorder(
+                borderRadius: r,
+                side: BorderSide(color: zen.outlineStrong),
+              )
+            : ZenStitchBorder(
+                borderRadius: r,
+                color: zen.outlineStrong,
+                thread: zen.accentSecondary.withValues(alpha: 0.85),
+              ),
+      ZenBorderStyle.leaf =>
+        topOnly
+            ? RoundedRectangleBorder(
+                borderRadius: r,
+                side: BorderSide(color: zen.outline),
+              )
+            : ZenLeafBorder.of(
+                radius: this.radius(radius),
+                color: zen.outline,
+                vein: zen.accent.withValues(alpha: 0.75),
+              ),
+      ZenBorderStyle.scallop =>
+        topOnly
+            ? RoundedRectangleBorder(
+                borderRadius: r,
+                side: BorderSide(color: zen.outlineStrong),
+              )
+            : ZenScallopBorder(color: zen.outlineStrong),
+      ZenBorderStyle.notch =>
+        topOnly
+            ? RoundedRectangleBorder(
+                borderRadius: r,
+                side: BorderSide(color: zen.outlineStrong),
+              )
+            : ZenNotchBorder(borderRadius: r, color: zen.outlineStrong),
+      ZenBorderStyle.blueprint =>
+        topOnly
+            ? RoundedRectangleBorder(side: BorderSide(color: zen.outlineStrong))
+            : ZenBlueprintBorder(color: zen.outlineStrong),
       ZenBorderStyle.glow => RoundedRectangleBorder(
         borderRadius: r,
         side: BorderSide(color: zen.accent.withValues(alpha: 0.45)),
@@ -830,6 +925,10 @@ final class ZenLook extends ThemeExtension<ZenLook> {
       ZenBorderStyle.window => zen.outlineStrong,
       ZenBorderStyle.filigree => zen.accent.withValues(alpha: 0.5),
       ZenBorderStyle.sheen => zen.accentSecondary.withValues(alpha: 0.5),
+      ZenBorderStyle.stitch ||
+      ZenBorderStyle.scallop ||
+      ZenBorderStyle.blueprint => zen.outlineStrong,
+      ZenBorderStyle.leaf || ZenBorderStyle.notch => zen.outline,
       ZenBorderStyle.doubleLine => zen.outline,
       ZenBorderStyle.none => zen.surfaceSunk,
       ZenBorderStyle.hairline => zen.outlineSoft,

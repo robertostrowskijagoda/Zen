@@ -28,8 +28,76 @@ push (section 6).
   (pyramid, dating, neighbors…);
 - `stats` (delivered / lost / waiting) and `trace`.
 
-A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
-`join`, `approve`, `approveAll`, `sync`, `duties`, `views`).
+Ready-made worlds:
+
+- `test/support/pyramid_world.dart` (`PyramidWorld.six()`, `join`, `approve`,
+  `approveAll`, `sync`, `duties`, `views`) for the pyramid;
+- `test/support/friends_world.dart` (`FriendsWorld`) for messaging, see
+  section 1.1.
+
+### 1.1 Simulated friends (`test/support/friends_world.dart`)
+
+`FriendsWorld` is a set of friends whose phones run the app's real
+messaging stack on a `SimNetwork`: each `FriendsPhone` has its own relay
+engine, social controller (`SocialHubController` over memory stores), reliable
+transport, notification service and files folder. A message goes the way it
+does in the app (controller, outbox, direct try, deposit in the recipient's
+mailboxes, acknowledgements), and what the network does to the datagrams
+(delay, loss, a split, a phone that is off) is the simulator's. There are no
+real timers: `advance(Duration(days: 1))` runs the engines' ticks on the
+virtual clock in about a second of real time, and the same `seed` gives the
+same run. A test of a dozen phones and a day of virtual time takes seconds.
+
+```dart
+final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'M1', 'M2']);
+await w.chooseMailboxes(w['B'], <FriendsPhone>[w['M1'], w['M2']]);
+
+await w.setOnline(w['B'], false);                 // B's phone is off
+await w.send(w['A'], w['B'], 'hello');            // as the send button does
+await w.advance(const Duration(seconds: 10));     // past the deposit delay
+await w.setOnline(w['A'], false);                 // the sender leaves too
+await w.setOnline(w['B'], true);                  // B returns, asks its mailboxes
+await w.assertDelivered(w['B'], 'hello', from: w['A'], within: const Duration(minutes: 1));
+expect(w['B'].messageNotices, hasLength(1));      // one notification
+```
+
+| Call | What it does |
+|---|---|
+| `FriendsWorld.create(names, devices:, allFriends:, seed:, dropRate:)` | phones (`SimDevice.android`, `desktop`, `iphone`: whether they announce that they stay online, as mailboxes of choice), friends with everyone by the real invitation and acceptance, mailbox announcements settled; torn down when the test ends |
+| `add(name)`, `befriend(a, b)`, `befriendAll`, `befriendChain` | more phones, a friend graph |
+| `chooseMailboxes(owner, [friends])`, `mailboxesOf(owner)` | the friends that hold the owner's mail (otherwise the engine picks up to six by itself) |
+| `setOnline(phone, on)` | switches a phone off (it sends and receives nothing; its engine stops) or on (the engine starts and asks its mailboxes) |
+| `lock(phone)`, `unlock(phone)` | the Android phone is locked: only the background service runs (`LockedReceiver` with a sealed inbox, `LockedMailbox` for friends' mail, one generic notice); unlock hands over the held mail and the inbox to the app |
+| `partition(a, b)`, `heal()`, `dropRate = 0.3` | a network split, loss |
+| `send(from, to, text)`, `createGroup`, `sendGroup` | what the user does; the network settles afterwards |
+| `settle()`, `advance(duration)`, `deliver()` | land what is in flight, move the virtual clock (engines tick every 5 s while something waits, 30 s otherwise) |
+| `assertDelivered(to, text, from:, within:)`, `assertNotDelivered`, `until(condition, within:)` | wait on the virtual clock; a failure prints what is still waiting where (`describe()`) |
+| `phone.textsFrom(x)`, `thread(x)`, `deliveryOf(x, text)`, `groupTexts` | what is in a phone's chats and the sender's delivery mark |
+| `phone.messageNotices`, `phone.shownMessageNotices` | every notification a phone posted for a message (the app's and the locked service's), and those still in the shade |
+| `phone.appTransport` | the phone's transport for other services (the recovery circle, the ledger): sends through its outbox and mailboxes, receives what its engine hands to the app |
+
+Not simulated: Yggdrasil itself (sessions, routing, real delays), presence
+pings, the platform (wake locks, alarms, radios) and the screens. With the app
+on the screen the social controller leaves messages for the chat screen, which
+this world has none of, so phones stay in the background. The frames a phone
+receives reach its engine and controller one at a time and are awaited
+(`SimNetwork` handlers are not nested), so the order inside a phone is the
+real order, but concurrency between the app and its background service is not
+tested here.
+
+`test/friends_world_test.dart` is the suite on top of it: a message to a
+friend who is offline held by phone mailboxes and delivered on return (also
+with the sender gone, with the sender gone before any mailbox had a copy,
+with one mailbox offline, with a late mailbox); group messages to online and
+offline members; exactly one notification per message across the direct and
+mailbox paths and in a burst; a locked phone (sealed inbox, one generic
+notice, locked mailboxes); a split and its healing; 30% loss; order in a
+conversation; an iPhone left out of the mailbox choice; files that come only
+from a holder that still has them; the conversations back from a friend after
+an account recovery; the same seed, the same run.
+`test/test_harness_gate_test.dart` reads the source to guard that the remote
+control of section 2 is started only in debug builds, on loopback, behind its
+header, and that nothing else brings it in.
 
 | File | What it checks |
 |---|---|
@@ -38,6 +106,8 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/pyramid_scenarios_test.dart` | delegations, immunity, dating ban, migration, absence, removal, advisory referendum and rules changed by the top, national section, paid mailbox, announcement, sponsorship, power key handover, cell chats |
 | `test/pyramid_security_test.dart`, `test/pyramid_attack_sim_test.dart` | attacks on the pyramid |
 | `test/dating_test.dart`, `test/neighbors_test.dart` | dating and neighbors on several phones |
+| `test/friends_world_test.dart` | messaging between simulated friends (section 1.1): mailboxes, offline and locked phones, groups, notifications, splits, loss, order, files, recovery |
+| `test/test_harness_gate_test.dart` | the remote control (section 2) starts only in debug builds, on loopback, behind its header |
 | `test/wire/golden_frames_test.dart` | protocol golden samples: frozen ping/pong frames (1.10.0 and 1.11), message, group_invite and a signed journal entry (fixed keys, fixed id). Never edit a sample to make a test pass — add a new one for a new format |
 | `test/version_exchange_test.dart` | version exchange (`ver` / `build` / `caps` in ping/pong), remembering friends' versions, snapshot compatibility (`peerVersions`), the "friends have a newer version" bar, forward-compatible journal spaces of unknown kinds (owner-only, 1000 entries per device journal) |
 | `test/feature_flags_test.dart` | feature flags (pyramid, wallet, dating; neighbors have none): defaults, `--dart-define` values, locking, hiding tabs |
@@ -51,6 +121,7 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/pyramid_root_test.dart`, `test/pyramid_original_found_test.dart`, `test/pyramid_rules_v2_test.dart`, `test/pyramid_v2_service_test.dart`, `test/pyramid_feed_test.dart`, `test/pyramid_gate_wallet_test.dart` | pinned genesis, founding the original pyramid with the power key, power-key handover, voting after 14 days or `known`, rules changed by the top with the 24 h delay, advisory referenda, cell chats, pyramid posts on the feed, gates paid in points |
 | `test/local_links_test.dart`, `test/native_stream_local_link_test.dart`, `test/runtime_lan_discovery_test.dart`, `test/offline_links_section_test.dart` | offline links with fake transports (settings, per-platform transports, secrets, status text) |
 | `test/alarm_kit_test.dart`, `test/nearby_background_test.dart`, `test/locked_background_inbox_test.dart`, `test/locked_signal_test.dart`, `test/neighbors_mailbox_door_test.dart` | the locked Android service: background key, alarm / nearby / door kits, sealed inbox, mailbox doors |
+| `test/relay_engine_test.dart` (group "phones as mailboxes while locked"), `test/locked_background_inbox_test.dart` (group "one notice per message"), `test/runtime_route_bridge_test.dart` | locked phones as friends' mailboxes (mail for an offline friend held and handed over with the sender gone, taken over by the app after unlock), one notice per message on a locked phone, where a tapped notification leads |
 | `test/encounters_test.dart`, `test/open_to_meet_test.dart`, `test/food_share_test.dart`, `test/graph_model_test.dart`, `test/dating_test.dart` | "Passed by", "open to meet", food sharing, graph modes and routes, dating intentions and filters |
 | `test/github_update_test.dart`, `test/sound_assets_test.dart` | GitHub release check and verified self-update, sound files |
 

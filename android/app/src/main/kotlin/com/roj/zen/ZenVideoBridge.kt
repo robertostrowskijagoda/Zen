@@ -55,11 +55,14 @@ object ZenVideoBridge {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val cancelled = AtomicBoolean(false)
+    /** The app engine's channel (progress goes there); main thread. */
     private var channel: MethodChannel? = null
+    private var channelEngine: FlutterEngine? = null
 
     fun register(engine: FlutterEngine, context: Context) {
         val c = MethodChannel(engine.dartExecutor.binaryMessenger, "zen/video")
         channel = c
+        channelEngine = engine
         c.setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAvailable" -> result.success(true)
@@ -124,6 +127,20 @@ object ZenVideoBridge {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /**
+     * [engine] is going away: its channel is dropped, and a compression it
+     * asked for stops (nobody is left to take the film).
+     */
+    fun unregister(engine: FlutterEngine) {
+        if (channelEngine !== engine) {
+            return
+        }
+        cancelled.set(true)
+        channel?.setMethodCallHandler(null)
+        channel = null
+        channelEngine = null
     }
 
     private var lastProgressAt = 0L

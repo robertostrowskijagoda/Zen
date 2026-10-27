@@ -106,7 +106,12 @@ class _CallCompactLayerState extends ConsumerState<CallCompactLayer> {
 /// hang up) and can be dragged; in Android's picture-in-picture the system
 /// draws the buttons.
 class CallCompactView extends ConsumerStatefulWidget {
-  const CallCompactView({required this.session, this.interactive, super.key});
+  const CallCompactView({
+    required this.session,
+    this.interactive,
+    this.now,
+    super.key,
+  });
 
   final CallSession session;
 
@@ -114,12 +119,17 @@ class CallCompactView extends ConsumerStatefulWidget {
   /// computer (Android's picture-in-picture has the system's).
   final bool? interactive;
 
+  /// The clock the call's length is read from; the system's by default.
+  final DateTime Function()? now;
+
   @override
   ConsumerState<CallCompactView> createState() => _CallCompactViewState();
 }
 
 class _CallCompactViewState extends ConsumerState<CallCompactView> {
   Timer? _ticker;
+
+  DateTime _now() => (widget.now ?? DateTime.now)();
 
   bool get _interactive =>
       widget.interactive ??
@@ -149,7 +159,7 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
       return t('Łączenie…');
     }
     final int seconds =
-        ((DateTime.now().millisecondsSinceEpoch - s.startedAtMillis) ~/ 1000)
+        ((_now().millisecondsSinceEpoch - s.startedAtMillis) ~/ 1000)
             .clamp(0, 86400);
     final String mm = (seconds ~/ 60).toString().padLeft(2, '0');
     final String ss = (seconds % 60).toString().padLeft(2, '0');

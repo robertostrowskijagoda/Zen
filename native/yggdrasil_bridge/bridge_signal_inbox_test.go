@@ -117,7 +117,7 @@ func TestSignalInboxDropsFromTheHeaviestSourceWhenFull(t *testing.T) {
 	inbox.push(signalMessage{From: "200:ffff::1", Payload: `{"type":"message"}`}, friend)
 	inbox.push(signalMessage{From: "200:ffff::1", Payload: `{"type":"message"}`}, friend)
 
-	sources := maxSignalInboxBytes/maxSignalPayloadBytes + 4
+	sources := signalInboxBytes/maxSignalPayloadBytes + 4
 	totalDropped := 0
 	for index := 0; index < sources; index++ {
 		address := fmt.Sprintf("200:%x::1", index+1)
@@ -129,8 +129,8 @@ func TestSignalInboxDropsFromTheHeaviestSourceWhenFull(t *testing.T) {
 	}
 
 	entries, totalBytes, _, _ := inbox.stats(friend)
-	if totalBytes > maxSignalInboxBytes {
-		t.Fatalf("inbox holds %d bytes, over the %d budget", totalBytes, maxSignalInboxBytes)
+	if totalBytes > signalInboxBytes {
+		t.Fatalf("inbox holds %d bytes, over the %d budget", totalBytes, signalInboxBytes)
 	}
 	if totalDropped == 0 {
 		t.Fatal("expected the budget to drop signals")

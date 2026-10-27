@@ -193,9 +193,14 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       _messageTimelineStore.load(key);
 
   /// A message from another device of this account (a copy of what it sent,
-  /// or its history): added to conversation [key] unless already there,
-  /// with its file when [bytes] are given — or [storedPath], a file of the
-  /// media vault written piece by piece (deleted here when not needed).
+  /// or its history) or from a copy of the account: added to conversation
+  /// [key] by its send time unless already there, with its file when
+  /// [bytes] are given — or [storedPath], a file of the media vault written
+  /// piece by piece (deleted here when not needed).
+  ///
+  /// Never counted as unread and never announced: it is history, not news.
+  /// A message here without its file takes [message]'s word on whether the
+  /// file can still come ([ChatMessage.attachmentUnavailable]).
   Future<void> importSyncedMessage(
     String key,
     ChatMessage message, {
@@ -229,12 +234,15 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
             attachmentBytes: null,
             fileName: stored.fileName,
             mimeType: stored.mimeType,
+            attachmentUnavailable: false,
           );
     bool unused = false;
     await _enqueueStateWork(() async {
       await _upsertTimelineMessage(
         peerAddress: key,
         messageId: message.id,
+        // Recovered or older history goes before what came since.
+        byTime: true,
         build: (ChatMessage? existing) {
           if (existing == null) {
             return withFile(message.copyWith(attachmentBytes: null));
@@ -248,6 +256,13 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
             return withFile(existing);
           }
           unused = stored != null;
+          if (missing &&
+              existing.type != ChatMessageType.text &&
+              existing.attachmentUnavailable != message.attachmentUnavailable) {
+            return existing.copyWith(
+              attachmentUnavailable: message.attachmentUnavailable,
+            );
+          }
           return existing;
         },
       );

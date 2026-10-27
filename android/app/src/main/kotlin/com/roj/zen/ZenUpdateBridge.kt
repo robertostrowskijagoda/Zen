@@ -28,6 +28,8 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Network updates on Android:
@@ -49,14 +51,25 @@ object ZenUpdateBridge {
     /** `${applicationId}.zenshare` in the manifest. */
     private const val SHARE_AUTHORITY_SUFFIX = ".zenshare"
     private const val APK_MIME = "application/vnd.android.package-archive"
+    private const val UPDATE_CHANNEL = "zen/app_update"
+    private const val SHARE_CHANNEL = "zen/share_app"
 
     private var statusReceiver: BroadcastReceiver? = null
     private var hotspot: WifiManager.LocalOnlyHotspotReservation? = null
 
+    private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * Copying a downloaded update (tens of megabytes) into the installer and
+     * parsing an APK for its signature: never on the main thread.
+     */
+    private val io = Executors.newSingleThreadExecutor { Thread(it, "zen-update") }
+
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         val messenger = engine.dartExecutor.binaryMessenger
         registerStatusReceiver(activity)
-        MethodChannel(messenger, "zen/app_update").setMethodCallHandler { call, result ->
+        val app = activity.applicationContext
+        MethodChannel(messenger, UPDATE_CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
                     "apkPath" -> {
@@ -89,8 +102,11 @@ object ZenUpdateBridge {
                         if (path == null || !File(path).exists()) {
                             result.error("install", "File missing", null)
                         } else {
-                            install(activity, File(path))
-                            result.success(activity.getString(R.string.update_installer_opened))
+                            val opened = activity.getString(R.string.update_installer_opened)
+                            offMain(call.method, result) {
+                                install(app, File(path))
+                                opened
+                            }
                         }
                     }
                     "signingCertificates" -> {
@@ -98,12 +114,12 @@ object ZenUpdateBridge {
                         // when the system verified its signature, those of
                         // the APK at `path` (SHA-256, lower-case hex).
                         val path = call.argument<String>("path")
-                        result.success(
+                        offMain(call.method, result) {
                             mapOf(
-                                "own" to ownCertificates(activity),
-                                "apk" to path?.let { archiveCertificates(activity, it) },
-                            ),
-                        )
+                                "own" to ownCertificates(app),
+                                "apk" to path?.let { archiveCertificates(app, it) },
+                            )
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -112,7 +128,7 @@ object ZenUpdateBridge {
                 result.error("app_update", error.message, null)
             }
         }
-        MethodChannel(messenger, "zen/share_app").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, SHARE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "startHotspot" -> startHotspot(activity, result)
                 "stopHotspot" -> {
@@ -127,6 +143,46 @@ object ZenUpdateBridge {
                 )
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /**
+     * [engine] is going away: its handlers (they hold the Activity) go with
+     * it. The install status receiver stays (it needs no Activity).
+     */
+    fun unregister(engine: FlutterEngine) {
+        val messenger = engine.dartExecutor.binaryMessenger
+        messenger.setMessageHandler(UPDATE_CHANNEL, null)
+        messenger.setMessageHandler(SHARE_CHANNEL, null)
+    }
+
+    /**
+     * Runs [work] on [io] and answers [result] on the main thread: with what
+     * it returns, or with the `app_update` error it threw, as when it ran
+     * right in the handler.
+     */
+    private fun offMain(method: String, result: MethodChannel.Result, work: () -> Any?) {
+        try {
+            io.execute {
+                var value: Any? = null
+                var failure: Exception? = null
+                try {
+                    value = work()
+                } catch (error: Exception) {
+                    Log.w(TAG, "app_update $method failed", error)
+                    failure = error
+                }
+                main.post {
+                    val error = failure
+                    if (error == null) {
+                        result.success(value)
+                    } else {
+                        result.error("app_update", error.message, null)
+                    }
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            result.error("app_update", error.message, null)
         }
     }
 
@@ -333,10 +389,11 @@ object ZenUpdateBridge {
         statusReceiver = receiver
     }
 
-    private fun install(activity: FragmentActivity, apk: File) {
-        val installer = activity.packageManager.packageInstaller
+    /** On [io]: the copy into the installer session takes a while. */
+    private fun install(context: Context, apk: File) {
+        val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-        params.setAppPackageName(activity.packageName)
+        params.setAppPackageName(context.packageName)
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
             apk.inputStream().use { input ->
@@ -345,13 +402,13 @@ object ZenUpdateBridge {
                     session.fsync(out)
                 }
             }
-            val intent = Intent(ACTION_STATUS).setPackage(activity.packageName)
+            val intent = Intent(ACTION_STATUS).setPackage(context.packageName)
             var flags = PendingIntent.FLAG_UPDATE_CURRENT
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // The installer fills in the status extras.
                 flags = flags or PendingIntent.FLAG_MUTABLE
             }
-            val pending = PendingIntent.getBroadcast(activity, sessionId, intent, flags)
+            val pending = PendingIntent.getBroadcast(context, sessionId, intent, flags)
             session.commit(pending.intentSender)
         }
     }

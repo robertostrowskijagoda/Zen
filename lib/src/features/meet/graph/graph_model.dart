@@ -657,13 +657,31 @@ List<GraphNode> searchGraph(
 /// A pyramid member as this person (a member) sees them.
 @immutable
 final class PyramidMark {
-  const PyramidMark({required this.level, this.line = false});
+  const PyramidMark({
+    required this.level,
+    this.line = false,
+    this.cellmate = false,
+    this.met = false,
+  });
 
   /// Their level in the tree (0 = the top).
   final int level;
 
   /// Above or below this person in the same branch ("Twoja linia").
   final bool line;
+
+  /// In a cell with this person (its head, the other member, or one of the
+  /// two under this person).
+  final bool cellmate;
+
+  /// One of the two confirmed that they know each other ("Poznaliśmy
+  /// się" in the pyramid).
+  final bool met;
+
+  /// In a cell together without having confirmed it: the line between them
+  /// is dashed, and until they do (or 14 days pass) the newer one's vote
+  /// does not count in that cell.
+  bool get unmetCellmate => cellmate && !met;
 }
 
 /// What this phone already knows about the people on the graph. Every

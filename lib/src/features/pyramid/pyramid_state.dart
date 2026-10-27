@@ -95,6 +95,13 @@ int pyrAge(int birthYear, int atMs) =>
 /// each other ([PyrT.known]).
 const int kPyrVoteAfterMs = 14 * 24 * 3600 * 1000;
 
+/// A place whose head left (or was removed, or declared absent) stays free
+/// this long: either of the two people right under it may take it
+/// ([PyrT.fill]). Then the one of them longer on their level moves up by
+/// itself, and their old place is free the same way
+/// ([PyramidState.autoFillOf]).
+const int kPyrAutoFillMs = 7 * 24 * 3600 * 1000;
+
 /// Somebody who moved up a level moves up again at the earliest this long
 /// after: a swap, a vote, taking a free place above or moving into a cell
 /// one level higher — never more than one level at a time.
@@ -677,6 +684,17 @@ final class PyramidState {
 
   /// Positions without anybody, whose branch below is still there.
   final Set<String> vacant = <String>{};
+
+  /// Since when each place of [vacant] is free ([kPyrAutoFillMs]).
+  final Map<String, int> vacantSince = <String, int>{};
+
+  /// Member → the people they share a cell with ([cellmates]) → since
+  /// when: a vote in a cell counts once its member knows somebody there or
+  /// after [kPyrVoteAfterMs] together ([votesInCell]).
+  final Map<String, Map<String, int>> _together = <String, Map<String, int>>{};
+
+  /// Members whose place changed since [_noteCells] last ran.
+  final Set<String> _moved = <String>{};
   final Map<String, PyrMember> members = <String, PyrMember>{};
   final Map<String, int> lastSeen = <String, int>{};
 
@@ -1145,7 +1163,7 @@ final class PyramidState {
       // their time stands; a branch's sum dated after it cannot void it
       // (one slow or stubborn cell would block the count for good).
       final bool timeBound = best.at >= r.end + kPyrTallyGraceMs;
-      for (final String c in PyrPath.children(root)) {
+      for (final String c in reportsTo(root)) {
         final PyrTally? kid = latestTally(r, c);
         if (kid != null &&
             !best.kids.contains(kid.id) &&
@@ -1217,12 +1235,149 @@ final class PyramidState {
     }.where((String k) => k != key).toList();
   }
 
-  /// The members of the cell at [cell] who vote at [at] ([canVote]): who
-  /// swaps its head and who is in the ring of its vote.
+  /// Whether [a] and [b] said they know each other ([PyrT.known], either
+  /// of them) by [at].
+  bool metWith(String a, String b, int at) =>
+      (knownBy[a]?[b] ?? at + 1) <= at || (knownBy[b]?[a] ?? at + 1) <= at;
+
+  /// Since when [a] and [b] share a cell (null: they do not).
+  int? togetherSince(String a, String b) => _together[a]?[b];
+
+  /// Whether [key]'s vote counts in the cell at [cell] at [at]: it votes at
+  /// all ([canVote]), and it knows somebody of that cell ([metWith]) or has
+  /// shared it with somebody for [kPyrVoteAfterMs] — the newcomer's rule
+  /// for everybody who comes into a cell of people they do not know (a
+  /// rise, a free place taken, a move). Alone in it, it counts.
+  bool votesInCell(String key, String cell, int at) {
+    if (!canVote(key, at)) {
+      return false;
+    }
+    final List<String> others = cellOf(
+      cell,
+    ).where((String k) => k != key).toList();
+    if (others.isEmpty) {
+      return true;
+    }
+    for (final String o in others) {
+      final int? since = _together[key]?[o];
+      if (metWith(key, o, at) ||
+          (since != null && at - since >= kPyrVoteAfterMs)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// When [key]'s vote starts to count in the cell at [cell] by time alone
+  /// ([votesInCell]); null when it counts already or never will by time.
+  int? cellVoteFrom(String key, String cell, int at) {
+    if (votesInCell(key, cell, at) || !canVote(key, at)) {
+      return null;
+    }
+    int? first;
+    for (final String o in cellOf(cell)) {
+      final int? since = o == key ? null : _together[key]?[o];
+      if (since != null && (first == null || since < first)) {
+        first = since;
+      }
+    }
+    return first == null ? null : first + kPyrVoteAfterMs;
+  }
+
+  /// The members of the cell at [cell] whose vote counts at [at]
+  /// ([votesInCell]): who swaps its head and who is in the ring of its vote.
   List<String> cellVoters(String cell, int at) => <String>[
     for (final String k in cellOf(cell))
-      if (canVote(k, at)) k,
+      if (votesInCell(k, cell, at)) k,
   ];
+
+  /// The nearest head above [path]: the first place up the line with
+  /// somebody in it — a free place is skipped, so a branch under it is
+  /// never cut off. Null at the top.
+  String? headAbove(String path) {
+    String q = path;
+    while (q.isNotEmpty) {
+      q = PyrPath.parent(q);
+      if (occupant[q] != null) {
+        return q;
+      }
+    }
+    return null;
+  }
+
+  /// The places whose nearest head above is [path] ([headAbove]): those
+  /// right under it, and under a free one the places under that, left
+  /// before right. Referendum votes and branch sums go to [path] from them.
+  List<String> reportsTo(String path) {
+    final List<String> out = <String>[];
+    void walk(String p) {
+      for (final String c in PyrPath.children(p)) {
+        if (occupant[c] != null) {
+          out.add(c);
+        } else if (vacant.contains(c)) {
+          walk(c);
+        }
+      }
+    }
+
+    walk(path);
+    return out;
+  }
+
+  /// When the free place [path] fills by itself, and who moves up into it,
+  /// as things stand: [kPyrAutoFillMs] after it became free, the person
+  /// right under it who has been on their level longer (then who joined
+  /// earlier, then the left place) — of those who may move up by then
+  /// ([kPyrRiseCooldownMs]); when neither may yet, once the first of them
+  /// may; never before [notBefore]. Null when nobody is right under it (a
+  /// free place below fills first) or [path] is not free.
+  (int, String)? autoFillOf(String path, {int notBefore = 0}) {
+    final int? since = vacantSince[path];
+    if (since == null || !vacant.contains(path)) {
+      return null;
+    }
+    final List<String> kids = <String>[
+      for (final String c in PyrPath.children(path))
+        if (occupant[c] != null) occupant[c]!,
+    ];
+    if (kids.isEmpty) {
+      return null;
+    }
+    final int at = max(
+      max(since + kPyrAutoFillMs, notBefore),
+      kids.map(nextRiseAt).reduce(min),
+    );
+    final List<String> ready =
+        kids.where((String k) => _canRise(k, at)).toList()
+          ..sort((String a, String b) {
+            final int byLevel = levelSince(a).compareTo(levelSince(b));
+            if (byLevel != 0) {
+              return byLevel;
+            }
+            final int byJoin = (members[a]?.joinedAt ?? 0).compareTo(
+              members[b]?.joinedAt ?? 0,
+            );
+            return byJoin != 0
+                ? byJoin
+                : (position[a] ?? '').compareTo(position[b] ?? '');
+          });
+    return (at, ready.first);
+  }
+
+  /// Since when [key] has been on the level it is on now, without a break
+  /// (a move along the same level keeps it).
+  int levelSince(String key) {
+    final List<List<int>> h = _levels[key] ?? const <List<int>>[];
+    if (h.isEmpty) {
+      return 0;
+    }
+    final int level = h.last[1];
+    int since = h.last[0];
+    for (int i = h.length - 1; i >= 0 && h[i][1] == level; i--) {
+      since = h[i][0];
+    }
+    return since;
+  }
 
   /// Whether the head at the top still waits for the power key.
   bool get handoverDue => head != null && head != powerHead;
@@ -1447,6 +1602,7 @@ final class PyramidState {
     }
     _noteHead(at);
     _noteTreasurers(at);
+    _noteCells(at);
     if (why == null) {
       if (proposal != null) {
         _proposalsDone.add(proposal);
@@ -1547,13 +1703,90 @@ final class PyramidState {
     return late ? witnessed : const <String, Set<String>>{};
   }
 
-  /// Things that happen by time: elections end, emissions and new rules
-  /// take effect.
+  /// Things that happen by time: free places fill ([autoFillOf]),
+  /// elections end, emissions and new rules take effect. A free place
+  /// fills in order with the rest: what happened by time before it first.
   void _timedUpTo(int upTo) {
     if (rulesTooNew != null) {
       // Stopped at rules this build does not know: time moves nothing.
       return;
     }
+    final int clock = _clock;
+    while (true) {
+      final (String, int, String)? next = _nextAutoFill(upTo);
+      if (next == null) {
+        break;
+      }
+      _timedRest(next.$2);
+      // An election that ended before it may have changed the place.
+      if (_nextAutoFill(upTo) == next) {
+        _autoFill(next.$1, next.$2, next.$3);
+      }
+    }
+    _timedRest(upTo);
+    _clock = clock;
+    _timedTo = max(_timedTo, upTo);
+  }
+
+  /// How far [_timedUpTo] has moved time: nothing by time happens before
+  /// it any more (a place a record made ready to fill, past its time,
+  /// fills from that record on, not back then).
+  int _timedTo = 0;
+
+  /// The free place that fills first by [upTo] ([autoFillOf]): the place,
+  /// when, who. The earliest first, then the higher place, then the left.
+  (String, int, String)? _nextAutoFill(int upTo) {
+    (String, int, String)? best;
+    for (final String v in vacant) {
+      final (int, String)? f = autoFillOf(v, notBefore: _timedTo);
+      if (f == null || f.$1 > upTo) {
+        continue;
+      }
+      final int at = f.$1;
+      if (best == null ||
+          at < best.$2 ||
+          (at == best.$2 &&
+              (v.length < best.$1.length ||
+                  (v.length == best.$1.length && v.compareTo(best.$1) < 0)))) {
+        best = (v, at, f.$2);
+      }
+    }
+    return best;
+  }
+
+  /// [up] moves up into the free place [path] by time, at [at]: as a
+  /// [PyrT.fill] would, and its old place is free from [at] on (with a
+  /// window of its own, [kPyrAutoFillMs], for the people under it).
+  void _autoFill(String path, int at, String up) {
+    final String upPath = position[up]!;
+    _clock = at;
+    _cause = 'auto|$path|$at';
+    _causeAt = at;
+    _vacate(upPath);
+    _place(up, path, _cause);
+    lastRise[up] = at;
+    if (path.isEmpty) {
+      _termChange(at);
+    }
+    _lastEvent = max(_lastEvent, at);
+    _noteHead(at);
+    _noteTreasurers(at);
+    _noteCells(at);
+    history.add(
+      PyrHistory(
+        at,
+        t(
+          '{name} zajął(-ęła) wolne miejsce wyżej samoczynnie, '
+          'po 7 dniach',
+          {'name': _name(up)},
+        ),
+        _cause,
+      ),
+    );
+  }
+
+  /// Elections end, emissions and new rules take effect, up to [upTo].
+  void _timedRest(int upTo) {
     final List<PyrElection> due =
         elections.values
             .where((PyrElection e) => !e.closed && e.deadline <= upTo)
@@ -1691,7 +1924,7 @@ final class PyramidState {
   void _place(String key, String path, String recordId) {
     occupant[path] = key;
     position[key] = path;
-    vacant.remove(path);
+    _dropVacant(path);
     _noteLevel(key);
   }
 
@@ -1699,9 +1932,54 @@ final class PyramidState {
     final String? p = position[key];
     (_levels[key] ??= <List<int>>[]).add(<int>[_clock, p?.length ?? -1]);
     moves.add(PyrMove(_causeAt, _cause, key, p));
+    _moved.add(key);
     _treasurersDirty = true;
     // The tree changed: national sections are worked out again.
     _natLead.clear();
+  }
+
+  /// [path] is free from now on ([vacantSince]).
+  void _addVacant(String path) {
+    if (vacant.add(path)) {
+      vacantSince[path] = _clock;
+    }
+  }
+
+  void _dropVacant(String path) {
+    vacant.remove(path);
+    vacantSince.remove(path);
+  }
+
+  /// Notes who shares a cell with whom since [at], for those who moved
+  /// ([_together]): a pair that stays together keeps its time (a branch
+  /// moved as a whole), a new pair starts at [at], a parted one is gone.
+  void _noteCells(int at) {
+    if (_moved.isEmpty) {
+      return;
+    }
+    final List<String> moved = _moved.toList()..sort();
+    _moved.clear();
+    for (final String k in moved) {
+      final Set<String> now = position.containsKey(k)
+          ? cellmates(k).toSet()
+          : const <String>{};
+      final Map<String, int> had = _together[k] ??= <String, int>{};
+      for (final String o in had.keys.toList()) {
+        if (!now.contains(o)) {
+          had.remove(o);
+          _together[o]?.remove(k);
+        }
+      }
+      for (final String o in now) {
+        if (!had.containsKey(o)) {
+          had[o] = at;
+          (_together[o] ??= <String, int>{})[k] = at;
+        }
+      }
+      if (had.isEmpty) {
+        _together.remove(k);
+      }
+    }
   }
 
   /// Whether [key] had level [lvl] at [at] or during the week before.
@@ -1727,16 +2005,16 @@ final class PyramidState {
       (String p) => p.length > path.length && p.startsWith(path),
     );
     if (hasBelow) {
-      vacant.add(path);
+      _addVacant(path);
     } else {
-      vacant.remove(path);
+      _dropVacant(path);
       // Empty vacant positions above disappear too.
       String q = path;
       while (q.isNotEmpty) {
         q = PyrPath.parent(q);
         if (vacant.contains(q) &&
             !occupant.keys.any((String p) => p.startsWith(q))) {
-          vacant.remove(q);
+          _dropVacant(q);
         } else {
           break;
         }
@@ -1751,28 +2029,32 @@ final class PyramidState {
       for (final MapEntry<String, String> e in occupant.entries)
         if (PyrPath.within(e.key, from)) e.key: e.value,
     };
-    final List<String> free = vacant
-        .where((String v) => PyrPath.within(v, from))
-        .toList();
+    // A free place moves with its branch and keeps its time.
+    final Map<String, int> free = <String, int>{
+      for (final String v in vacant)
+        if (PyrPath.within(v, from)) v: vacantSince[v] ?? _clock,
+    };
     for (final String p in people.keys) {
       occupant.remove(p);
     }
-    vacant.removeAll(free);
+    free.keys.forEach(_dropVacant);
     for (final MapEntry<String, String> e in people.entries) {
       final String np = '$to${e.key.substring(from.length)}';
       occupant[np] = e.value;
       position[e.value] = np;
       _noteLevel(e.value);
     }
-    for (final String v in free) {
-      vacant.add('$to${v.substring(from.length)}');
-    }
+    free.forEach((String v, int since) {
+      final String np = '$to${v.substring(from.length)}';
+      vacant.add(np);
+      vacantSince[np] = since;
+    });
     String q = from;
     while (q.isNotEmpty) {
       q = PyrPath.parent(q);
       if (vacant.contains(q) &&
           !occupant.keys.any((String p) => p.startsWith(q))) {
-        vacant.remove(q);
+        _dropVacant(q);
       } else {
         break;
       }
@@ -3199,7 +3481,8 @@ final class PyramidState {
   }
 
   /// [r]'s signer confirms knowing 'k', somebody of their own cell: from
-  /// then on 'k' votes ([canVote]). Only a member who votes confirms, so two
+  /// then on 'k' votes ([canVote]), and both votes count in a cell they
+  /// share ([votesInCell]). Only a member who votes confirms, so two
   /// newcomers cannot give each other the vote.
   String? _known(PyramidRecord r) {
     final String k = r.signers.length == 1 ? r.signers.first : '';
@@ -3633,6 +3916,7 @@ final class PyramidState {
     }
     _noteHead(at);
     _noteTreasurers(at);
+    _noteCells(at);
     history.add(
       PyrHistory(
         at,
@@ -3949,21 +4233,19 @@ final class PyramidState {
   }
 
   /// Whether the cell head at [p] holds the vote of the root of [root]'s
-  /// count: the root's first child (the root passes its vote down), or the
-  /// root itself when nobody is under it.
+  /// count: the first place reporting to the root ([reportsTo]; the root
+  /// passes its vote down), or the root itself when nobody is under it.
   bool _holdsRootVote(String p, String root) {
-    final List<String> kids = <String>[
-      for (final String c in PyrPath.children(root))
-        if (occupant[c] != null) c,
-    ];
+    final List<String> kids = reportsTo(root);
     return kids.isEmpty ? p == root : p == kids.first;
   }
 
   /// A cell head's sum of its branch. Checkable against the sums
   /// below: only after the end; whole numbers, none above the branch; the
-  /// newest sum of every branch right below (a branch with people under it
-  /// may be missing only after [kPyrTallyGraceMs]); each counted once; at
-  /// most one vote more per direct member with a vote at the end
+  /// newest sum of every branch reporting to it ([reportsTo]: right below,
+  /// or below a free place under it; one with people under it may be
+  /// missing only after [kPyrTallyGraceMs]); each counted once; at most one
+  /// vote more per member reporting to it with a vote at the end
   /// ([canVote]), and the root's own vote where it was passed.
   String? _tally(PyramidRecord r) {
     final PyrReferendum? ref = referenda[r.str('ref')];
@@ -3986,7 +4268,9 @@ final class PyramidState {
     final List<String> kidIds = r.body['kids'] is List
         ? (r.body['kids'] as List).whereType<String>().toList()
         : const <String>[];
-    if (kidIds.length > 2 || kidIds.toSet().length != kidIds.length) {
+    final List<String> below = reportsTo(p);
+    if (kidIds.length > max(2, below.length) ||
+        kidIds.toSet().length != kidIds.length) {
       return 'powtórzona suma gałęzi';
     }
     final int cap = branchSize(p) + 1;
@@ -4004,8 +4288,7 @@ final class PyramidState {
           .where((PyrTally x) => x.id == kid)
           .firstOrNull;
       if (t == null ||
-          PyrPath.parent(t.path) != p ||
-          t.path == p ||
+          !below.contains(t.path) ||
           !kidPaths.add(t.path) ||
           t.counts.length != sum.length) {
         return 'suma dziecka nie pasuje';
@@ -4014,25 +4297,21 @@ final class PyramidState {
         sum[i] += t.counts[i];
       }
     }
-    for (final String c in PyrPath.children(p)) {
-      if (occupant[c] == null || kidPaths.contains(c)) {
+    for (final String c in below) {
+      if (kidPaths.contains(c)) {
         continue;
       }
       if (latestTally(ref, c) != null) {
         return 'brak najnowszej sumy gałęzi niżej';
       }
-      final bool hasBranch = PyrPath.children(
-        c,
-      ).any((String g) => occupant[g] != null);
+      final bool hasBranch = reportsTo(c).isNotEmpty;
       if (hasBranch && r.at < ref.end + kPyrTallyGraceMs) {
         return 'czeka na sumę gałęzi niżej';
       }
     }
     // Only members met in person by 2 others vote.
     bool votes(String? key) => key != null && canVote(key, ref.end);
-    final int directs = PyrPath.children(
-      p,
-    ).where((String c) => votes(occupant[c])).length;
+    final int directs = below.where((String c) => votes(occupant[c])).length;
     final int allowance =
         directs +
         (r.body['extra'] == true &&

@@ -49,7 +49,7 @@ everywhere alike. There is no server that could be bribed or shut down.
 3. The member who referred them, the newcomer, and the head of the chosen
    cell sign.
 4. The newcomer **votes** after 14 days, or as soon as a voting member of
-   their cells confirms "we've met".
+   their cells confirms "we've met" (see also [New in a cell](#new-in-a-cell)).
 
 **Not a member yet?** The Pyramid and Wallet tabs stay on the rail and
 explain *How to join*: only through a friend who is already a member. Meet;
@@ -74,6 +74,49 @@ cell is allowed to the same level, lower, or one level up; with your whole
 branch, only to the same level or lower. Someone who left, was removed or
 was declared absent comes back at most to the level they left.
 
+## When a head leaves
+
+A branch is never cut off. When the head of a cell leaves, is removed or is
+declared absent, their place stays **free** and everyone under it stays
+where they are:
+
+- For **7 days** either of the two people directly under the free place
+  may take it (taking a free place directly above you, as above).
+- After 7 days, if nobody did, the place is taken **automatically** by the
+  one of the two who has been on their level longer (on a tie, the one who
+  joined earlier, then the left place). If that person rose less than 7
+  days ago, the other one moves up instead; if neither may rise yet, the
+  place waits until the first of them may.
+- The promoted person's old place is now free in turn, and the same rule
+  applies beneath it with a **new 7-day window**: the people under it get
+  their own week to decide, just as their head did. So a hole moves down
+  one level per week at most, never several levels at once.
+- Until the place is filled, **referendum votes and branch totals skip the
+  hole**: the people under it send their votes to the nearest head above,
+  and that head sums their branches as if they were directly below.
+
+Nobody signs the automatic promotion. Every phone works it out from the
+same records and the same clock rule (the time the place became free plus
+7 days), so all phones agree on who moved up and when. A record signed
+after that moment is applied after the promotion everywhere.
+
+## New in a cell
+
+People who do not know each other can end up in one cell: after a
+promotion, a free place taken, or a move to another cell. The newcomer
+rule then applies to everyone:
+
+- Your vote in a cell (a swap, a cell vote, the cell's voting cards) counts
+  only once you and someone in that cell have confirmed **"We've met"**
+  (either of you), or after you have shared the cell with someone for
+  **14 days**.
+- Your referendum vote does not change: it follows the newcomer rule for
+  the pyramid as a whole (14 days after joining, or "we've met").
+- On the graph (Pyramid mode), the line to a member of your cell whom you
+  have not confirmed as known is **dashed**; it turns solid once either of
+  you confirms. The cell list shows "vote in the cell from" with the date
+  for someone still waiting.
+
 ## Cell votes
 
 Anyone with a vote in a cell can ask, anonymously, for a vote on who should
@@ -95,8 +138,9 @@ be the head.
 
 Only the top (2 of 3) calls a referendum: a question with 2 to 6 options,
 for the whole pyramid, one branch or one nationality. It is **advisory**.
-Your vote goes only to the head of your cell; every head signs the total of
-their branch, and the totals are checked against the size of each branch.
+Your vote goes only to the head of your cell (when that place is free, to
+the nearest head above it); every head signs the total of their branch, and
+the totals are checked against the size of each branch.
 
 ## Rules and their hard limits
 

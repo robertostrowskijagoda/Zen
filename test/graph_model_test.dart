@@ -333,6 +333,48 @@ void main() {
     );
   });
 
+  test('pyramid: a cellmate not yet confirmed as known gets a dashed line, '
+      'one confirmed or outside the cell a solid one', () {
+    final List<GraphNode> nodes = <GraphNode>[
+      GraphNode(address: _ania, name: 'Ania', ring: 2),
+      GraphNode(address: _bartek, name: 'Bartek', ring: 2),
+      GraphNode(address: _celina, name: 'Celina', ring: 2),
+      GraphNode(address: _zenon, name: 'Zenon', ring: 2),
+    ];
+    final GraphScene scene = _scene(nodes);
+    final Map<String, PyramidMark> marks = <String, PyramidMark>{
+      // In this person's cell, nobody said "Poznaliśmy się" yet.
+      _ania: const PyramidMark(level: 2, cellmate: true),
+      // In the cell, confirmed.
+      _bartek: const PyramidMark(level: 2, cellmate: true, met: true),
+      // A member elsewhere in the pyramid.
+      _celina: const PyramidMark(level: 4),
+    };
+    expect(marks[_ania]!.unmetCellmate, isTrue);
+    expect(marks[_bartek]!.unmetCellmate, isFalse);
+    expect(marks[_celina]!.unmetCellmate, isFalse);
+    final GraphLook look = graphLook(
+      scene: scene,
+      mode: GraphMode.pyramid,
+      facts: GraphFacts(),
+      zen: zen,
+      pyramid: marks,
+    );
+    expect(
+      <bool>[for (final EdgeLook e in look.edges) e.dashed],
+      <bool>[true, false, false, false],
+    );
+    // Only the pyramid mode draws it so.
+    final GraphLook friends = graphLook(
+      scene: scene,
+      mode: GraphMode.friends,
+      facts: GraphFacts(),
+      zen: zen,
+      pyramid: marks,
+    );
+    expect(friends.edges.any((EdgeLook e) => e.dashed), isFalse);
+  });
+
   test('layout: everyone gets a place, crowded rings spread, and the mode '
       'bands move people', () {
     final List<GraphNode> nodes = <GraphNode>[

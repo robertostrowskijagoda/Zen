@@ -24,6 +24,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -34,6 +35,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import androidx.fragment.app.FragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -68,13 +70,14 @@ import javax.crypto.spec.SecretKeySpec
  *    changing addresses cannot crowd it out.
  *
  * Advertising is low power, so it can stay on all the time; scanning costs
- * more and runs only while someone asks for it: fully while "W pobliżu" is
- * open, otherwise in short low-power windows (a few seconds every five
- * minutes, decided in Dart from the battery, battery saver and Doze that
- * [state] reports), with results batched in the controller where the
- * phone can, and flushed when the window ends. When Bluetooth is switched
- * off and on again, advertising and scanning start again by themselves
- * and every engine hears a "bluetooth" event.
+ * more and runs only while someone asks for it: while "W pobliżu" is open,
+ * otherwise in short looks (a few seconds every few minutes, decided in
+ * Dart from the battery, battery saver and Doze that [state] reports).
+ * Results are never batched: each one comes the moment it is heard. When
+ * advertising fails to start, it is tried again a few times; a failed scan
+ * is tried again while it is still wanted. When Bluetooth is switched off
+ * and on again, advertising and scanning start again by themselves and
+ * every engine hears a "bluetooth" event.
  *
  * The radio is shared by every Flutter engine that uses it: the app's (with
  * its Activity) and the background service's (no Activity, so it can only
@@ -83,6 +86,13 @@ import javax.crypto.spec.SecretKeySpec
  * the background service while it takes them (it does only while it runs
  * the node, i.e. while the app is locked or closed — on screen behind its
  * lock screen the app could not answer them either), otherwise the app.
+ *
+ * Everything runs on the main thread except the token's change of a
+ * schedule and advertising tried again after a failure, which run on
+ * [ZenPower]'s wake task thread (Bluetooth calls
+ * can block, and a blocked main thread holds up the wake broadcast); the
+ * radio's state is changed only under [radio], and [clients] only on the
+ * main thread.
  */
 object ZenNearbyBridge {
     private const val TAG = "ZenNearby"
@@ -92,7 +102,10 @@ object ZenNearbyBridge {
     private val SERVICE: UUID = UUID.fromString("5a454e00-6e65-6172-6279-000000000001")
     private val WAVE: UUID = UUID.fromString("5a454e00-6e65-6172-6279-000000000002")
 
-    /** One engine using the radio. Touched on the main thread only. */
+    /**
+     * One engine using the radio. Changed on the main thread under [radio];
+     * the token's change reads it under [radio] from the wake task thread.
+     */
     private class Client(val engine: FlutterEngine, val activity: FragmentActivity?) {
         val background: Boolean
             get() = activity == null
@@ -109,7 +122,6 @@ object ZenNearbyBridge {
         var scheduleStart = 0L
         var tokenSetAt = 0L
         var scanning = false
-        var lowPower = false
 
         /** The background service answers alarm waves while the app is away. */
         var alarmReceiver = false
@@ -121,18 +133,45 @@ object ZenNearbyBridge {
         var alarmKeys: List<String> = emptyList()
     }
 
+    /**
+     * Guards the radio: the clients' wishes, advertising, scanning, the GATT
+     * server and the token's change. Held around every Bluetooth call that
+     * starts or stops them, on whichever thread.
+     */
+    private val radio = Any()
+
+    /** Added and removed on the main thread only (under [radio]). */
     private val clients = ArrayList<Client>()
     private var appContext: Context? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var advertisedToken: ByteArray? = null
     private var scanCallback: ScanCallback? = null
-    private var scanLowPower = false
 
-    /** Whether the low-power scan running now batches its results. */
-    private var scanBatched = false
+    /**
+     * Advertising failed to start this many times in a row (under [radio]);
+     * back to 0 once it starts, with a new token from Dart or a new slot.
+     */
+    private var advertiseFailures = 0
+    private var advertiseRetryPending = false
 
-    /** How long a low-power scan may hold results back (batched). */
-    private const val LOW_POWER_REPORT_DELAY_MS = 3_000L
+    /**
+     * The alarm that tries advertising again, and how long it waits: a
+     * little longer each time, at most [MAX_ADVERTISE_RETRIES] times (the
+     * phone is not left invisible until the next slot, nor woken for ever
+     * when advertising cannot work here).
+     */
+    private const val ADVERTISE_RETRY_ALARM = "nearby-advertise-retry"
+    private const val ADVERTISE_RETRY_MS = 30_000L
+    private const val MAX_ADVERTISE_RETRIES = 4
+
+    /**
+     * A scan failed this many times in a row (under [radio]); back to 0
+     * when Dart asks for a scan again. A wanted scan is tried again after
+     * [SCAN_RETRY_MS], at most [MAX_SCAN_RETRIES] times.
+     */
+    private var scanFailures = 0
+    private const val SCAN_RETRY_MS = 3_000L
+    private const val MAX_SCAN_RETRIES = 2
     private var gattServer: BluetoothGattServer? = null
 
     /** Prepared (long) writes per phone; touched on binder threads. */
@@ -143,8 +182,9 @@ object ZenNearbyBridge {
     /** Bluetooth on/off, registered once per process. */
     private var stateReceiver: BroadcastReceiver? = null
 
-    /** The next token change of a schedule (main thread). */
+    /** The next token change of a schedule, and its slot boundary (under [radio]). */
     private var rotation: Runnable? = null
+    private var rotationAt = 0L
 
     /** When waves came (main thread): per phone and in all. */
     private val waveTimes = HashMap<String, ArrayDeque<Long>>()
@@ -214,26 +254,30 @@ object ZenNearbyBridge {
 
     /** [engine] is going away: whatever only it wanted stops. */
     fun unregister(engine: FlutterEngine) {
-        if (!clients.removeAll { it.engine === engine }) {
-            return
-        }
-        tokenKeysEpoch = Long.MIN_VALUE
-        val context = appContext ?: return
-        try {
-            applyAdvertising(context)
-            applyScan(context)
-        } catch (error: Exception) {
-            Log.w(TAG, "Releasing the radio failed", error)
+        synchronized(radio) {
+            if (!clients.removeAll { it.engine === engine }) {
+                return
+            }
+            tokenKeysEpoch = Long.MIN_VALUE
+            val context = appContext ?: return
+            try {
+                applyAdvertising(context)
+                applyScan(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Releasing the radio failed", error)
+            }
         }
     }
 
     private fun attach(engine: FlutterEngine, context: Context, activity: FragmentActivity?) {
         appContext = context
         watchBluetoothState(context)
-        clients.removeAll { it.engine === engine }
-        tokenKeysEpoch = Long.MIN_VALUE
         val client = Client(engine, activity)
-        clients.add(client)
+        synchronized(radio) {
+            clients.removeAll { it.engine === engine }
+            clients.add(client)
+        }
+        tokenKeysEpoch = Long.MIN_VALUE
         val messenger = engine.dartExecutor.binaryMessenger
         EventChannel(messenger, "zen/nearby/events").setStreamHandler(
             object : EventChannel.StreamHandler {
@@ -263,10 +307,14 @@ object ZenNearbyBridge {
                         if (token == null) {
                             result.success(false)
                         } else {
-                            client.token = token
-                            client.schedule = null
-                            client.tokenSetAt = SystemClock.elapsedRealtime()
-                            result.success(applyAdvertising(context))
+                            val shown = synchronized(radio) {
+                                client.token = token
+                                client.schedule = null
+                                client.tokenSetAt = SystemClock.elapsedRealtime()
+                                advertiseFailures = 0
+                                applyAdvertising(context)
+                            }
+                            result.success(shown)
                         }
                     }
                     "startAdvertisingSchedule" -> {
@@ -282,31 +330,44 @@ object ZenNearbyBridge {
                         } else {
                             // Kept also while Bluetooth is off: shown once
                             // it is back on.
-                            client.token = null
-                            client.schedule = adverts.copyOf()
-                            client.scheduleStart = start
-                            client.tokenSetAt = SystemClock.elapsedRealtime()
-                            result.success(applyAdvertising(context))
+                            val shown = synchronized(radio) {
+                                client.token = null
+                                client.schedule = adverts.copyOf()
+                                client.scheduleStart = start
+                                client.tokenSetAt = SystemClock.elapsedRealtime()
+                                advertiseFailures = 0
+                                applyAdvertising(context)
+                            }
+                            result.success(shown)
                         }
                     }
                     "stopAdvertising" -> {
-                        client.token = null
-                        client.schedule = null
-                        applyAdvertising(context)
+                        synchronized(radio) {
+                            client.token = null
+                            client.schedule = null
+                            applyAdvertising(context)
+                        }
                         result.success(null)
                     }
                     "startScan" -> {
-                        client.scanning = true
-                        client.lowPower = call.argument<Boolean>("lowPower") ?: false
-                        val ok = applyScan(context)
-                        if (!ok) {
-                            client.scanning = false
+                        // "lowPower" (a short look in the background) is
+                        // scanned like any other look ([startScan]).
+                        val ok = synchronized(radio) {
+                            client.scanning = true
+                            scanFailures = 0
+                            val started = applyScan(context)
+                            if (!started) {
+                                client.scanning = false
+                            }
+                            started
                         }
                         result.success(ok)
                     }
                     "stopScan" -> {
-                        client.scanning = false
-                        applyScan(context)
+                        synchronized(radio) {
+                            client.scanning = false
+                            applyScan(context)
+                        }
                         result.success(null)
                     }
                     "setAlarmReceiver" -> {
@@ -386,6 +447,9 @@ object ZenNearbyBridge {
             "charging" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && battery?.isCharging == true),
             "powerSave" to (power?.isPowerSaveMode == true),
             "idle" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && power?.isDeviceIdleMode == true),
+            // Screen on: someone uses the phone (and may be on the move), so
+            // the background looks come at their shortest again.
+            "interactive" to (power?.isInteractive == true),
             "supported" to (adapter != null &&
                 context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)),
             "enabled" to (adapter?.isEnabled == true),
@@ -394,7 +458,22 @@ object ZenNearbyBridge {
             // Android 11 and older: Bluetooth scanning needs the location
             // permission (and location switched on).
             "needsLocation" to (Build.VERSION.SDK_INT < Build.VERSION_CODES.S),
+            // There a scan hears nobody while location is switched off.
+            "locationOn" to locationOn(context),
         )
+    }
+
+    /** Location switched on (always `true` where scanning does not need it). */
+    private fun locationOn(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return true
+        }
+        val location = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return true
+        return try {
+            LocationManagerCompat.isLocationEnabled(location)
+        } catch (_: Exception) {
+            true
+        }
     }
 
     /**
@@ -457,25 +536,32 @@ object ZenNearbyBridge {
     }
 
     private fun onBluetoothOn(context: Context) {
-        try {
-            applyAdvertising(context)
-            applyScan(context)
-        } catch (error: Exception) {
-            Log.w(TAG, "Restarting the radio failed", error)
+        synchronized(radio) {
+            try {
+                applyAdvertising(context)
+                applyScan(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Restarting the radio failed", error)
+            }
         }
         reportBluetooth(true)
     }
 
     /** The stack forgot advertising, scanning and the GATT server. */
     private fun onBluetoothOff() {
-        advertiseCallback = null
-        advertisedToken = null
-        scanCallback = null
-        try {
-            gattServer?.close()
-        } catch (_: Exception) {
+        synchronized(radio) {
+            advertiseCallback = null
+            advertisedToken = null
+            scanCallback = null
+            // Shown again once Bluetooth is back on ([onBluetoothOn]).
+            appContext?.let { cancelAdvertiseRetry(it) }
+            advertiseFailures = 0
+            try {
+                gattServer?.close()
+            } catch (_: Exception) {
+            }
+            gattServer = null
         }
-        gattServer = null
         synchronized(pendingWrites) {
             pendingWrites.clear()
         }
@@ -511,29 +597,49 @@ object ZenNearbyBridge {
     }
 
     /**
-     * While any engine follows a schedule, applies it again right after the
-     * next slot boundary. An exact alarm that wakes the phone (nothing holds
-     * it awake in between), so a token never stays on air past its slot.
+     * While any engine follows a schedule that shows a token now or later,
+     * applies it again right after the next slot boundary. An exact alarm
+     * that wakes the phone (nothing holds it awake in between), so a token
+     * never stays on air past its slot, nor into Android's own address
+     * change (an inexact alarm could come minutes late). None once every
+     * schedule is over (nothing would change), nor while Bluetooth is off
+     * ([onBluetoothOn] applies the schedule again); one already set for the
+     * same boundary is kept. Under [radio]; the change itself runs on the
+     * wake task thread.
      */
     private fun scheduleRotation(context: Context) {
+        val now = System.currentTimeMillis()
+        val slot = now / NEARBY_SLOT_MS
+        val next = (slot + 1) * NEARBY_SLOT_MS
+        val wanted = adapter(context)?.isEnabled == true &&
+            clients.any { client ->
+                val schedule = client.schedule
+                schedule != null && slot < client.scheduleStart + schedule.size / ADVERT_BYTES
+            }
+        if (wanted && rotation != null && rotationAt == next) {
+            return
+        }
         if (rotation != null) {
             ZenPower.cancel(context, ROTATION_ALARM)
         }
         rotation = null
-        if (clients.none { it.schedule != null }) {
+        if (!wanted) {
             return
         }
-        val now = System.currentTimeMillis()
-        val next = (now / NEARBY_SLOT_MS + 1) * NEARBY_SLOT_MS
         val task = Runnable {
-            rotation = null
-            try {
-                applyAdvertising(context)
-            } catch (error: Exception) {
-                Log.w(TAG, "Changing the token failed", error)
+            synchronized(radio) {
+                rotation = null
+                // A new token: it gets its own tries.
+                advertiseFailures = 0
+                try {
+                    applyAdvertising(context)
+                } catch (error: Exception) {
+                    Log.w(TAG, "Changing the token failed", error)
+                }
             }
         }
         rotation = task
+        rotationAt = next
         ZenPower.scheduleNative(
             context,
             ROTATION_ALARM,
@@ -546,6 +652,7 @@ object ZenNearbyBridge {
     /**
      * Shows the newest wanted token while any engine wants to be visible (both
      * engines compute the same one; restarting for an equal token is skipped).
+     * Under [radio], like everything that starts or stops the radio below.
      */
     private fun applyAdvertising(context: Context): Boolean {
         scheduleRotation(context)
@@ -554,6 +661,7 @@ object ZenNearbyBridge {
             .maxByOrNull { it.first }
             ?.second
         if (token == null) {
+            cancelAdvertiseRetry(context)
             stopAdvertising(context)
             return true
         }
@@ -590,13 +698,32 @@ object ZenNearbyBridge {
             )
             .build()
         val callback = object : AdvertiseCallback() {
+            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                val started = this
+                main.post {
+                    synchronized(radio) {
+                        if (advertiseCallback === started) {
+                            advertiseFailures = 0
+                            cancelAdvertiseRetry(context)
+                        }
+                    }
+                }
+            }
+
             override fun onStartFailure(errorCode: Int) {
                 Log.w(TAG, "Advertising failed: $errorCode")
+                if (errorCode == ADVERTISE_FAILED_ALREADY_STARTED) {
+                    return // it is on air already
+                }
                 val failed = this
-                // Tried again on the next request instead of looking shown.
+                // Not shown: tried again soon (and on the next request)
+                // instead of looking shown.
                 main.post {
-                    if (advertiseCallback === failed) {
-                        advertisedToken = null
+                    synchronized(radio) {
+                        if (advertiseCallback === failed) {
+                            advertisedToken = null
+                            retryAdvertising(context, errorCode)
+                        }
                     }
                 }
             }
@@ -605,6 +732,51 @@ object ZenNearbyBridge {
         advertiseCallback = callback
         advertisedToken = token.copyOf()
         return true
+    }
+
+    /**
+     * Advertising failed to start with [errorCode]: tried again in a while,
+     * on an alarm (a failure at a slot's change comes while the phone
+     * sleeps), a few times at most. Not when it cannot work at all (too
+     * much data, no advertising here). Under [radio].
+     */
+    private fun retryAdvertising(context: Context, errorCode: Int) {
+        if (errorCode == AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE ||
+            errorCode == AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED
+        ) {
+            return
+        }
+        if (advertiseFailures >= MAX_ADVERTISE_RETRIES) {
+            Log.w(TAG, "Advertising keeps failing: tried again with the next token")
+            return
+        }
+        advertiseFailures += 1
+        advertiseRetryPending = true
+        ZenPower.scheduleNative(
+            context,
+            ADVERTISE_RETRY_ALARM,
+            ADVERTISE_RETRY_MS * advertiseFailures,
+            exact = false,
+            holdMs = ROTATION_HOLD_MS,
+        ) {
+            synchronized(radio) {
+                advertiseRetryPending = false
+                try {
+                    applyAdvertising(context)
+                } catch (error: Exception) {
+                    Log.w(TAG, "Advertising again failed", error)
+                }
+            }
+        }
+    }
+
+    /** No retry is needed any more (shown, nothing to show, Bluetooth off). Under [radio]. */
+    private fun cancelAdvertiseRetry(context: Context) {
+        if (!advertiseRetryPending) {
+            return
+        }
+        advertiseRetryPending = false
+        ZenPower.cancel(context, ADVERTISE_RETRY_ALARM)
     }
 
     @SuppressLint("MissingPermission")
@@ -618,25 +790,37 @@ object ZenNearbyBridge {
         }
     }
 
-    /**
-     * Scans while any engine wants it; in low-power mode only when every one
-     * of them is fine with it (the background look around).
-     */
+    /** Scans while any engine wants it (one scan for all of them). */
     private fun applyScan(context: Context): Boolean {
-        val wanted = clients.filter { it.scanning }
-        if (wanted.isEmpty()) {
+        if (clients.none { it.scanning }) {
             stopScan(context)
             return true
         }
-        val lowPower = wanted.all { it.lowPower }
-        if (scanCallback != null && scanLowPower == lowPower) {
+        if (scanCallback != null) {
             return true
         }
-        return startScan(context, lowPower)
+        return startScan(context)
     }
 
+    /**
+     * One scan mode for every look, the full one while "W pobliżu" is open
+     * and the short one in the background alike: low latency, results not
+     * batched.
+     *
+     * A short look in the background costs mostly the phone it keeps awake
+     * (some 40 mA for its ~10 s), not the radio (some 10 mA while it
+     * listens). A low-power scan listens half a second of every five, so in
+     * a look of a few seconds it often catches nobody's advert (about once a
+     * second each) and the whole wake is wasted; batched, some phones
+     * (Samsung) hand over next to nothing in such a look, and what the
+     * controller still held when the look ended could be lost. Listening all
+     * the look long costs ~60 mAs more a look than the low-power scan, while
+     * the 3 s the batches needed after each look (~120 mAs awake) are gone:
+     * cheaper overall, and the look hears who is there. With the screen off,
+     * Android may lower any scan; from low latency it lowers it least.
+     */
     @SuppressLint("MissingPermission")
-    private fun startScan(context: Context, lowPower: Boolean): Boolean {
+    private fun startScan(context: Context): Boolean {
         val adapter = adapter(context) ?: return false
         if (!adapter.isEnabled || missingPermissions(context).isNotEmpty()) {
             return false
@@ -646,16 +830,9 @@ object ZenNearbyBridge {
         val filter = ScanFilter.Builder()
             .setManufacturerData(COMPANY_ID, MAGIC, byteArrayOf(0xFF.toByte(), 0xFF.toByte()))
             .build()
-        // A short low-power look lets the controller batch what it hears
-        // (the CPU and Dart are woken once per batch, not per advert); the
-        // batch is flushed when the look ends ([stopScan]).
-        val batched = lowPower && adapter.isOffloadedScanBatchingSupported
-        val builder = ScanSettings.Builder()
-            .setScanMode(if (lowPower) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY)
-        if (batched) {
-            builder.setReportDelay(LOW_POWER_REPORT_DELAY_MS)
-        }
-        val settings = builder.build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 report(result)
@@ -667,13 +844,54 @@ object ZenNearbyBridge {
 
             override fun onScanFailed(errorCode: Int) {
                 Log.w(TAG, "Scan failed: $errorCode")
+                if (errorCode == SCAN_FAILED_ALREADY_STARTED) {
+                    return // it scans already
+                }
+                val failed = this
+                // Not scanning: no longer looks running, so the next request
+                // (or the retry) starts it again.
+                main.post {
+                    synchronized(radio) {
+                        if (scanCallback === failed) {
+                            scanCallback = null
+                            try {
+                                scanner.stopScan(failed)
+                            } catch (_: Exception) {
+                            }
+                            retryScan(context, errorCode)
+                        }
+                    }
+                }
             }
         }
         scanner.startScan(listOf(filter), settings, callback)
         scanCallback = callback
-        scanLowPower = lowPower
-        scanBatched = batched
         return true
+    }
+
+    /**
+     * A scan failed to start with [errorCode]: tried again shortly while an
+     * engine still wants it (the screen is on, or a look holds the phone
+     * awake), a couple of times at most. Under [radio].
+     */
+    private fun retryScan(context: Context, errorCode: Int) {
+        if (errorCode == ScanCallback.SCAN_FAILED_FEATURE_UNSUPPORTED ||
+            scanFailures >= MAX_SCAN_RETRIES
+        ) {
+            return
+        }
+        scanFailures += 1
+        main.postDelayed({
+            synchronized(radio) {
+                try {
+                    applyScan(context)
+                } catch (error: SecurityException) {
+                    Log.w(TAG, "Scanning again: no permission", error)
+                } catch (error: Exception) {
+                    Log.w(TAG, "Scanning again failed", error)
+                }
+            }
+        }, SCAN_RETRY_MS)
     }
 
     private fun report(result: ScanResult) {
@@ -701,16 +919,8 @@ object ZenNearbyBridge {
     private fun stopScan(context: Context) {
         val callback = scanCallback ?: return
         scanCallback = null
-        val batched = scanBatched
-        scanBatched = false
         try {
-            val scanner = adapter(context)?.bluetoothLeScanner
-            if (batched) {
-                // What the controller still holds comes now (Dart takes it
-                // for a few seconds after the look).
-                scanner?.flushPendingScanResults(callback)
-            }
-            scanner?.stopScan(callback)
+            adapter(context)?.bluetoothLeScanner?.stopScan(callback)
         } catch (_: Exception) {
         }
     }

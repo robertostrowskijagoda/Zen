@@ -350,6 +350,8 @@ func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 		"selectedPeerLatency": selectedPeerLatency,
 		"publicPeersCustom":   customPublicPeers(),
 		"pqKey":               node.ownSignalKey(),
+		"traffic":             node.trafficState(),
+		"goMemory":            goMemoryStats(),
 	}
 }
 

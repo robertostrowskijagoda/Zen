@@ -451,7 +451,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
               icon: const Icon(Icons.install_mobile_rounded),
               label: Text(
                 !kIsWeb && Platform.isAndroid
-                    ? t('Zainstaluj')
+                    ? t('Aktualizuj')
                     : t('Zapisz instalator'),
               ),
             ),

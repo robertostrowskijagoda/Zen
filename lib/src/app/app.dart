@@ -6,6 +6,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/theme/zen_backdrop.dart';
+import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
@@ -17,6 +18,8 @@ import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/ios_background.dart';
+import 'package:zen/src/features/runtime/locked_notice_kit_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_route_bridge.dart';
@@ -126,19 +129,24 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
         // Outermost: while a call floats over other apps (Android
         // picture-in-picture, the small window on a computer) only the call
         // is drawn.
-        return CallCompactLayer(
-          child: IncomingCallLayer(
-            child: AppSecurityGate(
-              child: CallFloatingOverlay(
-                // Around the whole navigator: on a computer every screen,
-                // pushed ones and dialogs included, keeps the same phone-like
-                // column (before, only the home screen did and pushed
-                // screens stretched across the window).
-                child: _DesktopViewportFrame(
-                  // The look's backdrop (rain, grid, scan lines…) behind
-                  // every page.
-                  child: ZenBackdropHost(
-                    child: child ?? const SizedBox.shrink(),
+        return ZenMotionScope(
+          // The "Animacje" setting decides for everything below, the
+          // overlays and the lock screen included.
+          mode: settings.animations,
+          child: CallCompactLayer(
+            child: IncomingCallLayer(
+              child: AppSecurityGate(
+                child: CallFloatingOverlay(
+                  // Around the whole navigator: on a computer every screen,
+                  // pushed ones and dialogs included, keeps the same
+                  // phone-like column (before, only the home screen did and
+                  // pushed screens stretched across the window).
+                  child: _DesktopViewportFrame(
+                    // The look's backdrop (rain, grid, scan lines…) behind
+                    // every page.
+                    child: ZenBackdropHost(
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ),
@@ -153,11 +161,19 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
               // A computer's tray: the background accounts' nodes.
               child: DesktopBackgroundBridge(
                 child: RuntimeSignalBridge(
-                  child: TestHarnessBridge(
-                    child: AlarmWatcher(
-                      child: RuntimeRouteBridge(
-                        // After a restore: its progress and what came back.
-                        child: AccountImportLayer(child: AppShellScreen()),
+                  // An iPhone: background checks, the keep-alive.
+                  child: IosBackgroundBridge(
+                    child: TestHarnessBridge(
+                      child: AlarmWatcher(
+                        child: RuntimeRouteBridge(
+                          // Android: what the locked service's message
+                          // notices may say.
+                          child: LockedNoticeKitBridge(
+                            // After a restore: its progress and what came
+                            // back.
+                            child: AccountImportLayer(child: AppShellScreen()),
+                          ),
+                        ),
                       ),
                     ),
                   ),

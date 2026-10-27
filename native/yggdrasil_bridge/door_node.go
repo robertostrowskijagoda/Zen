@@ -81,6 +81,14 @@ const (
 	// Largest sealed knock: a flat's card without its photo
 	// (kMaxSealedChars in flat_door_mail.dart) and room to spare.
 	maxDoorSealBytes = 64 * 1024
+	// Longest base64 text a door buffers for one signal: its largest frame,
+	// sealed. A door's fragments never need the main node's room for a
+	// signal of the largest size (maxSignalEncodedBytes).
+	maxDoorEncodedBytes = ((maxDoorFrameBytes + pqMaxFrameOverhead + 2) / 3) * 4
+	// Bytes one door buffers for half-received signals at once: a few
+	// frames of the largest size. Up to 1+maxHostedDoors doors run next to
+	// the main node, each with its own buffers.
+	maxDoorPartialBytes = 4 * 1024 * 1024
 	// Mailbox doors one phone runs for friends at most (kMaxHostedDoors).
 	maxHostedDoors = 8
 	// Where a door listens for the door host's peering.
@@ -89,8 +97,13 @@ const (
 	// (yggdrasil core/types.go): traffic, or the core's own protocol
 	// (nodeinfo and debug queries), which the doors never answer.
 	doorSessionTraffic = 1
-	// Public peers the door host dials at once.
-	doorHostPeerCount = 2
+	// Public peers the door host dials at once. One: a Yggdrasil node with
+	// two or more peers may be picked as the next hop between them
+	// (ironwood routes greedily over every peer, weighted by link latency),
+	// so a host with two public peers could carry strangers' traffic
+	// through the phone. With one it is a leaf; watch moves it to another
+	// peer when that one stays down.
+	doorHostPeerCount = 1
 	// How often the door host checks that it is on the mesh, and how many
 	// failed checks in a row make it try other peers.
 	doorHostCheckInterval = 30 * time.Second
@@ -480,6 +493,10 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		doorCore.Stop()
 		return nil, err
 	}
+	assembler := &bridgeNode{
+		signalPartials: make(map[string]*signalReassembly),
+		partialLimits:  signalPartialLimits{total: maxDoorPartialBytes, perSignal: maxDoorEncodedBytes},
+	}
 	door := &doorNode{
 		core:      doorCore,
 		listener:  listener,
@@ -488,7 +505,7 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		seed:      strings.ToLower(strings.TrimSpace(seedHex)),
 		address:   doorCore.Address().String(),
 		ip:        *address.AddrForKey(doorCore.PublicKey()),
-		assembler: &bridgeNode{signalPartials: make(map[string]*signalReassembly)},
+		assembler: assembler,
 		host:      host,
 		quit:      make(chan struct{}),
 		done:      make(chan struct{}),

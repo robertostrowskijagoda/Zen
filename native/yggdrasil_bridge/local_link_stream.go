@@ -133,6 +133,29 @@ func (m *localLinkManager) peers() []localPeer {
 	return append([]localPeer(nil), m.settings.peers...)
 }
 
+// nearbySettings is what the app set for people nearby on the LAN.
+func (m *localLinkManager) nearbySettings() lanNearby {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.settings.nearby
+}
+
+// beaconsWanted: beacons go out by themselves while there are devices to
+// link with or the app looks around.
+func (m *localLinkManager) beaconsWanted() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.settings.peers) > 0 || m.settings.nearby.looking
+}
+
+// lanWanted: the LAN runs while it is on and there is something to do on
+// it: devices to link with, looking around, or being shown to those who
+// look.
+func lanWanted(settings localLinkSettings) bool {
+	return settings.lan &&
+		(len(settings.peers) > 0 || settings.nearby.looking || settings.nearby.visible())
+}
+
 // apply takes new settings: links to devices no longer listed close, the
 // LAN starts or stops.
 func (m *localLinkManager) apply(settings localLinkSettings) {
@@ -148,6 +171,7 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 		releaseLocalPeers(old)
 	}
 	lockMemory(sliceBytes(settings.peers))
+	startedLooking := settings.nearby.looking && !m.settings.nearby.looking
 	m.settings = settings
 	allowed := make(map[string]bool, len(settings.peers))
 	for _, peer := range settings.peers {
@@ -160,7 +184,7 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 			delete(m.links, id)
 		}
 	}
-	wantLan := settings.lan && len(settings.peers) > 0
+	wantLan := lanWanted(settings)
 	lan := m.lan
 	var stopLan *lanDiscovery
 	if !wantLan && lan != nil {
@@ -177,6 +201,11 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 	}
 	if lan != nil && wantLan {
 		lan.setInterval(settings.beaconSeconds)
+		if !settings.nearby.looking {
+			lan.forgetNearby()
+		} else if startedLooking {
+			lan.wake()
+		}
 	}
 	if startLan {
 		started, err := startLanDiscovery(m, settings.beaconSeconds)
@@ -188,7 +217,7 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 			return
 		}
 		m.lanError = ""
-		if m.stopped || m.lan != nil || !(m.settings.lan && len(m.settings.peers) > 0) {
+		if m.stopped || m.lan != nil || !lanWanted(m.settings) {
 			go started.stop()
 			return
 		}
@@ -468,8 +497,10 @@ func (m *localLinkManager) status() map[string]any {
 		"running":    m.lan != nil,
 		"interfaces": []string{},
 	}
+	nearby := []map[string]any{}
 	if m.lan != nil {
 		lan["interfaces"] = m.lan.interfaceNames()
+		nearby = m.lan.nearbyHeard(time.Now())
 	}
 	if m.lanError != "" {
 		lan["error"] = m.lanError
@@ -478,6 +509,9 @@ func (m *localLinkManager) status() map[string]any {
 		"lan":   lan,
 		"peers": len(m.settings.peers),
 		"links": links,
+		// People nearby heard on the LAN while looking around
+		// (lan_nearby.go): [{"advert": hex, "at": unix ms}].
+		"nearby": nearby,
 	}
 }
 

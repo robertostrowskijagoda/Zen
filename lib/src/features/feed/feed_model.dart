@@ -7,6 +7,7 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
@@ -33,7 +34,8 @@ Map<String, dynamic> deletePostBody(String postId) => <String, dynamic>{
 
 /// Body of an edit of [postId] (validated like a new post). With [images]
 /// the post's photos and videos are replaced too (`img`, even when empty);
-/// without, they stay as they were.
+/// without, they stay as they were. Who sees the post and how far it goes
+/// stay as the post said.
 Map<String, dynamic> editPostBody(
   String postId,
   String text, {
@@ -44,7 +46,7 @@ Map<String, dynamic> editPostBody(
     text,
     audience: audience,
     images: images ?? const <Map<String, dynamic>>[],
-  ),
+  )..remove(kPostReachKey),
   'img': ?images,
   'post': postId,
 };
@@ -490,6 +492,9 @@ final class FeedPost {
     this.audience = Audience.public,
     this.images = const <MediaRef>[],
     this.likes = const <FeedLiker>[],
+    this.reach = PostReach.friends,
+    this.degree = 1,
+    this.via = const <String>[],
     int? likeTotal,
     int? commentTotal,
     int? sortMillis,
@@ -541,6 +546,18 @@ final class FeedPost {
   /// Who may read it (only public posts can be reshared).
   final Audience audience;
 
+  /// How far its author let it go (`post_reach.dart`).
+  final PostReach reach;
+
+  /// Steps of friendship between this account and the author as the post
+  /// reached it: 1 for friends, followed people and reshares, 2 or 3 for a
+  /// post passed on by notices.
+  final int degree;
+
+  /// The friends whose notices brought the post ("przez …"), by name; empty
+  /// unless [degree] is above 1.
+  final List<String> via;
+
   /// Shown with "edytowano": the text is a later version.
   final bool edited;
 
@@ -575,6 +592,9 @@ final class FeedPost {
     images: images,
     sortMillis: sortMillis,
     likes: likes,
+    reach: reach,
+    degree: degree,
+    via: via,
     likeTotal: likeTotal,
     commentTotal: commentTotal,
   );
@@ -616,11 +636,13 @@ Set<String> likedPosts(Iterable<LogEntry> acts) {
 /// then sealed with [LedgerNode.seal] before it is written.
 ///
 /// [images] are references from [storeMedia]; a post with photos may have
-/// no text.
+/// no text. [reach] says how far a public post goes; any other audience is
+/// sealed for friends and goes no further.
 Map<String, dynamic> newPostBody(
   String text, {
   Audience audience = Audience.public,
   List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
+  PostReach reach = kDefaultPostReach,
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
@@ -650,6 +672,7 @@ Map<String, dynamic> newPostBody(
     'text': trimmed,
     'aud': audience.name,
     if (images.isNotEmpty) 'img': images,
+    if (audience == Audience.public) kPostReachKey: reach.hops,
   };
 }
 
@@ -688,6 +711,7 @@ FeedPost? _postFrom(
     entry: entry,
     audience: audienceByName(b['aud']) ?? Audience.public,
     images: images,
+    reach: reachOfBody(b),
   );
 }
 
@@ -766,19 +790,96 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
     audience: post.audience,
     images: images,
     edited: true,
+    reach: post.reach,
+    degree: post.degree,
+    via: post.via,
+    authorAddress: post.authorAddress,
+    sortMillis: post.sortMillis,
   );
 }
 
+/// Posts friends' notices brought from two or three steps away whose
+/// content [held] has and whose author let them go that far, unless
+/// already [shown] or [deleted]; labelled with the friends who passed them
+/// on.
+List<FeedPost> _announced(
+  LedgerNode node, {
+  required HeldPosts held,
+  required String Function(String address) nameOf,
+  required Map<String, String> accountNames,
+  required Set<String> shown,
+  required Set<String> deleted,
+  int? nowMillis,
+}) {
+  final Map<String, String> addressOf = <String, String>{
+    for (final MapEntry<String, String> f in node.friendAccounts.entries)
+      f.value: f.key,
+  };
+  final List<FeedPost> out = <FeedPost>[];
+  for (final AnnouncedPost a in announcedPosts(
+    node,
+    nowMillis: nowMillis,
+  ).values) {
+    final HeldPost? h = held.heldPost(a.post);
+    final LogEntry? entry = h?.post;
+    if (h == null ||
+        entry == null ||
+        h.removed ||
+        h.author != a.author ||
+        shown.contains(a.post) ||
+        deleted.contains(a.post) ||
+        h.reach.hops < a.hops) {
+      continue;
+    }
+    final LedgerProfile? profile = h.authorProfile;
+    final String carried = profile?.name ?? '';
+    final String author =
+        accountNames[a.author] ??
+        (carried.isNotEmpty ? carried : t('Znajomy znajomego'));
+    final FeedPost? post = _postFrom(entry, isOwn: false, authorLabel: author);
+    if (post == null) {
+      continue;
+    }
+    out.add(
+      _edited(
+        FeedPost(
+          id: post.id,
+          account: post.account,
+          authorLabel: post.authorLabel,
+          text: post.text,
+          millis: post.millis,
+          isOwn: false,
+          entry: entry,
+          authorAddress: profile?.address ?? a.authorAddress,
+          images: post.images,
+          reach: post.reach,
+          degree: a.hops,
+          via: <String>[
+            for (final String friend in a.via)
+              if (addressOf[friend] case final String address) nameOf(address),
+          ],
+        ),
+        h.edit?.body,
+      ),
+    );
+  }
+  return out;
+}
+
 /// This account's posts and those of friends and followed accounts whose
-/// keys are known (plus, with [reshares], posts reshared by friends),
-/// newest first. [nameOf] turns a friend's mesh address into a display name.
-/// [pyramidAddresses] are the device addresses of the pyramid's members:
-/// their accounts count as verified.
+/// keys are known (plus, with [reshares], posts reshared by friends, and
+/// with [held], posts friends' notices brought from further away whose
+/// content is here: `post_reach.dart`), newest first. [nameOf] turns a
+/// friend's mesh address into a display name. [pyramidAddresses] are the
+/// device addresses of the pyramid's members: their accounts count as
+/// verified.
 List<FeedPost> buildFeed(
   LedgerNode node, {
   required String Function(String address) nameOf,
   ReshareCache? reshares,
+  HeldPosts? held,
   Set<String> pyramidAddresses = const <String>{},
+  int? nowMillis,
 }) {
   final Set<String> deleted = <String>{};
   final List<FeedPost> posts = _postsOf(
@@ -872,11 +973,26 @@ List<FeedPost> buildFeed(
             entry: b.$1,
             authorAddress: profile?.address ?? '',
             images: post.images,
+            reach: post.reach,
             sortMillis: b.$3,
           ),
         );
       }
     }
+  }
+
+  if (held != null) {
+    posts.addAll(
+      _announced(
+        node,
+        held: held,
+        nameOf: nameOf,
+        accountNames: accountNames,
+        shown: <String>{for (final FeedPost p in posts) p.id},
+        deleted: deleted,
+        nowMillis: nowMillis,
+      ),
+    );
   }
 
   final List<LogEntry> myActs = node.entriesOf(spaceKind: 'acts');

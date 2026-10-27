@@ -22,7 +22,8 @@ import (
 //
 // Every few seconds the node broadcasts a beacon on each local network:
 // an advert (a Bloom filter of tags only the right devices can test, a new
-// random salt every time) and the TCP port it takes links on. A device that
+// random salt every time), the "people nearby" advert while the person is
+// visible (lan_nearby.go) and the TCP port it takes links on. A device that
 // recognises a beacon and has the lower mesh address of the two connects;
 // the other answers with a beacon sent straight back, so the lower one
 // hears it even if broadcasts get lost one way. The connection then runs
@@ -166,20 +167,54 @@ func lanInterfaceFor(interfaces []lanInterface, ip net.IP) (lanInterface, bool) 
 	return lanInterface{}, false
 }
 
-// lanBeacon is an advert followed by the TCP port links go to.
-func lanBeacon(advert []byte, port int) []byte {
-	return binary.BigEndian.AppendUint16(append([]byte(nil), advert...), uint16(port))
+// lanBeaconFields is what one beacon says: the link advert, the "people
+// nearby" advert (nil: not visible), whether its sender looks around, and
+// the TCP port links go to.
+type lanBeaconFields struct {
+	advert  []byte
+	nearby  []byte
+	looking bool
+	port    int
 }
 
-func parseLanBeacon(packet []byte) (advert []byte, port int, ok bool) {
-	if len(packet) < localLinkAdvertHeader+localLinkMinBloomBytes+2 || len(packet) > lanMaxDatagram {
-		return nil, 0, false
+// lanBeacon is the link advert, the nearby advert (empty or
+// lanNearbyAdvertBytes), an info byte (the nearby advert's length, and
+// lanNearbyLookingBit) and the TCP port links go to.
+func lanBeacon(fields lanBeaconFields) []byte {
+	info := byte(len(fields.nearby))
+	if fields.looking {
+		info |= lanNearbyLookingBit
 	}
-	port = int(binary.BigEndian.Uint16(packet[len(packet)-2:]))
-	if port == 0 {
-		return nil, 0, false
+	out := make([]byte, 0, len(fields.advert)+len(fields.nearby)+3)
+	out = append(out, fields.advert...)
+	out = append(out, fields.nearby...)
+	out = append(out, info)
+	return binary.BigEndian.AppendUint16(out, uint16(fields.port))
+}
+
+func parseLanBeacon(packet []byte) (lanBeaconFields, bool) {
+	if len(packet) < localLinkAdvertHeader+localLinkMinBloomBytes+3 || len(packet) > lanMaxDatagram {
+		return lanBeaconFields{}, false
 	}
-	return packet[:len(packet)-2], port, true
+	port := int(binary.BigEndian.Uint16(packet[len(packet)-2:]))
+	info := packet[len(packet)-3]
+	nearbyBytes := int(info & lanNearbyLengthMask)
+	if port == 0 || (nearbyBytes != 0 && nearbyBytes != lanNearbyAdvertBytes) {
+		return lanBeaconFields{}, false
+	}
+	advertEnd := len(packet) - 3 - nearbyBytes
+	if advertEnd < localLinkAdvertHeader+localLinkMinBloomBytes {
+		return lanBeaconFields{}, false
+	}
+	fields := lanBeaconFields{
+		advert:  packet[:advertEnd],
+		looking: info&lanNearbyLookingBit != 0,
+		port:    port,
+	}
+	if nearbyBytes > 0 {
+		fields.nearby = packet[advertEnd : advertEnd+nearbyBytes]
+	}
+	return fields, true
 }
 
 // lanDiscovery runs the beacons, the listener and the dialling for one
@@ -204,6 +239,13 @@ type lanDiscovery struct {
 	perSource   map[string]int
 	windowStart time.Time
 	windowCount int
+	// Nearby adverts heard while the app looks around (lan_nearby.go).
+	nearby map[[lanNearbyAdvertBytes]byte]lanNearbyHeard
+
+	// A beacon goes out at once (the app started looking around).
+	poke chan struct{}
+	// Set by tests to see the datagrams that go out.
+	sent func(packet []byte, to *net.UDPAddr)
 }
 
 func lanIntervalFor(seconds int) time.Duration {
@@ -242,6 +284,7 @@ func startLanDiscovery(m *localLinkManager, beaconSeconds int) (*lanDiscovery, e
 		lastReply:  map[string]time.Time{},
 		lastDial:   map[string]time.Time{},
 		perSource:  map[string]int{},
+		poke:       make(chan struct{}, 1),
 	}
 	lan.done.Add(3)
 	go lan.beaconLoop()
@@ -282,25 +325,41 @@ func (lan *lanDiscovery) beaconLoop() {
 		lan.mu.Lock()
 		interval := lan.interval
 		lan.mu.Unlock()
+		if lan.m.nearbySettings().looking && interval > lanNearbyLookInterval {
+			interval = lanNearbyLookInterval
+		}
 		// Jitter, so devices that started together do not stay in step.
 		wait := interval + time.Duration(rand.Int64N(int64(interval/4)+1))
 		select {
 		case <-lan.quit:
 			return
+		case <-lan.poke:
 		case <-time.After(wait):
 		}
 	}
 }
 
+// wake sends a beacon now instead of at the next turn.
+func (lan *lanDiscovery) wake() {
+	if lan.poke == nil {
+		return
+	}
+	select {
+	case lan.poke <- struct{}{}:
+	default:
+	}
+}
+
 // beacon makes a beacon with a fresh salt and remembers the salt.
 func (lan *lanDiscovery) beacon() []byte {
-	advert, err := buildLocalAdvert(lan.m.peers(), time.Now(), 0, cryptorand.Reader)
+	now := time.Now()
+	advert, err := buildLocalAdvert(lan.m.peers(), now, 0, cryptorand.Reader)
 	if err != nil {
 		return nil
 	}
+	nearby := lan.m.nearbySettings()
 	var salt [4]byte
 	copy(salt[:], advert[3:7])
-	now := time.Now()
 	lan.mu.Lock()
 	lan.ownSalts[salt] = now
 	for s, at := range lan.ownSalts {
@@ -309,7 +368,12 @@ func (lan *lanDiscovery) beacon() []byte {
 		}
 	}
 	lan.mu.Unlock()
-	return lanBeacon(advert, lan.tcpPort)
+	return lanBeacon(lanBeaconFields{
+		advert:  advert,
+		nearby:  nearby.shown(now),
+		looking: nearby.looking,
+		port:    lan.tcpPort,
+	})
 }
 
 func (lan *lanDiscovery) broadcast() {
@@ -317,7 +381,9 @@ func (lan *lanDiscovery) broadcast() {
 	lan.mu.Lock()
 	lan.interfaces = interfaces
 	lan.mu.Unlock()
-	if len(interfaces) == 0 {
+	// Shown only to people nearby, with no devices to link with: it answers
+	// those who look around, but sends nothing by itself.
+	if len(interfaces) == 0 || !lan.m.beaconsWanted() {
 		return
 	}
 	packet := lan.beacon()
@@ -327,9 +393,20 @@ func (lan *lanDiscovery) broadcast() {
 	for _, ifi := range interfaces {
 		for _, n := range ifi.nets {
 			if target := lanBroadcast(n); target != nil {
-				_, _ = lan.udp.WriteToUDP(packet, &net.UDPAddr{IP: target, Port: lanBeaconPort})
+				lan.send(packet, &net.UDPAddr{IP: target, Port: lanBeaconPort})
 			}
 		}
+	}
+}
+
+// send writes one datagram.
+func (lan *lanDiscovery) send(packet []byte, to *net.UDPAddr) {
+	if lan.sent != nil {
+		lan.sent(packet, to)
+		return
+	}
+	if lan.udp != nil {
+		_, _ = lan.udp.WriteToUDP(packet, to)
 	}
 }
 
@@ -409,8 +486,8 @@ func lanShouldDial(self string, candidates []*localPeer) bool {
 }
 
 func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
-	advert, port, ok := parseLanBeacon(packet)
-	if !ok || src == nil || src.IP.To4() == nil || lan.isOwnSalt(advert) {
+	beacon, ok := parseLanBeacon(packet)
+	if !ok || src == nil || src.IP.To4() == nil || lan.isOwnSalt(beacon.advert) {
 		return
 	}
 	now := time.Now()
@@ -418,8 +495,16 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 	if !lan.admit(source, now) {
 		return
 	}
+	nearby := lan.m.nearbySettings()
+	if nearby.looking && beacon.nearby != nil {
+		lan.rememberNearby(beacon.nearby, now)
+	}
+	if beacon.looking && nearby.shown(now) != nil {
+		// Someone looks around: this device answers at once.
+		lan.reply(src.IP, now)
+	}
 	var candidates []*localPeer
-	for _, peer := range matchLocalAdvert(lan.m.peers(), advert, now) {
+	for _, peer := range matchLocalAdvert(lan.m.peers(), beacon.advert, now) {
 		if !lan.m.hasLink(peer.address) {
 			candidates = append(candidates, peer)
 		}
@@ -428,7 +513,7 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 		return
 	}
 	if lanShouldDial(lan.m.self, candidates) {
-		lan.dial(src.IP, port, now)
+		lan.dial(src.IP, beacon.port, now)
 		return
 	}
 	lan.reply(src.IP, now)
@@ -446,7 +531,7 @@ func (lan *lanDiscovery) reply(ip net.IP, now time.Time) {
 	pruneLanTimes(lan.lastReply, now, lanReplyInterval)
 	lan.mu.Unlock()
 	if packet := lan.beacon(); packet != nil {
-		_, _ = lan.udp.WriteToUDP(packet, &net.UDPAddr{IP: ip, Port: lanBeaconPort})
+		lan.send(packet, &net.UDPAddr{IP: ip, Port: lanBeaconPort})
 	}
 }
 

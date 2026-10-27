@@ -27,9 +27,13 @@ friends, or close friends only.
   new entries from each other when they meet on the network. Anything that
   is not public is encrypted with a key of its audience, which only friends
   of a high enough level hold.
-- Filters: **All · Friends · Close friends · Pyramid · Country**. *Close
-  friends* shows posts of people you marked as close friends. *Pyramid* and
-  *Country* show posts from [the pyramid](pyramid.md).
+- Filters: **All · Friends · 2nd degree · 3rd degree · Close friends ·
+  Pyramid · Country**. *Friends* shows posts of friends and people you
+  follow (and what friends reshared); *2nd degree* and *3rd degree* show
+  posts that friends passed on from further away (see below). *Close
+  friends* shows posts of people you marked as close friends. *Pyramid*
+  and *Country* show posts from [the pyramid](pyramid.md). The order is
+  always by time, with no algorithm.
 - Likes, reactions, comments and shares. "Liked by you, Bob and 1,284
   others" counts only what your phone has seen.
 - Public posts can be **followed** by people who are not your friends.
@@ -47,6 +51,44 @@ friends, or close friends only.
 - You can hide comments and block people in your own threads; **Report**
   keeps the signed original as evidence and can remove the post from your
   device.
+
+## How far a post goes
+
+**What it is.** For a public post you also choose its reach: **Friends**,
+**Friends of friends** (the default) or **3rd degree** (one step further).
+A post for any other audience stays with your friends, whatever the reach.
+Your phone remembers the last reach you picked for the next public post.
+
+**How it works.**
+
+- Your friends get the post itself, as always. Beyond them only a small
+  notice travels: a friend of yours writes, in their own log that only
+  their friends read, that a post of yours exists (its id, when it was
+  written, its reach and how many steps from you it is). No text and no
+  photos.
+- A friend of a friend who sees such a notice fetches the post from the
+  friend who passed it on (who holds it) or from you directly, and checks
+  your signature and that you really gave the post that reach. So the post
+  arrives even while you are offline.
+- For a post of reach 3, a friend of a friend passes the notice one step
+  further, but only once the post is on their phone, so their friends can
+  fetch it from them. Nobody passes anything further than three steps.
+- On the wall such a post says **via Bob**: the friend of yours who passed
+  it on. You learn nothing about the path beyond that friend.
+- Edits and removals follow the same way: the friend passes on a new notice
+  and phones that hold the post fetch the new version, or your signed
+  removal.
+- Likes and comments of friends of friends reach you through the friend who
+  passed the post on, shown as "Ada (via Bob)".
+- Limits: notices only about posts from the last 30 days; each post passed
+  on once (again only when it changes); at most 10 posts of one person and
+  300 notices in all a day from one phone. A phone keeps up to 300 posts
+  fetched this way.
+- **Reshares** work as before: a reshare carries the whole post and goes as
+  far as people keep resharing it, whatever its reach.
+- The reach is kept by Zen on every phone, but it is not encryption: a
+  public post can still be read by anyone who follows you. For posts that
+  must stay among friends, choose a friends audience.
 
 ## Videos
 

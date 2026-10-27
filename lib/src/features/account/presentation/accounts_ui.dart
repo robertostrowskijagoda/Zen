@@ -34,8 +34,8 @@ final FutureProvider<List<ZenListedAccount>> zenListedAccountsProvider =
       (Ref ref) => ref.read(zenAccountRegistryProvider).listed(),
     );
 
-/// Your avatar in the top bar: the account menu (switching, adding,
-/// locking).
+/// Your avatar in the top bar: the account menu (switching, adding). Locking
+/// is the lock button next to it.
 class AccountMenuButton extends ConsumerWidget {
   const AccountMenuButton({super.key, this.size = 30});
 
@@ -94,20 +94,6 @@ class _AccountMenuSheetState extends ConsumerState<_AccountMenuSheet> {
             .then((_) => ref.invalidate(zenListedAccountsProvider))
             .catchError((Object _) {}),
       );
-    }
-  }
-
-  Future<void> _lock() async {
-    final NavigatorState navigator = Navigator.of(context);
-    final ZenAccountScope account = ref.read(zenAccountProvider);
-    final AppSecurityService security = ref.read(appSecurityServiceProvider);
-    navigator.pop();
-    if (!account.isDefault) {
-      await returnToDefaultZenAccount(ref);
-      return;
-    }
-    if (security.canQuickLock) {
-      security.lock();
     }
   }
 
@@ -210,16 +196,6 @@ class _AccountMenuSheetState extends ConsumerState<_AccountMenuSheet> {
                 Navigator.of(context).pop();
                 unawaited(AddAccountScreen.open(context));
               },
-            ),
-            const SizedBox(height: 8),
-            ZenTile(
-              key: const Key('account-menu-lock'),
-              icon: Icons.lock_outline_rounded,
-              title: t('Zablokuj'),
-              subtitle: account.isDefault
-                  ? t('Zamyka to konto do podania hasła')
-                  : t('Zamyka to konto i wraca do ekranu blokady'),
-              onTap: () => unawaited(_lock()),
             ),
             const SizedBox(height: 8),
             ZenTile(

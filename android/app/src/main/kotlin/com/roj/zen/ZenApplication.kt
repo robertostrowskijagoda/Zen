@@ -51,6 +51,7 @@ class ZenApplication : Application() {
         }
 
     private fun forgetTaskEngine(engine: FlutterEngine) {
+        ZenCallBridge.unregister(engine)
         ZenNearbyBridge.unregister(engine)
         ZenWifiDirectBridge.unregister(engine)
         ZenBluetoothLinkBridge.unregister(engine)

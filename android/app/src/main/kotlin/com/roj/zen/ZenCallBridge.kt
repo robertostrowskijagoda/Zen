@@ -48,14 +48,20 @@ object ZenCallBridge {
     var pendingAcceptRouteKey: String = ""
         private set
 
-    private val channels = CopyOnWriteArrayList<MethodChannel>()
+    /** One engine's channel (the app's, the background service's). */
+    private class Registered(val engine: FlutterEngine, val channel: MethodChannel)
+
+    private val registered = CopyOnWriteArrayList<Registered>()
+    private val channels: List<MethodChannel>
+        get() = registered.map { it.channel }
     private val mainHandler = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
     fun register(flutterEngine: FlutterEngine, context: Context) {
         appContext = context.applicationContext
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
-        channels.add(channel)
+        registered.removeAll { it.engine === flutterEngine }
+        registered.add(Registered(flutterEngine, channel))
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "bringToFront" -> {
@@ -174,9 +180,17 @@ object ZenCallBridge {
         }
     }
 
+    /**
+     * [flutterEngine] is going away: only its own channel is dropped (the
+     * other engine, e.g. the background service's, keeps hearing calls).
+     * Its handler holds the Activity, so it must not outlive the engine.
+     */
     fun unregister(flutterEngine: FlutterEngine) {
-        // Stale engines are skipped at dispatch time; dropping every channel
-        // here would also kill the still-live foreground-service isolate.
+        val gone = registered.filter { it.engine === flutterEngine }
+        registered.removeAll(gone.toSet())
+        for (entry in gone) {
+            entry.channel.setMethodCallHandler(null)
+        }
     }
 
     fun dispatchIncomingCallAction(action: String, peerAddress: String) {

@@ -103,6 +103,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(palette: value));
   }
 
+  Future<void> setAnimations(AppAnimations value) async {
+    await _save(state.copyWith(animations: value));
+  }
+
   Future<void> setLockMode(AppLockMode value) async {
     await _save(state.copyWith(lockMode: value));
   }
@@ -122,8 +126,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(gifSearch: value));
   }
 
-  Future<void> setHideNotificationContent(bool value) async {
-    await _save(state.copyWith(hideNotificationContent: value));
+  /// How much notifications tell, where a conversation has no level of
+  /// its own.
+  Future<void> setNotificationPrivacy(NotificationPrivacy value) async {
+    await _save(state.copyWith(notificationPrivacy: value));
   }
 
   Future<void> setInAppSounds(bool value) async {
@@ -172,6 +178,16 @@ final class AppSettingsController extends Notifier<AppSettings> {
   /// "Apple Wi-Fi/Bluetooth" (item 6, iPhone, iPad and Mac).
   Future<void> setMultipeerLinks(bool value) async {
     await _save(state.copyWith(multipeerLinks: value));
+  }
+
+  /// "Odbieraj w tle cały czas" (iPhone).
+  Future<void> setKeepReceivingInBackground(bool value) async {
+    await _save(state.copyWith(keepReceivingInBackground: value));
+  }
+
+  /// The first-start setup was gone through or skipped.
+  Future<void> setFirstRunSetupDone(bool value) async {
+    await _save(state.copyWith(firstRunSetupDone: value));
   }
 
   /// The first-start permissions step is done.

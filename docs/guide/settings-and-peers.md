@@ -35,7 +35,7 @@ tapped. The first button hides or shows the rail.
 | Invite | your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend |
 | About | version, about how many people use Zen and how many are in the pyramid, **Zen on GitHub** at the top, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
 | Zen on GitHub | the project page: code, releases, instructions and bug reports |
-| Privacy and security | app password, emergency wipe password and app lock, notifications without content (on by default), account and recovery (key copy, recovery circle, copy with friends, full account copy, second device), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, messages from non-friends |
+| Privacy and security | app password, emergency wipe password and app lock, **notification content** (*Sender and content* by default, *Sender only* or *Notice only*; a chat can have its own level in its menu → *Notifications*), account and recovery (key copy, recovery circle, copy with friends, full account copy, second device), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, messages from non-friends |
 | Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits, notifications and background operation (Android) |
 | App | permissions and Bluetooth, **Looking around in the background** (Android: how often and how long Bluetooth looks for people nearby), *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
 | Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, **delete this account from this device** |
@@ -45,11 +45,14 @@ people nearby without the Nearby screen open: by default for 8 seconds
 every 5 minutes (choices: every 2, 5, 10, 15 or 30 minutes, for 4, 8 or 15
 seconds, or off). The page shows an estimate of what it costs the battery
 a day, counting that every look wakes the phone for a few seconds: about
-42 mAh (1.4 %) by default, about 163 mAh every 2 minutes for 15 seconds,
-about 5 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
-visible nearby. These are estimates for a typical phone. It skips its turn
-below 15 % battery, in battery saver and while the phone sleeps, unless it
-is charging.
+42 mAh (1.4 %) by default, about 174 mAh every 2 minutes for 15 seconds,
+about 4 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
+visible nearby. These are estimates for a typical phone, and the most it
+costs: while Zen is locked and the looks find nobody new, they come less
+often (up to three times the chosen gap, at most 30 minutes apart) and go
+back to the chosen gap once someone new is seen or the screen is on. It
+skips its turn below 15 % battery, in battery saver and while the phone
+sleeps, unless it is charging.
 
 **Battery.** After 5 minutes in the background an Android phone only
 receives (no presence pings, scans or sync), lock or no lock; *Auto-lock*
@@ -66,8 +69,8 @@ default key runs out.
 
 Text on these pages can be selected and copied. *Why isn't it working?*
 checks the network, background work, notifications, battery, the clock and
-free space; on an iPhone it also says that Zen receives only while it is
-open. **Diagnostics** keeps an event log (without message content) to
+free space; on an iPhone it also says that Zen receives at once only while
+it is open. **Diagnostics** keeps an event log (without message content) to
 attach to a bug report.
 
 ## Public peers

@@ -243,6 +243,13 @@ device keys, label `zen.local.v1`); a stranger has none.
   every time, filter size in steps of 16 bytes), so to anyone without the
   secret they are random bytes; they reveal only that a Zen device with
   local links is there and roughly how many devices it links with.
+- **LAN beacon**: the advert, then the "people nearby" advert of 2.12 (20
+  bytes, only while the person is visible), an info byte (that advert's
+  length, 0 or 20, plus `0x80` while the sender looks around) and the TCP
+  port (2 bytes, big-endian). A device looking around beacons every 5 s; a
+  visible device answers such a beacon with one beacon sent straight back
+  (at most every 5 s per address). A device with no devices to link with
+  beacons only while it looks around.
 - **Handshake** (both ends, any stream): fresh X25519 keys, a selector
   `HMAC(selKey, ephemeral key)[:8]` per candidate device shuffled with random
   padding, session keys from HKDF over the X25519 result with the pair's
@@ -486,7 +493,8 @@ relay engine and never reaches the app layer.
 
 See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 `lg_sibling`, `lg_heads`, `lg_want`, `lg_entries`, `lg_revoke`, `lg_cert_want`,
-`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`.
+`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`,
+`lg_post_want`, `lg_post`.
 
 `lg_push` {`entries`} is the only reliable ledger frame: a device's new
 entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
@@ -534,6 +542,18 @@ Computers run no GATT server: they cannot receive waves.
   stranger sees random bytes that change every slot. The locked Android
   service shows tokens worked out in advance (the nearby kit, 8 days) and
   never holds the private key.
+- **Same network**: the same advertisement (token + hint) rides on the LAN
+  beacons (1.6) while the Wi-Fi discovery setting is on: from the app while
+  it is unlocked, and from the nearby kit's tokens in the locked Android
+  service (which has no devices to link with, so it only answers phones
+  that look around). The app hands the bridge the adverts of the
+  coming slots (a day) and the bridge shows the one of the current slot, so
+  a token never stays past its slot (`lan_nearby.go`). Adverts heard there
+  are kept only while the app looks around ("Nearby" open, or a short look
+  in the background), for at most 2 minutes. Nobody is written to over the
+  network (no hello, no alarm wave). The sender's IP address does not change
+  with the token, so others on that network can tell that the successive
+  pseudonyms are one device while it stays there (never who it is).
 - **GATT server**: service `5a454e00-6e65-6172-6279-000000000001`, one
   writable characteristic `5a454e00-6e65-6172-6279-000000000002` ("wave"),
   no pairing. Writes up to 600 bytes (long writes are assembled). A phone may
@@ -674,6 +694,22 @@ relays.
   recipient, unvouched strangers 30 messages / 256 KiB per recipient and 10 per
   /64, clock skew 1 day, 5000 seen and 5000 tombstones. Polls every 5 min,
   relay sync every 10 min.
+- **A locked Android phone stays a mailbox.** Once Zen locks (or after 5
+  minutes in the background) the background service runs the node without
+  the master key. From a mailbox kit the app leaves it (whom the phone
+  serves with their relays and deposit keys, the mail held, tombstones;
+  sealed with the background key) it goes on answering `rly_deposit`,
+  `rly_poll`, `rly_mail_ack`, `rly_purge`, `rly_sync` and `rly_sync_want`
+  by the same rules, and writes what it holds back to a file of its own,
+  which the app merges after unlock (`relay_engine_locked.dart`).
+  Attachments (`rly_bput`...) wait for the unlock.
+- **Mail for a locked phone** (`rly_mail` to the locked service) is kept
+  envelope by envelope, keyed like the direct payload (`sender|id`): a copy
+  that came already, directly or from another mailbox, or that the app
+  took before it locked (tags in the mailbox kit), is not kept or announced
+  again. The service answers `rly_mail_ack {ids}` once the envelopes are on
+  the disk (and `rly_ack` for envelopes handed over by their own sender's
+  locked outbox), so they are not handed over again at every poll.
 - A deposit is accepted only from the claimed sender or from a co-relay. A
   deposit token (`HMAC-SHA256(depositKey, "zen.relay.deposit-token.v1|recipient|sender")`
   truncated to 16 bytes, where `depositKey = HMAC-SHA256(identityPrivate,
@@ -765,7 +801,25 @@ A signed, append-only, per-device **log** for each **space**.
   section `film` (in `feed`, removed by `post_del`), and in `acts`
   `film_react` (the latest per film wins), `film_seen` (`posts`: film ids the
   author counts) and `film_pass` (a public film passed on to friends of
-  friends: the signed film with its certificate, like a reshare).
+  friends: the signed film with its certificate, like a reshare); in
+  `acts` also `post_ann` (notices of posts passed on beyond friends, below).
+- **Post reach** [P]: a public post's body has `reach` (1 friends, 2 friends
+  of friends, 3 one step further); any other audience never goes past
+  friends. A friend of the author writes a `post_ann` entry {`items`: [{`p`
+  post id, `a` author account, `t` post time, `r` reach, `h` steps from the
+  author of the entry's readers (2 or 3, <= `r`), `aa`? author address from
+  their public profile, `e`? newest edit time, `x`? 1 when removed}]} (<= 100
+  items; each post once, again when `e`/`x` change; <= 10 posts per author
+  and 300 items per day). A reader fetches the post with `lg_post_want`
+  {`id`, `a`} from the friends who passed it on or from the author, and gets
+  `lg_post` {`id`, `a`, `entry`?, `edit`?, `del`?, `prof`?} (each part a
+  signed entry with its certificate; `del` the author's tombstone instead of
+  the post). The post is taken only if asked for, signed by `a`, public and
+  with `reach` >= the steps it came. A reader two steps away passes it on (as
+  `h` 3) only for `reach` 3 and once it holds the post. Friends are served
+  any held post that may go one step further; anyone else only the asked
+  device's own posts with `reach` >= 2 (10 asks a minute per address, 200
+  in all). Notices only about posts from the last 30 days.
 - **Audience encryption**: bodies for non-public audiences are
   `{aud, kid, n, c}` sealed with ChaCha20-Poly1305 under a 32-byte audience key,
   AAD `"<account>|<kid>"`; keys are handed to friends in `lg_keys` according to
@@ -947,7 +1001,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Ledger audiences | ChaCha20-Poly1305, 32-byte keys, nonce 12 bytes random, AAD `account|kid` | `audience_keys.dart` |
 | Nearby | masked hash-chain tokens (10-min slots) and alarm MAC (v6) with a per-friend pair key | `nearby_crypto.dart` |
 | Local links (offline) | adverts: Bloom filters of HMAC tags; handshake: ephemeral X25519 and ML-KEM-768, selectors, HKDF, AES-256-GCM records; secrets from the two devices' X25519 keys, mixed with contributions exchanged over the session layer once paired (1.6) | `local_link*.go`, `runtime_lan_discovery.dart` |
-| Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
+| Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door, outbox, mailbox) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
 | Dating | `DatingBox`: two layers of the classical X25519 box (`zen.relay.v1`) with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)`; every hop is inside the post-quantum session layer | `dating_crypto.dart` |
 | Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; one-time hybrid cards for anonymous requests and votes; LSAG ring signatures (classical) only for card registration between cellmates | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
 | Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |

@@ -332,21 +332,24 @@ class NeighborsScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('neighbors-screen'),
       appBar: ZenSectionBar(title: t('Sąsiedzi')),
-      body: SelectionArea(
-        child: ListenableBuilder(
-          listenable: service,
-          builder: (BuildContext context, Widget? _) {
-            if (service.joining && !service.hasFlat) {
-              return _Joining(service: service);
-            }
-            if (service.canTakeOver) {
-              return const _HeldFlat();
-            }
-            if (!service.hasFlat) {
-              return _NoFlat(service: service);
-            }
-            return _FlatHome(service: service);
-          },
+      body: SafeArea(
+        top: false,
+        child: SelectionArea(
+          child: ListenableBuilder(
+            listenable: service,
+            builder: (BuildContext context, Widget? _) {
+              if (service.joining && !service.hasFlat) {
+                return _Joining(service: service);
+              }
+              if (service.canTakeOver) {
+                return const _HeldFlat();
+              }
+              if (!service.hasFlat) {
+                return _NoFlat(service: service);
+              }
+              return _FlatHome(service: service);
+            },
+          ),
         ),
       ),
     );

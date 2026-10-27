@@ -15,6 +15,7 @@ import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -76,17 +77,17 @@ const Set<String> _ringEndTypes = <String>{
 };
 
 /// Relay frames about this phone's own mail (acknowledgements of what it
-/// sent, friends' mailbox sets, mail held for it): kept, the app's relay
-/// layer handles them after unlock. Every other relay frame is a mailbox
-/// duty for friends (holding, handing out, syncing their mail), paused
-/// while the app is locked: unanswered, the friends' phones use their other
-/// mailboxes.
+/// sent, friends' mailbox sets): kept, the app's relay layer handles them
+/// after unlock. Mail held for this phone (`rly_mail`) is kept envelope by
+/// envelope ([LockedReceiver._keepMail]). The mailbox duties for friends
+/// ([LockedMailbox.dutyTypes]) go to the [LockedMailbox] the app left a kit
+/// for; without one they go unanswered and the friends' phones use their
+/// other mailboxes. Anything else (attachments held for friends) waits.
 const Set<String> _keptRelayTypes = <String>{
   'rly_ack',
   'rly_announce',
   'rly_announce_ack',
   'rly_deposit_ack',
-  'rly_mail',
   'rly_bput_ack',
   'rly_bput_no',
 };
@@ -122,8 +123,34 @@ const Set<String> _socialTypes = <String>{
 const int kLockedStrangerFramesPerSender = 5;
 const int kLockedStrangerFramesTotal = 50;
 
-/// How often the receiver asks its mailboxes for mail held for it.
+/// How often the receiver asks its mailboxes for mail held for it, at
+/// first and again once something came.
+///
+/// The polls only back the mailboxes up: they hand mail over by themselves
+/// the moment it is deposited while this phone is reachable, and whenever
+/// it shows a sign of life. A poll catches what such a hand-over missed.
 const Duration kLockedMailboxPollInterval = Duration(minutes: 5);
+
+/// The longest wait between polls: each poll that brought nothing doubles
+/// the wait (5, 10, 20, 30 minutes), all multiples of the first, so the
+/// polls keep sharing their wakes with the rest of the beat.
+const Duration kLockedMailboxPollMaxInterval = Duration(minutes: 30);
+
+/// The wait before the mailboxes are asked again, after one that lasted
+/// [last]: [base] when something was kept since the last poll, otherwise
+/// twice [last], at most [max].
+Duration nextMailboxPollWait({
+  required Duration last,
+  required bool keptSince,
+  Duration base = kLockedMailboxPollInterval,
+  Duration max = kLockedMailboxPollMaxInterval,
+}) {
+  if (keptSince || last < base) {
+    return base;
+  }
+  final Duration doubled = last * 2;
+  return doubled > max ? max : doubled;
+}
 
 /// How often a locked phone answers one contact's pings at most.
 const Duration kLockedPongEvery = Duration(minutes: 4);
@@ -449,8 +476,12 @@ String backgroundContactsSignature(SocialHubState state) {
 /// * Presence: a ping from a contact gets a pong ("background"), so
 ///   friends deliver directly instead of through mailboxes. It pings no
 ///   one itself.
-/// * Its own mailboxes are asked for held mail (`rly_poll`); the mail is
-///   kept like any frame.
+/// * Its own mailboxes are asked for held mail (`rly_poll`); each envelope
+///   is kept once (also when it came directly before, or the app already
+///   took it: `taken`) and confirmed to whoever handed it over, so it is
+///   not handed over (and told about) again and again.
+/// * Mailbox duties for friends run from the mailbox kit ([LockedMailbox]):
+///   friends who chose this phone as a mailbox keep it while Zen is locked.
 /// * The power-button alarm goes out from the alarm kit ([LockedAlarm]):
 ///   the frames it needs to see (confirmations, answers, pings) are shown
 ///   to it as well.
@@ -462,11 +493,14 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   (checked with the kit, [LockedKnockWatch]: at the door, sealed, held
 ///   by a friend or passed on by a housemate) rings "Ktoś puka do drzwi",
 ///   which opens the knocks once Zen is unlocked.
-/// * Paused while locked: mailbox duties for friends, the ledger (posts and
-///   photos for friends, its sync), outgoing retries, dating and pyramid
-///   duties — they all need the master key.
-/// * Notifications say only what kind of thing came (a message, an alarm, a
-///   call), never from whom or what: nothing else is readable here.
+/// * Paused while locked: attachments held for friends, the ledger (posts
+///   and photos for friends, its sync), dating and pyramid duties — they
+///   need the master key. (Outgoing retries go from the outbox kit,
+///   `LockedOutbox`.)
+/// * Notifications say what kind of thing came (a message, an alarm, a
+///   call); a chat message also who wrote it and what, as far as the
+///   notification privacy level of its conversation allows and the
+///   [LockedNoticeKit] knows the name. Nothing else is readable here.
 final class LockedReceiver {
   LockedReceiver({
     required SignalTransport transport,
@@ -476,11 +510,15 @@ final class LockedReceiver {
     LockedAlarm? alarm,
     Stream<SignalTransportFrame>? doorFrames,
     LockedKnockWatch? knocks,
+    LockedMailbox? mailbox,
+    LockedNoticeKit? noticeKit,
+    Set<String> taken = const <String>{},
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
     this.mailboxPollInterval = kLockedMailboxPollInterval,
-    this.pollAnswerGrace = const Duration(seconds: 4),
+    this.mailboxPollMax = kLockedMailboxPollMaxInterval,
+    this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
   }) : _transport = transport,
        _capability = capability,
@@ -489,6 +527,9 @@ final class LockedReceiver {
        _alarm = alarm,
        _doorFrames = doorFrames,
        _knocks = knocks,
+       _mailbox = mailbox,
+       _noticeKit = noticeKit ?? const LockedNoticeKit(),
+       _taken = taken,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final SignalTransport _transport;
@@ -506,6 +547,16 @@ final class LockedReceiver {
   /// This person's alarm from the alarm kit (`null`: the app never wrote
   /// one).
   final LockedAlarm? _alarm;
+
+  /// This phone as a mailbox for friends (`null`: no mailbox kit).
+  final LockedMailbox? _mailbox;
+
+  /// What a message's notice may say (without a kit: only that it came).
+  final LockedNoticeKit _noticeKit;
+
+  /// [LockedMailboxKit.takenTag]s of what the app already took before it
+  /// locked: a copy of one is confirmed, never kept or told about again.
+  final Set<String> _taken;
   final int Function() _now;
 
   /// A caller re-sends its invite every second while it rings: this long
@@ -516,7 +567,11 @@ final class LockedReceiver {
   final Duration noticeThrottle;
   final Duration mailboxPollInterval;
 
-  /// How long a poll's wake waits for the mailboxes' first answers.
+  /// The longest wait between polls ([nextMailboxPollWait]).
+  final Duration mailboxPollMax;
+
+  /// How long a poll's wake waits for the mailboxes' first answers (later
+  /// ones wake the phone themselves, like any frame).
   final Duration pollAnswerGrace;
 
   /// A contact's pings get a pong at most this often: friends ping only
@@ -529,7 +584,10 @@ final class LockedReceiver {
   StreamSubscription<SignalTransportFrame>? _doorSubscription;
   final Map<String, int> _doorFramesBy = <String, int>{};
   int _doorFramesTotal = 0;
-  WakeTimer? _pollTimer;
+  BeatTimer? _pollTimer;
+
+  /// [keptCount] when the last poll went out.
+  int _keptAtPoll = 0;
   Timer? _ringTimer;
   String? _ringingFrom;
   bool _running = false;
@@ -580,17 +638,19 @@ final class LockedReceiver {
     }
     // An alarm that was going on when the app locked carries on here.
     await _alarm?.start();
+    _keptAtPoll = _keptCount;
     await _pollMailboxes();
     if (mailboxPollInterval > Duration.zero &&
         _capability.mailboxes.isNotEmpty) {
       // On the shared beat: one wake of the phone for the polls of every
-      // account (and a look around nearby), held for the polls and their
-      // first answers and let go then.
+      // account (and a look around nearby, the outbox's rounds), held for
+      // the polls and their first answers and let go then. Polls that find
+      // nothing come less and less often ([nextMailboxPollWait]).
       _pollTimer = ZenWake.beat(
         'mailbox-poll',
         mailboxPollInterval,
         _pollOnWake,
-        hold: const Duration(seconds: 15),
+        hold: const Duration(seconds: 10),
       );
     }
     logZenMessage(
@@ -641,7 +701,7 @@ final class LockedReceiver {
     final Object? rawRid = frame.payload[kReliableIdKey];
     final String id = rawRid is String && rawRid.isNotEmpty
         ? 'd|$from|$rawRid'
-        : 'd|$from|${crypto.sha256.convert(record)}';
+        : 'd|$from|${_payloadHash(frame.payload)}';
     if (_kept.contains(id)) {
       return;
     }
@@ -713,6 +773,19 @@ final class LockedReceiver {
   /// The polls on a wake, then a moment for the answers (mail that comes
   /// later wakes the phone itself, like any frame).
   Future<void> _pollOnWake() async {
+    final BeatTimer? poll = _pollTimer;
+    if (poll != null) {
+      final Duration next = nextMailboxPollWait(
+        last: poll.every,
+        keptSince: _keptCount != _keptAtPoll,
+        base: mailboxPollInterval,
+        max: mailboxPollMax,
+      );
+      if (next != poll.every) {
+        poll.setEvery(next);
+      }
+    }
+    _keptAtPoll = _keptCount;
     try {
       await _pollMailboxes();
     } on Object catch (error, stackTrace) {
@@ -780,6 +853,25 @@ final class LockedReceiver {
       return;
     }
     if (type.startsWith('rly_')) {
+      final LockedMailbox? mailbox = _mailbox;
+      if (mailbox != null && LockedMailbox.dutyTypes.contains(type)) {
+        // From friends' senders too, who need not be contacts here: the
+        // mailbox checks who may leave what.
+        await ZenWake.holdWhile(
+          () => mailbox.handle(frame),
+          tag: _keepHoldTag,
+          limit: _keepHoldLimit,
+        );
+        return;
+      }
+      if (contact && type == 'rly_mail') {
+        await ZenWake.holdWhile(
+          () => _keepMail(frame, from, kind),
+          tag: _keepHoldTag,
+          limit: _keepHoldLimit,
+        );
+        return;
+      }
       if (contact && _keptRelayTypes.contains(type)) {
         await _keep(frame, from, type, kind, rid: null);
       }
@@ -847,9 +939,12 @@ final class LockedReceiver {
     }
     final String id = rid != null
         ? 'r|$from|$rid'
-        : 'h|$from|${crypto.sha256.convert(record)}';
-    if (_kept.contains(id)) {
-      // A repeat: the sender did not hear the first acknowledgement.
+        : 'h|$from|${_payloadHash(frame.payload)}';
+    if (_kept.contains(id) ||
+        (rid != null &&
+            _taken.contains(LockedMailboxKit.takenTag(from, rid)))) {
+      // A repeat (the sender did not hear the first acknowledgement), or
+      // what the app took before it locked.
       if (rid != null) {
         await _acknowledge(frame.from, rid);
       }
@@ -869,7 +964,7 @@ final class LockedReceiver {
     while (_kept.length > _maxKeptIds) {
       _kept.remove(_kept.first);
     }
-    _keptCount += 1;
+    _noteKept();
     if (rid != null) {
       await _acknowledge(frame.from, rid);
     }
@@ -878,17 +973,130 @@ final class LockedReceiver {
         await _ringKnock(frame)) {
       return;
     }
-    await _announce(type, frame.payload, kind);
+    await _announce(type, frame.payload, kind, from: from);
   }
+
+  /// Something from friends was kept: more may be on its way, so the
+  /// mailboxes are asked again in [mailboxPollInterval] (not after a long
+  /// wait that grew while nothing came).
+  void _noteKept() {
+    _keptCount += 1;
+    final BeatTimer? poll = _pollTimer;
+    if (poll != null && poll.every > mailboxPollInterval) {
+      poll.setEvery(mailboxPollInterval);
+    }
+  }
+
+  /// How long until the next poll now (tests).
+  @visibleForTesting
+  Duration? get mailboxPollWait => _pollTimer?.every;
 
   Future<void> _acknowledge(String to, String rid) =>
       _sendQuietly(to, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
 
+  /// What a frame without a reliable id is told apart by: its payload, not
+  /// the moment it arrived (a repeat arrives later).
+  static String _payloadHash(Map<String, dynamic> payload) =>
+      crypto.sha256.convert(utf8.encode(jsonEncode(payload))).toString();
+
+  /// Mail held for this phone, from one of its mailboxes or straight from a
+  /// sender's locked outbox. Each envelope counts as its payload would
+  /// directly (`r|sender|id`): one that came already, directly or from
+  /// another mailbox, or that the app took before it locked, is not kept
+  /// or told about again. Whoever handed the envelopes over hears that they
+  /// are here once they are on the disk (`rly_mail_ack`; a sender also
+  /// `rly_ack`), so it stops handing them over. The app opens and checks
+  /// them after unlock; the other mailboxes keep their copies until then.
+  Future<void> _keepMail(
+    SignalTransportFrame frame,
+    String from,
+    BackgroundContactKind kind,
+  ) async {
+    final Object? items = frame.payload['items'];
+    if (items is! List) {
+      return;
+    }
+    final List<Map<String, dynamic>> fresh = <Map<String, dynamic>>[];
+    final List<String> freshKeys = <String>[];
+    final List<String> here = <String>[];
+    final List<String> fromSender = <String>[];
+    for (final Object? item in items.take(200)) {
+      if (item is! Map) {
+        continue;
+      }
+      final Object? id = item['id'];
+      final Object? rawSender = item['s'];
+      if (id is! String || id.isEmpty || rawSender is! String) {
+        continue; // nothing the app could open either
+      }
+      final String sender = PeerShareCodec.normalizeAddress(rawSender);
+      final String key = 'r|$sender|$id';
+      if (sender == from) {
+        fromSender.add(id);
+      }
+      if (_kept.contains(key) ||
+          _taken.contains(LockedMailboxKit.takenTag(sender, id)) ||
+          freshKeys.contains(key)) {
+        here.add(id);
+        continue;
+      }
+      fresh.add(Map<String, dynamic>.from(item));
+      freshKeys.add(key);
+    }
+    if (fresh.isNotEmpty) {
+      final Uint8List record;
+      try {
+        record = encodeInboxFrame(
+          SignalTransportFrame(
+            from: frame.from,
+            payload: <String, dynamic>{'type': 'rly_mail', 'items': fresh},
+            receivedAtMillis: frame.receivedAtMillis,
+            senderKey: frame.senderKey,
+          ),
+        );
+      } on Object {
+        return;
+      }
+      if (await _inbox.append(
+        record,
+        sender: from,
+        stranger: kind == BackgroundContactKind.stranger,
+      )) {
+        _kept.addAll(freshKeys);
+        while (_kept.length > _maxKeptIds) {
+          _kept.remove(_kept.first);
+        }
+        _noteKept();
+        here.addAll(<String>[
+          for (final Map<String, dynamic> item in fresh) item['id'] as String,
+        ]);
+      } else {
+        // Not on the disk: not confirmed, the mailbox keeps it.
+        fresh.clear();
+      }
+    }
+    if (here.isNotEmpty) {
+      await _sendQuietly(frame.from, <String, dynamic>{
+        'type': 'rly_mail_ack',
+        'ids': here,
+      });
+      for (final String id in fromSender) {
+        if (here.contains(id)) {
+          await _acknowledge(frame.from, id);
+        }
+      }
+    }
+    if (fresh.isNotEmpty) {
+      await _announce('rly_mail', frame.payload, kind);
+    }
+  }
+
   Future<void> _announce(
     String type,
     Map<String, dynamic> payload,
-    BackgroundContactKind kind,
-  ) async {
+    BackgroundContactKind kind, {
+    String from = '',
+  }) async {
     if (type == 'alarm') {
       if (payload['end'] != null || kind != BackgroundContactKind.friend) {
         // Over (the app tells about it after unlock), or from someone whose
@@ -910,11 +1118,16 @@ final class LockedReceiver {
       return;
     }
     if (_messageTypes.contains(type)) {
+      final NoticeText text = _noticeKit.messageNotice(
+        from: from,
+        payload: payload,
+        genericBody: t('Odblokuj Zen, żeby przeczytać.'),
+      );
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedMessageSlot-${_now()}',
-          title: t('Nowa wiadomość'),
-          body: t('Odblokuj Zen, żeby przeczytać.'),
+          title: text.title,
+          body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
           routeKey: buildInboxRouteKey(),

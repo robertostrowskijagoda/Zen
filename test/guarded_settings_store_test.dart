@@ -17,6 +17,7 @@ void main() {
       const AppSettings(
         lockMode: AppLockMode.background,
         backgroundLockDelaySeconds: 30,
+        notificationPrivacy: NotificationPrivacy.generic,
         gifApiKey: 'mojKlucz123',
       ),
     );
@@ -28,7 +29,7 @@ void main() {
       const AppSettings(
         lockMode: AppLockMode.never,
         secureScreens: false,
-        hideNotificationContent: false,
+        notificationPrivacy: NotificationPrivacy.senderAndContent,
         allowNoAppPassword: true,
         themeMode: AppThemeMode.dark,
       ),
@@ -38,7 +39,7 @@ void main() {
     expect(loaded.lockMode, AppLockMode.background);
     expect(loaded.backgroundLockDelaySeconds, 30);
     expect(loaded.secureScreens, isTrue);
-    expect(loaded.hideNotificationContent, isTrue);
+    expect(loaded.notificationPrivacy, NotificationPrivacy.generic);
     expect(loaded.allowNoAppPassword, isFalse);
     expect(loaded.gifApiKey, 'mojKlucz123');
     // Everything else still comes from the file.

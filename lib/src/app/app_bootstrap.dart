@@ -29,6 +29,7 @@ import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -158,6 +159,14 @@ final class ZenBootstrapResult {
           hasTestProfile: ZenInstance.profile != null,
         ),
       ),
+      // The first-start setup once after the password; skipped the same
+      // way where a script drives the app.
+      firstRunSetupRequiredProvider.overrideWithValue(
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
+      ),
       // The permissions and Bluetooth step once after the password;
       // skipped the same way where a script drives the app.
       permissionsSetupRequiredProvider.overrideWithValue(
@@ -262,6 +271,13 @@ final class ZenBootstrapper {
   /// to in this process); `null`: the account open now (the default one
   /// at the app's start).
   final ZenAccountOpening? opening;
+
+  /// The settings as soon as they are read (the first step of [bootstrap]),
+  /// before the rest of the start-up is done: the splash shows the colours
+  /// of the chosen theme from then on, not the default ones. `null` until
+  /// then.
+  final ValueNotifier<AppSettings?> loadedSettings =
+      ValueNotifier<AppSettings?>(null);
   final SupportDirectoryLoader _supportDirectoryLoader;
   final AppSecurityServiceBuilder _appSecurityServiceBuilder;
   final AppSettingsStoreBuilder _appSettingsStoreBuilder;
@@ -344,6 +360,7 @@ final class ZenBootstrapper {
     );
     final AppSettings settings =
         await appSettingsStore.load() ?? const AppSettings();
+    loadedSettings.value = settings;
     return ZenBootstrapSettingsState(
       supportDirectory: supportDirectory,
       appSettingsStore: appSettingsStore,

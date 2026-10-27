@@ -1,9 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -348,6 +352,168 @@ void main() {
         .onPressed!
         .call();
     expect(security.isLocked, isTrue);
+    await _tearDown(tester);
+  });
+
+  testWidgets('the lock is in one place, the top bar: not in the account '
+      'menu, not in the settings', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      hasPassword: true,
+      passwordIterations: 10,
+    );
+    await _pumpApp(tester, security: security);
+    expect(find.byKey(const Key('side-tabs-lock')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('account-menu-button')));
+    await _route(tester);
+    expect(find.byKey(const Key('account-menu')), findsOneWidget);
+    expect(find.byKey(const Key('account-menu-lock')), findsNothing);
+    expect(find.text('Zablokuj'), findsNothing);
+    await tester.tapAt(const Offset(10, 10));
+    await _route(tester);
+
+    await tester.tap(find.byKey(const Key('chats-status-chip')));
+    await _route(tester);
+    expect(find.byKey(const Key('settings-tab-body')), findsOneWidget);
+    // With a password the settings do not repeat the lock button or the
+    // "set a password" card.
+    expect(find.byKey(const Key('settings-lock-now-button')), findsNothing);
+    expect(find.text('Zablokuj teraz'), findsNothing);
+    await tester.pageBack();
+    await _route(tester);
+
+    tester
+        .widget<IconButton>(find.byKey(const Key('side-tabs-lock')))
+        .onPressed!
+        .call();
+    expect(security.isLocked, isTrue);
+    await _tearDown(tester);
+  });
+
+  testWidgets('without a password the top bar has no lock and the settings '
+      'offer to set one', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester, security: MemoryAppSecurityService());
+    expect(find.byKey(const Key('side-tabs-lock')), findsNothing);
+    await tester.tap(find.byKey(const Key('chats-status-chip')));
+    await _route(tester);
+    expect(find.byKey(const Key('settings-lock-now-button')), findsOneWidget);
+    expect(find.text('Ustaw hasło'), findsWidgets);
+    await _tearDown(tester);
+  });
+
+  testWidgets('an additional account locks from the top bar by going back to '
+      'the default account', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final ZenAccountHost host = ZenAccountHost();
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      hasPassword: true,
+      passwordIterations: 10,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerNodeEnabledProvider.overrideWithValue(true),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          appSecurityServiceProvider.overrideWithValue(security),
+          zenAccountHostProvider.overrideWithValue(host),
+          zenAccountProvider.overrideWithValue(
+            ZenAccountScope.derive('TEST-ACCOUNT', Uint8List(32)),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const AppShellScreen()),
+      ),
+    );
+    await tester.runAsync(() => _settle());
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('side-tabs-lock')));
+    await tester.runAsync(() => _settle());
+    await tester.pump();
+    // Asked for: the default account's (locked) opening, and this account's
+    // key is gone from memory.
+    expect(host.switching, isTrue);
+    final ZenAccountOpening opening = host.take()!;
+    expect(opening.scope.isDefault, isTrue);
+    expect(security.isLocked, isTrue);
+    await _tearDown(tester);
+  });
+
+  testWidgets('"Mój kod" is one tap from the top bar, also on the smallest '
+      'phone', (WidgetTester tester) async {
+    addTearDown(tester.view.reset);
+    tester.view.devicePixelRatio = 1;
+    for (final Size size in const <Size>[Size(320, 568), Size(1280, 800)]) {
+      tester.view.physicalSize = size;
+      await _pumpApp(
+        tester,
+        security: MemoryAppSecurityService(
+          hasPassword: true,
+          passwordIterations: 10,
+        ),
+      );
+      final Finder myCode = find.byKey(const Key('status-my-code'));
+      expect(myCode, findsOneWidget, reason: '$size');
+      expect(_tappable(tester, myCode), isTrue, reason: '$size');
+      expect(tester.takeException(), isNull, reason: '$size');
+
+      await tester.tap(myCode);
+      await _route(tester);
+      // The invite screen: the QR / invite code, adding someone by theirs.
+      expect(find.text('Mój kod'), findsWidgets, reason: '$size');
+      expect(find.byKey(const Key('invite-add-friend')), findsOneWidget);
+      await tester.pageBack();
+      await _route(tester);
+      await _tearDown(tester);
+    }
+  });
+
+  testWidgets('"Nigdy" says what it means in the security settings', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(
+      tester,
+      security: MemoryAppSecurityService(
+        hasPassword: true,
+        passwordIterations: 10,
+      ),
+    );
+    await tester.tap(find.byKey(const Key('chats-status-chip')));
+    await _route(tester);
+    final Finder security = find.byKey(const Key('settings-nav-security'));
+    await tester.ensureVisible(security);
+    await tester.pump();
+    await tester.tap(security);
+    await _route(tester);
+
+    final Finder note = find.byKey(const Key('settings-lock-never-note'));
+    final Finder never = find.byKey(const Key('settings-lock-mode-never'));
+    await tester.ensureVisible(never);
+    await tester.pump();
+    expect(note, findsNothing);
+    await tester.tap(never);
+    await tester.pump();
+    expect(note, findsOneWidget);
+    // It names the catch: the password still opens the data after a restart.
+    expect(
+      tester.widget<Text>(note).data,
+      allOf(contains('nie blokuje się sam'), contains('hasło i tak')),
+    );
+    await tester.tap(find.byKey(const Key('settings-lock-mode-appClose')));
+    await tester.pump();
+    expect(note, findsNothing);
     await _tearDown(tester);
   });
 

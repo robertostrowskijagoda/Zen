@@ -46,7 +46,7 @@ const Set<String> kSyncedSettingKeys = <String>{
   'palette',
   'gifApiKey',
   'gifSearch',
-  'hideNotificationContent',
+  'notificationPrivacy',
   'inAppSounds',
   'secureScreens',
   'paperBackupDone',

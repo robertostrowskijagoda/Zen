@@ -112,13 +112,23 @@ can be the mailbox for a whole group of friends;
 
 ### iPhone
 
-iOS does not let Zen run in the background. On an iPhone:
+iOS lets Zen run in the background only briefly. On an iPhone:
 
-- messages and calls **arrive only while Zen is open**; until then they wait
-  with the sender or in your mailboxes on friends' devices;
-- messages you write **go out only while Zen is open**: lock the phone
-  right after sending and the message waits on the iPhone (*Waiting on your
-  iPhone, recipient offline*) until you open Zen again;
+- messages and calls **arrive at once only while Zen is open**. Otherwise
+  iOS wakes Zen now and then for a short check of your mailboxes — when, the
+  system decides: a few times a day at best, never after you swipe Zen away
+  in the app switcher. Until then messages wait with the sender or in your
+  mailboxes on friends' devices;
+- messages you write go out while Zen is open and for about half a minute
+  after you leave it; after that a message to someone offline waits on the
+  iPhone (*Waiting on your iPhone, recipient offline*) until the next check
+  or until you open Zen again;
+- all of this works only while Zen is unlocked: with the lock *After leaving
+  the app* it stops when Zen locks;
+- **Settings → Background work** shows when iOS last woke Zen and has
+  **Keep receiving in the background**: Zen plays a silent sound so that iOS
+  does not suspend it, and messages and calls arrive at once — at a clear
+  battery cost ([details](../IOS_BACKGROUND.md));
 - friends pick an iPhone as their mailbox only after devices that stay
   online.
 
@@ -134,7 +144,7 @@ and **Retry**.
 | Icon | Label | Meaning |
 |---|---|---|
 | clock | Sending… | the first direct attempt is under way |
-| outbox | Waiting on your phone, recipient offline | only this device has a copy and keeps trying (on an iPhone: *Waiting on your iPhone*, tried again only while Zen is open) |
+| outbox | Waiting on your phone, recipient offline | only this device has a copy and keeps trying (on an iPhone: *Waiting on your iPhone*, tried again while Zen is open and at the background checks) |
 | mailbox | Waiting in the recipient's mailboxes with friends (N) | N sealed copies wait in mailboxes; if you are one of them, the details say so |
 | one tick | Sent | in the queue, nothing more is known yet |
 | two ticks | Delivered | the recipient's device confirmed it |
@@ -161,8 +171,8 @@ video and shared screen are protected three times:
 The call screen says which protection a call has. In a group call every
 participant has a separate connection to every other.
 
-When you share your screen, notifications are shown without content and a
-red bar reminds you that everything is visible. When a call is recorded,
+When you share your screen, notifications show at most who wrote, never
+what, and a red bar reminds you that everything is visible. When a call is recorded,
 everyone hears a signal.
 
 **Recording** works on every system and only takes the call and your
@@ -208,8 +218,8 @@ then, and offers *Retry* when saving failed.
   some frames) but keeps playing.
 - Dropping files shows no highlight while you drag (the system reports only
   the drop).
-- On iPhone Zen receives and sends only while it is open (iOS does not allow
-  it to run in the background; [above](#iphone)).
+- On iPhone Zen receives and sends at once only while it is open (iOS lets
+  it run in the background only briefly; [above](#iphone)).
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.

@@ -2,17 +2,21 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/share_app_server.dart';
 import 'package:zen/src/features/update/store_build.dart';
+import 'package:zen/src/features/update/update_notice.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
 /// What the last look at GitHub's newest release found.
@@ -64,8 +68,11 @@ bool githubUpdatesEnabledFor({
   required Map<String, String> environment,
 }) => !storeBuild && !web && !environment.containsKey('FLUTTER_TEST');
 
-/// Looks at the project's newest GitHub release at start and every
-/// [checkEvery], and on the person's "Aktualizuj" downloads this platform's
+/// Looks at the project's newest GitHub release whenever the last look
+/// (here or in the Android background service, [noticeStore]) is
+/// [checkEvery] old: at start, when the app comes back, and while it runs.
+/// A newer release is announced once with a system notification
+/// ([notifications]). On the person's "Aktualizuj" it downloads this platform's
 /// file, checks it against the release's `SHA256SUMS` and, once this build
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
@@ -89,20 +96,32 @@ final class GithubUpdateService extends ChangeNotifier {
     this.beforeDownload,
     bool Function()? internetWorks,
     DateTime Function()? now,
+    UpdateNoticeStore? noticeStore,
+    this.notifications,
     this.currentVersion = kAppVersion,
     this.releaseKeys = kReleaseMaintainers,
     this.firstCheckAfter = const Duration(seconds: 20),
-    this.checkEvery = const Duration(hours: 12),
+    this.checkEvery = kGithubCheckEvery,
     this.confirmAfter = const Duration(minutes: 2),
     this.retryFirst = const Duration(minutes: 15),
   }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
        _internetWorks = internetWorks ?? (() => true),
-       _now = now ?? DateTime.now;
+       _now = now ?? DateTime.now,
+       noticeStore = noticeStore ?? MemoryUpdateNoticeStore();
 
   final GithubUpdateInstaller installer;
   final String currentVersion;
+
+  /// What this and the Android background service keep about the checks:
+  /// when GitHub last answered, which version was announced, which
+  /// version's banner was closed.
+  final UpdateNoticeStore noticeStore;
+
+  /// Where "Jest nowa wersja Zen" is shown (once per version); null: not
+  /// at all.
+  final RuntimeSystemNotificationService? notifications;
 
   /// The maintainers' keys (hybrid ids) a release's [kSignedSumsAssetName]
   /// must be signed with. Empty (as today): only `SHA256SUMS`, which comes from the same
@@ -144,13 +163,19 @@ final class GithubUpdateService extends ChangeNotifier {
   String? _dismissedVersion;
   Future<void>? _checking;
   bool _asking = false;
+  bool _started = false;
+
+  /// When this isolate last asked GitHub (answered or not).
+  DateTime? _triedAt;
+
+  /// The next [checkIfDue].
+  Timer? _next;
 
   GithubInstallState _install = GithubInstallState.idle;
   int _received = 0;
   int _total = 0;
   String? _installMessage;
 
-  final List<Timer> _timers = <Timer>[];
   Timer? _confirm;
   bool _disposed = false;
 
@@ -186,10 +211,14 @@ final class GithubUpdateService extends ChangeNotifier {
     return name != null && (newer?.assets.containsKey(name) ?? false);
   }
 
-  /// The banner "Jest nowa wersja…" (until "Później" for that version).
+  /// The banner "Jest nowa wersja…" (until it is closed for that version,
+  /// which is kept: closed, it stays closed after a restart; the card on
+  /// the updates screen still offers the version).
   bool get showNewerBanner {
     final GithubRelease? r = newer;
-    return r != null && r.version != _dismissedVersion;
+    final String? dismissed = _dismissedVersion;
+    return r != null &&
+        (dismissed == null || compareAppVersions(r.version, dismissed) > 0);
   }
 
   /// The banner with [githubUnreachableMessage]: only when two attempts in
@@ -218,19 +247,92 @@ final class GithubUpdateService extends ChangeNotifier {
   /// installing it (false while it knows no [releaseKeys]).
   bool get verifiesAuthorSignature => releaseKeys.isNotEmpty;
 
-  /// Checks after [firstCheckAfter] and then every [checkEvery].
+  /// Takes the kept state at once, and [checkIfDue] after
+  /// [firstCheckAfter]; from then on [checkIfDue] runs whenever a check is
+  /// due again (and when the app comes back, see the provider).
   void start() {
-    if (_timers.isNotEmpty || _disposed) {
+    if (_started || _disposed) {
       return;
     }
-    _timers
-      ..add(Timer(firstCheckAfter, () => unawaited(check())))
-      ..add(Timer.periodic(checkEvery, (_) => unawaited(check())));
+    _started = true;
+    unawaitedLogged(_readKept(), context: 'Reading the update check state');
+    _arm(firstCheckAfter);
   }
 
+  /// Asks GitHub when a check is due: GitHub last answered (here or in the
+  /// Android background service) [checkEvery] ago or longer, or the
+  /// background service has since found a version this isolate does not
+  /// know yet. Not twice within [retryFirst] when GitHub did not answer
+  /// (an offline phone coming back to the app now and then).
+  Future<void> checkIfDue() async {
+    if (_disposed) {
+      return;
+    }
+    final UpdateNoticeState kept = await _readKept();
+    final int now = _now().millisecondsSinceEpoch;
+    final int? mine = _checkedAt?.millisecondsSinceEpoch;
+    final int? theirs = kept.checkedAtMillis;
+    final int? last = mine == null || (theirs != null && theirs > mine)
+        ? theirs
+        : mine;
+    final String? found = kept.newestVersion;
+    final bool foundElsewhere =
+        found != null &&
+        theirs != null &&
+        (mine == null || theirs > mine) &&
+        compareAppVersions(found, newer?.version ?? currentVersion) > 0;
+    final DateTime? tried = _triedAt;
+    final bool triedJustNow =
+        tried != null && _now().difference(tried) < retryFirst;
+    if (_checking == null &&
+        (foundElsewhere ||
+            (!triedJustNow &&
+                updateCheckDue(last, nowMillis: now, every: checkEvery)))) {
+      await check();
+    }
+    _armNext();
+  }
+
+  /// The next [checkIfDue]: when the last answer turns [checkEvery] old.
+  void _armNext() {
+    final DateTime? at = _checkedAt;
+    final Duration left = at == null
+        ? checkEvery
+        : at.add(checkEvery).difference(_now());
+    _arm(left < const Duration(minutes: 1) ? const Duration(minutes: 1) : left);
+  }
+
+  void _arm(Duration wait) {
+    _next?.cancel();
+    _next = _disposed ? null : Timer(wait, () => unawaited(checkIfDue()));
+  }
+
+  /// What is kept, with the closed banner's version taken over.
+  Future<UpdateNoticeState> _readKept() async {
+    final UpdateNoticeState kept = await noticeStore.read();
+    final String? dismissed = kept.dismissedVersion;
+    if (dismissed != null &&
+        (_dismissedVersion == null ||
+            compareAppVersions(dismissed, _dismissedVersion!) > 0)) {
+      _dismissedVersion = dismissed;
+      _notify();
+    }
+    return kept;
+  }
+
+  /// Closes the banner for this version, also after a restart.
   void dismissNewer() {
-    _dismissedVersion = newer?.version;
+    final String? version = newer?.version;
+    _dismissedVersion = version;
     _notify();
+    if (version != null) {
+      unawaitedLogged(
+        noticeStore.update(
+          (UpdateNoticeState s) => s.copyWith(dismissedVersion: version),
+        ),
+        context: 'Keeping the closed update banner',
+      );
+    }
   }
 
   void dismissUnreachable() {
@@ -245,6 +347,7 @@ final class GithubUpdateService extends ChangeNotifier {
   });
 
   Future<void> _check() async {
+    _triedAt = _now();
     _notify();
     try {
       final GithubRelease? release = GithubRelease.fromJson(
@@ -258,6 +361,7 @@ final class GithubUpdateService extends ChangeNotifier {
       _state = newer != null
           ? GithubCheckState.newer
           : GithubCheckState.upToDate;
+      await _keepAnswer();
     } on GithubStatusException catch (e) {
       _reached();
       if (e.statusCode == HttpStatus.notFound) {
@@ -266,6 +370,7 @@ final class GithubUpdateService extends ChangeNotifier {
         _answered();
         _latest = null;
         _state = GithubCheckState.missing;
+        await _keepAnswer();
       } else {
         _state = GithubCheckState.failed;
         _error = e.toString();
@@ -287,6 +392,26 @@ final class GithubUpdateService extends ChangeNotifier {
         _failedAgain(false, null);
       }
       logZenWarning('Sprawdzanie nowej wersji na GitHubie: $e');
+    }
+  }
+
+  /// GitHub gave a real answer: kept for the Android background service
+  /// (which then waits [checkEvery] before it asks), and a newer version
+  /// announced, once.
+  Future<void> _keepAnswer() async {
+    final int now = _now().millisecondsSinceEpoch;
+    final String? found = newer?.version;
+    await noticeStore.update(
+      (UpdateNoticeState s) => s.answered(at: now, newest: found),
+    );
+    final RuntimeSystemNotificationService? notices = notifications;
+    if (found != null && notices != null) {
+      await announceUpdateOnce(
+        store: noticeStore,
+        notices: notices,
+        version: found,
+        nowMillis: now,
+      );
     }
   }
 
@@ -503,10 +628,8 @@ final class GithubUpdateService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    for (final Timer timer in _timers) {
-      timer.cancel();
-    }
-    _timers.clear();
+    _next?.cancel();
+    _next = null;
     _confirm?.cancel();
     _retry?.cancel();
     super.dispose();
@@ -542,7 +665,16 @@ final Provider<GithubUpdateService?> githubUpdateServiceProvider =
             return false;
           }
         },
+        noticeStore: FileUpdateNoticeStore(),
+        notifications: ref.read(runtimeSystemNotificationServiceProvider),
       )..start();
-      ref.onDispose(service.dispose);
+      // Back in the app after a while: a check when one is due.
+      final AppLifecycleListener lifecycle = AppLifecycleListener(
+        onResume: () => unawaited(service.checkIfDue()),
+      );
+      ref.onDispose(() {
+        lifecycle.dispose();
+        service.dispose();
+      });
       return service;
     });

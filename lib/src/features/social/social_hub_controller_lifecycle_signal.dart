@@ -796,6 +796,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal: signal,
             receivedAtMillis: timestamp,
             friends: state.friends,
+            privacy: _noticePrivacyFor(signal),
           )
         : null;
 
@@ -863,7 +864,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                   entry: backgroundEntry,
                   signal: signal,
                   friends: state.friends,
-                  hideContent: _appSettings.hideNotificationContent,
+                  privacy: _noticePrivacyFor(signal),
                 ),
               );
         if (displayed && backgroundEntry.type != InboxEntryType.callInvite) {
@@ -985,7 +986,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           entry: notifyEntry,
           signal: signal,
           friends: state.friends,
-          hideContent: _appSettings.hideNotificationContent,
+          privacy: _noticePrivacyFor(signal),
         ),
       );
     }

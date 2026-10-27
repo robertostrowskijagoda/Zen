@@ -60,10 +60,16 @@ object ZenLocationBridge {
     private const val SERVICE_START_WAIT_MS = 3_000L
 
     private var requestSerial = 0
+    private const val CHANNEL = "zen/location"
+
+    /** [engine] is going away: its handler (it may hold the Activity) goes with it. */
+    fun unregister(engine: FlutterEngine) {
+        engine.dartExecutor.binaryMessenger.setMessageHandler(CHANNEL, null)
+    }
 
     fun register(engine: FlutterEngine, context: Context, activity: FragmentActivity?) {
         val app = context.applicationContext
-        MethodChannel(engine.dartExecutor.binaryMessenger, "zen/location")
+        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 try {
                     when (call.method) {

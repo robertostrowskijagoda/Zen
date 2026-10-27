@@ -274,6 +274,66 @@ void main() {
     expect(target.last['Peers'], isEmpty);
   });
 
+  test('people nearby ride on the LAN settings: adverts, looking, and what '
+      'was heard', () async {
+    final _Target target = _Target();
+    final List<bool> lock = <bool>[];
+    final LocalLinksController controller = LocalLinksController(
+      target: target,
+      loadPeers: () async => const <LocalLinkPeer>[],
+      setMulticastLock: (bool held) async => lock.add(held),
+    );
+    // Set before the start: kept for it.
+    controller.setNearby(
+      LocalNearbyAdverts(
+        firstSlot: 2950000,
+        adverts: Uint8List.fromList(List<int>.generate(20, (int i) => i)),
+      ),
+    );
+    expect(target.pushed, isEmpty);
+    await controller.start(active: true, foreground: false);
+    await Future<void>.delayed(Duration.zero);
+    expect(target.last['Nearby'], <String, Object>{
+      'Start': 2950000,
+      'Adverts': '000102030405060708090a0b0c0d0e0f10111213',
+      'Looking': false,
+    });
+    expect(lock.last, isFalse, reason: 'shown only: no multicast lock');
+
+    // Looking around (in the background too) needs to hear the others.
+    controller.setNearby(
+      const LocalNearbyAdverts(firstSlot: 2950000, looking: true),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(target.last['Nearby'], <String, Object>{
+      'Start': 2950000,
+      'Adverts': '',
+      'Looking': true,
+    });
+    expect(lock.last, isTrue);
+    final int pushes = target.pushed.length;
+    controller.setNearby(
+      const LocalNearbyAdverts(firstSlot: 2950000, looking: true),
+    );
+    expect(target.pushed, hasLength(pushes), reason: 'the same: not again');
+
+    controller.setNearby(null);
+    await Future<void>.delayed(Duration.zero);
+    expect(target.last.containsKey('Nearby'), isFalse);
+    expect(lock.last, isFalse);
+
+    final LocalLinksStatus status = LocalLinksStatus.fromJson(<String, dynamic>{
+      'nearby': <Object?>[
+        <String, Object?>{'advert': '0a0b', 'at': 5},
+        <String, Object?>{'advert': 7, 'at': 5},
+      ],
+    });
+    expect(status.nearby.single.advert, <int>[10, 11]);
+    expect(status.nearby.single.at, 5);
+    expect(LocalLinksStatus.empty.nearby, isEmpty);
+    await controller.stop();
+  });
+
   test('native transports run only when on and the app is used', () async {
     final _Target target = _Target();
     final _Transport wifiDirect = _Transport(LocalLinkTransport.wifiDirect);

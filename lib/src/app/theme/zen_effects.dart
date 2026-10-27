@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -25,12 +26,16 @@ abstract final class ZenEffects {
     ZenBackdrop.steam => 10,
     ZenBackdrop.holo => 8,
     ZenBackdrop.embers => 14,
+    ZenBackdrop.aurora => 8,
+    ZenBackdrop.petals => 10,
+    ZenBackdrop.bubbles => 12,
+    ZenBackdrop.blueprint => 6,
+    ZenBackdrop.spotlight => 12,
     ZenBackdrop.halftone ||
     ZenBackdrop.brushed ||
     ZenBackdrop.rain ||
     ZenBackdrop.grid ||
     ZenBackdrop.scanlines ||
-    ZenBackdrop.aurora ||
     ZenBackdrop.none => 0,
   };
 
@@ -54,6 +59,10 @@ abstract final class ZenEffects {
     ZenBackdrop.grid => 0.30,
     ZenBackdrop.scanlines => 0.10,
     ZenBackdrop.aurora => 0.16,
+    ZenBackdrop.petals => 0.30,
+    ZenBackdrop.bubbles => 0.30,
+    ZenBackdrop.blueprint => 0.22,
+    ZenBackdrop.spotlight => 0.20,
     ZenBackdrop.none => 0,
   };
 
@@ -81,7 +90,11 @@ abstract final class ZenEffects {
     ],
     ZenBackdrop.vapor ||
     ZenBackdrop.halftone ||
-    ZenBackdrop.embers => <Color>[c.accent, c.accentSecondary],
+    ZenBackdrop.embers ||
+    ZenBackdrop.petals ||
+    ZenBackdrop.bubbles => <Color>[c.accent, c.accentSecondary],
+    ZenBackdrop.blueprint => <Color>[c.accent],
+    ZenBackdrop.spotlight => <Color>[c.accentSecondary, c.accent],
     ZenBackdrop.steam => <Color>[c.outlineStrong, c.textMuted],
     ZenBackdrop.brushed => <Color>[c.outlineStrong],
     ZenBackdrop.deepSea ||
@@ -125,6 +138,14 @@ abstract final class ZenEffects {
         _embers(canvas, size, t, c, a);
       case ZenBackdrop.brushed:
         _brushed(canvas, size, c, a);
+      case ZenBackdrop.petals:
+        _petals(canvas, size, t, c, a);
+      case ZenBackdrop.bubbles:
+        _bubbles(canvas, size, t, c, a);
+      case ZenBackdrop.blueprint:
+        _blueprint(canvas, size, t, c, a);
+      case ZenBackdrop.spotlight:
+        _spotlight(canvas, size, t, c, a);
       case ZenBackdrop.cipher:
       case ZenBackdrop.lightcycle:
       case ZenBackdrop.rain:
@@ -451,18 +472,23 @@ abstract final class ZenEffects {
         Rect.fromLTWH(sun.left, center.dy + r * (0.1 + i * 0.18), sun.width, 3),
       );
     }
-    canvas.drawPath(
-      disc..fillType = PathFillType.evenOdd,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            c.accent.withValues(alpha: a * 0.7),
-            c.accentSecondary.withValues(alpha: a * 0.7),
-          ],
-        ).createShader(sun),
-    );
+    // The sun sets behind the horizon: nothing of it shows on the floor.
+    canvas
+      ..save()
+      ..clipRect(Rect.fromLTWH(0, 0, s.width, horizon))
+      ..drawPath(
+        disc..fillType = PathFillType.evenOdd,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              c.accent.withValues(alpha: a * 0.7),
+              c.accentSecondary.withValues(alpha: a * 0.7),
+            ],
+          ).createShader(sun),
+      )
+      ..restore();
     final Paint line = Paint()
       ..strokeWidth = 1
       ..color = c.accentSecondary.withValues(alpha: a);
@@ -583,14 +609,20 @@ abstract final class ZenEffects {
         _gear(Offset(s.width * 0.05, s.height * 0.92), 90, 14, -t * 0.09),
         line,
       );
-    final Paint puff = Paint()..color = c.textMuted.withValues(alpha: a * 0.4);
+    // Soft puffs: dense in the middle, fading out, thinning as they rise.
     for (int i = 0; i < 6; i++) {
       final double k = (t * 0.05 + _h(i, 1)) % 1;
       final Offset p = Offset(
         s.width * (0.1 + _h(i, 2) * 0.8) + 14 * math.sin(t * 0.4 + i),
         s.height * (1.05 - k * 1.1),
       );
-      canvas.drawCircle(p, 18 + k * 30, puff);
+      _bloom(
+        canvas,
+        s,
+        p,
+        24 + k * 40,
+        c.textMuted.withValues(alpha: a * 0.5 * (1 - k * 0.6)),
+      );
     }
   }
 
@@ -667,6 +699,176 @@ abstract final class ZenEffects {
       final double len = s.width * (0.2 + _h(i, 2) * 0.8);
       p.color = c.outlineStrong.withValues(alpha: a * _h(i, 3));
       canvas.drawLine(Offset(from, y), Offset(from + len, y), p);
+    }
+  }
+
+  /// A leaf: a lens with the point up, one unit long.
+  static final Path _leaf = Path()
+    ..moveTo(0, -1)
+    ..quadraticBezierTo(0.9, -0.15, 0, 1)
+    ..quadraticBezierTo(-0.9, -0.15, 0, -1)
+    ..close();
+
+  // Leaves and petals sinking slowly, swaying and turning as they fall.
+  static void _petals(Canvas canvas, Size s, double t, ZenColors c, double a) {
+    final Paint leaf = Paint();
+    final double span = s.height + 40;
+    for (int i = 0; i < 26; i++) {
+      final double size = 5 + _h(i, 1) * 8;
+      final double y = (_h(i, 3) * span + t * (8 + _h(i, 2) * 14)) % span - 20;
+      final double x =
+          _h(i, 4) * s.width + 16 * math.sin(t * (0.4 + _h(i, 5) * 0.4) + i);
+      final double turn = t * (0.3 + _h(i, 6) * 0.6) * (i.isEven ? 1 : -1) + i;
+      leaf.color = (i % 3 == 0 ? c.accentSecondary : c.accent).withValues(
+        alpha: a * (0.45 + 0.55 * _h(i, 7)),
+      );
+      canvas
+        ..save()
+        ..translate(x, y)
+        ..rotate(turn)
+        ..scale(size * 0.6, size)
+        ..drawPath(_leaf, leaf)
+        ..restore();
+    }
+  }
+
+  // Soft bubbles rising with a little sway, each with a ring and a glint.
+  static void _bubbles(Canvas canvas, Size s, double t, ZenColors c, double a) {
+    final Paint fill = Paint();
+    final Paint ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final Paint glint = Paint();
+    for (int i = 0; i < 28; i++) {
+      final double r = 4 + _h(i, 1) * 12;
+      final double span = s.height + 2 * r;
+      final double rise = (_h(i, 3) * span + t * (12 + _h(i, 2) * 22)) % span;
+      final Offset p = Offset(
+        _h(i, 4) * s.width + 10 * math.sin(t * 0.7 + i),
+        s.height + r - rise,
+      );
+      final Color tone = i.isEven ? c.accent : c.accentSecondary;
+      fill.color = tone.withValues(alpha: a * 0.3);
+      ring.color = tone.withValues(alpha: a * 0.9);
+      glint.color = tone.withValues(alpha: a);
+      canvas
+        ..drawCircle(p, r, fill)
+        ..drawCircle(p, r, ring)
+        ..drawCircle(p + Offset(-r * 0.35, -r * 0.35), r * 0.16, glint);
+    }
+  }
+
+  // A drawing board: a grid drifting slowly with a heavier line every fifth,
+  // crosshairs where the heavy lines meet and a compass turning its needle.
+  static void _blueprint(
+    Canvas canvas,
+    Size s,
+    double t,
+    ZenColors c,
+    double a,
+  ) {
+    const double minor = 20;
+    const double major = minor * 5;
+    final Paint fine = Paint()
+      ..strokeWidth = 1
+      ..color = c.accent.withValues(alpha: a * 0.4);
+    final Paint bold = Paint()
+      ..strokeWidth = 1
+      ..color = c.accent.withValues(alpha: a * 0.85);
+    // The grid repeats every [major]: the drift wraps without a jump.
+    final double dx = (t * 2.5) % major;
+    final double dy = (t * 1.5) % major;
+    for (int k = 0; k * minor - dx < s.width; k++) {
+      final double x = k * minor - dx;
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, s.height),
+        k % 5 == 0 ? bold : fine,
+      );
+    }
+    for (int k = 0; k * minor - dy < s.height; k++) {
+      final double y = k * minor - dy;
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(s.width, y),
+        k % 5 == 0 ? bold : fine,
+      );
+    }
+    final Paint cross = Paint()
+      ..strokeWidth = 1.5
+      ..color = c.accent.withValues(alpha: a);
+    for (int i = 0; i < 4; i++) {
+      final double x =
+          (1 + (_h(i, 1) * (s.width / major - 1)).floor()) * major - dx;
+      final double y =
+          (1 + (_h(i, 2) * (s.height / major - 1)).floor()) * major - dy;
+      canvas
+        ..drawLine(Offset(x - 5, y), Offset(x + 5, y), cross)
+        ..drawLine(Offset(x, y - 5), Offset(x, y + 5), cross);
+    }
+    final Offset hub = Offset(s.width * 0.78, s.height * 0.2);
+    final double radius = s.width * 0.3;
+    final Paint arc = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = c.accent.withValues(alpha: a * 0.7);
+    final double turn = t * 0.25;
+    canvas
+      ..drawCircle(hub, radius, arc)
+      ..drawCircle(hub, radius * 0.6, arc)
+      ..drawLine(
+        hub,
+        hub + Offset(math.cos(turn), math.sin(turn)) * radius,
+        Paint()
+          ..strokeWidth = 1.5
+          ..color = c.accent.withValues(alpha: a),
+      )
+      ..drawCircle(hub, 3, Paint()..color = c.accent.withValues(alpha: a));
+  }
+
+  // Two projector beams swaying from the top corners over drifting dust.
+  static void _spotlight(
+    Canvas canvas,
+    Size s,
+    double t,
+    ZenColors c,
+    double a,
+  ) {
+    final double length = s.height * 1.1;
+    for (int k = 0; k < 2; k++) {
+      final Offset from = Offset(s.width * (k == 0 ? 0.12 : 0.88), -8);
+      final double centre =
+          (k == 0 ? 0.32 : -0.32) +
+          0.26 * math.sin(t * (0.22 + k * 0.07) + k * 2);
+      final double spread = 0.12 + 0.02 * math.sin(t * 0.3 + k);
+      Offset reach(double angle) =>
+          from + Offset(math.sin(angle), math.cos(angle)) * length;
+      final Color tone = k == 0 ? c.accentSecondary : c.accent;
+      final Offset left = reach(centre - spread);
+      final Offset right = reach(centre + spread);
+      canvas.drawPath(
+        Path()
+          ..moveTo(from.dx, from.dy)
+          ..lineTo(left.dx, left.dy)
+          ..lineTo(right.dx, right.dy)
+          ..close(),
+        Paint()
+          ..shader = ui.Gradient.linear(from, reach(centre), <Color>[
+            tone.withValues(alpha: a * 0.5),
+            tone.withValues(alpha: 0),
+          ]),
+      );
+    }
+    final Paint dust = Paint();
+    for (int i = 0; i < 30; i++) {
+      final double rise = (_h(i, 1) * s.height + t * (4 + _h(i, 2) * 8));
+      final Offset p = Offset(
+        _h(i, 3) * s.width + 8 * math.sin(t * 0.5 + i),
+        s.height - rise % s.height,
+      );
+      final double glow = 0.5 + 0.5 * math.sin(t * (0.8 + _h(i, 4)) + i);
+      dust.color = c.accentSecondary.withValues(alpha: a * (0.3 + 0.7 * glow));
+      canvas.drawCircle(p, 0.7 + _h(i, 5) * 1.1, dust);
     }
   }
 }

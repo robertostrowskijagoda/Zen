@@ -183,6 +183,130 @@ void main() {
     expect(done, isTrue, reason: 'a failure in b does not keep it awake');
   });
 
+  test('a poll that backs off still rides the look\'s wakes', () async {
+    final List<String> ran = <String>[];
+    late BeatTimer poll;
+    poll = ZenWake.beat('mailbox-poll', const Duration(minutes: 5), () async {
+      ran.add('poll');
+      // Nothing came: the poll waits longer from now on.
+      poll.setEvery(const Duration(minutes: 20));
+    });
+    ZenWake.beat(
+      'nearby-look',
+      const Duration(minutes: 5),
+      () async => ran.add('look'),
+      whileIdle: false,
+    );
+    now = 5 * 60 * 1000;
+    await platform.live.single.ring();
+    expect(ran, <String>['poll', 'look']);
+    int wakes = 1;
+    ran.clear();
+    // An hour on: one wake every five minutes, the poll on every fourth.
+    while (now < 65 * 60 * 1000) {
+      final _Alarm next = platform.live.first;
+      now += next.delay.inMilliseconds;
+      await next.ring();
+      wakes++;
+    }
+    expect(wakes, 13, reason: 'the look\'s wakes only');
+    expect(ran.where((String r) => r == 'poll'), hasLength(3));
+    expect(ran.where((String r) => r == 'look'), hasLength(12));
+  });
+
+  test('periods that are multiples of one another share their wakes', () async {
+    final Map<String, int> runs = <String, int>{};
+    void count(String name) => runs[name] = (runs[name] ?? 0) + 1;
+    ZenWake.beat(
+      'mailbox-poll',
+      const Duration(minutes: 10),
+      () async => count('poll'),
+    );
+    ZenWake.beat(
+      'locked-outbox',
+      const Duration(hours: 1),
+      () async => count('outbox'),
+    );
+    ZenWake.beat(
+      'update-check',
+      const Duration(minutes: 45),
+      () async => count('update'),
+      whileIdle: false,
+    );
+    int wakes = 0;
+    while (now < 3 * 60 * 60 * 1000) {
+      final _Alarm next = platform.live.first;
+      now += next.delay.inMilliseconds;
+      await next.ring();
+      wakes++;
+    }
+    expect(wakes, 18, reason: 'every ten minutes, nothing in between');
+    expect(runs['poll'], 18);
+    expect(runs['outbox'], 3);
+    expect(runs['update'], 4);
+  });
+
+  test('work that waits for Doze\'s window does not hold up work that may '
+      'not wait', () async {
+    final List<String> ran = <String>[];
+    ZenWake.beat(
+      'nearby-look',
+      const Duration(minutes: 5),
+      () async => ran.add('look'),
+      whileIdle: false,
+    );
+    ZenWake.beat(
+      'mailbox-poll',
+      const Duration(minutes: 20),
+      () async => ran.add('poll'),
+    );
+    expect(platform.live, hasLength(2));
+    final _Alarm look = platform.live.firstWhere((_Alarm a) => !a.whileIdle);
+    final _Alarm poll = platform.live.firstWhere((_Alarm a) => a.whileIdle);
+    expect(look.delay, const Duration(minutes: 5));
+    expect(poll.name, 'beat-doze');
+    expect(poll.delay, const Duration(minutes: 20));
+
+    // Doze put the look's alarm off: the poll's own alarm comes on time,
+    // and the overdue look rides it.
+    now = 20 * 60 * 1000;
+    await poll.ring();
+    expect(ran, <String>['look', 'poll']);
+    expect(look.cancelled, isTrue);
+    // And again: the look's wake, and the poll's own for Doze.
+    expect(
+      platform.live.map((_Alarm a) => '${a.name} ${a.delay.inMinutes}'),
+      <String>['beat 5', 'beat-doze 20'],
+    );
+  });
+
+  test('a period changed during a wake plans the next wake once', () async {
+    late BeatTimer poll;
+    poll = ZenWake.beat('mailbox-poll', const Duration(minutes: 5), () async {
+      poll.setEvery(const Duration(minutes: 10));
+    });
+    now = 5 * 60 * 1000;
+    final int before = platform.alarms.length;
+    await platform.live.single.ring();
+    expect(platform.alarms.length - before, 1);
+    expect(platform.live.single.delay, const Duration(minutes: 10));
+
+    // Shortened again outside a wake: from now.
+    now += 60 * 1000;
+    poll.setEvery(const Duration(minutes: 5));
+    expect(platform.live.single.delay, const Duration(minutes: 5));
+  });
+
+  test('default holds are short: only a safety limit', () {
+    expect(ZenWake.defaultHold, lessThanOrEqualTo(const Duration(seconds: 5)));
+    ZenWake.after('x', const Duration(minutes: 1), () {});
+    ZenWake.beat('y', const Duration(minutes: 5), () async {});
+    expect(
+      platform.alarms.map((_Alarm a) => a.hold),
+      everyElement(ZenWake.defaultHold),
+    );
+  });
+
   test('work that keeps something holds the phone until it is done', () async {
     final Completer<void> first = Completer<void>();
     final Completer<void> second = Completer<void>();
@@ -274,6 +398,47 @@ void main() {
       expect(released['afterMs'], 1000);
       // Not by the backup timer: the alarm already came.
       expect(calls.where((MethodCall c) => c.method == 'cancel'), isEmpty);
+    });
+
+    test('the beat lets go of a wake as soon as its works are done', () async {
+      mockPower();
+      ZenWake.platform = AndroidWakePlatform();
+      final Completer<void> sends = Completer<void>();
+      ZenWake.beat(
+        'locked-outbox',
+        const Duration(minutes: 10),
+        () => sends.future,
+        hold: const Duration(seconds: 10),
+      );
+      await _settle();
+      final Map<Object?, Object?> scheduled = argsOf('schedule');
+      expect(scheduled['holdMs'], 10000);
+      now = 10 * 60 * 1000;
+      sink!.success(<String, Object?>{'type': 'wake', 'id': scheduled['id']});
+      await _settle();
+      expect(calls.where((MethodCall c) => c.method == 'release'), isEmpty);
+      sends.complete();
+      await _settle();
+      final Map<Object?, Object?> released = argsOf('release');
+      expect(released['tag'], scheduled['tag']);
+      expect(released['afterMs'], 1000);
+    });
+
+    test('a wake whose work fails lets go too', () async {
+      mockPower();
+      final AndroidWakePlatform android = AndroidWakePlatform();
+      android.after(
+        'broken',
+        const Duration(minutes: 1),
+        () => throw StateError('broken'),
+        hold: const Duration(seconds: 8),
+        exact: false,
+      );
+      await _settle();
+      final Map<Object?, Object?> scheduled = argsOf('schedule');
+      sink!.success(<String, Object?>{'type': 'wake', 'id': scheduled['id']});
+      await _settle();
+      expect(argsOf('release')['tag'], scheduled['tag']);
     });
 
     testWidgets('the backup timer that came first cancels the alarm', (

@@ -23,10 +23,15 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 
 String _addr(String n) => PeerShareCodec.normalizeAddress('200::$n');
 
-/// Gives the services' queued work time to finish.
+/// Lets the services' queued work finish. All of it runs on this isolate
+/// (microtasks and zero-length timers; the bridge signs inline under
+/// `flutter test`), so turns of the event loop are enough: a timer of a
+/// few milliseconds waits for the system's timer tick instead, about 16 ms
+/// on Windows once the bridge is loaded, and hundreds of them outlast the
+/// test's timeout.
 Future<void> _settle() async {
   for (int i = 0; i < 100; i++) {
-    await Future<void>.delayed(const Duration(milliseconds: 2));
+    await Future<void>.delayed(Duration.zero);
   }
 }
 
@@ -269,7 +274,9 @@ final class _Channel implements AccountSyncChannel {
       domains: <AccountSyncDomain>[
         HouseholdSyncDomain('held/household', phone.service),
       ],
-      delay: const Duration(milliseconds: 1),
+      // Sent only on [AccountStateSync.flush] ([_settleAccount]), never
+      // when a real timer happens to fire.
+      delay: const Duration(hours: 1),
       scanEvery: const Duration(hours: 1),
     ),
     channel,

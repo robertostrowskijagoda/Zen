@@ -472,276 +472,244 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
           const SizedBox(width: 4),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          ZenGroup(
-            children: <Widget>[
-              SwitchListTile(
-                key: const Key('dating-enabled'),
-                value: _enabled,
-                secondary: Icon(
-                  _enabled
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  color: _enabled ? tone : zen.textMuted,
-                ),
-                title: Text(t('Randki włączone')),
-                subtitle: Text(
-                  t(
-                    'Wyłączone: Twój profil przestaje się rozchodzić i po ~2 '
-                    'tygodniach znika u innych.',
-                  ),
-                ),
-                onChanged: (bool v) => setState(() => _enabled = v),
-              ),
-            ],
-          ),
-          ZenSection(t('Zdjęcia')),
-          ZenCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            ZenGroup(
               children: <Widget>[
-                Text(
-                  t(
-                    'Do {count} zdjęć. Pierwsze jest główne — dotknij '
-                    'innego, żeby je nim zrobić.',
-                    {'count': kDatingMaxPhotos},
+                SwitchListTile(
+                  key: const Key('dating-enabled'),
+                  value: _enabled,
+                  secondary: Icon(
+                    _enabled
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: _enabled ? tone : zen.textMuted,
                   ),
-                  style: note,
+                  title: Text(t('Randki włączone')),
+                  subtitle: Text(
+                    t(
+                      'Wyłączone: Twój profil przestaje się rozchodzić i po ~2 '
+                      'tygodniach znika u innych.',
+                    ),
+                  ),
+                  onChanged: (bool v) => setState(() => _enabled = v),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: <Widget>[
-                    for (int i = 0; i < _photos.length; i++)
-                      Stack(
-                        key: Key('dating-photo-$i'),
-                        clipBehavior: Clip.none,
-                        children: <Widget>[
-                          InkWell(
-                            borderRadius: context.zenRadius(22),
-                            onTap: i == 0 ? null : () => _makeMain(i),
-                            child: datingPhoto(_photos[i], size: 76),
-                          ),
-                          if (i == 0)
-                            PositionedDirectional(
-                              start: 4,
-                              bottom: 4,
-                              child: IgnorePointer(
-                                child: ZenPill(
-                                  text: t('Główne'),
-                                  tone: tone,
-                                  filled: true,
+              ],
+            ),
+            ZenSection(t('Zdjęcia')),
+            ZenCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    t(
+                      'Do {count} zdjęć. Pierwsze jest główne — dotknij '
+                      'innego, żeby je nim zrobić.',
+                      {'count': kDatingMaxPhotos},
+                    ),
+                    style: note,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: <Widget>[
+                      for (int i = 0; i < _photos.length; i++)
+                        Stack(
+                          key: Key('dating-photo-$i'),
+                          clipBehavior: Clip.none,
+                          children: <Widget>[
+                            InkWell(
+                              borderRadius: context.zenRadius(22),
+                              onTap: i == 0 ? null : () => _makeMain(i),
+                              child: datingPhoto(_photos[i], size: 76),
+                            ),
+                            if (i == 0)
+                              PositionedDirectional(
+                                start: 4,
+                                bottom: 4,
+                                child: IgnorePointer(
+                                  child: ZenPill(
+                                    text: t('Główne'),
+                                    tone: tone,
+                                    filled: true,
+                                  ),
                                 ),
                               ),
-                            ),
-                          PositionedDirectional(
-                            end: -6,
-                            top: -6,
-                            child: Material(
-                              color: zen.surfaceRaised,
-                              shape: CircleBorder(
-                                side: BorderSide(color: zen.outlineSoft),
-                              ),
-                              child: InkWell(
-                                key: Key('dating-photo-remove-$i'),
-                                customBorder: const CircleBorder(),
-                                onTap: () => _removePhoto(i),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(4),
-                                  child: Icon(
-                                    Icons.close_rounded,
-                                    size: 16,
-                                    color: zen.textSecondary,
+                            PositionedDirectional(
+                              end: -6,
+                              top: -6,
+                              child: Material(
+                                color: zen.surfaceRaised,
+                                shape: CircleBorder(
+                                  side: BorderSide(color: zen.outlineSoft),
+                                ),
+                                child: InkWell(
+                                  key: Key('dating-photo-remove-$i'),
+                                  customBorder: const CircleBorder(),
+                                  onTap: () => _removePhoto(i),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      size: 16,
+                                      color: zen.textSecondary,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    if (_photos.length < kDatingMaxPhotos)
-                      InkWell(
-                        key: const Key('dating-photo-add'),
-                        borderRadius: context.zenRadius(22),
-                        onTap: () => unawaited(_pickPhotos()),
-                        child: Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            borderRadius: context.zenRadius(22),
-                            color: tone.withValues(alpha: 0.08),
-                            border: Border.all(
-                              color: tone.withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: Icon(Icons.add_a_photo_rounded, color: tone),
+                          ],
                         ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    FilledButton.tonalIcon(
-                      onPressed: _photos.length >= kDatingMaxPhotos
-                          ? null
-                          : () => unawaited(_pickPhotos()),
-                      icon: const Icon(Icons.photo_library_rounded),
-                      label: Text(t('Dodaj zdjęcia')),
-                    ),
-                    OutlinedButton.icon(
-                      key: const Key('dating-from-main'),
-                      onPressed: () => unawaited(_fromMain()),
-                      icon: const Icon(Icons.content_copy_rounded),
-                      label: Text(t('Weź z mojego profilu')),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          ZenSection(t('O Tobie')),
-          TextField(
-            key: const Key('dating-name'),
-            controller: _name,
-            maxLength: 40,
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(
-              labelText: t('Imię'),
-              hintText: t('np. Ola'),
-              prefixIcon: const Icon(Icons.badge_rounded),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(t('JESTEM'), style: zen.label(color: zen.textMuted)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              for (final DatingGender g in DatingGender.values)
-                ChoiceChip(
-                  label: Text(g.label),
-                  selected: _gender == g,
-                  onSelected: (_) => setState(() => _gender = g),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _about,
-            maxLines: 4,
-            minLines: 2,
-            maxLength: 1000,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: t('O mnie'),
-              hintText: t('Co lubisz, czym się zajmujesz, co Cię śmieszy…'),
-            ),
-          ),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _look,
-            maxLines: 2,
-            maxLength: 300,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: t('Czego szukam'),
-              hintText: t('np. kogoś na długie spacery i dłużej'),
-            ),
-          ),
-          ZenSection(t('Szukam')),
-          ZenGroup(
-            children: <Widget>[
-              for (final DatingIntent i in DatingIntent.values)
-                ListTile(
-                  key: Key('dating-intent-${i.code}'),
-                  selected: _intent == i,
-                  selectedColor: tone,
-                  leading: Icon(switch (i) {
-                    DatingIntent.dates => Icons.favorite_rounded,
-                    DatingIntent.friends => Icons.waving_hand_rounded,
-                    DatingIntent.both => Icons.diversity_3_rounded,
-                  }),
-                  title: Text(i.label),
-                  subtitle: Text(i.hint),
-                  trailing: _intent == i
-                      ? Icon(Icons.check_circle_rounded, color: tone)
-                      : null,
-                  onTap: () => setState(() => _intent = i),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ZenGroup(
-            children: <Widget>[
-              SwitchListTile(
-                key: const Key('dating-show-on-graph'),
-                value: _enabled && (_showOnGraph ?? false),
-                secondary: Icon(Icons.hub_rounded, color: tone),
-                title: Text(
-                  t('Pokazać Cię na grafie jako osobę otwartą na poznanie?'),
-                ),
-                subtitle: Text(
-                  t(
-                    'Domyślnie nie. Włączone: ludzie do 3 kroków znajomości '
-                    '(i za otwartymi bramami) zobaczą na grafie Twoje imię '
-                    'z „randki” albo „znajomości” — czyli że randkujesz. '
-                    'Nic więcej z profilu; osoby z „Ukryj przed” nie '
-                    'zobaczą nic.',
+                      if (_photos.length < kDatingMaxPhotos)
+                        InkWell(
+                          key: const Key('dating-photo-add'),
+                          borderRadius: context.zenRadius(22),
+                          onTap: () => unawaited(_pickPhotos()),
+                          child: Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              borderRadius: context.zenRadius(22),
+                              color: tone.withValues(alpha: 0.08),
+                              border: Border.all(
+                                color: tone.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Icon(Icons.add_a_photo_rounded, color: tone),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
-                onChanged: _enabled
-                    ? (bool v) => unawaited(_setShowOnGraph(v))
-                    : null,
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        onPressed: _photos.length >= kDatingMaxPhotos
+                            ? null
+                            : () => unawaited(_pickPhotos()),
+                        icon: const Icon(Icons.photo_library_rounded),
+                        label: Text(t('Dodaj zdjęcia')),
+                      ),
+                      OutlinedButton.icon(
+                        key: const Key('dating-from-main'),
+                        onPressed: () => unawaited(_fromMain()),
+                        icon: const Icon(Icons.content_copy_rounded),
+                        label: Text(t('Weź z mojego profilu')),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          if (_intent != DatingIntent.friends) ...<Widget>[
-            ZenSection(
-              _intent == DatingIntent.both
-                  ? t('Kogo szukasz na randki')
-                  : t('Kogo szukasz'),
             ),
+            ZenSection(t('O Tobie')),
+            TextField(
+              key: const Key('dating-name'),
+              controller: _name,
+              maxLength: 40,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: t('Imię'),
+                hintText: t('np. Ola'),
+                prefixIcon: const Icon(Icons.badge_rounded),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(t('JESTEM'), style: zen.label(color: zen.textMuted)),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: <Widget>[
                 for (final DatingGender g in DatingGender.values)
-                  FilterChip(
+                  ChoiceChip(
                     label: Text(g.label),
-                    selected: _wantGenders.contains(g),
-                    onSelected: (bool v) => setState(() {
-                      _wantGenders = <DatingGender>{..._wantGenders};
-                      if (v) {
-                        _wantGenders.add(g);
-                      } else {
-                        _wantGenders.remove(g);
-                      }
-                    }),
+                    selected: _gender == g,
+                    onSelected: (_) => setState(() => _gender = g),
                   ),
               ],
             ),
-          ],
-          if (_intent != DatingIntent.dates) ...<Widget>[
-            ZenSection(t('Nowi znajomi')),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _about,
+              maxLines: 4,
+              minLines: 2,
+              maxLength: 1000,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: t('O mnie'),
+                hintText: t('Co lubisz, czym się zajmujesz, co Cię śmieszy…'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _look,
+              maxLines: 2,
+              maxLength: 300,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: t('Czego szukam'),
+                hintText: t('np. kogoś na długie spacery i dłużej'),
+              ),
+            ),
+            ZenSection(t('Szukam')),
+            ZenGroup(
+              children: <Widget>[
+                for (final DatingIntent i in DatingIntent.values)
+                  ListTile(
+                    key: Key('dating-intent-${i.code}'),
+                    selected: _intent == i,
+                    selectedColor: tone,
+                    leading: Icon(switch (i) {
+                      DatingIntent.dates => Icons.favorite_rounded,
+                      DatingIntent.friends => Icons.waving_hand_rounded,
+                      DatingIntent.both => Icons.diversity_3_rounded,
+                    }),
+                    title: Text(i.label),
+                    subtitle: Text(i.hint),
+                    trailing: _intent == i
+                        ? Icon(Icons.check_circle_rounded, color: tone)
+                        : null,
+                    onTap: () => setState(() => _intent = i),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
             ZenGroup(
               children: <Widget>[
                 SwitchListTile(
-                  key: const Key('dating-friends-any-gender'),
-                  value: _friendsAnyGender,
-                  title: Text(t('Dowolna płeć')),
-                  onChanged: (bool v) => setState(() => _friendsAnyGender = v),
+                  key: const Key('dating-show-on-graph'),
+                  value: _enabled && (_showOnGraph ?? false),
+                  secondary: Icon(Icons.hub_rounded, color: tone),
+                  title: Text(
+                    t('Pokazać Cię na grafie jako osobę otwartą na poznanie?'),
+                  ),
+                  subtitle: Text(
+                    t(
+                      'Domyślnie nie. Włączone: ludzie do 3 kroków znajomości '
+                      '(i za otwartymi bramami) zobaczą na grafie Twoje imię '
+                      'z „randki” albo „znajomości” — czyli że randkujesz. '
+                      'Nic więcej z profilu; osoby z „Ukryj przed” nie '
+                      'zobaczą nic.',
+                    ),
+                  ),
+                  onChanged: _enabled
+                      ? (bool v) => unawaited(_setShowOnGraph(v))
+                      : null,
                 ),
               ],
             ),
-            if (!_friendsAnyGender) ...<Widget>[
-              const SizedBox(height: 8),
+            if (_intent != DatingIntent.friends) ...<Widget>[
+              ZenSection(
+                _intent == DatingIntent.both
+                    ? t('Kogo szukasz na randki')
+                    : t('Kogo szukasz'),
+              ),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -749,299 +717,335 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                   for (final DatingGender g in DatingGender.values)
                     FilterChip(
                       label: Text(g.label),
-                      selected: _friendGenders.contains(g),
+                      selected: _wantGenders.contains(g),
                       onSelected: (bool v) => setState(() {
-                        _friendGenders = <DatingGender>{..._friendGenders};
+                        _wantGenders = <DatingGender>{..._wantGenders};
                         if (v) {
-                          _friendGenders.add(g);
+                          _wantGenders.add(g);
                         } else {
-                          _friendGenders.remove(g);
+                          _wantGenders.remove(g);
                         }
                       }),
                     ),
                 ],
               ),
             ],
-          ],
-          ZenSection(t('Jak daleko chcesz widzieć')),
-          Text(
-            t(
-              'Tylko ludzie w tym zasięgu zobaczą Twój profil i Ty ich. Do 3 '
-              'kroków nie trzeba otwierać bram.',
-            ),
-            style: note,
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              for (int h = 1; h <= kDatingRangeGates; h++)
-                ChoiceChip(
-                  key: Key('dating-reach-$h'),
-                  label: Text(datingReachLabel(h)),
-                  selected: _hops == h,
-                  onSelected: (_) => setState(() => _hops = h),
+            if (_intent != DatingIntent.dates) ...<Widget>[
+              ZenSection(t('Nowi znajomi')),
+              ZenGroup(
+                children: <Widget>[
+                  SwitchListTile(
+                    key: const Key('dating-friends-any-gender'),
+                    value: _friendsAnyGender,
+                    title: Text(t('Dowolna płeć')),
+                    onChanged: (bool v) =>
+                        setState(() => _friendsAnyGender = v),
+                  ),
+                ],
+              ),
+              if (!_friendsAnyGender) ...<Widget>[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    for (final DatingGender g in DatingGender.values)
+                      FilterChip(
+                        label: Text(g.label),
+                        selected: _friendGenders.contains(g),
+                        onSelected: (bool v) => setState(() {
+                          _friendGenders = <DatingGender>{..._friendGenders};
+                          if (v) {
+                            _friendGenders.add(g);
+                          } else {
+                            _friendGenders.remove(g);
+                          }
+                        }),
+                      ),
+                  ],
                 ),
+              ],
             ],
-          ),
-          ZenSection(t('Zainteresowania')),
-          Text(
-            t(
-              'Wpisz własne albo wybierz z podpowiedzi — do {count}. Wielkość '
-              'liter i polskie znaki nie mają znaczenia w filtrach.',
-              {'count': kDatingMaxInterests},
+            ZenSection(t('Jak daleko chcesz widzieć')),
+            Text(
+              t(
+                'Tylko ludzie w tym zasięgu zobaczą Twój profil i Ty ich. Do 3 '
+                'kroków nie trzeba otwierać bram.',
+              ),
+              style: note,
             ),
-            style: note,
-          ),
-          const SizedBox(height: 8),
-          if (_interests.isNotEmpty)
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: <Widget>[
-                for (final String tag in _interests)
-                  InputChip(
-                    key: Key('dating-tag-$tag'),
-                    label: Text(tag),
-                    selected: true,
-                    showCheckmark: false,
-                    onDeleted: () => setState(() => _interests.remove(tag)),
+                for (int h = 1; h <= kDatingRangeGates; h++)
+                  ChoiceChip(
+                    key: Key('dating-reach-$h'),
+                    label: Text(datingReachLabel(h)),
+                    selected: _hops == h,
+                    onSelected: (_) => setState(() => _hops = h),
                   ),
               ],
             ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('dating-tag-input'),
-            controller: _tag,
-            enabled: _interests.length < kDatingMaxInterests,
-            maxLength: kDatingTagMaxChars,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              labelText: t('Dodaj zainteresowanie'),
-              hintText: t('np. wspinaczka'),
-              suffixIcon: IconButton(
-                key: const Key('dating-tag-add'),
-                tooltip: t('Dodaj'),
-                icon: const Icon(Icons.add_rounded),
-                onPressed: () => _addTag(_tag.text),
+            ZenSection(t('Zainteresowania')),
+            Text(
+              t(
+                'Wpisz własne albo wybierz z podpowiedzi — do {count}. Wielkość '
+                'liter i polskie znaki nie mają znaczenia w filtrach.',
+                {'count': kDatingMaxInterests},
+              ),
+              style: note,
+            ),
+            const SizedBox(height: 8),
+            if (_interests.isNotEmpty)
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  for (final String tag in _interests)
+                    InputChip(
+                      key: Key('dating-tag-$tag'),
+                      label: Text(tag),
+                      selected: true,
+                      showCheckmark: false,
+                      onDeleted: () => setState(() => _interests.remove(tag)),
+                    ),
+                ],
+              ),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('dating-tag-input'),
+              controller: _tag,
+              enabled: _interests.length < kDatingMaxInterests,
+              maxLength: kDatingTagMaxChars,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: t('Dodaj zainteresowanie'),
+                hintText: t('np. wspinaczka'),
+                suffixIcon: IconButton(
+                  key: const Key('dating-tag-add'),
+                  tooltip: t('Dodaj'),
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () => _addTag(_tag.text),
+                ),
+              ),
+              onSubmitted: _addTag,
+            ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: <Widget>[
+                for (final String tag in datingTagSuggestions())
+                  if (!_interests.any(
+                    (String i) => datingTagKey(i) == datingTagKey(tag),
+                  ))
+                    ActionChip(
+                      key: Key('dating-tag-suggest-$tag'),
+                      avatar: const Icon(Icons.add_rounded, size: 16),
+                      label: Text(tag),
+                      onPressed: _interests.length >= kDatingMaxInterests
+                          ? null
+                          : () => _addTag(tag),
+                    ),
+              ],
+            ),
+            ZenSection(t('Ukryj przed')),
+            ZenInfo(
+              icon: Icons.visibility_off_rounded,
+              tone: tone,
+              text: t(
+                'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca), '
+                'także gdy dotrze do nich okrężną drogą. Przy znajomym możesz '
+                'wybrać: tylko on(a), albo też jego/jej krąg — wtedy nie '
+                'poznasz nikogo, do kogo docierasz tylko przez tę osobę.',
               ),
             ),
-            onSubmitted: _addTag,
-          ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              for (final String tag in datingTagSuggestions())
-                if (!_interests.any(
-                  (String i) => datingTagKey(i) == datingTagKey(tag),
-                ))
-                  ActionChip(
-                    key: Key('dating-tag-suggest-$tag'),
-                    avatar: const Icon(Icons.add_rounded, size: 16),
-                    label: Text(tag),
-                    onPressed: _interests.length >= kDatingMaxInterests
-                        ? null
-                        : () => _addTag(tag),
-                  ),
-            ],
-          ),
-          ZenSection(t('Ukryj przed')),
-          ZenInfo(
-            icon: Icons.visibility_off_rounded,
-            tone: tone,
-            text: t(
-              'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca), '
-              'także gdy dotrze do nich okrężną drogą. Przy znajomym możesz '
-              'wybrać: tylko on(a), albo też jego/jej krąg — wtedy nie '
-              'poznasz nikogo, do kogo docierasz tylko przez tę osobę.',
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (social.groups.isEmpty && social.acceptedFriends.isEmpty)
-            Text(
-              t('Nie masz jeszcze znajomych ani grup.'),
-              style: TextStyle(color: zen.textMuted, fontSize: 13.5),
-            ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              for (final GroupProfile g in social.groups.values)
-                FilterChip(
-                  showCheckmark: false,
-                  avatar: Icon(
-                    _hiddenGroups.contains(g.id)
-                        ? Icons.visibility_off_rounded
-                        : Icons.groups_rounded,
-                    size: 18,
-                  ),
-                  label: Text(
-                    g.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  selected: _hiddenGroups.contains(g.id),
-                  onSelected: (bool v) =>
-                      setState(() => _toggle<String>(_hiddenGroups, g.id, v)),
-                ),
-              for (final FriendProfile f in social.acceptedFriends)
-                FilterChip(
-                  key: Key('dating-hide-${f.address}'),
-                  showCheckmark: false,
-                  avatar: Icon(
-                    !_hiddenFriends.contains(f.address)
-                        ? Icons.person_rounded
-                        : _hiddenCircles.contains(f.address)
-                        ? Icons.group_off_rounded
-                        : Icons.visibility_off_rounded,
-                    size: 18,
-                  ),
-                  label: Text(
-                    _hiddenCircles.contains(f.address) &&
-                            _hiddenFriends.contains(f.address)
-                        ? t('{name} i krąg', {'name': social.nameFor(f)})
-                        : social.nameFor(f),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  selected: _hiddenFriends.contains(f.address),
-                  onSelected: (_) =>
-                      unawaited(_chooseHiding(f.address, social.nameFor(f))),
-                ),
-            ],
-          ),
-          ZenSection(t('Znajomi o mnie')),
-          ListenableBuilder(
-            listenable: _dating,
-            builder: (BuildContext context, Widget? _) => Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(height: 8),
+            if (social.groups.isEmpty && social.acceptedFriends.isEmpty)
+              Text(
+                t('Nie masz jeszcze znajomych ani grup.'),
+                style: TextStyle(color: zen.textMuted, fontSize: 13.5),
+              ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: <Widget>[
-                if (_dating.me.vouches.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      t(
-                        'Kilka słów od znajomego mówi o Tobie więcej niż '
-                        'najlepszy opis.',
-                      ),
-                      style: note,
+                for (final GroupProfile g in social.groups.values)
+                  FilterChip(
+                    showCheckmark: false,
+                    avatar: Icon(
+                      _hiddenGroups.contains(g.id)
+                          ? Icons.visibility_off_rounded
+                          : Icons.groups_rounded,
+                      size: 18,
                     ),
+                    label: Text(
+                      g.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    selected: _hiddenGroups.contains(g.id),
+                    onSelected: (bool v) =>
+                        setState(() => _toggle<String>(_hiddenGroups, g.id, v)),
                   ),
-                for (final DatingVouch v in _shownVouches())
-                  ZenCard(
-                    tone: v.approved ? null : zen.warning,
-                    padding: const EdgeInsetsDirectional.fromSTEB(
-                      14,
-                      12,
-                      6,
-                      12,
+                for (final FriendProfile f in social.acceptedFriends)
+                  FilterChip(
+                    key: Key('dating-hide-${f.address}'),
+                    showCheckmark: false,
+                    avatar: Icon(
+                      !_hiddenFriends.contains(f.address)
+                          ? Icons.person_rounded
+                          : _hiddenCircles.contains(f.address)
+                          ? Icons.group_off_rounded
+                          : Icons.visibility_off_rounded,
+                      size: 18,
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Icon(
-                            Icons.format_quote_rounded,
-                            color: tone,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                '„${v.text}”',
-                                style: TextStyle(
-                                  color: zen.textPrimary,
-                                  fontSize: 14.5,
-                                  height: 1.4,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                v.approved
-                                    ? t('{name} · ✓ podpisane · na profilu', {
-                                        'name': v.by,
-                                      })
-                                    : t(
-                                        '{name} · ✓ podpisane · czeka na '
-                                        'Twoją zgodę',
-                                        {'name': v.by},
-                                      ),
-                                style: TextStyle(
-                                  color: v.approved
-                                      ? zen.textMuted
-                                      : zen.warning,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (!v.approved)
-                          IconButton(
-                            tooltip: t('Pokaż na profilu'),
-                            color: zen.success,
-                            icon: const Icon(Icons.check_rounded),
-                            onPressed: () =>
-                                unawaited(_dating.setVouch(v.id, keep: true)),
-                          ),
-                        IconButton(
-                          tooltip: t('Usuń'),
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          onPressed: () =>
-                              unawaited(_dating.setVouch(v.id, keep: false)),
-                        ),
-                      ],
+                    label: Text(
+                      _hiddenCircles.contains(f.address) &&
+                              _hiddenFriends.contains(f.address)
+                          ? t('{name} i krąg', {'name': social.nameFor(f)})
+                          : social.nameFor(f),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
+                    selected: _hiddenFriends.contains(f.address),
+                    onSelected: (_) =>
+                        unawaited(_chooseHiding(f.address, social.nameFor(f))),
                   ),
-                if (_dating.me.vouches.length > _vouchesFirst)
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton.icon(
-                      key: const Key('dating-editor-vouches-more'),
-                      onPressed: () =>
-                          setState(() => _allVouches = !_allVouches),
-                      icon: Icon(
-                        _allVouches
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                      ),
-                      label: Text(
-                        _allVouches
-                            ? t('Pokaż mniej')
-                            : t('Pokaż wszystkie ({count})', {
-                                'count': _dating.me.vouches.length,
-                              }),
-                      ),
-                    ),
-                  ),
-                Text(
-                  t('Na profilu: {count} z {max}', {
-                    'count': _dating.me.vouches
-                        .where((DatingVouch v) => v.approved)
-                        .length,
-                    'max': kDatingMaxVouches,
-                  }),
-                  style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                ),
               ],
             ),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => unawaited(_askVouch(social)),
-            icon: const Icon(Icons.rate_review_rounded),
-            label: Text(t('Poproś znajomego o kilka słów')),
-          ),
-        ],
+            ZenSection(t('Znajomi o mnie')),
+            ListenableBuilder(
+              listenable: _dating,
+              builder: (BuildContext context, Widget? _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (_dating.me.vouches.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        t(
+                          'Kilka słów od znajomego mówi o Tobie więcej niż '
+                          'najlepszy opis.',
+                        ),
+                        style: note,
+                      ),
+                    ),
+                  for (final DatingVouch v in _shownVouches())
+                    ZenCard(
+                      tone: v.approved ? null : zen.warning,
+                      padding: const EdgeInsetsDirectional.fromSTEB(
+                        14,
+                        12,
+                        6,
+                        12,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Icon(
+                              Icons.format_quote_rounded,
+                              color: tone,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  '„${v.text}”',
+                                  style: TextStyle(
+                                    color: zen.textPrimary,
+                                    fontSize: 14.5,
+                                    height: 1.4,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  v.approved
+                                      ? t('{name} · ✓ podpisane · na profilu', {
+                                          'name': v.by,
+                                        })
+                                      : t(
+                                          '{name} · ✓ podpisane · czeka na '
+                                          'Twoją zgodę',
+                                          {'name': v.by},
+                                        ),
+                                  style: TextStyle(
+                                    color: v.approved
+                                        ? zen.textMuted
+                                        : zen.warning,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!v.approved)
+                            IconButton(
+                              tooltip: t('Pokaż na profilu'),
+                              color: zen.success,
+                              icon: const Icon(Icons.check_rounded),
+                              onPressed: () =>
+                                  unawaited(_dating.setVouch(v.id, keep: true)),
+                            ),
+                          IconButton(
+                            tooltip: t('Usuń'),
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            onPressed: () =>
+                                unawaited(_dating.setVouch(v.id, keep: false)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_dating.me.vouches.length > _vouchesFirst)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        key: const Key('dating-editor-vouches-more'),
+                        onPressed: () =>
+                            setState(() => _allVouches = !_allVouches),
+                        icon: Icon(
+                          _allVouches
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                        ),
+                        label: Text(
+                          _allVouches
+                              ? t('Pokaż mniej')
+                              : t('Pokaż wszystkie ({count})', {
+                                  'count': _dating.me.vouches.length,
+                                }),
+                        ),
+                      ),
+                    ),
+                  Text(
+                    t('Na profilu: {count} z {max}', {
+                      'count': _dating.me.vouches
+                          .where((DatingVouch v) => v.approved)
+                          .length,
+                      'max': kDatingMaxVouches,
+                    }),
+                    style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => unawaited(_askVouch(social)),
+              icon: const Icon(Icons.rate_review_rounded),
+              label: Text(t('Poproś znajomego o kilka słów')),
+            ),
+          ],
+        ),
       ),
     );
   }

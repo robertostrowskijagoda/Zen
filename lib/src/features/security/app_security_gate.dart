@@ -26,6 +26,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 
 /// The wipe behind "Nie pamiętam hasła — zacznij od nowa" and the panic
 /// password: the whole device, every account on it (the lock screen is
@@ -212,8 +213,13 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     final AppSettings appSettings = ref.watch(appSettingsControllerProvider);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
     _follow(security);
-    // Once, after the app password, the permissions and Bluetooth
-    // step (skipped where there is nothing to ask).
+    // Once, after the app password, the setup: the lock, notifications,
+    // gates, animations.
+    final bool setupStep =
+        ref.watch(firstRunSetupRequiredProvider) &&
+        !appSettings.firstRunSetupDone;
+    // Then, once, the permissions and Bluetooth step (skipped where there
+    // is nothing to ask): the setup's last step.
     final bool permissionsStep =
         ref.watch(permissionsSetupRequiredProvider) &&
         !appSettings.permissionsSetupDone &&
@@ -233,13 +239,14 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         onPointerMove: _onPointer,
         onPointerHover: _onPointer,
         onPointerSignal: _onPointer,
-        child: _gated(security, permissionsStep, accountStep),
+        child: _gated(security, setupStep, permissionsStep, accountStep),
       ),
     );
   }
 
   Widget _gated(
     AppSecurityService security,
+    bool setupStep,
     bool permissionsStep,
     bool accountStep,
   ) {
@@ -295,14 +302,25 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         if (!security.encryptionEnabled ||
             !security.hasPassword ||
             !security.isLocked) {
-          if (permissionsStep) {
+          if (setupStep) {
             // Its own Navigator, like the password step above.
+            return Navigator(
+              key: const ValueKey<String>('gate-first-run-setup'),
+              onGenerateRoute: (RouteSettings route) => MaterialPageRoute<void>(
+                settings: route,
+                builder: (BuildContext context) => const FirstRunSetupStage(),
+              ),
+            );
+          }
+          if (permissionsStep) {
+            // The setup said hello already.
+            final bool welcome = !ref.read(firstRunSetupRequiredProvider);
             return Navigator(
               key: const ValueKey<String>('gate-permissions'),
               onGenerateRoute: (RouteSettings route) => MaterialPageRoute<void>(
                 settings: route,
                 builder: (BuildContext context) =>
-                    const PermissionsSetupStage(),
+                    PermissionsSetupStage(welcome: welcome),
               ),
             );
           }

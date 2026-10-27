@@ -129,11 +129,16 @@ var meshRange = &net.IPNet{IP: net.ParseIP("200::"), Mask: net.CIDRMask(7, 128)}
 //	 "Peers": [{"Address": "200:…", "Secret": "<64 hex>", "Own": false}]}
 //
 // Lan runs discovery on the local networks (lan_discovery.go); Peers are
-// every device this node may link with, over any transport.
+// every device this node may link with, over any transport. Nearby (may be
+// left out) is "people nearby" on the local networks (lan_nearby.go): the
+// adverts of the slots from Start on, hex, and whether the app looks around:
+//
+//	"Nearby": {"Start": 2950000, "Adverts": "<hex>", "Looking": true}
 type localLinkSettings struct {
 	lan           bool
 	beaconSeconds int
 	peers         []localPeer
+	nearby        lanNearby
 }
 
 func parseLocalLinkSettings(payload string) (localLinkSettings, error) {
@@ -145,6 +150,11 @@ func parseLocalLinkSettings(payload string) (localLinkSettings, error) {
 			Secret  string `json:"Secret"`
 			Own     bool   `json:"Own"`
 		} `json:"Peers"`
+		Nearby *struct {
+			Start   int64  `json:"Start"`
+			Adverts string `json:"Adverts"`
+			Looking bool   `json:"Looking"`
+		} `json:"Nearby"`
 	}
 	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
 		return localLinkSettings{}, err
@@ -153,6 +163,13 @@ func parseLocalLinkSettings(payload string) (localLinkSettings, error) {
 		return localLinkSettings{}, fmt.Errorf("%w: %d peers (at most %d)", errLocalLinkBadInput, len(raw.Peers), localLinkMaxPeers)
 	}
 	settings := localLinkSettings{lan: raw.Lan, beaconSeconds: raw.BeaconSeconds}
+	if raw.Nearby != nil {
+		nearby, err := parseLanNearby(raw.Nearby.Start, raw.Nearby.Adverts, raw.Nearby.Looking)
+		if err != nil {
+			return localLinkSettings{}, err
+		}
+		settings.nearby = nearby
+	}
 	seen := make(map[string]bool, len(raw.Peers))
 	for _, entry := range raw.Peers {
 		peer, err := newLocalPeer(entry.Address, entry.Secret, entry.Own)

@@ -21,6 +21,8 @@
 - [Protocol specification](PROTOCOL.md): frames, records and cryptography on
   the wire.
 - [Releases](RELEASES.md): signing, publishing, distribution, updates.
+- [iPhone in the background](IOS_BACKGROUND.md): what iOS allows without a
+  server, what Zen does, and how to test it.
 - [Testing](TESTING.md): the network simulator, several apps on one
   computer, the visual tours, translations, CI.
 - [Changelog](../CHANGELOG.md).

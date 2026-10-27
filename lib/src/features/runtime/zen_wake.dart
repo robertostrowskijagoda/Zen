@@ -300,6 +300,8 @@ final class _AlarmWakeTimer implements WakeTimer {
             }),
       );
     }
+    // Work that returns nothing keeps the alarm's hold to its limit: it may
+    // have started more than it waits for.
   }
 
   void _fallBackTo(Duration delay) {
@@ -323,59 +325,22 @@ final class _AlarmWakeTimer implements WakeTimer {
   }
 }
 
-/// A [WakeTimer] that runs again every [every] until cancelled.
-final class _RepeatingWakeTimer implements WakeTimer {
-  _RepeatingWakeTimer(
-    this.name,
-    this.every,
-    this.tick, {
-    required this.hold,
-    required this.exact,
-  }) {
-    _next();
-  }
+/// Work on the shared beat ([ZenWake.beat]); how often it comes may change.
+abstract interface class BeatTimer implements WakeTimer {
+  /// How long it waits between runs now.
+  Duration get every;
 
-  final String name;
-  final Duration every;
-  final FutureOr<void> Function() tick;
-  final Duration hold;
-  final bool exact;
-  WakeTimer? _current;
-  bool _cancelled = false;
-
-  void _next() {
-    _current = ZenWake.platform.after(
-      name,
-      every,
-      () {
-        if (_cancelled) {
-          return Future<void>.value();
-        }
-        _next();
-        return tick();
-      },
-      hold: hold,
-      exact: exact,
-    );
-  }
-
-  @override
-  bool get isActive => !_cancelled;
-
-  @override
-  void cancel() {
-    _cancelled = true;
-    _current?.cancel();
-    _current = null;
-  }
+  /// Runs next [every] from now, and then every [every]: longer while there
+  /// is nothing to do, short again once there is.
+  void setEvery(Duration every);
 }
 
-/// One piece of work on the shared beat ([ZenWake.beat]).
-final class _BeatWork implements WakeTimer {
+/// One piece of work on the shared beat.
+final class _BeatWork implements BeatTimer {
   _BeatWork(
     this._beat,
     this.name,
-    this.every,
+    this._every,
     this.tick, {
     required this.hold,
     required this.whileIdle,
@@ -384,7 +349,7 @@ final class _BeatWork implements WakeTimer {
 
   final _Beat _beat;
   final String name;
-  final Duration every;
+  Duration _every;
   final Future<void> Function() tick;
   final Duration hold;
   final bool whileIdle;
@@ -393,12 +358,26 @@ final class _BeatWork implements WakeTimer {
   int dueAt;
   bool _cancelled = false;
 
-  /// It may run this much before it is due, on another work's wake: so
-  /// works with the same period settle on one wake.
-  int get slackMs => every.inMilliseconds ~/ 3;
+  @override
+  Duration get every => _every;
+
+  /// It may run up to this much before it is due, on another work's wake,
+  /// rather than wake the phone on its own: so works whose periods are
+  /// multiples of one another settle on the same wakes.
+  int get slackMs => _every.inMilliseconds ~/ 3;
 
   @override
   bool get isActive => !_cancelled;
+
+  @override
+  void setEvery(Duration every) {
+    if (_cancelled) {
+      return;
+    }
+    _every = every;
+    dueAt = ZenWake.nowMillis() + every.inMilliseconds;
+    _beat._plan();
+  }
 
   @override
   void cancel() {
@@ -411,19 +390,35 @@ final class _BeatWork implements WakeTimer {
 }
 
 /// Work that comes back every few minutes (asking the mailboxes for mail,
-/// for every account; a look around nearby), all on one alarm: one wake of
-/// the phone runs everything due by then, or due a little later, instead
+/// for every account; the locked outbox's rounds; a look around nearby; the
+/// parked service's watchdog; the update check), all on one alarm: one wake
+/// of the phone runs everything due by then, or due a little later, instead
 /// of one wake for each.
 final class _Beat {
   final List<_BeatWork> _works = <_BeatWork>[];
+
+  /// The next wake, for whatever is due first.
   WakeTimer? _alarm;
 
-  /// What runs on the next wake (tests).
-  List<String> get planned => <String>[
-    for (final _BeatWork w in _dueBy(_nextAt())) w.name,
-  ];
+  /// The next wake for work that has to run in Doze, while [_alarm] is one
+  /// Doze may put off (only work that may wait is due on it): a look around
+  /// that waits for Doze's window must not hold up the mailbox poll.
+  WakeTimer? _dozeAlarm;
 
-  WakeTimer add(
+  /// A wake runs its works: they may change their periods meanwhile, and
+  /// the alarms are planned once, after them.
+  bool _firing = false;
+
+  /// What runs on the next wake (tests).
+  List<String> get planned {
+    final int? at = _nextAt(_works);
+    return <String>[
+      if (at != null)
+        for (final _BeatWork w in _dueBy(at)) w.name,
+    ];
+  }
+
+  BeatTimer add(
     String name,
     Duration every,
     Future<void> Function() tick, {
@@ -451,66 +446,130 @@ final class _Beat {
 
   void clear() {
     _works.clear();
-    _alarm?.cancel();
-    _alarm = null;
+    _firing = false;
+    _cancelAlarms();
   }
 
-  List<_BeatWork> _dueBy(int at) => <_BeatWork>[
-    for (final _BeatWork w in _works)
-      if (w.dueAt - w.slackMs <= at) w,
-  ];
+  /// What runs on a wake at [at]: what is due by then, and what is due a
+  /// little later (within its slack) when it would otherwise take a wake
+  /// of its own, i.e. when no other wake comes before it is due.
+  List<_BeatWork> _dueBy(int at) {
+    final List<_BeatWork> due = <_BeatWork>[];
+    final List<_BeatWork> early = <_BeatWork>[];
+    for (final _BeatWork w in _works) {
+      if (w.dueAt <= at) {
+        due.add(w);
+      } else if (w.dueAt - w.slackMs <= at) {
+        early.add(w);
+      }
+    }
+    early.sort((_BeatWork a, _BeatWork b) => a.dueAt.compareTo(b.dueAt));
+    for (final _BeatWork w in early) {
+      // The next wake without it: what runs now comes again a period on.
+      int? next;
+      for (final _BeatWork other in _works) {
+        if (identical(other, w)) {
+          continue;
+        }
+        final int t = due.contains(other)
+            ? at + other.every.inMilliseconds
+            : other.dueAt;
+        if (next == null || t < next) {
+          next = t;
+        }
+      }
+      if (next == null || w.dueAt < next) {
+        due.add(w);
+      }
+    }
+    return due;
+  }
 
-  /// When the next wake comes: the earliest work due, but never later than
-  /// a period away (a clock set back must not push it far out).
-  int _nextAt() {
+  /// When the next wake for [works] comes: the earliest due, but never
+  /// later than a period away (a clock set back must not push it far out).
+  int? _nextAt(Iterable<_BeatWork> works) {
     final int now = ZenWake.nowMillis();
     int? at;
-    for (final _BeatWork w in _works) {
+    for (final _BeatWork w in works) {
       final int due = math.min(w.dueAt, now + w.every.inMilliseconds);
       if (at == null || due < at) {
         at = due;
       }
     }
-    return math.max(now, at ?? now);
+    return at == null ? null : math.max(now, at);
+  }
+
+  void _cancelAlarms() {
+    _alarm?.cancel();
+    _alarm = null;
+    _dozeAlarm?.cancel();
+    _dozeAlarm = null;
   }
 
   void _plan() {
-    _alarm?.cancel();
-    _alarm = null;
-    if (_works.isEmpty) {
+    if (_firing) {
       return;
     }
-    final int now = ZenWake.nowMillis();
-    final int at = _nextAt();
+    _cancelAlarms();
+    final int? at = _nextAt(_works);
+    if (at == null) {
+      return;
+    }
     final List<_BeatWork> due = _dueBy(at);
+    // Doze puts the wake off unless something due must run in it.
+    final bool inDoze = due.any((_BeatWork w) => w.whileIdle);
+    _alarm = _wake('beat', at, due, whileIdle: inDoze);
+    if (inDoze) {
+      return;
+    }
+    final int? dozeAt = _nextAt(_works.where((_BeatWork w) => w.whileIdle));
+    if (dozeAt != null) {
+      _dozeAlarm = _wake('beat-doze', dozeAt, _dueBy(dozeAt), whileIdle: true);
+    }
+  }
+
+  /// An inexact alarm: nothing on the beat needs the minute, and Android
+  /// may then wake the phone for other apps' alarms at the same time.
+  WakeTimer _wake(
+    String name,
+    int at,
+    List<_BeatWork> due, {
+    required bool whileIdle,
+  }) {
     Duration hold = Duration.zero;
     for (final _BeatWork w in due) {
       if (w.hold > hold) {
         hold = w.hold;
       }
     }
-    _alarm = ZenWake.platform.after(
-      'beat',
-      Duration(milliseconds: at - now),
+    return ZenWake.platform.after(
+      name,
+      Duration(milliseconds: at - ZenWake.nowMillis()),
       _fire,
       hold: hold,
       exact: false,
-      // Doze puts the wake off unless something due must run in it.
-      whileIdle: due.any((_BeatWork w) => w.whileIdle),
+      whileIdle: whileIdle,
     );
   }
 
   Future<void> _fire() {
-    _alarm = null;
     final int now = ZenWake.nowMillis();
     final List<Future<void>> running = <Future<void>>[];
-    for (final _BeatWork w in _dueBy(now)) {
-      w.dueAt = now + w.every.inMilliseconds;
-      running.add(
-        Future<void>.sync(w.tick).catchError((Object error, StackTrace st) {
-          logZenError('Work on the wake (${w.name}) failed', error, st);
-        }),
-      );
+    _firing = true;
+    try {
+      for (final _BeatWork w in _dueBy(now)) {
+        if (w._cancelled) {
+          continue;
+        }
+        w.dueAt = now + w.every.inMilliseconds;
+        running.add(
+          Future<void>.sync(w.tick).catchError((Object error, StackTrace st) {
+            logZenError('Work on the wake (${w.name}) failed', error, st);
+          }),
+        );
+      }
+    } finally {
+      _firing = false;
     }
     _plan();
     // The phone may sleep again once everything that ran is done.
@@ -542,14 +601,22 @@ abstract final class ZenWake {
   static final _Beat _beat = _Beat();
   static final Map<String, int> _busy = <String, int>{};
 
+  /// A wake's hold when its work says nothing else: only a safety limit,
+  /// as the phone sleeps again as soon as the work is done.
+  static const Duration defaultHold = Duration(seconds: 5);
+
   /// Runs [fire] once after [delay], also while the phone sleeps, and
-  /// keeps it awake for [hold] then, or until the future [fire] returns
-  /// completes. [whileIdle] false: Doze may put it off.
+  /// keeps it awake until the future [fire] returns completes, never longer
+  /// than [hold] (work that returns nothing: for [hold]; so return the
+  /// future of what the wake is for). [whileIdle] false: Doze may put it
+  /// off. [exact] only where the minute matters (a reminder the person
+  /// set): an inexact alarm lets Android wake the phone once for several
+  /// apps.
   static WakeTimer after(
     String name,
     Duration delay,
     FutureOr<void> Function() fire, {
-    Duration hold = const Duration(seconds: 10),
+    Duration hold = defaultHold,
     bool exact = false,
     bool whileIdle = true,
   }) => platform.after(
@@ -561,25 +628,18 @@ abstract final class ZenWake {
     whileIdle: whileIdle,
   );
 
-  /// Runs [tick] every [every], also while the phone sleeps.
-  static WakeTimer every(
-    String name,
-    Duration every,
-    FutureOr<void> Function() tick, {
-    Duration hold = const Duration(seconds: 10),
-    bool exact = false,
-  }) => _RepeatingWakeTimer(name, every, tick, hold: hold, exact: exact);
-
   /// Runs [tick] about every [every] on the shared beat: one wake of the
   /// phone for everything due about then (mailbox polls of every account,
-  /// the look around nearby). It holds the phone for at most [hold] and
-  /// lets it sleep once [tick]'s future completes. [whileIdle] false: this
-  /// work alone does not wake the phone in Doze.
-  static WakeTimer beat(
+  /// the locked outbox, the look around nearby, the watchdog, the update
+  /// check). Periods that are multiples of one another share their wakes.
+  /// It holds the phone for at most [hold] and lets it sleep once [tick]'s
+  /// future completes. [whileIdle] false: this work alone does not wake the
+  /// phone in Doze. The period may change later ([BeatTimer.setEvery]).
+  static BeatTimer beat(
     String name,
     Duration every,
     Future<void> Function() tick, {
-    Duration hold = const Duration(seconds: 10),
+    Duration hold = defaultHold,
     bool whileIdle = true,
   }) => _beat.add(name, every, tick, hold: hold, whileIdle: whileIdle);
 
