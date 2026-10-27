@@ -413,6 +413,28 @@ void main() {
         isNot(contains('podpis')),
       );
     });
+
+    test('a locked notice never carries the whole message', () {
+      final LockedNoticeKit kit = lockedNoticeKitOf(
+        _seed(_background),
+        privacy: NotificationPrivacy.senderAndContent,
+      );
+      final String long = '${'ż' * 70} koniec wiadomości, której nie widać';
+      final String body = kit
+          .messageNotice(
+            from: _ada,
+            payload: <String, dynamic>{'type': 'message', 'text': long},
+            genericBody: '…',
+          )
+          .body;
+      expect(body.runes.length, kLockedNoticePreviewChars);
+      expect(body, endsWith('…'));
+      expect(body, isNot(contains('nie widać')));
+      expect(shortNoticePreview('  krótko  '), 'krótko');
+      // Whole characters: an emoji is never cut in half.
+      final String emoji = shortNoticePreview('😀' * 100, max: 5);
+      expect(emoji, '😀😀😀😀…');
+    });
   });
 }
 

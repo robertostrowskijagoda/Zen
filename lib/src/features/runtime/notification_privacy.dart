@@ -79,6 +79,23 @@ String? signalNoticePreview(ZenSignal signal) {
   );
 }
 
+/// The most characters of a message the locked background receiver puts in
+/// a notice. It reads an incoming message only in memory, to say this
+/// much; the whole message goes into the sealed inbox, which only the
+/// unlocked app opens (docs/SECURITY_MODEL.md).
+const int kLockedNoticePreviewChars = 80;
+
+/// [text] cut to [max] characters (whole characters, not UTF-16 halves),
+/// with "…" when anything was cut.
+String shortNoticePreview(String text, {int max = kLockedNoticePreviewChars}) {
+  final String trimmed = text.trim();
+  final List<int> runes = trimmed.runes.toList(growable: false);
+  if (runes.length <= max) {
+    return trimmed;
+  }
+  return '${String.fromCharCodes(runes.take(max - 1)).trimRight()}…';
+}
+
 /// The per-conversation key of the group chat [groupId] (the 1:1 chat's
 /// key is the friend's address), as `SocialHubState.notificationPrivacy`
 /// and the disappearing-message timers use it.
@@ -93,8 +110,10 @@ String conversationKeyOfSignal(ZenSignal signal) {
       : signal.sender;
 }
 
-/// What the locked background receiver needs to tell who wrote (and what)
-/// in its notifications: the level ([privacy]) and the conversations'
+/// What the locked background receiver (Android's service, an iPhone's
+/// background wakes) needs to tell who wrote (and at most
+/// [kLockedNoticePreviewChars] of what) in its notifications: the level
+/// ([privacy]) and the conversations'
 /// own levels ([overrides]); and the names ([names]: by normalized address
 /// and by group key) of only those conversations whose level shows the
 /// sender. Sealed with the background key, like the other kits; the app
@@ -154,11 +173,13 @@ final class LockedNoticeKit {
                   ? sanitizePeerName(signal.displayName)
                   : t('Kontakt Zen')))
         : known;
+    final String? preview = signalNoticePreview(signal);
     return messageNoticeText(
       level: level,
       sender: senderName,
       group: inGroup ? known : null,
-      preview: signalNoticePreview(signal),
+      // Never the whole message: the notice stays in the system's history.
+      preview: preview == null ? null : shortNoticePreview(preview),
       genericBody: genericBody,
     );
   }
