@@ -1,6 +1,15 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 
 import 'package:zen/src/domain/messages/chat_message.dart';
+
+/// What a frame without its own id is told apart by: its content, not the
+/// moment it arrived (a repeat arrives later). Used wherever such frames are
+/// kept once: the locked receiver's inbox and the chat timelines.
+String frameContentHash(Map<String, dynamic> content) =>
+    crypto.sha256.convert(utf8.encode(jsonEncode(content))).toString();
 
 enum ZenSignalType {
   ack,

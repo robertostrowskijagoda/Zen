@@ -882,35 +882,26 @@ void main() {
   });
 
   group('wiadomość bez identyfikatora od znajomego', () {
-    test(
-      'kopia przysłana później nie daje drugiego powiadomienia',
-      () async {
-        final MemoryRuntimeSystemNotificationService service =
-            MemoryRuntimeSystemNotificationService();
-        final ProviderContainer container = _boot(
-          _Storage(),
-          lifecycle: _background,
-          service: service,
-        );
-        final SocialHubController controller = _controller(container);
-        final ZenSignal withoutId = ZenSignal(
-          type: ZenSignalType.message,
-          sender: _ada,
-          displayName: 'Ada',
-          content: 'Hej!',
-        );
-        await controller.receiveSignal(withoutId, receivedAtMillis: 1000);
-        await controller.receiveSignal(withoutId, receivedAtMillis: 4000);
-        expect(service.activeNotifications.single.stackCount, 1);
-        expect(service.audibleAlertCount, 1);
-      },
-      skip:
-          'Real finding (low): the message frame of a friend with no msgId is '
-          'stored under an id made from the arrival time, so a copy that '
-          'arrives later is a second message with a second notification. '
-          'Current clients always send msgId; only a replayed or odd frame '
-          'is affected.',
-    );
+    test('kopia przysłana później nie daje drugiego powiadomienia', () async {
+      final MemoryRuntimeSystemNotificationService service =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = _boot(
+        _Storage(),
+        lifecycle: _background,
+        service: service,
+      );
+      final SocialHubController controller = _controller(container);
+      final ZenSignal withoutId = ZenSignal(
+        type: ZenSignalType.message,
+        sender: _ada,
+        displayName: 'Ada',
+        content: 'Hej!',
+      );
+      await controller.receiveSignal(withoutId, receivedAtMillis: 1000);
+      await controller.receiveSignal(withoutId, receivedAtMillis: 4000);
+      expect(service.activeNotifications.single.stackCount, 1);
+      expect(service.audibleAlertCount, 1);
+    });
   });
 
   group('ten sam identyfikator w dwóch różnych czatach', () {

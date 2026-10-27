@@ -3,13 +3,13 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
@@ -712,7 +712,7 @@ final class LockedReceiver {
     final Object? rawRid = frame.payload[kReliableIdKey];
     final String id = rawRid is String && rawRid.isNotEmpty
         ? 'd|$from|$rawRid'
-        : 'd|$from|${_payloadHash(frame.payload)}';
+        : 'd|$from|${frameContentHash(frame.payload)}';
     if (_kept.contains(id)) {
       return;
     }
@@ -955,7 +955,7 @@ final class LockedReceiver {
     }
     final String id = rid != null
         ? 'r|$from|$rid'
-        : 'h|$from|${_payloadHash(frame.payload)}';
+        : 'h|$from|${frameContentHash(frame.payload)}';
     if (_kept.contains(id) ||
         (rid != null &&
             _taken.contains(LockedMailboxKit.takenTag(from, rid)))) {
@@ -1009,11 +1009,6 @@ final class LockedReceiver {
 
   Future<void> _acknowledge(String to, String rid) =>
       _sendQuietly(to, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
-
-  /// What a frame without a reliable id is told apart by: its payload, not
-  /// the moment it arrived (a repeat arrives later).
-  static String _payloadHash(Map<String, dynamic> payload) =>
-      crypto.sha256.convert(utf8.encode(jsonEncode(payload))).toString();
 
   /// Mail held for this phone, from one of its mailboxes or straight from a
   /// sender's locked outbox. Each envelope counts as its payload would
