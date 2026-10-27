@@ -90,6 +90,7 @@ class ZenGif extends ConsumerWidget {
     this.fit = BoxFit.cover,
     this.width,
     this.height,
+    this.maxHeight,
     this.errorBuilder,
     super.key,
   });
@@ -99,6 +100,9 @@ class ZenGif extends ConsumerWidget {
   final BoxFit fit;
   final double? width;
   final double? height;
+
+  /// See [ZenAnimatedImage.maxHeight].
+  final double? maxHeight;
   final ImageErrorWidgetBuilder? errorBuilder;
 
   @override
@@ -108,6 +112,7 @@ class ZenGif extends ConsumerWidget {
     fit: fit,
     width: width,
     height: height,
+    maxHeight: maxHeight,
     errorBuilder: errorBuilder,
     autoplay: gifAutoplay(ref.watch(appSettingsControllerProvider)),
   );
@@ -130,6 +135,7 @@ class ZenAnimatedImage extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.width,
     this.height,
+    this.maxHeight,
     this.errorBuilder,
     this.autoplay = true,
   });
@@ -139,6 +145,11 @@ class ZenAnimatedImage extends StatefulWidget {
   final BoxFit fit;
   final double? width;
   final double? height;
+
+  /// With no [height]: the tallest it may be. The image then keeps its own
+  /// proportions (shown whole, shrunk to fit the width and this height, never
+  /// enlarged); until it has loaded, a box of this height stands in for it.
+  final double? maxHeight;
   final ImageErrorWidgetBuilder? errorBuilder;
 
   /// Plays on its own (unless the system asks for reduced motion).
@@ -268,7 +279,7 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage>
 
     final Size box = Size(
       side(widget.width, constraints.maxWidth),
-      side(widget.height, constraints.maxHeight),
+      side(widget.height ?? widget.maxHeight, constraints.maxHeight),
     );
     final Size? old = _box;
     if (old != null && !_muchLarger(box, old)) {
@@ -411,7 +422,7 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage>
     if (frame == null) {
       return SizedBox(
         width: widget.width,
-        height: widget.height,
+        height: widget.height ?? widget.maxHeight,
         child: const Center(
           child: SizedBox.square(
             dimension: 20,
@@ -420,13 +431,20 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage>
         ),
       );
     }
-    final Widget picture = RawImage(
+    final double? maxHeight = widget.height == null ? widget.maxHeight : null;
+    Widget picture = RawImage(
       image: frame,
       scale: _decodeScale,
       fit: widget.fit,
       width: widget.width,
       height: widget.height,
     );
+    if (maxHeight != null) {
+      picture = ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: picture,
+      );
+    }
     if (!_animated || _wantsPlay) {
       return picture;
     }

@@ -3,9 +3,13 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
+import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 
 Uint8List _twoFrameGif() {
   final img.Image first = img.Image(width: 8, height: 8, numChannels: 4)
@@ -25,6 +29,25 @@ Uint8List _bigGif({required int frames}) {
   for (int i = 1; i < frames; i++) {
     final img.Image next = img.Image(width: 200, height: 200, numChannels: 4)
       ..frameDuration = 40;
+    img.fill(next, color: img.ColorRgba8(0, 0, 255, 255));
+    first.addFrame(next);
+  }
+  return img.encodeGif(first);
+}
+
+Uint8List _gifOf(int width, int height, {required int frames}) {
+  final img.Image first = img.Image(
+    width: width,
+    height: height,
+    numChannels: 4,
+  )..frameDuration = 40;
+  img.fill(first, color: img.ColorRgba8(255, 0, 0, 255));
+  for (int i = 1; i < frames; i++) {
+    final img.Image next = img.Image(
+      width: width,
+      height: height,
+      numChannels: 4,
+    )..frameDuration = 40;
     img.fill(next, color: img.ColorRgba8(0, 0, 255, 255));
     first.addFrame(next);
   }
@@ -267,6 +290,74 @@ void main() {
     expect(moving.image!.width, lessThanOrEqualTo(200));
     expect(moving.image!.width / moving.scale, closeTo(200, 1));
     await tester.pumpWidget(const SizedBox());
+  });
+
+  group('a GIF in a chat bubble', () {
+    // The bubble is at most 300 wide; a GIF may be 320 tall at most.
+    Future<Size> shownSize(
+      WidgetTester tester,
+      int width,
+      int height, {
+      required int frames,
+    }) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  child: ChatAttachmentBody(
+                    message: ChatMessage(
+                      id: 'g',
+                      sender: 'ada',
+                      text: '',
+                      sentAtMillis: 1,
+                      direction: ChatMessageDirection.incoming,
+                      type: ChatMessageType.image,
+                      attachmentBytes: _gifOf(width, height, frames: frames),
+                      mimeType: 'image/gif',
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await _firstFrame(tester);
+      final RawImage raw = tester.widget<RawImage>(find.byType(RawImage));
+      expect(raw.fit, BoxFit.contain);
+      final Size size = tester.getSize(find.byType(RawImage));
+      await tester.pumpWidget(const SizedBox());
+      return size;
+    }
+
+    for (final int frames in <int>[1, 2]) {
+      testWidgets('wide: whole, in its proportions, not cropped '
+          '($frames frames)', (WidgetTester tester) async {
+        final Size size = await shownSize(tester, 600, 150, frames: frames);
+        expect(size.width, closeTo(300, 0.5));
+        expect(size.height, closeTo(75, 0.5));
+      });
+
+      testWidgets('tall: whole, in its proportions, not cropped '
+          '($frames frames)', (WidgetTester tester) async {
+        final Size size = await shownSize(tester, 150, 900, frames: frames);
+        expect(size.height, closeTo(320, 0.5));
+        expect(size.width, closeTo(320 / 6, 0.5));
+      });
+
+      testWidgets('small: not enlarged ($frames frames)', (
+        WidgetTester tester,
+      ) async {
+        final Size size = await shownSize(tester, 60, 30, frames: frames);
+        expect(size.width, closeTo(60, 0.5));
+        expect(size.height, closeTo(30, 0.5));
+      });
+    }
   });
 
   group('gifDecodeSize', () {

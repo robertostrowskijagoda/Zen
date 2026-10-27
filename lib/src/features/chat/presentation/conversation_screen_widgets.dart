@@ -601,6 +601,10 @@ ImageProvider<Object> _chatImageProvider(ImageProvider<Object> image) {
   );
 }
 
+/// The tallest a GIF in a bubble is shown. It keeps its own proportions
+/// within this and the bubble's width, and is never cropped.
+const double _kChatGifMaxHeight = 320;
+
 /// Whether [message] is a GIF: shown on its own, with no frame or caption.
 bool isGifMessage(ChatMessage message) {
   final Uint8List? held = message.attachmentBytes;
@@ -630,15 +634,15 @@ class _ImageAttachmentContent extends StatelessWidget {
     final Widget image = isGifFile && message.attachmentBytes != null
         ? ZenGif(
             bytes: message.attachmentBytes,
-            width: double.infinity,
-            height: 220,
+            fit: BoxFit.contain,
+            maxHeight: _kChatGifMaxHeight,
             errorBuilder: _buildImageError,
           )
         : isGifFile && message.attachmentPath != null
         ? ZenGif(
             file: File(message.attachmentPath!),
-            width: double.infinity,
-            height: 220,
+            fit: BoxFit.contain,
+            maxHeight: _kChatGifMaxHeight,
             errorBuilder: _buildImageError,
           )
         // Decoded no larger than the bubble can show: a peer's image may
