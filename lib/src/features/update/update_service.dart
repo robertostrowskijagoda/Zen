@@ -128,7 +128,7 @@ final class UpdateStatus {
 /// * we tell friends about the newest release we know when we meet them,
 ///   so it spreads without any server;
 /// * maintainers' vetoes travel the same way and stop a release anywhere;
-/// * nothing is installed without the person pressing "Zainstaluj".
+/// * nothing is installed without the person pressing "Aktualizuj".
 final class UpdateService extends ChangeNotifier {
   UpdateService({
     required this.host,
@@ -625,7 +625,7 @@ Future<String?> requestInstallPermission() async {
     await _appUpdateChannel.invokeMethod<void>('openInstallSettings');
     return t(
       'Zezwól Zen na instalowanie aplikacji, wróć i naciśnij '
-      '„Zainstaluj” jeszcze raz.',
+      '„Aktualizuj” jeszcze raz.',
     );
   } on MissingPluginException {
     return t('Instalowanie nie działa na tym urządzeniu.');
