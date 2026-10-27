@@ -9,6 +9,7 @@ import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 
 /// "Automatyczna blokada": when Zen locks itself, bound to the setting, with
 /// what "Nigdy" really means and the delay for "Po wyjściu z aplikacji".
@@ -86,24 +87,26 @@ class LockModeSettingChoice extends ConsumerWidget {
           runSpacing: 0,
           children: <Widget>[
             for (final AppLockMode mode in AppLockMode.values)
-              ChoiceChip(
-                key: Key('settings-lock-mode-${mode.name}'),
-                avatar: Icon(switch (mode) {
-                  AppLockMode.never => Icons.lock_open_rounded,
-                  AppLockMode.background => Icons.timer_outlined,
-                  AppLockMode.appClose => Icons.close_rounded,
-                  AppLockMode.systemRestart => Icons.restart_alt_rounded,
-                }, size: 18),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
-                label: Text(mode.label),
-                selected: settings.lockMode == mode,
-                onSelected: (_) => unawaited(
-                  _chooseLockMode(
-                    context,
-                    ref,
-                    security,
-                    current: settings.lockMode,
-                    mode: mode,
+              ChipTapTarget(
+                child: ChoiceChip(
+                  key: Key('settings-lock-mode-${mode.name}'),
+                  avatar: Icon(switch (mode) {
+                    AppLockMode.never => Icons.lock_open_rounded,
+                    AppLockMode.background => Icons.timer_outlined,
+                    AppLockMode.appClose => Icons.close_rounded,
+                    AppLockMode.systemRestart => Icons.restart_alt_rounded,
+                  }, size: 18),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: Text(mode.label),
+                  selected: settings.lockMode == mode,
+                  onSelected: (_) => unawaited(
+                    _chooseLockMode(
+                      context,
+                      ref,
+                      security,
+                      current: settings.lockMode,
+                      mode: mode,
+                    ),
                   ),
                 ),
               ),
@@ -168,13 +171,16 @@ class LockModeSettingChoice extends ConsumerWidget {
                 (900, t('{minutes} min', {'minutes': 15})),
                 (3600, t('{hours} h', {'hours': 1})),
               ])
-                ChoiceChip(
-                  key: Key('settings-lock-delay-$sec'),
-                  materialTapTargetSize: MaterialTapTargetSize.padded,
-                  label: Text(label),
-                  selected: settings.backgroundLockDelaySeconds == sec,
-                  onSelected: (_) =>
-                      unawaited(controller.setBackgroundLockDelaySeconds(sec)),
+                ChipTapTarget(
+                  child: ChoiceChip(
+                    key: Key('settings-lock-delay-$sec'),
+                    materialTapTargetSize: MaterialTapTargetSize.padded,
+                    label: Text(label),
+                    selected: settings.backgroundLockDelaySeconds == sec,
+                    onSelected: (_) => unawaited(
+                      controller.setBackgroundLockDelaySeconds(sec),
+                    ),
+                  ),
                 ),
             ],
           ),

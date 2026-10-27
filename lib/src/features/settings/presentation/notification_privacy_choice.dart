@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// The "Treść powiadomień" question: the three levels and a line saying
@@ -42,20 +43,24 @@ class NotificationPrivacyChoice extends StatelessWidget {
           runSpacing: 0,
           children: <Widget>[
             if (global != null)
-              ChoiceChip(
-                key: const Key('notification-privacy-global'),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
-                label: Text(t('Jak w ustawieniach')),
-                selected: value == null,
-                onSelected: (_) => onChanged(null),
+              ChipTapTarget(
+                child: ChoiceChip(
+                  key: const Key('notification-privacy-global'),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: Text(t('Jak w ustawieniach')),
+                  selected: value == null,
+                  onSelected: (_) => onChanged(null),
+                ),
               ),
             for (final NotificationPrivacy level in NotificationPrivacy.values)
-              ChoiceChip(
-                key: Key('notification-privacy-${level.name}'),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
-                label: Text(level.label),
-                selected: value == level,
-                onSelected: (_) => onChanged(level),
+              ChipTapTarget(
+                child: ChoiceChip(
+                  key: Key('notification-privacy-${level.name}'),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: Text(level.label),
+                  selected: value == level,
+                  onSelected: (_) => onChanged(level),
+                ),
               ),
           ],
         ),

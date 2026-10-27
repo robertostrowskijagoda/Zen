@@ -299,8 +299,11 @@ class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
       ),
     );
     final IosBackgroundStatus? s = status;
+    // 44 px for real: the compact density the app uses on phones would take
+    // 8 px off the minimum.
     final ButtonStyle buttonStyle = FilledButton.styleFrom(
       minimumSize: const Size(0, 44),
+      visualDensity: VisualDensity.standard,
       padding: const EdgeInsets.symmetric(horizontal: 14),
     );
     return Column(
@@ -400,6 +403,7 @@ class _IosWakeOptionsState extends _IosStatusState<IosWakeOptions> {
                       key: const Key('ios-wake-shortcut-how'),
                       style: TextButton.styleFrom(
                         minimumSize: const Size(0, 44),
+                        visualDensity: VisualDensity.standard,
                       ),
                       onPressed: () => setState(() => _stepsOpen = true),
                       child: Text(t('Jak to ustawić?')),
@@ -576,7 +580,10 @@ class _IosSettingsChecklistState extends _IosStatusState<IosSettingsChecklist> {
         const SizedBox(height: 12),
         FilledButton.tonal(
           key: const Key('ios-check-open-settings'),
-          style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(0, 44),
+            visualDensity: VisualDensity.standard,
+          ),
           onPressed: () => unawaited(ref.read(iosOpenZenSettingsProvider)()),
           child: Text(t('Otwórz ustawienia Zen w iOS')),
         ),

@@ -35,15 +35,11 @@ Widget _app(Widget child, {List overrides = const []}) => ProviderScope(
   ),
 );
 
-/// Every chip of [choice] is at least [minHeight] px tall (a hit box, not
-/// the look), and the chips of a wrapped row do not overlap. A chip that
-/// shrink-wraps is 32 px; the padded target is 48 less the compact density
-/// the app theme uses on phones.
-void _expectComfortableChips(
-  WidgetTester tester,
-  String choice, {
-  double minHeight = 40,
-}) {
+/// Every chip of [choice] is at least 44 px tall (a hit box, not the look),
+/// and the chips of a wrapped row do not overlap. A chip that shrink-wraps
+/// is 32 px; the padded target is 48 less the compact density the app theme
+/// uses on phones (40), and the settings chips add the rest around it.
+void _expectComfortableChips(WidgetTester tester, String choice) {
   final Finder chips = find.descendant(
     of: find.byKey(Key(choice)),
     matching: find.byType(ChoiceChip),
@@ -54,7 +50,7 @@ void _expectComfortableChips(
       tester.getRect(chips.at(i)),
   ];
   for (final Rect r in boxes) {
-    expect(r.height, greaterThanOrEqualTo(minHeight), reason: choice);
+    expect(r.height, greaterThanOrEqualTo(44), reason: choice);
   }
   for (int i = 0; i < boxes.length; i++) {
     for (int j = i + 1; j < boxes.length; j++) {
@@ -176,20 +172,6 @@ void main() {
       _expectComfortableChips(tester, 'settings-lock-delay-choices');
     });
   });
-
-  // Real finding, left skipped: the review asked for chips at least 44 px
-  // tall; the padded target gives 48, but the app theme is compact on phones
-  // (VisualDensity.compact takes 8 px off), so a chip is 40 px.
-  testWidgets('animations: chips are 44 px tall', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      _app(AnimationsChoice(value: AppAnimations.always, onChanged: (_) {})),
-    );
-    _expectComfortableChips(
-      tester,
-      'settings-animations-choice',
-      minHeight: 44,
-    );
-  }, skip: true);
 
   testWidgets('the diagnostics screen: the warning first, one place to copy '
       'and save, a question before clearing, no raw error', (
