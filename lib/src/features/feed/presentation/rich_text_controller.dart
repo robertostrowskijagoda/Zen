@@ -94,8 +94,12 @@ class RichTextController extends TextEditingController with MentionEditing {
     }
     return withMentionLook(
       built,
-      (TextStyle s) =>
-          s.copyWith(color: zen.accent, fontWeight: FontWeight.w700),
+      (TextStyle s) => s.copyWith(
+        color: zen.accent,
+        fontWeight: FontWeight.w700,
+        decoration: TextDecoration.underline,
+        decorationColor: zen.accent,
+      ),
     );
   }
 

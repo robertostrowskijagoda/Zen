@@ -142,8 +142,12 @@ class MentionTextController extends TextEditingController with MentionEditing {
     final ZenColors zen = ZenColors.of(context);
     return withMentionLook(
       built,
-      (TextStyle s) =>
-          s.copyWith(color: zen.accent, fontWeight: FontWeight.w700),
+      (TextStyle s) => s.copyWith(
+        color: zen.accent,
+        fontWeight: FontWeight.w700,
+        decoration: TextDecoration.underline,
+        decorationColor: zen.accent,
+      ),
     );
   }
 }
@@ -231,6 +235,9 @@ class MentionSuggestions extends StatefulWidget {
 }
 
 class _MentionSuggestionsState extends State<MentionSuggestions> {
+  /// Whether the list was on screen at the last build.
+  bool _wasShown = false;
+
   @override
   void initState() {
     super.initState();
@@ -270,16 +277,44 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
   Widget build(BuildContext context) {
     final ({int start, String query})? q = widget.controller.mentionQuery;
     if (q == null) {
+      _wasShown = false;
       return const SizedBox.shrink();
     }
     final List<MentionCandidate> shown = suggestMentions(
       widget.candidates(),
       q.query,
     );
-    if (shown.isEmpty) {
-      return const SizedBox.shrink();
-    }
     final ZenColors zen = ZenColors.of(context);
+    if (shown.isEmpty) {
+      _wasShown = false;
+      // A name was started and nobody matches it: say so instead of
+      // leaving the "@" with no answer.
+      if (q.query.isEmpty) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: widget.padding,
+        child: Text(
+          t('Brak pasujących osób'),
+          key: const Key('mention-suggestions-empty'),
+          style: TextStyle(color: zen.textMuted, fontSize: 13),
+        ),
+      );
+    }
+    if (!_wasShown) {
+      // The list came up: keep it in view above the keyboard.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 150),
+            ),
+          );
+        }
+      });
+    }
+    _wasShown = true;
     return Padding(
       padding: widget.padding,
       child: ConstrainedBox(
@@ -387,6 +422,9 @@ class _MentionTextState extends ConsumerState<MentionText> {
           style: TextStyle(
             color: widget.mentionColor ?? zen.accent,
             fontWeight: FontWeight.w700,
+            // Not by colour alone.
+            decoration: TextDecoration.underline,
+            decorationColor: widget.mentionColor ?? zen.accent,
           ),
         ),
       );
