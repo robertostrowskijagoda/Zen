@@ -76,12 +76,19 @@ func TestLanBeaconRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotAdvert, port, ok := parseLanBeacon(lanBeacon(advert, 40123))
-	if !ok || port != 40123 || !bytes.Equal(gotAdvert, advert) {
-		t.Fatalf("beacon round trip: %v %d", ok, port)
+	got, ok := parseLanBeacon(lanBeacon(lanBeaconFields{advert: advert, port: 40123}))
+	if !ok || got.port != 40123 || !bytes.Equal(got.advert, advert) || got.nearby != nil || got.looking {
+		t.Fatalf("beacon round trip: %v %+v", ok, got)
 	}
-	for _, bad := range [][]byte{nil, {1, 2, 3}, lanBeacon(advert, 0), make([]byte, lanMaxDatagram+1)} {
-		if _, _, ok := parseLanBeacon(bad); ok {
+	nearby := bytes.Repeat([]byte{0xab}, lanNearbyAdvertBytes)
+	got, ok = parseLanBeacon(lanBeacon(lanBeaconFields{advert: advert, nearby: nearby, looking: true, port: 40123}))
+	if !ok || got.port != 40123 || !bytes.Equal(got.advert, advert) || !bytes.Equal(got.nearby, nearby) || !got.looking {
+		t.Fatalf("beacon with a nearby advert: %v %+v", ok, got)
+	}
+	// A nearby advert of another length is not a beacon.
+	wrong := lanBeacon(lanBeaconFields{advert: advert, nearby: nearby[:7], port: 40123})
+	for _, bad := range [][]byte{nil, {1, 2, 3}, lanBeacon(lanBeaconFields{advert: advert}), wrong, make([]byte, lanMaxDatagram+1)} {
+		if _, ok := parseLanBeacon(bad); ok {
 			t.Fatalf("%d bytes must not parse", len(bad))
 		}
 	}
