@@ -764,12 +764,26 @@ class _UpdatesPage extends StatelessWidget {
         ZenSection(t('Dlaczego nie ma Zen w sklepach')),
         _Paragraph(
           t(
-            'Zen celowo nie jest w Google Play ani w App Store. Sklep może w '
-            'każdej chwili usunąć aplikację albo zażądać zmian — a Zen ma być '
-            'niezależny, także od wielkich firm i od polityki. Sklepy wymagają '
-            'też firmy, opłat i zgody na swoje zasady, a Zen tworzy jedna '
-            'osoba, za darmo. Przy okazji nikt, nawet sklep, nie wie, że '
-            'masz Zen.\n\n'
+            'Głównym powodem są wymagania prawne i regulaminy sklepów, '
+            'których Zen z założenia nie spełnia:\n'
+            '• moderacja: sklepy wymagają, żeby twórca sam przeglądał '
+            'zgłoszenia i usuwał treści i konta, a w Zen nie ma serwera ani '
+            'nikogo pośrodku, kto mógłby to robić;\n'
+            '• waluta i portfel piramidy: usługi finansowe i kryptowaluty '
+            'wymagają w sklepach firmy i licencji finansowych;\n'
+            '• płatne bramy: opłaty za cyfrowe usługi w aplikacji muszą iść '
+            'przez płatności sklepu, z jego prowizją 15–30%;\n'
+            '• randki: wymagają weryfikacji wieku i zespołu moderacji;\n'
+            '• samodzielne aktualizacje i praca w tle: Google Play zabrania '
+            'aktualizowania się aplikacji spoza sklepu, a App Store mocno '
+            'ogranicza działanie w tle;\n'
+            '• tożsamość twórcy: sklepy publikują dane twórcy i wymagają '
+            'formalności (m.in. deklaracji szyfrowania).\n\n'
+            'Do tego dochodzą koszty: App Store to 99 USD rocznie, Google Play '
+            '25 USD jednorazowo, a licencje i obsługa prawna liczone są w '
+            'tysiącach. Zen tworzy jedna osoba, za darmo. Sklep mógłby też w '
+            'każdej chwili usunąć aplikację albo zażądać zmian, a Zen ma być '
+            'niezależny. Przy okazji nikt, nawet sklep, nie wie, że masz Zen.\n\n'
             'Dlatego Zen pobierasz z oficjalnej strony projektu na GitHubie '
             'albo dostajesz od znajomego („Podaj dalej”).',
           ),
