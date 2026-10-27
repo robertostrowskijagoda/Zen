@@ -116,6 +116,7 @@ Future<void> showConversationNotificationPrivacyDialog(
     builder: (BuildContext context) => AlertDialog(
       key: const Key('conversation-notification-privacy-dialog'),
       title: Text(t('Powiadomienia z tej rozmowy')),
+      scrollable: true,
       content: Consumer(
         builder: (BuildContext context, WidgetRef ref, Widget? child) {
           final NotificationPrivacy global = ref.watch(
@@ -128,15 +129,13 @@ Future<void> showConversationNotificationPrivacyDialog(
               (state) => state.ownNotificationPrivacyOf(conversationKey),
             ),
           );
-          return SingleChildScrollView(
-            child: NotificationPrivacyChoice(
-              value: own,
-              global: global,
-              onChanged: (NotificationPrivacy? value) => unawaited(
-                ref
-                    .read(socialHubControllerProvider.notifier)
-                    .setConversationNotificationPrivacy(conversationKey, value),
-              ),
+          return NotificationPrivacyChoice(
+            value: own,
+            global: global,
+            onChanged: (NotificationPrivacy? value) => unawaited(
+              ref
+                  .read(socialHubControllerProvider.notifier)
+                  .setConversationNotificationPrivacy(conversationKey, value),
             ),
           );
         },
