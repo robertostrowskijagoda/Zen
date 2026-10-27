@@ -871,11 +871,35 @@ final class RuntimeNodeRuntime extends ChangeNotifier
 
   RuntimeTransportSnapshot get snapshot => _snapshot;
 
+  /// Another process runs this identity's node (the Android background
+  /// service): [start] does nothing until [releaseFromService]. Two nodes
+  /// on one key split what friends send between them, and the one in a
+  /// locked app drops its share.
+  bool _heldByService = false;
+
+  /// Whether [start] waits for the service to let go of the node.
+  bool get heldByService => _heldByService;
+
+  /// From now on [start] does nothing (a node already up stays up: the
+  /// caller stops it). Before anything may start the node: the background
+  /// bridge does this before it knows the service let go.
+  void holdForService() {
+    _heldByService = true;
+  }
+
+  /// The service confirmed it runs no node: [start] works again.
+  void releaseFromService() {
+    _heldByService = false;
+  }
+
   @override
   Stream<SignalTransportFrame> get frames => _frames.stream;
 
   @override
   Future<void> start() {
+    if (_heldByService) {
+      return Future<void>.value();
+    }
     if (_previewMode) {
       if (_snapshot.serviceRunning) {
         return Future<void>.value();

@@ -167,8 +167,16 @@ enum AndroidBackgroundRuntimeMode { standby, active }
 /// Message type the task isolate sends back once it reached a requested mode.
 const String _kRuntimeModeAckType = 'zen.runtime.mode';
 
-/// Message the app sends while it is on screen and owns the node itself.
+/// Message the app sends while it owns the node itself.
 const String _kRuntimeHeartbeatType = 'zen.runtime.heartbeat';
+
+/// Message the parked service sends before it takes the node over on a
+/// silence: an app that still runs its node answers with a heartbeat.
+const String _kRuntimeProbeType = 'zen.runtime.probe';
+
+/// Key of the mode acknowledgement's "the service took the node by itself"
+/// flag (no heartbeat came, or the app's engine went).
+const String _kModeAckTookKey = 'took';
 
 /// Message the app sends right before it stops the service on purpose (a
 /// restart with other service types). Any other end of the service means
@@ -222,6 +230,21 @@ Duration standbyWatchdogEvery({required bool appOnScreen}) => appOnScreen
 
 /// Key of the heartbeat's "the app is on screen" flag.
 const String _kHeartbeatOnScreenKey = 'onScreen';
+
+/// How long the parked service waits for an answer to its probe before it
+/// takes the node over.
+const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
+
+/// What the service tells the app without being asked.
+enum AndroidBackgroundServiceEvent {
+  /// The service is about to take the node over (no heartbeat came): an app
+  /// that still runs its node says so now.
+  probe,
+
+  /// The service took the node over by itself: the app's node, if any, has
+  /// to go at once.
+  tookNode,
+}
 
 /// After this long in the background, unlocked or not, the app hands the
 /// node to the service's receive-only mode, whatever the lock setting: no
@@ -500,10 +523,13 @@ abstract interface class AndroidBackgroundServiceController {
 
   Future<bool> isRunning();
 
-  /// Signals the parked task isolate that the app is still running, and
+  /// Signals the parked task isolate that the app still runs its node, and
   /// whether it is [onScreen] (the service's watchdog then wakes the phone
   /// far less often).
   void sendHeartbeat({required bool onScreen});
+
+  /// What the service says on its own ([AndroidBackgroundServiceEvent]).
+  Stream<AndroidBackgroundServiceEvent> get events;
 
   /// Makes sure the foreground service exists and drives it to
   /// [AndroidBackgroundBootstrapPayload.mode].
@@ -533,6 +559,10 @@ final class NoopAndroidBackgroundServiceController
   void sendHeartbeat({required bool onScreen}) {}
 
   @override
+  Stream<AndroidBackgroundServiceEvent> get events =>
+      const Stream<AndroidBackgroundServiceEvent>.empty();
+
+  @override
   Future<bool> start(
     AndroidBackgroundBootstrapPayload payload, {
     CallSession? activeCall,
@@ -556,6 +586,11 @@ final class FlutterForegroundAndroidBackgroundServiceController
   Completer<void>? _pendingModeAck;
   AndroidBackgroundRuntimeMode? _pendingMode;
   List<ForegroundServiceTypes>? _runningServiceTypes;
+  final StreamController<AndroidBackgroundServiceEvent> _events =
+      StreamController<AndroidBackgroundServiceEvent>.broadcast();
+
+  @override
+  Stream<AndroidBackgroundServiceEvent> get events => _events.stream;
 
   /// Tells the parked service the app is still here. Silence is the signal
   /// that the UI isolate is gone and the service has to own the node again.
@@ -767,8 +802,16 @@ final class FlutterForegroundAndroidBackgroundServiceController
     if (data is! Map<Object?, Object?>) {
       return;
     }
+    if (data['type'] == _kRuntimeProbeType) {
+      _events.add(AndroidBackgroundServiceEvent.probe);
+      return;
+    }
     if (data['type'] != _kRuntimeModeAckType) {
       return;
+    }
+    if (data[_kModeAckTookKey] == true &&
+        data['mode'] == AndroidBackgroundRuntimeMode.active.name) {
+      _events.add(AndroidBackgroundServiceEvent.tookNode);
     }
     final Completer<void>? completer = _pendingModeAck;
     final AndroidBackgroundRuntimeMode? expected = _pendingMode;
@@ -873,6 +916,14 @@ final class _AndroidBackgroundRuntimeBridgeState
   bool _isObserving = false;
   Timer? _heartbeatTimer;
 
+  /// What the service says on its own: a probe before it takes the node
+  /// over, and that it did.
+  StreamSubscription<AndroidBackgroundServiceEvent>? _serviceEvents;
+
+  /// Runs the sync again after the service did not confirm the mode it
+  /// was asked for.
+  Timer? _standbyRetry;
+
   /// Wakes the phone for the drop to receive-only (see
   /// [_planReceiveOnlyWake]).
   WakeTimer? _receiveOnlyWake;
@@ -954,10 +1005,36 @@ final class _AndroidBackgroundRuntimeBridgeState
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
     _security = security;
     security.addListener(_onSecurityChanged);
+    // Nothing in this isolate starts the node before the service confirmed
+    // it runs none (the core starts with the first frame, and a launch or
+    // an unlock may come while the service still runs it).
+    ref.read(runtimeNodeRuntimeProvider).holdForService();
+    _serviceEvents = ref
+        .read(androidBackgroundServiceControllerProvider)
+        .events
+        .listen(_onServiceEvent);
     unawaitedLogged(
       _initialize(),
       context: 'Android background runtime bridge initialization failed',
     );
+  }
+
+  void _onServiceEvent(AndroidBackgroundServiceEvent event) {
+    if (!mounted) {
+      return;
+    }
+    switch (event) {
+      case AndroidBackgroundServiceEvent.probe:
+        // Still here with the node: the service stays parked.
+        if (_heartbeatTimer != null) {
+          _sendHeartbeat();
+        }
+      case AndroidBackgroundServiceEvent.tookNode:
+        unawaitedLogged(
+          _yieldToService(),
+          context: 'Letting the service have the node failed',
+        );
+    }
   }
 
   void _onScreenCaptureChanged() {
@@ -981,6 +1058,10 @@ final class _AndroidBackgroundRuntimeBridgeState
     _security = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    unawaited(_serviceEvents?.cancel());
+    _serviceEvents = null;
+    _standbyRetry?.cancel();
+    _standbyRetry = null;
     _cancelReceiveOnlyWake();
     _drainRetry?.cancel();
     _drainRetry = null;
@@ -1024,8 +1105,10 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       _sendHeartbeat();
       // Frames stop while the app is off screen, so a deferred handoff has no
-      // rebuild to ride on; this tick is what eventually runs it.
-      if (ref.read(socialHubControllerProvider).lifecycle.isBackgroundLike) {
+      // rebuild to ride on; this tick is what eventually runs it (and runs
+      // again a handoff that was cut short).
+      if (ref.read(socialHubControllerProvider).lifecycle.isBackgroundLike ||
+          isSecurityBlockingUi(ref.read(appSecurityServiceProvider))) {
         _scheduleSync();
       }
     });
@@ -1348,39 +1431,30 @@ final class _AndroidBackgroundRuntimeBridgeState
     final AndroidBackgroundBootstrapPayload payload = _payload(
       AndroidBackgroundRuntimeMode.active,
     );
-    // Who counts as a contact, as of now (the key's public part is kept).
-    final Future<void> published = _publishCapability();
-    // The kits were written while the app was unlocked; one still being
-    // written finishes before the service reads it.
-    final Future<void> kitWritten = _alarmKitWriting;
-    final Future<void> lockedKitsWritten = _lockedKitsWriting;
-    // This device's queue, sealed for its recipients, for the service to
-    // keep delivering.
-    final Future<void> outboxKitWritten =
-        _outboxKitWriter?.flush() ?? Future<void>.value();
-    // The mail it holds for friends, and whom it holds it for.
-    final Future<void> mailboxKitWritten =
-        _mailboxKitWriter?.flush() ?? Future<void>.value();
-    // The service is about to own the node; a heartbeat from here on would
-    // only keep it parked.
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
+    // Who counts as a contact, as of now (the key's public part is kept);
+    // the kits written while the app was unlocked (one still being written
+    // finishes before the service reads it); this device's queue, sealed
+    // for its recipients; the mail it holds for friends.
+    final List<(String, Future<void>)> saves = <(String, Future<void>)>[
+      ('the background capability', _publishCapability()),
+      ('the alarm kit', _alarmKitWriting),
+      ('the locked kits', _lockedKitsWriting),
+      ('the outbox kit', _outboxKitWriter?.flush() ?? Future<void>.value()),
+      ('the mailbox kit', _mailboxKitWriter?.flush() ?? Future<void>.value()),
+    ];
     _lastConfirmedMode = null;
     _lastParkedCallSignature = null;
     logZenMessage('The app is locked: the service receives without the key.');
     try {
-      await published;
-      await kitWritten;
-      await lockedKitsWritten;
-      await outboxKitWritten;
-      await mailboxKitWritten;
-      // Saved and closed: nothing writes the ledger while the app is locked.
-      await ledger?.suspend();
-      final bool coreWasRunning = core.isStarted;
-      await core.stop();
-      // Down first: the identity key is shared, so a second Yggdrasil node
-      // must never be up while this one still holds the mesh session.
-      await runtime.stop();
+      final bool coreWasRunning = await _releaseNode(
+        runtime: runtime,
+        core: core,
+        ledger: ledger,
+        saves: saves,
+      );
+      if (mounted) {
+        _coreHandedOff = _coreHandedOff || coreWasRunning;
+      }
       final bool started = await controller.start(
         payload,
         activeCall: activeCall,
@@ -1392,17 +1466,114 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       ZenTechLog.handover('service', ok: started, took: handoff.elapsed);
       if (mounted) {
+        // Not confirmed: this isolate's node stays down all the same (held
+        // for the service), and a later sync asks the service again.
         _handoffActive = started;
         _lastConfirmedMode = started
             ? AndroidBackgroundRuntimeMode.active
             : null;
-        _coreHandedOff = _coreHandedOff || coreWasRunning;
+        if (!started) {
+          _retrySyncLater();
+        }
       }
     } on Object catch (error, stackTrace) {
       logZenError('Handing the node to the service failed', error, stackTrace);
     } finally {
       _handoffInFlight = false;
       unawaited(ZenWake.release(tag: 'handoff'));
+    }
+  }
+
+  /// Lets go of the node in this isolate: what has to be saved first
+  /// ([saves], the ledger), the app's `ZenCore`, then the node itself, kept
+  /// from starting again until the service lets go. Returns whether the
+  /// core was running.
+  ///
+  /// Saving is best effort: a lock erased the master key before this runs,
+  /// so a write under it fails, and a failure must never keep this
+  /// isolate's node up. The heartbeat stops right after the node does and
+  /// the service then runs its own; two nodes on one identity split what
+  /// friends send between them, and the locked app drops its share.
+  Future<bool> _releaseNode({
+    required RuntimeNodeRuntime runtime,
+    required ZenCore core,
+    required LedgerNode? ledger,
+    List<(String, Future<void>)> saves = const <(String, Future<void>)>[],
+  }) async {
+    for (final (String what, Future<void> save) in saves) {
+      await _settle(save, 'Saving $what before the handoff failed');
+    }
+    // Saved and closed: nothing writes the ledger while the service has
+    // the node.
+    if (ledger != null) {
+      await _settle(ledger.suspend(), 'Suspending the ledger failed');
+    }
+    final bool coreWasRunning = core.isStarted;
+    await _settle(core.stop(), 'Stopping ZenCore for the handoff failed');
+    // Down first: the identity key is shared, so a second Yggdrasil node
+    // must never be up while this one still holds the mesh session.
+    runtime.holdForService();
+    await _settle(runtime.stop(), 'Stopping the node for the handoff failed');
+    // The service owns the node from here on; a heartbeat would only keep
+    // it parked.
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    return coreWasRunning;
+  }
+
+  void _retrySyncLater() {
+    _standbyRetry?.cancel();
+    _standbyRetry = Timer(_standbyRetryBackoff, () {
+      _standbyRetry = null;
+      if (mounted) {
+        _scheduleSync();
+      }
+    });
+  }
+
+  static Future<void> _settle(Future<void> step, String context) async {
+    try {
+      await step;
+    } on Object catch (error, stackTrace) {
+      logZenError(context, error, stackTrace);
+    }
+  }
+
+  /// The parked service heard no heartbeat and took the node over: this
+  /// isolate's node, if one still runs (a frozen moment, a lost
+  /// heartbeat), goes at once. A sync then takes the node back the usual
+  /// way when the app is on screen and unlocked.
+  Future<void> _yieldToService() async {
+    if (_handoffInFlight) {
+      return;
+    }
+    final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+    if (_handoffActive && !runtime.snapshot.serviceRunning) {
+      return;
+    }
+    _handoffInFlight = true;
+    logZenWarning(
+      'The service took the node over by itself; the app lets go of its own.',
+    );
+    try {
+      final bool coreWasRunning = await _releaseNode(
+        runtime: runtime,
+        core: ref.read(zenCoreProvider),
+        ledger: ref.read(ledgerNodeProvider),
+      );
+      ZenTechLog.handover('service', ok: true, took: Duration.zero);
+      if (mounted) {
+        _inboxDrained = false;
+        _handoffActive = true;
+        _lastConfirmedMode = AndroidBackgroundRuntimeMode.active;
+        _lastParkedCallSignature = null;
+        _coreHandedOff = _coreHandedOff || coreWasRunning;
+      }
+    } finally {
+      _handoffInFlight = false;
+    }
+    if (mounted) {
+      _scheduleSync();
     }
   }
 
@@ -1424,6 +1595,15 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!mounted) {
       return;
     }
+    if (serviceOwnsNode && !parked) {
+      // The service may still run the node: none here until it confirms it
+      // let go (a second node on the same identity would take friends'
+      // frames from it). Tried again after the back-off.
+      _retrySyncLater();
+      return;
+    }
+    // The service runs no node (or never ran one): this isolate may.
+    ref.read(runtimeNodeRuntimeProvider).releaseFromService();
     if (serviceOwnsNode && parked) {
       final LifecycleSnapshot currentLifecycle = ref
           .read(socialHubControllerProvider)
@@ -1448,11 +1628,9 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
     }
     // The node is free (or never was taken): the ledger comes back.
-    if (!serviceOwnsNode || parked) {
-      await ref.read(ledgerNodeProvider)?.resume();
-      if (!mounted) {
-        return;
-      }
+    await ref.read(ledgerNodeProvider)?.resume();
+    if (!mounted) {
+      return;
     }
     final RuntimeTransportSnapshot runtimeSnapshot = ref.read(
       runtimeNodeSnapshotProvider,
@@ -1460,7 +1638,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!runtimeSnapshot.serviceRunning) {
       await ref.read(runtimeNodeRuntimeProvider).start();
     }
-    if (_coreHandedOff && (!serviceOwnsNode || parked) && mounted) {
+    if (_coreHandedOff && mounted) {
       _coreHandedOff = false;
       _restartCore();
     }
@@ -2229,6 +2407,16 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// The app's last heartbeat said it is on screen.
   bool _appOnScreen = false;
 
+  /// Since the probe sent on a silence; `null` while none waits for an
+  /// answer.
+  Stopwatch? _probe;
+  Timer? _probeTimer;
+
+  /// The node runs here because this service took it over (no heartbeat,
+  /// or the app's engine went), not because the app asked: the app is told
+  /// so with the acknowledgement, and lets go of a node it may still run.
+  bool _tookOver = false;
+
   /// The app's engine went away (ZenPower "appGone").
   StreamSubscription<void>? _appGone;
 
@@ -2362,6 +2550,29 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         since.elapsed < kAndroidBackgroundHeartbeatTimeout) {
       return;
     }
+    if (!appGone) {
+      // Silence alone may be a lost heartbeat: an app that still runs its
+      // node answers the probe, and the service stays parked. Only an app
+      // that does not answer is taken for gone.
+      final Stopwatch? probe = _probe;
+      if (probe == null) {
+        _probe = Stopwatch()..start();
+        try {
+          FlutterForegroundTask.sendDataToMain(<String, Object?>{
+            'type': _kRuntimeProbeType,
+          });
+        } catch (error, stackTrace) {
+          logZenError('Probing the app failed', error, stackTrace);
+        }
+        _probeTimer?.cancel();
+        _probeTimer = Timer(kAndroidBackgroundProbeWait, _checkStandbyWatchdog);
+        return;
+      }
+      if (probe.elapsed < kAndroidBackgroundProbeWait) {
+        return;
+      }
+    }
+    _endProbe();
     logZenWarning(
       appGone
           ? 'The app is gone while parked — the service is taking the '
@@ -2371,13 +2582,23 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
                 '— the service is taking the runtime node over.',
     );
     _noteAppAlive();
-    _request(desired.withMode(AndroidBackgroundRuntimeMode.active));
+    _request(
+      desired.withMode(AndroidBackgroundRuntimeMode.active),
+      tookOver: true,
+    );
   }
 
   void _noteAppAlive() {
     (_sinceAppHeartbeat ??= Stopwatch())
       ..reset()
       ..start();
+    _endProbe();
+  }
+
+  void _endProbe() {
+    _probe = null;
+    _probeTimer?.cancel();
+    _probeTimer = null;
   }
 
   /// While parked, a wake on the shared beat now and then looks at the
@@ -2391,7 +2612,11 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         'watchdog',
         standbyWatchdogEvery(appOnScreen: _appOnScreen),
         _watchOnWake,
-        hold: kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 3),
+        // The app's heartbeat, and a probe's answer when it is late.
+        hold:
+            kAndroidBackgroundHeartbeatInterval +
+            kAndroidBackgroundProbeWait +
+            const Duration(seconds: 3),
         whileIdle: !_appOnScreen,
       );
     } else {
@@ -2424,6 +2649,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     });
     _updateCheck?.stop();
     _updateCheck = null;
+    _endProbe();
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
     await _appGone?.cancel();
     _appGone = null;
@@ -2556,11 +2782,15 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
   }
 
-  void _request(AndroidBackgroundBootstrapPayload payload) {
+  void _request(
+    AndroidBackgroundBootstrapPayload payload, {
+    bool tookOver = false,
+  }) {
     if (payload.mode == AndroidBackgroundRuntimeMode.standby) {
       // A park request is itself proof the app is on screen and alive.
       _noteAppAlive();
     }
+    _tookOver = tookOver;
     _desired = payload;
     _transitions = _transitions.then((_) => _reconcile()).catchError((
       Object error,
@@ -2705,6 +2935,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       FlutterForegroundTask.sendDataToMain(<String, Object?>{
         'type': _kRuntimeModeAckType,
         'mode': mode.name,
+        if (_tookOver && mode == AndroidBackgroundRuntimeMode.active)
+          _kModeAckTookKey: true,
       });
     } catch (error, stackTrace) {
       logZenError(

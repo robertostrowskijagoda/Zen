@@ -9,12 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/locked_nearby.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -523,6 +526,207 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a lock whose saving fails still takes the app\'s node down before the '
+    'service runs one',
+    (WidgetTester tester) async {
+      // A lock erases the master key before the handoff runs, so the
+      // ledger's last save fails. That used to end the handoff with the
+      // heartbeat already stopped and the app's node still up: the service
+      // took the node over on the silence and two nodes ran on one
+      // identity, the locked app's dropping what friends sent.
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+      final _FakeAndroidBackgroundServiceController service =
+          _FakeAndroidBackgroundServiceController(watch: runtime);
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        hasPassword: true,
+        locked: false,
+      );
+      final _LockableLedgerDisk disk = _LockableLedgerDisk();
+      final LedgerNode ledger = LedgerNode(
+        transport: MemorySignalTransport(),
+        disk: disk,
+        friendAddresses: () => const <String>[],
+      );
+      addTearDown(runtime.dispose);
+      await runtime.start();
+      await tester.runAsync(ledger.start);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: security,
+              vault: _FakeBackgroundVault(),
+            ),
+            ledgerNodeProvider.overrideWithValue(ledger),
+          ],
+          child: const MaterialApp(
+            home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.standby);
+      expect(runtime.snapshot.serviceRunning, isTrue);
+
+      disk.locked = true;
+      security.lock();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(disk.refusedWrites, greaterThan(0));
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.active);
+      expect(runtime.snapshot.serviceRunning, isFalse);
+      // The service was asked to run the node only once this one was down.
+      expect(service.appNodeUpAtActive, orderedEquals(<bool>[false]));
+      // And nothing in the app brings it up again while the service has it.
+      expect(runtime.heldByService, isTrue);
+      await runtime.start();
+      expect(runtime.snapshot.serviceRunning, isFalse);
+      // No heartbeat keeps the service parked any more.
+      final int beats = service.heartbeatCount;
+      await tester.pump(kAndroidBackgroundHeartbeatInterval * 2);
+      expect(service.heartbeatCount, beats);
+
+      // Its close waits on what was begun in the test's fake time; the
+      // timers go with the first step.
+      unawaited(ledger.stop());
+    },
+  );
+
+  testWidgets(
+    'the service taking the node over on a silence makes the app let go of '
+    'its own, and the app takes it back cleanly on screen',
+    (WidgetTester tester) async {
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+      final _FakeAndroidBackgroundServiceController service =
+          _FakeAndroidBackgroundServiceController(watch: runtime);
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        settings: const AppSettings(lockMode: AppLockMode.never),
+        hasPassword: true,
+        locked: false,
+      );
+      addTearDown(runtime.dispose);
+      await runtime.start();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: security,
+              vault: _FakeBackgroundVault(),
+            ),
+          ],
+          child: const MaterialApp(
+            home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(AndroidBackgroundRuntimeBridge)),
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .setLifecycle(
+            const LifecycleSnapshot(
+              visibility: AppVisibilityState.background,
+              generation: 2,
+              capturedAtMillis: 1,
+            ),
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(runtime.snapshot.serviceRunning, isTrue);
+
+      // A probe while the app runs its node: it answers at once.
+      final int beforeProbe = service.heartbeatCount;
+      service.serviceEvents.add(AndroidBackgroundServiceEvent.probe);
+      await tester.pump();
+      expect(service.heartbeatCount, beforeProbe + 1);
+
+      // The service took the node over anyway (the answer came late).
+      service.serviceEvents.add(AndroidBackgroundServiceEvent.tookNode);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(runtime.snapshot.serviceRunning, isFalse);
+      expect(runtime.heldByService, isTrue);
+      final int beats = service.heartbeatCount;
+      await tester.pump(kAndroidBackgroundHeartbeatInterval * 2);
+      expect(service.heartbeatCount, beats);
+      // A probe now gets no answer: the app runs no node.
+      service.serviceEvents.add(AndroidBackgroundServiceEvent.probe);
+      await tester.pump();
+      expect(service.heartbeatCount, beats);
+
+      // Back on screen: the service parks first, then the node comes back.
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .setLifecycle(
+            const LifecycleSnapshot(
+              visibility: AppVisibilityState.foreground,
+              generation: 3,
+              capturedAtMillis: 2,
+            ),
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.standby);
+      expect(runtime.heldByService, isFalse);
+      expect(runtime.snapshot.serviceRunning, isTrue);
+    },
+  );
+
+  testWidgets(
+    'nothing in the app starts the node before the service let go of it',
+    (WidgetTester tester) async {
+      // An unlock or a launch on top of a service that runs the node: the
+      // app's core starts with the first frame and starts the node itself.
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+      final _FakeAndroidBackgroundServiceController service =
+          _FakeAndroidBackgroundServiceController(
+            gateStandbyAck: true,
+            running: true,
+          );
+      addTearDown(runtime.dispose);
+      await runtime.stop();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: MemoryAppSecurityService(),
+              vault: _FakeBackgroundVault(),
+            ),
+          ],
+          child: const MaterialApp(
+            home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+          ),
+        ),
+      );
+      await tester.pump();
+      await runtime.start();
+      expect(runtime.snapshot.serviceRunning, isFalse);
+
+      service.releaseStandbyAck();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(runtime.snapshot.serviceRunning, isTrue);
+    },
+  );
+
   test(
     'the stored bootstrap payload carries the settings and no key',
     () async {
@@ -828,7 +1032,14 @@ final class _FakeAndroidBackgroundServiceController
   _FakeAndroidBackgroundServiceController({
     this.gateStandbyAck = false,
     bool running = false,
+    this.watch,
   }) : _running = running;
+
+  /// The app's node, looked at when the service is asked to run its own.
+  final RuntimeNodeRuntime? watch;
+
+  /// Whether the app's node was up at each request to run the service's.
+  final List<bool> appNodeUpAtActive = <bool>[];
 
   /// When set, a standby request only resolves once [releaseStandbyAck] runs —
   /// the test uses it to prove the foreground node waits for the service to
@@ -875,6 +1086,12 @@ final class _FakeAndroidBackgroundServiceController
     onScreenBeats.add(onScreen);
   }
 
+  final StreamController<AndroidBackgroundServiceEvent> serviceEvents =
+      StreamController<AndroidBackgroundServiceEvent>.broadcast();
+
+  @override
+  Stream<AndroidBackgroundServiceEvent> get events => serviceEvents.stream;
+
   @override
   Future<bool> isRunning() async => _running;
 
@@ -885,6 +1102,10 @@ final class _FakeAndroidBackgroundServiceController
   }) async {
     startedPayloads.add(payload);
     startedCalls.add(activeCall);
+    final RuntimeNodeRuntime? node = watch;
+    if (node != null && payload.mode == AndroidBackgroundRuntimeMode.active) {
+      appNodeUpAtActive.add(node.snapshot.serviceRunning);
+    }
     _running = true;
     if (gateStandbyAck &&
         payload.mode == AndroidBackgroundRuntimeMode.standby) {
@@ -983,4 +1204,27 @@ final class _FakeBackgroundVault implements BackgroundVault {
     }
     return kept.length;
   }
+}
+
+/// A ledger's disk that refuses every write once [locked], like the
+/// encrypted storage once a lock erased the master key.
+final class _LockableLedgerDisk implements LedgerDisk {
+  final MemoryLedgerDisk _files = MemoryLedgerDisk();
+  bool locked = false;
+  int refusedWrites = 0;
+
+  @override
+  Future<Uint8List?> read(String key) => _files.read(key);
+
+  @override
+  Future<void> write(String key, Uint8List data) async {
+    if (locked) {
+      refusedWrites += 1;
+      throw StateError('Encrypted storage is locked.');
+    }
+    await _files.write(key, data);
+  }
+
+  @override
+  Future<void> delete(String key) => _files.delete(key);
 }
