@@ -69,9 +69,11 @@ const String appSecurityMasterKeyFingerprintStorageKey =
 /// the system's secret store (Android Keystore, the iOS / macOS keychain,
 /// the Windows credential store — where the device master key lives
 /// without a password), so a start from scratch opens without the
-/// password. Written only right after the password (or biometrics) proved
-/// the person, dropped as soon as another lock mode is chosen or the app
-/// is locked by hand.
+/// password. Written only when the person chooses it and proves it with
+/// the password ([AppSecurityService.keepMasterKeyForNeverLock]); never by
+/// setting a password or unlocking. Dropped as soon as another lock mode is
+/// chosen or the app is locked by hand, and then kept again only by
+/// choosing it once more.
 const String appSecurityNeverLockMasterKeyStorageKey =
     'zen_rewrite_never_lock_master_key';
 
@@ -926,12 +928,10 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       securityHexFromBytes(securityMasterFingerprint(currentMasterKey)),
     );
     // The biometric token holds the master key (never the raw password),
-    // sealed by the hardware vault.
+    // sealed by the hardware vault. A copy kept for "Nigdy" stays as it is
+    // (the master key does not change); none is made here: only the
+    // person's own choice keeps one (keepMasterKeyForNeverLock).
     await _storeBiometricToken(currentMasterKey);
-    if (_lockMode == AppLockMode.never) {
-      // "Nigdy" keeps opening without the password it has just been given.
-      await _storeNeverLockKey(currentMasterKey);
-    }
     await _credentialsStore.delete(appSecurityDeviceMasterKeyStorageKey);
     _hasPassword = true;
     _isLocked = false;
@@ -1302,9 +1302,12 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     _encryptionKey = null;
     if (_neverLockKeyKept) {
       // Locked by hand under "Nigdy": the lock holds across a restart too
-      // (with the panic password there to type) until the password or
-      // biometrics open it again.
-      unawaited(_dropNeverLockKey());
+      // (with the panic password there to type), and a start from scratch
+      // asks for the password until "Nigdy" is chosen again. The lock
+      // screen shows only once the copy is gone, so closing the app at
+      // once cannot bring it back.
+      unawaited(_dropNeverLockKey().whenComplete(notifyListeners));
+      return;
     }
     notifyListeners();
   }
@@ -1414,12 +1417,10 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     if (reseal) {
       await _storeBiometricToken(masterKey);
     }
+    // No copy for "Nigdy" here, even on that mode (after a lock by hand,
+    // or with settings brought back from elsewhere): only the person's own
+    // choice keeps one (keepMasterKeyForNeverLock).
     await _ensureMasterFingerprint(masterKey);
-    if (_lockMode == AppLockMode.never) {
-      // Unlocked after a lock by hand: "Nigdy" opens without the password
-      // again from now on.
-      await _storeNeverLockKey(masterKey);
-    }
     _hasPassword = true;
     _encryptionKey = masterKey;
     _isLocked = false;

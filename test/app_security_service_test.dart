@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -528,8 +529,8 @@ void main() {
     });
 
     test('locked by hand it stays locked across a restart, the panic '
-        'password still wipes from the lock screen, and the password '
-        'brings the copy back', () async {
+        'password still wipes from the lock screen, and only choosing '
+        '"Nigdy" again brings the copy back', () async {
       await service.setPanicPassword('panika123');
       await service.applySettings(never);
       expect(await service.keepMasterKeyForNeverLock('sekret12'), isTrue);
@@ -546,7 +547,16 @@ void main() {
       expect(await restarted.matchesPanicPassword('panika123'), isTrue);
       expect(await restarted.unlock('panika123'), isFalse);
 
+      // Unlocking keeps no copy: the next start still asks.
       expect(await restarted.unlock('sekret12'), isTrue);
+      expect(await keptCopy(), isNull);
+      expect(restarted.keepsNeverLockKey, isFalse);
+      restarted = restart();
+      await restarted.initialize(settings: never);
+      expect(restarted.isLocked, isTrue);
+
+      expect(await restarted.unlock('sekret12'), isTrue);
+      expect(await restarted.keepMasterKeyForNeverLock('sekret12'), isTrue);
       expect(await keptCopy(), securityHexFromBytes(masterKey));
       restarted = restart();
       await restarted.initialize(settings: never);
@@ -558,8 +568,40 @@ void main() {
       expect(restarted.keepsNeverLockKey, isFalse);
     });
 
-    test('a password set while on "Nigdy" keeps it opening without '
-        'one', () async {
+    test('the lock screen shows only once the copy is gone', () async {
+      final _HeldDeletes held = _HeldDeletes();
+      final LocalAppSecurityService locking = LocalAppSecurityService(
+        credentialsStore: held,
+        passwordIterations: 10,
+      );
+      await locking.initialize(settings: const AppSettings());
+      await locking.setPassword('sekret12');
+      await locking.applySettings(never);
+      expect(await locking.keepMasterKeyForNeverLock('sekret12'), isTrue);
+      int told = 0;
+      locking.addListener(() => told++);
+      final Completer<void> gate = Completer<void>();
+      held.gate = gate;
+
+      locking.lock();
+      expect(locking.isLocked, isTrue);
+      expect(await locking.currentEncryptionKey(), isNull);
+      await Future<void>.delayed(Duration.zero);
+      expect(told, 0, reason: 'the copy is still there');
+      expect(
+        await held.read(appSecurityNeverLockMasterKeyStorageKey),
+        isNotNull,
+      );
+
+      gate.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(told, 1);
+      expect(await held.read(appSecurityNeverLockMasterKeyStorageKey), isNull);
+    });
+
+    test('a password set while on "Nigdy" keeps no copy: the next start '
+        'asks for it until "Nigdy" is chosen with it', () async {
       final MemorySecurityCredentialsStore fresh =
           MemorySecurityCredentialsStore();
       final LocalAppSecurityService noPassword = LocalAppSecurityService(
@@ -574,7 +616,19 @@ void main() {
         isNull,
         reason: 'the plain device key goes as before',
       );
-      final LocalAppSecurityService restarted = LocalAppSecurityService(
+      expect(await fresh.read(appSecurityNeverLockMasterKeyStorageKey), isNull);
+      expect(noPassword.keepsNeverLockKey, isFalse);
+      LocalAppSecurityService restarted = LocalAppSecurityService(
+        credentialsStore: fresh,
+        passwordIterations: 10,
+      );
+      await restarted.initialize(settings: never);
+      expect(restarted.isLocked, isTrue);
+      expect(await restarted.currentEncryptionKey(), isNull);
+
+      expect(await restarted.unlock('sekret12'), isTrue);
+      expect(await restarted.keepMasterKeyForNeverLock('sekret12'), isTrue);
+      restarted = LocalAppSecurityService(
         credentialsStore: fresh,
         passwordIterations: 10,
       );
@@ -677,5 +731,24 @@ final class _BrokenWipeVault implements PlatformKeyVault {
   @override
   Future<void> wipe() async {
     throw StateError('TPM busy');
+  }
+}
+
+/// Credentials whose deletes wait for [gate] while it is set.
+final class _HeldDeletes implements AppSecurityCredentialsStore {
+  final MemorySecurityCredentialsStore _inner =
+      MemorySecurityCredentialsStore();
+  Completer<void>? gate;
+
+  @override
+  Future<String?> read(String key) => _inner.read(key);
+
+  @override
+  Future<void> write(String key, String value) => _inner.write(key, value);
+
+  @override
+  Future<void> delete(String key) async {
+    await gate?.future;
+    await _inner.delete(key);
   }
 }

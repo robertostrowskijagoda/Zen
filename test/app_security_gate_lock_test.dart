@@ -178,8 +178,10 @@ void main() {
       expect(find.text('aplikacja'), findsOneWidget);
       expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
 
-      // Locked by hand: the lock screen, with the panic password there.
+      // Locked by hand: the lock screen, with the panic password there,
+      // once the kept copy is gone.
       restarted.lock();
+      await tester.pump();
       await tester.pump();
       expect(
         find.byKey(const Key('app-unlock-password-field')),
