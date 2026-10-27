@@ -400,8 +400,11 @@ LockedNoticeKit lockedNoticeKitOf(
           memberCount += 1;
         }
       }
+      // Only a friend's name was given here: someone whose request still
+      // waits named themselves.
       final FriendProfile? friend = state.friendByAddress(member);
-      if (friend != null) {
+      if (friend != null &&
+          friend.status == FriendRelationshipStatus.accepted) {
         names[normal(member)] = friend.displayLabel;
       }
     }

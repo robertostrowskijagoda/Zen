@@ -30,6 +30,7 @@ const String _bob = 'bob.ygg';
 const String _groupId = 'grp-1';
 const String _eve = 'eve.ygg';
 const String _mallory = 'mallory.ygg';
+const String _pat = 'pat.ygg';
 
 const LifecycleSnapshot _background = LifecycleSnapshot(
   visibility: AppVisibilityState.background,
@@ -97,6 +98,7 @@ _boot({
   LifecycleSnapshot lifecycle = _background,
   RuntimeNotificationCenter? center,
   MemorySocialSnapshotStore? snapshots,
+  SocialHubState? seed,
 }) {
   final MemoryRuntimeSystemNotificationService shade =
       MemoryRuntimeSystemNotificationService();
@@ -124,7 +126,9 @@ _boot({
       ),
       if (center != null)
         runtimeNotificationCenterProvider.overrideWithValue(center),
-      socialHubSeedProvider.overrideWithValue(_seed(lifecycle, own: own)),
+      socialHubSeedProvider.overrideWithValue(
+        seed ?? _seed(lifecycle, own: own),
+      ),
     ],
   );
   addTearDown(container.dispose);
@@ -242,6 +246,122 @@ void main() {
       expect(banner.title, 'Nowa wiadomość');
       expect('${banner.title} ${banner.body}', isNot(contains('Tajny')));
       expect('${banner.title} ${banner.body}', isNot(contains('Ada')));
+    });
+  });
+
+  group('a group message\'s notice with the app unlocked', () {
+    // Eve is in the group but not a friend, Pat's friend request still
+    // waits (both named themselves), Mallory is not in the group at all.
+    SocialHubState mixed(LifecycleSnapshot lifecycle) {
+      final SocialHubState seeded = _seed(lifecycle);
+      return seeded.copyWith(
+        friends: <String, FriendProfile>{
+          ...seeded.friends,
+          _pat: const FriendProfile(
+            address: _pat,
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.pendingIncoming,
+          ),
+        },
+        groups: <String, GroupProfile>{
+          _groupId: seeded.groups[_groupId]!.copyWith(
+            memberAddresses: <String>[_ada, _bob, _eve, _pat],
+            memberNames: const <String, String>{_eve: 'Bob', _pat: 'Ada'},
+          ),
+        },
+      );
+    }
+
+    // Each claims a name and a group name of its own choosing.
+    ZenSignal from(String sender, String id, {String claimed = 'Ada'}) =>
+        ZenSignal(
+          type: ZenSignalType.groupMessage,
+          sender: sender,
+          displayName: claimed,
+          groupId: _groupId,
+          groupName: 'Bank',
+          messageId: id,
+          content: 'Hej',
+        );
+
+    Future<({List<RuntimeSystemNotification> shown, List<InboxEntry> alerts})>
+    background(ZenSignal signal) async {
+      final (:container, :shade) = _boot(
+        global: NotificationPrivacy.senderAndContent,
+        seed: mixed(_background),
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(signal, receivedAtMillis: 1000);
+      return (
+        shown: shade.activeNotifications,
+        alerts: container.read(socialHubControllerProvider).backgroundAlerts,
+      );
+    }
+
+    Future<({List<RuntimeNotification> banners, List<InboxEntry> inbox})>
+    focused(ZenSignal signal, NotificationPrivacy global) async {
+      final MemoryRuntimeNotificationCenter center =
+          MemoryRuntimeNotificationCenter();
+      final (:container, shade: _) = _boot(
+        global: global,
+        lifecycle: _focused,
+        center: center,
+        seed: mixed(_focused),
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(signal, receivedAtMillis: 1000);
+      return (
+        banners: center.activeNotifications,
+        inbox: container.read(socialHubControllerProvider).inbox,
+      );
+    }
+
+    test('a member who is a friend: by the name given here', () async {
+      final r = await background(from(_bob, 'g-1'));
+      expect(r.shown.single.title, 'Ekipa');
+      expect(r.shown.single.body, 'Bob: Hej');
+      expect(r.alerts.single.title, 'Ekipa: Bob');
+    });
+
+    test('any other member: "Kontakt Zen", never their own name', () async {
+      for (final String member in <String>[_eve, _pat]) {
+        final r = await background(from(member, 'g-$member', claimed: 'Bob'));
+        expect(r.shown.single.title, 'Ekipa');
+        expect(r.shown.single.body, 'Kontakt Zen: Hej');
+        expect(r.alerts.single.title, 'Ekipa: Kontakt Zen');
+      }
+    });
+
+    test('not a member: nothing about that group', () async {
+      final r = await background(from(_mallory, 'g-1'));
+      expect(r.shown, isEmpty);
+      expect(r.alerts, isEmpty);
+    });
+
+    test('the in-app list and banner name members the same way', () async {
+      var r = await focused(
+        from(_eve, 'g-1', claimed: 'Bob'),
+        NotificationPrivacy.senderOnly,
+      );
+      expect(r.inbox.single.title, 'Ekipa: Kontakt Zen');
+      expect(r.banners.single.title, 'Ekipa');
+      expect(r.banners.single.body, 'Kontakt Zen wysłał(a) wiadomość');
+
+      r = await focused(
+        from(_bob, 'g-2'),
+        NotificationPrivacy.senderAndContent,
+      );
+      expect(r.inbox.single.title, 'Ekipa: Bob');
+      expect(r.banners.single.title, 'Ekipa: Bob');
+
+      r = await focused(
+        from(_mallory, 'g-3'),
+        NotificationPrivacy.senderAndContent,
+      );
+      expect(r.inbox, isEmpty);
+      expect(r.banners, isEmpty);
     });
   });
 
@@ -422,9 +542,18 @@ void main() {
       final SocialHubState seeded = _seed(_background);
       final LockedNoticeKit kit = lockedNoticeKitOf(
         seeded.copyWith(
+          friends: <String, FriendProfile>{
+            ...seeded.friends,
+            // Their friend request still waits: the name is their own.
+            _pat: const FriendProfile(
+              address: _pat,
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.pendingIncoming,
+            ),
+          },
           groups: <String, GroupProfile>{
             _groupId: seeded.groups[_groupId]!.copyWith(
-              memberAddresses: <String>[_ada, _bob, _eve],
+              memberAddresses: <String>[_ada, _bob, _eve, _pat],
               // Names members gave themselves, one of them for someone
               // who is not in the group at all.
               memberNames: const <String, String>{_eve: 'Bob', _mallory: 'Ada'},
@@ -449,6 +578,8 @@ void main() {
       expect(notice(_bob, 'Ada'), (title: 'Ekipa', body: 'Bob: Hej'));
       // A member who is not a friend: no name at all.
       expect(notice(_eve, 'Bob'), (title: 'Ekipa', body: 'Kontakt Zen: Hej'));
+      expect(kit.names.containsKey(_pat), isFalse);
+      expect(notice(_pat, 'Ada'), (title: 'Ekipa', body: 'Kontakt Zen: Hej'));
       // Not a member: only that something came.
       expect(notice(_mallory, 'Ada'), (title: 'Nowa wiadomość', body: '…'));
       // Nor a 1:1 message from someone a group named.

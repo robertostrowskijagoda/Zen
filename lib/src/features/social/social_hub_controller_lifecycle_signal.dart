@@ -798,6 +798,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal: signal,
             receivedAtMillis: timestamp,
             friends: state.friends,
+            groups: state.groups,
             privacy: _noticePrivacyFor(signal),
           )
         : null;
@@ -845,6 +846,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
               signal: signal,
               receivedAtMillis: timestamp,
               friends: state.friends,
+              groups: state.groups,
             )
           : null;
       final List<InboxEntry> backgroundAlerts =
@@ -866,6 +868,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                   entry: backgroundEntry,
                   signal: signal,
                   friends: state.friends,
+                  groups: state.groups,
                   privacy: _noticePrivacyFor(signal),
                 ),
               );
@@ -982,12 +985,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         signal: signal,
         receivedAtMillis: timestamp,
         friends: state.friends,
+        groups: state.groups,
       );
       await _presentSystemNotification(
         _systemNotificationFromEntry(
           entry: notifyEntry,
           signal: signal,
           friends: state.friends,
+          groups: state.groups,
           privacy: _noticePrivacyFor(signal),
         ),
       );
