@@ -55,3 +55,24 @@ func TestAnyRelayOpenSeesRelaysOfAllNodes(t *testing.T) {
 		t.Fatal("a call runs")
 	}
 }
+
+func TestIdleTrimWaitsUntilTheGoSideGrew(t *testing.T) {
+	const trimmed = 20 << 20
+	if trimDue(trimmed+phoneMemoryTrimGrowth-1, trimmed) {
+		t.Fatal("a phone that holds about what it did after the last trim is not trimmed again")
+	}
+	if !trimDue(trimmed+phoneMemoryTrimGrowth, trimmed) {
+		t.Fatal("a phone that grew is trimmed")
+	}
+	if trimDue(trimmed/2, trimmed) {
+		t.Fatal("less than after the last trim is no reason to trim")
+	}
+}
+
+func TestATrimRemembersWhatTheGoSideHeldAfterIt(t *testing.T) {
+	trimMemory()
+	after := trimmedRetained.Load()
+	if after == 0 || trimDue(retainedMemory(), after) {
+		t.Fatalf("after a trim it holds %d, remembered %d", retainedMemory(), after)
+	}
+}

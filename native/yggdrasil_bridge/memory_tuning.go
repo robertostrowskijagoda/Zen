@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime/debug"
 	"runtime/metrics"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,18 +28,23 @@ import (
 //     layer's queue, 16 MiB each) plus the Yggdrasil nodes themselves, so
 //     even a bridge flooded to its budgets does not collect without end. A
 //     GOMEMLIMIT in the environment (development) wins.
-//   - trimMemoryWhileIdle hands every freed page back to the system every
-//     phoneMemoryTrimInterval while no call runs (debug.FreeOSMemory): the
-//     runtime collects about every two minutes anyway when idle, so this
-//     mostly adds the return of pages, not work. During a call it waits,
-//     not to add a pause to the media path. A Go ticker does not wake a
-//     sleeping phone.
+//   - trimMemoryWhileIdle hands every freed page back to the system
+//     (debug.FreeOSMemory) every phoneMemoryTrimInterval while no call runs
+//     and the Go side holds at least phoneMemoryTrimGrowth more than right
+//     after the last trim: a trim forces a full collection, which a phone
+//     that is only awake for moments at a time would otherwise pay on every
+//     wake for nothing. During a call it waits, not to add a pause to the
+//     media path. A Go ticker does not wake a sleeping phone.
 //
 // Computers keep Go's defaults.
 const (
 	phoneMemoryLimit        = 96 * 1024 * 1024
 	phoneMemoryTrimInterval = 5 * time.Minute
+	phoneMemoryTrimGrowth   = 8 * 1024 * 1024
 )
+
+// trimmedRetained is what the Go side held right after the last trim.
+var trimmedRetained atomic.Uint64
 
 func init() {
 	if !isPhoneOS() {
@@ -54,10 +60,31 @@ func trimMemoryWhileIdle() {
 	ticker := time.NewTicker(phoneMemoryTrimInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if !anyRelayOpen() {
-			debug.FreeOSMemory()
+		if !anyRelayOpen() && trimDue(retainedMemory(), trimmedRetained.Load()) {
+			trimMemory()
 		}
 	}
+}
+
+// trimDue reports whether the Go side grew enough since the last trim
+// (after which it held trimmed) for another one to be worth a full
+// collection.
+func trimDue(retained, trimmed uint64) bool {
+	return retained >= trimmed+phoneMemoryTrimGrowth
+}
+
+// trimMemory hands every page the Go side does not use back to the system
+// and remembers what it holds then.
+func trimMemory() {
+	debug.FreeOSMemory()
+	trimmedRetained.Store(retainedMemory())
+}
+
+// retainedMemory is what the Go side holds of the system's memory: what it
+// mapped, less what it gave back.
+func retainedMemory() uint64 {
+	retained, _ := goMemoryStats()["retainedBytes"].(uint64)
+	return retained
 }
 
 // anyRelayOpen reports whether a node of this process relays a call now.
@@ -134,6 +161,6 @@ func YggGetMemoryJson() *C.char {
 //
 //export YggTrimMemory
 func YggTrimMemory() *C.char {
-	debug.FreeOSMemory()
+	trimMemory()
 	return responseOK(goMemoryStats())
 }
