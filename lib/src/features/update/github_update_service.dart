@@ -8,6 +8,8 @@ import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
@@ -78,11 +80,15 @@ bool githubUpdatesEnabledFor({
 /// ([notifications]), with the release's short note ([whatsNew]) when it
 /// has one; a release newer still takes its place, in the notification,
 /// the banner and the card alike. Once installed, its notification goes.
-/// On the person's "Aktualizuj" it downloads this platform's
+/// What "Aktualizuj" does depends on the installation ([route]): where Zen
+/// can install itself it downloads this platform's
 /// file, checks it against the release's `SHA256SUMS` and, once this build
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
-/// also checks the signing certificate).
+/// also checks the signing certificate). On iPhone and iPad it downloads
+/// nothing and opens Scarlet with the release's IPA instead
+/// ([openInScarlet]); in a Flatpak, and for a release without this
+/// device's file, it points to the release page.
 ///
 /// Only one request to api.github.com per check, with no header but the
 /// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer:
@@ -100,6 +106,9 @@ final class GithubUpdateService extends ChangeNotifier {
     Sha256SumsFetcher? fetchSums,
     GithubDownloader? download,
     this.beforeDownload,
+    Future<bool> Function(String link)? openScarlet,
+    Future<bool> Function(String url)? openPage,
+    Future<void> Function(String text)? copy,
     bool Function()? internetWorks,
     DateTime Function()? now,
     String Function()? language,
@@ -114,6 +123,9 @@ final class GithubUpdateService extends ChangeNotifier {
   }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
+       _openScarlet = openScarlet ?? openScarletLink,
+       _openPage = openPage ?? openWebLink,
+       _copy = copy ?? copyWithExpiry,
        _internetWorks = internetWorks ?? (() => true),
        _now = now ?? DateTime.now,
        _language = language ?? (() => ZenI18n.code),
@@ -155,6 +167,13 @@ final class GithubUpdateService extends ChangeNotifier {
   final GithubJsonFetcher _fetchJson;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
+
+  /// Opens a `scarlet://` link (false: Scarlet is not installed).
+  final Future<bool> Function(String link) _openScarlet;
+
+  /// Opens an https page (false: it could not be opened).
+  final Future<bool> Function(String url) _openPage;
+  final Future<void> Function(String text) _copy;
   final bool Function() _internetWorks;
   final DateTime Function() _now;
   final String Function() _language;
@@ -233,12 +252,22 @@ final class GithubUpdateService extends ChangeNotifier {
   List<String> get whatsNewLines =>
       whatsNew?.linesFor(_language()) ?? const <String>[];
 
-  /// Whether "Aktualizuj" can download and install here (not on iOS, and
-  /// only when the release has this platform's file).
-  bool get canInstall {
-    final String? name = installer.assetName;
-    return name != null && (newer?.assets.containsKey(name) ?? false);
+  /// What "Aktualizuj" does for [newer] on this installation; null without
+  /// a newer release.
+  GithubUpdateRoute? get route {
+    final GithubRelease? release = newer;
+    return release == null
+        ? null
+        : githubUpdateRoute(
+            target: installer.target,
+            release: release,
+            assetName: installer.assetName,
+          );
   }
+
+  /// Whether "Aktualizuj" can download and install here (never on iOS or in
+  /// a Flatpak, and only when the release has this platform's file).
+  bool get canInstall => route == GithubUpdateRoute.download;
 
   /// The banner "Jest nowa wersja…" (until it is closed for that version,
   /// which is kept: closed, it stays closed after a restart; the card on
@@ -566,7 +595,12 @@ final class GithubUpdateService extends ChangeNotifier {
   Future<void> update() async {
     final GithubRelease? release = newer;
     final String? name = installer.assetName;
-    if (release == null || name == null || installing || _asking) {
+    // iPhone, iPad and Flatpak install nothing Zen downloads: never there.
+    if (release == null ||
+        name == null ||
+        installing ||
+        _asking ||
+        !_downloadsUpdates(installer.target)) {
       return;
     }
     final int? size = release.assets[name];
@@ -702,6 +736,86 @@ final class GithubUpdateService extends ChangeNotifier {
       );
     }
   }
+
+  /// iPhone and iPad ([GithubUpdateRoute.scarlet]): opens Scarlet with the
+  /// IPA of [newer] (pinned to that version; Scarlet downloads, signs and
+  /// installs it). Where Scarlet is not installed, or the release has no
+  /// IPA, the iPhone install page opens instead ([openInstallPage]).
+  /// Nothing is downloaded here.
+  Future<void> openInScarlet() async {
+    final GithubRelease? release = newer;
+    if (release == null || route != GithubUpdateRoute.scarlet) {
+      return;
+    }
+    final String? link = scarletInstallLink(release);
+    if (link != null && await _openScarlet(link)) {
+      _finish(
+        GithubInstallState.done,
+        t('Otwarto Scarlet. Potwierdź tam instalację Zen {version}.', {
+          'version': release.version,
+        }),
+      );
+      return;
+    }
+    await openInstallPage(noScarlet: link != null);
+  }
+
+  /// iPhone and iPad: opens the iPhone install page (Scarlet's steps);
+  /// [noScarlet]: Scarlet did not open. Where no browser opens it, its
+  /// address is copied.
+  Future<void> openInstallPage({bool noScarlet = false}) async {
+    if (await _openPage(kIphoneInstallPageUrl)) {
+      _finish(
+        GithubInstallState.done,
+        noScarlet
+            ? t(
+                'Nie ma tu Scarlet, więc otwarto stronę instalacji Zen na '
+                'iPhone’a.',
+              )
+            : t('Otwarto stronę instalacji Zen na iPhone’a.'),
+      );
+      return;
+    }
+    await _copied(kIphoneInstallPageUrl);
+  }
+
+  /// Flatpak, or a release without this device's file: opens the release
+  /// page of [newer] (its address is copied where it does not open).
+  Future<void> openReleasePage() async {
+    final GithubRelease? release = newer;
+    if (release == null) {
+      return;
+    }
+    final String url = release.pageUri.toString();
+    if (!await _openPage(url)) {
+      await _copied(url);
+    }
+  }
+
+  Future<void> _copied(String url) async {
+    try {
+      await _copy(url);
+    } on Object catch (error) {
+      logZenWarning('Kopiowanie adresu aktualizacji: $error');
+    }
+    _finish(
+      GithubInstallState.failed,
+      t('Nie udało się otworzyć strony. Skopiowano jej adres: {url}', {
+        'url': url,
+      }),
+    );
+  }
+
+  /// Whether the release file of [target] is downloaded and installed by
+  /// Zen itself.
+  static bool _downloadsUpdates(UpdateTarget target) => switch (target) {
+    UpdateTarget.android ||
+    UpdateTarget.windows ||
+    UpdateTarget.macos ||
+    UpdateTarget.linuxTarball ||
+    UpdateTarget.linuxDeb => true,
+    UpdateTarget.flatpak || UpdateTarget.ios || UpdateTarget.other => false,
+  };
 
   /// Whether the release's [kSignedSumsAssetName] is signed with one of
   /// [releaseKeys] and names [name] with [sha256Hex] in this very version.

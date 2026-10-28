@@ -66,6 +66,9 @@ final class _Notices implements RuntimeSystemNotificationService {
 
 final class _Installer implements GithubUpdateInstaller {
   @override
+  UpdateTarget get target => UpdateTarget.android;
+
+  @override
   String? get assetName => 'Zen-arm64-v8a.apk';
 
   @override

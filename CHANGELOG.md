@@ -45,6 +45,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ### Fixes
 - The "new version" notification goes away once that version is installed, and a What's new note that could not be fetched is fetched again at the next check.
+- **Updating does the right thing on each system**: on iPhone and iPad, **Open in Scarlet** opens Scarlet with the new version's `Zen-unsigned.ipa` (the iPhone install page when Scarlet isn't installed) instead of a dead end; links now open on iPhone at all. The updates card says beforehand what **Update** will do (Android installer, folder swap and restart, or the `.deb` saved for the package installer), and a file saved to Downloads comes with the right next step for Windows, Mac, the Linux tarball and the `.deb` (`sudo apt install …`). A release without this device's file points to its page.
 - The offline mailboxes, the meeting hub and several sheets no longer hide their last items under the system bar.
 - Holding the alarm and delete buttons no longer selects text.
 

@@ -33,6 +33,12 @@ void main() {
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());
+      // iPhone: Zen downloads nothing, Scarlet installs the release's IPA.
+      expect(
+        githubAssetName(releasePlatform: 'ios', abi: Abi.iosArm64),
+        isNull,
+      );
+      expect(kIosIpaAssetName, kIpaAsset);
       expect(kSignedSumsAsset, kSignedSumsAssetName);
       expect(sha256SumsUri('1.2.3').path, endsWith('/v1.2.3/$kSumsAsset'));
       for (final String name in kContractAssets) {

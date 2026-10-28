@@ -463,7 +463,12 @@ Run workflow; the file is in the run's artifacts) or as part of `release.yml`
 for a `v*` tag, which attaches it to the release. The package is unsigned —
 Scarlet, SideStore or AltStore sign it on the phone (README, section
 "iPhone"; the install page links `releases/latest/download/Zen-unsigned.ipa`,
-which follows every release). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
+which follows every release). The app's update notice on iPhone and iPad
+downloads nothing: **Open in Scarlet** opens
+`scarlet://install=<the release's Zen-unsigned.ipa>` (kIosIpaAssetName,
+pinned to the announced tag), else the iPhone install page, so every
+release must carry the IPA under exactly that name (`release.yml` refuses
+one without it). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
 `build_ios.sh`, then `flutter build ios --release --no-codesign`.
 
 ### 3.4. Build checks, pins and reproducibility

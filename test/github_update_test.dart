@@ -33,14 +33,30 @@ Map<String, Object?> _releaseJson(
   ],
 };
 
+/// An iPhone's update check and what it opened, copied and downloaded.
+typedef _IosRun = ({
+  GithubUpdateService service,
+  List<String> scarlet,
+  List<String> pages,
+  List<String> copied,
+  List<Uri> downloads,
+});
+
 final class _FakeInstaller implements GithubUpdateInstaller {
-  _FakeInstaller(this.dir, {this.assetName = 'Zen-arm64-v8a.apk'});
+  _FakeInstaller(
+    this.dir, {
+    this.assetName = 'Zen-arm64-v8a.apk',
+    this.target = UpdateTarget.android,
+  });
 
   final Directory dir;
   final List<File> installed = <File>[];
 
   @override
   final String? assetName;
+
+  @override
+  final UpdateTarget target;
 
   @override
   Future<Directory> workDirectory() async => dir;
@@ -180,6 +196,142 @@ void main() {
         isTrue,
       );
       expect(flatpakUpdateHint, contains('flatpak install --user'));
+    });
+
+    test('each system is its own kind of installation', () {
+      UpdateTarget target(String os, [LinuxInstall l = LinuxInstall.tarball]) =>
+          updateTargetFor(operatingSystem: os, linux: l);
+      expect(target('android'), UpdateTarget.android);
+      expect(target('windows'), UpdateTarget.windows);
+      // The Mac is never taken for an iPhone, nor an iPad for a Mac.
+      expect(target('macos'), UpdateTarget.macos);
+      expect(target('ios'), UpdateTarget.ios);
+      expect(target('linux'), UpdateTarget.linuxTarball);
+      expect(target('linux', LinuxInstall.deb), UpdateTarget.linuxDeb);
+      expect(target('linux', LinuxInstall.flatpak), UpdateTarget.flatpak);
+      // The install kind matters on Linux only.
+      expect(target('macos', LinuxInstall.flatpak), UpdateTarget.macos);
+      expect(target('fuchsia'), UpdateTarget.other);
+    });
+
+    test('what "Aktualizuj" does on each kind of installation', () {
+      final GithubRelease release = GithubRelease.fromJson(
+        _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{
+            'Zen-arm64-v8a.apk': 5,
+            'Zen-Windows.zip': 5,
+            'Zen-macOS.zip': 5,
+            'Zen-Linux-x64.tar.gz': 5,
+            'Zen-Linux-x64.deb': 5,
+            'Zen-Linux-x64.flatpak': 5,
+            'Zen-unsigned.ipa': 5,
+          },
+        ),
+      )!;
+      GithubUpdateRoute route(UpdateTarget t, String? file) =>
+          githubUpdateRoute(target: t, release: release, assetName: file);
+      expect(
+        route(UpdateTarget.android, 'Zen-arm64-v8a.apk'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.windows, 'Zen-Windows.zip'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.macos, 'Zen-macOS.zip'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.linuxTarball, 'Zen-Linux-x64.tar.gz'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        GithubUpdateRoute.download,
+      );
+      // iPhone and iPad never download, whatever file is named.
+      expect(route(UpdateTarget.ios, null), GithubUpdateRoute.scarlet);
+      expect(
+        route(UpdateTarget.ios, 'Zen-unsigned.ipa'),
+        GithubUpdateRoute.scarlet,
+      );
+      // A Flatpak never installs the bundle (nor a .deb) itself.
+      expect(route(UpdateTarget.flatpak, null), GithubUpdateRoute.flatpak);
+      expect(
+        route(UpdateTarget.flatpak, 'Zen-Linux-x64.flatpak'),
+        GithubUpdateRoute.flatpak,
+      );
+      // The release lacks this device's file (Windows ARM64 is optional).
+      expect(
+        route(UpdateTarget.windows, 'Zen-Windows-arm64.zip'),
+        GithubUpdateRoute.releasePage,
+      );
+      expect(route(UpdateTarget.other, null), GithubUpdateRoute.releasePage);
+    });
+
+    test('Scarlet gets the IPA of exactly the announced version', () {
+      final GithubRelease release = GithubRelease.fromJson(
+        _releaseJson('v1.12.0', assets: <String, int>{kIosIpaAssetName: 9}),
+      )!;
+      expect(kIosIpaAssetName, 'Zen-unsigned.ipa');
+      expect(
+        scarletInstallLink(release),
+        'scarlet://install=https://github.com/robertostrowskijagoda/Zen/'
+        'releases/download/v1.12.0/Zen-unsigned.ipa',
+      );
+      expect(
+        scarletInstallLink(GithubRelease.fromJson(_releaseJson('v1.12.0'))!),
+        isNull,
+      );
+      expect(kIphoneInstallPageUrl, endsWith('/install/iphone/'));
+      expect(kIphoneInstallPageUrl, startsWith('https://'));
+    });
+
+    test('the texts say what happens on each system', () {
+      expect(
+        githubUpdatePlan(UpdateTarget.android, 'Zen-arm64-v8a.apk'),
+        allOf(contains('Zen-arm64-v8a.apk'), contains('instalator Androida')),
+      );
+      expect(
+        githubUpdatePlan(UpdateTarget.windows, 'Zen-Windows.zip'),
+        contains('zamknie się i uruchomi'),
+      );
+      expect(
+        githubUpdatePlan(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        contains('instalatorem pakietów'),
+      );
+      for (final UpdateTarget t in <UpdateTarget>[
+        UpdateTarget.ios,
+        UpdateTarget.flatpak,
+        UpdateTarget.other,
+      ]) {
+        expect(githubUpdatePlan(t, 'x'), isNull, reason: t.name);
+      }
+      String saved(UpdateTarget t, String file) => savedUpdateMessage(
+        t,
+        file: file,
+        folder: '/home/a/Pobrane',
+        path: '/home/a/Pobrane/$file',
+      );
+      expect(
+        saved(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        contains("sudo apt install '/home/a/Pobrane/Zen-Linux-x64.deb'"),
+      );
+      expect(saved(UpdateTarget.macos, 'Zen-macOS.zip'), contains('Aplikacji'));
+      expect(
+        saved(UpdateTarget.windows, 'Zen-Windows.zip'),
+        contains('rozpakuj'),
+      );
+      expect(
+        saved(UpdateTarget.linuxTarball, 'Zen-Linux-x64.tar.gz'),
+        contains('rozpakuj'),
+      );
+      expect(
+        iosUpdateHint('1.12.0'),
+        allOf(contains('Scarlet'), contains('1.12.0')),
+      );
     });
 
     test('SHA256SUMS must list the file by name with its sum', () {
@@ -756,13 +908,176 @@ void main() {
       expect(installer.installed, isEmpty);
     });
 
-    test('where Zen cannot install itself (iOS) only the prompt', () async {
+    group('iPhone and iPad', () {
+      const String ipa =
+          'https://github.com/robertostrowskijagoda/Zen/releases/download/'
+          'v1.12.0/Zen-unsigned.ipa';
+      final Map<String, Object?> withIpa = _releaseJson(
+        'v1.12.0',
+        assets: <String, int>{'Zen-unsigned.ipa': 9, 'Zen-arm64-v8a.apk': 5},
+      );
+
+      _IosRun ios({
+        Map<String, Object?>? json,
+        bool scarletInstalled = true,
+        bool browser = true,
+        String? assetName,
+      }) {
+        final List<String> scarlet = <String>[];
+        final List<String> pages = <String>[];
+        final List<String> copied = <String>[];
+        final List<Uri> downloads = <Uri>[];
+        final GithubUpdateService s = GithubUpdateService(
+          installer: _FakeInstaller(
+            dir,
+            assetName: assetName,
+            target: UpdateTarget.ios,
+          ),
+          fetchJson: (Uri uri) async => json ?? withIpa,
+          fetchSums: (Uri uri) async => '',
+          download:
+              (
+                Uri uri,
+                File target, {
+                required int maxBytes,
+                void Function(int received)? onProgress,
+              }) async => downloads.add(uri),
+          openScarlet: (String link) async {
+            scarlet.add(link);
+            return scarletInstalled;
+          },
+          openPage: (String url) async {
+            pages.add(url);
+            return browser;
+          },
+          copy: (String text) async => copied.add(text),
+          currentVersion: '1.11.0',
+        );
+        addTearDown(s.dispose);
+        return (
+          service: s,
+          scarlet: scarlet,
+          pages: pages,
+          copied: copied,
+          downloads: downloads,
+        );
+      }
+
+      test('never download an IPA, even when a file is named', () async {
+        final _IosRun r = ios(assetName: 'Zen-unsigned.ipa');
+        await r.service.check();
+        expect(r.service.showNewerBanner, isTrue);
+        expect(r.service.route, GithubUpdateRoute.scarlet);
+        expect(r.service.canInstall, isFalse);
+        await r.service.update();
+        expect(r.downloads, isEmpty);
+        expect(r.service.installState, GithubInstallState.idle);
+      });
+
+      test('open Scarlet with the IPA of the announced version', () async {
+        final _IosRun r = ios();
+        await r.service.check();
+        await r.service.openInScarlet();
+        expect(r.scarlet, <String>['scarlet://install=$ipa']);
+        expect(r.pages, isEmpty);
+        expect(r.downloads, isEmpty);
+        expect(r.service.installMessage, contains('Otwarto Scarlet'));
+        expect(r.service.installMessage, contains('1.12.0'));
+      });
+
+      test('without Scarlet: the iPhone install page', () async {
+        final _IosRun r = ios(scarletInstalled: false);
+        await r.service.check();
+        await r.service.openInScarlet();
+        expect(r.scarlet, hasLength(1));
+        expect(r.pages, <String>[kIphoneInstallPageUrl]);
+        expect(r.service.installMessage, contains('Nie ma tu Scarlet'));
+      });
+
+      test(
+        'a release without the IPA: the install page, not Scarlet',
+        () async {
+          final _IosRun r = ios(json: _releaseJson('v1.12.0'));
+          await r.service.check();
+          await r.service.openInScarlet();
+          expect(r.scarlet, isEmpty);
+          expect(r.pages, <String>[kIphoneInstallPageUrl]);
+        },
+      );
+
+      test('nothing opens: the page address is copied and said', () async {
+        final _IosRun r = ios(scarletInstalled: false, browser: false);
+        await r.service.check();
+        await r.service.openInScarlet();
+        expect(r.copied, <String>[kIphoneInstallPageUrl]);
+        expect(r.service.installState, GithubInstallState.failed);
+        expect(r.service.installMessage, contains(kIphoneInstallPageUrl));
+      });
+
+      test('no newer release: Scarlet is not opened', () async {
+        final _IosRun r = ios(json: _releaseJson('v1.11.0'));
+        await r.service.check();
+        await r.service.openInScarlet();
+        expect(r.scarlet, isEmpty);
+        expect(r.pages, isEmpty);
+      });
+    });
+
+    test('Flatpak: nothing downloaded, the release page opens', () async {
+      final List<String> pages = <String>[];
+      final List<Uri> downloads = <Uri>[];
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _FakeInstaller(
+          dir,
+          assetName: 'Zen-Linux-x64.flatpak',
+          target: UpdateTarget.flatpak,
+        ),
+        fetchJson: (Uri uri) async => _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{
+            'Zen-Linux-x64.flatpak': 5,
+            'Zen-Linux-x64.deb': 5,
+          },
+        ),
+        download:
+            (
+              Uri uri,
+              File target, {
+              required int maxBytes,
+              void Function(int received)? onProgress,
+            }) async => downloads.add(uri),
+        openPage: (String url) async {
+          pages.add(url);
+          return true;
+        },
+        currentVersion: '1.11.0',
+      );
+      addTearDown(s.dispose);
+      await s.check();
+      expect(s.route, GithubUpdateRoute.flatpak);
+      expect(s.canInstall, isFalse);
+      await s.update();
+      expect(downloads, isEmpty);
+      await s.openReleasePage();
+      expect(pages, <String>[
+        'https://github.com/robertostrowskijagoda/Zen/releases/tag/v1.12.0',
+      ]);
+    });
+
+    test('a release without this device\'s file: its page', () async {
       final GithubUpdateService s = service(
-        installer: _FakeInstaller(dir, assetName: null),
-        fetchJson: (Uri uri) async => _releaseJson('v1.12.0'),
+        installer: _FakeInstaller(
+          dir,
+          assetName: 'Zen-Windows-arm64.zip',
+          target: UpdateTarget.windows,
+        ),
+        fetchJson: (Uri uri) async => _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{'Zen-Windows.zip': 5},
+        ),
       );
       await s.check();
-      expect(s.showNewerBanner, isTrue);
+      expect(s.route, GithubUpdateRoute.releasePage);
       expect(s.canInstall, isFalse);
     });
   });
@@ -1107,6 +1422,128 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Spróbuję ponownie'), findsOneWidget);
+      await finish(tester, s);
+    });
+
+    Future<GithubUpdateService> pumpWith(
+      WidgetTester tester,
+      _FakeInstaller installer,
+      Map<String, Object?> json, {
+      Widget home = const Scaffold(body: GithubUpdateBanner()),
+      Future<bool> Function(String link)? openScarlet,
+    }) async {
+      final GithubUpdateService s = GithubUpdateService(
+        installer: installer,
+        fetchJson: (Uri uri) async => json,
+        fetchSums: (Uri uri) async => '',
+        openScarlet: openScarlet ?? (String link) async => true,
+        openPage: (String url) async => true,
+        currentVersion: '1.11.0',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [githubUpdateServiceProvider.overrideWithValue(s)],
+          child: MaterialApp(theme: ZenTheme.dark(), home: home),
+        ),
+      );
+      await s.check();
+      await tester.pump();
+      return s;
+    }
+
+    testWidgets('on iPhone: "Otwórz w Scarlet", never "Aktualizuj"', (
+      WidgetTester tester,
+    ) async {
+      final List<String> opened = <String>[];
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.ios,
+        ),
+        _releaseJson('v1.12.0', assets: <String, int>{'Zen-unsigned.ipa': 9}),
+        openScarlet: (String link) async {
+          opened.add(link);
+          return true;
+        },
+      );
+      expect(find.byKey(const Key('github-update-install')), findsNothing);
+      expect(find.byKey(const Key('github-update-scarlet')), findsOneWidget);
+      expect(
+        find.byKey(const Key('github-update-install-page')),
+        findsOneWidget,
+      );
+      expect(find.text(iosUpdateHint('1.12.0')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('github-update-scarlet')));
+      await tester.pump();
+      expect(opened, hasLength(1));
+      expect(opened.single, startsWith('scarlet://install=https://'));
+      expect(find.byKey(const Key('github-update-message')), findsOneWidget);
+      await finish(tester, s);
+    });
+
+    testWidgets('in a Flatpak: the command and the release page', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.flatpak,
+        ),
+        _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{'Zen-Linux-x64.flatpak': 5},
+        ),
+      );
+      expect(find.byKey(const Key('github-update-install')), findsNothing);
+      expect(find.byKey(const Key('github-update-scarlet')), findsNothing);
+      expect(find.byKey(const Key('github-update-open-page')), findsOneWidget);
+      expect(find.text(flatpakUpdateHint), findsOneWidget);
+      await finish(tester, s);
+    });
+
+    testWidgets('the updates card says beforehand what Android will do', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(Directory.systemTemp),
+        _releaseJson('v1.12.0'),
+        home: const Scaffold(
+          body: SingleChildScrollView(child: GithubUpdateCard()),
+        ),
+      );
+      expect(find.byKey(const Key('github-update-install')), findsOneWidget);
+      expect(
+        find.text(githubUpdatePlan(UpdateTarget.android, 'Zen-arm64-v8a.apk')!),
+        findsOneWidget,
+      );
+      await finish(tester, s);
+    });
+
+    testWidgets('the updates card on iPhone does not promise a download', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.ios,
+        ),
+        _releaseJson('v1.11.0'),
+        home: const Scaffold(
+          body: SingleChildScrollView(child: GithubUpdateCard()),
+        ),
+      );
+      final String how = tester
+          .widget<Text>(find.byKey(const Key('github-update-how')))
+          .data!;
+      expect(how, contains('Scarlet'));
+      expect(how, isNot(contains('Pobrany plik')));
       await finish(tester, s);
     });
 

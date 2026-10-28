@@ -53,6 +53,49 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenOpenedFilesBridge") {
       ZenOpenedFilesBridge.register(with: registrar)
     }
+    // Links: web pages in Safari, the update in Scarlet.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenSystemLinks") {
+      ZenSystemLinks.register(with: registrar.messenger())
+    }
+  }
+}
+
+/// `zen/system` on iOS: `openUrl` {url} → Bool, the same as on Android.
+/// Only https pages (Safari) and `scarlet://` links (the signing app Zen is
+/// updated with, system_actions.dart) are opened. False when nothing opened
+/// the link, which for Scarlet means it is not installed (`open` needs no
+/// LSApplicationQueriesSchemes entry, unlike `canOpenURL`).
+enum ZenSystemLinks {
+  private static var channel: FlutterMethodChannel?
+
+  static func register(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "zen/system", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "openUrl" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let link = (call.arguments as? [String: Any])?["url"] as? String
+      guard let link = link, let url = URL(string: link), ZenSystemLinks.allowed(url) else {
+        result(false)
+        return
+      }
+      UIApplication.shared.open(url, options: [:]) { opened in
+        result(opened)
+      }
+    }
+    ZenSystemLinks.channel = channel
+  }
+
+  private static func allowed(_ url: URL) -> Bool {
+    switch url.scheme?.lowercased() {
+    case "https":
+      return !(url.host ?? "").isEmpty
+    case "scarlet":
+      return true
+    default:
+      return false
+    }
   }
 }
 

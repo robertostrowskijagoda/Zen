@@ -6,7 +6,6 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
@@ -191,7 +190,11 @@ class _WhatsNewLines extends StatelessWidget {
   }
 }
 
-/// "Aktualizuj" (or "Szczegóły"), the download's progress and the result.
+/// What this installation updates with ([GithubUpdateService.route]):
+/// "Aktualizuj" with the download's progress where Zen installs the file
+/// itself, "Otwórz w Scarlet" on iPhone and iPad, the release page in a
+/// Flatpak or when the release lacks this device's file; then the result
+/// (and "Szczegóły" in the banner).
 class _UpdateProgress extends StatelessWidget {
   const _UpdateProgress({required this.service, this.compact = false});
 
@@ -205,9 +208,25 @@ class _UpdateProgress extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final GithubInstallState state = service.installState;
     final String? message = service.installMessage;
-    // Flatpak: the sandbox cannot install; the release page can.
-    final bool flatpak = runningInFlatpak();
     final GithubRelease? newer = service.newer;
+    final GithubUpdateRoute? route = service.route;
+    final String? file = service.installer.assetName;
+    final String? manual = newer == null
+        ? null
+        : switch (route) {
+            GithubUpdateRoute.download =>
+              compact || file == null
+                  ? null
+                  : githubUpdatePlan(service.installer.target, file),
+            GithubUpdateRoute.scarlet => iosUpdateHint(newer.version),
+            GithubUpdateRoute.flatpak => flatpakUpdateHint,
+            GithubUpdateRoute.releasePage => t(
+              'Wydanie {version} nie ma pliku dla tego urządzenia. Pobierz '
+              'Zen ze strony wydania i zainstaluj go tak jak poprzednio.',
+              {'version': newer.version},
+            ),
+            null => null,
+          };
     final String? step = switch (state) {
       GithubInstallState.downloading => t('Pobieram… {percent}%', {
         'percent': (service.progress * 100).round(),
@@ -251,23 +270,25 @@ class _UpdateProgress extends StatelessWidget {
                 height: 1.35,
               ),
             ),
-          if (!service.canInstall)
-            SelectableText(
-              flatpak
-                  ? flatpakUpdateHint
-                  : t(
-                      'Na tym urządzeniu zaktualizuj Zen tak, jak go '
-                      'instalowano.',
-                    ),
-              key: const Key('github-update-manual'),
-              style: TextStyle(color: zen.textSecondary, fontSize: 13),
+          if (manual != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: SelectableText(
+                manual,
+                key: const Key('github-update-manual'),
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
             ),
           const SizedBox(height: 4),
           Wrap(
             spacing: 8,
             runSpacing: 4,
             children: <Widget>[
-              if (service.canInstall)
+              if (route == GithubUpdateRoute.download)
                 FilledButton.icon(
                   key: const Key('github-update-install'),
                   onPressed: service.installing
@@ -276,11 +297,24 @@ class _UpdateProgress extends StatelessWidget {
                   icon: const Icon(Icons.system_update_rounded, size: 18),
                   label: Text(t('Aktualizuj')),
                 ),
-              if (flatpak && newer != null)
+              if (route == GithubUpdateRoute.scarlet) ...<Widget>[
+                FilledButton.icon(
+                  key: const Key('github-update-scarlet'),
+                  onPressed: () => unawaited(service.openInScarlet()),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: Text(t('Otwórz w Scarlet')),
+                ),
+                TextButton(
+                  key: const Key('github-update-install-page'),
+                  onPressed: () => unawaited(service.openInstallPage()),
+                  child: Text(t('Otwórz stronę instalacji')),
+                ),
+              ],
+              if (route == GithubUpdateRoute.flatpak ||
+                  route == GithubUpdateRoute.releasePage)
                 FilledButton.icon(
                   key: const Key('github-update-open-page'),
-                  onPressed: () =>
-                      unawaited(openWebLink(newer.pageUri.toString())),
+                  onPressed: () => unawaited(service.openReleasePage()),
                   icon: const Icon(Icons.open_in_new_rounded, size: 18),
                   label: Text(t('Otwórz stronę wydania')),
                 ),
@@ -483,23 +517,38 @@ class GithubUpdateCard extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      service.verifiesAuthorSignature
-                          ? t(
-                              'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co godzinę, na Androidzie '
-                              'także w tle co kilka godzin, i o nowej '
-                              'wersji powiadamia raz. Pobrany plik '
-                              'instaluje dopiero po sprawdzeniu podpisu '
-                              'autora i zgodności z SHA256SUMS wydania.',
-                            )
-                          : t(
-                              'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co godzinę, na Androidzie '
-                              'także w tle co kilka godzin, i o nowej '
-                              'wersji powiadamia raz. Pobrany plik '
-                              'instaluje dopiero po zgodności z SHA256SUMS '
-                              'wydania.',
-                            ),
+                      switch (service.installer.target) {
+                        UpdateTarget.ios => t(
+                          'Zen sprawdza najnowsze wydanie na github.com przy '
+                          'starcie i co godzinę i o nowej wersji powiadamia '
+                          'raz. Na iPhonie i iPadzie sam niczego nie pobiera: '
+                          'plik wydania pobiera i instaluje Scarlet (albo '
+                          'SideStore).',
+                        ),
+                        UpdateTarget.flatpak => t(
+                          'Zen sprawdza najnowsze wydanie na github.com przy '
+                          'starcie i co godzinę i o nowej wersji powiadamia '
+                          'raz. W Flatpaku sam niczego nie pobiera: '
+                          'aktualizację instalujesz poleceniem flatpak.',
+                        ),
+                        _ when service.verifiesAuthorSignature => t(
+                          'Zen sprawdza najnowsze wydanie na github.com '
+                          'przy starcie i co godzinę, na Androidzie '
+                          'także w tle co kilka godzin, i o nowej '
+                          'wersji powiadamia raz. Pobrany plik '
+                          'instaluje dopiero po sprawdzeniu podpisu '
+                          'autora i zgodności z SHA256SUMS wydania.',
+                        ),
+                        _ => t(
+                          'Zen sprawdza najnowsze wydanie na github.com '
+                          'przy starcie i co godzinę, na Androidzie '
+                          'także w tle co kilka godzin, i o nowej '
+                          'wersji powiadamia raz. Pobrany plik '
+                          'instaluje dopiero po zgodności z SHA256SUMS '
+                          'wydania.',
+                        ),
+                      },
+                      key: const Key('github-update-how'),
                       style: TextStyle(
                         color: zen.textMuted,
                         fontSize: 12.5,

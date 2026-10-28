@@ -89,7 +89,7 @@ Future<bool> openWebLink(String url) async {
   }
   final String link = uri.toString();
   try {
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       return await _system.invokeMethod<bool>('openUrl', <String, Object>{
             'url': link,
           }) ??
@@ -107,6 +107,24 @@ Future<bool> openWebLink(String url) async {
     return true;
   } on Object catch (error) {
     logZenWarning('Otwieranie strony: $error');
+    return false;
+  }
+}
+
+/// iPhone and iPad: opens Scarlet with [link] (`scarlet://…`, see
+/// scarletInstallLink). Returns `false` when Scarlet is not installed
+/// (iOS then opens nothing) or elsewhere.
+Future<bool> openScarletLink(String link) async {
+  if (kIsWeb || !Platform.isIOS || !link.startsWith('scarlet://')) {
+    return false;
+  }
+  try {
+    return await _system.invokeMethod<bool>('openUrl', <String, Object>{
+          'url': link,
+        }) ??
+        false;
+  } on Object catch (error) {
+    logZenWarning('Otwieranie Scarlet: $error');
     return false;
   }
 }

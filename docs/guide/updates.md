@@ -36,20 +36,36 @@ aligned for phones with 16 KB memory pages. Details:
   and a bar say so, with a few lines about what is new in it. A version
   published after that takes the old notice's place, also when you closed
   the bar of the older one; once you have installed it, the notification
-  goes away. **Update**
-  downloads the
-  file for your system (on Android the APK for your phone's processor type)
-  and checks it against the release's `SHA256SUMS`;
-  on Android also that it is signed with the same certificate as the
-  installed app. Then the system installer asks (Android), or a helper
-  swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
-  Zen's folder is not writable (Program Files, `/opt`) the file is saved to
-  Downloads. On iPhone there is only the bar; install the update the way you
-  installed Zen (Scarlet: download the new `Zen-unsigned.ipa` from the install
-  page; SideStore: the Zen source, below).
+  goes away. What **Update** does depends on the system, and the updates
+  card says it before you tap:
+  - **Android, Windows, Mac, Linux:** Zen downloads the file for your
+    system (on Android the APK for your phone's processor type, on Windows
+    the x64 or ARM64 ZIP Zen runs as, on the Mac the universal ZIP for Apple
+    Silicon and Intel) and checks it against the release's `SHA256SUMS` and
+    the maintainers' signature; on Android also that it is signed with the
+    same certificate as the installed app. Then the system installer asks
+    (Android; the first time Android asks you to let Zen install apps), or
+    a helper swaps the folders after Zen closes and starts the new version
+    (Windows, Linux tarball, Mac). Where Zen's folder is not writable
+    (Program Files, a Mac app opened straight from Downloads) the file is
+    saved to Downloads with the next step: unpack it over the `Zen` folder
+    (Windows, Linux), drag Zen to Applications (Mac).
+  - **Linux `.deb`:** `/opt/zen` belongs to the package manager, so the
+    checked `.deb` is saved to Downloads; open it with the package
+    installer or run the `sudo apt install …` line Zen shows.
+  - **iPhone and iPad:** an iOS app can't install another, so Zen downloads
+    nothing. **Open in Scarlet** opens Scarlet with that version's
+    `Zen-unsigned.ipa` (`scarlet://install=` followed by the file's address
+    in the release); confirm there, without deleting the current Zen first.
+    When Scarlet isn't installed, the iPhone install page opens instead.
+    With SideStore or AltStore, update Zen there (the Zen source, below).
+    Scarlet downloads the file itself, so Zen's checksum and signature
+    check doesn't apply to it.
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
+- **A release without your system's file** (for example the optional
+  Windows ARM64 ZIP) shows **Open release page** instead of **Update**.
 - **When GitHub limits requests** (it allows only so many an hour from one
   address), Zen says so and shows when it tries again: as late as GitHub
   asks, otherwise after 15 minutes, then 30, then an hour.
@@ -114,8 +130,8 @@ already.
   on only as a link (never as an APK) and has no launcher disguise. Because
   the store signs it, it also skips the check of its own signing
   certificate.
-- On iPhone Zen updates through the signer you installed it with (Scarlet: a new
-  file from the install page; SideStore: the source above), not by itself.
+- On iPhone and iPad Zen updates through the signer you installed it with
+  (Scarlet: **Open in Scarlet**; SideStore: the source above), not by itself.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it
