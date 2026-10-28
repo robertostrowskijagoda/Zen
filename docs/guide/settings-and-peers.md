@@ -36,7 +36,7 @@ tapped. The first button hides or shows the rail.
 | About | version, about how many people use Zen and how many are in the pyramid, **Zen on GitHub** at the top, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
 | Zen on GitHub | the project page: code, releases, instructions and bug reports |
 | Privacy and security | app password, emergency wipe password and app lock, **notification content** (*Sender and content* by default, *Sender only* or *Notice only*; a chat can have its own level in its menu → *Notifications*), account and recovery (key copy, recovery circle, copy with friends, full account copy, second device), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, *Show when I last opened the app* (on by default), messages from non-friends |
-| Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits, notifications and background operation (Android) |
+| Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), **notifications and sounds** (sounds in the app and of system notifications, and a switch for each kind of news: messages, group messages, calls, mentions, reactions to your posts, friends' posts, posts of further friends (off by default), invitations, updates; a switched-off kind posts no notification and plays no sound but stays in the in-app list, except for posts), storage limits, notifications and background operation (Android) |
 | App | permissions and Bluetooth, **Looking around in the background** (Android: how often and how long Bluetooth looks for people nearby), *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
 | Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, **delete this account from this device** |
 
@@ -87,14 +87,25 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
-- A phone keeps links to 4 peers at a time, taken from up to 16 enabled
-  ones; a peer that stops answering is swapped for the next one (less
-  often when there is no network at all). A computer uses about 20, and
-  only 4 while it runs on battery. Computers check which peer answers
-  fastest every 6 hours, never on battery.
+- A phone keeps links to 4 peers at a time (2 while Zen only receives in
+  the background): its 16 first picks, then the rest of the list in
+  reserve. When a link goes down the phone dials the next two of the list
+  at once and keeps whichever comes up first; a peer that does not
+  connect within 8 seconds is replaced by the next one. So the links are
+  back within seconds, also when the next peer in line is down too. With
+  no network at all the phone tries again in waves, less and less often
+  (up to every 15 minutes), so a phone whose first picks went quiet moves
+  on to peers that still answer without dialling round and round. A
+  computer uses about 20, and only 4 while it runs on battery. Computers
+  check which peer answers fastest every 6 hours, never on battery.
+- Every peer of the built-in list is switched on; most of them simply wait
+  in reserve. Each one says what the device does with it now: *In use*,
+  *Connecting…*, *Not connecting* (a phone soon tries another one), *In
+  reserve*, or *Paused for a while* (a phone keeps a single link for a
+  while after too much of other people's mesh traffic passed through it).
 - **Settings → Advanced → Public peers:** see the list (the default one or
   your own), add a peer (the address is checked strictly), remove one,
-  switch one off, **Check peers** (reachable? latency in ms, does the key
+  switch one off (it is then never used), **Check peers** (reachable? latency in ms, does the key
   match?), **Pin key** (adds the `?key=` seen during the check, so a peer
   can't be swapped), **Restore defaults**. Changes apply at once. At least
   one peer must stay on.

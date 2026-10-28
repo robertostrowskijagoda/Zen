@@ -464,7 +464,7 @@ void main() {
     await _openSettingsPage(tester, 'settings-nav-data');
 
     expect(find.byKey(const Key('settings-preferences-panel')), findsOneWidget);
-    expect(find.text('Limit zdarzeń: 80 MB'), findsOneWidget);
+    expect(find.text('Limit miejsca: 80 MB'), findsOneWidget);
 
     final SwitchListTile unlimitedSwitch = tester.widget<SwitchListTile>(
       find.byKey(const Key('settings-inbox-unlimited-switch')),

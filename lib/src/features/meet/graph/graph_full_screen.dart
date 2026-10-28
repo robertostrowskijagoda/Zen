@@ -77,7 +77,7 @@ final Provider<FullScreenChrome> graphFullScreenChromeProvider =
 @immutable
 final class GraphView {
   const GraphView({
-    this.mode = GraphMode.friends,
+    this.mode = GraphMode.presence,
     this.filters = const GraphFilters(),
     this.goal = RouteGoal.shortest,
     this.selected,

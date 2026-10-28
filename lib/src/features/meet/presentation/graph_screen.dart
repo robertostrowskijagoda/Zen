@@ -58,6 +58,7 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 export 'package:zen/src/features/meet/graph/graph_model.dart';
 
 IconData _modeIcon(GraphMode m) => switch (m) {
+  GraphMode.presence => Icons.sensors_rounded,
   GraphMode.friends => Icons.hub_rounded,
   GraphMode.statuses => Icons.bolt_rounded,
   GraphMode.met => Icons.handshake_rounded,
@@ -224,10 +225,41 @@ GraphLook graphLook({
     Color? dot;
     String? tag;
     Color? tagTone;
+    bool hollow = false;
+    bool unknown = false;
+    bool noConnection = false;
     switch (mode) {
       case GraphMode.friends:
       case GraphMode.gates:
         break;
+      case GraphMode.presence:
+        // The five looks of the presence dots: filled green (online), a
+        // blue ring with a dot ("w tle"), an empty grey ring (offline), a
+        // faint grey dot with a question mark (not checked lately), a grey
+        // crossed-out cloud (this device has no network). Weak
+        // acquaintances and friends who hide it show nothing.
+        final PeerPresence presence = n.isFriend && n.ring <= 2
+            ? facts.presenceOf(a)
+            : PeerPresence.hidden;
+        switch (presence) {
+          case PeerPresence.online:
+            fill = zen.success;
+          case PeerPresence.background:
+            final Color away = zen.tone(ZenTone.network);
+            fill = away;
+            ring = away;
+          case PeerPresence.offline:
+            fill = zen.textMuted;
+            hollow = true;
+          case PeerPresence.unknown:
+            fill = zen.textMuted;
+            unknown = true;
+          case PeerPresence.noConnection:
+            fill = zen.textMuted;
+            noConnection = true;
+          case PeerPresence.hidden:
+            fill = dim(fill, n.isFriend ? 0.3 : 0.18);
+        }
       case GraphMode.statuses:
         final IntentStatus? s = facts.statusOf(a);
         final OpenToMeet? open = facts.openOf(a);
@@ -298,6 +330,9 @@ GraphLook graphLook({
         tag: tag,
         tagTone: tagTone,
         label: lit,
+        hollow: hollow && !lit,
+        unknown: unknown && !lit,
+        noConnection: noConnection && !lit,
       ),
     );
   }
@@ -314,6 +349,8 @@ GraphLook graphLook({
     switch (mode) {
       case GraphMode.friends:
         break;
+      case GraphMode.presence:
+        color = color.withValues(alpha: spoke ? 0.45 : 0.2);
       case GraphMode.statuses:
         color = color.withValues(alpha: spoke ? 0.45 : 0.25);
       case GraphMode.met:
@@ -412,6 +449,7 @@ int graphBand(
       return m == null ? (n.isFriend ? 3 : n.ring) : (m.line ? 1 : 2);
     case GraphMode.neglect:
       return n.isFriend ? (neglected.contains(n.address) ? 1 : 2) : n.ring;
+    case GraphMode.presence:
     case GraphMode.friends:
     case GraphMode.gates:
     case GraphMode.route:
@@ -514,7 +552,7 @@ final class _GraphData {
 
 class _GraphScreenState extends ConsumerState<GraphScreen>
     with TickerProviderStateMixin {
-  GraphMode _mode = GraphMode.friends;
+  GraphMode _mode = GraphMode.presence;
   GraphFilters _filters = const GraphFilters();
   RouteGoal _goal = RouteGoal.shortest;
   final TextEditingController _search = TextEditingController();
@@ -1377,9 +1415,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final Map<String, PyramidMark> pyr = pyramidMarks(pyramid);
     final GraphFacts facts = GraphFacts(
       statusOf: (String a) => meet.book.intentOf(a, nowMs),
-      // Zen open on their screen (in the background is not online).
+      // Zen open on their screen (in the background is not online), as
+      // known now.
       online: (String a) =>
-          byAddress[a]?.friend?.presence == PeerPresence.online,
+          byAddress[a]?.friend?.shownPresence == PeerPresence.online,
+      presence: (String a) =>
+          byAddress[a]?.friend?.shownPresence ?? PeerPresence.hidden,
       openOf: open.openOf,
       met: data.met.contains,
       nearby: near.contains,
@@ -2007,56 +2048,70 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     await notes.setLabel(c.members, name);
   }
 
-  /// The modes, and the filters button with how many are on.
+  /// The modes in a row of their own (scrolling when they do not fit), the
+  /// snapshot and filters buttons (with how many filters are on) in a row
+  /// under it: on a narrow phone nothing sits on top of the modes.
   Widget _modeBar(BuildContext context, List<GraphMode> modes) {
     final int active = _filters.active;
     return Padding(
-      padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 8, 8),
-      child: Row(
+      padding: const EdgeInsetsDirectional.only(top: 4, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsetsDirectional.only(start: 16, end: 8),
-              child: Row(
-                spacing: 8,
-                children: <Widget>[
-                  for (final GraphMode m in modes)
-                    ChoiceChip(
-                      key: Key('graph-mode-${m.name}'),
-                      showCheckmark: false,
-                      avatar: ZenIcon(_modeIcon(m), size: 18),
-                      label: Text(m.label),
-                      selected: _mode == m,
-                      onSelected: (_) => _setMode(m),
-                    ),
-                ],
-              ),
+          SingleChildScrollView(
+            key: const Key('graph-modes'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsetsDirectional.symmetric(horizontal: 16),
+            child: Row(
+              spacing: 8,
+              children: <Widget>[
+                for (final GraphMode m in modes)
+                  ChoiceChip(
+                    key: Key('graph-mode-${m.name}'),
+                    showCheckmark: false,
+                    avatar: ZenIcon(_modeIcon(m), size: 18),
+                    label: Text(m.label),
+                    selected: _mode == m,
+                    onSelected: (_) => _setMode(m),
+                  ),
+              ],
             ),
           ),
-          IconButton(
-            key: const Key('graph-snapshot'),
-            tooltip: t('Zrzut grafu bez danych osobowych'),
-            onPressed: _scene == null || _data == null
-                ? null
-                : () => unawaited(
-                    showGraphSnapshot(
-                      context,
-                      ref,
-                      scene: _scene!,
-                      clusters: _data!.clusters,
-                    ),
+          Padding(
+            key: const Key('graph-actions'),
+            padding: const EdgeInsetsDirectional.only(start: 16, end: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              spacing: 4,
+              children: <Widget>[
+                IconButton(
+                  key: const Key('graph-snapshot'),
+                  tooltip: t('Zrzut grafu bez danych osobowych'),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _scene == null || _data == null
+                      ? null
+                      : () => unawaited(
+                          showGraphSnapshot(
+                            context,
+                            ref,
+                            scene: _scene!,
+                            clusters: _data!.clusters,
+                          ),
+                        ),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                ),
+                Badge(
+                  isLabelVisible: active > 0,
+                  label: Text('$active'),
+                  child: IconButton.filledTonal(
+                    key: const Key('graph-filters'),
+                    tooltip: t('Filtry'),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => unawaited(_openFilters(context)),
+                    icon: const Icon(Icons.tune_rounded),
                   ),
-            icon: const Icon(Icons.photo_camera_outlined),
-          ),
-          Badge(
-            isLabelVisible: active > 0,
-            label: Text('$active'),
-            child: IconButton.filledTonal(
-              key: const Key('graph-filters'),
-              tooltip: t('Filtry'),
-              onPressed: () => unawaited(_openFilters(context)),
-              icon: const Icon(Icons.tune_rounded),
+                ),
+              ],
             ),
           ),
         ],
@@ -2547,6 +2602,40 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   ) {
     final ZenColors zen = ZenColors.of(context);
     final List<Widget> items = switch (_mode) {
+      GraphMode.presence => <Widget>[
+        _LegendDot(
+          color: zen.success,
+          label: presenceStateLabel(PeerPresence.online)!,
+        ),
+        _LegendDot(
+          color: zen.tone(ZenTone.network),
+          label: presenceStateLabel(PeerPresence.background)!,
+          ring: true,
+          dotted: true,
+        ),
+        _LegendDot(
+          color: zen.textMuted,
+          label: presenceStateLabel(PeerPresence.offline)!,
+          ring: true,
+        ),
+        _LegendDot(
+          key: const Key('graph-legend-unknown'),
+          color: zen.textMuted,
+          label: presenceStateLabel(PeerPresence.unknown)!,
+          question: true,
+        ),
+        _LegendDot(
+          key: const Key('graph-legend-no-connection'),
+          color: zen.textMuted,
+          label: presenceStateLabel(PeerPresence.noConnection)!,
+          icon: Icons.cloud_off_rounded,
+        ),
+        _LegendDot(
+          color: zen.accent.withValues(alpha: 0.3),
+          label: t('słabi znajomi — bez statusu'),
+          small: true,
+        ),
+      ],
       GraphMode.friends => <Widget>[
         _LegendDot(color: zen.accent, label: t('przyjaciele')),
         _LegendDot(
@@ -2796,6 +2885,15 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                             <String>[
                               _ringLabel(n.ring),
                               if (friend != null &&
+                                  friend.shownPresence == PeerPresence.unknown)
+                                // Not known now, and why.
+                                unknownPresenceLine(friend, meet.now)
+                              else if (friend != null &&
+                                  friend.shownPresence ==
+                                      PeerPresence.noConnection)
+                                // This device has no network.
+                                friendPresenceLine(friend, meet.now)!
+                              else if (friend != null &&
                                   friend.presence != PeerPresence.hidden &&
                                   friend.presence != PeerPresence.offline)
                                 presenceStateLabel(friend.presence)!
@@ -3287,10 +3385,14 @@ class _ListsDiagnostics extends StatelessWidget {
 /// One entry of the legend: a dot.
 class _LegendDot extends StatelessWidget {
   const _LegendDot({
+    super.key,
     required this.color,
     required this.label,
     this.small = false,
     this.ring = false,
+    this.dotted = false,
+    this.question = false,
+    this.icon,
   });
 
   final Color color;
@@ -3298,22 +3400,54 @@ class _LegendDot extends StatelessWidget {
   final bool small;
   final bool ring;
 
+  /// A ring with a dot in it ("w tle").
+  final bool dotted;
+
+  /// A faint dot with a question mark (presence not checked lately).
+  final bool question;
+
+  /// A glyph instead of a dot (a crossed-out cloud: no network).
+  final IconData? icon;
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final double d = small ? 7 : 10;
+    final IconData? glyph = icon;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Container(
-          width: ring ? 12 : d,
-          height: ring ? 12 : d,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: ring ? null : color,
-            border: ring ? Border.all(color: color, width: 1.5) : null,
+        if (glyph != null)
+          Icon(glyph, size: 14, color: color)
+        else
+          Container(
+            width: ring || question ? 12 : d,
+            height: ring || question ? 12 : d,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ring
+                  ? null
+                  : question
+                  ? color.withValues(alpha: 0.3)
+                  : color,
+              border: ring || question
+                  ? Border.all(color: color, width: 1.5)
+                  : null,
+            ),
+            child: dotted
+                ? Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color,
+                      ),
+                      child: const SizedBox.square(dimension: 5),
+                    ),
+                  )
+                : question
+                ? Icon(Icons.question_mark_rounded, size: 8, color: color)
+                : null,
           ),
-        ),
         const SizedBox(width: 5),
         Flexible(
           child: Text(

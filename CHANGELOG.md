@@ -10,6 +10,59 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Settings → Notifications and sounds: choose which kinds of notifications you get, and hear soft sounds for messages, likes and posts.
+- [en] Friends show up as online or in the background much sooner, and the graph opens on a presence view.
+- [en] See how much room Zen takes (1 GB by default), and keep unsent messages, comments and posts after a restart.
+- [pl] Ustawienia → Powiadomienia i dźwięki: wybierasz, o czym Zen powiadamia, i słyszysz ciche dźwięki wiadomości, polubień i postów.
+- [pl] Znajomi dużo szybciej pokazują się jako online lub w tle, a graf otwiera się na widoku obecności.
+- [pl] Widzisz, ile miejsca zajmuje Zen (domyślnie 1 GB), a niewysłane wiadomości, komentarze i posty zostają po ponownym uruchomieniu.
+
+### Notifications and sounds
+- **One page for notifications and sounds**: in-app sounds, a "notification sound" switch (off: notifications arrive silently; a ringing call and a friend's alarm are always heard) and one switch per kind: messages, group messages, calls, mentions, reactions, friends' posts, posts of further friends (off by default), invitations and updates. The rules also hold while Zen is locked.
+- **In-app sounds where they were missing**: sending in a group, a message arriving in the open chat, a like or reaction, a published post and a new entry in the notification list. On Android nothing plays in silent, vibrate or "Do not disturb" mode, and the diagnostics log now says so.
+- Every notice at the bottom of the screen can be swiped away to either side.
+
+### Chats and drafts
+- **The send button sits level with the letters** in chats and groups, for any font and text size (it was centred on the line, which looked too high, more so with tall phone fonts).
+- **A chat at the newest message stays there** when the keyboard opens, a message arrives or is sent, someone is typing or a picture loads; your own message always brings you down. Scrolled up, what you are reading no longer moves as messages arrive. A new message no longer rebuilds the whole list.
+- **Drafts survive a restart**: an unsent message in each chat and group, a comment under each post, and a new post's text, mentions and audience (closing the editor asks whether to keep the draft). Drafts are stored encrypted with the account and removed on send or wipe.
+
+### Presence and network
+- **Presence shows up sooner**: a new round of pings goes out as soon as the node reaches the network, a new friend is pinged at once, pings run every 2 minutes while Zen is open, and a friend counts as offline after 5 minutes (10 when they were in the background).
+- **Changes are told at once, without more pings**: leaving Zen, coming back, closing it on a computer and getting the network back go straight to the friends who have Zen open (at most once per state every 30 seconds); a locked phone gets nothing more than before.
+- **What friends showed is remembered over a restart**: a state confirmed within the last 30 minutes shows as it stands now (online from 3 minutes ago is online, from 8 minutes ago offline) until they say more.
+- **"status nieznany"** (a grey dot with a question mark) for a friend whose last state is older than that, until they answer or the answers had time to come (with what they showed last, e.g. "status nieznany · ostatnio w sieci 2 godz. temu"), and for a friend whose Zen is too old to tell it. Friends no longer look offline just because Zen has not asked them yet.
+- **"brak połączenia"** (a grey crossed-out cloud) for every friend while this device has no network ("Nie masz połączenia z siecią" in the chat), instead of showing them offline.
+- **Public peers**: every built-in peer is on and shows what the device does with it (in use, connecting, not connecting, in reserve, paused by the transit guard), also in a list you edited before: peers you never switched are turned on, the ones you switched stay as you set them. A phone keeps the whole list in reserve and dials 4 peers, only 2 while Zen just receives in the background (fewer packets waking the radio). A peer whose link goes down is replaced at once: two stand-ins are dialled in parallel and the phone has its links back within seconds (at most about 15 seconds when the next candidates are dead too). With no network at all it tries again in waves that thin out to one every 15 minutes, and after a sleep it redials at the first wake instead of waiting for the network library's own long retry timers.
+- **Wi-Fi Direct and Bluetooth links are on by default** and the first-start permissions ask for "Nearby devices"; both run only when there is a friend's device or another of your devices to link with.
+- "Share mailboxes with group members" is on by default.
+
+### Speed
+- **Posts of friends of friends arrive within seconds**: a friend passes a post on about 3 seconds after getting it (it was 20–40 seconds, and up to 10 minutes for the next post), a waiting pass no longer holds up fetches, and an ask whose answer got lost is repeated after a minute (it was 10–20 minutes). Their notification comes within about 15 seconds; before, it only showed once a friend's post arrived later.
+- Notifications of friends' posts and of likes and comments come after 5 seconds of quiet (at most 30 seconds in a busy thread); before, every new reaction pushed them back again.
+
+### Graph and profile
+- **The graph opens on a presence view**: online, in the background and offline at a glance; weak acquaintances have no status. The camera and filter buttons sit below the modes instead of over them.
+- The follower count includes every friend, and the followers list shows them.
+
+### Settings and storage
+- **One "Data and storage" page**: how much room Zen takes, with a breakdown, the storage limit (1 GB by default, from 10 MB to 10 GB) and an optional separate limit for friends' photos and videos.
+- **Zen keeps within its storage limit** by deleting only the oldest photos and videos of friends' posts; messages, chats, your own posts, backups and exports are never deleted on their own. When Zen goes over the limit, a warning on the page and one notice (at most once a day) offer to raise it.
+- "Run the setup again" is the first item in Settings.
+
+### Fixes
+- The "new version" notification goes away once that version is installed, and a What's new note that could not be fetched is fetched again at the next check.
+- **Updating does the right thing on each system**: on iPhone and iPad, numbered steps (turn on LocalDevVPN, tap **Update in SideStore**) hand the new version's `Zen-unsigned.ipa` to SideStore with its documented install link; **Download Zen 1.x.y** saves the file through Safari for **My Apps → +** in SideStore, and the iPhone install page is the fallback, instead of a dead end; links now open on iPhone at all. The updates card says beforehand what **Update** will do (Android installer, folder swap and restart, or the `.deb` saved for the package installer), and a file saved to Downloads comes with the right next step for Windows, Mac, the Linux tarball and the `.deb` (`sudo apt install …`). A release without this device's file points to its page.
+- **iPhone installs with SideStore again**: the iPhone install page walks through it in seven illustrated steps (LocalDevVPN, iloader on a computer once, trust and Developer Mode, the first refresh, Zen's source, a daily Shortcuts automation so SideStore renews Zen by itself without a computer, and how updates arrive), with what to do when something goes wrong (7 days passed, the pairing file after an iOS update, no Developer Mode, the 3-app limit). **Add Zen source to SideStore** is also on the updates screen and in "How to install Zen" on an iPhone, with the address to copy for **Sources → +**. The 7-day reminder in Chats says to tap the counter in **My Apps** and points to the automation. Only `apps.json` is published as a source now.
+- The thanks on the website, in the app and in the README go to Yggdrasil and SideStore.
+- The offline mailboxes, the meeting hub and several sheets no longer hide their last items under the system bar.
+- Holding the alarm and delete buttons no longer selects text.
+
+### Development
+- The tests run in parallel groups (`dart run tool/test.dart`), about twice as fast; CI splits them into four jobs and runs the tests that need Linux or the Go bridge on Linux.
+- A release needs one approval: the APKs are built in parallel without keys and everything is signed in one approved job. A release of this repository stops when a signing key is missing.
+
 ## 1.13.1 — 28.10.2026
 
 ### What's new

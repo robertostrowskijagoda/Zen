@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 
 /// The install page on GitHub Pages (`tool/pages/install`): the steps for
 /// every system and the downloads.
@@ -82,26 +83,39 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
   InstallSystem.iphone => <InstallStep>[
     InstallStep(
       t(
-        'W Safari otwórz usescarlet.com i zainstaluj Scarlet jej przyciskiem '
-        'instalacji. Korzystaj tylko z tego adresu.',
+        'Na iPhonie zainstaluj LocalDevVPN z App Store, otwórz go, stuknij '
+        '„Connect” i pozwól dodać VPN.',
       ),
     ),
     InstallStep(
       t(
-        'Ustawienia → Ogólne → VPN i zarządzanie urządzeniem → certyfikat '
-        'podany przez Scarlet → Ufaj.',
+        'Na komputerze zainstaluj iloader, podłącz iPhone’a kablem, zaloguj '
+        'się kontem Apple i wybierz „Install SideStore (Stable)”.',
       ),
     ),
     InstallStep(
       t(
-        'Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen na '
-        'iPhone’a”: plik Zen-unsigned.ipa zapisze się w aplikacji Pliki.',
+        'Na iPhonie: Ustawienia → Ogólne → VPN i zarządzanie urządzeniem → '
+        'Twoje konto Apple → Ufaj. Od iOS 16 też Prywatność i ochrona → Tryb '
+        'dewelopera.',
       ),
     ),
     InstallStep(
       t(
-        'W Scarlet przytrzymaj strzałkę pobierania, wybierz „Sideload IPA”, '
-        'wskaż Zen-unsigned.ipa i stuknij „Install”.',
+        'Otwórz SideStore, zaloguj się tym samym kontem Apple, w „My Apps” '
+        'stuknij licznik „7 DAYS” przy SideStore.',
+      ),
+    ),
+    InstallStep(
+      t(
+        'Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do '
+        'SideStore” i zainstaluj Zen z tego źródła.',
+      ),
+    ),
+    InstallStep(
+      t(
+        'Ustaw w Skrótach codzienną automatyzację „Refresh All Apps”: '
+        'SideStore sam odnowi Zen przed upływem 7 dni.',
       ),
     ),
   ],
@@ -146,22 +160,21 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
 List<String> installNotesFor(InstallSystem system) => switch (system) {
   InstallSystem.android => <String>[
     t(
-      'Aktualizacje same: w darmowej aplikacji Obtainium dodaj '
-      'github.com/robertostrowskijagoda/Zen (przycisk na stronie '
-      'instalacji). Telefon obok możesz też poczęstować Zen stąd, przez '
+      'Aktualizacje: Zen sam powie o nowej wersji i ją zainstaluje. Jeśli '
+      'wolisz, dodaj też github.com/robertostrowskijagoda/Zen w darmowej '
+      'aplikacji Obtainium (przycisk na stronie instalacji). Telefon obok możesz też poczęstować Zen stąd, przez '
       'Wi-Fi albo Quick Share.',
     ),
   ],
   InstallSystem.iphone => <String>[
     t(
-      'Scarlet podpisuje Zen certyfikatem, który sam zapewnia. Apple może '
-      'go unieważnić; wtedy Zen przestaje się otwierać, dopóki nie '
-      'zainstalujesz go ponownie tak samo. Najpierw zrób pełną kopię konta '
-      '(Ustawienia → Konto i odzyskiwanie).',
+      'Komputer jest potrzebny tylko raz. SideStore podpisuje Zen kontem '
+      'Apple na 7 dni i odnawia go przy włączonym LocalDevVPN. Z darmowym '
+      'kontem działają naraz najwyżej 3 takie aplikacje, licząc SideStore.',
     ),
     t(
-      'Inne sposoby: SideStore lub AltStore (źródło Zen jest na stronie '
-      'instalacji) albo Sideloadly z komputera.',
+      'Inne sposoby: AltStore (źródło Zen jest na stronie instalacji) albo '
+      'Sideloadly z komputera.',
     ),
   ],
   InstallSystem.windows => <String>[
@@ -182,10 +195,14 @@ List<String> installNotesFor(InstallSystem system) => switch (system) {
 /// a QR code to the install page (where the downloads are) and a picker of
 /// systems.
 class InstallGuideScreen extends StatefulWidget {
-  const InstallGuideScreen({this.initial, super.key});
+  const InstallGuideScreen({this.initial, this.onIphone, super.key});
 
   /// The system shown first (this device's when `null`).
   final InstallSystem? initial;
+
+  /// Whether this device is an iPhone or iPad, where the iPhone steps offer
+  /// to add Zen's source to its SideStore (`null`: as it runs).
+  final bool? onIphone;
 
   static Future<void> open(BuildContext context, {InstallSystem? initial}) =>
       Navigator.of(context).push(
@@ -366,6 +383,11 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                   children: <Widget>[
                     for (int i = 0; i < steps.length; i++)
                       _step(zen, i + 1, steps[i]),
+                    // On an iPhone the source can be added to its own
+                    // SideStore straight from here.
+                    if (_system == InstallSystem.iphone &&
+                        (widget.onIphone ?? (!kIsWeb && Platform.isIOS)))
+                      const SideStoreSourceOption(),
                   ],
                 ),
               ),

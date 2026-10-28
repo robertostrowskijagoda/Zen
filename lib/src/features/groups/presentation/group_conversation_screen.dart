@@ -34,6 +34,7 @@ import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/mentions.dart';
@@ -41,6 +42,7 @@ import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 final groupMessagesProvider = FutureProvider.autoDispose
     .family<List<ChatMessage>, String>((ref, String groupId) async {
@@ -79,7 +81,14 @@ class _GroupConversationScreenState
   /// The message to scroll to once the chat is loaded
   /// ([GroupConversationScreen.initialMessageId]).
   late String? _pendingJump = widget.initialMessageId;
-  final ScrollController _scrollController = ScrollController();
+
+  /// Keeps the chat at the newest message while it is there.
+  final ChatScrollController _scrollController = ChatScrollController(
+    reversed: true,
+  );
+
+  /// The newest message the chat was built with.
+  String? _newestShownId;
   final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   /// Where the chat was scrolled to when the app was closed.
@@ -96,6 +105,10 @@ class _GroupConversationScreenState
   /// "Tablica" tab (posts pinned to the group) instead of the chat.
   bool _boardTab = false;
   late final SocialHubController _socialHub;
+
+  /// What is written and not sent yet is kept as the group's draft.
+  late final ComposerDrafts _drafts;
+  late final String _draftId = ComposerDrafts.groupChat(widget.groupId);
 
   /// The message the next one replies to (shown over the composer).
   ChatReply? _replyTo;
@@ -314,6 +327,9 @@ class _GroupConversationScreenState
   void initState() {
     super.initState();
     _socialHub = ref.read(socialHubControllerProvider.notifier);
+    _drafts = ref.read(composerDraftsProvider);
+    _composerController.addListener(_keepDraft);
+    _restoreDraft();
     // Opening the chat reads it: clears the unread badge and keeps new
     // messages for this group from notifying while it is on screen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -323,6 +339,34 @@ class _GroupConversationScreenState
         unawaited(_socialHub.retryPendingGroupMedia(widget.groupId));
       }
     });
+  }
+
+  /// What was written here and not sent, before the screen or the app was
+  /// closed, is back in the field, its mentions too (unless something was
+  /// typed meanwhile).
+  void _restoreDraft() {
+    void fill() {
+      final ComposerDraft? draft = _drafts[_draftId];
+      if (!mounted || draft == null || _composerController.text.isNotEmpty) {
+        return;
+      }
+      _composerController.setStoredText(draft.text, draft.mentions);
+    }
+
+    if (_drafts.isLoaded) {
+      fill();
+    } else {
+      unawaited(_drafts.load().then((_) => fill()));
+    }
+  }
+
+  void _keepDraft() {
+    final ({String text, List<Mention> mentions}) stored = _composerController
+        .storedText();
+    _drafts.put(
+      _draftId,
+      ComposerDraft(text: stored.text, mentions: stored.mentions),
+    );
   }
 
   @override
@@ -335,6 +379,7 @@ class _GroupConversationScreenState
   void dispose() {
     _highlightTimer?.cancel();
     _socialHub.leaveGroupConversation(widget.groupId);
+    _composerController.removeListener(_keepDraft);
     _composerController.dispose();
     _scrollMemory.dispose();
     _scrollController.dispose();
@@ -457,12 +502,17 @@ class _GroupConversationScreenState
       if (_boardTab) {
         // A post on the group's board, not a chat message.
         await ref.read(groupBoardServiceProvider).publish(widget.groupId, text);
+        if (mounted) {
+          unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.posted));
+        }
         return;
       }
       final ChatReply? replyTo = _replyTo;
       if (replyTo != null) {
         setState(() => _replyTo = null);
       }
+      // Down to the newest message, where this one is about to appear.
+      _scrollController.showLatest();
       await ref
           .read(socialHubControllerProvider.notifier)
           .sendGroupMessage(
@@ -471,6 +521,9 @@ class _GroupConversationScreenState
             replyTo: replyTo,
             mentions: stored.mentions,
           );
+      if (mounted) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.messageSent));
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -607,6 +660,7 @@ class _GroupConversationScreenState
 
   Widget _buildScreen(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final ChatComposerMetrics composer = ChatComposerMetrics.of(context);
     final GroupProfile? group = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.groupById(widget.groupId),
@@ -895,6 +949,10 @@ class _GroupConversationScreenState
                       reversed: true,
                       incomingCount: incomingCount,
                       child: messagesAsync.when(
+                        // Each message reloads the chat: the list stays (and
+                        // keeps its place) until the new one is read,
+                        // instead of a spinner for a frame and a new list.
+                        skipLoadingOnReload: true,
                         loading: () =>
                             const Center(child: CircularProgressIndicator()),
                         error: (Object err, _) => Center(
@@ -928,6 +986,25 @@ class _GroupConversationScreenState
                               <String, ChatMessage>{
                                 for (final ChatMessage m in messages) m.id: m,
                               };
+                          final Map<String, int> indexOfId = <String, int>{
+                            for (final (int i, ChatMessage m)
+                                in messages.indexed)
+                              m.id: i,
+                          };
+                          final Map<Key, String> idOfBubble = <Key, String>{
+                            for (final MapEntry<String, GlobalKey> e
+                                in _bubbleKeys.entries)
+                              e.value: e.key,
+                          };
+                          // One's own new message is shown, also from
+                          // further up.
+                          final String newest = messages.last.id;
+                          if (_newestShownId != null &&
+                              newest != _newestShownId &&
+                              messages.last.isOutgoing) {
+                            _scrollController.showLatest();
+                          }
+                          _newestShownId = newest;
                           final String? jump = _pendingJump;
                           if (jump != null) {
                             // Opened from a mention's notification: at the
@@ -962,12 +1039,25 @@ class _GroupConversationScreenState
                             reverse: true,
                             padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                             itemCount: messages.length,
+                            // Each row by its message (its key: the id, or
+                            // the bubble's own): one coming in below does
+                            // not move those read further up.
+                            findChildIndexCallback: (Key key) {
+                              final String? id = key is ValueKey<String>
+                                  ? key.value
+                                  : idOfBubble[key];
+                              final int? index = indexOfId[id];
+                              return index == null
+                                  ? null
+                                  : messages.length - 1 - index;
+                            },
                             itemBuilder: (BuildContext context, int reversedIndex) {
                               final int index =
                                   messages.length - 1 - reversedIndex;
                               final ChatMessage msg = messages[index];
                               if (msg.isSystem) {
                                 return Padding(
+                                  key: ValueKey<String>(msg.id),
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 8,
                                   ),
@@ -1295,6 +1385,7 @@ class _GroupConversationScreenState
                               if (animateEntrance &&
                                   fromEnd < _entranceStaggerLimit) {
                                 return ZenFadeSlide(
+                                  key: ValueKey<String>(msg.id),
                                   duration: const Duration(milliseconds: 300),
                                   delay: Duration(milliseconds: 30 * fromEnd),
                                   offset: Offset(isSelf ? 10 : -10, 6),
@@ -1367,8 +1458,8 @@ class _GroupConversationScreenState
                                 padding: const EdgeInsetsDirectional.only(
                                   start: 4,
                                 ),
-                                child: SizedBox.square(
-                                  dimension: kChatComposerRowHeight,
+                                child: composer.slot(
+                                  width: kChatComposerRowHeight,
                                   child: IconButton(
                                     style: _composerButtonFrame,
                                     key: Key(
@@ -1400,53 +1491,60 @@ class _GroupConversationScreenState
                                 ),
                               ),
                               Expanded(
-                                // At least the send button's height, the
-                                // text on its centre line.
+                                // Exactly the buttons' height, the middle of
+                                // the letters on their centre line
+                                // (ChatComposerMetrics).
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    minHeight: kChatComposerRowHeight,
+                                  constraints: BoxConstraints(
+                                    minHeight: composer.rowHeight,
                                   ),
                                   child: Align(
                                     alignment: AlignmentDirectional.centerStart,
-                                    child: TextField(
-                                      key: const Key(
-                                        'group-chat-composer-field',
-                                      ),
-                                      controller: _composerController,
-                                      enableIMEPersonalizedLearning: false,
-                                      textCapitalization:
-                                          TextCapitalization.sentences,
-                                      style: TextStyle(
-                                        color: zen.textPrimary,
-                                        fontSize: 15,
-                                        height: 1.35,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: _boardTab
-                                            ? t('Napisz post na tablicę grupy...')
-                                            : t('Napisz wiadomość do grupy...'),
-                                        hintStyle: TextStyle(
-                                          color: zen.textMuted,
-                                          fontSize: 14.5,
+                                    child: Padding(
+                                      padding: composer.fieldShift,
+                                      child: TextField(
+                                        key: const Key(
+                                          'group-chat-composer-field',
                                         ),
-                                        filled: false,
-                                        isDense: true,
-                                        border: InputBorder.none,
-                                        enabledBorder: InputBorder.none,
-                                        focusedBorder: InputBorder.none,
-                                        contentPadding:
-                                            kChatComposerFieldPadding,
+                                        controller: _composerController,
+                                        enableIMEPersonalizedLearning: false,
+                                        textCapitalization:
+                                            TextCapitalization.sentences,
+                                        strutStyle: composer.strut,
+                                        style: composer.textStyle(
+                                          zen.textPrimary,
+                                        ),
+                                        decoration: InputDecoration(
+                                          hint: composer.hint(
+                                            _boardTab
+                                                ? t(
+                                                    'Napisz post na tablicę grupy...',
+                                                  )
+                                                : t(
+                                                    'Napisz wiadomość do grupy...',
+                                                  ),
+                                            zen.textMuted,
+                                            maxLines: 1,
+                                          ),
+                                          filled: false,
+                                          isDense: true,
+                                          // Not the theme's compact density:
+                                          // the padding is the metrics' own.
+                                          visualDensity: VisualDensity.standard,
+                                          border: InputBorder.none,
+                                          enabledBorder: InputBorder.none,
+                                          focusedBorder: InputBorder.none,
+                                          contentPadding: composer
+                                              .fieldPadding(),
+                                        ),
+                                        onSubmitted: (_) => _sendMessage(),
                                       ),
-                                      onSubmitted: (_) => _sendMessage(),
                                     ),
                                   ),
                                 ),
                               ),
-                              Padding(
-                                padding: const EdgeInsetsDirectional.only(
-                                  start: 2,
-                                ),
-                                child: IconButton.filled(
+                              composer.sendSlot(
+                                IconButton.filled(
                                   key: const Key('group-chat-send-button'),
                                   style: IconButton.styleFrom(
                                     backgroundColor: zen.accent,
@@ -1475,11 +1573,9 @@ class _GroupConversationScreenState
   }
 }
 
-/// The composer's buttons: a circle of [kChatComposerSendSize] in the middle
-/// of a tap target as tall as the composer's row ([kChatComposerRowHeight]),
-/// whatever the theme's density. With no padding above or below, the send
-/// button then sits on the text's centre line, in the middle of the row's
-/// rounded end.
+/// The composer's buttons: a circle of [kChatComposerSendSize] in a full
+/// tap target, whatever the theme's density; centred in their places of
+/// the row (ChatComposerMetrics).
 const ButtonStyle _composerButtonFrame = ButtonStyle(
   fixedSize: WidgetStatePropertyAll<Size>(Size.square(kChatComposerSendSize)),
   minimumSize: WidgetStatePropertyAll<Size>(Size.square(kChatComposerSendSize)),

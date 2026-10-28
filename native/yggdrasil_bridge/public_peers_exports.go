@@ -167,10 +167,108 @@ func builtInPeerListing() []publicPeerJSON {
 			add(peer, true)
 		}
 	}
+	if isPhoneOS() {
+		// The reserve, in the order the phone falls back on it.
+		for _, uri := range phonePeerCandidates(publicPeerPool) {
+			if peer, ok := byURI[uri]; ok {
+				add(peer, false)
+			}
+		}
+	}
 	for _, peer := range builtInPublicPeers() {
 		add(peer, false)
 	}
 	return listing
+}
+
+// What a public peer is to this device now, as the settings show it.
+const (
+	// Dialled, and the link is up.
+	peerStateUp = "up"
+	// Dialled, not up yet, and no try failed so far.
+	peerStateConnecting = "connecting"
+	// Dialled, and the last try failed (a phone swaps it for another one
+	// soon; a computer keeps trying).
+	peerStateFailing = "failing"
+	// Dialled before the transit guard held: set aside until it is over.
+	peerStateAside = "aside"
+	// In the pool, not dialled now: waits in reserve.
+	peerStateStandby = "standby"
+)
+
+// peerStateRank orders the states when several nodes (accounts) of this
+// process differ: the most useful one is told.
+var peerStateRank = map[string]int{
+	peerStateStandby:    0,
+	peerStateAside:      1,
+	peerStateFailing:    2,
+	peerStateConnecting: 3,
+	peerStateUp:         4,
+}
+
+// publicPeerStates is the state of each peer of the public pool across
+// the running nodes: standby unless a node dials it or set it aside.
+func publicPeerStates() map[string]string {
+	states := make(map[string]string)
+	for _, uri := range defaultPublicPeerURIs() {
+		states[uri] = peerStateStandby
+	}
+	nodes.Range(func(_, value any) bool {
+		node := value.(*bridgeNode)
+		if node.core == nil || node.config == nil {
+			return true
+		}
+		for uri, state := range node.publicPeerStates() {
+			if had, ok := states[uri]; !ok || peerStateRank[state] > peerStateRank[had] {
+				states[uri] = state
+			}
+		}
+		return true
+	})
+	return states
+}
+
+// publicPeerStates is what this node does with its public peers: the ones
+// it dials (up, connecting or failing, as the core tells) and the ones its
+// transit guard set aside.
+func (node *bridgeNode) publicPeerStates() map[string]string {
+	up := make(map[string]bool)
+	failed := make(map[string]bool)
+	for _, info := range node.core.GetPeers() {
+		base := peerURIBase(info.URI)
+		if info.Up {
+			up[base] = true
+		} else if info.LastError != nil {
+			failed[base] = true
+		}
+	}
+	states := make(map[string]string)
+	for _, peer := range node.dialledPublicPeers() {
+		base := peerURIBase(peer)
+		switch {
+		case up[base]:
+			states[peer] = peerStateUp
+		case failed[base]:
+			states[peer] = peerStateFailing
+		default:
+			states[peer] = peerStateConnecting
+		}
+	}
+	for _, peer := range node.transitAsidePeers() {
+		if _, dialled := states[peer]; !dialled {
+			states[peer] = peerStateAside
+		}
+	}
+	return states
+}
+
+// YggPublicPeerStatesJson: what this device does with each peer of the
+// public pool now, across its running nodes: {states: {uri: up |
+// connecting | failing | aside | standby}}. Read from memory, no network.
+//
+//export YggPublicPeerStatesJson
+func YggPublicPeerStatesJson() *C.char {
+	return responseOK(map[string]any{"states": publicPeerStates()})
 }
 
 // YggDefaultPublicPeersJson: the built-in public peers, as the app shows

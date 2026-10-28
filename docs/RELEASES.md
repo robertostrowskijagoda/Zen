@@ -47,6 +47,45 @@ in-app way of handing Zen to a friend).
    publishes `tool/pages/` on every change to `main`. Once in GitHub:
    **Settings → Pages → Source: GitHub Actions**. On the free plan GitHub
    Pages works only for **public** repositories.
+
+   **Search engines and link previews:** every page has its canonical
+   address, the hreflang alternates of its 21 languages (`?lang=xx`,
+   English without it), Open Graph and Twitter card tags (the picture
+   `og-image.png` and the icons of `manifest.webmanifest` are drawn by
+   `tool/ci/site_images.py`; run it again after the icon changes) and, on
+   the home, about and install pages, structured data (SoftwareApplication,
+   no ratings). At every deployment `tool/ci/site_files.py` writes
+   `sitemap.xml` (only the pages without `noindex`, so neither the
+   invitation nor the door page), `.well-known/security.txt` (it expires
+   after a year; every run renews it) and puts the latest release's version
+   into the structured data. `404.html` answers every missing address under
+   `/Zen/`. Crawlers read `robots.txt` only at the root of the host,
+   `https://robertostrowskijagoda.github.io/robots.txt`, which only a
+   repository named `robertostrowskijagoda.github.io` (with its own Pages)
+   can serve; a `robots.txt` under `/Zen/` would be ignored, so there is
+   none, and nothing announces the sitemap by itself. Once, after the
+   first deployment:
+   - **Google Search Console** (https://search.google.com/search-console):
+     add a property of the type *URL prefix*,
+     `https://robertostrowskijagoda.github.io/Zen/`, verify it with the
+     *HTML file* method (put the `google….html` file it gives into
+     `tool/pages/` and let the workflow publish it), then **Sitemaps → Add
+     a new sitemap**: `sitemap.xml`.
+   - **Bing Webmaster Tools** (https://www.bing.com/webmasters): import the
+     site from Search Console (or add and verify it the same way, with
+     `BingSiteAuth.xml`), then **Sitemaps → Submit sitemap**:
+     `https://robertostrowskijagoda.github.io/Zen/sitemap.xml`. Bing's
+     index also serves DuckDuckGo and Yahoo.
+   - **Settings → Code security → Private vulnerability reporting: Enable**,
+     or the `Contact` of security.txt (and of `SECURITY.md`) leads nowhere.
+   - Optional: the repository `robertostrowskijagoda.github.io` with a
+     `robots.txt` holding
+     `Sitemap: https://robertostrowskijagoda.github.io/Zen/sitemap.xml`
+     (crawlers then find the sitemap by themselves) and a copy of
+     `/.well-known/security.txt` (renewed there by hand before its
+     `Expires`): RFC 9116 places that file at the root
+     of the host too, so the one under `/Zen/` is found only by its
+     address (its `Canonical` field).
 3. Enable Issues in the repository settings; description: "A network of people
    who know each other — a messenger without servers, ads or an algorithm".
 4. **Contributions:** `CONTRIBUTING.md` (checks to run, and the contributor
@@ -120,7 +159,7 @@ key, so every release must be signed with this key.
 > 4. Swipe Zen away on one phone; messages still arrive within a minute.
 > 5. Restore an account from a backup on a phone (or a clean install):
 >    the setup appears once, friends see you online and see your name.
-> 6. Settings → Diagnostics: save the log; read it for `ERROR` lines,
+> 6. Settings → Advanced → Diagnostics: save the log; read it for `ERROR` lines,
 >    "already runs" or "Flutter framework error".
 >
 > Only when all of it works, edit the release, untick "pre-release" and tick
@@ -159,7 +198,11 @@ key, so every release must be signed with this key.
    `main` only through pull requests), wait for green CI and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
    `main`). Then `git push origin v1.12.0`. Approve the `release`
-   environment when GitHub asks (the APK key and the signing key).
+   environment when GitHub asks. It asks once, when every build is done
+   (about half an hour after the push; Actions → the run → "Review
+   deployments"), and that one approval lets the sign job use both the APK
+   key and the signing key. Until then nothing has a key; the request
+   waits up to 30 days.
    `release.yml` refuses a tag that differs from the version in
    `pubspec.yaml` / `app_version.dart` (otherwise every build would keep
    offering the release as an update).
@@ -208,34 +251,48 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    `dart run tool/go_licenses.dart` (the test `go_licenses_test.dart` reminds
    you).
 3. **Building:** pushing a tag `v<version>` runs
-   `.github/workflows/release.yml`: Android (a separate job) and Windows x64
-   on `windows-latest`, Windows ARM64 on `windows-11-arm`, Linux x64 on
-   `ubuntu-22.04`, Linux ARM64 on `ubuntu-22.04-arm` (section 3.4), the
-   Flatpak, checksums, signing and attaching on `ubuntu-24.04`, macOS on
-   `macos-latest` and iPhone (`ios.yml`, called from `release.yml`). No
-   Linux job uses the moving `ubuntu-latest` label. Each job
-   stores its files as an artifact; the second-to-last job gathers them and
-   computes `SHA256SUMS`, and the last one attaches everything to the draft
-   release. The APK signing key is in the secrets of the **`release`
-   environment** (Settings → Environments; not the repository secrets):
-   `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
+   `.github/workflows/release.yml`. Every build runs at the same time:
+   Android in three jobs, one per ABI, on `ubuntu-24.04` (each builds only
+   its own Go bridge), Windows x64 on `windows-latest`, Windows ARM64 on
+   `windows-11-arm`, Linux x64 on `ubuntu-22.04`, Linux ARM64 on
+   `ubuntu-22.04-arm` (section 3.4), the Flatpak (after Linux x64) on
+   `ubuntu-24.04`, macOS on `macos-latest` and iPhone (`ios.yml`, called
+   from `release.yml`). No Linux job uses the moving `ubuntu-latest` label.
+   Each job stores its files as an artifact. The Android jobs build without
+   any key, so Gradle signs their APKs with the runner's own throwaway
+   debug key; they stay artifacts named `unsigned-apk-<abi>` and never
+   carry a release file name. When every build is done, the **sign** job
+   replaces that signature with the release key (`apksigner`, APK
+   Signature Scheme v2 and v3), checks the certificate against the pin and
+   the 16 KB alignment, writes `whats-new.json`, computes `SHA256SUMS` over
+   all files and signs it (`SHA256SUMS.sig`); the last job attaches
+   everything to the draft release. The keys are in the secrets of the
+   **`release` environment** (Settings → Environments; not the repository
+   secrets): `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-   — without them the workflow skips the APKs — and
-   `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
-   `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
-   warning). Only the `android` and `sign` jobs use the environment. It
+   and `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
+   `SHA256SUMS` (section 8.6). In this repository the `sign` job fails when
+   any of them is missing, because the installed builds would refuse such a
+   release and its note; a fork without them gets a release without APKs
+   and without `SHA256SUMS.sig`, with a warning. Only the `sign` job uses the environment, so a tag run asks
+   for one approval. The environment
    requires an approver (the maintainer) and has a rule for `v*` tags
    only; the keys go only to a run of a `v*` tag after approval (described
    at the top of `release.yml`). The workflow's token is read-only
    (`permissions: {}` at the top, `contents: read` per job); only the
-   `attach` job, for tags, may write. The `checksums` job, which has no
-   environment, fails the run when any signing secret
+   `attach` job, for tags, may write. The `preflight` job ("Keys and
+   version"), which has no environment and which the sign job waits for,
+   fails the run when any signing secret
    (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
    `ANDROID_KEY_PASSWORD`, `ZEN_RELEASE_SIGNING_KEY`) is also visible as a
    repository or organization secret: the keys must live only in the
    environment. Environments with required reviewers are free for public
    repositories. A manual run from a branch builds the other files as
-   artifacts, without the APKs and without a release. **Windows ARM64 is
+   artifacts (its `checksums` job adds their `SHA256SUMS`), without the
+   APKs, without signing and without a release. No job of `release.yml`
+   uses a cache (no Flutter, pub, Gradle or Go cache): a cache another run
+   wrote could change what gets signed; the run is fast because the builds
+   run side by side. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
@@ -243,8 +300,10 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    "Building from source").
 4. **Files under exactly these names** (what `release.yml` produces):
    - `Zen-arm64-v8a.apk`, `Zen-armeabi-v7a.apk`, `Zen-x86_64.apk` — one APK
-     per ABI (`flutter build apk --release --split-per-abi`, from
-     `build/app/outputs/flutter-apk/app-<abi>-release.apk`): arm64-v8a for
+     per ABI (`flutter build apk --release --split-per-abi --target-platform
+     android-<arch>`, one job each, from
+     `build/app/outputs/flutter-apk/app-<abi>-release.apk`, signed by the
+     sign job with `apksigner`): arm64-v8a for
      most phones, armeabi-v7a for older 32-bit phones, x86_64 for
      Chromebooks and emulators; no universal APK and no x86 (Flutter has no
      x86 release engine);
@@ -318,14 +377,16 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    `Zen-Windows-arm64.zip`,
    `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, the `.deb` files, `Zen-Linux-x64.flatpak` and
    `Zen-macOS.zip`).
-5. **Checksums:** `SHA256SUMS` is computed by the last-but-one job of
-   `release.yml` over all release files (`sha256sum` format; check with
+5. **Checksums:** `SHA256SUMS` is computed by the sign job of
+   `release.yml` over all release files, the signed APKs included
+   (`sha256sum` format; check with
    `sha256sum -c SHA256SUMS`, on Windows
    `Get-FileHash -Algorithm SHA256 Zen-arm64-v8a.apk`). Anyone may redistribute copies, and the
    sums let people check that a copy is the official one, so they must accompany
    every release — also after replacing a file by hand they must be computed
    and signed again (section 8.6). The job runs only when the required builds
-   succeeded (Windows, Linux, macOS, iOS; Android unless it was skipped).
+   succeeded (Android, Windows, Linux, Flatpak, macOS, iOS) and the
+   preflight passed.
    The attach job never replaces a file already attached (no `--clobber`)
    and stops if the release is already published; to redo a file, delete it
    from the draft by hand and re-run the job.
@@ -371,9 +432,12 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
   version number, not by name.
 - **Without Go** (or without NDK / a C compiler) the existing library is used
   with a warning; without it the build aborts, saying what is missing.
-  `ZEN_SKIP_GO_BRIDGE=1` skips the check. Automatic rebuilding of the `.so`
-  works only on Windows (the script uses the Windows NDK); `build_android.sh`
-  does it on Linux (as in CI).
+  `ZEN_SKIP_GO_BRIDGE=1` skips the check. On Linux and macOS Gradle calls
+  `build_if_changed.sh`, the twin of the Windows script, which builds with
+  `build_android.sh` (the NDK's Linux or macOS toolchain); CI's
+  `android-bridge` job and the release's Android jobs build there, the
+  release calling `build_if_changed.sh <abi>` first so its output is in the
+  log and Gradle finds the library up to date.
 - **Windows ARM64:** `build_windows.ps1 -Arch x64|arm64` (default: the
   computer's architecture); the ARM64 DLL goes to `bin\windows-arm64\`, x64
   stays in `bin\`; CMake picks by `FLUTTER_TARGET_PLATFORM` / the generator
@@ -436,9 +500,24 @@ bridge → `flutter build ios --release --no-codesign` → `Zen-unsigned.ipa`
 (a `Payload/Runner.app` folder in a ZIP). It runs manually (Actions → iOS →
 Run workflow; the file is in the run's artifacts) or as part of `release.yml`
 for a `v*` tag, which attaches it to the release. The package is unsigned —
-Scarlet, SideStore or AltStore sign it on the phone (README, section
-"iPhone"; the install page links `releases/latest/download/Zen-unsigned.ipa`,
-which follows every release). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
+SideStore (or AltStore) signs it on the phone with the person's own Apple
+Account (README, section "iPhone"; the install page adds the source
+`apps.json` and links `releases/latest/download/Zen-unsigned.ipa`, which
+follows every release). The app's update notice on iPhone and iPad
+downloads nothing itself: after "turn on LocalDevVPN", **Update in
+SideStore** opens SideStore's documented install link
+`sidestore://install?url=` with the release's `Zen-unsigned.ipa`
+(kIosIpaAssetName, pinned to the announced tag); **Download Zen 1.x.y**
+opens the same file in Safari, for **My Apps → +** in SideStore. Without
+the IPA the iPhone install page opens instead, so every release must carry
+the IPA under exactly that name (`release.yml` refuses one without it). The
+updates card (and, on an iPhone, the guide's iPhone steps) also offers
+**Add Zen source to SideStore**: SideStore's documented
+`sidestore://source?url=` with the address of `apps.json`. `AppDelegate.swift`
+opens exactly that source link and install links of this repository's
+release IPAs, no other SideStore link; **Copy source address** and the step
+by hand (**Sources → +**) are always shown, and the address is copied when
+SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
 `build_ios.sh`, then `flutter build ios --release --no-codesign`.
 
 ### 3.4. Build checks, pins and reproducibility
@@ -497,7 +576,9 @@ which follows every release). App identifier: `com.roj.zen`. iOS 15+. Locally on
   the same tag twice and compare with `sha256sum`. Full reproducibility
   (F-Droid) would also need reproducible Flutter and Go builds.
 - Python tests of these tools run in CI: `tool/ci/test_ci_checks.py` (ELF and
-  APK alignment, PE imports, glibc, pinned runners, the environment),
+  APK alignment, PE imports, glibc, pinned runners, only the sign job in the
+  environment, no caches in the release, the CI test jobs behind the
+  required check),
   `tool/ci/test_release_source.py`, `tool/ci/test_check_libwebrtc.py`.
 
 ### 3.5. What's new (the note in the update notice)
@@ -656,7 +737,7 @@ legal nor tax advice; uncertain places are marked.
 | Huawei AppGallery | optional | Huawei phones without Google (Google verification does not apply); Zen uses no Google services — check on one phone |
 | Accrescent | not now | console for invited developers only, no self-update, package ID must match the author's domain (uncertain — the page may be outdated) |
 | Amazon, Aptoide, RuStore, Chinese stores | no | Amazon Appstore on Android closed since 20.08.2025; Aptoide — annual fee and a "piracy store" reputation; RuStore requires a VK ID, and VK is on the EU sanctions list (07.2026); China — ICP registration and a Chinese entity |
-| iPhone: Scarlet (install page), SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
+| iPhone: SideStore (install page), AltStore Classic, with a free Apple Account | works | `Zen-unsigned.ipa`; signing every 7 days (SideStore renews on the phone), at most 3 apps, no background work |
 | iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | section 6.3 |
 | Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (section 5) |
 | Linux | `tar.gz` and `.deb`, x64 and ARM64 (Ubuntu 22.04+, Debian 12+, Mint 21+; glibc 2.35+); Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional; Flathub and Fedora would refuse the from-source OpenH264 (section 6.1.1) |
@@ -817,14 +898,13 @@ changes are planned.
 
 ### 6.3 iPhone and Mac
 
-- **No account** — as today: Scarlet (the install page's one recommended way:
-  the install page links the stable `releases/latest/download/Zen-unsigned.ipa`,
-  so it follows every release without editing the site), or SideStore /
-  AltStore with a free Apple ID.
+- **No account** — as today: SideStore with the person's own free Apple
+  Account (the install page's one recommended way: a computer once with
+  iloader, then SideStore renews Zen on the phone), or AltStore Classic.
   `pages.yml` publishes the source `https://robertostrowskijagoda.github.io/Zen/apps.json`
   (`tool/ci/release_source.py`) for the latest published release's
-  `Zen-unsigned.ipa`, and the install page `/install/`; publishing a release
-  refreshes both (the release event starts a run on `main`, since the
+  `Zen-unsigned.ipa`, and the install page
+  `/install/`; publishing a release refreshes them all (the release event starts a run on `main`, since the
   `github-pages` environment deploys only from it). The source is built from
   that release's own IPA: downloaded only from GitHub hosts, checked against
   the release's `SHA256SUMS` and size, and its permission texts, version and
@@ -1124,7 +1204,18 @@ of Zen on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the
 release description is the oldest version still supported (section 3,
 step 6). A newer version is announced once with a quiet notification,
 whichever of the app and the service finds it first, with the release's
-short note (section 3.5) as its expanded text.
+short note (section 3.5) as its expanded text. A version newer still is
+announced again in the same notification slot (`app-update`), so it
+replaces the older notice rather than adding a second one; the bar and
+the card show the newest version with its own note, and closing the bar
+of one version never hides a newer one (`update_check.json` keeps the
+announced and the closed version and compares them). Every build since
+1.13.0 behaves so; for it to pick up a new release, the release only has
+to be the latest full release, tagged `vX.Y.Z`, with every file attached
+before it is published, and with `whats-new.json` of that same version
+listed in `SHA256SUMS` and signed in `SHA256SUMS.sig` (section 3, all
+done by `release.yml`). From 1.14.0 on, the notification is also taken
+away once the version it names is installed.
 Inside a Flatpak nothing is downloaded: the card shows the
 `flatpak install` command and opens the release page. A newer `v<version>`
 tag shows the bar "New version X is available — worth updating" with
@@ -1164,9 +1255,10 @@ installing (and showing the note of section 3.5) checks it.
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
 "sigs": [{"k", "s"}]}` (hybrid id and hybrid signature, as in section 8). The
 `sign` job of `release.yml` (with Go for the signature) makes it on every
-`v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (in the
-`release` environment, so it waits for the same approval as the Android
-job); without the secret it is skipped with a warning. The job then runs
+`v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (the
+only job in the `release` environment; it signs the APKs too, so one
+approval covers both keys); without the secret it is skipped with a
+warning. The job then runs
 `zen_release.dart verify --pinned`: a signature by a key that is not in
 `kReleaseMaintainers` of the tagged app stops the run (every installed
 computer would refuse such a release). By hand:

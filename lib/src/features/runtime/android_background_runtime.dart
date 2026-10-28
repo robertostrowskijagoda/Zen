@@ -2049,6 +2049,22 @@ String? lockedLocalLinksJson(NearbyKit? kit, {required bool lan}) {
   );
 }
 
+/// The default account's node in the locked receiver: its identity under
+/// the background key in [credentials], and only receiving, so it dials
+/// [kReceiveOnlyPeerTarget] public peers (the app takes the node back with
+/// its own number once it is on screen again).
+RuntimeSignalBootstrapConfig lockedReceiverNodeConfig({
+  required Duration waitTimeout,
+  required AppSecurityCredentialsStore credentials,
+}) => RuntimeSignalBootstrapConfig(
+  waitTimeout: waitTimeout,
+  nodeConfigProtector: BackgroundKeyProtector(credentials),
+  // Signals wake the service as they arrive (a blocking wait in an
+  // isolate of its own); this slow poll runs only if that wait fails.
+  fallbackPollInterval: const Duration(seconds: 2),
+  peerTarget: kReceiveOnlyPeerTarget,
+);
+
 /// The service's node while the app is locked or gone: the mesh
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
@@ -2221,12 +2237,9 @@ final class LockedReceiverSession {
       LockedMailboxKit.fromJson(await heldFile.read()),
     );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
-      config: RuntimeSignalBootstrapConfig(
+      config: lockedReceiverNodeConfig(
         waitTimeout: payload.settings.signalWaitTimeout,
-        nodeConfigProtector: BackgroundKeyProtector(credentials),
-        // Signals wake the service as they arrive (a blocking wait in an
-        // isolate of its own); this slow poll runs only if that wait fails.
-        fallbackPollInterval: const Duration(seconds: 2),
+        credentials: credentials,
       ),
       // Never takes the identity from the app on screen (node_identity.go).
       role: RuntimeNodeRole.service,
@@ -2271,6 +2284,7 @@ final class LockedReceiverSession {
         capability: capability,
         inbox: inbox,
         notices: notices,
+        meshLinked: runtime.meshLinked,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
         noticeKit: noticeKit,

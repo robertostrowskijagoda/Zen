@@ -145,17 +145,20 @@ LocalLinksStatus _linkedOver(String transport) =>
 
 void main() {
   test('Bluetooth and Multipeer are turned on by their own settings', () {
-    expect(enabledLocalTransports(const AppSettings()), isEmpty);
     expect(
       enabledLocalTransports(
-        const AppSettings(bluetoothLinks: true, lanDiscovery: false),
+        const AppSettings(wifiDirect: false, bluetoothLinks: false),
       ),
+      isEmpty,
+    );
+    expect(
+      enabledLocalTransports(const AppSettings(lanDiscovery: false)),
       <LocalLinkTransport>{LocalLinkTransport.bluetooth},
       reason: 'Bluetooth needs no local network',
     );
     expect(
       enabledLocalTransports(
-        const AppSettings(bluetoothLinks: true, multipeerLinks: true),
+        const AppSettings(wifiDirect: false, multipeerLinks: true),
       ),
       <LocalLinkTransport>{
         LocalLinkTransport.bluetooth,
@@ -166,13 +169,13 @@ void main() {
 
   test('the links settings are saved by name', () {
     final AppSettings settings = AppSettings.fromJson(
-      const AppSettings(bluetoothLinks: true, multipeerLinks: true).toJson(),
+      const AppSettings(bluetoothLinks: false, multipeerLinks: true).toJson(),
     );
-    expect(settings.bluetoothLinks, isTrue);
+    expect(settings.bluetoothLinks, isFalse);
     expect(settings.multipeerLinks, isTrue);
     expect(
       AppSettings.fromJson(const <String, dynamic>{}).bluetoothLinks,
-      isFalse,
+      isTrue,
     );
   });
 

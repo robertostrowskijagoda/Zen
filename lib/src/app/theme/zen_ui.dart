@@ -539,13 +539,18 @@ class ZenHairline extends StatelessWidget {
 }
 
 /// Online (a green filled dot), in the background ([away]: a blue ring
-/// with a dot in it) or not (an empty grey ring). Still: it pulses briefly
-/// only when it turns on, so a screen full of online friends draws nothing.
+/// with a dot in it), not checked lately ([unknown]: a grey dot with a
+/// question mark), not known because this device has no network
+/// ([noConnection]: a grey crossed-out cloud) or not (an empty grey ring).
+/// Still: it pulses briefly only when it turns on, so a screen full of
+/// online friends draws nothing.
 class ZenStatusDot extends StatefulWidget {
   const ZenStatusDot({
     super.key,
     required this.on,
     this.away = false,
+    this.unknown = false,
+    this.noConnection = false,
     this.size = 6,
   });
 
@@ -553,6 +558,13 @@ class ZenStatusDot extends StatefulWidget {
 
   /// Not on the screen but reachable ("w tle"); [on] wins.
   final bool away;
+
+  /// Not checked lately ("status nieznany"); [on] and [away] win.
+  final bool unknown;
+
+  /// This device has no network ("brak połączenia"); [on], [away] and
+  /// [unknown] win.
+  final bool noConnection;
   final double size;
 
   @override
@@ -615,6 +627,43 @@ class _ZenStatusDotState extends State<ZenStatusDot> {
         ),
       );
     }
+    if (widget.unknown) {
+      // A filled grey dot with a question mark: grey like offline, but
+      // filled where offline is empty, and marked.
+      return SizedBox.square(
+        dimension: size + 6,
+        child: Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: zen.textMuted,
+            ),
+            child: SizedBox.square(
+              dimension: size + 2,
+              child: Icon(
+                Icons.question_mark_rounded,
+                size: size,
+                color: zen.background,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (widget.noConnection) {
+      // A grey crossed-out cloud: about this device's network, not about
+      // the friend, so no dot at all.
+      return SizedBox.square(
+        dimension: size + 6,
+        child: Center(
+          child: Icon(
+            Icons.cloud_off_rounded,
+            size: size + 4,
+            color: zen.textMuted,
+          ),
+        ),
+      );
+    }
     return SizedBox.square(
       dimension: size + 6,
       child: Center(
@@ -636,6 +685,8 @@ class ZenBlobAvatar extends StatelessWidget {
     required this.name,
     this.online = false,
     this.away = false,
+    this.unknown = false,
+    this.noConnection = false,
     this.size = 44,
     this.glyph,
     this.image,
@@ -647,6 +698,13 @@ class ZenBlobAvatar extends StatelessWidget {
 
   /// In the background ("w tle"): the dot says so ([ZenStatusDot.away]).
   final bool away;
+
+  /// Not checked lately: the dot says so ([ZenStatusDot.unknown]).
+  final bool unknown;
+
+  /// This device has no network: the dot says so
+  /// ([ZenStatusDot.noConnection]).
+  final bool noConnection;
 
   /// The online dot (not for your own avatar).
   final bool showStatus;
@@ -738,6 +796,8 @@ class ZenBlobAvatar extends StatelessWidget {
                 child: ZenStatusDot(
                   on: online,
                   away: away,
+                  unknown: unknown,
+                  noConnection: noConnection,
                   size: size >= 36 ? 9 : 7,
                 ),
               ),

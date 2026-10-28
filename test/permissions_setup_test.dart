@@ -220,6 +220,15 @@ void main() {
     await tester.tap(find.byKey(const Key('permissions-step-bluetooth-on')));
     await tester.pumpAndSettle();
     expect(platform.asked.last, ZenPermission.bluetoothOn);
+    // Wi-Fi Direct links are on by default: their permission is a step of
+    // its own, not an optional one.
+    expect(ZenPermission.nearbyWifi.optional, isFalse);
+    await tester.ensureVisible(
+      find.byKey(const Key('permissions-step-nearby-wifi')),
+    );
+    await tester.tap(find.byKey(const Key('permissions-step-nearby-wifi')));
+    await tester.pumpAndSettle();
+    expect(platform.asked.last, ZenPermission.nearbyWifi);
 
     // The optional ones wait behind one line on the first start, and the
     // background location is not asked there at all.

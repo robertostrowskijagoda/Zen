@@ -15,6 +15,7 @@ final class FakePublicPeersBridge implements PublicPeersBridge {
   bool refuse;
   final List<List<String>?> applied = <List<String>?>[];
   Map<String, PublicPeerProbe> results = <String, PublicPeerProbe>{};
+  Map<String, PublicPeerState> live = <String, PublicPeerState>{};
 
   @override
   List<PublicPeer> builtIn() => const <PublicPeer>[
@@ -34,6 +35,9 @@ final class FakePublicPeersBridge implements PublicPeersBridge {
   @override
   Future<Map<String, PublicPeerProbe>> probe(List<String> uris) async =>
       results;
+
+  @override
+  Map<String, PublicPeerState> states() => live;
 }
 
 final class MemoryPublicPeersStore implements PublicPeersStore {
@@ -297,8 +301,31 @@ void main() {
       ],
     });
     expect(builtIn.length, 2);
+    // Every built-in peer is on: the device keeps the ones it does not dial
+    // in reserve, nothing is switched off unless the person does it.
     expect(builtIn.first.enabled, isTrue);
-    expect(builtIn.last.enabled, isFalse);
+    expect(builtIn.last.enabled, isTrue);
+    expect(builtIn.first.country, 'Poland');
+    final Map<String, PublicPeerState> states = publicPeerStatesFrom(
+      <String, dynamic>{
+        'states': <String, Object?>{
+          'tls://203.0.113.1:443': 'up',
+          'quic://203.0.113.2:443': 'standby',
+          'tls://203.0.113.3:443': 'aside',
+          'tls://203.0.113.4:443': 'failing',
+          'tls://203.0.113.5:443': 'connecting',
+          'tls://203.0.113.6:443': 'unheard of',
+        },
+      },
+    );
+    expect(states, <String, PublicPeerState>{
+      'tls://203.0.113.1:443': PublicPeerState.up,
+      'quic://203.0.113.2:443': PublicPeerState.standby,
+      'tls://203.0.113.3:443': PublicPeerState.aside,
+      'tls://203.0.113.4:443': PublicPeerState.failing,
+      'tls://203.0.113.5:443': PublicPeerState.connecting,
+    });
+    expect(publicPeerStatesFrom(const <String, dynamic>{}), isEmpty);
     final Map<String, PublicPeerProbe> probes = publicPeerProbesFrom(
       <String, dynamic>{
         'results': <Object?>[

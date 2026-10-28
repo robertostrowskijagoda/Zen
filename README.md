@@ -224,28 +224,43 @@ Option names may differ a little depending on the phone. You do this once.
 
 ### iPhone
 
-**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/iphone/)**, four steps on the phone, no computer:
+**[Step by step, with pictures](https://robertostrowskijagoda.github.io/Zen/install/iphone/)**:
+**[SideStore](https://sidestore.io/)** installs Zen with your own Apple
+Account (a free one is enough). You need a computer and a cable once, Wi-Fi,
+a passcode on the iPhone and iOS 15 or later; about 15 minutes.
 
-1. Get **Scarlet**, an installer that signs apps on the iPhone, from its own
-   website (the install page links it; beware of look-alike sites).
-2. If iOS asks, trust its certificate: **Settings → General → VPN & Device
-   Management**.
-3. Download [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa) in Safari.
-4. In Scarlet hold the download arrow, choose **Sideload IPA**, pick the file
-   and tap **Install**.
+1. On the iPhone install **LocalDevVPN** from the App Store, open it and tap
+   **Connect**. SideStore needs this VPN on whenever it installs or renews apps.
+2. On the computer install **iloader**
+   ([SideStore's guide](https://docs.sidestore.io/docs/installation/prerequisites)),
+   connect the iPhone by cable, sign in with your Apple Account and choose
+   **Install SideStore (Stable)**.
+3. On the iPhone: **Settings → General → VPN & Device Management** → your
+   Apple Account → trust it; on iOS 16 and later also **Settings → Privacy &
+   Security → Developer Mode**.
+4. Open SideStore (LocalDevVPN connected), sign in with the same Apple Account
+   and tap the **7 DAYS** counter next to SideStore in **My Apps**.
+5. Add Zen's source (**Add Zen to SideStore** on the install page, or in
+   SideStore **Sources → +**:
+   `https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen
+   from it.
+6. Let it renew by itself: in the Shortcuts app make a daily **Time of Day**
+   automation that runs immediately, with **Set VPN** (connect LocalDevVPN)
+   and SideStore's **Refresh All Apps**. An app signed with a free Apple
+   Account opens for 7 days; SideStore renews it on the phone, no computer
+   needed.
+7. New versions: Zen tells you, and its update button hands the new version
+   to SideStore (or **My Apps → Update** next to Zen).
 
-**Honestly:** Scarlet signs Zen with a certificate it provides. Apple can
-revoke such certificates; then Zen stops opening until you install it again the
-same way. Whether that keeps your data is not verified, so make a full
-account copy first (**Settings → Account and recovery**). Zen's own encryption
-does not depend on that certificate. A new release means a new file from the
-install page, installed the same way.
-
-Other ways, one line: **SideStore** or **AltStore Classic** (add the Zen
-source `https://robertostrowskijagoda.github.io/Zen/apps.json`; with a free Apple ID the signature expires after 7
-days and SideStore refreshes it, one tap on the install page) and Sideloadly
-(from a computer). The source always points to the latest release's
+With a free Apple Account at most 3 apps from SideStore run at a time,
+SideStore included. If the 7 days run out, Zen only stops opening until it is
+renewed (LocalDevVPN on, tap the counter in SideStore); its data stays. After
+an iOS update SideStore may need a new pairing file
+([guide](https://docs.sidestore.io/docs/advanced/pairing-file)). The source
+always points to the latest release's
 [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa).
+Other ways: **AltStore Classic** (the same source; it renews through AltServer
+on a computer) and Sideloadly (from a computer).
 
 **What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
 the background for long. Messages and calls arrive while Zen is open, and
@@ -559,8 +574,8 @@ If you have a job for me, let me know — you can find me on LinkedIn, among oth
 ## Thanks
 
 Thanks to **[Yggdrasil](https://yggdrasil-network.github.io/)**, the open,
-encrypted mesh network Zen runs on, and **[Scarlet](https://usescarlet.com/)**,
-which makes installing Zen on an iPhone simple.
+encrypted mesh network Zen runs on, and **[SideStore](https://sidestore.io/)**,
+which installs Zen on an iPhone and keeps it renewed right on the phone.
 
 ## License
 

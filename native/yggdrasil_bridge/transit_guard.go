@@ -213,10 +213,11 @@ type transitHold struct {
 	// A friend's bridge was up when the hold began: the bridges are the
 	// phone's way to the mesh, with no public peer, while one stays up.
 	onBridges bool
-	// How many public peers the phone dialled before, and how many of them
-	// it set aside.
+	// How many public peers the phone dialled before, and which of them it
+	// set aside (setAside of them).
 	target   int
 	setAside int
+	aside    []string
 }
 
 // chooseTransitKeep picks the one peering a holding phone keeps: the first
@@ -339,6 +340,17 @@ func (node *bridgeNode) checkTransitHold(now time.Time) {
 	}
 }
 
+// transitAsidePeers are the public peers a hold set aside (none while the
+// node does not hold).
+func (node *bridgeNode) transitAsidePeers() []string {
+	node.transitHoldMu.Lock()
+	defer node.transitHoldMu.Unlock()
+	if node.transitHold == nil {
+		return nil
+	}
+	return append([]string(nil), node.transitHold.aside...)
+}
+
 // transitHoldLink reports whether the node holds and which device nearby
 // it keeps ("" none).
 func (node *bridgeNode) transitHoldLink() (string, bool) {
@@ -409,9 +421,24 @@ func (node *bridgeNode) beginTransitHold(hold time.Duration, rate uint64) {
 		before := keeper.dialled
 		keeper.dialled = after
 		keeper.mu.Unlock()
+		kept := make(map[string]bool, len(after))
+		for _, peer := range after {
+			kept[peer] = true
+		}
+		var aside []string
+		for _, peer := range before {
+			if !kept[peer] {
+				aside = append(aside, peer)
+			}
+		}
+		// A stand-in for the peer kept is never one set aside.
+		keeper.mu.Lock()
+		keeper.rotation.setAside(aside)
+		keeper.mu.Unlock()
 		node.transitHoldMu.Lock()
 		state.target = target
-		state.setAside = len(before) - len(after)
+		state.setAside = len(aside)
+		state.aside = aside
 		node.transitHoldMu.Unlock()
 		node.swapPublicPeers(before, after)
 	}
@@ -440,6 +467,7 @@ func (node *bridgeNode) endTransitHold() {
 	if keeper := node.phonePeers; keeper != nil {
 		keeper.mu.Lock()
 		keeper.rotation.target = state.target
+		keeper.rotation.setAside(nil)
 		before := keeper.dialled
 		after := keeper.rotation.fill(before)
 		keeper.dialled = after

@@ -10,6 +10,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/unmetered_network.dart';
+import 'package:zen/src/core/utils/quiet_timer.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -41,8 +42,14 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// Quiet time before reactions are bundled and passed on.
-const Duration kReactionRelayDelay = Duration(seconds: 20);
+/// Quiet time before reactions are bundled and passed on (a like or a
+/// comment reaches the author's other friends this soon).
+const Duration kReactionRelayDelay = Duration(seconds: 5);
+
+/// The longest reactions wait to be bundled while more keep coming: a
+/// lively thread is passed on about once a minute, not only once it calms
+/// down.
+const Duration kReactionRelayAtMost = Duration(minutes: 1);
 
 /// Off by default (tests, previews); the real app turns it on at bootstrap.
 final Provider<bool> ledgerNodeEnabledProvider = Provider<bool>(
@@ -501,22 +508,10 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   );
   // Likes and comments travel along the reshare tree: after a quiet
   // moment, bundle what this circle said about posts we wrote or reshared.
-  Timer? relayTimer;
-  const Set<String> relayKinds = <String>{
-    kLikeKind,
-    kCommentKind,
-    kReactionsKind,
-    kReshareKind,
-    ...kReactionRelayExtraKinds,
-  };
-  final StreamSubscription<LogEntry> relaySub = node.store.added.listen((
-    LogEntry e,
-  ) {
-    if (!relayKinds.contains(e.kind)) {
-      return;
-    }
-    relayTimer?.cancel();
-    relayTimer = Timer(kReactionRelayDelay, () {
+  final QuietTimer relayTimer = QuietTimer(
+    quiet: kReactionRelayDelay,
+    atMost: kReactionRelayAtMost,
+    action: () {
       final SocialHubState social = ref.read(socialHubControllerProvider);
       unawaitedLogged(
         relayReactions(
@@ -528,12 +523,26 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
         ),
         context: 'Przekazanie reakcji nie udało się',
       );
-    });
+    },
+  );
+  const Set<String> relayKinds = <String>{
+    kLikeKind,
+    kCommentKind,
+    kReactionsKind,
+    kReshareKind,
+    ...kReactionRelayExtraKinds,
+  };
+  final StreamSubscription<LogEntry> relaySub = node.store.added.listen((
+    LogEntry e,
+  ) {
+    if (relayKinds.contains(e.kind)) {
+      relayTimer.nudge();
+    }
   });
   ref.onDispose(() {
     security.removeListener(lockAccountKey);
     unmanaged.cancel();
-    relayTimer?.cancel();
+    relayTimer.cancel();
     contactsTimer?.cancel();
     unawaitedLogged(contactsSub.cancel(), context: 'Zatrzymanie kopii');
     unawaitedLogged(chatSync.stop(), context: 'Zatrzymanie wspólnych rozmów');

@@ -34,8 +34,11 @@ final class GithubInstallOutcome {
 /// Installs a release file that [GithubUpdateService] downloaded and
 /// checked against the release's `SHA256SUMS`; a fake in tests.
 abstract interface class GithubUpdateInstaller {
+  /// The kind of installation (what "Aktualizuj" does).
+  UpdateTarget get target;
+
   /// The release file that updates this installation, or null where Zen
-  /// cannot update itself (iOS: only the prompt).
+  /// downloads nothing (iOS, Flatpak).
   String? get assetName;
 
   /// Where the download goes.
@@ -53,6 +56,101 @@ String get flatpakUpdateHint => t(
   'flatpak install --user ./Zen-Linux-x64.flatpak',
 );
 
+/// The label of the iPhone and iPad update button, which hands the IPA of
+/// the new version to SideStore.
+String get iosSideStoreLabel => t('Zaktualizuj w SideStore');
+
+/// The label of the quieter iPhone and iPad button, which opens the IPA of
+/// [version] in Safari (for the "+" in SideStore's "My Apps").
+String iosDownloadLabel(String version) =>
+    t('Pobierz Zen {version}', {'version': version});
+
+/// Said on iPhone and iPad above [iosUpdateSteps] (Zen downloads nothing
+/// there: SideStore installs the IPA).
+String get iosUpdateHint => t(
+  'Na iPhonie i iPadzie Zen nie zainstaluje się sam. Zaktualizujesz go '
+  'w SideStore:',
+);
+
+/// The update of an iPhone or iPad to [version], step by step, in the words
+/// of the iPhone install page and the install guide.
+List<String> iosUpdateSteps(String version) => <String>[
+  t('Otwórz LocalDevVPN i stuknij „Connect”.'),
+  t(
+    'Stuknij „Zaktualizuj w SideStore”: SideStore pobierze Zen {version} '
+    'i go zainstaluje.',
+    {'version': version},
+  ),
+  t('Nie usuwaj wcześniej obecnego Zen: nowa wersja zastąpi starą.'),
+];
+
+/// Said on iPhone and iPad below [iosUpdateSteps]: the other ways in
+/// SideStore itself.
+String iosOtherWaysHint(String version) => t(
+  'Ze źródłem Zen w SideStore wystarczy też „My Apps” → „Update” przy Zen. '
+  'Bez SideStore pod ręką: stuknij „Pobierz Zen {version}”, a potem w '
+  'SideStore w „My Apps” stuknij „+” i wybierz Zen-unsigned.ipa.',
+  {'version': version},
+);
+
+/// What "Aktualizuj" will do on [target] with the release file [file],
+/// said before it is tapped; null where Zen downloads nothing.
+String? githubUpdatePlan(UpdateTarget target, String file) => switch (target) {
+  UpdateTarget.android => t(
+    'Zen pobierze {file}, sprawdzi go i otworzy instalator Androida: '
+    'potwierdź tam instalację. Za pierwszym razem Android poprosi o '
+    'zgodę na instalowanie aplikacji z Zen.',
+    {'file': file},
+  ),
+  UpdateTarget.windows || UpdateTarget.macos || UpdateTarget.linuxTarball => t(
+    'Zen pobierze {file}, sprawdzi go, zamknie się i uruchomi w nowej '
+    'wersji. Jeśli nie może sam podmienić swoich plików, zapisze '
+    'pobrany plik w Pobranych i powie, co dalej.',
+    {'file': file},
+  ),
+  UpdateTarget.linuxDeb => t(
+    'Zen pobierze {file}, sprawdzi go i zapisze w Pobranych. Pakiet '
+    'zainstalujesz instalatorem pakietów albo poleceniem apt (z hasłem '
+    'administratora).',
+    {'file': file},
+  ),
+  UpdateTarget.flatpak || UpdateTarget.ios || UpdateTarget.other => null,
+};
+
+/// What the person does with [file], saved in [folder] because Zen could
+/// not swap its own files ([path]: the whole path of the saved file).
+String savedUpdateMessage(
+  UpdateTarget target, {
+  required String file,
+  required String folder,
+  required String path,
+}) => switch (target) {
+  UpdateTarget.windows => t(
+    'Zapisano {file} w {folder}. Zamknij Zen, rozpakuj cały plik i zastąp '
+    'nim obecny folder Zen.',
+    {'file': file, 'folder': folder},
+  ),
+  UpdateTarget.macos => t(
+    'Zapisano {file} w {folder}. Zamknij Zen, otwórz plik i przeciągnij Zen '
+    'do Aplikacji, zastępując obecny.',
+    {'file': file, 'folder': folder},
+  ),
+  UpdateTarget.linuxTarball => t(
+    'Zapisano {file} w {folder}. Zamknij Zen, rozpakuj archiwum i zastąp '
+    'nim obecny folder Zen.',
+    {'file': file, 'folder': folder},
+  ),
+  UpdateTarget.linuxDeb => t(
+    'Zapisano {file} w {folder}. Otwórz go instalatorem pakietów albo '
+    'wpisz: sudo apt install {path}',
+    {'file': file, 'folder': folder, 'path': shellQuote(path)},
+  ),
+  _ => t('Zapisano {file} w {folder}. Uruchom go, żeby zaktualizować Zen.', {
+    'file': file,
+    'folder': folder,
+  }),
+};
+
 /// Whether [environment] and the file system are those of a Flatpak
 /// sandbox: `FLATPAK_ID` is set there, and `/.flatpak-info` exists even
 /// when the environment was cleared.
@@ -69,6 +167,14 @@ bool runningInFlatpak() =>
       Platform.environment,
       (String path) => File(path).existsSync(),
     );
+
+/// The kind of this installation.
+UpdateTarget currentUpdateTarget() => kIsWeb
+    ? UpdateTarget.other
+    : updateTargetFor(
+        operatingSystem: Platform.operatingSystem,
+        linux: Platform.isLinux ? currentLinuxInstall() : LinuxInstall.tarball,
+      );
 
 /// How this Linux installation was made.
 LinuxInstall currentLinuxInstall() {
@@ -90,10 +196,14 @@ LinuxInstall currentLinuxInstall() {
 ///   Files, `/opt/zen` of the .deb), or is not provably Zen's own (Windows
 ///   and Linux: [isOwnAppFolder], so never Downloads or the Desktop with
 ///   Zen's files unpacked loose into it), the file is saved to Downloads
-///   and its folder opened instead.
+///   and its folder opened instead, with what to do ([savedUpdateMessage]).
+/// * Linux `.deb`: saved to Downloads for the package installer (`/opt/zen`
+///   belongs to the package manager).
 /// * Flatpak: nothing ([assetName] is null). The sandbox can neither write
 ///   to Downloads nor run `flatpak install`; the banner opens the release
 ///   page instead ([flatpakUpdateHint]).
+/// * iOS: nothing ([assetName] is null); the banner hands the release's
+///   IPA to SideStore ([GithubUpdateRoute.sideload]).
 final class SystemGithubInstaller implements GithubUpdateInstaller {
   SystemGithubInstaller({Future<void> Function()? quit})
     : _quit = quit ?? _quitForUpdate {
@@ -107,7 +217,13 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
   final Future<void> Function() _quit;
 
   @override
-  String? get assetName => kIsWeb || runningInFlatpak()
+  final UpdateTarget target = currentUpdateTarget();
+
+  @override
+  String? get assetName =>
+      target == UpdateTarget.flatpak ||
+          target == UpdateTarget.ios ||
+          target == UpdateTarget.other
       ? null
       : githubAssetName(
           releasePlatform: currentReleasePlatform(),
@@ -136,14 +252,17 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
 
   @override
   Future<GithubInstallOutcome> install(File file, GithubRelease release) async {
-    if (Platform.isAndroid) {
+    if (target == UpdateTarget.android) {
       return _installApk(file);
     }
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      final _Swap swap =
-          !Platform.isLinux || currentLinuxInstall() == LinuxInstall.tarball
-          ? await _swapInPlace(file, release)
-          : _Swap.failed;
+    if (target == UpdateTarget.windows ||
+        target == UpdateTarget.macos ||
+        target == UpdateTarget.linuxTarball ||
+        target == UpdateTarget.linuxDeb) {
+      // The .deb's /opt/zen belongs to the package manager: never swapped.
+      final _Swap swap = target == UpdateTarget.linuxDeb
+          ? _Swap.failed
+          : await _swapInPlace(file, release);
       if (swap == _Swap.notOwnFolder) {
         return _saveForPerson(file, notOwnFolder: true);
       }
@@ -160,6 +279,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       }
       return _saveForPerson(file);
     }
+    await _deleteQuietly(file);
     return GithubInstallOutcome(
       t('Na tym urządzeniu zaktualizuj Zen tak, jak go instalowano.'),
       ok: false,
@@ -379,10 +499,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       );
     }
     return GithubInstallOutcome(
-      t('Zapisano {file} w {folder}. Uruchom go, żeby zaktualizować Zen.', {
-        'file': name,
-        'folder': dir.path,
-      }),
+      savedUpdateMessage(target, file: name, folder: dir.path, path: out.path),
     );
   }
 }

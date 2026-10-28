@@ -258,12 +258,19 @@ final class PublicPeerList {
     final Map<String, PublicPeer> before = <String, PublicPeer>{
       for (final PublicPeer p in base) p.uri: p,
     };
-    final Set<String> now = <String>{for (final PublicPeer p in builtIn) p.uri};
+    final Map<String, PublicPeer> now = <String, PublicPeer>{
+      for (final PublicPeer p in builtIn) p.uri: p,
+    };
+    // A built-in peer the user left as it was follows this build's default
+    // (before 1.14.0 only the first picks were on); one the user switched
+    // stays as they set it.
+    bool untouched(PublicPeer p) =>
+        before[p.uri] != null && before[p.uri]!.enabled == p.enabled;
     final List<PublicPeer> merged = <PublicPeer>[
       for (final PublicPeer p in peers)
-        if (now.contains(p.uri) ||
-            before[p.uri] == null ||
-            before[p.uri]!.enabled != p.enabled)
+        if (now.containsKey(p.uri))
+          untouched(p) ? now[p.uri]! : p
+        else if (!untouched(p))
           p,
     ];
     final Set<String> have = <String>{for (final PublicPeer p in merged) p.uri};
@@ -320,6 +327,56 @@ final class PublicPeerList {
     );
     return list.active.isEmpty ? null : list;
   }
+}
+
+/// What this device does with a peer of its pool now (the bridge's
+/// public_peers_exports.go, publicPeerStates).
+enum PublicPeerState {
+  /// Dialled, and the link is up.
+  up('up'),
+
+  /// Dialled, not up yet.
+  connecting('connecting'),
+
+  /// Dialled, and the last try failed: a phone swaps it for one in reserve
+  /// soon, a computer keeps trying.
+  failing('failing'),
+
+  /// Set aside for a while by the transit guard (too much of others' mesh
+  /// traffic went through this phone).
+  aside('aside'),
+
+  /// Not dialled now: waits in reserve. A device dials only a few peers of
+  /// its list at once.
+  standby('standby');
+
+  const PublicPeerState(this.wire);
+
+  final String wire;
+
+  static PublicPeerState? fromWire(Object? value) {
+    for (final PublicPeerState state in values) {
+      if (state.wire == value) {
+        return state;
+      }
+    }
+    return null;
+  }
+}
+
+/// The states from the bridge's `{states: {uri: state}}`.
+Map<String, PublicPeerState> publicPeerStatesFrom(
+  Map<String, dynamic> payload,
+) {
+  final Object? states = payload['states'];
+  if (states is! Map) {
+    return const <String, PublicPeerState>{};
+  }
+  return <String, PublicPeerState>{
+    for (final MapEntry<Object?, Object?> entry in states.entries)
+      if (entry.key is String && PublicPeerState.fromWire(entry.value) != null)
+        entry.key! as String: PublicPeerState.fromWire(entry.value)!,
+  };
 }
 
 /// What checking a peer found.
@@ -414,6 +471,10 @@ abstract interface class PublicPeersBridge {
 
   /// Checks [uris]; off the UI isolate, a few seconds at most.
   Future<Map<String, PublicPeerProbe>> probe(List<String> uris);
+
+  /// What the running nodes do with each peer of the pool now (empty while
+  /// none runs). From memory, at once.
+  Map<String, PublicPeerState> states();
 }
 
 /// No bridge (tests, previews): nothing built in, nothing checked.
@@ -429,6 +490,9 @@ final class NoPublicPeersBridge implements PublicPeersBridge {
   @override
   Future<Map<String, PublicPeerProbe>> probe(List<String> uris) async =>
       const <String, PublicPeerProbe>{};
+
+  @override
+  Map<String, PublicPeerState> states() => const <String, PublicPeerState>{};
 }
 
 /// The Go bridge (public_peers_exports.go).
@@ -455,9 +519,16 @@ final class FfiPublicPeersBridge implements PublicPeersBridge {
     );
     return publicPeerProbesFrom(result);
   }
+
+  @override
+  Map<String, PublicPeerState> states() =>
+      publicPeerStatesFrom(_bridge.publicPeerStates());
 }
 
-/// The built-in list from the bridge's `{peers: [...]}`.
+/// The built-in list from the bridge's `{peers: [...]}`, in the order this
+/// device tries them. Every one is on: the device dials a few at once and
+/// keeps the others in reserve (`chosen` only names its first picks), so a
+/// switch is off only where the person switched it off.
 List<PublicPeer> builtInPublicPeersFrom(Map<String, dynamic> payload) {
   final Object? peers = payload['peers'];
   if (peers is! List) {
@@ -468,7 +539,6 @@ List<PublicPeer> builtInPublicPeersFrom(Map<String, dynamic> payload) {
       if (entry is Map && entry['uri'] is String)
         PublicPeer(
           uri: entry['uri'] as String,
-          enabled: entry['chosen'] == true,
           country: entry['country'] is String ? entry['country'] as String : '',
         ),
   ];
@@ -538,6 +608,7 @@ final class PublicPeersState {
     this.custom = false,
     this.peers = const <PublicPeer>[],
     this.probes = const <String, PublicPeerProbe>{},
+    this.live = const <String, PublicPeerState>{},
     this.checking = false,
     this.error,
   });
@@ -546,6 +617,10 @@ final class PublicPeersState {
   final bool custom;
   final List<PublicPeer> peers;
   final Map<String, PublicPeerProbe> probes;
+
+  /// What the running nodes do with each peer now ([PublicPeerState]);
+  /// empty while none runs.
+  final Map<String, PublicPeerState> live;
   final bool checking;
 
   /// Why the last change did not take, or null.
@@ -553,11 +628,17 @@ final class PublicPeersState {
 
   int get activeCount => peers.where((PublicPeer peer) => peer.enabled).length;
 
+  /// Switched-on peers in [state] now.
+  int countLive(PublicPeerState state) => peers
+      .where((PublicPeer peer) => peer.enabled && live[peer.uri] == state)
+      .length;
+
   PublicPeersState copyWith({
     bool? loaded,
     bool? custom,
     List<PublicPeer>? peers,
     Map<String, PublicPeerProbe>? probes,
+    Map<String, PublicPeerState>? live,
     bool? checking,
     String? error,
     bool clearError = false,
@@ -566,6 +647,7 @@ final class PublicPeersState {
     custom: custom ?? this.custom,
     peers: peers ?? this.peers,
     probes: probes ?? this.probes,
+    live: live ?? this.live,
     checking: checking ?? this.checking,
     error: clearError ? null : error ?? this.error,
   );
@@ -606,6 +688,25 @@ final class PublicPeersController extends Notifier<PublicPeersState> {
       custom: kept != null,
       peers: kept?.mergedWith(_builtIn).peers ?? _builtIn,
     );
+    refreshStates();
+  }
+
+  /// Reads again what the running nodes do with each peer (cheap: from
+  /// the bridge's memory). The settings call it every few seconds while
+  /// they are on the screen.
+  void refreshStates() {
+    if (!ref.mounted) {
+      return;
+    }
+    Map<String, PublicPeerState> live = const <String, PublicPeerState>{};
+    try {
+      live = ref.read(publicPeersBridgeProvider).states();
+    } on Object catch (error) {
+      logZenWarning('Public peer states unavailable: $error');
+    }
+    if (!mapEquals(live, state.live)) {
+      state = state.copyWith(live: live);
+    }
   }
 
   /// Adds [raw]; returns why it was not added, or null.
@@ -703,6 +804,7 @@ final class PublicPeersController extends Notifier<PublicPeersState> {
   void _apply(List<String>? uris) {
     try {
       ref.read(publicPeersBridgeProvider).apply(uris);
+      refreshStates();
     } on Object catch (error) {
       logZenWarning('The public peer list was not applied: $error');
       if (ref.mounted) {
@@ -731,5 +833,6 @@ final class PublicPeersController extends Notifier<PublicPeersState> {
       return;
     }
     state = state.copyWith(checking: false, probes: probes);
+    refreshStates();
   }
 }

@@ -15,6 +15,7 @@ import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
 import 'package:zen/src/features/update/presentation/github_update_banner.dart';
+import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
@@ -33,14 +34,30 @@ Map<String, Object?> _releaseJson(
   ],
 };
 
+/// An iPhone's update check and what it opened, copied and downloaded.
+typedef _IosRun = ({
+  GithubUpdateService service,
+  List<String> pages,
+  List<String> links,
+  List<String> copied,
+  List<Uri> downloads,
+});
+
 final class _FakeInstaller implements GithubUpdateInstaller {
-  _FakeInstaller(this.dir, {this.assetName = 'Zen-arm64-v8a.apk'});
+  _FakeInstaller(
+    this.dir, {
+    this.assetName = 'Zen-arm64-v8a.apk',
+    this.target = UpdateTarget.android,
+  });
 
   final Directory dir;
   final List<File> installed = <File>[];
 
   @override
   final String? assetName;
+
+  @override
+  final UpdateTarget target;
 
   @override
   Future<Directory> workDirectory() async => dir;
@@ -180,6 +197,192 @@ void main() {
         isTrue,
       );
       expect(flatpakUpdateHint, contains('flatpak install --user'));
+    });
+
+    test('each system is its own kind of installation', () {
+      UpdateTarget target(String os, [LinuxInstall l = LinuxInstall.tarball]) =>
+          updateTargetFor(operatingSystem: os, linux: l);
+      expect(target('android'), UpdateTarget.android);
+      expect(target('windows'), UpdateTarget.windows);
+      // The Mac is never taken for an iPhone, nor an iPad for a Mac.
+      expect(target('macos'), UpdateTarget.macos);
+      expect(target('ios'), UpdateTarget.ios);
+      expect(target('linux'), UpdateTarget.linuxTarball);
+      expect(target('linux', LinuxInstall.deb), UpdateTarget.linuxDeb);
+      expect(target('linux', LinuxInstall.flatpak), UpdateTarget.flatpak);
+      // The install kind matters on Linux only.
+      expect(target('macos', LinuxInstall.flatpak), UpdateTarget.macos);
+      expect(target('fuchsia'), UpdateTarget.other);
+    });
+
+    test('what "Aktualizuj" does on each kind of installation', () {
+      final GithubRelease release = GithubRelease.fromJson(
+        _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{
+            'Zen-arm64-v8a.apk': 5,
+            'Zen-Windows.zip': 5,
+            'Zen-macOS.zip': 5,
+            'Zen-Linux-x64.tar.gz': 5,
+            'Zen-Linux-x64.deb': 5,
+            'Zen-Linux-x64.flatpak': 5,
+            'Zen-unsigned.ipa': 5,
+          },
+        ),
+      )!;
+      GithubUpdateRoute route(UpdateTarget t, String? file) =>
+          githubUpdateRoute(target: t, release: release, assetName: file);
+      expect(
+        route(UpdateTarget.android, 'Zen-arm64-v8a.apk'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.windows, 'Zen-Windows.zip'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.macos, 'Zen-macOS.zip'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.linuxTarball, 'Zen-Linux-x64.tar.gz'),
+        GithubUpdateRoute.download,
+      );
+      expect(
+        route(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        GithubUpdateRoute.download,
+      );
+      // iPhone and iPad never download, whatever file is named.
+      expect(route(UpdateTarget.ios, null), GithubUpdateRoute.sideload);
+      expect(
+        route(UpdateTarget.ios, 'Zen-unsigned.ipa'),
+        GithubUpdateRoute.sideload,
+      );
+      // A Flatpak never installs the bundle (nor a .deb) itself.
+      expect(route(UpdateTarget.flatpak, null), GithubUpdateRoute.flatpak);
+      expect(
+        route(UpdateTarget.flatpak, 'Zen-Linux-x64.flatpak'),
+        GithubUpdateRoute.flatpak,
+      );
+      // The release lacks this device's file (Windows ARM64 is optional).
+      expect(
+        route(UpdateTarget.windows, 'Zen-Windows-arm64.zip'),
+        GithubUpdateRoute.releasePage,
+      );
+      expect(route(UpdateTarget.other, null), GithubUpdateRoute.releasePage);
+    });
+
+    test('SideStore and Safari get the IPA of exactly the announced '
+        'version', () {
+      final GithubRelease release = GithubRelease.fromJson(
+        _releaseJson('v1.12.0', assets: <String, int>{kIosIpaAssetName: 9}),
+      )!;
+      expect(kIosIpaAssetName, 'Zen-unsigned.ipa');
+      expect(
+        iosIpaUrl(release),
+        'https://github.com/robertostrowskijagoda/Zen/'
+        'releases/download/v1.12.0/Zen-unsigned.ipa',
+      );
+      expect(
+        iosIpaUrl(GithubRelease.fromJson(_releaseJson('v1.12.0'))!),
+        isNull,
+      );
+      // SideStore's documented links: install that very IPA, add the
+      // source (apps.json, the one the iPhone page adds). iOS opens the
+      // source link exactly and install links only for this repository's
+      // release IPAs.
+      expect(
+        sideStoreInstallLink(iosIpaUrl(release)!),
+        'sidestore://install?url=https://github.com/robertostrowskijagoda/'
+        'Zen/releases/download/v1.12.0/Zen-unsigned.ipa',
+      );
+      expect(
+        kSideStoreSourceUrl,
+        'https://robertostrowskijagoda.github.io/Zen/apps.json',
+      );
+      expect(
+        kSideStoreSourceLink,
+        'sidestore://source?url=$kSideStoreSourceUrl',
+      );
+      final String swift = File(
+        'ios/Runner/AppDelegate.swift',
+      ).readAsStringSync();
+      expect(swift, contains('"$kSideStoreSourceLink"'));
+      expect(
+        swift,
+        contains(
+          '"sidestore://install?url=https://github.com/'
+          'robertostrowskijagoda/Zen/releases/download/"',
+        ),
+      );
+      expect(swift, contains('"/Zen-unsigned.ipa"'));
+      expect(kIphoneInstallPageUrl, endsWith('/install/iphone/'));
+      expect(kIphoneInstallPageUrl, startsWith('https://'));
+    });
+
+    test('the texts say what happens on each system', () {
+      expect(
+        githubUpdatePlan(UpdateTarget.android, 'Zen-arm64-v8a.apk'),
+        allOf(contains('Zen-arm64-v8a.apk'), contains('instalator Androida')),
+      );
+      expect(
+        githubUpdatePlan(UpdateTarget.windows, 'Zen-Windows.zip'),
+        contains('zamknie się i uruchomi'),
+      );
+      expect(
+        githubUpdatePlan(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        contains('instalatorem pakietów'),
+      );
+      for (final UpdateTarget t in <UpdateTarget>[
+        UpdateTarget.ios,
+        UpdateTarget.flatpak,
+        UpdateTarget.other,
+      ]) {
+        expect(githubUpdatePlan(t, 'x'), isNull, reason: t.name);
+      }
+      String saved(UpdateTarget t, String file) => savedUpdateMessage(
+        t,
+        file: file,
+        folder: '/home/a/Pobrane',
+        path: '/home/a/Pobrane/$file',
+      );
+      expect(
+        saved(UpdateTarget.linuxDeb, 'Zen-Linux-x64.deb'),
+        contains("sudo apt install '/home/a/Pobrane/Zen-Linux-x64.deb'"),
+      );
+      expect(saved(UpdateTarget.macos, 'Zen-macOS.zip'), contains('Aplikacji'));
+      expect(
+        saved(UpdateTarget.windows, 'Zen-Windows.zip'),
+        contains('rozpakuj'),
+      );
+      expect(
+        saved(UpdateTarget.linuxTarball, 'Zen-Linux-x64.tar.gz'),
+        contains('rozpakuj'),
+      );
+      expect(iosUpdateHint, contains('SideStore'));
+      expect(iosSideStoreLabel, 'Zaktualizuj w SideStore');
+      expect(iosDownloadLabel('1.12.0'), 'Pobierz Zen 1.12.0');
+      final List<String> steps = iosUpdateSteps('1.12.0');
+      expect(steps, hasLength(3));
+      // The words of the iPhone install page and the install guide: the
+      // VPN first, then the button that hands the IPA to SideStore.
+      expect(steps[0], allOf(contains('LocalDevVPN'), contains('„Connect”')));
+      expect(
+        steps[1],
+        allOf(contains('„Zaktualizuj w SideStore”'), contains('1.12.0')),
+      );
+      expect(steps[2], contains('Nie usuwaj'));
+      // The other ways in SideStore: "Update" with the source, "+" with the
+      // file from Safari.
+      expect(
+        iosOtherWaysHint('1.12.0'),
+        allOf(
+          contains('„My Apps” → „Update”'),
+          contains('„Pobierz Zen 1.12.0”'),
+          contains('„+”'),
+          contains('Zen-unsigned.ipa'),
+        ),
+      );
     });
 
     test('SHA256SUMS must list the file by name with its sum', () {
@@ -756,13 +959,240 @@ void main() {
       expect(installer.installed, isEmpty);
     });
 
-    test('where Zen cannot install itself (iOS) only the prompt', () async {
+    group('iPhone and iPad', () {
+      const String ipa =
+          'https://github.com/robertostrowskijagoda/Zen/releases/download/'
+          'v1.12.0/Zen-unsigned.ipa';
+      final Map<String, Object?> withIpa = _releaseJson(
+        'v1.12.0',
+        assets: <String, int>{'Zen-unsigned.ipa': 9, 'Zen-arm64-v8a.apk': 5},
+      );
+
+      _IosRun ios({
+        Map<String, Object?>? json,
+        bool Function(String url)? browser,
+        bool sideStore = true,
+        String? assetName,
+      }) {
+        final List<String> pages = <String>[];
+        final List<String> links = <String>[];
+        final List<String> copied = <String>[];
+        final List<Uri> downloads = <Uri>[];
+        final GithubUpdateService s = GithubUpdateService(
+          installer: _FakeInstaller(
+            dir,
+            assetName: assetName,
+            target: UpdateTarget.ios,
+          ),
+          fetchJson: (Uri uri) async => json ?? withIpa,
+          fetchSums: (Uri uri) async => '',
+          download:
+              (
+                Uri uri,
+                File target, {
+                required int maxBytes,
+                void Function(int received)? onProgress,
+              }) async => downloads.add(uri),
+          openPage: (String url) async {
+            pages.add(url);
+            return browser?.call(url) ?? true;
+          },
+          openSideStore: (String link) async {
+            links.add(link);
+            return sideStore;
+          },
+          copy: (String text) async => copied.add(text),
+          currentVersion: '1.11.0',
+        );
+        addTearDown(s.dispose);
+        return (
+          service: s,
+          pages: pages,
+          links: links,
+          copied: copied,
+          downloads: downloads,
+        );
+      }
+
+      test('never download an IPA, even when a file is named', () async {
+        final _IosRun r = ios(assetName: 'Zen-unsigned.ipa');
+        await r.service.check();
+        expect(r.service.showNewerBanner, isTrue);
+        expect(r.service.route, GithubUpdateRoute.sideload);
+        expect(r.service.canInstall, isFalse);
+        await r.service.update();
+        expect(r.service.installState, GithubInstallState.idle);
+        await r.service.openInSideStore();
+        await r.service.openIpaInSafari();
+        expect(r.downloads, isEmpty);
+      });
+
+      test('SideStore gets the IPA of exactly the announced version', () async {
+        final _IosRun r = ios();
+        await r.service.check();
+        await r.service.openInSideStore();
+        expect(r.links, <String>['sidestore://install?url=$ipa']);
+        expect(r.pages, isEmpty);
+        expect(r.downloads, isEmpty);
+        expect(r.service.installState, GithubInstallState.done);
+        // What to check when the install does not start: the VPN.
+        expect(
+          r.service.installMessage,
+          allOf(
+            contains('Otwarto SideStore'),
+            contains('1.12.0'),
+            contains('LocalDevVPN'),
+          ),
+        );
+      });
+
+      test('SideStore did not open: the file instead', () async {
+        final _IosRun r = ios(sideStore: false);
+        await r.service.check();
+        await r.service.openInSideStore();
+        expect(r.links, <String>['sidestore://install?url=$ipa']);
+        expect(r.pages, isEmpty);
+        expect(r.service.installState, GithubInstallState.failed);
+        expect(
+          r.service.installMessage,
+          allOf(
+            contains('Nie udało się otworzyć SideStore'),
+            contains('„Pobierz Zen 1.12.0”'),
+          ),
+        );
+      });
+
+      test('SideStore for a release without the IPA: the install '
+          'page', () async {
+        final _IosRun r = ios(json: _releaseJson('v1.12.0'));
+        await r.service.check();
+        await r.service.openInSideStore();
+        expect(r.links, isEmpty);
+        expect(r.pages, <String>[kIphoneInstallPageUrl]);
+      });
+
+      test('Safari opens the IPA of exactly the announced version', () async {
+        final _IosRun r = ios();
+        await r.service.check();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa]);
+        expect(r.links, isEmpty);
+        expect(r.downloads, isEmpty);
+        expect(r.copied, isEmpty);
+        expect(r.service.installState, GithubInstallState.done);
+        // The message says the next step in SideStore: "+" in "My Apps".
+        expect(
+          r.service.installMessage,
+          allOf(
+            contains('1.12.0'),
+            contains('Pliki'),
+            contains('SideStore'),
+            contains('„My Apps”'),
+            contains('„+”'),
+          ),
+        );
+      });
+
+      test('a release without the IPA: the install page', () async {
+        final _IosRun r = ios(json: _releaseJson('v1.12.0'));
+        await r.service.check();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[kIphoneInstallPageUrl]);
+        expect(r.service.installState, GithubInstallState.done);
+        expect(r.service.installMessage, contains('stronę instalacji'));
+      });
+
+      test('the IPA did not open in a browser: the install page', () async {
+        final _IosRun r = ios(browser: (String url) => url != ipa);
+        await r.service.check();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa, kIphoneInstallPageUrl]);
+        expect(r.copied, isEmpty);
+        expect(r.service.installMessage, contains('stronę instalacji'));
+      });
+
+      test('nothing opens: the page address is copied and said', () async {
+        final _IosRun r = ios(browser: (String url) => false);
+        await r.service.check();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa, kIphoneInstallPageUrl]);
+        expect(r.copied, <String>[kIphoneInstallPageUrl]);
+        expect(r.service.installState, GithubInstallState.failed);
+        expect(r.service.installMessage, contains(kIphoneInstallPageUrl));
+      });
+
+      test('the install page button opens the install page', () async {
+        final _IosRun r = ios();
+        await r.service.check();
+        await r.service.openInstallPage();
+        expect(r.pages, <String>[kIphoneInstallPageUrl]);
+      });
+
+      test('no newer release: nothing opens', () async {
+        final _IosRun r = ios(json: _releaseJson('v1.11.0'));
+        await r.service.check();
+        await r.service.openInSideStore();
+        await r.service.openIpaInSafari();
+        expect(r.pages, isEmpty);
+        expect(r.links, isEmpty);
+      });
+    });
+
+    test('Flatpak: nothing downloaded, the release page opens', () async {
+      final List<String> pages = <String>[];
+      final List<Uri> downloads = <Uri>[];
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _FakeInstaller(
+          dir,
+          assetName: 'Zen-Linux-x64.flatpak',
+          target: UpdateTarget.flatpak,
+        ),
+        fetchJson: (Uri uri) async => _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{
+            'Zen-Linux-x64.flatpak': 5,
+            'Zen-Linux-x64.deb': 5,
+          },
+        ),
+        download:
+            (
+              Uri uri,
+              File target, {
+              required int maxBytes,
+              void Function(int received)? onProgress,
+            }) async => downloads.add(uri),
+        openPage: (String url) async {
+          pages.add(url);
+          return true;
+        },
+        currentVersion: '1.11.0',
+      );
+      addTearDown(s.dispose);
+      await s.check();
+      expect(s.route, GithubUpdateRoute.flatpak);
+      expect(s.canInstall, isFalse);
+      await s.update();
+      expect(downloads, isEmpty);
+      await s.openReleasePage();
+      expect(pages, <String>[
+        'https://github.com/robertostrowskijagoda/Zen/releases/tag/v1.12.0',
+      ]);
+    });
+
+    test('a release without this device\'s file: its page', () async {
       final GithubUpdateService s = service(
-        installer: _FakeInstaller(dir, assetName: null),
-        fetchJson: (Uri uri) async => _releaseJson('v1.12.0'),
+        installer: _FakeInstaller(
+          dir,
+          assetName: 'Zen-Windows-arm64.zip',
+          target: UpdateTarget.windows,
+        ),
+        fetchJson: (Uri uri) async => _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{'Zen-Windows.zip': 5},
+        ),
       );
       await s.check();
-      expect(s.showNewerBanner, isTrue);
+      expect(s.route, GithubUpdateRoute.releasePage);
       expect(s.canInstall, isFalse);
     });
   });
@@ -1107,6 +1537,368 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Spróbuję ponownie'), findsOneWidget);
+      await finish(tester, s);
+    });
+
+    Future<GithubUpdateService> pumpWith(
+      WidgetTester tester,
+      _FakeInstaller installer,
+      Map<String, Object?> json, {
+      Widget home = const Scaffold(body: GithubUpdateBanner()),
+      Future<bool> Function(String url)? openPage,
+      Future<bool> Function(String link)? openSideStore,
+    }) async {
+      final GithubUpdateService s = GithubUpdateService(
+        installer: installer,
+        fetchJson: (Uri uri) async => json,
+        fetchSums: (Uri uri) async => '',
+        openPage: openPage ?? (String url) async => true,
+        openSideStore: openSideStore ?? (String link) async => true,
+        currentVersion: '1.11.0',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [githubUpdateServiceProvider.overrideWithValue(s)],
+          child: MaterialApp(theme: ZenTheme.dark(), home: home),
+        ),
+      );
+      await s.check();
+      await tester.pump();
+      return s;
+    }
+
+    _FakeInstaller iosInstaller() => _FakeInstaller(
+      Directory.systemTemp,
+      assetName: null,
+      target: UpdateTarget.ios,
+    );
+
+    testWidgets('on iPhone: "Zaktualizuj w SideStore" and numbered steps, '
+        'never "Aktualizuj"', (WidgetTester tester) async {
+      // Tall enough for the steps, both buttons and the message after a tap.
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final List<String> opened = <String>[];
+      final List<String> links = <String>[];
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        iosInstaller(),
+        _releaseJson('v1.12.0', assets: <String, int>{'Zen-unsigned.ipa': 9}),
+        openPage: (String url) async {
+          opened.add(url);
+          return true;
+        },
+        openSideStore: (String link) async {
+          links.add(link);
+          return true;
+        },
+      );
+      const String ipa =
+          'https://github.com/robertostrowskijagoda/Zen/releases/download/'
+          'v1.12.0/Zen-unsigned.ipa';
+      expect(find.byKey(const Key('github-update-install')), findsNothing);
+      expect(find.byKey(const Key('github-update-sidestore')), findsOneWidget);
+      expect(find.text('Zaktualizuj w SideStore'), findsOneWidget);
+      expect(find.byKey(const Key('github-update-ipa')), findsOneWidget);
+      expect(find.text('Pobierz Zen 1.12.0'), findsOneWidget);
+      expect(
+        find.byKey(const Key('github-update-install-page')),
+        findsOneWidget,
+      );
+      expect(find.text(iosUpdateHint), findsOneWidget);
+      final List<String> steps = iosUpdateSteps('1.12.0');
+      for (int i = 0; i < steps.length; i++) {
+        expect(
+          tester
+              .widget<Text>(find.byKey(Key('github-update-ios-step-${i + 1}')))
+              .data,
+          steps[i],
+        );
+        expect(find.text('${i + 1}.'), findsOneWidget);
+      }
+      expect(find.text(iosOtherWaysHint('1.12.0')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('github-update-sidestore')));
+      await tester.pump();
+      expect(links, <String>['sidestore://install?url=$ipa']);
+      expect(opened, isEmpty);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('github-update-message')))
+            .data,
+        contains('Otwarto SideStore'),
+      );
+      await tester.tap(find.byKey(const Key('github-update-ipa')));
+      await tester.pump();
+      expect(opened, <String>[ipa]);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('github-update-message')))
+            .data,
+        allOf(contains('„My Apps”'), contains('„+”')),
+      );
+      await finish(tester, s);
+    });
+
+    testWidgets('the iPhone steps are not shown on other systems', (
+      WidgetTester tester,
+    ) async {
+      for (final _FakeInstaller installer in <_FakeInstaller>[
+        _FakeInstaller(Directory.systemTemp),
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: 'Zen-Windows.zip',
+          target: UpdateTarget.windows,
+        ),
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.flatpak,
+        ),
+      ]) {
+        final GithubUpdateService s = await pumpWith(
+          tester,
+          installer,
+          _releaseJson(
+            'v1.12.0',
+            assets: <String, int>{
+              'Zen-arm64-v8a.apk': 5,
+              'Zen-Windows.zip': 5,
+              'Zen-Linux-x64.flatpak': 5,
+              'Zen-unsigned.ipa': 9,
+            },
+          ),
+          home: const Scaffold(
+            body: SingleChildScrollView(child: GithubUpdateCard()),
+          ),
+        );
+        final String system = installer.target.name;
+        expect(
+          find.byKey(const Key('github-update-ios-steps')),
+          findsNothing,
+          reason: system,
+        );
+        expect(
+          find.byKey(const Key('github-update-ipa')),
+          findsNothing,
+          reason: system,
+        );
+        expect(
+          find.byKey(const Key('github-update-sidestore')),
+          findsNothing,
+          reason: system,
+        );
+        expect(find.text(iosUpdateHint), findsNothing, reason: system);
+        expect(
+          find.byType(SideStoreSourceOption),
+          findsNothing,
+          reason: system,
+        );
+        await finish(tester, s);
+      }
+    });
+
+    // A small phone (320 x 568) at twice the text size: the banner above
+    // the app's content as in the shell, the card on the updates screen.
+    for (final (String where, Widget home) in <(String, Widget)>[
+      (
+        'banner',
+        const Scaffold(
+          body: Column(
+            children: <Widget>[
+              GithubUpdateBanner(),
+              Expanded(child: SizedBox.expand()),
+            ],
+          ),
+        ),
+      ),
+      (
+        'card',
+        const Scaffold(body: SingleChildScrollView(child: GithubUpdateCard())),
+      ),
+    ]) {
+      testWidgets('the iPhone steps fit 320 px at twice the text size '
+          '($where)', (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(320, 568);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final GithubUpdateService s = await pumpWith(
+          tester,
+          iosInstaller(),
+          _releaseJson('v1.12.0', assets: <String, int>{'Zen-unsigned.ipa': 9}),
+          home: home,
+        );
+        expect(
+          find.byKey(const Key('github-update-ios-steps')),
+          findsOneWidget,
+        );
+        for (int i = 1; i <= 3; i++) {
+          expect(find.byKey(Key('github-update-ios-step-$i')), findsOneWidget);
+        }
+        expect(
+          find.byKey(const Key('github-update-ios-other-ways')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('github-update-sidestore')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('github-update-ipa')), findsOneWidget);
+        if (where == 'card') {
+          expect(find.byKey(const Key('sidestore-source-add')), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+        await finish(tester, s);
+      });
+    }
+
+    group('the SideStore source', () {
+      Future<(List<String>, List<String>)> pumpOption(
+        WidgetTester tester, {
+        required bool opens,
+      }) async {
+        final List<String> opened = <String>[];
+        final List<String> copied = <String>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ZenTheme.dark(),
+            home: Scaffold(
+              body: SideStoreSourceOption(
+                openLink: (String link) async {
+                  opened.add(link);
+                  return opens;
+                },
+                copy: (String text) async => copied.add(text),
+              ),
+            ),
+          ),
+        );
+        return (opened, copied);
+      }
+
+      String message(WidgetTester tester) => tester
+          .widget<Text>(find.byKey(const Key('sidestore-source-message')))
+          .data!;
+
+      testWidgets('the button opens exactly the source link', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: true,
+        );
+        // The step by hand is said before anything is tapped.
+        expect(
+          tester
+              .widget<Text>(find.byKey(const Key('sidestore-source-manual')))
+              .data,
+          allOf(contains('„Sources”'), contains('„+”')),
+        );
+        await tester.tap(find.byKey(const Key('sidestore-source-add')));
+        await tester.pump();
+        expect(opened, <String>[
+          'sidestore://source?url=https://robertostrowskijagoda.github.io/'
+              'Zen/apps.json',
+        ]);
+        expect(copied, isEmpty);
+        expect(message(tester), contains('Otwarto SideStore'));
+      });
+
+      testWidgets('SideStore did not open: the address is copied', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: false,
+        );
+        await tester.tap(find.byKey(const Key('sidestore-source-add')));
+        await tester.pump();
+        expect(opened, hasLength(1));
+        expect(copied, <String>[kSideStoreSourceUrl]);
+        expect(message(tester), contains('„Sources” → „+”'));
+      });
+
+      testWidgets('"Kopiuj adres źródła" copies and shows the address', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: true,
+        );
+        await tester.tap(find.byKey(const Key('sidestore-source-copy')));
+        await tester.pump();
+        expect(opened, isEmpty);
+        expect(copied, <String>[kSideStoreSourceUrl]);
+        expect(message(tester), contains(kSideStoreSourceUrl));
+      });
+    });
+
+    testWidgets('in a Flatpak: the command and the release page', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.flatpak,
+        ),
+        _releaseJson(
+          'v1.12.0',
+          assets: <String, int>{'Zen-Linux-x64.flatpak': 5},
+        ),
+      );
+      expect(find.byKey(const Key('github-update-install')), findsNothing);
+      expect(find.byKey(const Key('github-update-ipa')), findsNothing);
+      expect(find.byKey(const Key('github-update-open-page')), findsOneWidget);
+      expect(find.text(flatpakUpdateHint), findsOneWidget);
+      await finish(tester, s);
+    });
+
+    testWidgets('the updates card says beforehand what Android will do', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(Directory.systemTemp),
+        _releaseJson('v1.12.0'),
+        home: const Scaffold(
+          body: SingleChildScrollView(child: GithubUpdateCard()),
+        ),
+      );
+      expect(find.byKey(const Key('github-update-install')), findsOneWidget);
+      expect(
+        find.text(githubUpdatePlan(UpdateTarget.android, 'Zen-arm64-v8a.apk')!),
+        findsOneWidget,
+      );
+      await finish(tester, s);
+    });
+
+    testWidgets('the updates card on iPhone does not promise a download', (
+      WidgetTester tester,
+    ) async {
+      final GithubUpdateService s = await pumpWith(
+        tester,
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.ios,
+        ),
+        _releaseJson('v1.11.0'),
+        home: const Scaffold(
+          body: SingleChildScrollView(child: GithubUpdateCard()),
+        ),
+      );
+      final String how = tester
+          .widget<Text>(find.byKey(const Key('github-update-how')))
+          .data!;
+      expect(how, contains('SideStore'));
+      // The SideStore source, even with no new version.
+      expect(find.byType(SideStoreSourceOption), findsOneWidget);
+      expect(find.byKey(const Key('sidestore-source-copy')), findsOneWidget);
+      expect(how, isNot(contains('Pobrany plik')));
       await finish(tester, s);
     });
 

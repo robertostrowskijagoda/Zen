@@ -33,20 +33,62 @@ aligned for phones with 16 KB memory pages. Details:
   the app is closed. When a friend's Zen is newer than yours, Zen looks at
   once. GitHub sees your IP address and the name "Zen", nothing else.
 - When there is a newer version, a quiet notification (once per version)
-  and a bar say so, with a few lines about what is new in it. **Update**
-  downloads the
-  file for your system (on Android the APK for your phone's processor type)
-  and checks it against the release's `SHA256SUMS`;
-  on Android also that it is signed with the same certificate as the
-  installed app. Then the system installer asks (Android), or a helper
-  swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
-  Zen's folder is not writable (Program Files, `/opt`) the file is saved to
-  Downloads. On iPhone there is only the bar; install the update the way you
-  installed Zen (Scarlet: download the new `Zen-unsigned.ipa` from the install
-  page; SideStore: the Zen source, below).
+  and a bar say so, with a few lines about what is new in it. A version
+  published after that takes the old notice's place, also when you closed
+  the bar of the older one; once you have installed it, the notification
+  goes away. What **Update** does depends on the system, and the updates
+  card says it before you tap:
+  - **Android, Windows, Mac, Linux:** Zen downloads the file for your
+    system (on Android the APK for your phone's processor type, on Windows
+    the x64 or ARM64 ZIP Zen runs as, on the Mac the universal ZIP for Apple
+    Silicon and Intel) and checks it against the release's `SHA256SUMS` and
+    the maintainers' signature; on Android also that it is signed with the
+    same certificate as the installed app. Then the system installer asks
+    (Android; the first time Android asks you to let Zen install apps), or
+    a helper swaps the folders after Zen closes and starts the new version
+    (Windows, Linux tarball, Mac). Where Zen's folder is not writable
+    (Program Files, a Mac app opened straight from Downloads) the file is
+    saved to Downloads with the next step: unpack it over the `Zen` folder
+    (Windows, Linux), drag Zen to Applications (Mac).
+  - **Linux `.deb`:** `/opt/zen` belongs to the package manager, so the
+    checked `.deb` is saved to Downloads; open it with the package
+    installer or run the `sudo apt install …` line Zen shows.
+  - **iPhone and iPad:** an iOS app can't install another, so Zen downloads
+    nothing itself; SideStore installs the update. The card shows the
+    steps, numbered, in the words of the iPhone install page:
+    1. Open LocalDevVPN and tap **Connect**.
+    2. Tap **Update in SideStore**: SideStore downloads that version's
+       `Zen-unsigned.ipa` (pinned to the announced release) and installs it.
+       This is SideStore's documented link `sidestore://install?url=…`.
+    3. Don't delete the current Zen first: the new version replaces it.
+
+    Below the steps: with Zen's source in SideStore, **My Apps → Update**
+    next to Zen does the same; without SideStore at hand, **Download Zen
+    1.x.y** saves the IPA to Files through Safari, and in SideStore **My
+    Apps → +** picks it. When SideStore doesn't open, Zen says so and points
+    to the download; when the release has no IPA, or no browser opens it,
+    the iPhone install page opens instead (its address is copied when that
+    fails too); **Open install page** is always there. SideStore (or Safari)
+    downloads the file, so Zen's checksum and signature check doesn't apply
+    to it.
+
+    Under the steps on the updates screen (and in the iPhone steps of "How
+    to install Zen" on an iPhone): **Add Zen source to SideStore**
+    (`sidestore://source?url=…`, SideStore's documented link), so SideStore
+    itself shows new versions in **My Apps**. **Copy source address** and
+    the step by hand are always there: in SideStore open **Sources**, tap
+    **+** and paste `https://robertostrowskijagoda.github.io/Zen/apps.json`.
+    When SideStore doesn't open, the address is copied.
+
+    An app signed with a free Apple Account opens for 7 days. From two days
+    before, a card in Chats says so: turn on LocalDevVPN and tap the day
+    counter next to Zen in SideStore's **My Apps** (or **Refresh All**), or
+    let a daily Shortcuts automation do it (the iPhone install page, step 6).
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
+- **A release without your system's file** (for example the optional
+  Windows ARM64 ZIP) shows **Open release page** instead of **Update**.
 - **When GitHub limits requests** (it allows only so many an hour from one
   address), Zen says so and shows when it tries again: as late as GitHub
   asks, otherwise after 15 minutes, then 30, then an hour.
@@ -71,14 +113,18 @@ aligned for phones with 16 KB memory pages. Details:
 
 GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 (steps for every system, the downloads, the Android signing certificate
-fingerprint; one recommended way and its own page for each system) and **`apps.json`**, a SideStore / AltStore source. Both are
+fingerprint; one recommended way and its own page for each system) and
+**`apps.json`**, a SideStore / AltStore source (the iPhone page adds it in
+step 5, with the address to paste in SideStore's **Sources → +**). Both are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
 version, date, size and checksum, and the permissions read from that very
 file. SideStore checks the source, offers the update, and signs the file
-with the person's own Apple ID. With a free Apple ID that signature expires
-after 7 days: once a week turn on LocalDevVPN, open SideStore and tap
-**Refresh**. Zen shows a reminder in Chats 2 days before the date.
+with the person's own Apple Account. With a free Apple Account that
+signature expires after 7 days: SideStore renews it on the phone whenever
+LocalDevVPN is connected (tap the counter in **My Apps**, or a daily
+Shortcuts automation with **Set VPN** and **Refresh All Apps**, step 6 of
+the iPhone page). Zen shows a reminder in Chats 2 days before the date.
 
 ## Pass it on
 
@@ -111,8 +157,9 @@ already.
   on only as a link (never as an APK) and has no launcher disguise. Because
   the store signs it, it also skips the check of its own signing
   certificate.
-- On iPhone Zen updates through the signer you installed it with (Scarlet: a new
-  file from the install page; SideStore: the source above), not by itself.
+- On iPhone and iPad Zen updates through SideStore (**Update in SideStore**,
+  or the source above), not by itself; with AltStore Classic, update it
+  there.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it

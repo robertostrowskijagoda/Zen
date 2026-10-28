@@ -224,6 +224,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         // "Skrzynka … nie odpowiada": the picker, to choose another.
         unawaited(openRelayMailboxScreen(context));
         break;
+      case RuntimeRouteTarget.storage:
+        // "Zen zajmuje więcej niż …": where the limit is raised.
+        unawaited(openStorageSettingsPage(context));
+        break;
     }
     _handledIntentId = handledId;
     _scheduledIntentId = null;

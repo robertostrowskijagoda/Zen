@@ -124,7 +124,7 @@ void main() {
     final _FakeAccess access = _FakeAccess();
     final Directory elsewhere = Directory(inBase('elsewhere'))..createSync();
     access.modes[elsewhere.path] = kOwnerOnlyFolderMode;
-    Link(inBase('zen-media')).createSync(elsewhere.path);
+    _linkFolder(inBase('zen-media'), elsewhere.path);
     final Directory folder = await preparePrivateFolder(
       base,
       'zen-media',
@@ -139,7 +139,7 @@ void main() {
     expect(Link(inBase('zen-media')).existsSync(), isFalse);
     expect(folder.existsSync(), isFalse);
     expect(File('${elsewhere.path}${sep}keep.txt').existsSync(), isTrue);
-  }, skip: Platform.isWindows ? 'Links need extra rights on Windows' : false);
+  });
 
   test(
     'no plain media is written when no folder can be made private',
@@ -202,6 +202,29 @@ void main() {
     await file.writeAsBytes(<int>[1, 2, 3], flush: true);
     expect((await file.stat()).mode & 0x1FF, kOwnerOnlyFileMode);
   }, skip: Platform.isLinux || Platform.isMacOS ? false : 'POSIX only');
+}
+
+/// A link at [path] to the folder [target]. On Windows a symbolic link needs
+/// Developer Mode (or administrator rights); without them a directory
+/// junction is made instead, which Dart and the app also see as a link.
+void _linkFolder(String path, String target) {
+  try {
+    Link(path).createSync(target);
+  } on FileSystemException {
+    if (!Platform.isWindows) {
+      rethrow;
+    }
+    final ProcessResult r = Process.runSync('cmd', <String>[
+      '/c',
+      'mklink',
+      '/J',
+      path,
+      target,
+    ]);
+    if (r.exitCode != 0) {
+      fail('No link and no junction at $path: ${r.stdout}${r.stderr}');
+    }
+  }
 }
 
 /// [_FakeAccess] where no mode can be changed (as for another user).

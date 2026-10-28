@@ -79,10 +79,11 @@ abstract interface class RelayPeerSource {
 
   /// People this device shares a group with but is not friends with.
   ///
-  /// They get this device's key and relay list only if the person opted in
-  /// (see [RelayState.shareWithGroups], off by default), so that group
-  /// messages to someone offline can wait in that person's mailboxes like a
-  /// friend's message would. Their own announcements are accepted either way.
+  /// They get this device's key and relay list unless the person switched
+  /// that off (see [RelayState.shareWithGroups], on by default), so that
+  /// group messages to someone offline can wait in that person's mailboxes
+  /// like a friend's message would. Their own announcements are accepted
+  /// either way.
   List<RelayFriend> groupContacts();
 }
 
@@ -309,7 +310,7 @@ final class RelayOverview {
     this.heldEnvelopeCount = 0,
     this.heldForPeerCount = 0,
     this.publicKeyFingerprint = '',
-    this.shareWithGroups = false,
+    this.shareWithGroups = true,
     this.blobQuotaBytes = 0,
     this.heldBlobBytes = 0,
     this.outgoingBlobCount = 0,
@@ -321,7 +322,7 @@ final class RelayOverview {
   final bool isAutomatic;
 
   /// Whether group members who are not friends learn this device's mailboxes
-  /// (off unless the person switched it on).
+  /// (on unless the person switched it off).
   final bool shareWithGroups;
 
   /// Friends' devices currently holding this device's mail.

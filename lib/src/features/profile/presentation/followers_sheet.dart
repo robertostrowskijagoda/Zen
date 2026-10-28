@@ -1,13 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
+import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// Who follows you: friends automatically, and everyone else who
 /// chose to. A follower can be blocked: they leave the list and their
@@ -21,16 +26,16 @@ Future<void> showFollowersSheet(BuildContext context, LedgerNode node) =>
       builder: (BuildContext context) => FollowersSheet(node: node),
     );
 
-class FollowersSheet extends StatefulWidget {
+class FollowersSheet extends ConsumerStatefulWidget {
   const FollowersSheet({required this.node, super.key});
 
   final LedgerNode node;
 
   @override
-  State<FollowersSheet> createState() => _FollowersSheetState();
+  ConsumerState<FollowersSheet> createState() => _FollowersSheetState();
 }
 
-class _FollowersSheetState extends State<FollowersSheet> {
+class _FollowersSheetState extends ConsumerState<FollowersSheet> {
   late final FollowLedger _follows = FollowLedger.of(widget.node);
   StreamSubscription<void>? _changes;
 
@@ -92,7 +97,9 @@ class _FollowersSheetState extends State<FollowersSheet> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final List<Follower> followers = _follows.followers;
-    final int friends = widget.node.friendAccounts.values.toSet().length;
+    final SocialHubState social = ref.watch(socialHubControllerProvider);
+    final List<FriendProfile> friendList = social.acceptedFriends;
+    final int friends = friendList.length;
     final Map<String, String> blocked = _follows.blocked;
     return SafeArea(
       child: ListView(
@@ -133,6 +140,31 @@ class _FollowersSheetState extends State<FollowersSheet> {
                   ),
           ),
           const SizedBox(height: 8),
+          // Friends follow automatically: they are part of the count, so
+          // they are on the list too.
+          for (final FriendProfile friend in friendList)
+            ListTile(
+              key: Key('follower-friend-${friend.address}'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+              leading: PeerAvatar(
+                address: friend.address,
+                name: social.nameFor(friend),
+                size: 38,
+                showStatus: false,
+              ),
+              title: Text(
+                social.nameFor(friend),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                t('Znajomy'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: zen.textMuted, fontSize: 12),
+              ),
+              onTap: () => unawaited(showMiniProfile(context, friend.address)),
+            ),
           if (followers.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),

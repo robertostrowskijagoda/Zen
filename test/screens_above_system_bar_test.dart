@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,7 @@ import 'package:zen/src/features/account/presentation/account_restore_info.dart'
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
+import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
@@ -23,12 +25,15 @@ import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
+import 'package:zen/src/features/meet/meet_thread.dart';
 import 'package:zen/src/features/meet/plan/plan_service.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/meet/presentation/ask_screen.dart';
 import 'package:zen/src/features/meet/presentation/circle_screen.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/presentation/food_screen.dart';
+import 'package:zen/src/features/meet/presentation/meet_hub_screen.dart';
+import 'package:zen/src/features/meet/presentation/meet_thread_sheet.dart';
 import 'package:zen/src/features/meet/presentation/plan_screen.dart';
 import 'package:zen/src/features/meet/presentation/table_screen.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
@@ -38,8 +43,12 @@ import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/profile/presentation/gallery_add_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/update/own_copy.dart';
@@ -354,6 +363,54 @@ Future<NeighborsService> _flat(WidgetTester tester) async {
   return flat;
 }
 
+/// Nobody to relay for: the mailbox page is still a long page.
+final class _NoRelayPeers implements RelayPeerSource {
+  @override
+  bool get isReady => true;
+
+  @override
+  String get localAddress => PeerShareCodec.normalizeAddress('200::1');
+
+  @override
+  List<RelayFriend> acceptedFriends() => const <RelayFriend>[];
+
+  @override
+  List<RelayFriend> groupContacts() => const <RelayFriend>[];
+}
+
+/// Opens [open] over an empty page as soon as it is on the screen: a sheet
+/// or a page that is only ever pushed.
+final class _Opener extends StatefulWidget {
+  const _Opener(this.open);
+
+  final void Function(BuildContext context) open;
+
+  @override
+  State<_Opener> createState() => _OpenerState();
+}
+
+class _OpenerState extends State<_Opener> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.open(context);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold();
+}
+
+/// A sheet is above the system bar when nothing of it is under it.
+Future<void> _expectSheetAbove(WidgetTester tester) async {
+  final _Ends ends = await _scrollToEnd(tester);
+  expect(ends.content, greaterThan(0), reason: 'nothing on the sheet');
+  expect(ends.content, lessThanOrEqualTo(_usableBottom));
+}
+
 /// One screen under test: how it is put on the small phone.
 typedef _Case = Future<void> Function(WidgetTester tester);
 
@@ -651,6 +708,34 @@ void main() {
       );
       await _expectAboveSystemBar(tester);
     },
+    '"Skrzynki offline"': (WidgetTester tester) async {
+      final RelayEngine engine = (await tester.runAsync(() async {
+        final RelayEngine e = RelayEngine(
+          store: MemoryRelayStateStore(),
+          peers: _NoRelayPeers(),
+          send: (String to, Map<String, dynamic> payload) async {},
+          clock: () => DateTime.now().millisecondsSinceEpoch,
+        );
+        await e.activate();
+        return e;
+      }))!;
+      await _pumpOnPhone(
+        tester,
+        _Opener(openRelayMailboxScreen),
+        overrides: <Override>[relayEngineProvider.overrideWithValue(engine)],
+      );
+      await _waitFor(tester, find.byKey(const Key('relay-settings-screen')));
+      await _expectAboveSystemBar(tester);
+    },
+    '"Spotkania"': (WidgetTester tester) async {
+      final MeetService meet = _meet(MemoryLedgerDisk());
+      await _pumpOnPhone(
+        tester,
+        const MeetHubScreen(),
+        overrides: _meetOverrides(meet),
+      );
+      await _expectAboveSystemBar(tester);
+    },
     '"Nagrania rozmow"': (WidgetTester tester) async {
       final MemoryLedgerDisk disk = MemoryLedgerDisk();
       await disk.write(
@@ -686,6 +771,46 @@ void main() {
       await screen.value(tester);
     });
   }
+
+  testWidgets('a small chat sheet keeps its last line above the system bar', (
+    WidgetTester tester,
+  ) async {
+    await _pumpOnPhone(
+      tester,
+      _Opener(
+        (BuildContext context) => unawaited(
+          showMeetThreadSheet(
+            context,
+            title: 'Kolacja',
+            listenable: ValueNotifier<int>(0),
+            messages: () => const <MeetThreadMessage>[],
+            nameOf: (String a) => a,
+            send: (String text) async => true,
+            empty: 'Nic tu jeszcze nie ma.',
+          ),
+        ),
+      ),
+    );
+    await _waitFor(tester, find.text('Nic tu jeszcze nie ma.'));
+    await _expectSheetAbove(tester);
+    // The field to write is above the bar as well.
+    expect(
+      tester.getBottomLeft(find.byType(TextField).last).dy,
+      lessThanOrEqualTo(_usableBottom),
+    );
+  });
+
+  testWidgets('the sheet for a new group keeps its last button above the '
+      'system bar', (WidgetTester tester) async {
+    await _pumpOnPhone(
+      tester,
+      _Opener(
+        (BuildContext context) => unawaited(CreateGroupSheet.show(context)),
+      ),
+    );
+    await _waitFor(tester, find.byType(CreateGroupSheet));
+    await _expectSheetAbove(tester);
+  });
 
   /// The very last row of a list, which is built by a plain list of rows.
   Future<void> expectLastRowAbove(WidgetTester tester) async {

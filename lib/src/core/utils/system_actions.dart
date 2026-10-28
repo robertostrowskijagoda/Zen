@@ -89,7 +89,7 @@ Future<bool> openWebLink(String url) async {
   }
   final String link = uri.toString();
   try {
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       return await _system.invokeMethod<bool>('openUrl', <String, Object>{
             'url': link,
           }) ??
@@ -107,6 +107,25 @@ Future<bool> openWebLink(String url) async {
     return true;
   } on Object catch (error) {
     logZenWarning('Otwieranie strony: $error');
+    return false;
+  }
+}
+
+/// iPhone and iPad: opens SideStore with [link], one of its documented
+/// links (kSideStoreSourceLink, sideStoreInstallLink; iOS opens no other
+/// SideStore link). Returns `false` where nothing opened it (SideStore is
+/// not installed) or elsewhere.
+Future<bool> openSideStoreLink(String link) async {
+  if (kIsWeb || !Platform.isIOS || !link.startsWith('sidestore://')) {
+    return false;
+  }
+  try {
+    return await _system.invokeMethod<bool>('openUrl', <String, Object>{
+          'url': link,
+        }) ??
+        false;
+  } on Object catch (error) {
+    logZenWarning('Otwieranie SideStore: $error');
     return false;
   }
 }

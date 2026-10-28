@@ -4,6 +4,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/launcher_disguise.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final Provider<AppSettings> appSettingsInitialStateProvider =
@@ -88,6 +89,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(inboxLimitMb: value));
   }
 
+  Future<void> setFeedLimitMb(int value) async {
+    await _save(state.copyWith(feedLimitMb: value));
+  }
+
   Future<void> setAutoCleanupDays(int value) async {
     await _save(state.copyWith(autoCleanupDays: value));
   }
@@ -133,11 +138,6 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(notificationPrivacy: value));
   }
 
-  /// "Powiadomienia o nowych postach" on or off.
-  Future<void> setPostNotifications(bool value) async {
-    await _save(state.copyWith(postNotifications: value));
-  }
-
   /// "Wycisz posty tej osoby": new posts of the friend at [address] are
   /// not announced while [muted].
   Future<void> setPostAuthorMuted(String address, {required bool muted}) async {
@@ -156,6 +156,29 @@ final class AppSettingsController extends Notifier<AppSettings> {
 
   Future<void> setInAppSounds(bool value) async {
     await _save(state.copyWith(inAppSounds: value));
+  }
+
+  /// The system notifications' sound and vibration on or off.
+  Future<void> setNotificationSounds(bool value) async {
+    await _save(state.copyWith(notificationSounds: value));
+  }
+
+  /// The news of [kind] switched off ([muted]) or on again.
+  Future<void> setNoticeMuted(NoticeKind kind, {required bool muted}) async {
+    if (state.mutes(kind) == muted) {
+      return;
+    }
+    if (kind == NoticeKind.friendPost) {
+      await _save(state.copyWith(postNotifications: !muted));
+      return;
+    }
+    await _save(
+      state.copyWith(
+        mutedNotices: muted
+            ? <NoticeKind>{...state.mutedNotices, kind}
+            : (Set<NoticeKind>.of(state.mutedNotices)..remove(kind)),
+      ),
+    );
   }
 
   Future<void> setSecureScreens(bool value) async {

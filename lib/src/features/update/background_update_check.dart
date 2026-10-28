@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -28,7 +29,9 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// runs). Once when the service starts, too (after [firstAfter]), so a
 /// service that is restarted often still checks. A version still to be
 /// announced comes with the release's short note (whats_new.dart) in the
-/// app's language, when the release has one that holds up.
+/// app's language, when the release has one that holds up, in the place
+/// of the notification of an older one; the notification of a version
+/// that is installed now is taken away.
 final class BackgroundUpdateCheck {
   BackgroundUpdateCheck({
     required Future<RuntimeSystemNotificationService?> Function() notices,
@@ -102,6 +105,19 @@ final class BackgroundUpdateCheck {
 
   Future<void> _checkIfDue() async {
     final UpdateNoticeState kept = await store.read();
+    final String? announced = kept.notifiedVersion;
+    if (announced != null &&
+        compareAppVersions(announced, currentVersion) <= 0) {
+      // Zen was updated since: its notification offers what is installed.
+      final RuntimeSystemNotificationService? notices = await _notices();
+      if (notices != null) {
+        await withdrawInstalledUpdateNotice(
+          store: store,
+          notices: notices,
+          currentVersion: currentVersion,
+        );
+      }
+    }
     final int now = _now();
     if (!updateCheckDue(kept.checkedAtMillis, nowMillis: now, every: every)) {
       return;

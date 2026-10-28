@@ -183,7 +183,7 @@ void main() {
       lockMode: AppLockMode.appClose,
       allowNoAppPassword: true,
       legalAcceptedVersion: 'v-now',
-      bluetoothLinks: true,
+      bluetoothLinks: false,
     );
     // A copy from before the setup revisions, with the account's choices.
     final AppSettings copy = const AppSettings().copyWith(
@@ -200,7 +200,7 @@ void main() {
     expect(taken.lockMode, AppLockMode.appClose);
     expect(taken.allowNoAppPassword, isTrue);
     expect(taken.legalAcceptedVersion, 'v-now');
-    expect(taken.bluetoothLinks, isTrue);
+    expect(taken.bluetoothLinks, isFalse);
     expect(taken.disguiseIcon, isFalse, reason: 'this device\'s launcher');
     expect(taken.accentTheme, AppAccentTheme.values.last);
     expect(taken.notificationPrivacy, NotificationPrivacy.generic);

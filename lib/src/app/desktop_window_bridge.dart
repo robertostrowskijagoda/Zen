@@ -15,6 +15,27 @@ import 'package:zen/src/features/media/media_temp_folder.dart';
 
 typedef DesktopTrayIconLoader = Future<String?> Function();
 
+/// Work done just before Zen quits for good (not when it only goes to the
+/// tray): friends who have Zen open are told it is closing
+/// (runtime_signal_module.dart). All of it gets [kBeforeQuitLimit].
+final Set<Future<void> Function()> zenBeforeQuit = <Future<void> Function()>{};
+
+/// How long quitting waits for [zenBeforeQuit].
+const Duration kBeforeQuitLimit = Duration(seconds: 1);
+
+Future<void> _runBeforeQuit() async {
+  try {
+    await Future.wait(<Future<void>>[
+      for (final Future<void> Function() work in zenBeforeQuit.toList())
+        work().catchError((Object error) {
+          logZenWarning('Work before quitting failed: $error');
+        }),
+    ]).timeout(kBeforeQuitLimit);
+  } on TimeoutException {
+    // Quitting goes on: it was only a courtesy.
+  }
+}
+
 enum DesktopTrayEvent { click, rightClick }
 
 abstract class DesktopWindowShellApi {
@@ -254,10 +275,13 @@ class _DesktopWindowBridgeState extends State<DesktopWindowBridge>
       return;
     }
     // No plain copy of a film or a recording outlives the app.
-    await wipeMediaTemporaryFiles().timeout(
-      const Duration(seconds: 2),
-      onTimeout: () {},
-    );
+    await Future.wait(<Future<void>>[
+      wipeMediaTemporaryFiles().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      ),
+      _runBeforeQuit(),
+    ]);
     try {
       await ZenSingleInstance.release();
       await windowManager.destroy();
@@ -414,10 +438,13 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
   @override
   Future<void> close() async {
     // No plain copy of a film or a recording outlives the app.
-    await wipeMediaTemporaryFiles().timeout(
-      const Duration(seconds: 2),
-      onTimeout: () {},
-    );
+    await Future.wait(<Future<void>>[
+      wipeMediaTemporaryFiles().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      ),
+      _runBeforeQuit(),
+    ]);
     try {
       await ZenSingleInstance.release();
       await windowManager.destroy();

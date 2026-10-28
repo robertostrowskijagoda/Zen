@@ -9,7 +9,12 @@
 #                  keeps it up to date (tool/ci/release_source.py);
 #   /release.json  version, files and sizes, and the Android signing
 #                  certificate fingerprint, for the install page;
-#   /zen-icon.png  the app icon the source names.
+#   /zen-icon.png  the app icon the source names;
+#   /sitemap.xml   every page that may be indexed, in its 21 languages,
+#                  dated by its last commit (tool/ci/site_files.py);
+#   /.well-known/security.txt  where to report a vulnerability, renewed
+#                  by every run (it expires after a year).
+# The latest release's version also goes into the pages' structured data.
 # The app's data in apps.json (permissions, version numbers) comes from
 # the release itself (its Zen-unsigned.ipa, checked against its
 # SHA256SUMS), never from main: AltStore refuses an app whose permissions
@@ -31,6 +36,7 @@ on:
     paths:
       - 'tool/pages/**'
       - 'tool/ci/release_source.py'
+      - 'tool/ci/site_files.py'
       - '.github/workflows/pages.yml'
   release:
     types: [published]
@@ -73,9 +79,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # The whole history: the sitemap dates each page by its last commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
@@ -111,9 +119,14 @@ jobs:
           --repo "$GITHUB_REPOSITORY" --site _site
           --fingerprint "$RUNNER_TEMP/fingerprint.txt"
 
+      - name: Sitemap, security.txt and the version in the structured data
+        run: python3 tool/ci/site_files.py --site _site --source tool/pages
+
+      # .well-known (security.txt) is a hidden folder: left out unless asked.
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
+          include-hidden-files: true
 
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

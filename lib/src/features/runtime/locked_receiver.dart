@@ -24,6 +24,7 @@ import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -107,6 +108,13 @@ const Set<String> _messageTypes = <String>{
   'message_placeholder',
 };
 
+/// Of those, what the switch "Zaproszenia i prośby o kontakt" governs.
+const Set<String> _invitationTypes = <String>{
+  'friend_request',
+  'friend_accept',
+  'group_invite',
+};
+
 const Set<String> _socialTypes = <String>{
   'friend_request',
   'friend_accept',
@@ -153,11 +161,16 @@ Duration nextMailboxPollWait({
   return doubled > max ? max : doubled;
 }
 
-/// How often a locked phone answers one contact's pings at most.
-const Duration kLockedPongEvery = Duration(minutes: 4);
+/// How often a locked phone answers one contact's pings at most. A contact
+/// pings every kPresencePingInterval (2 min) while Zen is on their screen:
+/// the first ping after a quiet while (Zen just came on their screen) is
+/// answered at once, then every other one — a little under two intervals,
+/// so however the timings drift, an answer comes every 4 min.
+const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
 
-/// "I am leaving the screen": sent to friends when Zen goes to the
-/// background (runtime_signal_module.dart). Nothing to keep for later.
+/// A one-way presence announcement ("leaving the screen", "back", "closing"):
+/// sent to friends who have Zen open when this device's state changes
+/// (runtime_signal_module.dart). Nothing to keep for later.
 const String kPresenceAwayType = 'away';
 
 /// What came to a door while the app was locked, per run of the receiver
@@ -526,7 +539,13 @@ final class LockedReceiver {
     this.mailboxPollMax = kLockedMailboxPollMaxInterval,
     this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
+    WakeBeat? beat,
+    Future<bool> Function()? meshLinked,
+    this.relinkWait = const Duration(seconds: 10),
+    this.relinkStep = const Duration(milliseconds: 500),
   }) : _transport = transport,
+       _beat = beat,
+       _meshLinked = meshLinked,
        _capability = capability,
        _inbox = inbox,
        _notices = notices,
@@ -543,6 +562,9 @@ final class LockedReceiver {
   final BackgroundCapability _capability;
   final SealedInboxWriter _inbox;
   final RuntimeSystemNotificationService _notices;
+
+  /// The beat the mailbox polls go on (`null`: the app's, [ZenWake.beat]).
+  final WakeBeat? _beat;
 
   /// What came to the doors the node runs (`RuntimeNodeRuntime.doorFrames`);
   /// `null`: no doors.
@@ -585,9 +607,26 @@ final class LockedReceiver {
   /// ones wake the phone themselves, like any frame).
   final Duration pollAnswerGrace;
 
+  /// Whether the node has a link to the mesh now (`null`: not known). A
+  /// wake's poll that went out without one, and that no mailbox answered,
+  /// is sent once more in the same wake as soon as a link is up, waiting at
+  /// most [relinkWait] for it (looking every [relinkStep]).
+  final Future<bool> Function()? _meshLinked;
+  final Duration relinkWait;
+  final Duration relinkStep;
+
+  /// A mailbox sent something since the wake's poll went out.
+  bool _mailboxAnswered = false;
+
+  late final Set<String> _mailboxSet = <String>{
+    for (final String m in _capability.mailboxes)
+      PeerShareCodec.normalizeAddress(m),
+  };
+
   /// A contact's pings get a pong at most this often: friends ping only
-  /// while Zen is on their screen, and a pong every other ping keeps this
-  /// phone reachable, "w tle", for them (kPresenceOfflineAfter).
+  /// while Zen is on their screen; the first ping after a quiet while gets
+  /// one at once, and a pong every other ping keeps this phone reachable,
+  /// "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
   final Map<String, int> _pongedAt = <String, int>{};
 
@@ -657,12 +696,22 @@ final class LockedReceiver {
       // account (and a look around nearby, the outbox's rounds), held for
       // the polls and their first answers and let go then. Polls that find
       // nothing come less and less often ([nextMailboxPollWait]).
-      _pollTimer = ZenWake.beat(
-        'mailbox-poll',
-        mailboxPollInterval,
-        _pollOnWake,
-        hold: const Duration(seconds: 10),
-      );
+      const Duration hold = Duration(seconds: 10);
+      final WakeBeat? beat = _beat;
+      _pollTimer = beat == null
+          ? ZenWake.beat(
+              'mailbox-poll',
+              mailboxPollInterval,
+              _pollOnWake,
+              hold: hold,
+            )
+          : beat.add(
+              'mailbox-poll',
+              mailboxPollInterval,
+              _pollOnWake,
+              hold: hold,
+              whileIdle: true,
+            );
     }
     logZenMessage(
       'Locked receiver runs (no master key; '
@@ -797,6 +846,10 @@ final class LockedReceiver {
       }
     }
     _keptAtPoll = _keptCount;
+    // Without a link to the mesh the poll goes nowhere: the first wake
+    // after an outage, while the node redials (phone_peers.go).
+    final bool linked = await _meshLinkedNow();
+    _mailboxAnswered = false;
     try {
       await _pollMailboxes();
     } on Object catch (error, stackTrace) {
@@ -805,6 +858,45 @@ final class LockedReceiver {
     if (_running) {
       await Future<void>.delayed(pollAnswerGrace);
     }
+    if (!linked && !_mailboxAnswered && _running) {
+      // Asked once more in the same wake as soon as a link is up, rather
+      // than a whole poll period later.
+      await ZenWake.holdWhile(
+        _pollAgainOnceLinked,
+        tag: 'relink',
+        limit: relinkWait + pollAnswerGrace + const Duration(seconds: 2),
+      );
+    }
+  }
+
+  /// Whether the node has a link to the mesh now (`true` when that is not
+  /// known: nothing more is done then).
+  Future<bool> _meshLinkedNow() async {
+    final Future<bool> Function()? meshLinked = _meshLinked;
+    if (meshLinked == null) {
+      return true;
+    }
+    try {
+      return await meshLinked();
+    } on Object {
+      return true;
+    }
+  }
+
+  /// Waits up to [relinkWait] for a link to the mesh, then polls again.
+  Future<void> _pollAgainOnceLinked() async {
+    final Stopwatch waited = Stopwatch()..start();
+    while (!await _meshLinkedNow()) {
+      if (!_running || waited.elapsed >= relinkWait) {
+        return;
+      }
+      await Future<void>.delayed(relinkStep);
+    }
+    if (!_running || _mailboxAnswered) {
+      return;
+    }
+    await _pollMailboxes();
+    await Future<void>.delayed(pollAnswerGrace);
   }
 
   /// Asks every mailbox for what it holds now, outside the beat (an
@@ -842,6 +934,9 @@ final class LockedReceiver {
       return;
     }
     final bool contact = kind != BackgroundContactKind.stranger;
+    if (_mailboxSet.contains(from)) {
+      _mailboxAnswered = true;
+    }
     // Friends' confirmations and answers, and mailboxes (possibly strangers
     // here) taking their copy of the alarm.
     _alarm?.observe(frame);
@@ -1141,6 +1236,7 @@ final class LockedReceiver {
           body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
+          kind: _noticeKit.messageKind(from: from, payload: payload),
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMessageSlot,
           contentRedacted: true,
@@ -1156,6 +1252,7 @@ final class LockedReceiver {
           body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
+          kind: _invitationTypes.contains(type) ? NoticeKind.invitation : null,
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedSocialSlot,
           contentRedacted: true,
@@ -1216,6 +1313,7 @@ final class LockedReceiver {
           body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
+          kind: NoticeKind.call,
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMissedCallSlot,
           contentRedacted: true,
@@ -1262,6 +1360,10 @@ final class LockedReceiver {
   /// One entry per kind at most every [noticeThrottle], posted anew (so
   /// the shade does not stack the same line).
   Future<void> _postThrottled(RuntimeSystemNotification notice) async {
+    if (_noticeKit.settingsApplied(notice) == null) {
+      // Switched off: it neither shows nor takes the slot's turn.
+      return;
+    }
     final String slot = notice.slotKey!;
     final int now = _now();
     final int? last = _lastNoticeAt[slot];
@@ -1274,8 +1376,13 @@ final class LockedReceiver {
   }
 
   Future<void> _post(RuntimeSystemNotification notice) async {
+    // The notification switches of the settings (from the notice kit).
+    final RuntimeSystemNotification? shown = _noticeKit.settingsApplied(notice);
+    if (shown == null) {
+      return;
+    }
     try {
-      await _notices.show(notice);
+      await _notices.show(shown);
     } on Object catch (error, stackTrace) {
       logZenError('A locked notice failed', error, stackTrace);
     }

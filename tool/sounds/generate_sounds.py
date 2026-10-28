@@ -207,6 +207,38 @@ def message_sent() -> np.ndarray:
     return normalize(fade(out, fade_out=0.02), 0.32)
 
 
+def message_arrived() -> np.ndarray:
+    """One quiet, round tone (E5): a message in the chat that is open."""
+    out = silence(0.45)
+    place(out, marimba(hz('E5'), 0.42, decay=0.14), 0.0)
+    return normalize(fade(trim_tail(out, 0.004), fade_out=0.06), 0.30)
+
+
+def like() -> np.ndarray:
+    """A tiny bright pluck (C6) with a faint octave above: a like."""
+    out = silence(0.32)
+    place(out, kalimba(hz('C6'), 0.3, decay=0.09), 0.0)
+    place(out, kalimba(hz('C7'), 0.12, decay=0.04), 0.0, 0.25)
+    return normalize(fade(trim_tail(out, 0.004), fade_out=0.05), 0.32)
+
+
+def posted() -> np.ndarray:
+    """Two light plucks rising a fifth (G5 then D6): a post is out."""
+    out = silence(0.6)
+    place(out, kalimba(hz('G5'), 0.45, decay=0.16), 0.0, 0.85)
+    place(out, kalimba(hz('D6'), 0.5, decay=0.2), 0.085, 1.0)
+    return normalize(fade(trim_tail(out, 0.004), fade_out=0.08), 0.36)
+
+
+def pop() -> np.ndarray:
+    """A soft, short 'pop' that falls in pitch: news in the list."""
+    t = times(0.1)
+    freq = 330 + 520 * np.exp(-t / 0.018)
+    phase = 2 * np.pi * np.cumsum(freq) / RATE
+    tone = np.sin(phase) * envelope(len(t), 0.003, 0.03)
+    return normalize(fade(tone, fade_out=0.03), 0.28)
+
+
 def social() -> np.ndarray:
     """One soft, round marimba-like tone (G5): quieter than a message."""
     out = silence(0.8)
@@ -318,6 +350,10 @@ def call_ended() -> np.ndarray:
 SOUNDS = {
     'zen_message': message_received,
     'zen_sent': message_sent,
+    'zen_received': message_arrived,
+    'zen_like': like,
+    'zen_posted': posted,
+    'zen_pop': pop,
     'zen_social': social,
     'zen_knock': knock,
     'zen_ringtone': ringtone,

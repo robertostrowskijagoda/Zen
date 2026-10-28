@@ -19,6 +19,9 @@ final class NodeLook {
     this.tag,
     this.tagTone,
     this.label = false,
+    this.hollow = false,
+    this.unknown = false,
+    this.noConnection = false,
   });
 
   /// The dot (a dimmed person has a see-through colour).
@@ -37,6 +40,17 @@ final class NodeLook {
 
   /// Always named, whatever the zoom (picked, found, on the route).
   final bool label;
+
+  /// Drawn as an empty ring in [fill] only (offline).
+  final bool hollow;
+
+  /// Drawn as a faint disc in [fill] with a ring and a question mark
+  /// (presence not checked lately).
+  final bool unknown;
+
+  /// Drawn as a crossed-out cloud in [fill] only (this device has no
+  /// network, so nobody's presence can be known).
+  final bool noConnection;
 }
 
 /// How one line is drawn in the current mode.
@@ -166,6 +180,31 @@ final class GraphLabelCache {
       maxLines: 1,
       ellipsis: '…',
     )..layout(maxWidth: 96);
+  }
+
+  /// [icon] drawn as a glyph [size] high in [color].
+  TextPainter icon(IconData icon, Color color, double size) {
+    final String key = 'icon|${color.toARGB32()}|$size|${icon.codePoint}';
+    final TextPainter? had = _cache[key];
+    if (had != null) {
+      return had;
+    }
+    if (_cache.length >= _max) {
+      clear();
+    }
+    return _cache[key] = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          color: color,
+          fontSize: size,
+          height: 1,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
   }
 
   void clear() {
@@ -458,6 +497,31 @@ class GraphPainter extends CustomPainter {
           }
           continue;
         }
+      }
+      if (l.hollow) {
+        canvas.drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        continue;
+      }
+      if (l.unknown) {
+        canvas
+          ..drawCircle(
+            p,
+            l.radius - 0.8,
+            fill..color = l.fill.withValues(alpha: 0.3),
+          )
+          ..drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        final TextPainter mark = labels.get('?', l.fill, bold: true);
+        mark.paint(canvas, p - Offset(mark.width / 2, mark.height / 2));
+        continue;
+      }
+      if (l.noConnection) {
+        final TextPainter cloud = labels.icon(
+          Icons.cloud_off_rounded,
+          l.fill,
+          l.radius * 2 + 2,
+        );
+        cloud.paint(canvas, p - Offset(cloud.width / 2, cloud.height / 2));
+        continue;
       }
       if (l.radius <= 5 && l.ring == null && l.dot == null) {
         final (double, List<double>) b = dots.putIfAbsent(

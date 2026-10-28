@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
@@ -24,6 +25,7 @@ import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -586,6 +588,103 @@ void main() {
       expect(receiver.mailboxPollWait, const Duration(minutes: 10));
     });
 
+    group('a wake whose poll went out without a link to the mesh', () {
+      late _BeatAlarms wake;
+      late List<bool> links;
+      int clock = 0;
+
+      setUp(() {
+        wake = _BeatAlarms();
+        ZenWake.platform = wake;
+        ZenWake.nowMillis = () => clock;
+      });
+
+      tearDown(() {
+        ZenWake.resetForTest();
+        ZenWake.platform = const TimerWakePlatform();
+        ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
+      });
+
+      /// Starts the receiver; the node tells [links] in turn whether it has
+      /// a link (the last one stays).
+      Future<void> start(
+        List<bool> answers, {
+        Duration relinkWait = const Duration(seconds: 10),
+      }) async {
+        links = List<bool>.of(answers);
+        final BackgroundCapability capability = await publishFor(_masterKey());
+        transport = MemorySignalTransport();
+        notices = MemoryRuntimeSystemNotificationService();
+        receiver = LockedReceiver(
+          transport: transport,
+          capability: capability,
+          inbox: SealedInboxWriter(
+            file: await serviceVault.inboxFile(),
+            recipientPublicKey: capability.inboxPublicKey,
+          ),
+          notices: notices,
+          pollAnswerGrace: const Duration(milliseconds: 100),
+          relinkStep: const Duration(milliseconds: 5),
+          relinkWait: relinkWait,
+          meshLinked: () async =>
+              links.length > 1 ? links.removeAt(0) : links.single,
+        );
+        await receiver.start();
+      }
+
+      int polls() => transport.sentSignals
+          .where((s) => s.payload['type'] == 'rly_poll')
+          .length;
+
+      /// Rings the next poll; [during] runs while it waits for answers.
+      Future<int> wakeAndCount({Future<void> Function()? during}) async {
+        final int before = polls();
+        final WakeTimer alarm = wake.live.single;
+        clock += wake.delayOf(alarm).inMilliseconds;
+        final Future<void> ringing = wake.ring(alarm);
+        if (during != null) {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          await during();
+        }
+        await ringing;
+        return polls() - before;
+      }
+
+      test('asks once more as soon as a link is up, once', () async {
+        // Down at the wake, up three looks later.
+        await start(<bool>[false, false, false, true]);
+        expect(await wakeAndCount(), 2);
+        // The next wake is linked: one poll.
+        expect(await wakeAndCount(), 1);
+      });
+
+      test('a mailbox that answered the poll: no second one', () async {
+        await start(<bool>[false, true]);
+        expect(
+          await wakeAndCount(
+            during: () =>
+                receive(_mailbox, const <String, dynamic>{'type': 'rly_here'}),
+          ),
+          1,
+        );
+      });
+
+      test(
+        'linked at the wake: no second poll, also without an answer',
+        () async {
+          await start(<bool>[true]);
+          expect(await wakeAndCount(), 1);
+        },
+      );
+
+      test('no link within the wait: no second poll', () async {
+        await start(<bool>[
+          false,
+        ], relinkWait: const Duration(milliseconds: 50));
+        expect(await wakeAndCount(), 1);
+      });
+    });
+
     test('the wait between polls doubles up to its longest', () {
       Duration wait = kLockedMailboxPollInterval;
       final List<int> minutes = <int>[];
@@ -801,6 +900,44 @@ void main() {
         expect(ring.isRingingCall, isTrue);
         expect(ring.title, 'Połączenie przychodzące');
       });
+
+      test('the notification switches of the settings apply: a kind that '
+          'is off posts nothing, quiet sounds mean quiet', () async {
+        final LockedNoticeKit muted = LockedNoticeKit(
+          names: names.names,
+          members: names.members,
+          muted: const <NoticeKind>{
+            NoticeKind.groupMessage,
+            NoticeKind.invitation,
+            NoticeKind.call,
+          },
+          sounds: false,
+        );
+        await startReceiver(await publishFor(_masterKey()), noticeKit: muted);
+        await receive(_member, inGroup);
+        await receive(_bob, const <String, dynamic>{'type': 'friend_request'});
+        await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        expect(notices.activeNotifications, isEmpty);
+
+        // A message from a person still comes, without a sound.
+        await receive(_ada, direct);
+        final RuntimeSystemNotification notice =
+            notices.activeNotifications.single;
+        expect(notice.kind, NoticeKind.message);
+        expect(notice.silent, isTrue);
+      });
+
+      test('a ringing call is not made quiet by the sounds switch', () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: const LockedNoticeKit(sounds: false),
+        );
+        await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        final RuntimeSystemNotification ring =
+            notices.activeNotifications.single;
+        expect(ring.isRingingCall, isTrue);
+        expect(ring.silent, isFalse);
+      });
     });
 
     test('a repeat is kept once and acknowledged again', () async {
@@ -988,15 +1125,23 @@ void main() {
           .where((sent) => sent.payload['type'] == 'pong')
           .length;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
-      expect(pongs(), 1);
+      expect(pongs(), 1, reason: 'the first ping: an answer at once');
       // The next ping, one interval later: no answer needed yet.
-      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      clock += kPresencePingInterval.inMilliseconds;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
       expect(pongs(), 1);
-      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      // Every other ping gets one, even when it comes a little early.
+      clock += kPresencePingInterval.inMilliseconds - 20000;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
       expect(pongs(), 2);
-      expect(kLockedPongEvery, lessThan(kPresenceOfflineAfter));
+      // Zen left Ada's screen and came back a while later: her first ping
+      // is answered at once again.
+      clock += const Duration(minutes: 7).inMilliseconds;
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(pongs(), 3);
+      expect(kLockedPongEvery, lessThan(kPresencePingInterval * 2));
+      // An answer every two intervals; one of them lost is not "offline".
+      expect(kPresencePingInterval * 4, lessThan(kPresenceOfflineAfter));
       await receive(_ada, <String, dynamic>{'type': kPresenceAwayType});
       expect(receiver.keptCount, 0);
     });

@@ -1527,6 +1527,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final bool visible =
         friend.isOnline != reachable ||
         friend.presence != report.presence ||
+        friend.presenceDoubt != null ||
         (openedAt == 0) != (friend.lastOpenedAtMillis == 0) ||
         openedShows;
     final bool stale =
@@ -1548,11 +1549,152 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         lastPresenceAtMillis: reachable ? timestamp : null,
         presence: report.presence,
         presenceAtMillis: timestamp,
+        // Heard from them just now: no longer in doubt.
+        presenceDoubt: null,
         lastOpenedAtMillis: openedAt,
       ),
     );
     state = state.copyWith(friends: friends);
     _persistSoon();
+  }
+
+  /// Whether this device reaches the network, as it changes: without it
+  /// nothing from friends can come, so every friend shows "brak
+  /// połączenia" ([PresenceDoubt.noNetwork]: the last state known is kept
+  /// and does not expire into "offline"); back on it, each one shows what
+  /// that state is worth by now, or "status nieznany" when it was confirmed
+  /// longer than [kPresenceRememberedFor] ago ([_rememberedPresence]),
+  /// until they answer or the answers had time to come ([decayPresence]
+  /// with `settleUnchecked`).
+  Future<void> notePresenceNetwork({
+    required bool reachable,
+    Duration offlineAfter = kPresenceOfflineAfter,
+    Duration foregroundFor = kPresenceForegroundFor,
+    int? nowMillis,
+  }) {
+    return _enqueueStateWork(() async {
+      final int timestamp = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
+      _reviewPresence(
+        (FriendProfile friend) => !reachable
+            ? _inDoubt(friend, PresenceDoubt.noNetwork)
+            : friend.presenceDoubt == PresenceDoubt.noNetwork
+            ? _rechecked(
+                friend,
+                nowMillis: timestamp,
+                offlineAfter: offlineAfter,
+                foregroundFor: foregroundFor,
+              )
+            : friend,
+      );
+    });
+  }
+
+  /// Zen came back to the screen after a while: a friend whose presence
+  /// would have expired by now shows what it is worth (offline), or "status
+  /// nieznany" ([PresenceDoubt.unchecked]) when it was confirmed longer than
+  /// [kPresenceRememberedFor] ago, until they answer the pings that go out
+  /// now.
+  Future<void> recheckStalePresence({
+    required Duration offlineAfter,
+    required Duration foregroundFor,
+    int? nowMillis,
+  }) {
+    return _enqueueStateWork(() async {
+      final int timestamp = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
+      _reviewPresence((FriendProfile friend) {
+        if (friend.presenceDoubt != null) {
+          return friend;
+        }
+        final int confirmed = max(
+          friend.presenceAtMillis,
+          _presenceConfirmedAt[PeerShareCodec.normalizeAddress(
+                friend.address,
+              )] ??
+              0,
+        );
+        final PeerPresence now = presenceAt(
+          presence: friend.presence,
+          presenceAtMillis: confirmed,
+          nowMillis: timestamp,
+          foregroundFor: foregroundFor,
+          backgroundFor: offlineAfter,
+        );
+        if (now == friend.presence) {
+          return friend;
+        }
+        return _rechecked(
+          friend,
+          nowMillis: timestamp,
+          offlineAfter: offlineAfter,
+          foregroundFor: foregroundFor,
+        );
+      });
+    });
+  }
+
+  /// [friend] in doubt for [doubt], with the last confirmation as memory
+  /// has it, for "ostatnio w sieci 2 godz. temu" (the state keeps an older
+  /// time while nothing shows).
+  FriendProfile _inDoubt(FriendProfile friend, PresenceDoubt doubt) {
+    if (friend.presenceDoubt == doubt) {
+      return friend;
+    }
+    final String key = PeerShareCodec.normalizeAddress(friend.address);
+    return friend.copyWith(
+      presenceDoubt: doubt,
+      presenceAtMillis: max(
+        friend.presenceAtMillis,
+        _presenceConfirmedAt[key] ?? 0,
+      ),
+      lastPresenceAtMillis: max(
+        friend.lastPresenceAtMillis,
+        _presenceSeenAt[key] ?? 0,
+      ),
+    );
+  }
+
+  /// [friend]'s presence at [nowMillis] after a while without a word
+  /// ([_rememberedPresence]), with what memory knows of them.
+  FriendProfile _rechecked(
+    FriendProfile friend, {
+    required int nowMillis,
+    required Duration offlineAfter,
+    required Duration foregroundFor,
+  }) {
+    final String key = PeerShareCodec.normalizeAddress(friend.address);
+    return _rememberedPresence(
+      friend,
+      nowMillis: nowMillis,
+      foregroundFor: foregroundFor,
+      offlineAfter: offlineAfter,
+      confirmedAtMillis: _presenceConfirmedAt[key] ?? 0,
+      seenAtMillis: _presenceSeenAt[key] ?? 0,
+      openedAtMillis: _openedAt[key] ?? 0,
+    );
+  }
+
+  /// Each accepted friend who shows presence as [review] has it now; one
+  /// change of the state. Doubt lives only in memory; a state that settles
+  /// is saved with the next save.
+  void _reviewPresence(FriendProfile Function(FriendProfile friend) review) {
+    Map<String, FriendProfile>? friends;
+    for (final MapEntry<String, FriendProfile> entry in state.friends.entries) {
+      final FriendProfile friend = entry.value;
+      if (friend.status != FriendRelationshipStatus.accepted ||
+          friend.presence == PeerPresence.hidden) {
+        continue;
+      }
+      final FriendProfile next = review(friend);
+      if (identical(next, friend)) {
+        continue;
+      }
+      (friends ??= Map<String, FriendProfile>.from(state.friends))[entry.key] =
+          next;
+    }
+    if (friends != null) {
+      state = state.copyWith(friends: friends);
+      _persistSoon();
+    }
   }
 
   /// Shows nothing more of [peerAddress]'s presence (a weak acquaintance:
@@ -1606,16 +1748,22 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
   /// Friends with no sign of life lately count as offline: "online" after
   /// [foregroundFor] without one, "w tle" (and being reachable at all)
-  /// after [offlineAfter].
+  /// after [offlineAfter]. A friend whose presence is in doubt keeps the
+  /// last one known: with no network nothing could come; one not checked
+  /// lately ([PresenceDoubt.unchecked]) is settled only with
+  /// [settleUnchecked] (the answers to a round had time to come), and then
+  /// shows what that last state is worth by now.
   Future<void> decayPresence({
     required Duration offlineAfter,
     required Duration foregroundFor,
+    bool settleUnchecked = false,
     int? nowMillis,
   }) {
     return _enqueueStateWork(
       () => _decayPresence(
         offlineAfter: offlineAfter,
         foregroundFor: foregroundFor,
+        settleUnchecked: settleUnchecked,
         nowMillis: nowMillis,
       ),
     );
@@ -1624,6 +1772,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   Future<void> _decayPresence({
     required Duration offlineAfter,
     required Duration foregroundFor,
+    required bool settleUnchecked,
     int? nowMillis,
   }) async {
     if (offlineAfter <= Duration.zero) {
@@ -1649,14 +1798,18 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           friend.isOnline &&
           seen > 0 &&
           timestamp - seen >= offlineAfter.inMilliseconds;
-      final PeerPresence presence = presenceAt(
-        presence: friend.presence,
-        presenceAtMillis: confirmed,
-        nowMillis: timestamp,
-        foregroundFor: foregroundFor,
-        backgroundFor: offlineAfter,
-      );
-      if (!unreachable && presence == friend.presence) {
+      final PresenceDoubt? doubt = friend.presenceDoubt;
+      final bool settles = doubt == PresenceDoubt.unchecked && settleUnchecked;
+      final PeerPresence presence = doubt != null && !settles
+          ? friend.presence
+          : presenceAt(
+              presence: friend.presence,
+              presenceAtMillis: confirmed,
+              nowMillis: timestamp,
+              foregroundFor: foregroundFor,
+              backgroundFor: offlineAfter,
+            );
+      if (!unreachable && !settles && presence == friend.presence) {
         continue;
       }
       friends[entry.key] = friend.copyWith(
@@ -1664,6 +1817,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         lastPresenceAtMillis: seen,
         presence: presence,
         presenceAtMillis: confirmed,
+        presenceDoubt: settles ? null : doubt,
         // Online until now: they last had Zen open at the last sign.
         lastOpenedAtMillis: friend.presence == PeerPresence.online
             ? max(friend.lastOpenedAtMillis, _openedAt[key] ?? 0)

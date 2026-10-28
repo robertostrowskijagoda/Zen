@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/quiet_timer.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
@@ -14,6 +15,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -21,8 +23,9 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 // everything new since the user last looked at the Tablica ("Nowy post od
 // Ady", "3 nowe posty"), updated in place, and the same news in the in-app
 // list. Only direct friends' own posts count: no own posts, no edits, no
-// reshares, nothing passed on from friends of friends (post_reach.dart),
-// nothing older than the last look at the Tablica. Each post is announced
+// reshares, nothing older than the last look at the Tablica. Posts passed
+// on from friends of friends (post_reach.dart) count only when the person
+// switched "Posty dalszych znajomych" on, which is off at first. Each post is announced
 // at most once: what was announced is kept in the ledger's store, so a
 // restart or a post that arrives twice (from two of the friend's devices,
 // from a mailbox) changes nothing.
@@ -58,6 +61,7 @@ final class NewPostNotice {
     required this.preview,
     required this.millis,
     this.privacy = NotificationPrivacy.senderAndContent,
+    this.far = false,
   });
 
   final String postId;
@@ -76,6 +80,9 @@ final class NewPostNotice {
 
   /// How much a notification about this friend may tell.
   final NotificationPrivacy privacy;
+
+  /// A friend of a friend, not a friend.
+  final bool far;
 }
 
 /// What a notification says of [post]: its beginning, or for a post with
@@ -175,6 +182,10 @@ RuntimeSystemNotification newPostsNotification(
     stackCount: posts.length,
     // The level is applied here, per friend.
     contentRedacted: true,
+    // A friend's post makes it a friend's notification.
+    kind: posts.every((NewPostNotice p) => p.far)
+        ? NoticeKind.farPost
+        : NoticeKind.friendPost,
   );
 }
 
@@ -199,7 +210,7 @@ InboxEntry newPostsInboxEntry(
         : _fromNames(posts),
     createdAtMillis: createdAtMillis,
     routeKey: buildFeedRouteKey(FeedFilter.all.name, postId: newest.postId),
-    peerAddress: one ? newest.address : null,
+    peerAddress: one && newest.address.isNotEmpty ? newest.address : null,
   );
 }
 
@@ -302,7 +313,11 @@ final class FriendPostNotifier {
     required this.announces,
     required this.privacyOf,
     required this.privacy,
-    this.quiet = const Duration(seconds: 10),
+    this.announcesFar = _never,
+    this.farPosts = _noPosts,
+    this.farChanges,
+    this.quiet = const Duration(seconds: 5),
+    this.atMost = const Duration(seconds: 30),
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -330,14 +345,43 @@ final class FriendPostNotifier {
   /// several friends at once.
   final NotificationPrivacy Function() privacy;
 
+  /// Whether the posts of friends of friends are announced too ("Posty
+  /// dalszych znajomych", off at first).
+  final bool Function() announcesFar;
+
+  /// The posts passed on from friends of friends that are on the wall now
+  /// (not own, not friends'), as far as the Tablica looks. Asked only while
+  /// [announcesFar].
+  final List<FeedPost> Function() farPosts;
+
+  /// Fires when a post passed on from friends of friends came (they never
+  /// come as entries of this phone's own ledger): its notification follows
+  /// the same quiet time as a friend's post.
+  final Stream<void>? farChanges;
+
+  static bool _never() => false;
+
+  static List<FeedPost> _noPosts() => const <FeedPost>[];
+
   /// Quiet time before a burst of posts is announced, so a friend's
   /// catching up comes as one notification.
   final Duration quiet;
+
+  /// The longest a post waits for its notification while more keep coming.
+  final Duration atMost;
   final int Function() _now;
 
   StreamSubscription<LogEntry>? _added;
   StreamSubscription<void>? _opened;
-  Timer? _timer;
+  StreamSubscription<void>? _far;
+  late final QuietTimer _timer = QuietTimer(
+    quiet: quiet,
+    atMost: atMost,
+    action: () => unawaitedLogged(
+      check(),
+      context: 'Powiadomienia o postach nie powiodły się',
+    ),
+  );
 
   /// The check under way: the next one waits for it, never runs beside it.
   Future<int>? _running;
@@ -351,6 +395,7 @@ final class FriendPostNotifier {
     });
     // A friends-only post becomes readable once its key arrives.
     _opened ??= node.openedChanges.listen((_) => _schedule());
+    _far ??= farChanges?.listen((_) => _schedule());
     _schedule();
   }
 
@@ -358,14 +403,7 @@ final class FriendPostNotifier {
     if (_disposed) {
       return;
     }
-    _timer?.cancel();
-    _timer = Timer(
-      quiet,
-      () => unawaitedLogged(
-        check(),
-        context: 'Powiadomienia o postach nie powiodły się',
-      ),
-    );
+    _timer.nudge();
   }
 
   /// Once a minute from the app's clock: a look at the Tablica since the
@@ -419,6 +457,14 @@ final class FriendPostNotifier {
       for (final FeedPost p in friendPosts(node, nameOf: nameOf))
         if (p.millis >= oldest) p,
     ];
+    final Set<String> farIds = <String>{};
+    if (announcesFar()) {
+      for (final FeedPost p in farPosts()) {
+        if (p.millis >= oldest && farIds.add(p.id)) {
+          posts.add(p);
+        }
+      }
+    }
     final bool looking = lookingAtFeed();
     if (had == null || looking) {
       // The first run only learns what is there; on the Tablica the user
@@ -447,7 +493,8 @@ final class FriendPostNotifier {
       final List<String> of = addresses[p.account] ?? const <String>[];
       // What was there at the last look is known already, so a post of the
       // very millisecond of the look is one that came after it.
-      if (p.millis >= had.lookedAt && of.isNotEmpty && of.every(announces)) {
+      if (p.millis >= had.lookedAt &&
+          (farIds.contains(p.id) || (of.isNotEmpty && of.every(announces)))) {
         fresh.add(p);
       }
     }
@@ -464,7 +511,11 @@ final class FriendPostNotifier {
     };
     final List<NewPostNotice> told = <NewPostNotice>[
       for (final String id in had.pending)
-        if (byId[id] case final FeedPost p) _noticeOf(p, addresses[p.account]!),
+        if (byId[id] case final FeedPost p)
+          if (farIds.contains(p.id))
+            _farNoticeOf(p)
+          else if (addresses[p.account] case final List<String> of)
+            _noticeOf(p, of),
     ]..sort((NewPostNotice a, NewPostNotice b) => b.millis.compareTo(a.millis));
     if (told.isEmpty) {
       await had.save(node.disk, nowMillis: now);
@@ -502,12 +553,27 @@ final class FriendPostNotifier {
     );
   }
 
+  NewPostNotice _farNoticeOf(FeedPost post) {
+    return NewPostNotice(
+      postId: post.id,
+      author: post.authorLabel,
+      address: post.authorAddress,
+      preview: postNoticePreview(post),
+      millis: post.millis,
+      // Not a friend: never a level of their own, always the global one.
+      privacy: privacy(),
+      far: true,
+    );
+  }
+
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
+    _timer.cancel();
     unawaited(_added?.cancel());
     unawaited(_opened?.cancel());
+    unawaited(_far?.cancel());
     _added = null;
     _opened = null;
+    _far = null;
   }
 }

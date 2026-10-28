@@ -7,11 +7,13 @@ named by $GITHUB_STEP_SUMMARY (or prints it, outside Actions). It never
 fails the job: a missing or unreadable file is reported as such.
 
   ci_summary.py flutter --format OUTCOME --analyze OUTCOME \
-      --analyze-log analyze.log --test OUTCOME --tests test-results.json
+      --analyze-log analyze.log --test OUTCOME --tests results/*.json
   ci_summary.py go --vet OUTCOME --test OUTCOME --log go-test.log
   ci_summary.py files --dir dist
 
 OUTCOME is a step's outcome: success, failure, cancelled or skipped.
+--tests takes one JSON file per `flutter test` run (each test shard writes
+its own); the counts and the failures are added up.
 """
 
 import argparse
@@ -87,8 +89,45 @@ def analyzer_section(outcome, log_path):
 
 # flutter test --file-reporter json:… ----------------------------------------
 
-def test_results(path):
-    """Counts and failures from the JSON reporter, or None."""
+def test_results(paths):
+    """Counts and failures from the JSON reporter files [paths] (one per
+    `flutter test` run), added up; None when none of them can be read.
+    "never_run": the tests (file, name) skipped in every run that has them,
+    e.g. skipped on Windows and not run on Linux either."""
+    if isinstance(paths, str):
+        paths = [paths]
+    total = None
+    skipped = set()
+    ran = set()
+    for path in paths or []:
+        one = _test_results(path)
+        if one is None:
+            continue
+        if total is None:
+            total = {"passed": 0, "failed": 0, "skipped": 0, "failures": [],
+                     "finished": True, "files": 0}
+        for key in ("passed", "failed", "skipped"):
+            total[key] += one[key]
+        total["failures"].extend(one["failures"])
+        total["finished"] = total["finished"] and one["finished"] is True
+        total["files"] += 1
+        skipped |= one["skipped_tests"]
+        ran |= one["ran_tests"]
+    if total is not None:
+        total["never_run"] = sorted(skipped - ran)
+    return total
+
+
+def relative_test_path(path):
+    """[path] (absolute, as the reporter writes it, on any system) from its
+    test/ folder on, so runs on Windows and Linux name a file alike."""
+    p = (path or "").replace("\\", "/")
+    at = p.rfind("/test/")
+    return p[at + 1:] if at >= 0 else p
+
+
+def _test_results(path):
+    """Counts and failures of one JSON reporter file, or None."""
     text = read_text(path) if path else None
     if text is None:
         return None
@@ -120,32 +159,35 @@ def test_results(path):
             finished = e.get("success")
     passed = failed = skipped = 0
     failures = []
+    skipped_tests = set()
+    ran_tests = set()
     for test_id, e in done.items():
         result = e.get("result")
         # Hidden entries are the "loading" placeholders of each file: they
         # count only when the file itself failed to load.
         if e.get("hidden") and result == "success":
             continue
+        t = tests.get(test_id) or {}
+        key = (relative_test_path(suites.get(t.get("suiteID"), "")),
+               t.get("name") or f"test {test_id}")
         if e.get("skipped"):
             skipped += 1
-        elif result == "success":
+            skipped_tests.add(key)
+            continue
+        ran_tests.add(key)
+        if result == "success":
             passed += 1
         else:
             failed += 1
-            t = tests.get(test_id) or {}
-            failures.append(
-                (
-                    suites.get(t.get("suiteID"), ""),
-                    t.get("name") or f"test {test_id}",
-                    errors.get(test_id, []),
-                )
-            )
+            failures.append((key[0], key[1], errors.get(test_id, [])))
     return {
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
         "failures": failures,
         "finished": finished,
+        "skipped_tests": skipped_tests,
+        "ran_tests": ran_tests,
     }
 
 
@@ -161,12 +203,26 @@ def flutter_summary(args):
         out.append(f"| Tests | {badge(args.test)} | no results |")
     else:
         total = results["passed"] + results["failed"] + results["skipped"]
+        runs = f" ({results['files']} runs)" if results["files"] > 1 else ""
         out.append(
             f"| Tests | {badge(args.test)} | "
             f"**{results['passed']}** passed · **{results['failed']}** failed · "
-            f"**{results['skipped']}** skipped · {total} in total |"
+            f"**{results['skipped']}** skipped · {total} in total{runs} |"
+        )
+        never = results["never_run"]
+        out.append(
+            f"| Skipped everywhere | {'⚠️' if never else '✅'} | "
+            f"{len(never)} test{'s' if len(never) != 1 else ''} ran in no job |"
         )
     out.append("")
+    if results and results["never_run"]:
+        out.append(f"<details><summary>Tests no job ran ({len(results['never_run'])})"
+                   "</summary>")
+        out.append("")
+        for suite, name in results["never_run"][:MAX_LISTED]:
+            out.append(f"- `{cell(suite)}`: {cell(name)}")
+        out.append("</details>")
+        out.append("")
     if issues:
         out.append(f"<details><summary>Analyzer issues ({len(issues)})</summary>")
         out.append("")
@@ -295,7 +351,7 @@ def main():
     flutter.add_argument("--analyze", default="")
     flutter.add_argument("--analyze-log", default="")
     flutter.add_argument("--test", default="")
-    flutter.add_argument("--tests", default="")
+    flutter.add_argument("--tests", nargs="*", default=[])
     go = commands.add_parser("go")
     go.add_argument("--vet", default="")
     go.add_argument("--test", default="")

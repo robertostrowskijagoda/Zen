@@ -33,11 +33,93 @@ void main() {
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());
+      // iPhone: Zen downloads nothing; SideStore installs the release's
+      // IPA.
+      expect(
+        githubAssetName(releasePlatform: 'ios', abi: Abi.iosArm64),
+        isNull,
+      );
+      expect(kIosIpaAssetName, kIpaAsset);
       expect(kSignedSumsAsset, kSignedSumsAssetName);
       expect(sha256SumsUri('1.2.3').path, endsWith('/v1.2.3/$kSumsAsset'));
       for (final String name in kContractAssets) {
         expect(kSafeAssetName.hasMatch(name), isTrue, reason: name);
       }
+    });
+
+    test('only the documented SideStore links are used', () {
+      // docs.sidestore.io ("URL Schema") documents two links: one adds a
+      // source, one installs an IPA. The app uses nothing else of SideStore,
+      // and iOS opens exactly the source link and install links of this
+      // repository's release IPAs.
+      final RegExp undocumented = RegExp(
+        r'sidestore://(?!source\?url=|install\?url=)\w',
+      );
+      final List<String> found = <String>[
+        for (final String root in <String>['lib', 'ios/Runner'])
+          for (final FileSystemEntity f in Directory(
+            root,
+          ).listSync(recursive: true))
+            // latin1: images and sounds read without failing.
+            if (f is File &&
+                undocumented.hasMatch(
+                  latin1.decode(f.readAsBytesSync()).toLowerCase(),
+                ))
+              f.path,
+      ];
+      expect(found, isEmpty);
+      final String swift = File(
+        'ios/Runner/AppDelegate.swift',
+      ).readAsStringSync();
+      expect(swift, contains('"$kSideStoreSourceLink"'));
+      expect('sidestore://'.allMatches(swift), hasLength(2));
+      expect(
+        kSideStoreSourceLink,
+        'sidestore://source?url=https://robertostrowskijagoda.github.io/Zen/'
+        'apps.json',
+      );
+    });
+
+    test('Scarlet is gone from the app, the iPhone code, the website and the '
+        'guide', () {
+      // The iPhone build installs with SideStore only; the released
+      // sections of CHANGELOG.md keep their history. The public peer list
+      // (native/) has a host of that name, which is not the app.
+      final List<String> found = <String>[
+        for (final String root in <String>[
+          'lib',
+          'ios/Runner',
+          'tool/pages',
+          'tool/ci',
+          'docs/guide',
+        ])
+          for (final FileSystemEntity f in Directory(
+            root,
+          ).listSync(recursive: true))
+            if (f is File &&
+                latin1
+                    .decode(f.readAsBytesSync())
+                    .toLowerCase()
+                    .contains('scarlet'))
+              f.path,
+        for (final String path in <String>[
+          'README.md',
+          'docs/RELEASES.md',
+          'docs/IOS_BACKGROUND.md',
+          '.github/workflows/pages.yml',
+          '.github/workflows/release.yml',
+          'tool/release_contract.dart',
+        ])
+          if (File(path).readAsStringSync().toLowerCase().contains('scarlet'))
+            path,
+      ];
+      expect(found, isEmpty);
+      final String changelog = File('CHANGELOG.md').readAsStringSync();
+      final String unreleased = changelog.substring(
+        changelog.indexOf('## Unreleased'),
+        changelog.indexOf('\n## ', changelog.indexOf('## Unreleased') + 1),
+      );
+      expect(unreleased.toLowerCase(), isNot(contains('scarlet')));
     });
 
     test('release.yml produces every one of them', () {
@@ -373,17 +455,27 @@ void main() {
       final String yml = File(
         '.github/workflows/release.yml',
       ).readAsStringSync();
-      // The pins are checked in the tag-only android job, before any key.
+      // The pins are checked at once in the tag-only android jobs (which
+      // have no key), and in the sign job before any key.
       final int android = yml.indexOf('\n  android:\n');
       final int windows = yml.indexOf('\n  windows:\n');
       final String androidJob = yml.substring(android, windows);
       expect(androidJob, contains('dart run tool/release.dart pinned'));
+      expect(androidJob, isNot(contains('secrets.')));
+      final int sign = yml.indexOf('\n  sign:\n');
+      final String signJob = yml.substring(
+        sign,
+        yml.indexOf('\n  attach:\n', sign),
+      );
       expect(
-        androidJob.indexOf('tool/release.dart pinned'),
-        lessThan(androidJob.indexOf('name: Release key')),
+        signJob.indexOf('dart run tool/release.dart pinned'),
+        allOf(greaterThan(0), lessThan(signJob.indexOf('name: Release keys'))),
+      );
+      expect(
+        signJob.indexOf('name: Release keys'),
+        lessThan(signJob.indexOf('secrets.')),
       );
       // The signature is checked against the pins.
-      final String signJob = yml.substring(yml.indexOf('\n  sign:\n'));
       expect(
         signJob,
         contains(

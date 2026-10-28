@@ -59,12 +59,14 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 part 'social_hub_controller_helpers.dart';
 part 'social_hub_controller_lifecycle_signal.dart';
@@ -573,6 +575,16 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       await setRingingCallWindowActive(true);
       return;
     }
+    if (ringingIncoming &&
+        !flutterUiVisible &&
+        _appSettings.mutes(NoticeKind.call)) {
+      // "Połączenia" are switched off: no card and no ring while Zen is in
+      // the background. The call ends up in the list of notifications as
+      // a missed one.
+      await setRingingCallWindowActive(false);
+      await hideIncomingCallPopup();
+      return;
+    }
     if (ringingIncoming && !flutterUiVisible) {
       // Stay in the background and raise only the native card. Bringing
       // MainActivity forward is what made the whole messenger pop up.
@@ -788,6 +800,37 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   final Map<String, int> _presenceConfirmedAt = <String, int>{};
   final Map<String, int> _openedAt = <String, int>{};
 
+  /// [hub] as saved: each friend's presence with its latest confirmation
+  /// from memory (and, while online, the last opening that goes with it),
+  /// so what is shown after a restart ("w sieci" from 3 min ago, offline
+  /// from 8 min ago, "ostatnio w sieci 2 godz. temu") is not older than it
+  /// was.
+  SocialHubState _withConfirmedPresence(SocialHubState hub) {
+    Map<String, FriendProfile>? friends;
+    for (final MapEntry<String, FriendProfile> entry in hub.friends.entries) {
+      final FriendProfile friend = entry.value;
+      final String key = PeerShareCodec.normalizeAddress(friend.address);
+      final int confirmed = _presenceConfirmedAt[key] ?? 0;
+      final int seen = _presenceSeenAt[key] ?? 0;
+      final int opened = friend.presence == PeerPresence.online
+          ? _openedAt[key] ?? 0
+          : 0;
+      if (confirmed <= friend.presenceAtMillis &&
+          seen <= friend.lastPresenceAtMillis &&
+          opened <= friend.lastOpenedAtMillis) {
+        continue;
+      }
+      (friends ??= Map<String, FriendProfile>.from(
+        hub.friends,
+      ))[entry.key] = friend.copyWith(
+        presenceAtMillis: max(confirmed, friend.presenceAtMillis),
+        lastPresenceAtMillis: max(seen, friend.lastPresenceAtMillis),
+        lastOpenedAtMillis: max(opened, friend.lastOpenedAtMillis),
+      );
+    }
+    return friends == null ? hub : hub.copyWith(friends: friends);
+  }
+
   Timer? _persistSoonTimer;
 
   /// Saves the state a moment later, once for a burst of small changes
@@ -836,7 +879,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         }
         return;
       }
-      await _snapshotStore.save(state);
+      await _snapshotStore.save(_withConfirmedPresence(state));
     } catch (error, stackTrace) {
       logZenError('Saving social hub state snapshot failed', error, stackTrace);
     } finally {

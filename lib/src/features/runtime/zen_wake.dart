@@ -348,7 +348,7 @@ final class _BeatWork implements BeatTimer {
     required this.dueAt,
   });
 
-  final _Beat _beat;
+  final WakeBeat _beat;
   final String name;
   Duration _every;
   final Future<void> Function() tick;
@@ -395,7 +395,12 @@ final class _BeatWork implements BeatTimer {
 /// parked service's watchdog; the update check), all on one alarm: one wake
 /// of the phone runs everything due by then, or due a little later, instead
 /// of one wake for each.
-final class _Beat {
+///
+/// The app has one ([ZenWake.beat]); a test that runs several phones in one
+/// process gives each of them a beat of its own.
+final class WakeBeat {
+  WakeBeat();
+
   final List<_BeatWork> _works = <_BeatWork>[];
 
   /// The next wake, for whatever is due first.
@@ -623,7 +628,7 @@ abstract final class ZenWake {
   static const Duration signalHold = Duration(seconds: 3);
   static final Stopwatch _sinceSignalHold = Stopwatch();
 
-  static final _Beat _beat = _Beat();
+  static final WakeBeat _beat = WakeBeat();
   static final Map<String, int> _busy = <String, int>{};
 
   /// A wake's hold when its work says nothing else: only a safety limit,

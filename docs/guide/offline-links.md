@@ -9,13 +9,19 @@
 | Channel | Default | Where | Good for |
 |---|---|---|---|
 | Same Wi-Fi or cable | on | all systems | everything, calls too |
-| Wi-Fi Direct | off | Android 10+, Windows | everything, when there is no Wi-Fi network |
-| Bluetooth | off | Android, Linux (BLE); Windows (paired devices) | messages and photos; calls may not work |
+| Wi-Fi Direct | on | Android 10+, Windows | everything, when there is no Wi-Fi network |
+| Bluetooth | on | Android, Linux (BLE); Windows (paired devices) | messages and photos; calls may not work |
 | Apple Multipeer | off | iPhone, Mac (while Zen is open) | everything |
 
-Turn them on in **Settings → Advanced → Network and service**,
+Change them in **Settings → Advanced → Network and service**,
 section *Connectivity without the internet*. The
 settings show how many devices are linked directly ("Wi-Fi Direct: 1").
+The first start asks for what Wi-Fi Direct and Bluetooth need ("Nearby
+devices", Bluetooth). To spare the battery they run only while they can
+help: while Zen is used (or, on Android, during the first minutes in the
+background), once you have a friend or another device of your own to link
+with; Wi-Fi Direct also rests while the device is on a Wi-Fi network, and
+Bluetooth advertises and scans only in short windows.
 
 ## How it works
 

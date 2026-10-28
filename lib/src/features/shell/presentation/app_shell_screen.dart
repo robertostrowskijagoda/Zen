@@ -89,6 +89,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/diagnostics_log_file.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
@@ -98,6 +99,7 @@ import 'package:zen/src/features/settings/presentation/notification_privacy_choi
 import 'package:zen/src/features/settings/presentation/page_title.dart';
 import 'package:zen/src/features/settings/presentation/public_peers_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_limits_section.dart';
+import 'package:zen/src/features/settings/presentation/storage_usage_section.dart';
 import 'package:zen/src/features/shell/presentation/health_screen.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
@@ -114,6 +116,7 @@ import 'package:zen/src/features/update/presentation/signing_expiry_banner.dart'
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
+part 'app_shell_screen_notification_settings.dart';
 part 'app_shell_screen_notifications.dart';
 part 'app_shell_screen_views.dart';
 part 'app_shell_screen_settings_security.dart';
@@ -293,7 +296,7 @@ final class ConversationPreview {
     required this.timeLabel,
     required this.unreadCount,
     this.presence = PeerPresence.offline,
-    this.lastOpenedAtMillis = 0,
+    this.presenceLine,
     this.isTyping = false,
     this.avatarPath,
     this.nickname = '',
@@ -312,10 +315,13 @@ final class ConversationPreview {
   final String timeLabel;
   final int unreadCount;
 
-  /// What the friend's Zen is doing ([PeerPresence.hidden]: they do not
-  /// show it), and when it was last open there (0: not known).
+  /// What the friend's Zen is doing as shown ([PeerPresence.hidden]: they
+  /// do not show it; [PeerPresence.unknown]: not checked lately;
+  /// [PeerPresence.noConnection]: this device has no network), and that in
+  /// words, as the list was built ("w tle · ostatnio otwierał(a) 5 min
+  /// temu", "status nieznany · ostatnio w sieci 2 godz. temu").
   final PeerPresence presence;
-  final int lastOpenedAtMillis;
+  final String? presenceLine;
   final bool isTyping;
 
   /// Zen is open on their screen now.

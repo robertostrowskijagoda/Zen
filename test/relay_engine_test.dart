@@ -631,8 +631,9 @@ void main() {
   group('group members who are not friends', () {
     /// Alice and bob share a group but are not friends; the helpers are
     /// everyone's friends and hold mail as usual. Sharing mailboxes with group
-    /// members is opt-in, so it is switched on here for whoever [aliceShares] /
-    /// [bobShares] say; [onSend] sees every datagram from the very start.
+    /// members is on by default, so it is switched off here for whoever
+    /// [aliceShares] / [bobShares] say not to; [onSend] sees every datagram
+    /// from the very start.
     Future<_SimMesh> groupMesh({
       bool aliceShares = true,
       bool bobShares = true,
@@ -652,11 +653,11 @@ void main() {
       mesh.nodes[bob]!
         ..friends.remove(alice)
         ..groupMates.add(alice);
-      if (aliceShares) {
-        await mesh.nodes[alice]!.engine.setShareWithGroups(true);
+      if (!aliceShares) {
+        await mesh.nodes[alice]!.engine.setShareWithGroups(false);
       }
-      if (bobShares) {
-        await mesh.nodes[bob]!.engine.setShareWithGroups(true);
+      if (!bobShares) {
+        await mesh.nodes[bob]!.engine.setShareWithGroups(false);
       }
       if (onSend != null) {
         mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
@@ -679,8 +680,10 @@ void main() {
       'text': text,
     };
 
-    test('a group message waits in the offline member\'s mailboxes', () async {
+    test('by default a group message waits in the offline member\'s '
+        'mailboxes', () async {
       final _SimMesh mesh = await groupMesh();
+      expect((await mesh.nodes[bob]!.state()).shareWithGroups, isTrue);
       expect(
         (await mesh.nodes[alice]!.state()).peers[bob]?.relays,
         hasLength(6),
@@ -744,8 +747,8 @@ void main() {
       },
     );
 
-    test('by default the mailboxes are announced to friends only, never to '
-        'group members who are not friends', () async {
+    test('switched off, the mailboxes are announced to friends only, never '
+        'to group members who are not friends', () async {
       final List<String> toGroupMate = <String>[];
       final _SimMesh mesh = await groupMesh(
         aliceShares: false,
@@ -787,8 +790,8 @@ void main() {
       expect((await mesh.nodes[bob]!.state()).currentRelays, hasLength(6));
     });
 
-    test('opting in later shares the mailboxes with group members, and '
-        'opting out stops it again', () async {
+    test('switching it on again shares the mailboxes with group members, '
+        'and off again stops it', () async {
       final _SimMesh mesh = await groupMesh(
         aliceShares: false,
         bobShares: false,

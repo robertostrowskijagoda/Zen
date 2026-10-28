@@ -1107,6 +1107,8 @@ abstract final class ZenTheme {
         contentTextStyle: TextStyle(color: colors.textPrimary, fontSize: 14),
         actionTextColor: colors.accent,
         behavior: SnackBarBehavior.floating,
+        // A swipe to either side puts a notice at the bottom away.
+        dismissDirection: DismissDirection.horizontal,
         elevation: look.elevation == ZenElevation.flat ? 0 : null,
         shape: look.floatingShape(colors, radius: 22),
       ),

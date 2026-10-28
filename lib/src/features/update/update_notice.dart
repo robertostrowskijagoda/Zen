@@ -95,6 +95,19 @@ final class UpdateNoticeState {
     );
   }
 
+  /// This build is [current]: the versions up to it that were found,
+  /// announced or closed are installed, and forgotten.
+  UpdateNoticeState installed(String current) {
+    bool over(String? version) =>
+        version != null && compareAppVersions(version, current) <= 0;
+    return UpdateNoticeState(
+      checkedAtMillis: checkedAtMillis,
+      newestVersion: over(newestVersion) ? null : newestVersion,
+      notifiedVersion: over(notifiedVersion) ? null : notifiedVersion,
+      dismissedVersion: over(dismissedVersion) ? null : dismissedVersion,
+    );
+  }
+
   Map<String, Object?> toJson() => <String, Object?>{
     'checkedAt': ?checkedAtMillis,
     'newest': ?newestVersion,
@@ -259,8 +272,10 @@ RuntimeSystemNotification updateAvailableNotification(
 
 /// Shows [updateAvailableNotification] for [version] (with [whatsNew])
 /// once: never again for it or an older one, whichever isolate asks, and
-/// not at all when its banner was already closed. Returns whether it was
-/// shown now.
+/// not at all when its banner was already closed. A newer version is
+/// shown again, in the place of the one before ([kUpdateNoticeSlot]): a
+/// notice or a closed banner of 1.13.1 never holds back 1.14.0. Returns
+/// whether it was shown now.
 Future<bool> announceUpdateOnce({
   required UpdateNoticeStore store,
   required RuntimeSystemNotificationService notices,
@@ -288,6 +303,38 @@ Future<bool> announceUpdateOnce({
     );
   } on Object catch (error, stackTrace) {
     logZenError('Showing the update notification failed', error, stackTrace);
+    return false;
+  }
+}
+
+/// Takes "Jest nowa wersja Zen" away once its version is installed: the
+/// version it named is [currentVersion] or older, so it would offer what
+/// the person already has (a phone keeps the notification across an app
+/// update). A notice of a version newer than this build stays. Returns
+/// whether one was taken away.
+Future<bool> withdrawInstalledUpdateNotice({
+  required UpdateNoticeStore store,
+  required RuntimeSystemNotificationService notices,
+  required String currentVersion,
+}) async {
+  String? announced;
+  await store.update((UpdateNoticeState state) {
+    announced = state.notifiedVersion;
+    return state.installed(currentVersion);
+  });
+  final String? version = announced;
+  if (version == null || compareAppVersions(version, currentVersion) > 0) {
+    return false;
+  }
+  try {
+    await notices.dismissSlot(kUpdateNoticeSlot);
+    return true;
+  } on Object catch (error, stackTrace) {
+    logZenError(
+      'Taking the update notification away failed',
+      error,
+      stackTrace,
+    );
     return false;
   }
 }

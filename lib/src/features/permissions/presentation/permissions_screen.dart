@@ -128,6 +128,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   static bool _settingsAfterNo(ZenPermission p) => switch (p) {
     ZenPermission.notifications ||
     ZenPermission.bluetooth ||
+    ZenPermission.nearbyWifi ||
     ZenPermission.location ||
     ZenPermission.backgroundLocation ||
     ZenPermission.microphone ||
@@ -553,6 +554,16 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         t('Włączony Bluetooth'),
         t('Telefon pokazuje się znajomym obok i słyszy ich alarm.'),
       ),
+      ZenPermission.nearbyWifi => (
+        Icons.wifi_tethering_rounded,
+        t('Wi-Fi Direct'),
+        t(
+          'Telefony znajomych obok łączą się bez internetu, gdy w pobliżu '
+          'nie ma sieci Wi-Fi. System nazywa tę zgodę „Urządzenia w '
+          'pobliżu” (na starszym Androidzie: lokalizacja). Zen nie ustala '
+          'z niej, gdzie jesteś.',
+        ),
+      ),
       ZenPermission.location => (
         Icons.my_location_rounded,
         t('Położenie'),
@@ -618,6 +629,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     ZenPermission.notifications => 'notifications',
     ZenPermission.bluetooth => 'bluetooth',
     ZenPermission.bluetoothOn => 'bluetooth-on',
+    ZenPermission.nearbyWifi => 'nearby-wifi',
     ZenPermission.location => 'location',
     ZenPermission.backgroundLocation => 'background-location',
     ZenPermission.exactAlarms => 'exact-alarms',

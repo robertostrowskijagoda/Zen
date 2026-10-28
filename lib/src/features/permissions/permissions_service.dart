@@ -8,6 +8,7 @@ import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/wifi_direct_local_link.dart';
 
 /// Something Zen asks the system for, in the order it asks.
 enum ZenPermission {
@@ -19,6 +20,10 @@ enum ZenPermission {
 
   /// Bluetooth itself switched on.
   bluetoothOn,
+
+  /// Wi-Fi Direct links with friends nearby: "Nearby devices"
+  /// (NEARBY_WIFI_DEVICES, Android 13+), the location permission before.
+  nearbyWifi,
 
   /// Where this phone is while Zen is open: the place sent with an alarm,
   /// neighbours nearby.
@@ -105,11 +110,12 @@ abstract interface class PermissionsPlatform {
   Stream<bool> get bluetoothChanges;
 }
 
-/// Android: notifications, Bluetooth, the full-screen alarm, battery,
-/// microphone and camera.
+/// Android: notifications, Bluetooth, Wi-Fi Direct, the full-screen alarm,
+/// battery, microphone and camera.
 final class AndroidPermissionsPlatform implements PermissionsPlatform {
-  AndroidPermissionsPlatform({ChannelNearbyRadio? radio})
-    : _radio = radio ?? ChannelNearbyRadio();
+  AndroidPermissionsPlatform({ChannelNearbyRadio? radio, WifiDirectRadio? wifi})
+    : _radio = radio ?? ChannelNearbyRadio(),
+      _wifi = wifi ?? const MethodChannelWifiDirectRadio();
 
   static const MethodChannel _channel = MethodChannel('zen/permissions');
 
@@ -123,6 +129,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
   static const int _exactAlarmSdk = 31;
 
   final ChannelNearbyRadio _radio;
+  final WifiDirectRadio _wifi;
 
   @override
   bool get hasAnything => true;
@@ -146,6 +153,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
   Future<PermissionsSnapshot> check() async {
     final Map<Object?, Object?> own = await _state();
     final Map<Object?, Object?> radio = await _radio.state();
+    final Map<String, Object?> wifi = await _wifi.state();
     final bool battery = await isAndroidBackgroundDeliveryUnrestricted();
     final bool fullScreen = await canUseCallFullScreenIntent();
     final Object? sdk = own['sdk'];
@@ -158,6 +166,8 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
           ZenPermission.bluetooth,
           ZenPermission.bluetoothOn,
         ],
+        // Wi-Fi Direct links are on by default: asked here with the rest.
+        if (wifi['supported'] == true) ZenPermission.nearbyWifi,
         ZenPermission.location,
         // Android 10 split "also in the background" from the rest.
         if (sdk is int && sdk >= _backgroundLocationSdk)
@@ -173,6 +183,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         ZenPermission.notifications: own['notifications'] == true,
         ZenPermission.bluetooth: radio['permitted'] == true,
         ZenPermission.bluetoothOn: radio['enabled'] == true,
+        ZenPermission.nearbyWifi: wifi['permitted'] == true,
         ZenPermission.location:
             place == LocationPermission.whileInUse ||
             place == LocationPermission.always,
@@ -218,6 +229,8 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         await _radio.requestPermissions();
       case ZenPermission.bluetoothOn:
         await _radio.requestEnable();
+      case ZenPermission.nearbyWifi:
+        await _wifi.requestPermissions();
       case ZenPermission.location:
         try {
           await requestLocationPermission();

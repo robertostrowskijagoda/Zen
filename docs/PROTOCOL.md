@@ -35,8 +35,18 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` with a checksum
   (`PeerShareCodec.inviteCodeForAddress` / `addressFromInviteCode` [P]). Links:
   `zen://c/CODE` and `https://robertostrowskijagoda.github.io/Zen/#CODE`.
-- Peering: a built-in list of public peers (`public_peers.go`; Android starts
-  with a TLS-only subset), local links with friends' and own devices without
+- Peering: a built-in list of public peers (`public_peers.go`; a phone
+  dials 4 at once, 2 while it only receives in the background, a TLS-only
+  subset first, the rest of the encrypted list
+  in reserve for the peers that stop answering; `phone_peers.go`: a link
+  that goes down gets two stand-ins dialled in parallel at once, told by
+  the core's "Disconnected" log line, a candidate not up within 8 s is
+  replaced, the surplus goes once the target is up again, at most twice
+  the target are dialled at once, peers the transit guard set aside are
+  no candidates; with no peer up, waves of fresh candidates after 5 s,
+  then 15 s doubling up to 15 min by the wall clock, each one also
+  redialling every kept peer, and the first send after a wake looks at
+  once), local links with friends' and own devices without
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and
   "bridge" announcements in the ledger (`lg_bridges`).
@@ -251,9 +261,10 @@ device keys, label `zen.local.v1`); a stranger has none.
   Bluetooth (BLE GATT service `5a454e00-6c69-6e6b-0000-000000000001`,
   manufacturer data of company `0xFFFF` starting `"ZL"`, L2CAP channels or,
   on Windows, GATT streams; classic RFCOMM with paired devices on Android
-  and Windows); Apple Multipeer (service type `zen-link`). Wi-Fi Direct,
-  Bluetooth and Multipeer are off until the person turns them on; Wi-Fi
-  discovery is on unless turned off. Phones use Wi-Fi interfaces only, never
+  and Windows); Apple Multipeer (service type `zen-link`). Wi-Fi discovery,
+  Wi-Fi Direct and Bluetooth are on unless turned off, Multipeer is off
+  until the person turns it on; a native transport runs only while there
+  is a device to link with. Phones use Wi-Fi interfaces only, never
   mobile data.
 - **Adverts** carry a Bloom filter with one tag per device the sender links
   with (`HMAC(tagKey, "adv" | 5-minute slot | salt)`, a fresh random salt
@@ -286,12 +297,12 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
-| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
-| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence, at most once every 5 min (`kPresenceAwayEvery`): one held back goes out when that time is over, unless Zen is back on the screen by then. Never mailboxed; ignored by a locked phone. |
+| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen (once more when the node first reaches the mesh, if that round went out before it did), at once to a target just added, then every 2 min (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
+| `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 3 min 30 s (`kLockedPongEvery`: the first ping after a quiet while at once, then every other one), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
+| `away` | presence: `state`, `lo` | A one-way presence announcement, despite its name for any change of the sender's state: leaving the screen (`"background"`, or `"asleep"` on an iPhone iOS suspends), coming back before the next round (`"foreground"`), quitting Zen on a computer (`"asleep"`), and what was held back while the node had no network, once it has. Sent only to friends who see presence and have Zen open now (their last `ping`, `pong` or `away` in this run, within 5 min, said `"foreground"`), and only when they were last told another state; at most one per state per friend every 30 s (`kPresenceNoticeEvery`), changes within 2 s told as one (`kPresenceNoticeDelay`). One held back goes when its time is over, unless the state is back to what they were told. An iPhone's `"asleep"` goes to every friend who sees presence (their mail should go to the mailboxes now), to one without Zen open at most every 4 min (`kPresenceAwayEvery`). Never mailboxed; ignored by a locked phone (which says `"background"` in its pongs, so it never gets one). A 1.13 Zen applies whatever `state` an `away` names. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
 
-Presence fields ride on the frames above; nothing is sent only for them.
+Presence fields ride on the frames above; nothing is polled only for them.
 They go only to accepted friends who may see statuses (not to a friend at
 the "weak acquaintance" level, and never to group members or strangers); to
 anyone else a `ping` or `pong` carries neither field.
@@ -300,23 +311,50 @@ anyone else a `ping` or `pong` carries neither field.
   (off the screen but still receiving: Android's background service, a
   computer's tray, an iPhone with the keep-alive) or `"asleep"` (off the
   screen and about to stop receiving: an iPhone iOS suspends). A frame
-  without `state` says nothing about presence; the receiver shows none.
+  without `state` says nothing about presence; the receiver shows none
+  (unknown for a Zen older than 1.13.0, see below).
 - `lo`: seconds since Zen was last open on the sender's screen (0 while it
   is open). Left out when the sender turned off "show when I last opened
   the app", or does not know (a computer that started in the tray).
 
 The receiver shows *online* for `"foreground"`, *in the background* for
 `"background"`, and *offline* for `"asleep"` or when the state expires:
-*online* after 6 min without a new frame (`kPresenceForegroundFor`: a
-friend on the screen pings every 2 min 30 s and answers at once, and says
-`away` when it leaves), *in the background* after 12 min
-(`kPresenceOfflineAfter`: a locked phone answers about every 5 min, as it
-answers one contact at most every 4 min). The receiver keeps the last
+*online* after 5 min without a new frame (`kPresenceForegroundFor`: a
+friend on the screen pings every 2 min and answers at once, and says
+`away` when it leaves), *in the background* after 10 min
+(`kPresenceOfflineAfter`: a locked phone answers every 4 min, as it
+answers one contact at most every 3 min 30 s). The receiver keeps the last
 opening (receive time minus `lo`) and shows it while the friend is not
 online. A locked Android phone takes `state` and `lo` for its pongs from a
 presence kit the app writes, sealed with the background key, whenever Zen
 leaves the screen (`presence-kit.zenbg`: the friends who may see presence
 and when Zen was last open).
+
+Two more states are shown only by the receiver; the last state known is
+kept underneath and nothing is sent for them:
+
+- *No connection* ("brak połączenia"): this device has not reached the
+  mesh for 30 s (`kPresenceNoNetworkAfter`), so every friend shows it at
+  once; it is about this device, not about them. Nothing expires into
+  *offline* meanwhile. Back on the mesh, each friend shows the last state
+  as it stands now, or *unknown* when it was confirmed more than 30 min
+  ago (below); the friends who had Zen open are pinged at once (they hear
+  this device and answer).
+- *Unknown* ("status nieznany"), for two reasons:
+  - *Not checked lately*: the state remembered from before a start (kept
+    per friend in the encrypted social snapshot: the state, when it was
+    last confirmed, the last opening) is shown as it stands now when it
+    was confirmed at most 30 min ago (`kPresenceRememberedFor`; the
+    expiry above counts from that confirmation, so *online* from 8 min ago
+    shows *offline*); confirmed longer ago, it is *unknown* until the
+    friend's next frame, or until 20 s after the second round of pings
+    that could arrive (about 2 min after the node reached the mesh,
+    `kPresenceSettleAfterResume`), when it shows what that state is worth
+    by then. The same after coming back to the screen, or to the mesh, for
+    a state that would have expired meanwhile.
+  - *Too old*: a friend whose `ping` or `pong` names a `ver` older than
+    1.13.0 and no `state` (a newer Zen without `state` hides its presence
+    from this person, which shows nothing).
 
 ### 2.2 Friends and profile
 

@@ -55,6 +55,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
@@ -94,7 +95,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   static const int _entranceStaggerLimit = 10;
 
   final TextEditingController _composerController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+
+  /// Keeps the list at the newest message while it is there.
+  final ChatScrollController _scrollController = ChatScrollController();
   final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   /// Where the conversation was scrolled to when the app was closed.
@@ -105,6 +108,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     bubbleKeys: _bubbleKeys,
   );
   late final SocialHubController _socialHubController;
+
+  /// What is written and not sent yet is kept as this conversation's draft.
+  late final ComposerDrafts _drafts;
+  late final String _draftId = ComposerDrafts.peerChat(widget.peerAddress);
+  bool _fillingDraft = false;
   VoiceMessageRecorder? _voiceRecorder;
   Timer? _recordingTicker;
   DateTime? _recordingStartedAt;
@@ -113,6 +121,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   bool _isRecordingBusy = false;
   bool _messageEntrancePlayed = false;
   int _lastRenderedMessageCount = -1;
+
+  /// The newest message the list was built with.
+  String? _newestShownId;
   DateTime? _lastTypingSentAt;
 
   /// The message the next one replies to (shown over the composer).
@@ -186,7 +197,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   void initState() {
     super.initState();
     _socialHubController = ref.read(socialHubControllerProvider.notifier);
+    _drafts = ref.read(composerDraftsProvider);
     _composerController.addListener(_onComposerChanged);
+    _restoreDraft();
     Future<void>.microtask(() {
       _socialHubController.enterConversation(widget.peerAddress);
     });
@@ -198,7 +211,38 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _scrollMemory.attach(context);
   }
 
+  /// What was written here and not sent, before the screen or the app was
+  /// closed, is back in the field (unless something was typed meanwhile).
+  void _restoreDraft() {
+    void fill() {
+      final ComposerDraft? draft = _drafts[_draftId];
+      if (!mounted || draft == null || _composerController.text.isNotEmpty) {
+        return;
+      }
+      _fillingDraft = true;
+      try {
+        _composerController.value = TextEditingValue(
+          text: draft.text,
+          selection: TextSelection.collapsed(offset: draft.text.length),
+        );
+      } finally {
+        _fillingDraft = false;
+      }
+    }
+
+    if (_drafts.isLoaded) {
+      fill();
+    } else {
+      unawaited(_drafts.load().then((_) => fill()));
+    }
+  }
+
   void _onComposerChanged() {
+    // A draft put back is not typing.
+    if (_fillingDraft) {
+      return;
+    }
+    _drafts.put(_draftId, ComposerDraft(text: _composerController.text));
     final String text = _composerController.text.trim();
     if (text.isNotEmpty) {
       final DateTime now = DateTime.now();
@@ -269,8 +313,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       friend: friend,
       peerAddress: widget.peerAddress,
     );
-    // The presence dot: only for a friend who shows it.
-    final PeerPresence presence = friend?.presence ?? PeerPresence.hidden;
+    // The presence dot: only for a friend who shows it ("status nieznany"
+    // while it is not known now).
+    final PeerPresence presence = friend?.shownPresence ?? PeerPresence.hidden;
     final bool showsPresence =
         friend?.status == FriendRelationshipStatus.accepted &&
         presence != PeerPresence.hidden;
@@ -334,8 +379,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   address: widget.peerAddress,
                   name: conversationTitle,
                   size: 40,
-                  online: presence == PeerPresence.online,
-                  away: presence == PeerPresence.background,
+                  presence: presence,
                   showStatus: showsPresence,
                 ),
                 const SizedBox(width: 12),
@@ -737,6 +781,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   reversed: false,
                   incomingCount: incomingCount,
                   child: messages.when(
+                    // Each message reloads the conversation: the list stays
+                    // (and keeps its place) until the new one is read,
+                    // instead of a spinner for a frame and a new list.
+                    skipLoadingOnReload: true,
                     data: (List<ChatMessage> thread) {
                       _scheduleScrollToBottom(thread);
                       final bool animateEntrance =
@@ -973,6 +1021,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ?.displayLabel ??
         widget.title;
     _composerController.clear();
+    // Down to the newest message, where this one is about to appear.
+    _scrollController.showLatest();
     final ChatReply? replyTo = _replyTo;
     if (replyTo != null) {
       setState(() => _replyTo = null);
@@ -1266,32 +1316,39 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
+  /// The list opens at its newest message and stays with it while it is
+  /// there ([ChatScrollController]); someone reading further up is not
+  /// pulled down by what comes in (the button below the list counts it).
+  /// This brings back where the conversation was when the app was closed,
+  /// and shows one's own new message, also from further up.
   void _scheduleScrollToBottom(List<ChatMessage> thread) {
     if (_lastRenderedMessageCount == thread.length) {
       return;
     }
     final bool first = _lastRenderedMessageCount < 0;
     _lastRenderedMessageCount = thread.length;
-    // Someone reading further up is not pulled down by what comes in (the
-    // button below the list counts it); their own message does.
-    if (!first &&
-        thread.isNotEmpty &&
-        !thread.last.isOutgoing &&
-        !JumpToLatest.isNearLatest(_scrollController)) {
+    final String? newest = thread.lastOrNull?.id;
+    final bool ownNew =
+        !first &&
+        newest != null &&
+        newest != _newestShownId &&
+        thread.last.isOutgoing;
+    _newestShownId = newest;
+    if (first) {
+      if (_scrollMemory.hasAnchor) {
+        final List<String> remembered = <String>[
+          for (final ChatMessage m in thread) m.id,
+        ];
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scrollController.hasClients) {
+            _scrollMemory.restore(remembered);
+          }
+        });
+      }
       return;
     }
-    final List<String>? remembered = _scrollMemory.hasAnchor
-        ? <String>[for (final ChatMessage m in thread) m.id]
-        : null;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
-      // The conversation was closed with the app: back where it was.
-      if (remembered != null && _scrollMemory.restore(remembered)) {
-        return;
-      }
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
+    if (ownNew) {
+      _scrollController.showLatest();
+    }
   }
 }

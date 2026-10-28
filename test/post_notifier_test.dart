@@ -10,6 +10,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -43,7 +44,10 @@ final class _Phone {
     return address;
   }
 
-  FriendPostNotifier notifier() {
+  FriendPostNotifier notifier({
+    bool Function()? announcesFar,
+    List<FeedPost> Function()? farPosts,
+  }) {
     final FriendPostNotifier n = FriendPostNotifier(
       node: node,
       nameOf: nameOf,
@@ -59,6 +63,8 @@ final class _Phone {
       announces: (String address) => postsOn && !muted.contains(address),
       privacyOf: (String address) => own[address] ?? global,
       privacy: () => global,
+      announcesFar: announcesFar ?? () => false,
+      farPosts: farPosts ?? () => const <FeedPost>[],
       now: () => clock ?? DateTime.now().millisecondsSinceEpoch,
     );
     addTearDown(n.dispose);
@@ -120,6 +126,7 @@ void main() {
       expect(n.title, 'Nowy post od Bob');
       expect(n.body, 'Hej, jestem w górach');
       expect(n.contentRedacted, isTrue);
+      expect(n.kind, NoticeKind.friendPost);
 
       final InboxEntry entry = ada.inbox.single;
       expect(entry.type, InboxEntryType.post);
@@ -304,6 +311,47 @@ void main() {
       expect(await notifier.check(), 0);
       expect(ada.shown, isEmpty);
       expect(ada.inbox, isEmpty);
+    });
+
+    test('posts of friends of friends, unless "Posty dalszych znajomych" '
+        'is on', () async {
+      final (_, _Phone ada) = await world();
+      bool farOn = false;
+      final int look = DateTime.now().millisecondsSinceEpoch;
+      ada.clock = look;
+      final List<FeedPost> far = <FeedPost>[
+        FeedPost(
+          id: 'far-1',
+          account: 'dan-account',
+          authorLabel: 'Dan',
+          text: 'Dwa kroki dalej',
+          millis: look + 500,
+          isOwn: false,
+          degree: 2,
+          authorAddress: 'dan.ygg',
+        ),
+      ];
+      final FriendPostNotifier notifier = ada.notifier(
+        announcesFar: () => farOn,
+        farPosts: () => far,
+      );
+      await notifier.check();
+
+      // Off at first: nothing, neither in the shade nor in the list.
+      expect(await notifier.check(), 0);
+      expect(ada.shown, isEmpty);
+      expect(ada.inbox, isEmpty);
+
+      farOn = true;
+      expect(await notifier.check(), 1);
+      expect(ada.shown.single.kind, NoticeKind.farPost);
+      expect(ada.shown.single.title, 'Nowy post od Dan');
+      expect(ada.inbox.single.title, 'Nowy post od Dan');
+      expect(ada.inbox.single.peerAddress, 'dan.ygg');
+
+      // Announced once.
+      expect(await notifier.check(), 0);
+      expect(ada.shown, hasLength(1));
     });
 
     test('posts older than the last look at the Tablica, or than a few '

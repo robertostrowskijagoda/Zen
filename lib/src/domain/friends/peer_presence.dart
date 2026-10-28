@@ -8,7 +8,51 @@ import 'package:flutter/foundation.dart';
 /// [offline]: no sign of life lately, or a device that stops receiving off
 /// the screen (an iPhone iOS suspends). [hidden]: the friend does not show
 /// it to this person (a weak acquaintance there sees no statuses).
-enum PeerPresence { hidden, offline, background, online }
+/// [unknown]: not checked lately ("status nieznany": the last state known
+/// was confirmed longer than [kPresenceRememberedFor] ago and nothing new
+/// came yet, see [PresenceDoubt.unchecked]); kept for a friend only when
+/// their Zen is too old to tell it ([kPresenceSinceVersion]).
+/// [noConnection]: this device has no connection to the network, so
+/// nothing can be known of anyone ("brak połączenia", see
+/// [PresenceDoubt.noNetwork]); only shown, never kept.
+/// Neither of the last two is ever sent. New values go last, so the stored
+/// indexes of the others stay.
+enum PeerPresence { hidden, offline, background, online, unknown, noConnection }
+
+/// Why a friend's presence is not shown as it was last known, which is
+/// kept underneath: [unchecked], confirmed longer than
+/// [kPresenceRememberedFor] ago and not since (after a start, or coming
+/// back to the screen or to the network after a while), shown as
+/// [PeerPresence.unknown]; [noNetwork], this device has had no connection
+/// to the network for a while, so nothing from friends can come, shown as
+/// [PeerPresence.noConnection].
+enum PresenceDoubt { unchecked, noNetwork }
+
+/// A friend's last presence confirmed at most this long ago is shown as it
+/// stands now ([presenceAt]: "online" from 3 min ago is still online, from
+/// 8 min ago offline) until they say more; confirmed longer ago, it is
+/// [PeerPresence.unknown] until they answer or the answers had time to
+/// come.
+const Duration kPresenceRememberedFor = Duration(minutes: 30);
+
+/// A friend "w tle" with no sign of life for this long counts as offline
+/// (and no longer reachable directly). A phone in the background never
+/// pings; it only answers this phone's pings, which go out only while Zen
+/// is on this screen, every kPresencePingInterval (2 min), and a locked
+/// phone answers one contact at most every kLockedPongEvery (3.5 min): the
+/// first ping after a quiet while at once, then every other one, so an
+/// answer comes every 4 min. Twice that and a bit, so one lost answer is
+/// not "offline".
+const Duration kPresenceOfflineAfter = Duration(minutes: 10);
+
+/// A friend "online" with no new sign for this long counts as offline. A
+/// friend on the screen pings every kPresencePingInterval and answers this
+/// phone's pings at once, and tells "away" when Zen leaves their screen (an
+/// "away" lost: the next answer says "w tle"). Silence for two rounds and a
+/// bit means Zen was closed or the phone lost the network.
+const Duration kPresenceForegroundFor = Duration(minutes: 5);
+
+const String kPresenceSinceVersion = '1.13.0';
 
 /// The key of the presence state in `ping`, `pong` and `away`.
 const String kPresenceStateKey = 'state';
@@ -17,7 +61,9 @@ const String kPresenceStateKey = 'state';
 const String kPresenceOpenedKey = 'lo';
 
 /// The values of [kPresenceStateKey]: open on the screen, off the screen
-/// but receiving, off the screen and about to stop receiving.
+/// but receiving, off the screen and about to stop receiving. Any of them
+/// may come in a `ping`, a `pong` or an `away` (despite its name, also
+/// "back on the screen" and "closing").
 const String kPresenceForeground = 'foreground';
 const String kPresenceBackground = 'background';
 const String kPresenceAsleep = 'asleep';
@@ -75,7 +121,8 @@ final class PresenceReport {
 /// [PeerPresence.online] (on the screen), [PeerPresence.background] (off
 /// it, still receiving) or [PeerPresence.offline] (off it and about to stop
 /// receiving); [openedAgo] how long ago Zen was last open, `null` to keep
-/// it to itself. [PeerPresence.hidden] says nothing at all.
+/// it to itself. [PeerPresence.hidden] (and [PeerPresence.unknown],
+/// [PeerPresence.noConnection]) says nothing at all.
 Map<String, dynamic> presenceFields({
   required PeerPresence own,
   Duration? openedAgo,
@@ -84,7 +131,9 @@ Map<String, dynamic> presenceFields({
     PeerPresence.online => kPresenceForeground,
     PeerPresence.background => kPresenceBackground,
     PeerPresence.offline => kPresenceAsleep,
-    PeerPresence.hidden => null,
+    PeerPresence.hidden ||
+    PeerPresence.unknown ||
+    PeerPresence.noConnection => null,
   };
   if (state == null) {
     return const <String, dynamic>{};
@@ -114,4 +163,17 @@ PeerPresence presenceAt({
       PeerPresence.offline,
     _ => presence,
   };
+}
+
+/// Whether a presence last confirmed at [confirmedAtMillis] is still worth
+/// showing at [nowMillis] ([kPresenceRememberedFor]); a time ahead of the
+/// clock (the clock was set back) is not.
+bool presenceRemembered({
+  required int confirmedAtMillis,
+  required int nowMillis,
+}) {
+  final int age = nowMillis - confirmedAtMillis;
+  return confirmedAtMillis > 0 &&
+      age >= 0 &&
+      age <= kPresenceRememberedFor.inMilliseconds;
 }

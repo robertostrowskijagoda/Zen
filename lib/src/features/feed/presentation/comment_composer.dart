@@ -17,6 +17,7 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/presentation/mention_field.dart';
 
@@ -67,6 +68,7 @@ class CommentComposer extends ConsumerStatefulWidget {
     this.fieldKey,
     this.sendKey,
     this.prefixIcon,
+    this.draftKey,
     super.key,
   }) : assert(onSend != null || onSendMentioning != null);
 
@@ -80,6 +82,10 @@ class CommentComposer extends ConsumerStatefulWidget {
   final Key? fieldKey;
   final Key? sendKey;
   final Widget? prefixIcon;
+
+  /// The draft the unsent text is kept as (`ComposerDrafts.comment`), also
+  /// after the app was closed; none when `null`.
+  final String? draftKey;
 
   @override
   ConsumerState<CommentComposer> createState() => _CommentComposerState();
@@ -96,8 +102,49 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
 
   int get _room => kMaxCommentImages - _pictures.length - _preparing;
 
+  ComposerDrafts? _drafts;
+
+  @override
+  void initState() {
+    super.initState();
+    final String? draftKey = widget.draftKey;
+    if (draftKey == null) {
+      return;
+    }
+    final ComposerDrafts drafts = ref.read(composerDraftsProvider);
+    _drafts = drafts;
+    // What was written here and not sent is back (unless something was
+    // typed meanwhile); the pictures are not kept.
+    void fill() {
+      final ComposerDraft? draft = drafts[draftKey];
+      if (mounted && draft != null && _field.text.isEmpty) {
+        _field.setStoredText(draft.text, draft.mentions);
+      }
+    }
+
+    if (drafts.isLoaded) {
+      fill();
+    } else {
+      unawaited(drafts.load().then((_) => fill()));
+    }
+    _field.addListener(_keepDraft);
+  }
+
+  void _keepDraft() {
+    final String? draftKey = widget.draftKey;
+    if (draftKey == null) {
+      return;
+    }
+    final ({String text, List<Mention> mentions}) stored = _field.storedText();
+    _drafts?.put(
+      draftKey,
+      ComposerDraft(text: stored.text, mentions: stored.mentions),
+    );
+  }
+
   @override
   void dispose() {
+    _field.removeListener(_keepDraft);
     _field.dispose();
     super.dispose();
   }

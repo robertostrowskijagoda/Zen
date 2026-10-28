@@ -63,6 +63,7 @@ _world(
     noticeAudience: () => noticeAudienceFor(FriendListAudience.friends),
     delay: Duration.zero,
     minGap: Duration.zero,
+    firstRetryAfter: Duration.zero,
     retryAfter: Duration.zero,
   );
   addTearDown(reach.stop);
@@ -75,6 +76,7 @@ _world(
         noticeAudience: () => noticeAudienceFor(FriendListAudience.friends),
         delay: Duration.zero,
         minGap: Duration.zero,
+        firstRetryAfter: Duration.zero,
         retryAfter: Duration.zero,
       );
       addTearDown(other.stop);

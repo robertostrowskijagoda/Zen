@@ -338,6 +338,8 @@ main.prose { max-width: 780px; }
 .fig .accl { fill: none; stroke: var(--btn1); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .fig .ink { fill: none; stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .fig .inkm { fill: none; stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.fig .crd { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.fig .pillo { fill: none; stroke: var(--link); stroke-width: 1.5; }
 .fig .wht { fill: #fff; }
 .fig .whts { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .fig .ring { fill: none; stroke: var(--btn2); stroke-width: 3; stroke-dasharray: 6 5; }
@@ -348,7 +350,28 @@ main.prose { max-width: 780px; }
 .fig text.t2 { fill: var(--text); }
 .fig text.tw { fill: #fff; }
 .fig text.mono { font-family: var(--mono); font-weight: 600; }
+.fig text.lnkt { fill: var(--link); }
 .fig-slot { position: relative; }
+/* What is needed before the steps (iPhone), steps inside a step, buttons side by side. */
+.need {
+  margin: 0 0 22px; padding: 16px 18px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
+}
+.need h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 19px; }
+.need h2 .ico { width: 24px; height: 24px; color: var(--link); }
+.need ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.need li { display: flex; align-items: flex-start; gap: 12px; color: var(--muted); font-size: 15.5px; }
+.need li .ico {
+  flex: none; width: 20px; height: 20px; padding: 8px; box-sizing: content-box;
+  border-radius: 12px; background: var(--soft); color: var(--link);
+}
+.need li span { padding-top: 6px; min-width: 0; }
+.need li b { color: var(--text); }
+@media (min-width: 700px) { .need ul { grid-template-columns: 1fr 1fr; } }
+.how ol.sub { margin: 10px 0 0; padding-inline-start: 22px; color: var(--muted); font-size: 15.5px; display: grid; gap: 6px; }
+.how ol.sub li::marker { color: var(--link); font-weight: 800; }
+.how .btns { display: flex; flex-wrap: wrap; gap: 0 10px; }
+.how p.small { margin-top: 10px; font-size: 14.5px; }
 
 /* Troubleshooting and other ways: native disclosure widgets. */
 .accs { display: grid; gap: 10px; }
@@ -371,21 +394,66 @@ main.prose { max-width: 780px; }
 .fp { font: 12.5px/1.5 var(--mono); word-break: break-all; background: var(--soft); padding: 10px 12px; border-radius: 10px; margin: 8px 0 0; direction: ltr; text-align: left; }
 
 /* Topic cards (guide), pillars and feature cards (features), contact cards (support). */
+/* "On this page": a button with the section being read that opens the
+   list on phones, a sticky column of sections beside the text on wide
+   screens. Without the script the list simply wraps. */
 .toc {
   position: sticky; top: 0; z-index: 15; margin: 0 -16px 16px; padding: 8px 16px;
   background: var(--bar); border-bottom: 1px solid var(--line);
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
-.toc ul { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; overflow-x: auto; scrollbar-width: thin; }
-.toc li { flex: none; }
+.toc ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .toc a {
   display: block; padding: 7px 13px; border: 1px solid var(--line); border-radius: 999px;
-  background: var(--card); color: var(--text); font: 600 14.5px/1.3 var(--font);
-  text-decoration: none; white-space: nowrap;
+  background: var(--card); color: var(--text); font: 600 14.5px/1.3 var(--font); text-decoration: none;
 }
 .toc a:hover { border-color: var(--link); background: var(--soft); }
 .toc a[aria-current="location"] { background: var(--soft); border-color: var(--link); color: var(--link); }
+.toc-btn {
+  display: none; width: 100%; align-items: center; gap: 8px; padding: 9px 14px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text);
+  font: 600 15px/1.3 var(--font); text-align: start; cursor: pointer;
+}
+.toc-btn small { color: var(--muted); font-weight: 600; flex: none; }
+.toc-btn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toc-btn::after {
+  content: ""; flex: none; width: 8px; height: 8px; margin: 0 4px 3px;
+  border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .2s;
+}
+.toc.open .toc-btn::after { transform: rotate(-135deg); margin-bottom: -3px; }
+.toc.js .toc-btn { display: flex; }
+.toc.js ul {
+  position: absolute; inset-inline: 16px; top: calc(100% + 4px);
+  display: none; flex-direction: column; flex-wrap: nowrap; gap: 2px; padding: 6px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow);
+  max-height: min(60vh, 440px); overflow-y: auto;
+}
+.toc.js.open ul { display: flex; }
+.toc.js ul a { border: 0; border-radius: 10px; background: none; padding: 10px 12px; }
+.toc.js ul a[aria-current="location"] { background: var(--soft); }
 @media (min-width: 720px) { .toc { top: 61px; } }
+@media (min-width: 1000px) {
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; align-items: start; }
+  .toc, .toc.js {
+    top: 85px; margin: 0; padding: 0; background: none; border: 0;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .toc.js .toc-btn { display: none; }
+  .toc ul, .toc.js ul, .toc.js.open ul {
+    position: static; display: flex; flex-direction: column; flex-wrap: nowrap; gap: 2px; margin: 0; padding: 0 0 0 2px;
+    border: 0; border-inline-start: 2px solid var(--line); border-radius: 0; background: none; box-shadow: none;
+    max-height: calc(100vh - 110px); overflow-y: auto;
+  }
+  .toc a, .toc.js ul a {
+    margin-inline-start: -4px; padding: 7px 12px; border: 0; border-inline-start: 2px solid transparent;
+    border-radius: 0; border-start-end-radius: 10px; border-end-end-radius: 10px;
+    background: none; color: var(--muted); font-size: 14.5px;
+  }
+  .toc a:hover, .toc.js ul a:hover { color: var(--text); background: var(--soft); }
+  .toc a[aria-current="location"], .toc.js ul a[aria-current="location"] {
+    color: var(--link); border-inline-start-color: var(--link); background: var(--soft);
+  }
+}
 .topics { display: grid; gap: 18px; }
 .topic { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 20px 18px; box-shadow: var(--shadow); scroll-margin-top: 130px; }
 .topic-h { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
@@ -491,4 +559,3 @@ main.prose { max-width: 780px; }
 .support-box .btn { margin: 6px 0; }
 
 /* Right-to-left pages. */
-[dir="rtl"] .toc ul { direction: rtl; }

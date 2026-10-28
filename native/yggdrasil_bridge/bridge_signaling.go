@@ -115,6 +115,8 @@ func sendSignal(node *bridgeNode, remoteAddress string, payload string) error {
 		return fmt.Errorf("signal payload is %d bytes, over the %d byte limit", len(payload), maxSignalPayloadBytes)
 	}
 
+	// The phone is awake: its peers get a look (peer_keepers.go).
+	node.phonePeers.appSends()
 	// Compressed first: sealed text no longer compresses.
 	wirePayload := buildSignalWirePayload(payload)
 	debugf("[ZEN-GO] sendSignal to=%s rawLen=%d wireLen=%d\n",

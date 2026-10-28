@@ -13,6 +13,7 @@ import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/reactor_avatar.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 
 /// Who likes [post]: you and your friends first, then the others;
 /// "i N innych osób" for those known only by number. With [node] a stranger
@@ -382,6 +383,7 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
               child: CommentComposer(
                 fieldKey: const Key('post-comment-field'),
                 sendKey: const Key('post-comment-send'),
+                draftKey: ComposerDrafts.comment(widget.post.id),
                 onSend: _send,
               ),
             ),

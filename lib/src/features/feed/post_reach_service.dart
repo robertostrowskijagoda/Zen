@@ -42,8 +42,9 @@ final class PostReachService implements HeldPosts {
   PostReachService({
     required this.node,
     this.noticeAudience = _defaultNoticeAudience,
-    this.delay = const Duration(seconds: 20),
-    this.minGap = const Duration(minutes: 10),
+    this.delay = const Duration(seconds: 3),
+    this.minGap = const Duration(minutes: 2),
+    this.firstRetryAfter = const Duration(minutes: 1),
     this.retryAfter = const Duration(minutes: 10),
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -57,13 +58,22 @@ final class PostReachService implements HeldPosts {
   static Audience? _defaultNoticeAudience() =>
       noticeAudienceFor(FriendListAudience.friends);
 
-  /// Quiet time after news before a round.
+  /// Quiet time after news before a round: a friend's post is passed on,
+  /// and a post a notice names is asked for, this soon (a sync that brings
+  /// many entries at once still makes one round).
   final Duration delay;
 
-  /// Shortest time between two notice entries of this device.
+  /// Shortest time between two notice entries of this device (posts that
+  /// come meanwhile go together in the next one).
   final Duration minGap;
 
-  /// How long an unanswered ask waits before it is asked again.
+  /// How long the first ask for a post waits for an answer before it is
+  /// asked again (a frame lost on the way), with a round set for then.
+  final Duration firstRetryAfter;
+
+  /// How long a post asked for more than once waits before the next ask
+  /// (its holders are away: a friend coming back asks sooner, see
+  /// [start]).
   final Duration retryAfter;
   final int Function() _now;
 
@@ -79,9 +89,9 @@ final class PostReachService implements HeldPosts {
   /// What was kept on the device has been read.
   bool _loaded = false;
 
-  /// Post id → what was asked: when, for how many steps, of whom.
-  final Map<String, ({int at, int hops, String author})> _asked =
-      <String, ({int at, int hops, String author})>{};
+  /// Post id → what was asked: when, for how many steps, of whom, how many
+  /// times.
+  final Map<String, _Ask> _asked = <String, _Ask>{};
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final Map<String, (int, int)> _budget = <String, (int, int)>{};
   (int, int) _strangers = (0, 0);
@@ -90,6 +100,9 @@ final class PostReachService implements HeldPosts {
   StreamSubscription<String>? _greeted;
   StreamSubscription<void>? _opened;
   Timer? _timer;
+
+  /// When [_timer] fires ([_now] millis).
+  int _timerDue = 0;
   Future<void>? _started;
   bool _stopped = false;
   bool _running = false;
@@ -159,14 +172,16 @@ final class PostReachService implements HeldPosts {
           unawaitedLogged(handle(f), context: 'Posty dalszych znajomych'),
     );
     _added = node.store.added.listen(_onAdded);
-    // A friend back online may hold what nobody answered for so far.
+    // A friend back online may hold what nobody answered for so far: a
+    // round asks again. Only then: greetings come with every sync, and a
+    // round with nothing to ask again would only cost.
     _greeted = node.peerGreeted.listen((String _) {
       final int now = _now();
-      _asked.removeWhere(
-        (String id, ({int at, int hops, String author}) a) =>
-            now - a.at >= 60000,
-      );
-      schedule();
+      final int waiting = _asked.length;
+      _asked.removeWhere((String id, _Ask a) => now - a.at >= 60000);
+      if (_asked.length < waiting) {
+        schedule();
+      }
     });
     // Notices sealed for friends who see the list open once keys come.
     _opened = node.openedChanges.listen((_) => schedule());
@@ -196,12 +211,23 @@ final class PostReachService implements HeldPosts {
     }
   }
 
-  /// A round after [delay] (one at a time).
+  /// A round after [delay] (one at a time). A round set for later (the
+  /// gap between notices, a retry) is brought forward, so news never waits
+  /// behind it.
   void schedule([Duration? after]) {
-    if (_stopped || _timer != null) {
+    if (_stopped) {
       return;
     }
-    _timer = Timer(after ?? delay, () {
+    final Duration wait = after ?? delay;
+    final int due = _now() + wait.inMilliseconds;
+    if (_timer != null) {
+      if (_timerDue <= due) {
+        return;
+      }
+      _timer!.cancel();
+    }
+    _timerDue = due;
+    _timer = Timer(wait, () {
       _timer = null;
       unawaitedLogged(round(), context: 'Posty dalszych znajomych');
     });
@@ -254,15 +280,23 @@ final class PostReachService implements HeldPosts {
               (!a.removed && a.editMillis <= h.editMillis))) {
         continue;
       }
-      final ({int at, int hops, String author})? before = _asked[a.post];
-      if (before != null && now - before.at < retryAfter.inMilliseconds) {
+      final _Ask? before = _asked[a.post];
+      final Duration wait = (before?.tries ?? 0) <= 1
+          ? firstRetryAfter
+          : retryAfter;
+      if (before != null && now - before.at < wait.inMilliseconds) {
         continue;
       }
       if (asked++ >= kMaxPostAsksPerRound) {
         break;
       }
       _asked.remove(a.post);
-      _asked[a.post] = (at: now, hops: a.hops, author: a.author);
+      _asked[a.post] = (
+        at: now,
+        hops: a.hops,
+        author: a.author,
+        tries: (before?.tries ?? 0) + 1,
+      );
       final Map<String, dynamic> want = postWantFrame(a.post, a.author);
       for (final String to in _sourcesOf(a, h)) {
         _send(to, want);
@@ -270,6 +304,11 @@ final class PostReachService implements HeldPosts {
     }
     while (_asked.length > 500) {
       _asked.remove(_asked.keys.first);
+    }
+    // An answer lost on the way is asked for again soon, not at the next
+    // ten-minute round.
+    if (_asked.values.any((_Ask a) => a.tries == 1)) {
+      schedule(firstRetryAfter);
     }
   }
 
@@ -442,9 +481,7 @@ final class PostReachService implements HeldPosts {
   /// A post asked for came: checked, kept, its files fetched.
   Future<void> _onAnswer(String from, Map<String, dynamic> payload) async {
     final Object? id = payload['id'];
-    final ({int at, int hops, String author})? asked = id is String
-        ? _asked[id]
-        : null;
+    final _Ask? asked = id is String ? _asked[id] : null;
     if (id is! String || asked == null) {
       // Only what this device asked for is taken.
       return;
@@ -609,6 +646,9 @@ final class PostReachService implements HeldPosts {
     ),
   );
 }
+
+/// One ask for a post: when, for how many steps, of whom, how many times.
+typedef _Ask = ({int at, int hops, String author, int tries});
 
 /// Posts beyond friends, or `null` while the ledger is off.
 final Provider<PostReachService?> postReachProvider =

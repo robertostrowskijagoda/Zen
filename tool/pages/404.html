@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Page not found — Zen</title>
+<meta name="description" content="This page of the Zen website does not exist. Go on to installing Zen, the guide, the features or support.">
+<!-- Served for any missing address under /Zen/, at that address: every
+     link of this page starts at the site's root. -->
+<link rel="icon" type="image/png" href="/Zen/zen-icon.png">
+<link rel="apple-touch-icon" href="/Zen/zen-icon.png">
+<link rel="manifest" href="/Zen/manifest.webmanifest">
+<meta name="theme-color" content="#f6f4fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0a10" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/Zen/site.css">
+<script src="/Zen/site.js"></script>
+</head>
+<body data-nav="">
+<header class="top" id="zenTop"></header>
+<div class="hero">
+  <img class="hero-icon" src="/Zen/zen-icon.png" width="88" height="88" alt="">
+  <h1 data-i="h1">Page not found</h1>
+  <p class="lead" data-i="lead">There is no page at this address. It may have moved, or the address has a typo.</p>
+  <div class="cta-row">
+    <a class="btn primary" href="/Zen/install/"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="getTitle">Get Zen</span></a>
+    <a class="btn secondary" href="/Zen/"><svg class="ico" aria-hidden="true"><use href="#i-home"/></svg><span data-i="home">Start page</span></a>
+  </div>
+</div>
+<main>
+  <p class="hint">
+    <a class="chip" href="/Zen/guide/"><svg class="ico" aria-hidden="true"><use href="#i-book"/></svg><span data-i="navGuide">Guide</span></a>
+    <a class="chip" href="/Zen/features/"><svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg><span data-i="navFeatures">Features</span></a>
+    <a class="chip" href="/Zen/support/"><svg class="ico" aria-hidden="true"><use href="#i-lifebuoy"/></svg><span data-i="navSupport">Support</span></a>
+    <a class="chip" href="/Zen/about/"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span data-i="navAbout">About</span></a></p>
+</main>
+<footer class="foot" id="zenFoot"></footer>
+<script>
+(function () {
+  "use strict";
+  var TEXTS = {
+    "en": {"title": "Page not found — Zen", "desc": "This page of the Zen website does not exist. Go on to installing Zen, the guide, the features or support.", "h1": "Page not found", "lead": "There is no page at this address. It may have moved, or the address has a typo.", "home": "Start page"},
+    "pl": {"title": "Nie znaleziono strony — Zen", "desc": "Ta strona witryny Zen nie istnieje. Przejdź do instalacji Zen, poradnika, funkcji lub pomocy.", "h1": "Nie znaleziono strony", "lead": "Pod tym adresem nie ma strony. Mogła zostać przeniesiona albo w adresie jest literówka.", "home": "Strona główna"},
+    "id": {"title": "Halaman tidak ditemukan — Zen", "desc": "Halaman situs Zen ini tidak ada. Lanjutkan ke pemasangan Zen, panduan, fitur, atau bantuan.", "h1": "Halaman tidak ditemukan", "lead": "Tidak ada halaman di alamat ini. Mungkin sudah dipindahkan, atau ada salah ketik di alamatnya.", "home": "Halaman awal"},
+    "cs": {"title": "Stránka nenalezena — Zen", "desc": "Tato stránka webu Zen neexistuje. Pokračujte k instalaci Zen, návodu, funkcím nebo pomoci.", "h1": "Stránka nenalezena", "lead": "Na této adrese žádná stránka není. Možná byla přesunuta, nebo je v adrese překlep.", "home": "Úvodní stránka"},
+    "de": {"title": "Seite nicht gefunden — Zen", "desc": "Diese Seite der Zen-Website gibt es nicht. Weiter zur Installation von Zen, zur Anleitung, zu den Funktionen oder zur Hilfe.", "h1": "Seite nicht gefunden", "lead": "Unter dieser Adresse gibt es keine Seite. Vielleicht wurde sie verschoben, oder die Adresse enthält einen Tippfehler.", "home": "Startseite"},
+    "es": {"title": "Página no encontrada — Zen", "desc": "Esta página del sitio de Zen no existe. Continúa con la instalación de Zen, la guía, las funciones o la ayuda.", "h1": "Página no encontrada", "lead": "No hay ninguna página en esta dirección. Puede que se haya movido o que la dirección tenga un error.", "home": "Página de inicio"},
+    "fr": {"title": "Page introuvable — Zen", "desc": "Cette page du site de Zen n’existe pas. Passez à l’installation de Zen, au guide, aux fonctions ou à l’aide.", "h1": "Page introuvable", "lead": "Il n’y a pas de page à cette adresse. Elle a peut-être été déplacée, ou l’adresse contient une faute de frappe.", "home": "Page d’accueil"},
+    "it": {"title": "Pagina non trovata — Zen", "desc": "Questa pagina del sito di Zen non esiste. Vai all’installazione di Zen, alla guida, alle funzioni o all’assistenza.", "h1": "Pagina non trovata", "lead": "A questo indirizzo non c’è nessuna pagina. Forse è stata spostata, o l’indirizzo contiene un errore di battitura.", "home": "Pagina iniziale"},
+    "hu": {"title": "Az oldal nem található — Zen", "desc": "A Zen webhelyének ez az oldala nem létezik. Tovább a Zen telepítéséhez, az útmutatóhoz, a funkciókhoz vagy a segítséghez.", "h1": "Az oldal nem található", "lead": "Ezen a címen nincs oldal. Lehet, hogy áthelyezték, vagy elírás van a címben.", "home": "Kezdőlap"},
+    "nl": {"title": "Pagina niet gevonden — Zen", "desc": "Deze pagina van de Zen-website bestaat niet. Ga verder naar het installeren van Zen, de handleiding, de functies of hulp.", "h1": "Pagina niet gevonden", "lead": "Op dit adres staat geen pagina. Misschien is ze verplaatst, of zit er een typfout in het adres.", "home": "Startpagina"},
+    "pt": {"title": "Página não encontrada — Zen", "desc": "Esta página do site do Zen não existe. Continue para a instalação do Zen, o guia, os recursos ou a ajuda.", "h1": "Página não encontrada", "lead": "Não há nenhuma página neste endereço. Ela pode ter sido movida, ou o endereço tem um erro de digitação.", "home": "Página inicial"},
+    "ro": {"title": "Pagina nu a fost găsită — Zen", "desc": "Această pagină a site-ului Zen nu există. Mergi la instalarea Zen, la ghid, la funcții sau la ajutor.", "h1": "Pagina nu a fost găsită", "lead": "La această adresă nu există nicio pagină. Poate a fost mutată sau adresa conține o greșeală de tipar.", "home": "Pagina de start"},
+    "vi": {"title": "Không tìm thấy trang — Zen", "desc": "Trang này của trang web Zen không tồn tại. Hãy chuyển đến phần cài đặt Zen, hướng dẫn, tính năng hoặc trợ giúp.", "h1": "Không tìm thấy trang", "lead": "Không có trang nào ở địa chỉ này. Có thể trang đã được chuyển đi, hoặc địa chỉ bị gõ sai.", "home": "Trang đầu"},
+    "tr": {"title": "Sayfa bulunamadı — Zen", "desc": "Zen web sitesinin bu sayfası yok. Zen kurulumuna, rehbere, özelliklere veya yardıma geçin.", "h1": "Sayfa bulunamadı", "lead": "Bu adreste bir sayfa yok. Taşınmış olabilir ya da adreste bir yazım hatası var.", "home": "Başlangıç sayfası"},
+    "ru": {"title": "Страница не найдена — Zen", "desc": "Этой страницы на сайте Zen нет. Перейдите к установке Zen, руководству, возможностям или помощи.", "h1": "Страница не найдена", "lead": "По этому адресу нет страницы. Возможно, её перенесли, или в адресе опечатка.", "home": "Главная страница"},
+    "uk": {"title": "Сторінку не знайдено — Zen", "desc": "Такої сторінки на сайті Zen немає. Перейдіть до встановлення Zen, посібника, можливостей або допомоги.", "h1": "Сторінку не знайдено", "lead": "За цією адресою немає сторінки. Можливо, її перенесли, або в адресі помилка.", "home": "Головна сторінка"},
+    "ar": {"title": "الصفحة غير موجودة — Zen", "desc": "هذه الصفحة من موقع Zen غير موجودة. انتقل إلى تثبيت Zen أو الدليل أو الميزات أو المساعدة.", "h1": "الصفحة غير موجودة", "lead": "لا توجد صفحة على هذا العنوان. ربما نُقلت، أو أن في العنوان خطأً مطبعيًا.", "home": "الصفحة الرئيسية"},
+    "hi": {"title": "पेज नहीं मिला — Zen", "desc": "Zen वेबसाइट का यह पेज मौजूद नहीं है। Zen इंस्टॉल करने, गाइड, सुविधाओं या सहायता पर जाएँ।", "h1": "पेज नहीं मिला", "lead": "इस पते पर कोई पेज नहीं है। हो सकता है वह कहीं और चला गया हो, या पते में टाइपिंग की गलती हो।", "home": "शुरुआती पेज"},
+    "zh": {"title": "找不到页面 — Zen", "desc": "Zen 网站上没有这个页面。前往安装 Zen、指南、功能或帮助。", "h1": "找不到页面", "lead": "这个地址没有页面。它可能已被移动，或者地址有拼写错误。", "home": "首页"},
+    "ja": {"title": "ページが見つかりません — Zen", "desc": "Zen のウェブサイトにこのページはありません。Zen のインストール、ガイド、機能、サポートへどうぞ。", "h1": "ページが見つかりません", "lead": "このアドレスにはページがありません。移動したか、アドレスに入力ミスがある可能性があります。", "home": "トップページ"},
+    "ko": {"title": "페이지를 찾을 수 없음 — Zen", "desc": "Zen 웹사이트에 이 페이지가 없습니다. Zen 설치, 가이드, 기능 또는 도움말로 이동하세요.", "h1": "페이지를 찾을 수 없습니다", "lead": "이 주소에는 페이지가 없습니다. 페이지가 옮겨졌거나 주소에 오타가 있을 수 있습니다.", "home": "시작 페이지"}
+  };
+  Zen.init({ texts: TEXTS });
+})();
+</script>
+</body>
+</html>

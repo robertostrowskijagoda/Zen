@@ -23,6 +23,7 @@ import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 
 /// The plaque of a pyramid post: „PIRAMIDA · szczyt”, „PIRAMIDA · Twoja
 /// linia · poziom 2”, „KRAJ PL · prowadzący”.
@@ -746,6 +747,7 @@ Future<void> showPyramidCommentSheet(
         child: CommentComposer(
           fieldKey: Key('pyr-comment-field-$postId'),
           sendKey: Key('pyr-comment-send-$postId'),
+          draftKey: ComposerDrafts.comment('pyramid:$postId'),
           onSend: (String text, List<CommentPicture> pictures) async {
             final NavigatorState nav = Navigator.of(sheet);
             final String? failed = await sendPyramidComment(

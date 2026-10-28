@@ -179,8 +179,12 @@ final class LocalLinksController {
     if (generation != _generation || !_running) {
       return;
     }
+    final bool hadPeers = _peers.isNotEmpty;
     _peers = List<LocalLinkPeer>.unmodifiable(peers);
     _push();
+    if (_peers.isNotEmpty != hadPeers) {
+      unawaited(_applyTransports());
+    }
   }
 
   /// Tries the transports again: a permission may have been given
@@ -216,13 +220,17 @@ final class LocalLinksController {
   }
 
   /// Starts the transports that should run and stops the others, one change
-  /// at a time.
+  /// at a time. A transport runs only while it can help: switched on, the
+  /// app used (or the Android background service running), and devices to
+  /// link with (a friend's or the account's own); with none, nobody nearby
+  /// could pass the bridge's handshake, so the radio stays quiet.
   Future<void> _applyTransports() {
     return _transportWork = _transportWork.then((_) async {
       for (final LocalLink link in transports) {
         final bool wanted =
             _running &&
             _active &&
+            _peers.isNotEmpty &&
             link.isSupported &&
             _enabled.contains(link.transport);
         try {

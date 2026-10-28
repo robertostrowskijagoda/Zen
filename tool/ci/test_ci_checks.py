@@ -14,11 +14,16 @@
   (ios/Flutter and macos GoBridge.xcconfig, -Wl,-u,_<name>); the build
   scripts stop on a missing one only on a Mac.
 - The release workflow uses them, keeps every Linux runner pinned and
-  builds Linux on the baseline's Ubuntu.
+  builds Linux on the baseline's Ubuntu; only its sign job has the keys
+  (one approval per tag) and it uses no caches.
+- CI: the required "Analyze and test" waits for every test job, the shards
+  cover all files, and every test that can skip itself also runs on Linux.
+- ci_summary.py adds up the reports of several test runs.
 
 Standard library only.
 """
 
+import json
 import os
 import re
 import shutil
@@ -198,15 +203,149 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("--runtime-repo=", self.release)
         self.assertNotIn("run: flutter pub get\n", self.release)
 
-    def test_signing_jobs_use_the_environment(self):
-        jobs = re.split(r"(?m)^  (?=[\w-]+:\s*$)", self.release)
-        for job in ("android:", "sign:"):
-            body = next(j for j in jobs if j.startswith(job))
-            self.assertIn("environment: release", body, job)
-        # No other job names the environment (and so no other job can
-        # read the keys).
-        named = [j.split(":")[0] for j in jobs if "environment: release" in j]
-        self.assertEqual(sorted(named), ["android", "sign"])
+    @staticmethod
+    def jobs(workflow):
+        """Job id -> its text, for the jobs of [workflow]."""
+        body = workflow[workflow.index("\njobs:\n"):]
+        parts = re.split(r"(?m)^  (?=[\w-]+:\s*$)", body)[1:]
+        return {p.split(":")[0]: p for p in parts}
+
+    def test_one_job_has_the_keys(self):
+        jobs = self.jobs(self.release)
+        # Only the sign job names the environment, so a tag run asks for one
+        # approval and no other job can read the keys.
+        named = [name for name, body in jobs.items() if "environment: release" in body]
+        self.assertEqual(named, ["sign"])
+        sign = jobs["sign"]
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", sign)
+        # It waits for the check that the keys are not repository secrets
+        # (in a job without the environment, which sees only those).
+        self.assertRegex(sign, r"needs: \[preflight, ")
+        self.assertIn("needs.preflight.result == 'success'", sign)
+        self.assertIn("secrets.ZEN_RELEASE_SIGNING_KEY", jobs["preflight"])
+        self.assertNotIn("\n    environment:", jobs["preflight"])
+        # A secret appears only in those two jobs.
+        for name, body in jobs.items():
+            if name not in ("sign", "preflight"):
+                self.assertNotIn("secrets.", body, name)
+        # The APKs come unsigned from the android jobs and are signed there,
+        # with the passwords in the environment, never on the command line.
+        self.assertIn("pattern: unsigned-apk-*", sign)
+        self.assertIn("--ks-pass env:STORE_PASSWORD", sign)
+        self.assertIn("--key-pass env:KEY_PASSWORD", sign)
+        self.assertIn("--v4-signing-enabled false", sign)
+        self.assertNotIn("release-android", self.release)
+        # The draft is made from the signed files only, without secrets.
+        self.assertIn("needs: sign\n", jobs["attach"])
+        self.assertIn("contents: write", jobs["attach"])
+
+    def test_android_builds_in_parallel(self):
+        android = self.jobs(self.release)["android"]
+        self.assertIn("if: startsWith(github.ref, 'refs/tags/v')", android)
+        for abi, platform in (("arm64-v8a", "android-arm64"),
+                              ("armeabi-v7a", "android-arm"),
+                              ("x86_64", "android-x64")):
+            self.assertIn("- abi: %s\n            platform: %s\n" % (abi, platform), android)
+        self.assertIn("--target-platform ${{ matrix.platform }}", android)
+        # Never under a release file name before it is signed.
+        self.assertNotIn("Zen-", android.replace("Zen-unsigned", ""))
+
+    def test_no_caches_in_the_release(self):
+        for line in self.release.splitlines():
+            if line.strip().startswith("cache:"):
+                self.assertEqual(line.strip(), "cache: false")
+        self.assertNotIn("uses: actions/cache", self.release)
+
+
+class CiWorkflowTest(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            self.ci = f.read()
+        self.jobs = WorkflowTest.jobs(self.ci)
+
+    def test_required_check_waits_for_every_test_job(self):
+        app = self.jobs["app"]
+        # The name the branch rules require stays.
+        self.assertIn("name: Analyze and test\n", app)
+        self.assertIn("needs: [checks, test, test-linux]", app)
+        # Also when one failed: a skipped required check counts as passed.
+        self.assertIn("if: ${{ always() }}", app)
+        for result in ("needs.checks.result", "needs.test.result",
+                       "needs.test-linux.result"):
+            self.assertIn(result, app)
+
+    def test_shards_are_numbered_from_one(self):
+        test = self.jobs["test"]
+        match = re.search(r"shard: \[([\d, ]+)\]", test)
+        shards = [int(s) for s in match.group(1).split(",")]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        self.assertIn("--shard ${{ matrix.shard }}/%d" % len(shards), test)
+
+    def test_tests_that_can_skip_themselves_run_on_linux(self):
+        linux = self.jobs["test-linux"]
+        for folder, _, files in os.walk(os.path.join(ROOT, "test")):
+            for name in files:
+                if not name.endswith("_test.dart"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as f:
+                    text = f.read()
+                if "markTestSkipped(" in text or re.search(r"skip:[^;]*Platform\.", text):
+                    relative = os.path.relpath(path, ROOT).replace(os.sep, "/")
+                    self.assertIn(relative + "\n", linux)
+
+
+class SummaryTest(unittest.TestCase):
+    @staticmethod
+    def report(folder, name, root, tests):
+        """A JSON reporter file of one run: [tests] are (file, name, result)
+        with result "success", "failure" or "skipped"."""
+        events = []
+        suites = {}
+        for i, (file, test, result) in enumerate(tests):
+            if file not in suites:
+                suites[file] = len(suites)
+                events.append({"type": "suite", "suite": {
+                    "id": suites[file], "path": root + file}})
+            events.append({"type": "testStart", "test": {
+                "id": i, "name": test, "suiteID": suites[file]}, "time": i})
+            done = {"type": "testDone", "testID": i, "hidden": False,
+                    "skipped": result == "skipped",
+                    "result": "failure" if result == "failure" else "success",
+                    "time": i + 1}
+            events.append(done)
+        events.append({"type": "done", "success": True})
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(json.dumps(e) for e in events) + "\n")
+        return path
+
+    def test_runs_are_added_up(self):
+        import ci_summary  # noqa: E402
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder)
+        windows = self.report(folder, "w.json", "C:\\work\\zen\\", [
+            ("test\\a_test.dart", "one", "success"),
+            ("test\\a_test.dart", "posix", "skipped"),
+            ("test\\a_test.dart", "bridge", "skipped"),
+        ])
+        windows2 = self.report(folder, "w2.json", "C:\\work\\zen\\", [
+            ("test\\b_test.dart", "two", "failure"),
+        ])
+        linux = self.report(folder, "l.json", "/home/runner/zen/", [
+            ("test/a_test.dart", "posix", "success"),
+        ])
+        missing = os.path.join(folder, "missing.json")
+        results = ci_summary.test_results([windows, windows2, linux, missing])
+        self.assertEqual((results["passed"], results["failed"], results["skipped"]),
+                         (2, 1, 2))
+        self.assertEqual(results["files"], 3)
+        self.assertEqual([(s, n) for s, n, _ in results["failures"]],
+                         [("test/b_test.dart", "two")])
+        # Skipped on Windows but run on Linux: not "never run".
+        self.assertEqual(results["never_run"], [("test/a_test.dart", "bridge")])
+        self.assertIsNone(ci_summary.test_results([missing]))
+        self.assertIsNone(ci_summary.test_results([]))
 
 
 class GoBridgeExportsTest(unittest.TestCase):

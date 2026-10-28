@@ -800,7 +800,18 @@ class _SettingsScreen extends ConsumerWidget {
             key: const Key('settings-tab-body'),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
-              // Inviting someone and the app's own page come first.
+              // The first-start setup again, every step, with what is set
+              // now.
+              FilledButton.tonalIcon(
+                key: const Key('settings-rerun-setup'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: () => unawaited(FirstRunSetupScreen.open(context)),
+                icon: const Icon(Icons.checklist_rounded),
+                label: Text(t('Ponownie przeprowadź konfigurację')),
+              ),
+              // Inviting someone and the app's own page come next.
               _SettingsGroup(
                 title: '',
                 tiles: <Widget>[
@@ -1026,37 +1037,19 @@ class _SettingsScreen extends ConsumerWidget {
                           .setMediaOnlyOnWifi(value),
                     ),
                   ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-in-app-sounds'),
-                    icon: Icons.music_note_outlined,
-                    tone: ZenTone.media,
-                    title: t('Dźwięki w aplikacji'),
-                    subtitle: t(
-                      'Ciche dźwięki przy wysłaniu wiadomości i w rozmowach. '
-                      'Alarm przyjaciela słychać zawsze.',
-                    ),
-                    value: settings.inAppSounds,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setInAppSounds(value),
-                    ),
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-post-notifications'),
-                    icon: Icons.article_outlined,
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-notifications'),
+                    icon: Icons.notifications_outlined,
                     tone: ZenTone.communication,
-                    title: t('Powiadomienia o nowych postach znajomych'),
+                    title: t('Powiadomienia i dźwięki'),
                     subtitle: t(
-                      'Posty znajomych znajomych nie powiadamiają. Jedną '
-                      'osobę wyciszysz w menu jej posta albo rozmowy.',
+                      'Dźwięki oraz rodzaje powiadomień: wiadomości, '
+                      'połączenia, reakcje, posty',
                     ),
-                    value: settings.postNotifications,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setPostNotifications(value),
-                    ),
+                    pageTitle: t('Powiadomienia i dźwięki'),
+                    pageChildren: const <Widget>[
+                      _NotificationSettingsSection(),
+                    ],
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-muted-post-authors'),
@@ -1073,17 +1066,6 @@ class _SettingsScreen extends ConsumerWidget {
                           ),
                     pageTitle: t('Wyciszone osoby'),
                     pageChildren: const <Widget>[_MutedPostAuthorsSection()],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-storage-limits'),
-                    icon: Icons.sd_storage_outlined,
-                    tone: ZenTone.system,
-                    title: t('Limity przechowywania'),
-                    subtitle: t(
-                      'Największe dozwolone rozmiary w każdej kategorii',
-                    ),
-                    pageTitle: t('Limity przechowywania'),
-                    pageChildren: const <Widget>[StorageLimitsSection()],
                   ),
                   if (Platform.isAndroid)
                     _SettingsNavTile(
@@ -1185,18 +1167,18 @@ class _SettingsScreen extends ConsumerWidget {
                     tone: ZenTone.system,
                     title: t('Dane i pamięć'),
                     subtitle: settings.autoCleanupDays == 0
-                        ? t('Limit zdarzeń: {limit}', {
+                        ? t('Zajęte miejsce, limity: {limit}', {
                             'limit': settings.inboxLimitLabel,
                           })
                         : t(
-                            'Limit zdarzeń: {limit} · czyszczenie po {days} dn.',
+                            'Zajęte miejsce, limity: {limit} · czyszczenie po {days} dn.',
                             {
                               'limit': settings.inboxLimitLabel,
                               'days': settings.autoCleanupDays,
                             },
                           ),
                     pageTitle: t('Dane i pamięć'),
-                    pageChildren: const <Widget>[_DataSection()],
+                    pageChildren: _storagePageChildren(),
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-updates'),
@@ -1261,18 +1243,6 @@ class _SettingsScreen extends ConsumerWidget {
                     pageChildren: const <Widget>[_ResetDataPanel()],
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              // The first-start setup again, every step, with what is set
-              // now.
-              FilledButton.tonalIcon(
-                key: const Key('settings-rerun-setup'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                ),
-                onPressed: () => unawaited(FirstRunSetupScreen.open(context)),
-                icon: const Icon(Icons.checklist_rounded),
-                label: Text(t('Ponownie przeprowadź konfigurację')),
               ),
               const SizedBox(height: 16),
               Center(
@@ -1495,6 +1465,33 @@ class _SettingsSwitchTile extends StatelessWidget {
     );
   }
 }
+
+/// Ustawienia → Dane i pamięć: how much room Zen takes, the defaults for
+/// the data and the limits.
+List<Widget> _storagePageChildren() => <Widget>[
+  const _Panel(child: StorageUsageSection()),
+  const SizedBox(height: 12),
+  const _DataSection(),
+  const SizedBox(height: 12),
+  _SectionIntro(
+    title: t('Limity przechowywania'),
+    caption: t('Największe dozwolone rozmiary w każdej kategorii'),
+  ),
+  const SizedBox(height: 8),
+  const _Panel(child: StorageLimitsSection()),
+];
+
+/// Opens "Dane i pamięć" on its own (the notice that Zen took more than its
+/// limit).
+Future<void> openStorageSettingsPage(BuildContext context) =>
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => _SettingsPage(
+          title: t('Dane i pamięć'),
+          children: _storagePageChildren(),
+        ),
+      ),
+    );
 
 /// A settings sub-page: the panels of one topic, nothing else.
 class _SettingsPage extends StatelessWidget {
@@ -2335,11 +2332,11 @@ class _DataSectionState extends ConsumerState<_DataSection> {
             key: const Key('settings-inbox-unlimited-switch'),
             value: settings.inboxUnlimited,
             contentPadding: EdgeInsets.zero,
-            title: Text(t('Bez limitu zdarzeń')),
+            title: Text(t('Bez limitu miejsca')),
             subtitle: Text(
               t(
-                'Wyłączenie limitu zostawia 0 jako spójną wartość '
-                '"nigdy nie czyść".',
+                'Zen nie usuwa wtedy niczego z powodu zajętego miejsca, '
+                'poza osobnym limitem postów znajomych.',
               ),
               style: TextStyle(color: zen.textSecondary, height: 1.35),
             ),
@@ -2364,7 +2361,7 @@ class _DataSectionState extends ConsumerState<_DataSection> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          t('Limit zdarzeń: {limit}', {
+                          t('Limit miejsca: {limit}', {
                             'limit': settings.inboxLimitLabel,
                           }),
                           key: const Key('settings-inbox-limit-label'),
@@ -2374,23 +2371,10 @@ class _DataSectionState extends ConsumerState<_DataSection> {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        Slider(
+                        StorageLimitSlider(
                           key: const Key('settings-inbox-limit-slider'),
-                          min: AppSettings.minimumInboxLimitMb.toDouble(),
-                          max: 250,
-                          divisions: 49,
-                          value: settings.inboxLimitMb
-                              .clamp(AppSettings.minimumInboxLimitMb, 250)
-                              .toDouble(),
-                          label: settings.inboxLimitLabel,
-                          onChanged: (double value) {
-                            controller.setInboxLimitMb(
-                              ((value / 5).round() * 5).clamp(
-                                AppSettings.minimumInboxLimitMb,
-                                250,
-                              ),
-                            );
-                          },
+                          valueMb: settings.inboxLimitMb,
+                          onChanged: controller.setInboxLimitMb,
                         ),
                       ],
                     ),
@@ -4180,84 +4164,88 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
             borderRadius: context.zenRadius(18),
             // Raw pointer events, not a tap: a ten-second press is a long
             // press, which the page's text selection wins (the tap is then
-            // cancelled and the hold stops).
-            child: Listener(
-              onPointerDown: (_) {
-                if (!_running && !_confirming) {
-                  _startHold();
-                }
-              },
-              onPointerUp: (_) => _cancelHold(),
-              onPointerCancel: (_) => _cancelHold(),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  key: const Key('desktop-reset-data-button'),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: zen.danger.withValues(alpha: 0.08),
-                      borderRadius: context.zenRadius(18),
-                      border: Border.all(
-                        color: zen.danger.withValues(alpha: 0.35),
+            // cancelled and the hold stops). Holding never selects text.
+            child: SelectionContainer.disabled(
+              child: Listener(
+                onPointerDown: (_) {
+                  if (!_running && !_confirming) {
+                    _startHold();
+                  }
+                },
+                onPointerUp: (_) => _cancelHold(),
+                onPointerCancel: (_) => _cancelHold(),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    key: const Key('desktop-reset-data-button'),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: zen.danger.withValues(alpha: 0.08),
+                        borderRadius: context.zenRadius(18),
+                        border: Border.all(
+                          color: zen.danger.withValues(alpha: 0.35),
+                        ),
                       ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Icon(
-                                _running
-                                    ? Icons.hourglass_top_rounded
-                                    : Icons.delete_forever_outlined,
-                                color: zen.danger,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  actionLabel,
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(
-                                        color: zen.danger,
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Icon(
+                                  _running
+                                      ? Icons.hourglass_top_rounded
+                                      : Icons.delete_forever_outlined,
+                                  color: zen.danger,
                                 ),
-                              ),
-                              if (_running)
-                                const SizedBox.square(
-                                  dimension: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    actionLabel,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: zen.danger,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                   ),
                                 ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: context.zenRadius(999),
-                            child: LinearProgressIndicator(
-                              key: const Key('desktop-reset-data-progress'),
-                              minHeight: 8,
-                              value: _running ? null : progress,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                zen.danger,
-                              ),
-                              backgroundColor: zen.danger.withValues(
-                                alpha: 0.12,
+                                if (_running)
+                                  const SizedBox.square(
+                                    dimension: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: context.zenRadius(999),
+                              child: LinearProgressIndicator(
+                                key: const Key('desktop-reset-data-progress'),
+                                minHeight: 8,
+                                value: _running ? null : progress,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  zen.danger,
+                                ),
+                                backgroundColor: zen.danger.withValues(
+                                  alpha: 0.12,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            helperLabel,
-                            style: TextStyle(
-                              color: zen.textSecondary,
-                              height: 1.35,
+                            const SizedBox(height: 8),
+                            Text(
+                              helperLabel,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                height: 1.35,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

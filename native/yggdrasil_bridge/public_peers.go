@@ -321,13 +321,55 @@ func selectAndroidBootstrapPeers(pool []publicPeer, count int) []string {
 	return candidates
 }
 
-// desktopPublicPeers is what a desktop dials: the user's list when they
-// made one, else a spread over as many countries as possible — one stable
-// peer per country per round, TLS preferred, encrypted transports only,
-// one URI per host (two links to one node only take a slot), no IPv6
-// literals (many homes have no IPv6).
+// phonePeerCandidates is a phone's whole pool in the order it tries the
+// peers: its picks first (selectAndroidBootstrapPeers), then every other
+// encrypted peer of the pool in reserve — stable before unstable, IPv6
+// literals last (many mobile networks have none). The phone dials only a
+// few at once (phonePeerCount) and swaps one that stays down for the next
+// (peerRotation): with the whole pool behind its picks, a phone whose
+// picks went dead (the list is a snapshot) moves on to peers that still
+// answer instead of going round the dead ones.
+func phonePeerCandidates(pool []publicPeer) []string {
+	picks := selectAndroidBootstrapPeers(pool, phonePeerPoolSize)
+	taken := make(map[string]bool, len(pool))
+	for _, uri := range picks {
+		taken[uri] = true
+	}
+	reserve := make([]publicPeer, 0, len(pool))
+	for _, peer := range pool {
+		if taken[peer.uri] || !isEncryptedPeerURI(peer.uri) {
+			continue
+		}
+		taken[peer.uri] = true
+		reserve = append(reserve, peer)
+	}
+	rank := func(peer publicPeer) int {
+		score := 0
+		if peerHostIsIPv6Literal(peer.uri) {
+			score += 2
+		}
+		if !peer.stable {
+			score++
+		}
+		return score
+	}
+	sort.SliceStable(reserve, func(i, j int) bool {
+		return rank(reserve[i]) < rank(reserve[j])
+	})
+	candidates := append([]string(nil), picks...)
+	for _, peer := range reserve {
+		candidates = append(candidates, peer.uri)
+	}
+	return candidates
+}
+
+// desktopPublicPeers is what a desktop dials: the first of the user's list
+// when they made one, else a spread over as many countries as possible —
+// one stable peer per country per round, TLS preferred, encrypted
+// transports only, one URI per host (two links to one node only take a
+// slot), no IPv6 literals (many homes have no IPv6).
 func desktopPublicPeers(count int) []string {
-	if uris, ok := firstUserPeers(maxUserPublicPeers); ok {
+	if uris, ok := firstUserPeers(count); ok {
 		return uris
 	}
 	return builtInDesktopPeers(count)
@@ -453,9 +495,6 @@ var userPublicPeers struct {
 	set  bool
 	uris []string
 }
-
-// Most of the user's peers a node dials at once.
-const maxUserPublicPeers = 32
 
 func setUserPublicPeers(uris []string, set bool) {
 	userPublicPeers.mu.Lock()

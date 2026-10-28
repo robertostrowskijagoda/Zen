@@ -16,6 +16,20 @@ enum ZenSound {
   /// A very small "bloop" when a message leaves (in the app only).
   messageSent('zen_sent'),
 
+  /// One quiet, round tone: a message arrives in the chat that is open (in
+  /// the app only; the chime is for a notification).
+  messageReceived('zen_received'),
+
+  /// A tiny bright "pluck": a like or a reaction given (in the app only).
+  like('zen_like'),
+
+  /// Two light rising notes: a post is published (in the app only).
+  posted('zen_posted'),
+
+  /// A soft "pop": a new entry in the list of notifications while the app
+  /// is open (in the app only).
+  pop('zen_pop'),
+
   /// One soft tone: groups, posts, events and other news from friends.
   social('zen_social'),
 
@@ -52,6 +66,10 @@ enum ZenSound {
     ZenSound.ringtone ||
     ZenSound.alarm => true,
     ZenSound.messageSent ||
+    ZenSound.messageReceived ||
+    ZenSound.like ||
+    ZenSound.posted ||
+    ZenSound.pop ||
     ZenSound.callConnected ||
     ZenSound.callEnded => false,
   };
@@ -59,7 +77,8 @@ enum ZenSound {
   /// The notification sound in the iOS and macOS bundles (`Runner/Sounds`).
   String get appleFileName => '$fileName.caf';
 
-  /// A short effect inside the app, governed by "Dźwięki w aplikacji".
+  /// A short effect inside the app, governed by "Dźwięki w aplikacji" (the
+  /// notification sounds by "Dźwięk powiadomień").
   bool get isInAppEffect => !isNotificationSound;
 }
 
@@ -179,6 +198,8 @@ Future<bool> deviceKeepsQuietNow() async {
 
 Future<bool> _neverQuiet() async => false;
 
+bool _alwaysOn() => true;
+
 final Provider<ZenSoundEffects> zenSoundEffectsProvider =
     Provider<ZenSoundEffects>((Ref ref) {
       // Widget tests have no media player and no system channel.
@@ -189,38 +210,46 @@ final Provider<ZenSoundEffects> zenSoundEffectsProvider =
             : const VideoPlayerSoundOutput(),
         inAppSoundsOn: () =>
             ref.read(appSettingsControllerProvider).inAppSounds,
+        notificationSoundsOn: () =>
+            ref.read(appSettingsControllerProvider).notificationSounds,
         deviceKeepsQuiet: underTest ? _neverQuiet : deviceKeepsQuietNow,
       );
     });
 
 /// Zen's sounds inside the app.
 ///
-/// * In-app effects ([ZenSound.isInAppEffect]: a sent message, a call that
-///   connects or ends) play on Android, macOS, Windows and Linux while
-///   "Dźwięki w aplikacji" is on. Not on iOS: its silent switch cannot be
-///   read, and a player would sound through it.
+/// * In-app effects ([ZenSound.isInAppEffect]: a message sent or received
+///   in the open chat, a like, a post published, a new entry in the list
+///   of notifications, a call that connects or ends) play on Android,
+///   macOS, Windows and Linux while "Dźwięki w aplikacji" is on. Not on
+///   iOS: its silent switch cannot be read, and a player would sound
+///   through it.
 /// * Notification sounds play here only on Windows and Linux, where the
 ///   system notification cannot carry Zen's own sound reliably (a Windows
 ///   toast only can from an MSIX package; Linux notification servers often
-///   ignore a sound file). Elsewhere the notification itself sounds.
+///   ignore a sound file), and while "Dźwięk powiadomień" is on. Elsewhere
+///   the notification itself sounds.
 /// * Nothing plays while the device keeps quiet (silent mode, "Nie
 ///   przeszkadzać"), except a friend's alarm, which always does; and the
-///   setting never silences an alarm or a ringing call.
+///   settings never silence an alarm or a ringing call.
 final class ZenSoundEffects {
   ZenSoundEffects({
     required ZenSoundOutput output,
     required bool Function() inAppSoundsOn,
+    bool Function()? notificationSoundsOn,
     Future<bool> Function()? deviceKeepsQuiet,
     TargetPlatform? platform,
     DateTime Function()? clock,
   }) : _output = output,
        _inAppSoundsOn = inAppSoundsOn,
+       _notificationSoundsOn = notificationSoundsOn ?? _alwaysOn,
        _deviceKeepsQuiet = deviceKeepsQuiet ?? deviceKeepsQuietNow,
        _platform = platform ?? defaultTargetPlatform,
        _clock = clock ?? DateTime.now;
 
   final ZenSoundOutput _output;
   final bool Function() _inAppSoundsOn;
+  final bool Function() _notificationSoundsOn;
   final Future<bool> Function() _deviceKeepsQuiet;
   final TargetPlatform _platform;
   final DateTime Function() _clock;
@@ -260,10 +289,14 @@ final class ZenSoundEffects {
     if (sound == ZenSound.alarm) {
       return true;
     }
-    if (sound != ZenSound.ringtone && !_settingOn()) {
+    if (sound != ZenSound.ringtone && !_settingOn(sound)) {
       return false;
     }
-    return !await _keepsQuiet();
+    if (await _keepsQuiet()) {
+      logZenMessage('Sound ${sound.fileName} skipped: the device keeps quiet.');
+      return false;
+    }
+    return true;
   }
 
   /// Plays [sound] once, when it may. Returns whether it started.
@@ -293,9 +326,9 @@ final class ZenSoundEffects {
     return handle == null ? null : ZenSoundLoop._(handle, maxDuration);
   }
 
-  bool _settingOn() {
+  bool _settingOn(ZenSound sound) {
     try {
-      return _inAppSoundsOn();
+      return sound.isInAppEffect ? _inAppSoundsOn() : _notificationSoundsOn();
     } catch (_) {
       // Settings not readable (yet): the default, on.
       return true;

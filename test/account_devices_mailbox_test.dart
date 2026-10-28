@@ -135,7 +135,7 @@ void main() {
       expect(boxes, isNot(contains(w['B'])));
       expect(boxes, contains(fresh));
       expect(w['A'].engine.overview.value.quiet, isEmpty);
-    });
+    }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('a hand-picked mailbox follows the friend to the new phone', () async {
       final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);

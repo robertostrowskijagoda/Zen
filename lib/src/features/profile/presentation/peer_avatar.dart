@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -29,18 +31,20 @@ class PeerAvatar extends ConsumerWidget {
     required this.address,
     required this.name,
     this.size = 44,
-    this.online = false,
-    this.away = false,
+    this.presence,
     this.showStatus = true,
   });
 
   final String address;
   final String name;
   final double size;
-  final bool online;
-  final bool away;
 
-  /// The presence dot (not when the friend does not show it).
+  /// What the presence dot shows; `null`: what the state shows for
+  /// [address] ([FriendProfile.shownPresence] of an accepted friend,
+  /// nothing for anyone else).
+  final PeerPresence? presence;
+
+  /// The presence dot (never when the presence is [PeerPresence.hidden]).
   final bool showStatus;
 
   @override
@@ -50,12 +54,26 @@ class PeerAvatar extends ConsumerWidget {
         (SocialHubState state) => state.peerProfileOf(address)?.avatarPath,
       ),
     );
+    final PeerPresence shown =
+        presence ??
+        (showStatus
+            ? ref.watch(
+                socialHubControllerProvider.select((SocialHubState state) {
+                  final FriendProfile? friend = state.friendByAddress(address);
+                  return friend?.status == FriendRelationshipStatus.accepted
+                      ? friend!.shownPresence
+                      : PeerPresence.hidden;
+                }),
+              )
+            : PeerPresence.hidden);
     return ZenBlobAvatar(
       name: name,
       size: size,
-      online: online,
-      away: away,
-      showStatus: showStatus,
+      online: shown == PeerPresence.online,
+      away: shown == PeerPresence.background,
+      unknown: shown == PeerPresence.unknown,
+      noConnection: shown == PeerPresence.noConnection,
+      showStatus: showStatus && shown != PeerPresence.hidden,
       image: peerAvatarImage(path),
     );
   }

@@ -101,6 +101,21 @@ void main() {
   });
 
   test(
+    'every friend follows, also one whose account is not known yet',
+    () async {
+      // Two friends on the list, neither has greeted yet.
+      final LedgerNode a = await make(ada, friends: <String>[cel, dan]);
+      final FollowLedger onA = FollowLedger.of(a);
+      await onA.ready;
+
+      expect(a.friendAccounts, isEmpty);
+      expect(onA.followers, isEmpty);
+      expect(onA.friendCount, 2);
+      expect(onA.followerCount, 2);
+    },
+  );
+
+  test(
     'a notice signed by someone else or for someone else is ignored',
     () async {
       final LedgerNode a = await make(ada);

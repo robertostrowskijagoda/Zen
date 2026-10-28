@@ -235,10 +235,17 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         current != null &&
         (_callMedia.activeCallId == current.id ||
             _groupMedia.activeCallId == current.id);
+    final Map<String, FriendProfile> known = state.friends;
     state = _withTrimmedInbox(
       persisted.copyWith(
         lifecycle: state.lifecycle,
-        friends: _canonicalizeFriends(persisted.friends),
+        // What is in doubt here stays so: the other isolate heard nothing
+        // of it.
+        friends: _withRememberedPresence(
+          _canonicalizeFriends(persisted.friends),
+          nowMillis: DateTime.now().millisecondsSinceEpoch,
+          keep: (FriendProfile friend) => known[friend.address],
+        ),
         activeCall: mediaOwnsCall
             ? current
             : _restorableCallSession(persisted.activeCall),
@@ -337,7 +344,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         // the background: the pending queue is not flushed and every incoming
         // signal raises a system notification on top of the open app.
         lifecycle: state.lifecycle,
-        friends: _canonicalizeFriends(persisted.friends),
+        // What each friend showed last is remembered: shown as it stands
+        // now when it was confirmed lately, "status nieznany" otherwise
+        // until they answer (or the answers had time to come).
+        friends: _withRememberedPresence(
+          _canonicalizeFriends(persisted.friends),
+          nowMillis: DateTime.now().millisecondsSinceEpoch,
+        ),
         groups: _canonicalizeGroups(persisted.groups),
         activeCall:
             state.activeCall ?? _restorableCallSession(persisted.activeCall),

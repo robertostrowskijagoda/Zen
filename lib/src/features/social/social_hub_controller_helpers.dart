@@ -1229,6 +1229,18 @@ RuntimeSystemNotification _systemNotificationFromEntry({
     // Messages already got the form their conversation's level asks for
     // above; everything else is left to the central redaction.
     contentRedacted: chat != null,
+    // What the notification switches of the settings see.
+    kind: switch (signal.type) {
+      ZenSignalType.message => NoticeKind.message,
+      ZenSignalType.groupMessage =>
+        signalMentionsYou(signal)
+            ? NoticeKind.mention
+            : NoticeKind.groupMessage,
+      ZenSignalType.friendRequest ||
+      ZenSignalType.friendAccept ||
+      ZenSignalType.groupInvite => NoticeKind.invitation,
+      _ => null,
+    },
     category: switch (signal.type) {
       ZenSignalType.friendRequest ||
       ZenSignalType.friendAccept ||
@@ -1660,6 +1672,95 @@ void _removeFriend(Map<String, FriendProfile> friends, String address) {
   for (final String key in staleKeys) {
     friends.remove(key);
   }
+}
+
+/// [friend]'s presence as it stands at [nowMillis] when nothing was heard
+/// from them for a while (read back from the store, back on the network or
+/// on the screen), [confirmedAtMillis], [seenAtMillis] and [openedAtMillis]
+/// being what memory knows besides the friend: confirmed at most
+/// [kPresenceRememberedFor] ago, what that state is worth by now
+/// ([presenceAt]: offline when it would have expired); confirmed longer
+/// ago, not known ([PresenceDoubt.unchecked]) until they answer or the
+/// answers had time to come. [friend] itself when nothing changes, or they
+/// do not show it.
+FriendProfile _rememberedPresence(
+  FriendProfile friend, {
+  required int nowMillis,
+  Duration foregroundFor = kPresenceForegroundFor,
+  Duration offlineAfter = kPresenceOfflineAfter,
+  int confirmedAtMillis = 0,
+  int seenAtMillis = 0,
+  int openedAtMillis = 0,
+}) {
+  if (friend.presence == PeerPresence.hidden) {
+    return friend;
+  }
+  final int confirmed = max(friend.presenceAtMillis, confirmedAtMillis);
+  final int seen = max(friend.lastPresenceAtMillis, seenAtMillis);
+  final bool sameTimes =
+      confirmed == friend.presenceAtMillis &&
+      seen == friend.lastPresenceAtMillis;
+  if (!presenceRemembered(confirmedAtMillis: confirmed, nowMillis: nowMillis)) {
+    if (friend.presenceDoubt == PresenceDoubt.unchecked && sameTimes) {
+      return friend;
+    }
+    return friend.copyWith(
+      presenceDoubt: PresenceDoubt.unchecked,
+      presenceAtMillis: confirmed,
+      lastPresenceAtMillis: seen,
+    );
+  }
+  final PeerPresence presence = presenceAt(
+    presence: friend.presence,
+    presenceAtMillis: confirmed,
+    nowMillis: nowMillis,
+    foregroundFor: foregroundFor,
+    backgroundFor: offlineAfter,
+  );
+  // Online until the last confirmation: Zen was last open there then.
+  final int opened =
+      friend.presence == PeerPresence.online && presence != friend.presence
+      ? max(friend.lastOpenedAtMillis, openedAtMillis)
+      : friend.lastOpenedAtMillis;
+  final bool unreachable =
+      friend.isOnline &&
+      seen > 0 &&
+      nowMillis - seen >= offlineAfter.inMilliseconds;
+  if (friend.presenceDoubt == null &&
+      presence == friend.presence &&
+      sameTimes &&
+      opened == friend.lastOpenedAtMillis &&
+      !unreachable) {
+    return friend;
+  }
+  return friend.copyWith(
+    isOnline: unreachable ? false : null,
+    presence: presence,
+    presenceAtMillis: confirmed,
+    lastPresenceAtMillis: seen,
+    presenceDoubt: null,
+    lastOpenedAtMillis: opened,
+  );
+}
+
+/// [friends] as read back from the store at [nowMillis]: each one's
+/// presence as [_rememberedPresence] has it, unless [keep] gives it (what
+/// memory knows of that friend).
+Map<String, FriendProfile> _withRememberedPresence(
+  Map<String, FriendProfile> friends, {
+  required int nowMillis,
+  FriendProfile? Function(FriendProfile friend)? keep,
+}) {
+  return <String, FriendProfile>{
+    for (final MapEntry<String, FriendProfile> e in friends.entries)
+      e.key: switch (keep?.call(e.value)) {
+        final FriendProfile known =>
+          e.value.presence == PeerPresence.hidden
+              ? e.value
+              : e.value.copyWith(presenceDoubt: known.presenceDoubt),
+        null => _rememberedPresence(e.value, nowMillis: nowMillis),
+      },
+  };
 }
 
 Map<String, FriendProfile> _canonicalizeFriends(

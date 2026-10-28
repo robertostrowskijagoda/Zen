@@ -1,10 +1,16 @@
 # Every push to main and every pull request: format, analysis and all tests
 # of the app, and the Go bridge's own tests. Runs on Windows, like the
-# maintainer's machine (docs/TESTING.md). Next to them the Go bridge for
+# maintainer's machine (docs/TESTING.md); the app's tests run in four
+# parallel jobs, and the few that only work on Linux or macOS in one more
+# on Linux. The job "Analyze and test" waits for all of them and is the
+# check the branch rules require. Next to them the Go bridge for
 # the three Android ABIs, the Linux, Windows on ARM and macOS builds (the Go
 # bridge builds itself inside them), the Linux packaging and a short start
-# of each app. Actions are pinned to commit SHAs (Dependabot updates them,
+# of each app; every job starts at once except the .deb installs (they need
+# the Linux build). Actions are pinned to commit SHAs (Dependabot updates them,
 # .github/dependabot.yml); the token is read-only and no secret is used.
+# Caches (Flutter with its pub packages, Go modules and builds) only here,
+# never in release.yml.
 # The test jobs write a short report (format, analyzer, test counts, failed
 # tests) to the run's summary page with tool/ci/ci_summary.py.
 # Linux runners are pinned to an image (as in release.yml): the Linux build
@@ -30,10 +36,75 @@ env:
   FLUTTER_VERSION: '3.47.1'
 
 jobs:
-  app:
-    name: Analyze and test
+  checks:
+    name: Format and analyze
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    outputs:
+      format: ${{ steps.format.outcome }}
+      analyze: ${{ steps.analyze.outcome }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        id: packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Format
+        id: format
+        run: dart format --output=none --set-exit-if-changed lib test tool
+
+      # Also after a format slip, so one run shows every problem.
+      - name: Analyze
+        id: analyze
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        run: flutter analyze | Tee-Object -FilePath analyze.log
+
+      # The release workflow makes every file the app updates from, and the
+      # install page and the SideStore source point to them
+      # (tool/release.dart, tool/ci/test_release_source.py).
+      - name: Release contract
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        run: |
+          dart run tool/release.dart check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_release_source.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_ci_checks.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_check_libwebrtc.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_check_webrtc_sdk.py
+
+      # For the summary of the "Analyze and test" job.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: ci-analyze-log
+          path: analyze.log
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # The app's tests in four parallel jobs: each runs a quarter of the test
+  # files (tool/test.dart splits them by tool/test_times.json and their
+  # size, the same way in every job), in one `flutter test` with all of
+  # the runner's cores.
+  test:
+    name: Tests (${{ matrix.shard }} of 4)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,45 +119,125 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
-      - name: Format
-        id: format
-        run: dart format --output=none --set-exit-if-changed lib test tool
-
-      - name: Analyze
-        id: analyze
-        run: flutter analyze | Tee-Object -FilePath analyze.log
-
-      # The usual output in the log, and the JSON events in a file for the
-      # summary below.
+      # The usual output in the log, and the JSON events in test-results/
+      # for the summary.
       - name: Test
-        id: test
-        run: flutter test --file-reporter json:test-results.json
+        run: dart run tool/test.dart --shard ${{ matrix.shard }}/4 --results test-results
 
-      # The release workflow makes every file the app updates from, and the
-      # install page and the SideStore source point to them
-      # (tool/release.dart, tool/ci/test_release_source.py).
-      - name: Release contract
-        run: |
-          dart run tool/release.dart check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tool/ci/test_release_source.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tool/ci/test_ci_checks.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tool/ci/test_check_libwebrtc.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tool/ci/test_check_webrtc_sdk.py
-
-      # Format, analyzer and test counts (with the failed tests) on the
-      # run's summary page; tool/ci/ci_summary.py never fails the job.
-      - name: Summary
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
-        shell: bash
+        with:
+          name: ci-test-results-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # The tests the Windows jobs skip run here, so that no test is skipped
+  # everywhere: the POSIX file modes, and the app's calls into the real Go
+  # bridge (the KEM and signature vectors), built first; the Windows jobs
+  # have no bridge and no C compiler for it. Every test file that can skip
+  # itself is listed (tool/ci/test_ci_checks.py checks it), and the summary
+  # of "Analyze and test" names any test no job ran.
+  test-linux:
+    name: Tests on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Go bridge (linux-x64)
+        run: sh native/yggdrasil_bridge/build_linux.sh linux-x64
+
+      - name: Test
         run: >-
-          python tool/ci/ci_summary.py flutter
-          --format '${{ steps.format.outcome }}'
-          --analyze '${{ steps.analyze.outcome }}' --analyze-log analyze.log
-          --test '${{ steps.test.outcome }}' --tests test-results.json
+          dart run tool/test.dart --results test-results
+          test/media_temp_folder_test.dart
+          test/hybrid_kem_test.dart
+          test/hybrid_signature_test.dart
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: ci-test-results-linux
+          path: test-results/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # The check the branch rules require: green only when format, analyzer,
+  # the release contract and every test job passed. It runs even when one
+  # of them failed (a skipped required check would count as passed), and
+  # writes one report of all of them to the run's summary page
+  # (tool/ci/ci_summary.py, which never fails the job itself).
+  app:
+    name: Analyze and test
+    needs: [checks, test, test-linux]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: ci-test-results-*
+          path: test-results
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: ci-analyze-log
+          path: .
+
+      - name: Summary
+        env:
+          FORMAT: ${{ needs.checks.outputs.format }}
+          ANALYZE: ${{ needs.checks.outputs.analyze }}
+          TESTS: ${{ needs.test.result }}
+          LINUX_TESTS: ${{ needs.test-linux.result }}
+        run: |
+          outcome=$TESTS
+          if [ "$TESTS" = success ] && [ "$LINUX_TESTS" != success ]; then
+            outcome=$LINUX_TESTS
+          fi
+          # shellcheck disable=SC2046 # one argument per results file
+          python3 tool/ci/ci_summary.py flutter --format "$FORMAT" \
+            --analyze "$ANALYZE" --analyze-log analyze.log \
+            --test "$outcome" --tests $(find test-results -name '*.json' 2> /dev/null | sort)
+
+      - name: Every check passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          TESTS: ${{ needs.test.result }}
+          LINUX_TESTS: ${{ needs.test-linux.result }}
+        run: |
+          echo "Format, analyzer and release contract: $CHECKS"
+          echo "Tests (Windows, 4 jobs): $TESTS"
+          echo "Tests on Linux: $LINUX_TESTS"
+          for result in "$CHECKS" "$TESTS" "$LINUX_TESTS"; do
+            if [ "$result" != success ]; then
+              exit 1
+            fi
+          done
 
   go:
     name: Go bridge

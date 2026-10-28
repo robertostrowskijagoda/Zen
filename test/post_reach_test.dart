@@ -49,6 +49,7 @@ final class _World {
             noticeAudienceFor(w.lists[n] ?? FriendListAudience.friends),
         delay: Duration.zero,
         minGap: Duration.zero,
+        firstRetryAfter: Duration.zero,
         retryAfter: Duration.zero,
       );
       addTearDown(service.stop);

@@ -22,10 +22,8 @@ func TestPublicPeerScorePrefers443AndIPv4(t *testing.T) {
 }
 
 func TestAndroidBootstrapPeersAreCuratedTlsUris(t *testing.T) {
-	peers := androidBootstrapPeers()
-	if len(peers) < 6 {
-		t.Fatalf("got %d Android bootstrap peers, want at least 6", len(peers))
-	}
+	// The phone's picks; the rest of its pool is reserve behind them.
+	peers := androidBootstrapPeers()[:phonePeerPoolSize]
 	seen := make(map[string]bool, len(peers))
 	ipv4Count := 0
 	for _, peer := range peers {

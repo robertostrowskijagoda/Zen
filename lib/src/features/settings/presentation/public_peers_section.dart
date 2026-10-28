@@ -6,10 +6,25 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/runtime/public_peers.dart';
 
-/// The line under a peer: where it stands, what a check found, and a
-/// warning for a link without encryption.
-String publicPeerStatusText(PublicPeer peer, PublicPeerProbe? probe) {
+/// What [state] means, for the line under a peer.
+String publicPeerStateLabel(PublicPeerState state) => switch (state) {
+  PublicPeerState.up => t('W użyciu'),
+  PublicPeerState.connecting => t('Łączę…'),
+  PublicPeerState.failing => t('Nie łączy się'),
+  PublicPeerState.aside => t('Wstrzymany na chwilę: za dużo cudzego ruchu'),
+  PublicPeerState.standby => t('W rezerwie'),
+};
+
+/// The line under a peer: what this device does with it now ([live], for a
+/// peer switched on), where it stands, what a check found, and a warning
+/// for a link without encryption.
+String publicPeerStatusText(
+  PublicPeer peer,
+  PublicPeerProbe? probe, {
+  PublicPeerState? live,
+}) {
   final List<String> parts = <String>[
+    if (peer.enabled && live != null) publicPeerStateLabel(live),
     if (peer.country.isNotEmpty) peer.country,
     if (probe != null)
       if (!probe.reachable)
@@ -26,7 +41,9 @@ String publicPeerStatusText(PublicPeer peer, PublicPeerProbe? probe) {
 /// Ustawienia → Publiczne węzły: the public Yggdrasil peers this device
 /// connects through. The user can add, remove and switch off peers, check
 /// which answer and how fast, and go back to the built-in list. Changes
-/// apply at once.
+/// apply at once. Each peer says what the device does with it now: a
+/// device dials only a few at once and keeps the rest in reserve, so most
+/// of the list waits, by design.
 class PublicPeersSection extends ConsumerStatefulWidget {
   const PublicPeersSection({super.key});
 
@@ -38,8 +55,23 @@ class _PublicPeersSectionState extends ConsumerState<PublicPeersSection> {
   final TextEditingController _input = TextEditingController();
   String? _problem;
 
+  /// What the nodes do with the peers is read again this often while the
+  /// list is on the screen (from memory, nothing goes out).
+  static const Duration _liveEvery = Duration(seconds: 5);
+  Timer? _live;
+
+  @override
+  void initState() {
+    super.initState();
+    _live = Timer.periodic(
+      _liveEvery,
+      (_) => ref.read(publicPeersProvider.notifier).refreshStates(),
+    );
+  }
+
   @override
   void dispose() {
+    _live?.cancel();
     _input.dispose();
     super.dispose();
   }
@@ -97,6 +129,32 @@ class _PublicPeersSectionState extends ConsumerState<PublicPeersSection> {
               : t('Lista domyślna'),
           key: const Key('public-peers-status'),
           style: TextStyle(color: zen.textPrimary, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          state.live.isEmpty
+              ? t(
+                  'Zen łączy się naraz tylko z kilkoma węzłami z listy, a '
+                  'resztę trzyma w rezerwie, na wypadek gdyby któryś '
+                  'przestał odpowiadać.',
+                )
+              : t(
+                  'W użyciu: {up}, łączę: {connecting}, w rezerwie: '
+                  '{standby}. Zen łączy się naraz tylko z kilkoma węzłami, a '
+                  'resztę trzyma w rezerwie, na wypadek gdyby któryś '
+                  'przestał odpowiadać.',
+                  <String, Object?>{
+                    'up': state.countLive(PublicPeerState.up),
+                    'connecting':
+                        state.countLive(PublicPeerState.connecting) +
+                        state.countLive(PublicPeerState.failing),
+                    'standby':
+                        state.countLive(PublicPeerState.standby) +
+                        state.countLive(PublicPeerState.aside),
+                  },
+                ),
+          key: const Key('public-peers-live'),
+          style: note,
         ),
         const SizedBox(height: 12),
         TextField(
@@ -172,6 +230,7 @@ class _PublicPeersSectionState extends ConsumerState<PublicPeersSection> {
               key: ValueKey<String>('public-peer-${peer.uri}'),
               peer: peer,
               probe: state.probes[peer.uri],
+              live: state.live[peer.uri],
               onEnabled: (bool value) =>
                   unawaited(_change(controller.setEnabled(peer.uri, value))),
               onRemove: () => unawaited(_change(controller.remove(peer.uri))),
@@ -186,6 +245,7 @@ class _PeerRow extends StatelessWidget {
   const _PeerRow({
     required this.peer,
     required this.probe,
+    required this.live,
     required this.onEnabled,
     required this.onRemove,
     required this.onPinKey,
@@ -194,6 +254,7 @@ class _PeerRow extends StatelessWidget {
 
   final PublicPeer peer;
   final PublicPeerProbe? probe;
+  final PublicPeerState? live;
   final ValueChanged<bool> onEnabled;
   final VoidCallback onRemove;
   final VoidCallback onPinKey;
@@ -201,10 +262,12 @@ class _PeerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final String status = publicPeerStatusText(peer, probe);
+    final String status = publicPeerStatusText(peer, probe, live: live);
     final PublicPeerProbe? result = probe;
     final bool bad =
-        result != null && (!result.reachable || result.keyMatches == false);
+        (result != null && (!result.reachable || result.keyMatches == false)) ||
+        (peer.enabled && live == PublicPeerState.failing);
+    final bool inUse = peer.enabled && live == PublicPeerState.up;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -227,7 +290,11 @@ class _PeerRow extends StatelessWidget {
                     status,
                     softWrap: true,
                     style: TextStyle(
-                      color: bad ? zen.danger : zen.textSecondary,
+                      color: bad
+                          ? zen.danger
+                          : inUse
+                          ? zen.success
+                          : zen.textSecondary,
                       fontSize: 12,
                     ),
                   ),

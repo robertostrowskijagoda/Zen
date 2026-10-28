@@ -14,6 +14,47 @@ In addition: Go bridge tests (`go test` in `native/yggdrasil_bridge`,
 discovery, Bluetooth and Wi-Fi Direct logic and the door node), translation checks (section 5) and GitHub Actions on every
 push (section 6).
 
+## Running the tests
+
+`flutter test` runs every test, but it runs only half as many files at
+once as the computer has cores (its default `--concurrency`), it starts
+them in alphabetical order, and the tests of one file always run one after
+another, so a long file that starts late keeps everything waiting. The
+fastest ways:
+
+| Command | What it does |
+|---|---|
+| `dart run tool/test.dart` | every test: several `flutter test` runs at once (one per four cores), together using every core, the longest files first; at the end the counts and the failed tests |
+| `dart run tool/test.dart test/chat_test.dart test/wire` | only these files and folders, the same way |
+| `dart run tool/test.dart -- --plain-name "mailbox"` | everything after `--` goes to each `flutter test` |
+| `flutter test test/chat_test.dart` | one file with its whole output (the quickest for one file) |
+| `flutter test -j 16` | the plain run, with all 16 cores |
+
+On a 16-core Windows computer the whole suite takes about 5 minutes with
+`tool/test.dart` and about 10 with a plain `flutter test`.
+`tool/test.dart` remembers how long each file took
+(`build/test_times.json`, written by every full run) to start the longest
+files first and to give each run the same amount of work; before the first
+run it takes the times of the longest files from `tool/test_times.json`
+(kept in the repository, refreshed from `build/test_times.json` now and
+then) and guesses the rest from their size. `--groups N` (parallel runs) and `--concurrency N`
+(files at once in each) change the split; the defaults keep every core
+busy. It fetches the packages only when they were never fetched: after
+changing `pubspec.yaml`, run `flutter pub get` yourself.
+
+CI splits the files into four jobs of about the same length
+(`--shard 1/4` … `4/4`, section 6, by `tool/test_times.json` and the file
+sizes only, so every job computes the same split);
+`dart run tool/test.dart --list --shard 2/4` shows the files of one of them.
+
+The longest files are the simulated phone worlds (`post_reach_test.dart`,
+`neighbors_test.dart`, `dating_test.dart`, `conversation_recovery_sync_test.dart`),
+the whole app (`widget_test.dart`, `shell_*_test.dart`) and the text fit
+checks of every screen in every language, which are split into
+`test/ui_text_fit_1_test.dart` … `_4_test.dart` so that the four parts run
+side by side. Split a new long file the same way rather than letting it
+grow past a minute or two.
+
 ## 1. Network simulator (`lib/src/dev/sim/sim_network.dart`)
 
 `SimNetwork` is an in-memory network of phones:
@@ -314,25 +355,36 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 
 | Job | Where | What it does |
 |---|---|---|
-| Analyze and test | Windows | `dart format` (no changes), `flutter analyze`, `flutter test` (including translations) |
+| Format and analyze | Windows | `dart format` (no changes), `flutter analyze`, the release contract (`tool/release.dart check`) and the Python tests of `tool/ci` |
+| Tests (1 of 4) … (4 of 4) | Windows | the app's tests (including translations), a quarter of the files each, at the same time (`dart run tool/test.dart --shard N/4`, see "Running the tests") |
+| Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
+| Analyze and test | Ubuntu | waits for the four jobs above and is green only when all of them are; the check the branch rules require. Writes the report described below |
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
 | Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
 | Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build |
 | macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start |
 
+All jobs start at once (only the `.deb` installs wait for the Linux build).
+The Flutter SDK with its pub packages and Go's modules and build cache are
+cached between CI runs; the release workflow uses no caches at all.
+
 The *Analyze and test* and *Go bridge* jobs write a short report to the run's
 summary page (Actions → the run → Summary): format, analyzer issues, test
-counts (passed, failed, skipped) with the failed tests and their first error
-lines, and the Go packages and tests. `tool/ci/ci_summary.py` (Python 3,
-standard library only; tested with the other CI scripts, e.g.
-`tool/ci/test_check_libwebrtc.py`, `tool/ci/test_check_webrtc_sdk.py`) turns `flutter test --file-reporter json:…`,
-`flutter analyze --write=…` and `go test -v` output into that Markdown; it
-never fails the job itself. The release workflow's *SHA256SUMS* job lists
-every release file with its size and checksum the same way.
+counts of all test jobs added up (passed, failed, skipped) with the failed
+tests and their first error lines, the tests that no job ran (skipped on
+Windows and not run on Linux either; there should be none), and the Go
+packages and tests. `tool/ci/ci_summary.py` (Python 3,
+standard library only; tested with the other CI scripts in
+`tool/ci/test_ci_checks.py`) turns `flutter test --file-reporter json:…`,
+`flutter analyze` and `go test -v` output into that Markdown; it
+never fails the job itself. The release workflow's *Sign* job (and, for a
+run from a branch, its *SHA256SUMS* job) lists every release file with its
+size and checksum the same way.
 
-`release.yml` on a `v*` tag builds all the release files — Android (signed
-APKs, one per ABI), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
+`release.yml` on a `v*` tag builds all the release files — Android (one APK
+per ABI, each in its own job, signed afterwards by the one job that has the
+keys), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
 `.deb`, macOS and iPhone (`RELEASES.md` section 3). If the Xvfb start proves unstable, building and the symbol check remain. The release
 job for Linux additionally checks the bridge and GStreamer linkage and runs
 `dpkg-deb --info` on the `.deb`.
@@ -344,8 +396,9 @@ job for Linux additionally checks the bridge and GStreamer linkage and runs
   the radios themselves (Kotlin, Swift, C++ runners) only by hand.
 - The Android background service has few tests, the Kotlin code (BLE, calls)
   none.
-- App tests run in CI only on Windows; on Linux, macOS and Windows on ARM CI
-  only builds and (Linux, macOS) runs the app for 20 s. There is no APK build
+- App tests run in CI on Windows, and on Linux only those the Windows jobs
+  skip; on macOS and Windows on ARM CI only builds and (Linux, macOS) runs
+  the app for 20 s. There is no APK build
   on push (only the Go bridge for the three ABIs) and no emulator test; the
   `appStoreOnly` flavor is covered only by the Dart-level `store_build_test.dart`, not
   by a Gradle build in CI.

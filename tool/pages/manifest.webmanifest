@@ -1,0 +1,16 @@
+{
+  "name": "Zen",
+  "short_name": "Zen",
+  "description": "An open-source messenger for people who know each other. No servers of its own, no ads, no algorithm.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#f6f4fb",
+  "theme_color": "#f6f4fb",
+  "icons": [
+    {"src": "zen-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "zen-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}

@@ -1041,6 +1041,21 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// a start.
   Stream<RuntimeNodeYield> get ownerYields => _yields.stream;
 
+  /// Whether the node has a link to the mesh now (asks the node, from
+  /// memory; false while it does not run).
+  Future<bool> meshLinked() async {
+    final Future<RuntimeTransportSnapshot> Function()? read =
+        _session?.refreshSnapshot;
+    if (read == null) {
+      return false;
+    }
+    try {
+      return (await read()).peers > 0;
+    } on Object {
+      return false;
+    }
+  }
+
   @override
   Stream<SignalTransportFrame> get frames => _frames.stream;
 
@@ -2024,6 +2039,17 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
   }
 }
 
+/// How many public peers a phone node dials while it only receives: the
+/// locked receiver of the default account and the extra accounts' nodes in
+/// the background service. Every peer passes on the tree's signed updates
+/// (each node renews its own every few minutes) and each of them is
+/// answered, so on a locked phone the peers are what wakes the radio most
+/// (about a thousand small packets an hour each way with four); two halve
+/// that and are what Yggdrasil advises for end nodes. A peer whose link
+/// goes down is replaced within seconds by the next of the pool
+/// (phone_peers.go). The app on screen dials the bridge's own number (four).
+const int kReceiveOnlyPeerTarget = 2;
+
 final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({
     this.waitTimeout = const Duration(seconds: 30),
@@ -2034,8 +2060,8 @@ final class RuntimeSignalBootstrapConfig {
   });
 
   /// How many public peers a phone node dials at once; `null`: the
-  /// bridge's own number (4). The extra accounts the background service
-  /// receives for ask for fewer (phone_peers.go in the bridge).
+  /// bridge's own number (4). Nodes that only receive ask for fewer
+  /// ([kReceiveOnlyPeerTarget]; phone_peers.go in the bridge).
   final int? peerTarget;
 
   /// The folder of the account whose node this is; `null`: the account

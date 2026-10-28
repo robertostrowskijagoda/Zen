@@ -12,6 +12,7 @@ import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/sound/zen_sound_effects.dart';
@@ -28,10 +29,17 @@ List buildRuntimeSystemNotificationProviderOverrides({
   return [
     runtimeSystemNotificationServiceProvider.overrideWith(
       (Ref ref) => PrivacyRedactingNotificationService(
-        serviceFactory?.call() ??
-            FlutterLocalRuntimeSystemNotificationService(
-              soundEffects: ref.read(zenSoundEffectsProvider),
-            ),
+        NoticeSettingsNotificationService(
+          serviceFactory?.call() ??
+              FlutterLocalRuntimeSystemNotificationService(
+                soundEffects: ref.read(zenSoundEffectsProvider),
+              ),
+          // Read on every post, like the privacy level.
+          muted: (NoticeKind kind) =>
+              ref.read(appSettingsControllerProvider).mutes(kind),
+          sounds: () =>
+              ref.read(appSettingsControllerProvider).notificationSounds,
+        ),
         // Read on every post, so changing the setting applies at once.
         // While this device shares its screen in a call, never more than
         // who wrote.
@@ -85,6 +93,20 @@ ZenSound? zenSoundFor(RuntimeSystemNotification notification) {
   };
 }
 
+/// The kind of news [notification] is, for the switches in the settings
+/// ([NoticeKind]); `null` for what is never switched off (an alarm, the
+/// neighbours, dating, the meet-ups, the app's own duties). Whoever posts
+/// a notification of a kind names it in [RuntimeSystemNotification.kind];
+/// calls and updates are known by their category.
+NoticeKind? noticeKindOf(RuntimeSystemNotification notification) {
+  return notification.kind ??
+      switch (notification.category) {
+        RuntimeSystemNotificationCategory.call => NoticeKind.call,
+        RuntimeSystemNotificationCategory.update => NoticeKind.update,
+        _ => null,
+      };
+}
+
 @immutable
 final class RuntimeSystemNotification {
   const RuntimeSystemNotification({
@@ -100,6 +122,8 @@ final class RuntimeSystemNotification {
     this.lines = const <String>[],
     this.stackCount = 1,
     this.contentRedacted = false,
+    this.kind,
+    this.silent = false,
   });
 
   final String id;
@@ -128,6 +152,34 @@ final class RuntimeSystemNotification {
   /// central redaction leaves its text alone.
   final bool contentRedacted;
 
+  /// The switch of the settings that governs this notification
+  /// ([noticeKindOf] also knows it from the category).
+  final NoticeKind? kind;
+
+  /// Arrives without a sound or a vibration (the notification sounds are
+  /// switched off): see [NoticeSettingsNotificationService].
+  final bool silent;
+
+  /// This notification without its sound.
+  RuntimeSystemNotification asSilent() {
+    return RuntimeSystemNotification(
+      id: id,
+      title: title,
+      body: body,
+      createdAtMillis: createdAtMillis,
+      category: category,
+      routeKey: routeKey,
+      slotKey: slotKey,
+      suppressionKey: suppressionKey,
+      isRingingCall: isRingingCall,
+      lines: lines,
+      stackCount: stackCount,
+      contentRedacted: contentRedacted,
+      kind: kind,
+      silent: true,
+    );
+  }
+
   /// This notification with its text replaced by [body] (and no stacked
   /// lines), and its title by [title] when given, see
   /// [PrivacyRedactingNotificationService].
@@ -144,6 +196,8 @@ final class RuntimeSystemNotification {
       isRingingCall: isRingingCall,
       stackCount: stackCount,
       contentRedacted: true,
+      kind: kind,
+      silent: silent,
     );
   }
 
@@ -164,6 +218,8 @@ final class RuntimeSystemNotification {
       lines: lines,
       stackCount: stackCount,
       contentRedacted: contentRedacted,
+      kind: kind,
+      silent: silent,
     );
   }
 }
@@ -196,6 +252,28 @@ RuntimeSystemNotification stackRuntimeNotification(
 }
 
 const int _maxStackedLines = 6;
+
+/// The kind of news the in-app list entry [entry] is, for the switches in
+/// the settings; `null` for what no switch governs (and for a ringing call,
+/// which has its own sounds).
+NoticeKind? noticeKindOfInboxEntry(InboxEntry entry) {
+  return switch (entry.type) {
+    InboxEntryType.message =>
+      runtimeRouteIntentFromRouteKey(
+                id: entry.id,
+                routeKey: entry.routeKey,
+              )?.target ==
+              RuntimeRouteTarget.groupConversation
+          ? NoticeKind.groupMessage
+          : NoticeKind.message,
+    InboxEntryType.friendRequest ||
+    InboxEntryType.friendAccepted ||
+    InboxEntryType.groupInvite => NoticeKind.invitation,
+    InboxEntryType.post => NoticeKind.friendPost,
+    InboxEntryType.mention => NoticeKind.mention,
+    _ => null,
+  };
+}
 
 /// Updates of a still-visible notification within this window stay silent.
 const Duration kNotificationRealertWindow = Duration(seconds: 30);
@@ -331,6 +409,104 @@ final class PrivacyRedactingNotificationService
   @override
   Future<bool> show(RuntimeSystemNotification notification) {
     return delegate.show(redact(notification));
+  }
+
+  @override
+  Future<void> dismiss(String id) => delegate.dismiss(id);
+
+  @override
+  Future<void> dismissSlot(String slotKey) => delegate.dismissSlot(slotKey);
+
+  @override
+  Future<void> clear() => delegate.clear();
+}
+
+/// [notification] as the notification switches allow it: `null` when its
+/// kind is [muted] (no notification, no sound), quiet when the notification
+/// [sounds] are off; a ringing call and an alarm are never made quiet, and
+/// what has no kind ([noticeKindOf]) is never held back.
+RuntimeSystemNotification? applyNoticeSettings(
+  RuntimeSystemNotification notification, {
+  required bool Function(NoticeKind kind) muted,
+  required bool sounds,
+}) {
+  final NoticeKind? kind = noticeKindOf(notification);
+  if (kind != null && muted(kind)) {
+    return null;
+  }
+  if (notification.silent ||
+      notification.isRingingCall ||
+      notification.category == RuntimeSystemNotificationCategory.alarm ||
+      sounds) {
+    return notification;
+  }
+  return notification.asSilent();
+}
+
+/// Applies the notification switches of the settings to every notification
+/// the app posts, whoever posts it (like the privacy level, see
+/// [PrivacyRedactingNotificationService]).
+///
+/// * A kind that is switched off ([NoticeKind], [noticeKindOf]) posts
+///   nothing: no notification, no sound. What it tells of stays in the
+///   in-app list of notifications.
+/// * With the notification sounds off, everything else arrives quietly (no
+///   sound, no vibration) - except a ringing call and an alarm, which have
+///   to be heard.
+/// * Alarms and what has no kind are never held back.
+final class NoticeSettingsNotificationService
+    implements RuntimeSystemNotificationService {
+  NoticeSettingsNotificationService(
+    this.delegate, {
+    required bool Function(NoticeKind kind) muted,
+    required bool Function() sounds,
+  }) : _muted = muted,
+       _sounds = sounds;
+
+  final RuntimeSystemNotificationService delegate;
+  final bool Function(NoticeKind kind) _muted;
+  final bool Function() _sounds;
+
+  /// [notification] as it may be posted now: `null` when its kind is
+  /// switched off, quiet when the notification sounds are
+  /// ([applyNoticeSettings]).
+  RuntimeSystemNotification? apply(RuntimeSystemNotification notification) {
+    return applyNoticeSettings(
+      notification,
+      muted: _isMuted,
+      sounds: _soundsOn(),
+    );
+  }
+
+  bool _isMuted(NoticeKind kind) {
+    try {
+      return _muted(kind);
+    } catch (_) {
+      // Settings not readable (yet): the default, on.
+      return false;
+    }
+  }
+
+  bool _soundsOn() {
+    try {
+      return _sounds();
+    } catch (_) {
+      return true;
+    }
+  }
+
+  @override
+  Future<void> initialize({
+    required Future<void> Function(String routeKey) onOpenRoute,
+    NotificationActionCallback? onAction,
+  }) {
+    return delegate.initialize(onOpenRoute: onOpenRoute, onAction: onAction);
+  }
+
+  @override
+  Future<bool> show(RuntimeSystemNotification notification) async {
+    final RuntimeSystemNotification? shown = apply(notification);
+    return shown != null && await delegate.show(shown);
   }
 
   @override
@@ -965,9 +1141,9 @@ final class FlutterLocalRuntimeSystemNotificationService
     final DarwinNotificationDetails darwin = DarwinNotificationDetails(
       presentAlert: true,
       presentBanner: true,
-      presentSound: !isUpdate,
+      presentSound: !isUpdate && !notification.silent,
       presentBadge: true,
-      sound: sound?.appleFileName,
+      sound: notification.silent ? null : sound?.appleFileName,
       categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
       interruptionLevel: isRinging
           ? InterruptionLevel.timeSensitive
@@ -1020,6 +1196,8 @@ final class FlutterLocalRuntimeSystemNotificationService
         // dismissible or they pile up as notifications the user cannot swipe.
         ongoing: isRinging,
         autoCancel: !isRinging,
+        // Quiet: no sound and no vibration, whatever the channel says.
+        silent: notification.silent,
         playSound: sound != null,
         sound: sound == null
             ? null
@@ -1081,7 +1259,7 @@ final class FlutterLocalRuntimeSystemNotificationService
             : null,
         subtitle: channel.name,
         // Zen plays its own sound instead (see [_playOwnSound]).
-        audio: _playsOwnSounds || isUpdate
+        audio: _playsOwnSounds || isUpdate || notification.silent
             ? WindowsNotificationAudio.silent()
             : null,
       ),
@@ -1091,7 +1269,7 @@ final class FlutterLocalRuntimeSystemNotificationService
         urgency: isCall
             ? LinuxNotificationUrgency.critical
             : LinuxNotificationUrgency.normal,
-        suppressSound: _playsOwnSounds || isUpdate,
+        suppressSound: _playsOwnSounds || isUpdate || notification.silent,
       ),
     );
   }
@@ -1113,6 +1291,7 @@ final class FlutterLocalRuntimeSystemNotificationService
     }
     if (effects == null ||
         !_playsOwnSounds ||
+        notification.silent ||
         sound == null ||
         sound == ZenSound.ringtone ||
         onlyAlertOnce) {
@@ -1263,8 +1442,39 @@ final class _RuntimeSystemNotificationsBridgeState
       socialHubControllerProvider.select(_callSoundStateOf),
       _onCallSoundState,
     );
+    ref.listen<InboxEntry?>(
+      socialHubControllerProvider.select(
+        (SocialHubState state) =>
+            state.inbox.isEmpty ? null : state.inbox.first,
+      ),
+      _onNewestInboxEntry,
+    );
     return widget.child;
   }
+
+  /// A new entry in the list of notifications while Zen is on screen gets a
+  /// soft "pop" (a muted kind of news does not, and nor does what was only
+  /// loaded from storage).
+  void _onNewestInboxEntry(InboxEntry? previous, InboxEntry? next) {
+    if (next == null ||
+        next.id == previous?.id ||
+        DateTime.now().millisecondsSinceEpoch - next.createdAtMillis >
+            _freshEntryWindow.inMilliseconds ||
+        !ref.read(socialHubControllerProvider).lifecycle.isFocused) {
+      return;
+    }
+    final NoticeKind? kind = noticeKindOfInboxEntry(next);
+    if (kind == null || ref.read(appSettingsControllerProvider).mutes(kind)) {
+      return;
+    }
+    unawaitedLogged(
+      ref.read(zenSoundEffectsProvider).play(ZenSound.pop),
+      context: 'Playing the list sound failed',
+    );
+  }
+
+  /// An entry older than this is not news (it was read from storage).
+  static const Duration _freshEntryWindow = Duration(seconds: 10);
 
   /// A call that connects or ends gets its short sound; on Windows and
   /// Linux an incoming call rings here for as long as it rings.
@@ -1288,7 +1498,10 @@ final class _RuntimeSystemNotificationsBridgeState
       // Elsewhere the system rings (the notification, Android's call card).
       return;
     }
-    _wantsRingtone = next.incoming && next.status == CallSessionStatus.ringing;
+    _wantsRingtone =
+        next.incoming &&
+        next.status == CallSessionStatus.ringing &&
+        !ref.read(appSettingsControllerProvider).mutes(NoticeKind.call);
     if (!_wantsRingtone) {
       _stopRingtone();
     } else if ((_ringtone == null || _ringtone!.isStopped) &&

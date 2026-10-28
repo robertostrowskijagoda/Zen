@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// The revision of the first-start setup. Bump it when a release adds or
@@ -437,6 +438,7 @@ enum GroupInviteFrom {
 final class AppSettings {
   const AppSettings({
     this.inboxLimitMb = defaultInboxLimitMb,
+    this.feedLimitMb = 0,
     this.autoCleanupDays = defaultAutoCleanupDays,
     this.lockMode = defaultLockMode,
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
@@ -452,6 +454,8 @@ final class AppSettings {
     this.postNotifications = true,
     this.mutedPostAuthors = const <String>{},
     this.inAppSounds = true,
+    this.notificationSounds = true,
+    this.mutedNotices = NoticeKind.defaultMuted,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
@@ -464,8 +468,8 @@ final class AppSettings {
     this.legalAcceptedAtMillis = 0,
     this.groupInviteFrom = GroupInviteFrom.friends,
     this.lanDiscovery,
-    this.wifiDirect = false,
-    this.bluetoothLinks = false,
+    this.wifiDirect = true,
+    this.bluetoothLinks = true,
     this.multipeerLinks = false,
     this.keepReceivingInBackground = false,
     this.showLastOpened = true,
@@ -473,7 +477,7 @@ final class AppSettings {
     this.notificationsSeenMillis = 0,
   });
 
-  static const int defaultInboxLimitMb = 100;
+  static const int defaultInboxLimitMb = 1024;
   static const int minimumInboxLimitMb = 5;
   static const int defaultAutoCleanupDays = 0;
 
@@ -491,6 +495,10 @@ final class AppSettings {
       NotificationPrivacy.senderAndContent;
 
   final int inboxLimitMb;
+
+  /// What other people's posts (their photos and videos) may take on this
+  /// phone; 0 = no limit of their own, they share the whole [inboxLimitMb].
+  final int feedLimitMb;
   final int autoCleanupDays;
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
@@ -546,11 +554,27 @@ final class AppSettings {
       postNotifications &&
       !mutedPostAuthors.contains(PeerShareCodec.normalizeAddress(address));
 
-  /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
-  /// connects or ends; on Windows and Linux also the notification sounds
-  /// Zen plays itself. Never silences a ringing call or an alarm. On by
-  /// default.
+  /// "Dźwięki w aplikacji": short sounds inside the app (a message sent or
+  /// received in the open chat, a like, a post published, a new entry in
+  /// the list of notifications, a call that connects or ends). Never
+  /// silences a ringing call or an alarm. On by default.
   final bool inAppSounds;
+
+  /// "Dźwięk powiadomień": the system notifications make their sound (and
+  /// vibrate); off, they arrive quietly. A ringing call and an alarm
+  /// always do. On by default.
+  final bool notificationSounds;
+
+  /// The kinds of news switched off ([NoticeKind]), except the friends'
+  /// posts, which [postNotifications] switches. Far friends' posts are off
+  /// until the person switches them on.
+  final Set<NoticeKind> mutedNotices;
+
+  /// Whether the news of [kind] is switched off: no system notification and
+  /// no notification sound (the in-app list still has it).
+  bool mutes(NoticeKind kind) => kind == NoticeKind.friendPost
+      ? !postNotifications
+      : mutedNotices.contains(kind);
 
   /// Screenshots and screen recording are blocked on conversations and
   /// account screens, and their content is hidden in the recent-apps view.
@@ -611,13 +635,17 @@ final class AppSettings {
   bool get lanDiscoveryOn => lanDiscovery ?? true;
 
   /// "Wi-Fi Direct (Android)": with no Wi-Fi network around, nearby
-  /// friends' phones form a Wi-Fi Direct group and link over it. Off by
-  /// default: it needs a permission and costs battery.
+  /// friends' phones form a Wi-Fi Direct group and link over it. On by
+  /// default: its permission is asked on the first start, and it runs only
+  /// while it can help — Zen used (or its background service running), no
+  /// Wi-Fi network, and friends' devices to link with.
   final bool wifiDirect;
 
   /// "Bluetooth": nearby friends' devices link over Bluetooth when there is
-  /// no network. Off by default: it needs a permission, costs battery and
-  /// is slow (text and photos; calls may not work).
+  /// no network (slow: text and photos; calls may not work). On by default:
+  /// its permission is asked on the first start, and it runs only while Zen
+  /// is used (or its background service runs) and there are friends'
+  /// devices to link with, advertising and scanning in short windows.
   final bool bluetoothLinks;
 
   /// "Apple Wi-Fi/Bluetooth" (iPhone, iPad, Mac): Apple's Multipeer
@@ -664,12 +692,37 @@ final class AppSettings {
   /// fewer pointless wake-ups.
   Duration get signalWaitTimeout => const Duration(seconds: 30);
 
-  String get inboxLimitLabel => inboxUnlimited
-      ? t('Bez limitu')
-      : t('{size} MB', <String, Object?>{'size': inboxLimitMb});
+  String get inboxLimitLabel =>
+      inboxUnlimited ? t('Bez limitu') : storageLimitLabel(inboxLimitMb);
+
+  /// `512 MB` / `1 GB` / `1.5 GB` for a limit in MB.
+  static String storageLimitLabel(int mb) {
+    if (mb < 1024) {
+      return t('{size} MB', <String, Object?>{'size': mb});
+    }
+    final double gb = mb / 1024;
+    return t('{size} GB', <String, Object?>{
+      'size': gb == gb.roundToDouble() ? gb.round() : gb.toStringAsFixed(1),
+    });
+  }
+
+  /// The values of the storage limit sliders, in MB.
+  static const List<int> storageLimitStepsMb = <int>[
+    10,
+    25,
+    50,
+    100,
+    250,
+    500,
+    1024,
+    2048,
+    5120,
+    10240,
+  ];
 
   AppSettings copyWith({
     int? inboxLimitMb,
+    int? feedLimitMb,
     int? autoCleanupDays,
     AppLockMode? lockMode,
     int? backgroundLockDelaySeconds,
@@ -685,6 +738,8 @@ final class AppSettings {
     bool? postNotifications,
     Set<String>? mutedPostAuthors,
     bool? inAppSounds,
+    bool? notificationSounds,
+    Set<NoticeKind>? mutedNotices,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
@@ -707,6 +762,7 @@ final class AppSettings {
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
+      feedLimitMb: normalizeInboxLimitMb(feedLimitMb ?? this.feedLimitMb),
       autoCleanupDays: normalizeAutoCleanupDays(
         autoCleanupDays ?? this.autoCleanupDays,
       ),
@@ -726,6 +782,8 @@ final class AppSettings {
       postNotifications: postNotifications ?? this.postNotifications,
       mutedPostAuthors: mutedPostAuthors ?? this.mutedPostAuthors,
       inAppSounds: inAppSounds ?? this.inAppSounds,
+      notificationSounds: notificationSounds ?? this.notificationSounds,
+      mutedNotices: mutedNotices ?? this.mutedNotices,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
@@ -800,6 +858,7 @@ final class AppSettings {
   /// default, so a new setting needs no format version.
   Map<String, Object> toJson() => <String, Object>{
     'inboxLimitMb': inboxLimitMb,
+    'feedLimitMb': feedLimitMb,
     'autoCleanupDays': autoCleanupDays,
     'lockMode': lockMode.name,
     'backgroundLockDelaySeconds': backgroundLockDelaySeconds,
@@ -816,6 +875,8 @@ final class AppSettings {
     if (mutedPostAuthors.isNotEmpty)
       'mutedPostAuthors': mutedPostAuthors.toList(growable: false),
     'inAppSounds': inAppSounds,
+    'notificationSounds': notificationSounds,
+    'mutedNotices': <String>[for (final NoticeKind k in mutedNotices) k.name],
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
@@ -856,6 +917,7 @@ final class AppSettings {
 
     return const AppSettings().copyWith(
       inboxLimitMb: pick<int>('inboxLimitMb'),
+      feedLimitMb: pick<int>('feedLimitMb'),
       autoCleanupDays: pick<int>('autoCleanupDays'),
       lockMode: byName(AppLockMode.values, 'lockMode'),
       backgroundLockDelaySeconds: pick<int>('backgroundLockDelaySeconds'),
@@ -881,6 +943,14 @@ final class AppSettings {
         _ => null,
       },
       inAppSounds: pick<bool>('inAppSounds'),
+      notificationSounds: pick<bool>('notificationSounds'),
+      mutedNotices: switch (json['mutedNotices']) {
+        final List<dynamic> names => <NoticeKind>{
+          for (final Object? name in names)
+            if (NoticeKind.byName(name) case final NoticeKind kind) kind,
+        },
+        _ => null,
+      },
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),

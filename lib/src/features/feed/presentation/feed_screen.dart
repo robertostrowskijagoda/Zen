@@ -60,10 +60,12 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart'
     show PyrMember, PyramidState;
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 /// The wall: posts of friends and followed people, newest first, and a
 /// place to write. Your own posts are on your profile, not here.
@@ -433,14 +435,25 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       return;
     }
     final LedgerNode node = _node!;
+    // A post started earlier and not published comes back as it was left.
+    final ComposerDrafts drafts = ref.read(composerDraftsProvider);
+    await drafts.load();
+    if (!mounted) {
+      return;
+    }
+    final ComposerDraft? draft = drafts[ComposerDrafts.newPost];
     final bool published = await PostEditorScreen.open(
       context,
       onSubmit: _publish,
       // A new post may mention friends and their friends.
       mentionCandidates: () => postMentionCandidatesFor(ref, node),
-      initialAudience: _audience,
+      initialText: draft?.text ?? '',
+      initialMentions: draft?.mentions ?? const <Mention>[],
+      initialAudience:
+          Audience.values.asNameMap()[draft?.audience] ?? _audience,
       pickPhotos: widget.pickPhotos,
       pickOnOpen: withPhotos,
+      drafts: drafts,
     );
     if (published && mounted) {
       // Own posts live on the profile, not on the wall.
@@ -693,6 +706,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         likeBody(post.id, on: !post.likedByMe, mini: ownMiniProfile(node)),
         spaceKind: 'acts',
       );
+      if (!post.likedByMe && mounted) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.like));
+      }
     } catch (e) {
       if (mounted) {
         setState(
@@ -886,6 +902,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         child: CommentComposer(
                           fieldKey: const Key('feed-comment-field'),
                           sendKey: const Key('feed-comment-send'),
+                          draftKey: ComposerDrafts.comment(post.id),
                           // "@": the post's author, those who reacted, the
                           // writer's friends and theirs.
                           mentionCandidates: _node == null
@@ -1437,6 +1454,7 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
       await node.seal(draft.audience, body),
       blobs: mediaIds(media),
     );
+    unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.posted));
     return null;
   } on ArgumentError catch (e) {
     return e.message as String? ?? t('Nie udało się opublikować.');

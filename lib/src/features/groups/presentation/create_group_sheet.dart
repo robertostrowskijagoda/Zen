@@ -85,7 +85,9 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
     final List<FriendProfile> acceptedFriends = watchSocialPeople(
       ref,
     ).acceptedFriends;
-    final double bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final double bottomInset =
+        MediaQuery.of(context).viewInsets.bottom +
+        MediaQuery.of(context).padding.bottom;
 
     return ZenFadeSlide(
       duration: const Duration(milliseconds: 240),

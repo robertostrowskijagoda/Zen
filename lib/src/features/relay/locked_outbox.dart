@@ -159,7 +159,9 @@ final class LockedOutbox {
     this.heldEvery = const Duration(hours: 3),
     this.sightingThrottle = const Duration(minutes: 1),
     this.maxMailBatchBytes = 6 * 1024,
+    WakeBeat? beat,
   }) : _transport = transport,
+       _beat = beat,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
     for (final LockedOutboxItem item in kit.items) {
       _pending[item.id] = item;
@@ -169,6 +171,9 @@ final class LockedOutbox {
 
   final SignalTransport _transport;
   final int Function() _now;
+
+  /// The beat the rounds go on (`null`: the app's, [ZenWake.beat]).
+  final WakeBeat? _beat;
 
   /// Waits between rounds; the last one repeats. The long ones are
   /// multiples of the mailbox poll's period, so their rounds ride its wakes.
@@ -225,12 +230,17 @@ final class LockedOutbox {
     final Duration wait = nextWait;
     final BeatTimer? timer = _timer;
     if (timer == null) {
-      _timer = ZenWake.beat(
-        'locked-outbox',
-        wait,
-        _roundOnWake,
-        hold: const Duration(seconds: 10),
-      );
+      const Duration hold = Duration(seconds: 10);
+      final WakeBeat? beat = _beat;
+      _timer = beat == null
+          ? ZenWake.beat('locked-outbox', wait, _roundOnWake, hold: hold)
+          : beat.add(
+              'locked-outbox',
+              wait,
+              _roundOnWake,
+              hold: hold,
+              whileIdle: true,
+            );
     } else if (timer.every != wait) {
       timer.setEvery(wait);
     }

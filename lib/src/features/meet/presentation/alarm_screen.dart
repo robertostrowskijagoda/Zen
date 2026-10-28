@@ -319,108 +319,111 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                 ? null
                 : () => unawaited(_hold.forward(from: 0)),
             child: ExcludeSemantics(
-              child: Listener(
-                onPointerDown: (_) {
-                  if (!_sending && to.isNotEmpty) {
-                    unawaited(_hold.forward(from: 0));
-                  }
-                },
-                onPointerUp: (_) {
-                  if (!_hold.isCompleted) {
-                    _hold.reset();
-                  }
-                },
-                onPointerCancel: (_) {
-                  if (!_hold.isCompleted) {
-                    _hold.reset();
-                  }
-                },
-                child: AnimatedBuilder(
-                  animation: _hold,
-                  builder: (BuildContext context, Widget? _) => SizedBox(
-                    key: const Key('alarm-hold-button'),
-                    width: 220,
-                    height: 220,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: <Widget>[
-                        Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: <Color>[
-                                alarmRed.withValues(
-                                  alpha: 0.10 + 0.25 * _hold.value,
-                                ),
-                                alarmRed.withValues(alpha: 0),
-                              ],
-                            ),
-                          ),
-                        ),
-                        SizedBox.expand(
-                          child: CircularProgressIndicator(
-                            value: _hold.value,
-                            strokeWidth: 10,
-                            strokeCap: StrokeCap.round,
-                            color: alarmRed,
-                            backgroundColor: alarmRed.withValues(alpha: 0.15),
-                          ),
-                        ),
-                        Transform.scale(
-                          scale: 1 - 0.05 * _hold.value,
-                          child: Container(
-                            width: 176,
-                            height: 176,
+              // Holding never starts a text selection around the button.
+              child: SelectionContainer.disabled(
+                child: Listener(
+                  onPointerDown: (_) {
+                    if (!_sending && to.isNotEmpty) {
+                      unawaited(_hold.forward(from: 0));
+                    }
+                  },
+                  onPointerUp: (_) {
+                    if (!_hold.isCompleted) {
+                      _hold.reset();
+                    }
+                  },
+                  onPointerCancel: (_) {
+                    if (!_hold.isCompleted) {
+                      _hold.reset();
+                    }
+                  },
+                  child: AnimatedBuilder(
+                    animation: _hold,
+                    builder: (BuildContext context, Widget? _) => SizedBox(
+                      key: const Key('alarm-hold-button'),
+                      width: 220,
+                      height: 220,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: <Widget>[
+                          Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: LinearGradient(
+                              gradient: RadialGradient(
                                 colors: <Color>[
-                                  ZenEmergency.glow(zen),
-                                  alarmRed,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              boxShadow: ZenLook.of(context).tinted(
-                                zen,
-                                alarmRed,
-                                radius: 28,
-                                alpha: 0.45,
-                                offset: const Offset(0, 10),
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Icon(
-                                  _sending
-                                      ? Icons.wifi_tethering_rounded
-                                      : Icons.touch_app_rounded,
-                                  color: onAlarm,
-                                  size: 34,
-                                ),
-                                const SizedBox(height: 6),
-                                FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _sending
-                                        ? t('Wysyłam…')
-                                        : t('Przytrzymaj\n3 sekundy'),
-                                    textAlign: TextAlign.center,
-                                    style: zen.display(
-                                      color: onAlarm,
-                                      size: 20,
-                                      weight: FontWeight.w600,
-                                    ),
+                                  alarmRed.withValues(
+                                    alpha: 0.10 + 0.25 * _hold.value,
                                   ),
-                                ),
-                              ],
+                                  alarmRed.withValues(alpha: 0),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                          SizedBox.expand(
+                            child: CircularProgressIndicator(
+                              value: _hold.value,
+                              strokeWidth: 10,
+                              strokeCap: StrokeCap.round,
+                              color: alarmRed,
+                              backgroundColor: alarmRed.withValues(alpha: 0.15),
+                            ),
+                          ),
+                          Transform.scale(
+                            scale: 1 - 0.05 * _hold.value,
+                            child: Container(
+                              width: 176,
+                              height: 176,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: <Color>[
+                                    ZenEmergency.glow(zen),
+                                    alarmRed,
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                boxShadow: ZenLook.of(context).tinted(
+                                  zen,
+                                  alarmRed,
+                                  radius: 28,
+                                  alpha: 0.45,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(
+                                    _sending
+                                        ? Icons.wifi_tethering_rounded
+                                        : Icons.touch_app_rounded,
+                                    color: onAlarm,
+                                    size: 34,
+                                  ),
+                                  const SizedBox(height: 6),
+                                  FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      _sending
+                                          ? t('Wysyłam…')
+                                          : t('Przytrzymaj\n3 sekundy'),
+                                      textAlign: TextAlign.center,
+                                      style: zen.display(
+                                        color: onAlarm,
+                                        size: 20,
+                                        weight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

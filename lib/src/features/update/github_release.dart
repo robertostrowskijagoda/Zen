@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/peer_version.dart';
+import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/android_abi.dart';
 import 'package:zen/src/features/update/github_redirects.dart';
@@ -208,8 +209,9 @@ enum LinuxInstall {
 }
 
 /// The release file that updates this platform ([releasePlatform] as
-/// [currentReleasePlatform] names it), or null where Zen cannot update
-/// itself (iOS: only the prompt is shown). Android: the APK of the best
+/// [currentReleasePlatform] names it), or null where Zen downloads nothing
+/// (iOS: the person installs [kIosIpaAssetName], see [UpdateTarget.ios]).
+/// Android: the APK of the best
 /// of the device's [androidAbis] (`Build.SUPPORTED_ABIS`), else of the
 /// ABI the app runs as ([abi]); see [preferredAndroidAbi].
 String? githubAssetName({
@@ -241,6 +243,119 @@ String? githubAssetName({
   }
   return null;
 }
+
+/// The kind of installation, which decides what "Aktualizuj" does.
+enum UpdateTarget {
+  /// The APK: downloaded, checked, then the system installer asks.
+  android,
+
+  /// The ZIP: its folder swapped in place, else saved to Downloads.
+  windows,
+
+  /// `Zen-macOS.zip` (universal: Apple Silicon and Intel): Zen.app
+  /// swapped in place, else saved to Downloads.
+  macos,
+
+  /// `Zen-Linux-*.tar.gz`: its folder swapped in place, else saved.
+  linuxTarball,
+
+  /// The `.deb` (`/opt/zen`, owned by the package manager): saved to
+  /// Downloads for the system's package installer.
+  linuxDeb,
+
+  /// The Flatpak bundle: the sandbox can neither save to Downloads nor run
+  /// `flatpak`, so it is updated outside Zen.
+  flatpak,
+
+  /// iPhone and iPad: SideStore (or AltStore) installed Zen, and an iOS
+  /// app cannot install another one; Zen hands the release's IPA to
+  /// SideStore instead ([GithubUpdateRoute.sideload]).
+  ios,
+
+  /// Anything else (the web): only the release page.
+  other,
+}
+
+/// The [UpdateTarget] of a device running [operatingSystem] (as
+/// `Platform.operatingSystem` names it), installed as [linux] on Linux.
+UpdateTarget updateTargetFor({
+  required String operatingSystem,
+  LinuxInstall linux = LinuxInstall.tarball,
+}) => switch (operatingSystem) {
+  'android' => UpdateTarget.android,
+  'windows' => UpdateTarget.windows,
+  'macos' => UpdateTarget.macos,
+  'ios' => UpdateTarget.ios,
+  'linux' => switch (linux) {
+    LinuxInstall.tarball => UpdateTarget.linuxTarball,
+    LinuxInstall.deb => UpdateTarget.linuxDeb,
+    LinuxInstall.flatpak => UpdateTarget.flatpak,
+  },
+  _ => UpdateTarget.other,
+};
+
+/// What "Aktualizuj" does for a newer release.
+enum GithubUpdateRoute {
+  /// Zen downloads this device's file, checks it and installs it.
+  download,
+
+  /// iPhone and iPad: SideStore downloads and installs the release's IPA
+  /// ([sideStoreInstallLink]); without SideStore, Safari saves the IPA to
+  /// Files for the "+" of SideStore's "My Apps" (the iPhone install page
+  /// when the release has no IPA). Zen downloads nothing.
+  sideload,
+
+  /// Flatpak: the command and the release page. Nothing is downloaded.
+  flatpak,
+
+  /// The release has no file for this device: its page.
+  releasePage,
+}
+
+/// The [GithubUpdateRoute] for [release] on [target], whose file is
+/// [assetName] (null where Zen downloads nothing).
+GithubUpdateRoute githubUpdateRoute({
+  required UpdateTarget target,
+  required GithubRelease release,
+  required String? assetName,
+}) => switch (target) {
+  UpdateTarget.ios => GithubUpdateRoute.sideload,
+  UpdateTarget.flatpak => GithubUpdateRoute.flatpak,
+  UpdateTarget.other => GithubUpdateRoute.releasePage,
+  _ =>
+    assetName != null && release.assets.containsKey(assetName)
+        ? GithubUpdateRoute.download
+        : GithubUpdateRoute.releasePage,
+};
+
+/// The iPhone file of every release (built by .github/workflows/ios.yml,
+/// unsigned: the signing app signs it on the phone).
+const String kIosIpaAssetName = 'Zen-unsigned.ipa';
+
+/// The steps for iPhone on the project's pages (SideStore).
+const String kIphoneInstallPageUrl = '${kZenPagesBase}install/iphone/';
+
+/// Zen's SideStore source (made by the Pages workflow from the latest
+/// release; AltStore reads the same file).
+const String kSideStoreSourceUrl = '${kZenPagesBase}apps.json';
+
+/// The link that adds [kSideStoreSourceUrl] to SideStore, in the form
+/// SideStore documents (docs.sidestore.io, "URL Schema").
+/// AppDelegate.swift opens exactly this one of SideStore's source links.
+const String kSideStoreSourceLink =
+    'sidestore://source?url=$kSideStoreSourceUrl';
+
+/// The link that makes SideStore download and install the IPA at [ipaUrl]
+/// (documented next to [kSideStoreSourceLink]). AppDelegate.swift opens it
+/// only for a Zen-unsigned.ipa of this repository's releases.
+String sideStoreInstallLink(String ipaUrl) => 'sidestore://install?url=$ipaUrl';
+
+/// The address of [release]'s IPA, pinned to that very version (Safari
+/// saves it to Files); null when the release has no IPA.
+String? iosIpaUrl(GithubRelease release) =>
+    release.assets.containsKey(kIosIpaAssetName)
+    ? release.assetUri(kIosIpaAssetName).toString()
+    : null;
 
 /// Whether the release's `SHA256SUMS` ([sumsText]) lists the file [name]
 /// with exactly [sha256Hex]. Stricter than [compareWithSha256Sums]: the

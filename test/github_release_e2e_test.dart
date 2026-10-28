@@ -89,13 +89,28 @@ Map<String, Object?> _githubJson(Directory dist, String tag) =>
     };
 
 final class _Installer implements GithubUpdateInstaller {
-  _Installer(this.dir, this.assetName);
+  _Installer(this.dir, this.assetName) : target = _targetOf(assetName);
 
   final Directory dir;
   final List<List<int>> installed = <List<int>>[];
 
   @override
   final String assetName;
+
+  @override
+  final UpdateTarget target;
+
+  /// The installation [asset] updates. The Flatpak bundle stands in for a
+  /// Linux file here: a Flatpak itself downloads nothing (github_update_test).
+  static UpdateTarget _targetOf(String asset) => asset.endsWith('.apk')
+      ? UpdateTarget.android
+      : asset.startsWith('Zen-Windows')
+      ? UpdateTarget.windows
+      : asset.startsWith('Zen-macOS')
+      ? UpdateTarget.macos
+      : asset.endsWith('.deb')
+      ? UpdateTarget.linuxDeb
+      : UpdateTarget.linuxTarball;
 
   @override
   Future<Directory> workDirectory() async => dir;

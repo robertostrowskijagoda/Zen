@@ -8,6 +8,8 @@ import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
@@ -76,11 +78,18 @@ bool githubUpdatesEnabledFor({
 /// and at once when a friend says they run a newer Zen ([hintNewer]).
 /// A newer release is announced once with a system notification
 /// ([notifications]), with the release's short note ([whatsNew]) when it
-/// has one. On the person's "Aktualizuj" it downloads this platform's
+/// has one; a release newer still takes its place, in the notification,
+/// the banner and the card alike. Once installed, its notification goes.
+/// What "Aktualizuj" does depends on the installation ([route]): where Zen
+/// can install itself it downloads this platform's
 /// file, checks it against the release's `SHA256SUMS` and, once this build
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
-/// also checks the signing certificate).
+/// also checks the signing certificate). On iPhone and iPad it downloads
+/// nothing: SideStore installs the release's IPA ([openInSideStore]), or
+/// Safari saves it for SideStore ([openIpaInSafari]); in a Flatpak, and
+/// for a release without this device's file, it points to the release
+/// page.
 ///
 /// Only one request to api.github.com per check, with no header but the
 /// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer:
@@ -98,6 +107,9 @@ final class GithubUpdateService extends ChangeNotifier {
     Sha256SumsFetcher? fetchSums,
     GithubDownloader? download,
     this.beforeDownload,
+    Future<bool> Function(String url)? openPage,
+    Future<bool> Function(String link)? openSideStore,
+    Future<void> Function(String text)? copy,
     bool Function()? internetWorks,
     DateTime Function()? now,
     String Function()? language,
@@ -112,6 +124,9 @@ final class GithubUpdateService extends ChangeNotifier {
   }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
+       _openPage = openPage ?? openWebLink,
+       _openSideStore = openSideStore ?? openSideStoreLink,
+       _copy = copy ?? copyWithExpiry,
        _internetWorks = internetWorks ?? (() => true),
        _now = now ?? DateTime.now,
        _language = language ?? (() => ZenI18n.code),
@@ -153,6 +168,13 @@ final class GithubUpdateService extends ChangeNotifier {
   final GithubJsonFetcher _fetchJson;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
+
+  /// Opens an https page (false: it could not be opened).
+  final Future<bool> Function(String url) _openPage;
+
+  /// Opens a `sidestore://` link (false: SideStore is not installed).
+  final Future<bool> Function(String link) _openSideStore;
+  final Future<void> Function(String text) _copy;
   final bool Function() _internetWorks;
   final DateTime Function() _now;
   final String Function() _language;
@@ -231,12 +253,22 @@ final class GithubUpdateService extends ChangeNotifier {
   List<String> get whatsNewLines =>
       whatsNew?.linesFor(_language()) ?? const <String>[];
 
-  /// Whether "Aktualizuj" can download and install here (not on iOS, and
-  /// only when the release has this platform's file).
-  bool get canInstall {
-    final String? name = installer.assetName;
-    return name != null && (newer?.assets.containsKey(name) ?? false);
+  /// What "Aktualizuj" does for [newer] on this installation; null without
+  /// a newer release.
+  GithubUpdateRoute? get route {
+    final GithubRelease? release = newer;
+    return release == null
+        ? null
+        : githubUpdateRoute(
+            target: installer.target,
+            release: release,
+            assetName: installer.assetName,
+          );
   }
+
+  /// Whether "Aktualizuj" can download and install here (never on iOS or in
+  /// a Flatpak, and only when the release has this platform's file).
+  bool get canInstall => route == GithubUpdateRoute.download;
 
   /// The banner "Jest nowa wersja…" (until it is closed for that version,
   /// which is kept: closed, it stays closed after a restart; the card on
@@ -274,7 +306,8 @@ final class GithubUpdateService extends ChangeNotifier {
   /// installing it (false while it knows no [releaseKeys]).
   bool get verifiesAuthorSignature => releaseKeys.isNotEmpty;
 
-  /// Takes the kept state at once, and [checkIfDue] after
+  /// Takes the kept state at once (and takes away the notification of a
+  /// version that is installed now), and [checkIfDue] after
   /// [firstCheckAfter]; from then on [checkIfDue] runs whenever a check is
   /// due again (and when the app comes back, see the provider).
   void start() {
@@ -282,8 +315,20 @@ final class GithubUpdateService extends ChangeNotifier {
       return;
     }
     _started = true;
-    unawaitedLogged(_readKept(), context: 'Reading the update check state');
+    unawaitedLogged(_startKept(), context: 'Reading the update check state');
     _arm(firstCheckAfter);
+  }
+
+  Future<void> _startKept() async {
+    final RuntimeSystemNotificationService? notices = notifications;
+    if (notices != null) {
+      await withdrawInstalledUpdateNotice(
+        store: noticeStore,
+        notices: notices,
+        currentVersion: currentVersion,
+      );
+    }
+    await _readKept();
   }
 
   /// Asks GitHub when a check is due: GitHub last answered (here or in the
@@ -486,19 +531,24 @@ final class GithubUpdateService extends ChangeNotifier {
 
   /// Fetches the note of [release] once per version (a note that does not
   /// hold up is logged and left out; the banner shows the version alone).
+  /// A note that could not be fetched (github.com not reached, an error
+  /// answer) is asked for again at the next check.
   Future<void> _fetchWhatsNew(GithubRelease release) async {
     if (_whatsNewTriedFor == release.version) {
       return;
     }
-    _whatsNewTriedFor = release.version;
+    _whatsNew = null;
     try {
       _whatsNew = await fetchWhatsNew(
         release,
         fetchText: _fetchSums,
         maintainers: releaseKeys,
       );
+      _whatsNewTriedFor = release.version;
+    } on FormatException catch (e) {
+      _whatsNewTriedFor = release.version;
+      logZenWarning('Co nowego w wersji ${release.version}: $e');
     } on Object catch (e) {
-      _whatsNew = null;
       logZenWarning('Co nowego w wersji ${release.version}: $e');
     }
     _notify();
@@ -546,7 +596,12 @@ final class GithubUpdateService extends ChangeNotifier {
   Future<void> update() async {
     final GithubRelease? release = newer;
     final String? name = installer.assetName;
-    if (release == null || name == null || installing || _asking) {
+    // iPhone, iPad and Flatpak install nothing Zen downloads: never there.
+    if (release == null ||
+        name == null ||
+        installing ||
+        _asking ||
+        !_downloadsUpdates(installer.target)) {
       return;
     }
     final int? size = release.assets[name];
@@ -682,6 +737,120 @@ final class GithubUpdateService extends ChangeNotifier {
       );
     }
   }
+
+  /// iPhone and iPad ([GithubUpdateRoute.sideload]): opens SideStore with
+  /// the link that downloads and installs the IPA of [newer] (pinned to
+  /// that version; [sideStoreInstallLink]). Where SideStore does not open
+  /// (not installed), the person is told to download the file instead;
+  /// where the release has no IPA, the iPhone install page opens
+  /// ([openInstallPage]). Zen itself downloads nothing.
+  Future<void> openInSideStore() async {
+    final GithubRelease? release = newer;
+    if (release == null || route != GithubUpdateRoute.sideload) {
+      return;
+    }
+    final String? url = iosIpaUrl(release);
+    if (url == null) {
+      await openInstallPage();
+      return;
+    }
+    if (await _openSideStore(sideStoreInstallLink(url))) {
+      _finish(
+        GithubInstallState.done,
+        t(
+          'Otwarto SideStore. Jeśli instalacja Zen {version} nie ruszy, '
+          'sprawdź, czy LocalDevVPN jest połączony, i spróbuj jeszcze raz.',
+          {'version': release.version},
+        ),
+      );
+      return;
+    }
+    _finish(
+      GithubInstallState.failed,
+      t(
+        'Nie udało się otworzyć SideStore. Stuknij „Pobierz Zen {version}” '
+        'i zainstaluj plik w SideStore albo tak, jak instalowano Zen.',
+        {'version': release.version},
+      ),
+    );
+  }
+
+  /// iPhone and iPad ([GithubUpdateRoute.sideload]), without SideStore's
+  /// link: opens the IPA of [newer] (pinned to that version) in Safari,
+  /// which saves it to Files; the person then adds it with the "+" in
+  /// SideStore's "My Apps". Where the release has no IPA, or no browser
+  /// opens it, the iPhone install page opens instead ([openInstallPage]).
+  Future<void> openIpaInSafari() async {
+    final GithubRelease? release = newer;
+    if (release == null || route != GithubUpdateRoute.sideload) {
+      return;
+    }
+    final String? url = iosIpaUrl(release);
+    if (url != null && await _openPage(url)) {
+      _finish(
+        GithubInstallState.done,
+        t(
+          'Safari pobiera Zen {version}: plik Zen-unsigned.ipa zapisze się '
+          'w aplikacji Pliki. Teraz w SideStore otwórz „My Apps”, stuknij '
+          '„+” i wybierz ten plik.',
+          {'version': release.version},
+        ),
+      );
+      return;
+    }
+    await openInstallPage();
+  }
+
+  /// iPhone and iPad: opens the iPhone install page (SideStore's steps).
+  /// Where no browser opens it, its address is copied.
+  Future<void> openInstallPage() async {
+    if (await _openPage(kIphoneInstallPageUrl)) {
+      _finish(
+        GithubInstallState.done,
+        t('Otwarto stronę instalacji Zen na iPhone’a.'),
+      );
+      return;
+    }
+    await _copied(kIphoneInstallPageUrl);
+  }
+
+  /// Flatpak, or a release without this device's file: opens the release
+  /// page of [newer] (its address is copied where it does not open).
+  Future<void> openReleasePage() async {
+    final GithubRelease? release = newer;
+    if (release == null) {
+      return;
+    }
+    final String url = release.pageUri.toString();
+    if (!await _openPage(url)) {
+      await _copied(url);
+    }
+  }
+
+  Future<void> _copied(String url) async {
+    try {
+      await _copy(url);
+    } on Object catch (error) {
+      logZenWarning('Kopiowanie adresu aktualizacji: $error');
+    }
+    _finish(
+      GithubInstallState.failed,
+      t('Nie udało się otworzyć strony. Skopiowano jej adres: {url}', {
+        'url': url,
+      }),
+    );
+  }
+
+  /// Whether the release file of [target] is downloaded and installed by
+  /// Zen itself.
+  static bool _downloadsUpdates(UpdateTarget target) => switch (target) {
+    UpdateTarget.android ||
+    UpdateTarget.windows ||
+    UpdateTarget.macos ||
+    UpdateTarget.linuxTarball ||
+    UpdateTarget.linuxDeb => true,
+    UpdateTarget.flatpak || UpdateTarget.ios || UpdateTarget.other => false,
+  };
 
   /// Whether the release's [kSignedSumsAssetName] is signed with one of
   /// [releaseKeys] and names [name] with [sha256Hex] in this very version.

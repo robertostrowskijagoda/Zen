@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -21,7 +22,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/update/own_copy.dart';
 import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
 
-/// The harness of test/ui_text_fit_test.dart and test/large_text_test.dart:
+/// The harness of test/ui_text_fit_*_test.dart and test/large_text_test.dart:
 /// the screens to check, how to pump them, and how to find a cut text.
 ///
 /// To check another screen, add a [TextFitScreen] to [textFitScreens]: a
@@ -289,6 +290,56 @@ Future<void> loadAppFonts() async {
       }
     }
     await loader.load();
+  }
+}
+
+/// Every text of a screen fits a 320 dp wide phone in every language Zen
+/// speaks: no text ends cut ("…" or clipped after its last line) and no row
+/// or column overflows. The screens are listed in [textFitScreens].
+///
+/// All of it takes minutes, and the tests of one file run one after
+/// another, so the languages are spread over [parts] files
+/// (test/ui_text_fit_1_test.dart, …) that run at the same time; this is
+/// part [part] (from 0): every [parts]-th language of [textFitLanguages].
+void textFitTests({required int part, required int parts}) {
+  setUpAll(loadAppFonts);
+  tearDown(ZenI18n.debugReset);
+
+  final List<String> languages = textFitLanguages();
+  for (int i = part; i < languages.length; i += parts) {
+    final String code = languages[i];
+    group('in "$code"', () {
+      setUpAll(() async {
+        if (code != 'pl') {
+          await initializeDateFormatting(code);
+        }
+      });
+
+      for (final TextFitScreen screen in textFitScreens) {
+        testWidgets('${screen.name}: nothing cut at $kNarrowestPhoneWidth dp', (
+          WidgetTester tester,
+        ) async {
+          ZenI18n.debugUse(code, textFitStrings(code));
+          tester.view.physicalSize = Size(kNarrowestPhoneWidth, screen.height);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+
+          await screen.open(tester);
+
+          final Object? overflow = tester.takeException();
+          expect(overflow, isNull, reason: '${screen.name} ($code): $overflow');
+          expect(
+            truncatedTexts(tester),
+            isEmpty,
+            reason: '${screen.name} ($code): texts cut',
+          );
+          screen.check?.call(tester);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.runAsync(settleAsync);
+        });
+      }
+    });
   }
 }
 

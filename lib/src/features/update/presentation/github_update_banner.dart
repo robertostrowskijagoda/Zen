@@ -6,10 +6,10 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
 /// Across the top of the app: "Jest nowa wersja … — warto zaktualizować"
@@ -52,12 +52,21 @@ class GithubUpdateBanner extends ConsumerWidget {
                     'version': newer.version,
                   }),
                   onClose: service.installing ? null : service.dismissNewer,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _WhatsNewLines(lines: service.whatsNewLines),
-                      _UpdateProgress(service: service, compact: true),
-                    ],
+                  // At most part of the screen (the iPhone steps with large
+                  // text are long): the rest scrolls, the app stays usable.
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _WhatsNewLines(lines: service.whatsNewLines),
+                          _UpdateProgress(service: service, compact: true),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               if (showUnreachable)
@@ -191,7 +200,11 @@ class _WhatsNewLines extends StatelessWidget {
   }
 }
 
-/// "Aktualizuj" (or "Szczegóły"), the download's progress and the result.
+/// What this installation updates with ([GithubUpdateService.route]):
+/// "Aktualizuj" with the download's progress where Zen installs the file
+/// itself, "Zaktualizuj w SideStore" with the numbered steps on iPhone and
+/// iPad, the release page in a Flatpak or when the release lacks
+/// this device's file; then the result (and "Szczegóły" in the banner).
 class _UpdateProgress extends StatelessWidget {
   const _UpdateProgress({required this.service, this.compact = false});
 
@@ -205,9 +218,25 @@ class _UpdateProgress extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final GithubInstallState state = service.installState;
     final String? message = service.installMessage;
-    // Flatpak: the sandbox cannot install; the release page can.
-    final bool flatpak = runningInFlatpak();
     final GithubRelease? newer = service.newer;
+    final GithubUpdateRoute? route = service.route;
+    final String? file = service.installer.assetName;
+    final String? manual = newer == null
+        ? null
+        : switch (route) {
+            GithubUpdateRoute.download =>
+              compact || file == null
+                  ? null
+                  : githubUpdatePlan(service.installer.target, file),
+            GithubUpdateRoute.sideload => iosUpdateHint,
+            GithubUpdateRoute.flatpak => flatpakUpdateHint,
+            GithubUpdateRoute.releasePage => t(
+              'Wydanie {version} nie ma pliku dla tego urządzenia. Pobierz '
+              'Zen ze strony wydania i zainstaluj go tak jak poprzednio.',
+              {'version': newer.version},
+            ),
+            null => null,
+          };
     final String? step = switch (state) {
       GithubInstallState.downloading => t('Pobieram… {percent}%', {
         'percent': (service.progress * 100).round(),
@@ -251,23 +280,27 @@ class _UpdateProgress extends StatelessWidget {
                 height: 1.35,
               ),
             ),
-          if (!service.canInstall)
-            SelectableText(
-              flatpak
-                  ? flatpakUpdateHint
-                  : t(
-                      'Na tym urządzeniu zaktualizuj Zen tak, jak go '
-                      'instalowano.',
-                    ),
-              key: const Key('github-update-manual'),
-              style: TextStyle(color: zen.textSecondary, fontSize: 13),
+          if (manual != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: SelectableText(
+                manual,
+                key: const Key('github-update-manual'),
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
             ),
+          if (newer != null && route == GithubUpdateRoute.sideload)
+            _SideloadSteps(version: newer.version),
           const SizedBox(height: 4),
           Wrap(
             spacing: 8,
             runSpacing: 4,
             children: <Widget>[
-              if (service.canInstall)
+              if (route == GithubUpdateRoute.download)
                 FilledButton.icon(
                   key: const Key('github-update-install'),
                   onPressed: service.installing
@@ -276,11 +309,30 @@ class _UpdateProgress extends StatelessWidget {
                   icon: const Icon(Icons.system_update_rounded, size: 18),
                   label: Text(t('Aktualizuj')),
                 ),
-              if (flatpak && newer != null)
+              if (newer != null &&
+                  route == GithubUpdateRoute.sideload) ...<Widget>[
+                FilledButton.icon(
+                  key: const Key('github-update-sidestore'),
+                  onPressed: () => unawaited(service.openInSideStore()),
+                  icon: const Icon(Icons.system_update_rounded, size: 18),
+                  label: Text(iosSideStoreLabel),
+                ),
+                TextButton(
+                  key: const Key('github-update-ipa'),
+                  onPressed: () => unawaited(service.openIpaInSafari()),
+                  child: Text(iosDownloadLabel(newer.version)),
+                ),
+                TextButton(
+                  key: const Key('github-update-install-page'),
+                  onPressed: () => unawaited(service.openInstallPage()),
+                  child: Text(t('Otwórz stronę instalacji')),
+                ),
+              ],
+              if (route == GithubUpdateRoute.flatpak ||
+                  route == GithubUpdateRoute.releasePage)
                 FilledButton.icon(
                   key: const Key('github-update-open-page'),
-                  onPressed: () =>
-                      unawaited(openWebLink(newer.pageUri.toString())),
+                  onPressed: () => unawaited(service.openReleasePage()),
                   icon: const Icon(Icons.open_in_new_rounded, size: 18),
                   label: Text(t('Otwórz stronę wydania')),
                 ),
@@ -291,6 +343,67 @@ class _UpdateProgress extends StatelessWidget {
                   child: Text(t('Szczegóły')),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// iPhone and iPad: the update to [version] as numbered steps (one line
+/// each, so they read well on a narrow phone with large text), then the
+/// other ways in SideStore ("Update" with the source, "+" with the file).
+class _SideloadSteps extends StatelessWidget {
+  const _SideloadSteps({required this.version});
+
+  final String version;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final TextStyle style = TextStyle(
+      color: zen.textSecondary,
+      fontSize: 13,
+      height: 1.35,
+    );
+    final List<String> steps = iosUpdateSteps(version);
+    return Padding(
+      key: const Key('github-update-ios-steps'),
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (int i = 0; i < steps.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${i + 1}.',
+                    style: style.copyWith(
+                      color: zen.accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      steps[i],
+                      key: Key('github-update-ios-step-${i + 1}'),
+                      style: style,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              iosOtherWaysHint(version),
+              key: const Key('github-update-ios-other-ways'),
+              style: style,
+            ),
           ),
         ],
       ),
@@ -452,6 +565,10 @@ class GithubUpdateCard extends ConsumerWidget {
                         style: TextStyle(color: zen.textSecondary),
                       ),
                     ),
+                  // iPhone and iPad: Zen's source in SideStore, so that
+                  // SideStore itself shows the next versions.
+                  if (service.installer.target == UpdateTarget.ios)
+                    const SideStoreSourceOption(),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     key: const Key('github-check-now'),
@@ -483,23 +600,38 @@ class GithubUpdateCard extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      service.verifiesAuthorSignature
-                          ? t(
-                              'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co godzinę, na Androidzie '
-                              'także w tle co kilka godzin, i o nowej '
-                              'wersji powiadamia raz. Pobrany plik '
-                              'instaluje dopiero po sprawdzeniu podpisu '
-                              'autora i zgodności z SHA256SUMS wydania.',
-                            )
-                          : t(
-                              'Zen sprawdza najnowsze wydanie na github.com '
-                              'przy starcie i co godzinę, na Androidzie '
-                              'także w tle co kilka godzin, i o nowej '
-                              'wersji powiadamia raz. Pobrany plik '
-                              'instaluje dopiero po zgodności z SHA256SUMS '
-                              'wydania.',
-                            ),
+                      switch (service.installer.target) {
+                        UpdateTarget.ios => t(
+                          'Zen sprawdza najnowsze wydanie na github.com przy '
+                          'starcie i co godzinę i o nowej wersji powiadamia '
+                          'raz. Na iPhonie i iPadzie sam niczego nie pobiera '
+                          'ani nie instaluje: nową wersję instaluje '
+                          'SideStore.',
+                        ),
+                        UpdateTarget.flatpak => t(
+                          'Zen sprawdza najnowsze wydanie na github.com przy '
+                          'starcie i co godzinę i o nowej wersji powiadamia '
+                          'raz. W Flatpaku sam niczego nie pobiera: '
+                          'aktualizację instalujesz poleceniem flatpak.',
+                        ),
+                        _ when service.verifiesAuthorSignature => t(
+                          'Zen sprawdza najnowsze wydanie na github.com '
+                          'przy starcie i co godzinę, na Androidzie '
+                          'także w tle co kilka godzin, i o nowej '
+                          'wersji powiadamia raz. Pobrany plik '
+                          'instaluje dopiero po sprawdzeniu podpisu '
+                          'autora i zgodności z SHA256SUMS wydania.',
+                        ),
+                        _ => t(
+                          'Zen sprawdza najnowsze wydanie na github.com '
+                          'przy starcie i co godzinę, na Androidzie '
+                          'także w tle co kilka godzin, i o nowej '
+                          'wersji powiadamia raz. Pobrany plik '
+                          'instaluje dopiero po zgodności z SHA256SUMS '
+                          'wydania.',
+                        ),
+                      },
+                      key: const Key('github-update-how'),
                       style: TextStyle(
                         color: zen.textMuted,
                         fontSize: 12.5,

@@ -610,6 +610,11 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                   away:
                       conversation.presence == PeerPresence.background &&
                       !pending,
+                  unknown:
+                      conversation.presence == PeerPresence.unknown && !pending,
+                  noConnection:
+                      conversation.presence == PeerPresence.noConnection &&
+                      !pending,
                   // A friend who does not show presence gets no dot.
                   showStatus:
                       pending || conversation.presence != PeerPresence.hidden,
@@ -733,6 +738,10 @@ void _showConversationActionSheet(
   final bool online = conversation.isOnline && !pending;
   final bool away =
       conversation.presence == PeerPresence.background && !pending;
+  final bool unknown =
+      conversation.presence == PeerPresence.unknown && !pending;
+  final bool noConnection =
+      conversation.presence == PeerPresence.noConnection && !pending;
   final String? presence = pending ? null : _presenceSemantics(conversation);
 
   showModalBottomSheet<void>(
@@ -757,6 +766,8 @@ void _showConversationActionSheet(
                     size: 52,
                     online: online,
                     away: away,
+                    unknown: unknown,
+                    noConnection: noConnection,
                     showStatus:
                         pending || conversation.presence != PeerPresence.hidden,
                     image: peerAvatarImage(conversation.avatarPath),
@@ -796,6 +807,10 @@ void _showConversationActionSheet(
                                 ? Icons.circle
                                 : away
                                 ? Icons.adjust_rounded
+                                : unknown
+                                ? Icons.help_rounded
+                                : noConnection
+                                ? Icons.cloud_off_rounded
                                 : Icons.circle_outlined,
                           ),
                         ],
@@ -1424,6 +1439,7 @@ ConversationPreview _conversationFromFriend(
     FriendRelationshipStatus.blocked => t('Kontakt zablokowany.'),
     FriendRelationshipStatus.none => t('Brak relacji.'),
   };
+  final bool accepted = friend.status == FriendRelationshipStatus.accepted;
   return ConversationPreview(
     address: friend.address,
     // Their own name (the newest profile wins); the nickname goes under it.
@@ -1436,25 +1452,19 @@ ConversationPreview _conversationFromFriend(
         ? t('Teraz')
         : friend.lastActivityLabel,
     unreadCount: friend.unreadCount,
-    presence: friend.status == FriendRelationshipStatus.accepted
-        ? friend.presence
-        : PeerPresence.hidden,
-    lastOpenedAtMillis: friend.lastOpenedAtMillis,
+    presence: accepted ? friend.shownPresence : PeerPresence.hidden,
+    presenceLine: accepted
+        ? friendPresenceLine(friend, DateTime.now().millisecondsSinceEpoch)
+        : null,
     isTyping: friend.isTyping,
   );
 }
 
 /// What a chat's presence dot says, in words: "w sieci", "w tle · ostatnio
-/// otwierał(a) 5 min temu", …; `null` for a friend who does not show it.
+/// otwierał(a) 5 min temu", "Nie masz połączenia z siecią", …; `null` for
+/// a friend who does not show it.
 String? _presenceSemantics(ConversationPreview conversation) =>
-    friendPresenceLine(
-      FriendProfile(
-        address: conversation.address,
-        presence: conversation.presence,
-        lastOpenedAtMillis: conversation.lastOpenedAtMillis,
-      ),
-      DateTime.now().millisecondsSinceEpoch,
-    );
+    conversation.presenceLine;
 
 Color _shellStatusAccent(ZenColors zen, AppShellState state) {
   if (state.health == ServiceHealth.failed ||
@@ -1481,6 +1491,7 @@ IconData _inboxIcon(InboxEntryType type) {
     InboxEntryType.post => Icons.article_outlined,
     InboxEntryType.mention => Icons.alternate_email_rounded,
     InboxEntryType.mailbox => Icons.markunread_mailbox_outlined,
+    InboxEntryType.storage => Icons.storage_outlined,
   };
 }
 
@@ -1498,6 +1509,7 @@ Color _inboxTone(ZenColors zen, InboxEntryType type) {
     InboxEntryType.post => zen.tone(ZenTone.people),
     InboxEntryType.mention => zen.tone(ZenTone.communication),
     InboxEntryType.mailbox => zen.warning,
+    InboxEntryType.storage => zen.warning,
   };
 }
 

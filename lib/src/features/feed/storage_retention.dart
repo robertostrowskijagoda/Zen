@@ -16,6 +16,12 @@ import 'package:zen/src/features/profile/profile_gallery.dart';
 //  * Photos and videos of friends: at most 2 GB per person.
 //  * Photos and videos of people who are not friends (followed accounts,
 //    posts reshared from afar): a cache of 1 GB.
+//  * Everything of other people's posts together: at most the limit the
+//    person set for it (none unless they set one), oldest first.
+//  * Everything Zen takes: when it is over the limit the person set for
+//    all of Zen, the oldest of other people's photos and videos go until
+//    it fits again (or none are left). Messages, chats' media, backups
+//    and exports are never deleted for it.
 //
 // The signed entries themselves stay in the log (a hash chain cannot lose
 // its first links without losing its proof); they are a few hundred bytes
@@ -71,6 +77,9 @@ final class RetentionPlan {
     this.expired = const <StoredMedia>[],
     this.overPersonLimit = const <StoredMedia>[],
     this.overCache = const <StoredMedia>[],
+    this.overFeed = const <StoredMedia>[],
+    this.overTotal = const <StoredMedia>[],
+    this.stillOverTotalBytes = 0,
   });
 
   /// Friends' files older than [kFriendEntriesKept].
@@ -82,14 +91,32 @@ final class RetentionPlan {
   /// Other people's files over the 1 GB cache (oldest first).
   final List<StoredMedia> overCache;
 
+  /// What is left of other people's files over the limit the person set
+  /// for all of them together (oldest first).
+  final List<StoredMedia> overFeed;
+
+  /// What is left of other people's files that must go for all of Zen to
+  /// fit the limit the person set for it (oldest first).
+  final List<StoredMedia> overTotal;
+
+  /// How much Zen stays over its limit when all of [all] is gone: there
+  /// are no more of other people's files to delete.
+  final int stillOverTotalBytes;
+
   Iterable<StoredMedia> get all sync* {
     yield* expired;
     yield* overPersonLimit;
     yield* overCache;
+    yield* overFeed;
+    yield* overTotal;
   }
 
   bool get isEmpty =>
-      expired.isEmpty && overPersonLimit.isEmpty && overCache.isEmpty;
+      expired.isEmpty &&
+      overPersonLimit.isEmpty &&
+      overCache.isEmpty &&
+      overFeed.isEmpty &&
+      overTotal.isEmpty;
 
   int get bytes => all.fold<int>(0, (int sum, StoredMedia m) => sum + m.bytes);
 }
@@ -101,13 +128,20 @@ int _oldestFirst(StoredMedia a, StoredMedia b) {
 
 /// Which of [media] go, at [nowMillis]: friends' files older than [kept]
 /// first, then the oldest of what is left until each friend is within
-/// [perPersonBytes] and everybody else within [cacheBytes].
+/// [perPersonBytes] and everybody else within [cacheBytes]. With
+/// [feedBytes] the oldest of what is still left go until all of it fits.
+/// With [zenBytes] (what all of Zen takes now, [media] included) over
+/// [zenLimitBytes], the oldest of what is left after that go until Zen
+/// fits its limit; nothing but [media] is ever picked.
 RetentionPlan planStorageRetention(
   Iterable<StoredMedia> media, {
   required int nowMillis,
   Duration kept = kFriendEntriesKept,
   int perPersonBytes = kCircleMediaPerPersonBytes,
   int cacheBytes = kMediaCacheBytes,
+  int? feedBytes,
+  int? zenBytes,
+  int? zenLimitBytes,
 }) {
   final int cutoff = nowMillis - kept.inMilliseconds;
   final List<StoredMedia> expired = <StoredMedia>[];
@@ -127,10 +161,60 @@ RetentionPlan planStorageRetention(
   for (final List<StoredMedia> files in perFriend.values) {
     overPerson.addAll(_oldestOver(files, perPersonBytes));
   }
+  overPerson.sort(_oldestFirst);
+  final List<StoredMedia> overCache = _oldestOver(cache, cacheBytes);
+  final List<StoredMedia> overFeed = <StoredMedia>[];
+  if (feedBytes != null && feedBytes >= 0) {
+    final Set<String> going = <String>{
+      for (final StoredMedia m in expired) m.id,
+      for (final StoredMedia m in overPerson) m.id,
+      for (final StoredMedia m in overCache) m.id,
+    };
+    overFeed.addAll(
+      _oldestOver(<StoredMedia>[
+        for (final StoredMedia m in media)
+          if (!going.contains(m.id)) m,
+      ], feedBytes),
+    );
+  }
+  final List<StoredMedia> overTotal = <StoredMedia>[];
+  int stillOver = 0;
+  if (zenBytes != null && zenLimitBytes != null && zenLimitBytes > 0) {
+    final Set<String> going = <String>{
+      for (final StoredMedia m in expired) m.id,
+      for (final StoredMedia m in overPerson) m.id,
+      for (final StoredMedia m in overCache) m.id,
+      for (final StoredMedia m in overFeed) m.id,
+    };
+    // What the other limits delete already makes room.
+    int excess = zenBytes - zenLimitBytes;
+    final List<StoredMedia> left = <StoredMedia>[];
+    for (final StoredMedia m in media) {
+      if (going.contains(m.id)) {
+        excess -= m.bytes;
+      } else {
+        left.add(m);
+      }
+    }
+    if (excess > 0) {
+      left.sort(_oldestFirst);
+      for (final StoredMedia m in left) {
+        if (excess <= 0) {
+          break;
+        }
+        overTotal.add(m);
+        excess -= m.bytes;
+      }
+      stillOver = excess > 0 ? excess : 0;
+    }
+  }
   return RetentionPlan(
     expired: expired..sort(_oldestFirst),
-    overPersonLimit: overPerson..sort(_oldestFirst),
-    overCache: _oldestOver(cache, cacheBytes),
+    overPersonLimit: overPerson,
+    overCache: overCache,
+    overFeed: overFeed,
+    overTotal: overTotal,
+    stillOverTotalBytes: stillOver,
   );
 }
 
@@ -253,15 +337,19 @@ List<StoredMedia> storedMediaOf(
   return out;
 }
 
-/// How much of the limits is used now (the "Limity przechowywania" page).
+/// How much of the limits is used now (the "Dane i pamięć" page).
 @immutable
 final class StorageUsage {
   const StorageUsage({
+    this.friendBytes = 0,
     this.largestFriendBytes = 0,
     this.friendFiles = 0,
     this.cacheBytes = 0,
     this.cacheFiles = 0,
   });
+
+  /// Photos and videos of all friends together.
+  final int friendBytes;
 
   /// Photos and videos of the friend who has the most on this phone.
   final int largestFriendBytes;
@@ -270,6 +358,9 @@ final class StorageUsage {
   /// Photos and videos of everyone who is not a friend.
   final int cacheBytes;
   final int cacheFiles;
+
+  /// Everything of other people's posts.
+  int get feedBytes => friendBytes + cacheBytes;
 }
 
 StorageUsage storageUsageOf(Iterable<StoredMedia> media) {
@@ -287,6 +378,7 @@ StorageUsage storageUsageOf(Iterable<StoredMedia> media) {
     }
   }
   return StorageUsage(
+    friendBytes: perFriend.values.fold<int>(0, (int sum, int b) => sum + b),
     largestFriendBytes: perFriend.values.fold<int>(
       0,
       (int most, int bytes) => bytes > most ? bytes : most,
@@ -305,6 +397,10 @@ final class RetentionResult {
     this.expiredBytes = 0,
     this.limitFiles = 0,
     this.limitBytes = 0,
+    this.totalFiles = 0,
+    this.totalBytes = 0,
+    this.zenBytes,
+    this.stillOverTotalBytes = 0,
   });
 
   final int expiredFiles;
@@ -312,16 +408,31 @@ final class RetentionResult {
   final int limitFiles;
   final int limitBytes;
 
-  int get files => expiredFiles + limitFiles;
-  int get bytes => expiredBytes + limitBytes;
+  /// Files deleted for all of Zen to fit its limit, and their size.
+  final int totalFiles;
+  final int totalBytes;
+
+  /// What all of Zen took before this round (`null` when not measured).
+  final int? zenBytes;
+
+  /// How much Zen stays over its limit after this round.
+  final int stillOverTotalBytes;
+
+  int get files => expiredFiles + limitFiles + totalFiles;
+  int get bytes => expiredBytes + limitBytes + totalBytes;
 }
 
 /// Applies the limits now: deletes the files [planStorageRetention] picks
-/// from the phone (they are not fetched again). Returns what went.
+/// from the phone (they are not fetched again). Returns what went. With
+/// [zenLimitBytes], [zenBytesOf] measures all of Zen (told how much of it
+/// other people's files take) for the limit of the whole.
 Future<RetentionResult> enforceStorageLimits(
   LedgerNode node, {
   int? nowMillis,
   Iterable<LogEntry> held = const <LogEntry>[],
+  int? feedLimitBytes,
+  int? zenLimitBytes,
+  Future<int?> Function(StorageUsage usage)? zenBytesOf,
 }) async {
   await node.start();
   if (node.isSuspended) {
@@ -346,14 +457,23 @@ Future<RetentionResult> enforceStorageLimits(
     removedBytes += size;
     removedFiles++;
   }
+  final List<StoredMedia> media = storedMediaOf(node, held: held);
+  final int? zenBytes = zenLimitBytes == null || zenBytesOf == null
+      ? null
+      : await zenBytesOf(storageUsageOf(media));
   final RetentionPlan plan = planStorageRetention(
-    storedMediaOf(node, held: held),
+    media,
     nowMillis: nowMillis ?? DateTime.now().millisecondsSinceEpoch,
+    feedBytes: feedLimitBytes,
+    zenBytes: zenBytes,
+    zenLimitBytes: zenLimitBytes,
   );
   if (plan.isEmpty) {
     return RetentionResult(
       expiredFiles: removedFiles,
       expiredBytes: removedBytes,
+      zenBytes: zenBytes,
+      stillOverTotalBytes: plan.stillOverTotalBytes,
     );
   }
   int expiredBytes = removedBytes;
@@ -369,22 +489,38 @@ Future<RetentionResult> enforceStorageLimits(
   for (final StoredMedia m in <StoredMedia>[
     ...plan.overPersonLimit,
     ...plan.overCache,
+    ...plan.overFeed,
   ]) {
     if (await node.blobs.expire(m.id)) {
       limitFiles++;
       limitBytes += m.bytes;
     }
   }
+  int totalFiles = 0;
+  int totalBytes = 0;
+  int kept = 0;
+  for (final StoredMedia m in plan.overTotal) {
+    if (await node.blobs.expire(m.id)) {
+      totalFiles++;
+      totalBytes += m.bytes;
+    } else {
+      kept += m.bytes;
+    }
+  }
   logZenMessage(
     'Limity miejsca: usunięto '
-    '${expiredFiles + limitFiles + removedFiles} plików '
-    '(${expiredBytes + limitBytes} B).',
+    '${expiredFiles + limitFiles + totalFiles + removedFiles} plików '
+    '(${expiredBytes + limitBytes + totalBytes} B).',
   );
   return RetentionResult(
     expiredFiles: expiredFiles + removedFiles,
     expiredBytes: expiredBytes,
     limitFiles: limitFiles,
     limitBytes: limitBytes,
+    totalFiles: totalFiles,
+    totalBytes: totalBytes,
+    zenBytes: zenBytes,
+    stillOverTotalBytes: plan.stillOverTotalBytes + kept,
   );
 }
 
