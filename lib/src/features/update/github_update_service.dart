@@ -76,7 +76,9 @@ bool githubUpdatesEnabledFor({
 /// and at once when a friend says they run a newer Zen ([hintNewer]).
 /// A newer release is announced once with a system notification
 /// ([notifications]), with the release's short note ([whatsNew]) when it
-/// has one. On the person's "Aktualizuj" it downloads this platform's
+/// has one; a release newer still takes its place, in the notification,
+/// the banner and the card alike. Once installed, its notification goes.
+/// On the person's "Aktualizuj" it downloads this platform's
 /// file, checks it against the release's `SHA256SUMS` and, once this build
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
@@ -274,7 +276,8 @@ final class GithubUpdateService extends ChangeNotifier {
   /// installing it (false while it knows no [releaseKeys]).
   bool get verifiesAuthorSignature => releaseKeys.isNotEmpty;
 
-  /// Takes the kept state at once, and [checkIfDue] after
+  /// Takes the kept state at once (and takes away the notification of a
+  /// version that is installed now), and [checkIfDue] after
   /// [firstCheckAfter]; from then on [checkIfDue] runs whenever a check is
   /// due again (and when the app comes back, see the provider).
   void start() {
@@ -282,8 +285,20 @@ final class GithubUpdateService extends ChangeNotifier {
       return;
     }
     _started = true;
-    unawaitedLogged(_readKept(), context: 'Reading the update check state');
+    unawaitedLogged(_startKept(), context: 'Reading the update check state');
     _arm(firstCheckAfter);
+  }
+
+  Future<void> _startKept() async {
+    final RuntimeSystemNotificationService? notices = notifications;
+    if (notices != null) {
+      await withdrawInstalledUpdateNotice(
+        store: noticeStore,
+        notices: notices,
+        currentVersion: currentVersion,
+      );
+    }
+    await _readKept();
   }
 
   /// Asks GitHub when a check is due: GitHub last answered (here or in the
@@ -486,19 +501,24 @@ final class GithubUpdateService extends ChangeNotifier {
 
   /// Fetches the note of [release] once per version (a note that does not
   /// hold up is logged and left out; the banner shows the version alone).
+  /// A note that could not be fetched (github.com not reached, an error
+  /// answer) is asked for again at the next check.
   Future<void> _fetchWhatsNew(GithubRelease release) async {
     if (_whatsNewTriedFor == release.version) {
       return;
     }
-    _whatsNewTriedFor = release.version;
+    _whatsNew = null;
     try {
       _whatsNew = await fetchWhatsNew(
         release,
         fetchText: _fetchSums,
         maintainers: releaseKeys,
       );
+      _whatsNewTriedFor = release.version;
+    } on FormatException catch (e) {
+      _whatsNewTriedFor = release.version;
+      logZenWarning('Co nowego w wersji ${release.version}: $e');
     } on Object catch (e) {
-      _whatsNew = null;
       logZenWarning('Co nowego w wersji ${release.version}: $e');
     }
     _notify();

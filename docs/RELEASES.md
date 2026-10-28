@@ -1151,7 +1151,18 @@ of Zen on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the
 release description is the oldest version still supported (section 3,
 step 6). A newer version is announced once with a quiet notification,
 whichever of the app and the service finds it first, with the release's
-short note (section 3.5) as its expanded text.
+short note (section 3.5) as its expanded text. A version newer still is
+announced again in the same notification slot (`app-update`), so it
+replaces the older notice rather than adding a second one; the bar and
+the card show the newest version with its own note, and closing the bar
+of one version never hides a newer one (`update_check.json` keeps the
+announced and the closed version and compares them). Every build since
+1.13.0 behaves so; for it to pick up a new release, the release only has
+to be the latest full release, tagged `vX.Y.Z`, with every file attached
+before it is published, and with `whats-new.json` of that same version
+listed in `SHA256SUMS` and signed in `SHA256SUMS.sig` (section 3, all
+done by `release.yml`). From 1.14.0 on, the notification is also taken
+away once the version it names is installed.
 Inside a Flatpak nothing is downloaded: the card shows the
 `flatpak install` command and opens the release page. A newer `v<version>`
 tag shows the bar "New version X is available — worth updating" with

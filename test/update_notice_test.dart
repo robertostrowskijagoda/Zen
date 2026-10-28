@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -11,7 +16,11 @@ import 'package:zen/src/features/update/background_update_check.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/update_notice.dart';
+import 'package:zen/src/features/update/whats_new.dart';
+
+import '../tool/release_contract.dart' as contract;
 
 Map<String, Object?> _releaseJson(String tag) => <String, Object?>{
   'tag_name': tag,
@@ -22,9 +31,15 @@ Map<String, Object?> _releaseJson(String tag) => <String, Object?>{
   ],
 };
 
-/// Every notification posted, in order.
+/// Every notification posted, in order, and what the shade holds now (one
+/// per slot, as the system keeps them).
 final class _Notices implements RuntimeSystemNotificationService {
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
+  final Map<String, RuntimeSystemNotification> _bySlot =
+      <String, RuntimeSystemNotification>{};
+
+  List<RuntimeSystemNotification> get onScreen =>
+      _bySlot.values.toList(growable: false);
 
   @override
   Future<void> initialize({
@@ -35,6 +50,7 @@ final class _Notices implements RuntimeSystemNotificationService {
   @override
   Future<bool> show(RuntimeSystemNotification notification) async {
     shown.add(notification);
+    _bySlot[notification.slotKey ?? notification.id] = notification;
     return true;
   }
 
@@ -42,7 +58,7 @@ final class _Notices implements RuntimeSystemNotificationService {
   Future<void> dismiss(String id) async {}
 
   @override
-  Future<void> dismissSlot(String slotKey) async {}
+  Future<void> dismissSlot(String slotKey) async => _bySlot.remove(slotKey);
 
   @override
   Future<void> clear() async {}
@@ -112,6 +128,48 @@ final class _WakePlatform implements ZenWakePlatform {
 }
 
 const int _hour = 60 * 60 * 1000;
+
+/// A release of [version] on GitHub whose whats-new.json says [line],
+/// listed in its SHA256SUMS (no maintainer key pinned). [fails]: github.com
+/// does not answer for its files.
+final class _NotedRelease {
+  _NotedRelease(this.version, this.line)
+    : note = contract.whatsNewJson(version, <String, List<String>>{
+        'en': <String>[line],
+        'pl': <String>[line],
+      });
+
+  final String version;
+  final String line;
+  final String note;
+  bool fails = false;
+  late final String sums =
+      '${sha256Hex(utf8.encode(note))}  $kWhatsNewAssetName\n'
+      '${'0' * 64}  Zen-arm64-v8a.apk\n';
+
+  Map<String, Object?> json() => <String, Object?>{
+    'tag_name': 'v$version',
+    'draft': false,
+    'prerelease': false,
+    'assets': <Object?>[
+      <String, Object?>{'name': 'Zen-arm64-v8a.apk', 'size': 5},
+      <String, Object?>{'name': 'SHA256SUMS', 'size': sums.length},
+      <String, Object?>{'name': kWhatsNewAssetName, 'size': note.length},
+    ],
+  };
+
+  Future<String> text(Uri uri) async {
+    if (fails) {
+      throw const SocketException('offline');
+    }
+    expect(uri.pathSegments, contains('v$version'));
+    return switch (uri.pathSegments.last) {
+      kWhatsNewAssetName => note,
+      'SHA256SUMS' => sums,
+      _ => throw HttpException('HTTP 404', uri: uri),
+    };
+  }
+}
 
 void main() {
   group('the notification about a new version', () {
@@ -561,6 +619,265 @@ void main() {
       now += 3 * _hour;
       await check.checkIfDue();
       expect(asked, 2);
+    });
+  });
+
+  group('a newer release after one already announced', () {
+    const String apk = 'Zen-arm64-v8a.apk';
+
+    GithubUpdateService app({
+      required UpdateNoticeStore store,
+      required _Notices notices,
+      required _NotedRelease Function() latest,
+      String currentVersion = '1.13.0',
+    }) {
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _Installer(),
+        fetchJson: (Uri uri) async => latest().json(),
+        fetchSums: (Uri uri) => latest().text(uri),
+        noticeStore: store,
+        notifications: notices,
+        language: () => 'pl',
+        currentVersion: currentVersion,
+        releaseKeys: const <String>[],
+      );
+      addTearDown(s.dispose);
+      return s;
+    }
+
+    test('in the app: 1.14.0 takes the place of 1.13.1 in the notification, '
+        'the banner and the card, with its own note, once', () async {
+      final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+      final _Notices notices = _Notices();
+      _NotedRelease latest = _NotedRelease(
+        '1.13.1',
+        'Rozmowy są wyraźniejsze.',
+      );
+      final GithubUpdateService s = app(
+        store: store,
+        notices: notices,
+        latest: () => latest,
+      );
+      await s.check();
+      expect(notices.onScreen.single.body, contains('1.13.1'));
+      expect(notices.onScreen.single.body, contains(latest.line));
+      // "Później" for 1.13.1.
+      s.dismissNewer();
+      expect(s.showNewerBanner, isFalse);
+
+      latest = _NotedRelease('1.14.0', 'Dźwięki wiadomości.');
+      await s.check();
+      expect(notices.shown, hasLength(2), reason: 'exactly one more');
+      final RuntimeSystemNotification n = notices.onScreen.single;
+      expect(n.id, '$kUpdateNoticeSlot-1.14.0');
+      expect(n.slotKey, kUpdateNoticeSlot);
+      expect(n.body.split('\n'), <String>[
+        'Wersja 1.14.0 — warto zaktualizować',
+        '• Dźwięki wiadomości.',
+      ]);
+      expect(s.newer?.version, '1.14.0');
+      expect(
+        s.showNewerBanner,
+        isTrue,
+        reason: '1.13.1 was closed, not 1.14.0',
+      );
+      expect(s.whatsNewLines, <String>['Dźwięki wiadomości.']);
+      expect(s.newer!.assetUri(apk).pathSegments, contains('v1.14.0'));
+      expect(store.state.notifiedVersion, '1.14.0');
+      expect(store.state.newestVersion, '1.14.0');
+
+      // The same version again, also after a restart: nothing more.
+      await s.check();
+      final GithubUpdateService restarted = app(
+        store: store,
+        notices: notices,
+        latest: () => latest,
+      )..start();
+      await Future<void>.delayed(Duration.zero);
+      await restarted.check();
+      expect(notices.shown, hasLength(2));
+      expect(notices.onScreen.single.id, '$kUpdateNoticeSlot-1.14.0');
+      expect(restarted.showNewerBanner, isTrue);
+    });
+
+    test('in the Android background service: a closed 1.13.1 does not hold '
+        'back 1.14.0, whose notification replaces the old one', () async {
+      final int now = 1000 * _hour;
+      final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
+        UpdateNoticeState(
+          checkedAtMillis: now - 5 * _hour,
+          newestVersion: '1.13.1',
+          notifiedVersion: '1.13.1',
+          dismissedVersion: '1.13.1',
+        ),
+      );
+      final _Notices notices = _Notices();
+      await notices.show(
+        updateAvailableNotification(
+          '1.13.1',
+          createdAtMillis: now - 6 * _hour,
+          whatsNew: const <String>['Rozmowy są wyraźniejsze.'],
+        ),
+      );
+      int clock = now;
+      final _NotedRelease latest = _NotedRelease(
+        '1.14.0',
+        'Dźwięki wiadomości.',
+      );
+      BackgroundUpdateCheck check() => BackgroundUpdateCheck(
+        notices: () async => notices,
+        store: store,
+        fetchJson: (Uri uri) async => latest.json(),
+        fetchText: latest.text,
+        now: () => clock,
+        language: () => 'pl',
+        currentVersion: '1.13.0',
+        releaseKeys: const <String>[],
+      );
+      await check().checkIfDue();
+      expect(notices.shown, hasLength(2));
+      final RuntimeSystemNotification n = notices.onScreen.single;
+      expect(n.id, '$kUpdateNoticeSlot-1.14.0');
+      expect(n.body, contains('1.14.0'));
+      expect(n.body, contains(latest.line));
+      expect(n.body, isNot(contains('1.13.1')));
+      expect(store.state.notifiedVersion, '1.14.0');
+
+      // Asked again 4 hours later: the same version is not announced again.
+      clock += 4 * _hour;
+      await check().checkIfDue();
+      expect(notices.shown, hasLength(2));
+    });
+
+    testWidgets('the banner and the card switch to 1.14.0 and its note', (
+      WidgetTester tester,
+    ) async {
+      _NotedRelease latest = _NotedRelease(
+        '1.13.1',
+        'Rozmowy są wyraźniejsze.',
+      );
+      final GithubUpdateService s = app(
+        store: MemoryUpdateNoticeStore(),
+        notices: _Notices(),
+        latest: () => latest,
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [githubUpdateServiceProvider.overrideWithValue(s)],
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            home: const Scaffold(
+              body: SingleChildScrollView(
+                child: Column(
+                  children: <Widget>[GithubUpdateBanner(), GithubUpdateCard()],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await s.check();
+      await tester.pump();
+      const String old = 'Jest nowa wersja 1.13.1 — warto zaktualizować';
+      expect(find.text(old), findsNWidgets(2));
+      expect(find.text('• Rozmowy są wyraźniejsze.'), findsNWidgets(2));
+      await tester.tap(find.byTooltip('Zamknij'));
+      await tester.pump();
+      expect(find.byKey(const Key('github-newer-banner')), findsNothing);
+
+      latest = _NotedRelease('1.14.0', 'Dźwięki wiadomości.');
+      await s.check();
+      await tester.pump();
+      expect(find.byKey(const Key('github-newer-banner')), findsOneWidget);
+      expect(
+        find.text('Jest nowa wersja 1.14.0 — warto zaktualizować'),
+        findsNWidgets(2),
+      );
+      expect(find.text('• Dźwięki wiadomości.'), findsNWidgets(2));
+      expect(find.text(old), findsNothing);
+      expect(find.text('• Rozmowy są wyraźniejsze.'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    test('a note github.com did not give is asked for again at the next '
+        'check', () async {
+      final _NotedRelease latest = _NotedRelease(
+        '1.14.0',
+        'Dźwięki wiadomości.',
+      )..fails = true;
+      final GithubUpdateService s = app(
+        store: MemoryUpdateNoticeStore(),
+        notices: _Notices(),
+        latest: () => latest,
+      );
+      await s.check();
+      expect(s.newer?.version, '1.14.0');
+      expect(s.whatsNewLines, isEmpty);
+      latest.fails = false;
+      await s.check();
+      expect(s.whatsNewLines, <String>['Dźwięki wiadomości.']);
+    });
+
+    test('once installed, its notification goes, in the app and in the '
+        'background service; a newer one stays', () async {
+      Future<_Notices> shade(String version) async {
+        final _Notices notices = _Notices();
+        await notices.show(
+          updateAvailableNotification(version, createdAtMillis: 1),
+        );
+        return notices;
+      }
+
+      final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
+        const UpdateNoticeState(
+          checkedAtMillis: 1,
+          newestVersion: '1.14.0',
+          notifiedVersion: '1.14.0',
+          dismissedVersion: '1.13.1',
+        ),
+      );
+      final _Notices notices = await shade('1.14.0');
+      app(
+        store: store,
+        notices: notices,
+        latest: () => _NotedRelease('1.14.0', 'Dźwięki wiadomości.'),
+        currentVersion: '1.14.0',
+      ).start();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(notices.onScreen, isEmpty);
+      expect(store.state, const UpdateNoticeState(checkedAtMillis: 1));
+
+      final MemoryUpdateNoticeStore background = MemoryUpdateNoticeStore(
+        UpdateNoticeState(
+          checkedAtMillis: DateTime.now().millisecondsSinceEpoch,
+          notifiedVersion: '1.14.0',
+        ),
+      );
+      final _Notices backgroundNotices = await shade('1.14.0');
+      await BackgroundUpdateCheck(
+        notices: () async => backgroundNotices,
+        store: background,
+        fetchJson: (Uri uri) async => fail('not due'),
+        currentVersion: '1.14.0',
+      ).checkIfDue();
+      expect(backgroundNotices.onScreen, isEmpty);
+      expect(background.state.notifiedVersion, isNull);
+
+      final MemoryUpdateNoticeStore newer = MemoryUpdateNoticeStore(
+        const UpdateNoticeState(notifiedVersion: '1.15.0'),
+      );
+      final _Notices newerNotices = await shade('1.15.0');
+      expect(
+        await withdrawInstalledUpdateNotice(
+          store: newer,
+          notices: newerNotices,
+          currentVersion: '1.14.0',
+        ),
+        isFalse,
+      );
+      expect(newerNotices.onScreen.single.id, '$kUpdateNoticeSlot-1.15.0');
+      expect(newer.state.notifiedVersion, '1.15.0');
     });
   });
 }

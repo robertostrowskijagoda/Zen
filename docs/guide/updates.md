@@ -33,7 +33,10 @@ aligned for phones with 16 KB memory pages. Details:
   the app is closed. When a friend's Zen is newer than yours, Zen looks at
   once. GitHub sees your IP address and the name "Zen", nothing else.
 - When there is a newer version, a quiet notification (once per version)
-  and a bar say so, with a few lines about what is new in it. **Update**
+  and a bar say so, with a few lines about what is new in it. A version
+  published after that takes the old notice's place, also when you closed
+  the bar of the older one; once you have installed it, the notification
+  goes away. **Update**
   downloads the
   file for your system (on Android the APK for your phone's processor type)
   and checks it against the release's `SHA256SUMS`;
