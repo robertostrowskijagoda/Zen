@@ -756,7 +756,7 @@ final class RelayState {
     Map<String, int>? seen,
     this.seenFloorMillis = 0,
     Map<String, int>? seenFloors,
-    this.shareWithGroups = false,
+    this.shareWithGroups = true,
     List<RelayDeliveryReport>? deliveryReports,
     this.blobQuotaBytes,
     Map<String, RelayBlobOut>? outBlobs,
@@ -841,11 +841,12 @@ final class RelayState {
   final Map<String, int> seenFloors;
 
   /// Whether group members who are not friends learn this device's key and
-  /// mailboxes. Revealing the mailboxes means revealing which friends hold
-  /// them (part of the trust graph), so it is the person's explicit opt-in and
-  /// off by default: only friends ever get the mailbox addresses unless this
-  /// is switched on. Group messages to someone offline then wait in mailboxes
-  /// only for members who are friends (or who also opted in).
+  /// mailboxes. On by default: group messages to someone offline wait in
+  /// their mailboxes only for members who know them. Revealing the mailboxes
+  /// means revealing which friends hold them (part of the trust graph), so
+  /// the person can switch it off; then only friends ever get the mailbox
+  /// addresses, and group messages from other members reach this person
+  /// only while both are online.
   bool shareWithGroups;
 
   /// Delivery news for the chat layer that it has not taken over yet, oldest
@@ -995,7 +996,7 @@ final class RelayState {
       seen: _intMap(decoded['seen']),
       seenFloorMillis: (decoded['sfl'] as num?)?.toInt() ?? 0,
       seenFloors: _intMap(decoded['sfls']),
-      shareWithGroups: decoded['swg'] == true,
+      shareWithGroups: decoded['swg'] != false,
       deliveryReports: reports,
       blobQuotaBytes: (decoded['bq'] as num?)?.toInt(),
       outBlobs: <String, RelayBlobOut>{

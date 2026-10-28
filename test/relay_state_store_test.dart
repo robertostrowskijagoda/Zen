@@ -94,25 +94,25 @@ void main() {
   });
 
   group('sharing mailboxes with group members', () {
-    test('is off for a new state', () async {
-      expect(RelayState().shareWithGroups, isFalse);
-      expect(RelayState.fromJsonString('{}').shareWithGroups, isFalse);
+    test('is on for a new state', () async {
+      expect(RelayState().shareWithGroups, isTrue);
+      expect(RelayState.fromJsonString('{}').shareWithGroups, isTrue);
       expect(
         (await FileRelayStateStore(store: binary).load()).shareWithGroups,
-        isFalse,
+        isTrue,
       );
-      expect(const RelayOverview().shareWithGroups, isFalse);
+      expect(const RelayOverview().shareWithGroups, isTrue);
     });
 
-    test('a deliberate choice written by this version round-trips', () {
-      final RelayState on = RelayState.fromJsonString(
-        RelayState(shareWithGroups: true).toJsonString(),
-      );
-      expect(on.shareWithGroups, isTrue);
+    test('switching it off is kept', () {
       final RelayState off = RelayState.fromJsonString(
-        RelayState().toJsonString(),
+        RelayState(shareWithGroups: false).toJsonString(),
       );
       expect(off.shareWithGroups, isFalse);
+      final RelayState on = RelayState.fromJsonString(
+        RelayState().toJsonString(),
+      );
+      expect(on.shareWithGroups, isTrue);
     });
   });
 
