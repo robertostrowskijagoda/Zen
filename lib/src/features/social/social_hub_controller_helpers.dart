@@ -1229,6 +1229,18 @@ RuntimeSystemNotification _systemNotificationFromEntry({
     // Messages already got the form their conversation's level asks for
     // above; everything else is left to the central redaction.
     contentRedacted: chat != null,
+    // What the notification switches of the settings see.
+    kind: switch (signal.type) {
+      ZenSignalType.message => NoticeKind.message,
+      ZenSignalType.groupMessage =>
+        signalMentionsYou(signal)
+            ? NoticeKind.mention
+            : NoticeKind.groupMessage,
+      ZenSignalType.friendRequest ||
+      ZenSignalType.friendAccept ||
+      ZenSignalType.groupInvite => NoticeKind.invitation,
+      _ => null,
+    },
     category: switch (signal.type) {
       ZenSignalType.friendRequest ||
       ZenSignalType.friendAccept ||

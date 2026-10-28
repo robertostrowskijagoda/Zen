@@ -18,6 +18,7 @@ import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -351,6 +352,7 @@ RuntimeSystemNotification mentionNotification(
     body: said.body,
     createdAtMillis: createdAtMillis,
     category: RuntimeSystemNotificationCategory.social,
+    kind: NoticeKind.mention,
     slotKey: '$kMentionNoticeIdPrefix${n.id}',
     routeKey: buildFeedRouteKey(FeedFilter.all.name, postId: n.postId),
     // The level is applied here.

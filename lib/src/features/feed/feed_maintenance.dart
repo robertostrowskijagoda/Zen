@@ -5,8 +5,10 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_mentions.dart';
 import 'package:zen/src/features/feed/post_notifier.dart';
+import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/post_reach_service.dart';
 import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
@@ -16,6 +18,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -212,6 +215,16 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       },
       announces: (String address) =>
           ref.read(appSettingsControllerProvider).announcesPostsOf(address),
+      announcesFar: () =>
+          !ref.read(appSettingsControllerProvider).mutes(NoticeKind.farPost),
+      // Passed on from friends of friends, as far as the Tablica looks.
+      farPosts: () => <FeedPost>[
+        for (final FeedPost p in buildFeed(node, nameOf: nameOf, held: reach))
+          if (!p.isOwn &&
+              p.degree > 1 &&
+              p.degree <= (reach?.depth ?? kDefaultFeedDepth))
+            p,
+      ],
       privacyOf: friendPrivacy,
       privacy: () =>
           shared(ref.read(appSettingsControllerProvider).notificationPrivacy),

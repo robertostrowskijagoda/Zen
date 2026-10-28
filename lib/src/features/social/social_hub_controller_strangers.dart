@@ -129,6 +129,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
           body: notice.body,
           createdAtMillis: timestamp,
           category: RuntimeSystemNotificationCategory.message,
+          kind: NoticeKind.message,
           routeKey: buildConversationRouteKey(
             peerAddress: signal.sender,
             title: name,

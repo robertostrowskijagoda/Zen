@@ -41,6 +41,7 @@ import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 final groupMessagesProvider = FutureProvider.autoDispose
     .family<List<ChatMessage>, String>((ref, String groupId) async {
@@ -457,6 +458,9 @@ class _GroupConversationScreenState
       if (_boardTab) {
         // A post on the group's board, not a chat message.
         await ref.read(groupBoardServiceProvider).publish(widget.groupId, text);
+        if (mounted) {
+          unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.posted));
+        }
         return;
       }
       final ChatReply? replyTo = _replyTo;
@@ -471,6 +475,9 @@ class _GroupConversationScreenState
             replyTo: replyTo,
             mentions: stored.mentions,
           );
+      if (mounted) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.messageSent));
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

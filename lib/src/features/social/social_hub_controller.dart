@@ -59,12 +59,14 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 part 'social_hub_controller_helpers.dart';
 part 'social_hub_controller_lifecycle_signal.dart';
@@ -571,6 +573,16 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       // the keyguard — that would put the PIN pad on the buttons.
       await hideIncomingCallPopup();
       await setRingingCallWindowActive(true);
+      return;
+    }
+    if (ringingIncoming &&
+        !flutterUiVisible &&
+        _appSettings.mutes(NoticeKind.call)) {
+      // "Połączenia" are switched off: no card and no ring while Zen is in
+      // the background. The call ends up in the list of notifications as
+      // a missed one.
+      await setRingingCallWindowActive(false);
+      await hideIncomingCallPopup();
       return;
     }
     if (ringingIncoming && !flutterUiVisible) {

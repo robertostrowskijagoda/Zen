@@ -24,6 +24,7 @@ import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -105,6 +106,13 @@ const Set<String> _messageTypes = <String>{
   'message',
   'group_message',
   'message_placeholder',
+};
+
+/// Of those, what the switch "Zaproszenia i prośby o kontakt" governs.
+const Set<String> _invitationTypes = <String>{
+  'friend_request',
+  'friend_accept',
+  'group_invite',
 };
 
 const Set<String> _socialTypes = <String>{
@@ -1141,6 +1149,7 @@ final class LockedReceiver {
           body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
+          kind: _noticeKit.messageKind(from: from, payload: payload),
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMessageSlot,
           contentRedacted: true,
@@ -1156,6 +1165,7 @@ final class LockedReceiver {
           body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
+          kind: _invitationTypes.contains(type) ? NoticeKind.invitation : null,
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedSocialSlot,
           contentRedacted: true,
@@ -1216,6 +1226,7 @@ final class LockedReceiver {
           body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
+          kind: NoticeKind.call,
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMissedCallSlot,
           contentRedacted: true,
@@ -1262,6 +1273,10 @@ final class LockedReceiver {
   /// One entry per kind at most every [noticeThrottle], posted anew (so
   /// the shade does not stack the same line).
   Future<void> _postThrottled(RuntimeSystemNotification notice) async {
+    if (_noticeKit.settingsApplied(notice) == null) {
+      // Switched off: it neither shows nor takes the slot's turn.
+      return;
+    }
     final String slot = notice.slotKey!;
     final int now = _now();
     final int? last = _lastNoticeAt[slot];
@@ -1274,8 +1289,13 @@ final class LockedReceiver {
   }
 
   Future<void> _post(RuntimeSystemNotification notice) async {
+    // The notification switches of the settings (from the notice kit).
+    final RuntimeSystemNotification? shown = _noticeKit.settingsApplied(notice);
+    if (shown == null) {
+      return;
+    }
     try {
-      await _notices.show(notice);
+      await _notices.show(shown);
     } on Object catch (error, stackTrace) {
       logZenError('A locked notice failed', error, stackTrace);
     }

@@ -24,6 +24,7 @@ import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -800,6 +801,44 @@ void main() {
         expect(ring.category, RuntimeSystemNotificationCategory.call);
         expect(ring.isRingingCall, isTrue);
         expect(ring.title, 'Połączenie przychodzące');
+      });
+
+      test('the notification switches of the settings apply: a kind that '
+          'is off posts nothing, quiet sounds mean quiet', () async {
+        final LockedNoticeKit muted = LockedNoticeKit(
+          names: names.names,
+          members: names.members,
+          muted: const <NoticeKind>{
+            NoticeKind.groupMessage,
+            NoticeKind.invitation,
+            NoticeKind.call,
+          },
+          sounds: false,
+        );
+        await startReceiver(await publishFor(_masterKey()), noticeKit: muted);
+        await receive(_member, inGroup);
+        await receive(_bob, const <String, dynamic>{'type': 'friend_request'});
+        await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        expect(notices.activeNotifications, isEmpty);
+
+        // A message from a person still comes, without a sound.
+        await receive(_ada, direct);
+        final RuntimeSystemNotification notice =
+            notices.activeNotifications.single;
+        expect(notice.kind, NoticeKind.message);
+        expect(notice.silent, isTrue);
+      });
+
+      test('a ringing call is not made quiet by the sounds switch', () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: const LockedNoticeKit(sounds: false),
+        );
+        await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        final RuntimeSystemNotification ring =
+            notices.activeNotifications.single;
+        expect(ring.isRingingCall, isTrue);
+        expect(ring.silent, isFalse);
       });
     });
 

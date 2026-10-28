@@ -1037,37 +1037,19 @@ class _SettingsScreen extends ConsumerWidget {
                           .setMediaOnlyOnWifi(value),
                     ),
                   ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-in-app-sounds'),
-                    icon: Icons.music_note_outlined,
-                    tone: ZenTone.media,
-                    title: t('Dźwięki w aplikacji'),
-                    subtitle: t(
-                      'Ciche dźwięki przy wysłaniu wiadomości i w rozmowach. '
-                      'Alarm przyjaciela słychać zawsze.',
-                    ),
-                    value: settings.inAppSounds,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setInAppSounds(value),
-                    ),
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-post-notifications'),
-                    icon: Icons.article_outlined,
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-notifications'),
+                    icon: Icons.notifications_outlined,
                     tone: ZenTone.communication,
-                    title: t('Powiadomienia o nowych postach znajomych'),
+                    title: t('Powiadomienia i dźwięki'),
                     subtitle: t(
-                      'Posty znajomych znajomych nie powiadamiają. Jedną '
-                      'osobę wyciszysz w menu jej posta albo rozmowy.',
+                      'Dźwięki oraz rodzaje powiadomień: wiadomości, '
+                      'połączenia, reakcje, posty',
                     ),
-                    value: settings.postNotifications,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setPostNotifications(value),
-                    ),
+                    pageTitle: t('Powiadomienia i dźwięki'),
+                    pageChildren: const <Widget>[
+                      _NotificationSettingsSection(),
+                    ],
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-muted-post-authors'),

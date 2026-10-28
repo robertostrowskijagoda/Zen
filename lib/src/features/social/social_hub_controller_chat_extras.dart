@@ -110,6 +110,9 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       },
     );
     if (changed) {
+      if (sent.isNotEmpty) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.like));
+      }
       await _sendChatChange(conversationKey, <String, dynamic>{
         'type': 'msg_react',
         'msgId': messageId,

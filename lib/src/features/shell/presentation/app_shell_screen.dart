@@ -89,6 +89,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/diagnostics_log_file.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
@@ -115,6 +116,7 @@ import 'package:zen/src/features/update/presentation/signing_expiry_banner.dart'
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
+part 'app_shell_screen_notification_settings.dart';
 part 'app_shell_screen_notifications.dart';
 part 'app_shell_screen_views.dart';
 part 'app_shell_screen_settings_security.dart';

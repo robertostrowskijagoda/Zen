@@ -64,6 +64,7 @@ import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 /// The wall: posts of friends and followed people, newest first, and a
 /// place to write. Your own posts are on your profile, not here.
@@ -693,6 +694,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         likeBody(post.id, on: !post.likedByMe, mini: ownMiniProfile(node)),
         spaceKind: 'acts',
       );
+      if (!post.likedByMe && mounted) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.like));
+      }
     } catch (e) {
       if (mounted) {
         setState(
@@ -1437,6 +1441,7 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
       await node.seal(draft.audience, body),
       blobs: mediaIds(media),
     );
+    unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.posted));
     return null;
   } on ArgumentError catch (e) {
     return e.message as String? ?? t('Nie udało się opublikować.');

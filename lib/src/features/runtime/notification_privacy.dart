@@ -9,8 +9,10 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -181,6 +183,11 @@ String conversationKeyOfSignal(ZenSignal signal) {
 /// background key, like the other kits; the app writes it whenever any of
 /// it changes ([lockedNoticeKitOf]).
 ///
+/// The kit also carries the notification switches of the settings: the
+/// kinds of news that are off ([muted]) and whether the notification
+/// sounds are on ([sounds]), which the locked receiver applies like the
+/// app does ([applyNoticeSettings]).
+///
 /// A conversation the kit has no name for is told about without one: so is
 /// everything from strangers, a group message from anyone the kit does not
 /// list as a member of that group, and everything without a kit. A name
@@ -193,6 +200,8 @@ final class LockedNoticeKit {
     this.overrides = const <String, NotificationPrivacy>{},
     this.names = const <String, String>{},
     this.members = const <String, Set<String>>{},
+    this.muted = const <NoticeKind>{},
+    this.sounds = true,
   });
 
   final NotificationPrivacy privacy;
@@ -202,6 +211,33 @@ final class LockedNoticeKit {
   /// The normalized addresses of each group's members (a friend's other
   /// devices among them), by group key.
   final Map<String, Set<String>> members;
+
+  /// The kinds of news switched off in the settings.
+  final Set<NoticeKind> muted;
+
+  /// Whether the notification sounds are on.
+  final bool sounds;
+
+  /// [notice] as the locked receiver may post it: `null` when its kind is
+  /// switched off, quiet when the notification sounds are.
+  RuntimeSystemNotification? settingsApplied(
+    RuntimeSystemNotification notice,
+  ) => applyNoticeSettings(notice, muted: muted.contains, sounds: sounds);
+
+  /// Which kind of news the chat message [payload] from [from] is: one in a
+  /// group chat, or one from a person.
+  NoticeKind messageKind({
+    required String from,
+    required Map<String, dynamic> payload,
+  }) {
+    final ZenSignal? signal = zenSignalFromTransportPayload(
+      sender: PeerShareCodec.normalizeAddress(from),
+      payload: payload,
+    );
+    return signal?.type == ZenSignalType.groupMessage
+        ? NoticeKind.groupMessage
+        : NoticeKind.message;
+  }
 
   /// The most names and levels a kit holds, and the most members of all
   /// its groups together.
@@ -271,6 +307,9 @@ final class LockedNoticeKit {
         for (final MapEntry<String, Set<String>> e in members.entries)
           e.key: e.value.toList(growable: false),
       },
+    if (muted.isNotEmpty)
+      'q': <String>[for (final NoticeKind k in muted) k.name],
+    if (!sounds) 's': false,
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -291,6 +330,7 @@ final class LockedNoticeKit {
     final Object? o = json['o'];
     final Object? n = json['n'];
     final Object? m = json['m'];
+    final Object? q = json['q'];
     int memberCount = 0;
     final Map<String, Set<String>> members = <String, Set<String>>{};
     if (m is Map) {
@@ -328,6 +368,12 @@ final class LockedNoticeKit {
               e.key as String: sanitizePeerName(e.value as String),
       },
       members: members,
+      muted: <NoticeKind>{
+        if (q is List)
+          for (final Object? name in q)
+            if (NoticeKind.byName(name) case final NoticeKind kind) kind,
+      },
+      sounds: json['s'] != false,
     );
   }
 }
@@ -337,11 +383,13 @@ final class LockedNoticeKit {
 /// those whose level shows who wrote. A friend's other devices
 /// ([directory]) count as the friend. The names group members gave
 /// themselves stay out: a member who is not a friend is told about without
-/// a name.
+/// a name. [muted] and [sounds] are the notification switches.
 LockedNoticeKit lockedNoticeKitOf(
   SocialHubState state, {
   required NotificationPrivacy privacy,
   AccountDeviceDirectory? directory,
+  Set<NoticeKind> muted = const <NoticeKind>{},
+  bool sounds = true,
 }) {
   String normal(String address) => PeerShareCodec.normalizeAddress(address);
   final Map<String, NotificationPrivacy> overrides =
@@ -419,6 +467,8 @@ LockedNoticeKit lockedNoticeKitOf(
           )
         : names,
     members: members,
+    muted: muted,
+    sounds: sounds,
   );
 }
 

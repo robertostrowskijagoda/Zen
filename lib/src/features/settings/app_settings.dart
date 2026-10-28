@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// The revision of the first-start setup. Bump it when a release adds or
@@ -453,6 +454,8 @@ final class AppSettings {
     this.postNotifications = true,
     this.mutedPostAuthors = const <String>{},
     this.inAppSounds = true,
+    this.notificationSounds = true,
+    this.mutedNotices = NoticeKind.defaultMuted,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
@@ -551,11 +554,27 @@ final class AppSettings {
       postNotifications &&
       !mutedPostAuthors.contains(PeerShareCodec.normalizeAddress(address));
 
-  /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
-  /// connects or ends; on Windows and Linux also the notification sounds
-  /// Zen plays itself. Never silences a ringing call or an alarm. On by
-  /// default.
+  /// "Dźwięki w aplikacji": short sounds inside the app (a message sent or
+  /// received in the open chat, a like, a post published, a new entry in
+  /// the list of notifications, a call that connects or ends). Never
+  /// silences a ringing call or an alarm. On by default.
   final bool inAppSounds;
+
+  /// "Dźwięk powiadomień": the system notifications make their sound (and
+  /// vibrate); off, they arrive quietly. A ringing call and an alarm
+  /// always do. On by default.
+  final bool notificationSounds;
+
+  /// The kinds of news switched off ([NoticeKind]), except the friends'
+  /// posts, which [postNotifications] switches. Far friends' posts are off
+  /// until the person switches them on.
+  final Set<NoticeKind> mutedNotices;
+
+  /// Whether the news of [kind] is switched off: no system notification and
+  /// no notification sound (the in-app list still has it).
+  bool mutes(NoticeKind kind) => kind == NoticeKind.friendPost
+      ? !postNotifications
+      : mutedNotices.contains(kind);
 
   /// Screenshots and screen recording are blocked on conversations and
   /// account screens, and their content is hidden in the recent-apps view.
@@ -716,6 +735,8 @@ final class AppSettings {
     bool? postNotifications,
     Set<String>? mutedPostAuthors,
     bool? inAppSounds,
+    bool? notificationSounds,
+    Set<NoticeKind>? mutedNotices,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
@@ -758,6 +779,8 @@ final class AppSettings {
       postNotifications: postNotifications ?? this.postNotifications,
       mutedPostAuthors: mutedPostAuthors ?? this.mutedPostAuthors,
       inAppSounds: inAppSounds ?? this.inAppSounds,
+      notificationSounds: notificationSounds ?? this.notificationSounds,
+      mutedNotices: mutedNotices ?? this.mutedNotices,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
@@ -849,6 +872,8 @@ final class AppSettings {
     if (mutedPostAuthors.isNotEmpty)
       'mutedPostAuthors': mutedPostAuthors.toList(growable: false),
     'inAppSounds': inAppSounds,
+    'notificationSounds': notificationSounds,
+    'mutedNotices': <String>[for (final NoticeKind k in mutedNotices) k.name],
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
@@ -915,6 +940,14 @@ final class AppSettings {
         _ => null,
       },
       inAppSounds: pick<bool>('inAppSounds'),
+      notificationSounds: pick<bool>('notificationSounds'),
+      mutedNotices: switch (json['mutedNotices']) {
+        final List<dynamic> names => <NoticeKind>{
+          for (final Object? name in names)
+            if (NoticeKind.byName(name) case final NoticeKind kind) kind,
+        },
+        _ => null,
+      },
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),

@@ -14,6 +14,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -398,6 +399,11 @@ void main() {
     await tester.tap(find.byKey(const Key('chats-status-chip')));
     await _route(tester);
 
+    final Finder page = find.byKey(const Key('settings-nav-notifications'));
+    await tester.ensureVisible(page);
+    await tester.pump();
+    await tester.tap(page);
+    await _route(tester);
     final Finder posts = find.byKey(const Key('settings-post-notifications'));
     await tester.ensureVisible(posts);
     await tester.pump();
@@ -412,7 +418,42 @@ void main() {
       isFalse,
     );
 
+    // The other switches of the page: each kind on its own, a warning when
+    // the calls are off, the sounds apart.
+    Future<void> tapSwitch(String key) async {
+      final Finder tile = find.byKey(Key(key));
+      await tester.ensureVisible(tile);
+      await tester.pump();
+      await tester.tap(tile);
+      await tester.pump();
+    }
+
+    AppSettings settings() => container.read(appSettingsControllerProvider);
+    expect(find.byKey(const Key('settings-notice-call-warning')), findsNothing);
+    await tapSwitch('settings-notice-call');
+    expect(settings().mutes(NoticeKind.call), isTrue);
+    expect(settings().mutes(NoticeKind.message), isFalse);
+    expect(
+      find.byKey(const Key('settings-notice-call-warning')),
+      findsOneWidget,
+    );
+    await tapSwitch('settings-notice-call');
+    expect(settings().mutes(NoticeKind.call), isFalse);
+    expect(find.byKey(const Key('settings-notice-call-warning')), findsNothing);
+
+    expect(settings().mutes(NoticeKind.farPost), isTrue);
+    await tapSwitch('settings-notice-farPost');
+    expect(settings().mutes(NoticeKind.farPost), isFalse);
+
+    await tapSwitch('settings-notification-sounds');
+    expect(settings().notificationSounds, isFalse);
+    expect(settings().inAppSounds, isTrue);
+    await tapSwitch('settings-in-app-sounds');
+    expect(settings().inAppSounds, isFalse);
+
     // Nobody muted yet; a muted person is listed and comes back with one tap.
+    await tester.pageBack();
+    await _route(tester);
     final Finder muted = find.byKey(
       const Key('settings-nav-muted-post-authors'),
     );

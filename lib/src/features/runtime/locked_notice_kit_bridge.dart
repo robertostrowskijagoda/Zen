@@ -13,6 +13,7 @@ import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -35,8 +36,10 @@ String lockedNoticeKitSignature(SocialHubState state) {
 /// Keeps the [LockedNoticeKit] in step on Android and on an iPhone while
 /// the app is unlocked: the notification privacy level, the conversations'
 /// own levels and the names the locked background receiver may show in a
-/// message's notice. Written again whenever any of it changes; only once the friends
-/// were read, so a kit without them never replaces the stored one.
+/// message's notice, and the notification switches (the kinds of news that
+/// are off, the notification sounds). Written again whenever any of it
+/// changes; only once the friends were read, so a kit without them never
+/// replaces the stored one.
 class LockedNoticeKitBridge extends ConsumerStatefulWidget {
   const LockedNoticeKitBridge({required this.child, super.key});
 
@@ -62,6 +65,15 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
         (AppSettings settings) => settings.notificationPrivacy,
       ),
     );
+    ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings settings) => (
+          settings.notificationSounds,
+          settings.mutedNotices,
+          settings.postNotifications,
+        ),
+      ),
+    );
     ref.watch(socialHubControllerProvider.select(lockedNoticeKitSignature));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -82,10 +94,16 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
         state.snapshotUnreadable) {
       return;
     }
+    final AppSettings settings = ref.read(appSettingsControllerProvider);
     final LockedNoticeKit kit = lockedNoticeKitOf(
       state,
-      privacy: ref.read(appSettingsControllerProvider).notificationPrivacy,
+      privacy: settings.notificationPrivacy,
       directory: ref.read(accountDirectoryHolderProvider).directory,
+      muted: <NoticeKind>{
+        for (final NoticeKind kind in NoticeKind.values)
+          if (settings.mutes(kind)) kind,
+      },
+      sounds: settings.notificationSounds,
     );
     final Map<String, dynamic> json = kit.toJson();
     final String signature = jsonEncode(json);

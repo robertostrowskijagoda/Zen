@@ -10,6 +10,7 @@ import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 
 /// Id prefix of the system notifications about reactions. The title of such
 /// a notification names who liked or commented, so with "Powiadomienia bez
@@ -138,6 +139,7 @@ RuntimeSystemNotification reactionNotification(
         : t('Reakcje na Twoje posty'),
     createdAtMillis: createdAtMillis,
     category: RuntimeSystemNotificationCategory.social,
+    kind: NoticeKind.reaction,
     slotKey: '$kReactionNoticeIdPrefix${n.postId}',
     // A tap opens the Tablica, where the post and its reactions are.
     routeKey: buildFeedRouteKey(FeedFilter.all.name),

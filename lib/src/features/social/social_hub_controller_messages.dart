@@ -651,6 +651,13 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             }),
           );
         }
+        if (!exists &&
+            _openConversationAddress == signal.sender &&
+            _isUiFocused()) {
+          unawaited(
+            ref.read(zenSoundEffectsProvider).play(ZenSound.messageReceived),
+          );
+        }
         if (_openConversationAddress == signal.sender && _isUiInteractive()) {
           unawaited(
             _sendReadReceiptIfNeeded(
@@ -998,6 +1005,11 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           await _adoptDisappearTimerOf(signal, timestamp);
           // With its file (inline, or fetched as blocks), reply, forwarding.
           await _storeIncomingGroupMessage(signal, messageId, timestamp);
+          if (_openGroupId == signal.groupId && _isUiFocused()) {
+            unawaited(
+              ref.read(zenSoundEffectsProvider).play(ZenSound.messageReceived),
+            );
+          }
         }
         return;
       case ZenSignalType.groupLeave:
