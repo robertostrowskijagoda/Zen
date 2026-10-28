@@ -60,6 +60,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart'
     show PyrMember, PyramidState;
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -434,14 +435,25 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       return;
     }
     final LedgerNode node = _node!;
+    // A post started earlier and not published comes back as it was left.
+    final ComposerDrafts drafts = ref.read(composerDraftsProvider);
+    await drafts.load();
+    if (!mounted) {
+      return;
+    }
+    final ComposerDraft? draft = drafts[ComposerDrafts.newPost];
     final bool published = await PostEditorScreen.open(
       context,
       onSubmit: _publish,
       // A new post may mention friends and their friends.
       mentionCandidates: () => postMentionCandidatesFor(ref, node),
-      initialAudience: _audience,
+      initialText: draft?.text ?? '',
+      initialMentions: draft?.mentions ?? const <Mention>[],
+      initialAudience:
+          Audience.values.asNameMap()[draft?.audience] ?? _audience,
       pickPhotos: widget.pickPhotos,
       pickOnOpen: withPhotos,
+      drafts: drafts,
     );
     if (published && mounted) {
       // Own posts live on the profile, not on the wall.
@@ -890,6 +902,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         child: CommentComposer(
                           fieldKey: const Key('feed-comment-field'),
                           sendKey: const Key('feed-comment-send'),
+                          draftKey: ComposerDrafts.comment(post.id),
                           // "@": the post's author, those who reacted, the
                           // writer's friends and theirs.
                           mentionCandidates: _node == null

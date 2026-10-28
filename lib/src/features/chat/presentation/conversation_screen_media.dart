@@ -8,6 +8,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     final bool canText =
         canCompose || isStrangerConversation(friend, widget.peerAddress);
     final bool idle = !_isRecordingVoice && !_isRecordingBusy;
+    final ChatComposerMetrics metrics = ChatComposerMetrics.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
       child: Column(
@@ -106,13 +107,12 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
                 Expanded(
-                  // One line: as tall as the send button's place, its text
-                  // on the button's centre line. Longer, it grows and the
-                  // button stays at the bottom.
+                  // One line: exactly as tall as the send button's place,
+                  // the middle of its letters on the button's centre line
+                  // (ChatComposerMetrics). Longer, it grows and the button
+                  // stays by the last line.
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minHeight: kChatComposerRowHeight,
-                    ),
+                    constraints: BoxConstraints(minHeight: metrics.rowHeight),
                     child: Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: AnimatedSwitcher(
@@ -126,57 +126,60 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                 ),
                                 elapsed: _recordingElapsed,
                               )
-                            : TextField(
-                                key: const Key('conversation-composer-field'),
-                                controller: _composerController,
-                                // GIFs and stickers from the keyboard (Android's
-                                // rich content): a GIF stays animated.
-                                contentInsertionConfiguration: canCompose
-                                    ? ContentInsertionConfiguration(
-                                        onContentInserted:
-                                            (KeyboardInsertedContent content) =>
-                                                unawaited(
-                                                  _sendKeyboardContent(content),
-                                                ),
-                                      )
-                                    : null,
-                                // iPhone keyboards copy GIFs to the clipboard:
-                                // "Wklej obrazek" in the field's menu sends one.
-                                contextMenuBuilder: picturePasteMenu(
-                                  _sendTransferred,
-                                ),
-                                // Keyboard must not learn what you write.
-                                enableIMEPersonalizedLearning: false,
-                                enabled: canText && !_isRecordingBusy,
-                                minLines: 1,
-                                maxLines: 6,
-                                textCapitalization:
-                                    TextCapitalization.sentences,
-                                style: TextStyle(
-                                  color: zen.textPrimary,
-                                  fontSize: 15,
-                                  height: 1.35,
-                                ),
-                                decoration: InputDecoration(
-                                  filled: false,
-                                  isDense: true,
-                                  contentPadding: kChatComposerFieldPadding,
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  disabledBorder: InputBorder.none,
-                                  hintStyle: TextStyle(
-                                    color: zen.textMuted,
-                                    fontSize: 14.5,
+                            : Padding(
+                                padding: metrics.fieldShift,
+                                child: TextField(
+                                  key: const Key('conversation-composer-field'),
+                                  controller: _composerController,
+                                  // GIFs and stickers from the keyboard (Android's
+                                  // rich content): a GIF stays animated.
+                                  contentInsertionConfiguration: canCompose
+                                      ? ContentInsertionConfiguration(
+                                          onContentInserted:
+                                              (
+                                                KeyboardInsertedContent content,
+                                              ) => unawaited(
+                                                _sendKeyboardContent(content),
+                                              ),
+                                        )
+                                      : null,
+                                  // iPhone keyboards copy GIFs to the clipboard:
+                                  // "Wklej obrazek" in the field's menu sends one.
+                                  contextMenuBuilder: picturePasteMenu(
+                                    _sendTransferred,
                                   ),
-                                  hintText: canCompose
-                                      ? t('Wiadomość…')
-                                      : canText
-                                      ? t('Wiadomość (tylko tekst)…')
-                                      : t(
-                                          'Rozmowa odblokuje się po akceptacji '
-                                          'relacji',
-                                        ),
+                                  // Keyboard must not learn what you write.
+                                  enableIMEPersonalizedLearning: false,
+                                  enabled: canText && !_isRecordingBusy,
+                                  minLines: 1,
+                                  maxLines: 6,
+                                  textCapitalization:
+                                      TextCapitalization.sentences,
+                                  strutStyle: metrics.strut,
+                                  style: metrics.textStyle(zen.textPrimary),
+                                  decoration: InputDecoration(
+                                    filled: false,
+                                    isDense: true,
+                                    // The theme's compact density would take
+                                    // 8 px off the padding the metrics give.
+                                    visualDensity: VisualDensity.standard,
+                                    contentPadding: metrics.fieldPadding(),
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    disabledBorder: InputBorder.none,
+                                    hint: metrics.hint(
+                                      canCompose
+                                          ? t('Wiadomość…')
+                                          : canText
+                                          ? t('Wiadomość (tylko tekst)…')
+                                          : t(
+                                              'Rozmowa odblokuje się po akceptacji '
+                                              'relacji',
+                                            ),
+                                      zen.textMuted,
+                                    ),
+                                  ),
                                 ),
                               ),
                       ),
@@ -200,9 +203,8 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                             : hasText
                             ? _sendMessage
                             : null;
-                        return Padding(
-                          padding: kChatComposerSendPadding,
-                          child: SizedBox.square(
+                        return metrics.sendSlot(
+                          SizedBox.square(
                             dimension: kChatComposerSendSize,
                             child: _isRecordingVoice
                                 ? IconButton.filled(
@@ -794,21 +796,172 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
 /// The send button of a chat composer (1:1 and groups): a circle this wide.
 const double kChatComposerSendSize = 40;
 
-/// Around the send button of a chat: as much above, below and after it, so
-/// it sits in the middle of the rounded end of the composer.
-const EdgeInsetsDirectional kChatComposerSendPadding =
-    EdgeInsetsDirectional.fromSTEB(2, 4, 4, 4);
-
-/// The height of a chat composer's row with a one-line message: the send
-/// button and the space around it (a full tap target). The text field is
-/// at least this tall, with its text in the middle, so the button sits on
-/// its centre line.
+/// The least height of a chat composer's row with a one-line message: the
+/// send button and the space around it (a full tap target).
 const double kChatComposerRowHeight = kMinInteractiveDimension;
 
-/// Inside the composer's text field. One line of text with this padding
-/// fits [kChatComposerRowHeight] also with a larger system font.
-const EdgeInsetsDirectional kChatComposerFieldPadding =
-    EdgeInsetsDirectional.fromSTEB(18, 10, 8, 10);
+/// The size of the text in a chat composer's field.
+const double kChatComposerFontSize = 15;
+
+/// The height of a line in a chat composer's field, in multiples of the
+/// text's size.
+const double kChatComposerLineHeight = 1.35;
+
+/// Where the eye finds the middle of a line of text: this many ems above
+/// its baseline, between the middle of the small letters (about half an em
+/// tall) and of the capitals (about 0.7 em) of common faces. Faces differ
+/// far more in their ascent and descent (a phone's own font with a tall
+/// ascent draws its letters low in the line) than in where their letters
+/// stand on the baseline, so the composer centres the button on this point
+/// rather than on the middle of the line.
+const double kChatComposerOpticalCentre = 0.28;
+
+/// The least space above and below the line of text in the field.
+const double _kChatComposerMinFieldInset = 4;
+
+/// How a chat composer's row (1:1 and groups) is laid out for the text size
+/// of the screen: the text field with one line and the place of each button
+/// are exactly [rowHeight] tall, and the field's padding puts the middle of
+/// its letters ([kChatComposerOpticalCentre]) on the centre line of that
+/// height, where the buttons are centred. That holds for any face, line
+/// height and text size: the line is fixed by a strut ([strut]), and the
+/// padding comes from where that strut puts the baseline.
+///
+/// With more lines the field grows upwards; the buttons, at the bottom of
+/// the row, stay on the centre line of the last one.
+@immutable
+final class ChatComposerMetrics {
+  const ChatComposerMetrics._({
+    required this.strut,
+    required this.rowHeight,
+    required this.fieldTop,
+    required this.fieldBottom,
+  });
+
+  /// For the theme's text face and the text size of [context]; [height]:
+  /// another line height.
+  factory ChatComposerMetrics.of(
+    BuildContext context, {
+    double height = kChatComposerLineHeight,
+  }) {
+    final TextStyle face =
+        Theme.of(context).textTheme.bodyLarge ?? const TextStyle();
+    return ChatComposerMetrics.measure(
+      StrutStyle(
+        fontFamily: face.fontFamily,
+        fontFamilyFallback: face.fontFamilyFallback,
+        fontSize: kChatComposerFontSize,
+        height: height,
+        leadingDistribution: TextLeadingDistribution.even,
+        forceStrutHeight: true,
+      ),
+      MediaQuery.textScalerOf(context),
+    );
+  }
+
+  /// For a line of [strut] (with its face, size and height given) at
+  /// [scaler].
+  factory ChatComposerMetrics.measure(StrutStyle strut, TextScaler scaler) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: ' ',
+        style: TextStyle(
+          fontFamily: strut.fontFamily,
+          fontFamilyFallback: strut.fontFamilyFallback,
+          fontSize: strut.fontSize,
+          height: strut.height,
+          leadingDistribution: strut.leadingDistribution,
+        ),
+      ),
+      strutStyle: strut,
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+    )..layout();
+    final double line = painter.height;
+    final double baseline = painter.computeDistanceToActualBaseline(
+      TextBaseline.alphabetic,
+    );
+    painter.dispose();
+    // The middle of the letters, from the top of the line.
+    final double centre =
+        baseline -
+        kChatComposerOpticalCentre *
+            scaler.scale(strut.fontSize ?? kChatComposerFontSize);
+    final double rowHeight = math.max(
+      kChatComposerRowHeight,
+      2 * (math.max(centre, line - centre) + _kChatComposerMinFieldInset),
+    );
+    final double top = rowHeight / 2 - centre;
+    return ChatComposerMetrics._(
+      strut: strut,
+      rowHeight: rowHeight,
+      fieldTop: top,
+      fieldBottom: rowHeight - top - line,
+    );
+  }
+
+  /// The field's lines: every one as tall, whatever face draws its letters
+  /// (an emoji, a script the app's face lacks).
+  final StrutStyle strut;
+
+  /// The height of the field with one line, and of each button's place.
+  final double rowHeight;
+
+  /// The space above and below the field's text.
+  final double fieldTop;
+  final double fieldBottom;
+
+  /// Between the send button and the edges of the row: as much after it as
+  /// above and below, so the circle sits in the middle of the rounded end.
+  double get sendInset => (rowHeight - kChatComposerSendSize) / 2;
+
+  double get _fieldInset => math.min(fieldTop, fieldBottom);
+
+  /// The field's padding, with [start] and [end] beside the text: as much
+  /// above as below (a field centres its text between uneven paddings);
+  /// the rest of [fieldTop] and [fieldBottom] is [fieldShift].
+  EdgeInsetsDirectional fieldPadding({double start = 18, double end = 8}) =>
+      EdgeInsetsDirectional.fromSTEB(start, _fieldInset, end, _fieldInset);
+
+  /// Around the field: what of [fieldTop] or [fieldBottom] its own padding
+  /// leaves.
+  EdgeInsets get fieldShift => EdgeInsets.only(
+    top: fieldTop - _fieldInset,
+    bottom: fieldBottom - _fieldInset,
+  );
+
+  /// The style of the field's text (and, with [hint], of its hint).
+  TextStyle textStyle(Color color, {bool hint = false}) => TextStyle(
+    color: color,
+    fontSize: hint ? kChatComposerFontSize - 0.5 : kChatComposerFontSize,
+    height: strut.height,
+    leadingDistribution: TextLeadingDistribution.even,
+  );
+
+  /// The hint of the field: on the same line as the text would be.
+  Widget hint(String text, Color color, {int? maxLines}) => Text(
+    text,
+    style: textStyle(color, hint: true),
+    strutStyle: strut,
+    maxLines: maxLines,
+    overflow: maxLines == null ? null : TextOverflow.ellipsis,
+  );
+
+  /// A button's place in the row: [width] wide, [rowHeight] tall, [child]
+  /// in its middle.
+  Widget slot({required double width, required Widget child}) => SizedBox(
+    width: width,
+    height: rowHeight,
+    child: Center(child: child),
+  );
+
+  /// The send button's place: the circle with [sendInset] around it.
+  Widget sendSlot(Widget child) => SizedBox(
+    width: kChatComposerSendSize + 2 * sendInset,
+    height: rowHeight,
+    child: Center(child: child),
+  );
+}
 
 class _ComposerActionButton extends StatelessWidget {
   const _ComposerActionButton({

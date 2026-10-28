@@ -21,6 +21,7 @@ import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/presentation/mention_field.dart';
 
@@ -355,6 +356,7 @@ class PostEditorScreen extends StatefulWidget {
     this.pickAudio,
     this.recorder,
     this.pickOnOpen = false,
+    this.drafts,
     super.key,
   });
 
@@ -382,6 +384,11 @@ class PostEditorScreen extends StatefulWidget {
   /// Opens the photo picker right away ("add a photo" on the wall).
   final bool pickOnOpen;
 
+  /// Where a new post's text and audience are kept while it is written
+  /// (`ComposerDrafts.newPost`), also after the app was closed; the opener
+  /// gives the stored draft as [initialText]. Not for an edit.
+  final ComposerDrafts? drafts;
+
   /// Opens the editor; true once something was published.
   static Future<bool> open(
     BuildContext context, {
@@ -397,6 +404,7 @@ class PostEditorScreen extends StatefulWidget {
     AudioSource? pickAudio,
     VoiceMessageRecorder Function()? recorder,
     bool pickOnOpen = false,
+    ComposerDrafts? drafts,
   }) async =>
       await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
@@ -414,6 +422,7 @@ class PostEditorScreen extends StatefulWidget {
             pickAudio: pickAudio,
             recorder: recorder,
             pickOnOpen: pickOnOpen,
+            drafts: drafts,
           ),
         ),
       ) ??
@@ -531,7 +540,52 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   void _changed() {
     if (mounted) {
       setState(() {});
+      _keepDraft();
     }
+  }
+
+  /// The drafts of a new post, `null` for an edit.
+  ComposerDrafts? get _drafts => widget.editing ? null : widget.drafts;
+
+  /// Keeps the text (without its photos, videos and recordings) and the
+  /// audience as the new post's draft.
+  void _keepDraft() {
+    final ComposerDrafts? drafts = _drafts;
+    if (drafts == null) {
+      return;
+    }
+    final StringBuffer text = StringBuffer();
+    final List<MentionSpan> spans = <MentionSpan>[];
+    for (final _Block b in _blocks) {
+      if (b is! _TextBlock) {
+        continue;
+      }
+      final String piece = b.controller.text.trimRight();
+      if (piece.trim().isEmpty) {
+        continue;
+      }
+      if (text.isNotEmpty) {
+        text.write('\n');
+      }
+      final int start = text.length;
+      text.write(piece);
+      spans.addAll(<MentionSpan>[
+        for (final MentionSpan s in b.controller.mentionSpans)
+          if (s.end <= piece.length) s.shifted(start),
+      ]);
+    }
+    final ({String text, List<Mention> mentions}) stored = encodeMentions(
+      text.toString(),
+      spans,
+    );
+    drafts.put(
+      ComposerDrafts.newPost,
+      ComposerDraft(
+        text: stored.text,
+        mentions: stored.mentions,
+        audience: _audience.name,
+      ),
+    );
   }
 
   @override
@@ -1089,12 +1143,17 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     );
     if (picked != null && mounted) {
       setState(() => _audience = picked);
+      _keepDraft();
     }
   }
 
   Future<void> _close() async {
     if (!_dirty || _submitting) {
       Navigator.of(context).pop(false);
+      return;
+    }
+    if (_drafts != null) {
+      await _closeKeepingDraft();
       return;
     }
     final bool? discard = await showDialog<bool>(
@@ -1123,6 +1182,53 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     }
   }
 
+  /// A new post closed with something written: kept as a draft for the
+  /// next time, or dropped.
+  Future<void> _closeKeepingDraft() async {
+    final bool withMedia = _media.isNotEmpty;
+    final bool? keep = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
+        title: Text(t('Zachować szkic posta?')),
+        content: Text(
+          withMedia
+              ? t(
+                  'Tekst i odbiorcy będą tu przy następnym otwarciu, także '
+                  'po zamknięciu aplikacji. Zdjęcia, filmy i nagrania nie '
+                  'zostaną zachowane.',
+                )
+              : t(
+                  'Tekst i odbiorcy będą tu przy następnym otwarciu, także '
+                  'po zamknięciu aplikacji.',
+                ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            key: const Key('post-discard'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Odrzuć')),
+          ),
+          FilledButton(
+            key: const Key('post-keep-draft'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zachowaj szkic')),
+          ),
+        ],
+      ),
+    );
+    // Dismissed: writing goes on.
+    if (keep == null || !mounted) {
+      return;
+    }
+    if (keep) {
+      _keepDraft();
+    } else {
+      _drafts?.clear(ComposerDrafts.newPost);
+    }
+    Navigator.of(context).pop(false);
+  }
+
   Future<void> _submit() async {
     if (!_canPublish) {
       return;
@@ -1144,6 +1250,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       return;
     }
     if (error == null) {
+      _drafts?.clear(ComposerDrafts.newPost);
       Navigator.of(context).pop(true);
       return;
     }

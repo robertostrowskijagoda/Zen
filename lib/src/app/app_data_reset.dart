@@ -20,6 +20,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// Wipes every piece of local state of the account open now
@@ -30,6 +31,8 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 /// the device stay as they are (see [performZenDeviceWipe]).
 Future<void> performZenLocalDataReset(WidgetRef ref) async {
   final ZenAccountScope account = ref.read(zenAccountProvider);
+  // Unsent texts held in memory must not be written back after the wipe.
+  ref.read(composerDraftsProvider).forget();
   if (!account.isDefault) {
     await _wipeAdditionalAccount(ref, account);
     return;
@@ -92,6 +95,8 @@ Future<void> _resetDefaultAccountInPlace(
   // What the person hid after reports is gone from the disk with the rest;
   // the list in memory must not write it back.
   ref.invalidate(hiddenByMeProvider);
+  // The drafts start over too (the old ones were forgotten, not written).
+  ref.invalidate(composerDraftsProvider);
   await ref.read(runtimeNotificationCenterProvider).clear();
   await ref.read(runtimeSystemNotificationServiceProvider).clear();
   await runtime.start();
@@ -132,6 +137,8 @@ Future<void> _wipeAdditionalAccount(
 /// password do.
 Future<void> performZenDeviceWipe(WidgetRef ref) async {
   final ZenAccountScope account = ref.read(zenAccountProvider);
+  // Unsent texts held in memory must not be written back after the wipe.
+  ref.read(composerDraftsProvider).forget();
   // A computer's tray nodes write into the folders about to go.
   await ref.read(desktopBackgroundAccountsProvider).stop();
   final AppSecurityService security = ref.read(appSecurityServiceProvider);

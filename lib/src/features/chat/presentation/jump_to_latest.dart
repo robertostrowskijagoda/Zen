@@ -1,9 +1,262 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+
+/// The controller of a conversation's list. While the list is at its
+/// newest message it stays there, in the same frame, whatever changes its
+/// size: the keyboard opening, a message coming in or going out, a picture
+/// in one being decoded, a list built lazily measuring its bubbles. Once
+/// the user scrolls away (further than [JumpToLatest]'s margin) it keeps
+/// its place; scrolling back down, the jump-to-latest button or
+/// [showLatest] (one's own message sent) makes it follow again.
+///
+/// Away from it, a bubble on screen is kept where it is when bubbles before
+/// it change: a message coming in below it in a [reversed] list (the newest
+/// message at offset 0, the group chat), a picture above it decoded. A
+/// reversed list must keep its bubbles by key (`findChildIndexCallback`)
+/// for that, or each would take the place of the next one.
+class ChatScrollController extends ScrollController {
+  ChatScrollController({this.reversed = false});
+
+  final bool reversed;
+
+  bool _following = true;
+
+  /// The list is kept at its newest message.
+  bool get followsLatest => _following;
+
+  /// Shows the newest message and stays with it: at once where the list
+  /// is laid out, and again after the frame being built (which may add the
+  /// message).
+  void showLatest() {
+    _following = true;
+    _jumpToLatest();
+    SchedulerBinding.instance.addPostFrameCallback((_) => _jumpToLatest());
+  }
+
+  void _jumpToLatest() {
+    if (!_following ||
+        SchedulerBinding.instance.schedulerPhase ==
+            SchedulerPhase.persistentCallbacks) {
+      return;
+    }
+    for (final ScrollPosition position in positions) {
+      if (position.hasContentDimensions) {
+        final double latest = reversed
+            ? position.minScrollExtent
+            : position.maxScrollExtent;
+        if (position.pixels != latest) {
+          position.jumpTo(latest);
+        }
+      }
+    }
+  }
+
+  /// The list moved (the user, a jump, an animation): it follows the
+  /// newest message when it ended up at it.
+  void _moved(ScrollPosition position) {
+    if (!position.hasContentDimensions) {
+      return;
+    }
+    final double distance = reversed
+        ? position.pixels - position.minScrollExtent
+        : position.maxScrollExtent - position.pixels;
+    _following = distance <= JumpToLatest._nearLatest;
+  }
+
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) {
+    return _ChatScrollPosition(
+      this,
+      physics: physics,
+      context: context,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
+}
+
+class _ChatScrollPosition extends ScrollPositionWithSingleContext {
+  _ChatScrollPosition(
+    this.owner, {
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  final ChatScrollController owner;
+
+  /// Away from the newest message: a bubble on screen and where it stood in
+  /// the list after the last frame. A message coming in below it (a
+  /// reversed list) or a bubble before it growing moves it; the list moves
+  /// with it, in the same frame, so what is read stays where it is.
+  RenderBox? _anchor;
+  double _anchorOffset = 0;
+  bool _anchorPending = false;
+
+  bool get _userScrolling => activity?.isScrolling ?? false;
+
+  double _latest(double min, double max) => owner.reversed ? min : max;
+
+  /// Puts the list at [latest] while it follows the newest message and the
+  /// user is not scrolling it; `false` when the layout has to run again.
+  bool _keepLatest(double latest) {
+    if (!owner._following || _userScrolling) {
+      return true;
+    }
+    if (nearEqual(pixels, latest, Tolerance.defaultTolerance.distance)) {
+      return true;
+    }
+    correctPixels(latest);
+    return false;
+  }
+
+  /// Moves the list by as much as [_anchor] moved in it; `false` when the
+  /// layout has to run again.
+  bool _keepPlace() {
+    final RenderBox? anchor = _anchor;
+    if (anchor == null || owner._following || _userScrolling) {
+      return true;
+    }
+    final Object? data = anchor.parentData;
+    final double? offset =
+        anchor.attached && data is SliverMultiBoxAdaptorParentData
+        ? data.layoutOffset
+        : null;
+    if (offset == null) {
+      _anchor = null;
+      return true;
+    }
+    final double moved = offset - _anchorOffset;
+    _anchorOffset = offset;
+    if (nearEqual(moved, 0, Tolerance.defaultTolerance.distance)) {
+      return true;
+    }
+    correctPixels(
+      (pixels + moved).clamp(minScrollExtent, maxScrollExtent).toDouble(),
+    );
+    return false;
+  }
+
+  /// After this frame: the bubble on screen nearest the list's leading
+  /// edge becomes [_anchor].
+  void _scheduleAnchor() {
+    if (_anchorPending) {
+      return;
+    }
+    _anchorPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _anchorPending = false;
+      _pickAnchor();
+    });
+  }
+
+  void _pickAnchor() {
+    _anchor = null;
+    if (owner._following) {
+      return;
+    }
+    final RenderObject? root = context.notificationContext?.findRenderObject();
+    final RenderSliverMultiBoxAdaptor? list = root == null
+        ? null
+        : _listIn(root);
+    if (list == null || !list.attached) {
+      return;
+    }
+    final SliverConstraints constraints = list.constraints;
+    final double start = constraints.scrollOffset;
+    final double end = start + constraints.remainingPaintExtent;
+    double nearest = double.infinity;
+    for (
+      RenderBox? child = list.firstChild;
+      child != null;
+      child = list.childAfter(child)
+    ) {
+      final double? offset =
+          (child.parentData! as SliverMultiBoxAdaptorParentData).layoutOffset;
+      if (offset == null || !child.hasSize) {
+        continue;
+      }
+      final bool onScreen = offset + child.size.height > start && offset < end;
+      if (onScreen && (offset - start).abs() < nearest) {
+        nearest = (offset - start).abs();
+        _anchor = child;
+        _anchorOffset = offset;
+      }
+    }
+  }
+
+  /// The list of bubbles under [object]: the first one, the others are
+  /// inside it.
+  static RenderSliverMultiBoxAdaptor? _listIn(RenderObject object) {
+    if (object is RenderSliverMultiBoxAdaptor) {
+      return object;
+    }
+    RenderSliverMultiBoxAdaptor? found;
+    object.visitChildren((RenderObject child) {
+      found ??= _listIn(child);
+    });
+    return found;
+  }
+
+  @override
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    // The first layout: a conversation opens at its newest message.
+    final bool first = !haveDimensions;
+    if (!super.applyContentDimensions(minScrollExtent, maxScrollExtent)) {
+      return false;
+    }
+    if (first) {
+      return _keepLatest(_latest(minScrollExtent, maxScrollExtent));
+    }
+    if (!_keepPlace()) {
+      return false;
+    }
+    _scheduleAnchor();
+    return true;
+  }
+
+  @override
+  void correctBy(double correction) {
+    // The list moved its bubbles and the offset together (it measured some
+    // it had only estimated): nothing the reader would see.
+    _anchorOffset += correction;
+    super.correctBy(correction);
+  }
+
+  @override
+  bool correctForNewDimensions(
+    ScrollMetrics oldPosition,
+    ScrollMetrics newPosition,
+  ) {
+    if (owner._following && !_userScrolling) {
+      return _keepLatest(
+        _latest(newPosition.minScrollExtent, newPosition.maxScrollExtent),
+      );
+    }
+    return super.correctForNewDimensions(oldPosition, newPosition);
+  }
+
+  @override
+  void notifyListeners() {
+    owner._moved(this);
+    super.notifyListeners();
+  }
+}
 
 /// Puts a round "down to the newest message" button over the bottom-right
 /// corner of a conversation's list ([child]), above the composer.
