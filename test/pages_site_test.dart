@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,6 +31,31 @@ String _read(String page) => File('$_site/$page').readAsStringSync();
 
 /// The way up from [page] to the root of the site: "", "../", "../../".
 String _up(String page) => '../' * (page.split('/').length - 1);
+
+/// One line per language, `"pl": {...}`, in a page's TEXTS and in the
+/// shared script's COMMON.
+final RegExp _languageLine = RegExp(
+  r'^\s*"([a-z]{2})": (\{.*\}),?\s*$',
+  multiLine: true,
+);
+
+/// The texts of [file] (a page or site.js): language → key → text.
+Map<String, Map<String, String>> _texts(String file) =>
+    <String, Map<String, String>>{
+      for (final RegExpMatch m in _languageLine.allMatches(_read(file)))
+        m.group(1)!: (jsonDecode(m.group(2)!) as Map<String, dynamic>).map(
+          (String k, dynamic v) => MapEntry<String, String>(k, v as String),
+        ),
+    };
+
+/// What a translation must keep of the English text: placeholders, bold,
+/// code and link targets.
+List<String> _markup(String text) => <String>[
+  for (final RegExpMatch m in RegExp(
+    r'\{[a-z]+\}|\*\*|`|\[[^|\]]+\|([^\]]+)\]',
+  ).allMatches(text))
+    m.group(1) ?? m.group(0)!,
+]..sort();
 
 void main() {
   group('the addresses stay', () {
@@ -122,6 +148,110 @@ void main() {
       for (final String page in _pages) {
         expect(_read(page), contains('"en": {'), reason: page);
       }
+    });
+
+    test('every text table is valid JSON in 21 languages with the English '
+        'keys, placeholders, bold and links', () {
+      for (final String file in <String>[..._pages, 'site.js']) {
+        final Map<String, Map<String, String>> texts = _texts(file);
+        expect(texts, hasLength(21), reason: file);
+        final Map<String, String> en = texts['en']!;
+        for (final MapEntry<String, Map<String, String>> lang
+            in texts.entries) {
+          expect(
+            lang.value.keys.toSet(),
+            en.keys.toSet(),
+            reason: '$file ${lang.key}',
+          );
+          for (final MapEntry<String, String> text in lang.value.entries) {
+            expect(
+              _markup(text.value),
+              _markup(en[text.key]!),
+              reason: '$file ${lang.key} ${text.key}',
+            );
+          }
+        }
+      }
+    });
+  });
+
+  group('honest and reassuring', () {
+    test('the guide says how to get the account back, with friends, next to '
+        'the missing "forgot password" e-mail', () {
+      final Map<String, Map<String, String>> guide = _texts('guide/index.html');
+      final Map<String, List<String>> words = <String, List<String>>{
+        'en': <String>[
+          'forgot password',
+          'key copy',
+          'recovery circle',
+          'friends',
+        ],
+        'pl': <String>[
+          'zapomniałem hasła',
+          'kopię klucza',
+          'krąg odzyskiwania',
+          'znajom',
+        ],
+      };
+      for (final MapEntry<String, List<String>> lang in words.entries) {
+        final String start = guide[lang.key]!['start_3']!;
+        for (final String word in lang.value) {
+          expect(start, contains(word), reason: '${lang.key}: $word');
+        }
+      }
+      // All the ways back, the circle's friends among them, before the
+      // caveat.
+      final String backEn = guide['en']!['lock_3']!;
+      final String backPl = guide['pl']!['lock_3']!;
+      for (final String way in <String>[
+        'another device',
+        'full account copy',
+        'key copy',
+        'recovery circle',
+        'friends',
+      ]) {
+        expect(backEn, contains(way), reason: way);
+      }
+      for (final String way in <String>[
+        'drugiego urządzenia',
+        'kopii całego konta',
+        'kopii klucza',
+        'kręgu odzyskiwania',
+        'znajomych',
+      ]) {
+        expect(backPl, contains(way), reason: way);
+      }
+      expect(
+        backEn.indexOf('recovery circle'),
+        lessThan(backEn.indexOf('cannot')),
+      );
+      expect(backPl.indexOf('kręgu'), lessThan(backPl.indexOf('nie da się')));
+    });
+
+    test('Zen runs no servers of its own, but never claims no server at '
+        'all: public mesh nodes exist', () {
+      for (final String page in <String>['index.html', 'about/index.html']) {
+        final Map<String, Map<String, String>> texts = _texts(page);
+        for (final String key in <String>['lead', 'desc']) {
+          final String en = texts['en']![key]!.toLowerCase();
+          final String pl = texts['pl']![key]!.toLowerCase();
+          expect(en, contains('no servers of its own'), reason: '$page $key');
+          expect(pl, contains('bez własnych serwerów'), reason: '$page $key');
+        }
+      }
+      expect(
+        _texts('about/index.html')['en']!['what_1'],
+        contains('public nodes run by volunteers'),
+      );
+    });
+
+    test('the iPhone page tells how to receive all the time, not only while '
+        'Zen is open', () {
+      final Map<String, Map<String, String>> iphone = _texts(
+        'install/iphone/index.html',
+      );
+      expect(iphone['en']!['limit'], contains('Settings → Background work'));
+      expect(iphone['pl']!['limit'], contains('Ustawienia → Praca w tle'));
     });
   });
 
