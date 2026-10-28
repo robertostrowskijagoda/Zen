@@ -98,6 +98,7 @@ import 'package:zen/src/features/settings/presentation/notification_privacy_choi
 import 'package:zen/src/features/settings/presentation/page_title.dart';
 import 'package:zen/src/features/settings/presentation/public_peers_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_limits_section.dart';
+import 'package:zen/src/features/settings/presentation/storage_usage_section.dart';
 import 'package:zen/src/features/shell/presentation/health_screen.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';

@@ -31,6 +31,7 @@ final class FeedMaintenance {
     this.posts,
     this.reach,
     this.mentions,
+    this.feedLimitBytes,
   });
 
   final LedgerNode node;
@@ -45,6 +46,10 @@ final class FeedMaintenance {
   /// Tells people of their mentions in this account's posts and comments,
   /// and this person of theirs.
   final PostMentionService? mentions;
+
+  /// What other people's posts may take together (the limit the person
+  /// set for them); `null` or `0` = no limit of their own.
+  final int Function()? feedLimitBytes;
 
   Timer? _first;
 
@@ -90,6 +95,7 @@ final class FeedMaintenance {
       final RetentionResult result = await enforceStorageLimits(
         node,
         held: reach?.heldEntries ?? const <LogEntry>[],
+        feedLimitBytes: _feedLimit(),
       );
       cleaned = RetentionResult(
         expiredFiles: cleaned.expiredFiles + result.expiredFiles,
@@ -104,6 +110,11 @@ final class FeedMaintenance {
     } finally {
       _enforcing = false;
     }
+  }
+
+  int? _feedLimit() {
+    final int bytes = feedLimitBytes?.call() ?? 0;
+    return bytes > 0 ? bytes : null;
   }
 
   void dispose() {
@@ -154,6 +165,8 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
   final FeedMaintenance maintenance = FeedMaintenance(
     node: node,
     reach: reach,
+    feedLimitBytes: () =>
+        ref.read(appSettingsControllerProvider).feedLimitMb * 1024 * 1024,
     mentions: PostMentionService(
       node: node,
       nameOf: nameOf,

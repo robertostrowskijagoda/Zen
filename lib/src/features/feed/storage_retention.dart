@@ -16,6 +16,8 @@ import 'package:zen/src/features/profile/profile_gallery.dart';
 //  * Photos and videos of friends: at most 2 GB per person.
 //  * Photos and videos of people who are not friends (followed accounts,
 //    posts reshared from afar): a cache of 1 GB.
+//  * Everything of other people's posts together: at most the limit the
+//    person set for it (none unless they set one), oldest first.
 //
 // The signed entries themselves stay in the log (a hash chain cannot lose
 // its first links without losing its proof); they are a few hundred bytes
@@ -71,6 +73,7 @@ final class RetentionPlan {
     this.expired = const <StoredMedia>[],
     this.overPersonLimit = const <StoredMedia>[],
     this.overCache = const <StoredMedia>[],
+    this.overFeed = const <StoredMedia>[],
   });
 
   /// Friends' files older than [kFriendEntriesKept].
@@ -82,14 +85,22 @@ final class RetentionPlan {
   /// Other people's files over the 1 GB cache (oldest first).
   final List<StoredMedia> overCache;
 
+  /// What is left of other people's files over the limit the person set
+  /// for all of them together (oldest first).
+  final List<StoredMedia> overFeed;
+
   Iterable<StoredMedia> get all sync* {
     yield* expired;
     yield* overPersonLimit;
     yield* overCache;
+    yield* overFeed;
   }
 
   bool get isEmpty =>
-      expired.isEmpty && overPersonLimit.isEmpty && overCache.isEmpty;
+      expired.isEmpty &&
+      overPersonLimit.isEmpty &&
+      overCache.isEmpty &&
+      overFeed.isEmpty;
 
   int get bytes => all.fold<int>(0, (int sum, StoredMedia m) => sum + m.bytes);
 }
@@ -101,13 +112,15 @@ int _oldestFirst(StoredMedia a, StoredMedia b) {
 
 /// Which of [media] go, at [nowMillis]: friends' files older than [kept]
 /// first, then the oldest of what is left until each friend is within
-/// [perPersonBytes] and everybody else within [cacheBytes].
+/// [perPersonBytes] and everybody else within [cacheBytes]. With
+/// [feedBytes] the oldest of what is still left go until all of it fits.
 RetentionPlan planStorageRetention(
   Iterable<StoredMedia> media, {
   required int nowMillis,
   Duration kept = kFriendEntriesKept,
   int perPersonBytes = kCircleMediaPerPersonBytes,
   int cacheBytes = kMediaCacheBytes,
+  int? feedBytes,
 }) {
   final int cutoff = nowMillis - kept.inMilliseconds;
   final List<StoredMedia> expired = <StoredMedia>[];
@@ -127,10 +140,27 @@ RetentionPlan planStorageRetention(
   for (final List<StoredMedia> files in perFriend.values) {
     overPerson.addAll(_oldestOver(files, perPersonBytes));
   }
+  overPerson.sort(_oldestFirst);
+  final List<StoredMedia> overCache = _oldestOver(cache, cacheBytes);
+  final List<StoredMedia> overFeed = <StoredMedia>[];
+  if (feedBytes != null && feedBytes >= 0) {
+    final Set<String> going = <String>{
+      for (final StoredMedia m in expired) m.id,
+      for (final StoredMedia m in overPerson) m.id,
+      for (final StoredMedia m in overCache) m.id,
+    };
+    overFeed.addAll(
+      _oldestOver(<StoredMedia>[
+        for (final StoredMedia m in media)
+          if (!going.contains(m.id)) m,
+      ], feedBytes),
+    );
+  }
   return RetentionPlan(
     expired: expired..sort(_oldestFirst),
-    overPersonLimit: overPerson..sort(_oldestFirst),
-    overCache: _oldestOver(cache, cacheBytes),
+    overPersonLimit: overPerson,
+    overCache: overCache,
+    overFeed: overFeed,
   );
 }
 
@@ -253,15 +283,19 @@ List<StoredMedia> storedMediaOf(
   return out;
 }
 
-/// How much of the limits is used now (the "Limity przechowywania" page).
+/// How much of the limits is used now (the "Dane i pamięć" page).
 @immutable
 final class StorageUsage {
   const StorageUsage({
+    this.friendBytes = 0,
     this.largestFriendBytes = 0,
     this.friendFiles = 0,
     this.cacheBytes = 0,
     this.cacheFiles = 0,
   });
+
+  /// Photos and videos of all friends together.
+  final int friendBytes;
 
   /// Photos and videos of the friend who has the most on this phone.
   final int largestFriendBytes;
@@ -270,6 +304,9 @@ final class StorageUsage {
   /// Photos and videos of everyone who is not a friend.
   final int cacheBytes;
   final int cacheFiles;
+
+  /// Everything of other people's posts.
+  int get feedBytes => friendBytes + cacheBytes;
 }
 
 StorageUsage storageUsageOf(Iterable<StoredMedia> media) {
@@ -287,6 +324,7 @@ StorageUsage storageUsageOf(Iterable<StoredMedia> media) {
     }
   }
   return StorageUsage(
+    friendBytes: perFriend.values.fold<int>(0, (int sum, int b) => sum + b),
     largestFriendBytes: perFriend.values.fold<int>(
       0,
       (int most, int bytes) => bytes > most ? bytes : most,
@@ -322,6 +360,7 @@ Future<RetentionResult> enforceStorageLimits(
   LedgerNode node, {
   int? nowMillis,
   Iterable<LogEntry> held = const <LogEntry>[],
+  int? feedLimitBytes,
 }) async {
   await node.start();
   if (node.isSuspended) {
@@ -349,6 +388,7 @@ Future<RetentionResult> enforceStorageLimits(
   final RetentionPlan plan = planStorageRetention(
     storedMediaOf(node, held: held),
     nowMillis: nowMillis ?? DateTime.now().millisecondsSinceEpoch,
+    feedBytes: feedLimitBytes,
   );
   if (plan.isEmpty) {
     return RetentionResult(
@@ -369,6 +409,7 @@ Future<RetentionResult> enforceStorageLimits(
   for (final StoredMedia m in <StoredMedia>[
     ...plan.overPersonLimit,
     ...plan.overCache,
+    ...plan.overFeed,
   ]) {
     if (await node.blobs.expire(m.id)) {
       limitFiles++;

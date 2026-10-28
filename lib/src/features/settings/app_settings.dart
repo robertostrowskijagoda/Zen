@@ -437,6 +437,7 @@ enum GroupInviteFrom {
 final class AppSettings {
   const AppSettings({
     this.inboxLimitMb = defaultInboxLimitMb,
+    this.feedLimitMb = 0,
     this.autoCleanupDays = defaultAutoCleanupDays,
     this.lockMode = defaultLockMode,
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
@@ -473,7 +474,7 @@ final class AppSettings {
     this.notificationsSeenMillis = 0,
   });
 
-  static const int defaultInboxLimitMb = 100;
+  static const int defaultInboxLimitMb = 1024;
   static const int minimumInboxLimitMb = 5;
   static const int defaultAutoCleanupDays = 0;
 
@@ -491,6 +492,10 @@ final class AppSettings {
       NotificationPrivacy.senderAndContent;
 
   final int inboxLimitMb;
+
+  /// What other people's posts (their photos and videos) may take on this
+  /// phone; 0 = no limit of their own, they share the whole [inboxLimitMb].
+  final int feedLimitMb;
   final int autoCleanupDays;
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
@@ -666,10 +671,36 @@ final class AppSettings {
 
   String get inboxLimitLabel => inboxUnlimited
       ? t('Bez limitu')
-      : t('{size} MB', <String, Object?>{'size': inboxLimitMb});
+      : storageLimitLabel(inboxLimitMb);
+
+  /// `512 MB` / `1 GB` / `1.5 GB` for a limit in MB.
+  static String storageLimitLabel(int mb) {
+    if (mb < 1024) {
+      return t('{size} MB', <String, Object?>{'size': mb});
+    }
+    final double gb = mb / 1024;
+    return t('{size} GB', <String, Object?>{
+      'size': gb == gb.roundToDouble() ? gb.round() : gb.toStringAsFixed(1),
+    });
+  }
+
+  /// The values of the storage limit sliders, in MB.
+  static const List<int> storageLimitStepsMb = <int>[
+    10,
+    25,
+    50,
+    100,
+    250,
+    500,
+    1024,
+    2048,
+    5120,
+    10240,
+  ];
 
   AppSettings copyWith({
     int? inboxLimitMb,
+    int? feedLimitMb,
     int? autoCleanupDays,
     AppLockMode? lockMode,
     int? backgroundLockDelaySeconds,
@@ -707,6 +738,7 @@ final class AppSettings {
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
+      feedLimitMb: normalizeInboxLimitMb(feedLimitMb ?? this.feedLimitMb),
       autoCleanupDays: normalizeAutoCleanupDays(
         autoCleanupDays ?? this.autoCleanupDays,
       ),
@@ -800,6 +832,7 @@ final class AppSettings {
   /// default, so a new setting needs no format version.
   Map<String, Object> toJson() => <String, Object>{
     'inboxLimitMb': inboxLimitMb,
+    'feedLimitMb': feedLimitMb,
     'autoCleanupDays': autoCleanupDays,
     'lockMode': lockMode.name,
     'backgroundLockDelaySeconds': backgroundLockDelaySeconds,
@@ -856,6 +889,7 @@ final class AppSettings {
 
     return const AppSettings().copyWith(
       inboxLimitMb: pick<int>('inboxLimitMb'),
+      feedLimitMb: pick<int>('feedLimitMb'),
       autoCleanupDays: pick<int>('autoCleanupDays'),
       lockMode: byName(AppLockMode.values, 'lockMode'),
       backgroundLockDelaySeconds: pick<int>('backgroundLockDelaySeconds'),

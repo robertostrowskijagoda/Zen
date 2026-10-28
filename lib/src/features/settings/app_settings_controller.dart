@@ -88,6 +88,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(inboxLimitMb: value));
   }
 
+  Future<void> setFeedLimitMb(int value) async {
+    await _save(state.copyWith(feedLimitMb: value));
+  }
+
   Future<void> setAutoCleanupDays(int value) async {
     await _save(state.copyWith(autoCleanupDays: value));
   }

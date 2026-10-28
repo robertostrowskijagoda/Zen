@@ -112,6 +112,46 @@ void main() {
       expect(plan.overPersonLimit, isEmpty);
     });
 
+    test('no limit of its own for the wall deletes nothing extra', () {
+      final RetentionPlan plan = planStorageRetention(<StoredMedia>[
+        _file('a', 500 * _mb, 1),
+        _file('b', 500 * _mb, 2, owner: StoredMediaOwner.cache),
+      ], nowMillis: now);
+      expect(plan.overFeed, isEmpty);
+      expect(plan.isEmpty, isTrue);
+    });
+
+    test('over the limit set for the wall the oldest go first, friends and '
+        'others alike', () {
+      final RetentionPlan plan = planStorageRetention(
+        <StoredMedia>[
+          _file('friend-old', 40 * _mb, 30),
+          _file('cache-older', 30 * _mb, 60, owner: StoredMediaOwner.cache),
+          _file('friend-new', 40 * _mb, 2, account: 'cela'),
+          _file('cache-new', 30 * _mb, 1, owner: StoredMediaOwner.cache),
+        ],
+        nowMillis: now,
+        feedBytes: 80 * _mb,
+      );
+      // 140 MB held, 80 allowed: the two oldest (70 MB) leave, 70 stay.
+      expect(_ids(plan.overFeed), <String>{'cache-older', 'friend-old'});
+      expect(plan.overPersonLimit, isEmpty);
+      expect(plan.overCache, isEmpty);
+    });
+
+    test('what the older limits already delete is not counted twice', () {
+      final RetentionPlan plan = planStorageRetention(
+        <StoredMedia>[
+          _file('expired', 60 * _mb, 500),
+          _file('kept', 60 * _mb, 3),
+        ],
+        nowMillis: now,
+        feedBytes: 70 * _mb,
+      );
+      expect(_ids(plan.expired), <String>{'expired'});
+      expect(plan.overFeed, isEmpty);
+    });
+
     test('usage tells the largest friend and the cache', () {
       final StorageUsage usage = storageUsageOf(<StoredMedia>[
         _file('a', 5 * _mb, 1),
@@ -120,6 +160,8 @@ void main() {
         _file('d', 3 * _mb, 1, owner: StoredMediaOwner.cache),
       ]);
       expect(usage.largestFriendBytes, 20 * _mb);
+      expect(usage.friendBytes, 32 * _mb);
+      expect(usage.feedBytes, 35 * _mb);
       expect(usage.friendFiles, 3);
       expect(usage.cacheBytes, 3 * _mb);
       expect(usage.cacheFiles, 1);
@@ -199,6 +241,31 @@ void main() {
       expect(b.blobs.isComplete(theirs), isTrue);
       expect(b.blobs.isComplete(mine), isFalse);
     });
+
+    test(
+      'a limit for the wall deletes the oldest friend files, not my own',
+      () async {
+        final (LedgerNode a, LedgerNode b) = await pair();
+        final String mine = await postWithPhoto(a, 'Moje', 1);
+        final String first = await postWithPhoto(b, 'Pierwsze', 2);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final String second = await postWithPhoto(b, 'Drugie', 3);
+        await _settle();
+        expect(a.blobs.isComplete(first), isTrue);
+        expect(a.blobs.isComplete(second), isTrue);
+
+        // No limit of its own: nothing goes.
+        RetentionResult result = await enforceStorageLimits(a);
+        expect(result.files, 0);
+
+        // Room for one of the two (3000 bytes each): the older one goes.
+        result = await enforceStorageLimits(a, feedLimitBytes: 4000);
+        expect(result.limitFiles, 1);
+        expect(a.blobs.isComplete(first), isFalse);
+        expect(a.blobs.isComplete(second), isTrue);
+        expect(a.blobs.isComplete(mine), isTrue);
+      },
+    );
 
     test('the wall leaves out friends\' posts older than 12 months', () async {
       final (LedgerNode a, LedgerNode b) = await pair();

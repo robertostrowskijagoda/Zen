@@ -43,7 +43,6 @@ String formatStorageSize(int bytes) {
 /// anything of your own.
 List<StorageLimitRow> storageLimitRows(AppSettings settings) =>
     <StorageLimitRow>[
-      StorageLimitRow(t('Zdarzenia w skrzynce'), settings.inboxLimitLabel),
       StorageLimitRow(
         t('Jeden plik danych (stan, wiadomości)'),
         formatStorageSize(BinaryCodec.defaultMaxPayloadBytes),
