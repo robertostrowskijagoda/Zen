@@ -1367,93 +1367,95 @@ class _GroupConversationScreenState
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: <Widget>[
                               Padding(
-                                padding: const EdgeInsetsDirectional.fromSTEB(
-                                  4,
-                                  4,
-                                  0,
-                                  4,
+                                padding: const EdgeInsetsDirectional.only(
+                                  start: 4,
                                 ),
-                                child: IconButton(
-                                  key: Key(
-                                    _boardTab
-                                        ? 'group-board-photo-button'
-                                        : 'group-chat-attach-button',
-                                  ),
-                                  tooltip: _boardTab
-                                      ? t('Dodaj zdjęcie')
-                                      : t('Załącznik'),
-                                  onPressed: _attaching
-                                      ? null
-                                      : (_boardTab
-                                            ? _attachBoardPhoto
-                                            : _attach),
-                                  icon: _attaching
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
+                                child: SizedBox.square(
+                                  dimension: kChatComposerRowHeight,
+                                  child: IconButton(
+                                    style: _composerButtonFrame,
+                                    key: Key(
+                                      _boardTab
+                                          ? 'group-board-photo-button'
+                                          : 'group-chat-attach-button',
+                                    ),
+                                    tooltip: _boardTab
+                                        ? t('Dodaj zdjęcie')
+                                        : t('Załącznik'),
+                                    onPressed: _attaching
+                                        ? null
+                                        : (_boardTab
+                                              ? _attachBoardPhoto
+                                              : _attach),
+                                    icon: _attaching
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : Icon(
+                                            Icons.add_circle_outline_rounded,
+                                            color: zen.accent,
                                           ),
-                                        )
-                                      : Icon(
-                                          Icons.add_circle_outline_rounded,
-                                          color: zen.accent,
-                                        ),
+                                  ),
                                 ),
                               ),
                               Expanded(
-                                child: TextField(
-                                  key: const Key('group-chat-composer-field'),
-                                  controller: _composerController,
-                                  enableIMEPersonalizedLearning: false,
-                                  textCapitalization:
-                                      TextCapitalization.sentences,
-                                  style: TextStyle(
-                                    color: zen.textPrimary,
-                                    fontSize: 15,
-                                    height: 1.35,
+                                // At least the send button's height, the
+                                // text on its centre line.
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: kChatComposerRowHeight,
                                   ),
-                                  decoration: InputDecoration(
-                                    hintText: _boardTab
-                                        ? t('Napisz post na tablicę grupy...')
-                                        : t('Napisz wiadomość do grupy...'),
-                                    hintStyle: TextStyle(
-                                      color: zen.textMuted,
-                                      fontSize: 14.5,
-                                    ),
-                                    filled: false,
-                                    isDense: true,
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    contentPadding:
-                                        const EdgeInsetsDirectional.fromSTEB(
-                                          18,
-                                          13,
-                                          8,
-                                          13,
+                                  child: Align(
+                                    alignment: AlignmentDirectional.centerStart,
+                                    child: TextField(
+                                      key: const Key(
+                                        'group-chat-composer-field',
+                                      ),
+                                      controller: _composerController,
+                                      enableIMEPersonalizedLearning: false,
+                                      textCapitalization:
+                                          TextCapitalization.sentences,
+                                      style: TextStyle(
+                                        color: zen.textPrimary,
+                                        fontSize: 15,
+                                        height: 1.35,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText: _boardTab
+                                            ? t('Napisz post na tablicę grupy...')
+                                            : t('Napisz wiadomość do grupy...'),
+                                        hintStyle: TextStyle(
+                                          color: zen.textMuted,
+                                          fontSize: 14.5,
                                         ),
+                                        filled: false,
+                                        isDense: true,
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        contentPadding:
+                                            kChatComposerFieldPadding,
+                                      ),
+                                      onSubmitted: (_) => _sendMessage(),
+                                    ),
                                   ),
-                                  onSubmitted: (_) => _sendMessage(),
                                 ),
                               ),
                               Padding(
-                                padding: const EdgeInsetsDirectional.fromSTEB(
-                                  2,
-                                  4,
-                                  4,
-                                  4,
+                                padding: const EdgeInsetsDirectional.only(
+                                  start: 2,
                                 ),
                                 child: IconButton.filled(
                                   key: const Key('group-chat-send-button'),
                                   style: IconButton.styleFrom(
                                     backgroundColor: zen.accent,
                                     foregroundColor: zen.onAccent,
-                                    minimumSize: const Size(40, 40),
-                                    fixedSize: const Size(40, 40),
-                                    padding: EdgeInsets.zero,
                                     shape: const CircleBorder(),
-                                  ),
+                                  ).merge(_composerButtonFrame),
                                   icon: const Icon(
                                     Icons.send_rounded,
                                     size: 20,
@@ -1475,6 +1477,19 @@ class _GroupConversationScreenState
     );
   }
 }
+
+/// The composer's buttons: a circle of [kChatComposerSendSize] in the middle
+/// of a tap target as tall as the composer's row ([kChatComposerRowHeight]),
+/// whatever the theme's density. With no padding above or below, the send
+/// button then sits on the text's centre line, in the middle of the row's
+/// rounded end.
+const ButtonStyle _composerButtonFrame = ButtonStyle(
+  fixedSize: WidgetStatePropertyAll<Size>(Size.square(kChatComposerSendSize)),
+  minimumSize: WidgetStatePropertyAll<Size>(Size.square(kChatComposerSendSize)),
+  padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(EdgeInsets.zero),
+  tapTargetSize: MaterialTapTargetSize.padded,
+  visualDensity: VisualDensity.standard,
+);
 
 class _PendingInviteBanner extends StatelessWidget {
   const _PendingInviteBanner({

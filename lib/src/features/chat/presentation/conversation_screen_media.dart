@@ -106,73 +106,81 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
                 Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    child: _isRecordingVoice
-                        ? _RecordingComposerStatus(
-                            key: const ValueKey<String>('recording-composer'),
-                            elapsed: _recordingElapsed,
-                          )
-                        : TextField(
-                            key: const Key('conversation-composer-field'),
-                            controller: _composerController,
-                            // GIFs and stickers from the keyboard (Android's
-                            // rich content): a GIF stays animated.
-                            contentInsertionConfiguration: canCompose
-                                ? ContentInsertionConfiguration(
-                                    onContentInserted:
-                                        (KeyboardInsertedContent content) =>
-                                            unawaited(
-                                              _sendKeyboardContent(content),
-                                            ),
-                                  )
-                                : null,
-                            // iPhone keyboards copy GIFs to the clipboard:
-                            // "Wklej obrazek" in the field's menu sends one.
-                            contextMenuBuilder: picturePasteMenu(
-                              _sendTransferred,
-                            ),
-                            // Keyboard must not learn what you write.
-                            enableIMEPersonalizedLearning: false,
-                            enabled: canText && !_isRecordingBusy,
-                            minLines: 1,
-                            maxLines: 6,
-                            textCapitalization: TextCapitalization.sentences,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 15,
-                              height: 1.35,
-                            ),
-                            decoration: InputDecoration(
-                              filled: false,
-                              isDense: true,
-                              contentPadding:
-                                  const EdgeInsetsDirectional.fromSTEB(
-                                    18,
-                                    13,
-                                    8,
-                                    13,
+                  // One line: as tall as the send button's place, its text
+                  // on the button's centre line. Longer, it grows and the
+                  // button stays at the bottom.
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: kChatComposerRowHeight,
+                    ),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        child: _isRecordingVoice
+                            ? _RecordingComposerStatus(
+                                key: const ValueKey<String>(
+                                  'recording-composer',
+                                ),
+                                elapsed: _recordingElapsed,
+                              )
+                            : TextField(
+                                key: const Key('conversation-composer-field'),
+                                controller: _composerController,
+                                // GIFs and stickers from the keyboard (Android's
+                                // rich content): a GIF stays animated.
+                                contentInsertionConfiguration: canCompose
+                                    ? ContentInsertionConfiguration(
+                                        onContentInserted:
+                                            (KeyboardInsertedContent content) =>
+                                                unawaited(
+                                                  _sendKeyboardContent(content),
+                                                ),
+                                      )
+                                    : null,
+                                // iPhone keyboards copy GIFs to the clipboard:
+                                // "Wklej obrazek" in the field's menu sends one.
+                                contextMenuBuilder: picturePasteMenu(
+                                  _sendTransferred,
+                                ),
+                                // Keyboard must not learn what you write.
+                                enableIMEPersonalizedLearning: false,
+                                enabled: canText && !_isRecordingBusy,
+                                minLines: 1,
+                                maxLines: 6,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                style: TextStyle(
+                                  color: zen.textPrimary,
+                                  fontSize: 15,
+                                  height: 1.35,
+                                ),
+                                decoration: InputDecoration(
+                                  filled: false,
+                                  isDense: true,
+                                  contentPadding: kChatComposerFieldPadding,
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  disabledBorder: InputBorder.none,
+                                  hintStyle: TextStyle(
+                                    color: zen.textMuted,
+                                    fontSize: 14.5,
                                   ),
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              disabledBorder: InputBorder.none,
-                              hintStyle: TextStyle(
-                                color: zen.textMuted,
-                                fontSize: 14.5,
+                                  hintText: canCompose
+                                      ? t('Wiadomość…')
+                                      : canText
+                                      ? t('Wiadomość (tylko tekst)…')
+                                      : t(
+                                          'Rozmowa odblokuje się po akceptacji '
+                                          'relacji',
+                                        ),
+                                ),
                               ),
-                              hintText: canCompose
-                                  ? t('Wiadomość…')
-                                  : canText
-                                  ? t('Wiadomość (tylko tekst)…')
-                                  : t(
-                                      'Rozmowa odblokuje się po akceptacji '
-                                      'relacji',
-                                    ),
-                            ),
-                          ),
+                      ),
+                    ),
                   ),
                 ),
                 ValueListenableBuilder<TextEditingValue>(
@@ -193,15 +201,9 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                             ? _sendMessage
                             : null;
                         return Padding(
-                          padding: const EdgeInsetsDirectional.fromSTEB(
-                            2,
-                            4,
-                            4,
-                            4,
-                          ),
-                          child: SizedBox(
-                            width: 40,
-                            height: 40,
+                          padding: kChatComposerSendPadding,
+                          child: SizedBox.square(
+                            dimension: kChatComposerSendSize,
                             child: _isRecordingVoice
                                 ? IconButton.filled(
                                     key: const Key(
@@ -307,10 +309,11 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     }
     // The sender fetches the GIF and sends its bytes as an ordinary image
     // attachment: the recipient never contacts the GIF host, and the bytes
-    // pass through media_guard on arrival like any other image.
+    // pass through media_guard on arrival like any other image. A copy
+    // small enough to go in the message itself, as from the keyboard.
     final Uint8List bytes;
     try {
-      bytes = await ref.read(gifDownloaderProvider).download(entry.sendUrl);
+      bytes = await downloadGifToSend(ref.read(gifDownloaderProvider), entry);
     } on Object {
       if (mounted) {
         _showComposerSnackBar(t('Nie udało się pobrać GIF-a.'));
@@ -787,6 +790,25 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
+
+/// The send button of a chat composer (1:1 and groups): a circle this wide.
+const double kChatComposerSendSize = 40;
+
+/// Around the send button of a chat: as much above, below and after it, so
+/// it sits in the middle of the rounded end of the composer.
+const EdgeInsetsDirectional kChatComposerSendPadding =
+    EdgeInsetsDirectional.fromSTEB(2, 4, 4, 4);
+
+/// The height of a chat composer's row with a one-line message: the send
+/// button and the space around it (a full tap target). The text field is
+/// at least this tall, with its text in the middle, so the button sits on
+/// its centre line.
+const double kChatComposerRowHeight = kMinInteractiveDimension;
+
+/// Inside the composer's text field. One line of text with this padding
+/// fits [kChatComposerRowHeight] also with a larger system font.
+const EdgeInsetsDirectional kChatComposerFieldPadding =
+    EdgeInsetsDirectional.fromSTEB(18, 10, 8, 10);
 
 class _ComposerActionButton extends StatelessWidget {
   const _ComposerActionButton({

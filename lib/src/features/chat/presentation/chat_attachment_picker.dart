@@ -281,7 +281,7 @@ Future<PickedChatAttachment?> _fromGifSearch(
   // host, and the bytes pass through the media guard like any picture.
   final Uint8List bytes;
   try {
-    bytes = await ref.read(gifDownloaderProvider).download(entry.sendUrl);
+    bytes = await downloadGifToSend(ref.read(gifDownloaderProvider), entry);
   } on Object {
     throw FormatException(t('Nie udało się pobrać GIF-a.'));
   }
