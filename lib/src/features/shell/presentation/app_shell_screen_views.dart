@@ -2332,11 +2332,11 @@ class _DataSectionState extends ConsumerState<_DataSection> {
             key: const Key('settings-inbox-unlimited-switch'),
             value: settings.inboxUnlimited,
             contentPadding: EdgeInsets.zero,
-            title: Text(t('Bez limitu zdarzeń')),
+            title: Text(t('Bez limitu miejsca')),
             subtitle: Text(
               t(
-                'Wyłączenie limitu zostawia 0 jako spójną wartość '
-                '"nigdy nie czyść".',
+                'Zen nie usuwa wtedy niczego z powodu zajętego miejsca, '
+                'poza osobnym limitem postów znajomych.',
               ),
               style: TextStyle(color: zen.textSecondary, height: 1.35),
             ),
@@ -2361,7 +2361,7 @@ class _DataSectionState extends ConsumerState<_DataSection> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          t('Limit zdarzeń: {limit}', {
+                          t('Limit miejsca: {limit}', {
                             'limit': settings.inboxLimitLabel,
                           }),
                           key: const Key('settings-inbox-limit-label'),
