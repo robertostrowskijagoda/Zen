@@ -281,23 +281,6 @@ const Map<String, String> _knownFindings = <String, String>{
   // backup) throws out of the first step of the start-up: the app never
   // gets past the logo until its data is wiped.
   'FileAppSettingsStore.load': 'R5-#22',
-  // A damaged file of the ledger (its keys, its identity, an archive part)
-  // throws out of LedgerNode._start: posts, profiles and the account's
-  // devices stay off for the whole session, and FollowLedger leaves the
-  // error unhandled (follows.dart, `_ready = _start()`).
-  'LedgerNode._start': 'R5-#8',
-  'LedgerNode._loadKeys': 'R5-#8',
-  'LedgerIdentity._load': 'R5-#8',
-  'LedgerArchive.': 'R5-#8',
-  // A damaged relay state (outbox, mailboxes, mail held for friends)
-  // throws out of RelayEngine._load on every send: nothing goes out.
-  'FileRelayStateStore.load': 'R5-F1',
-  // A damaged conversation file throws out of every append: that friend
-  // cannot be written to (nor written by).
-  'FileMessageTimelineStore._open': 'R5-F2',
-  // Logging that error asserts in a debug build: debugPrintStack with a
-  // chained trace ('===== asynchronous gap =====').
-  'stack_frame.dart': 'R5-F3',
 };
 
 String? _knownFinding(String problem) {

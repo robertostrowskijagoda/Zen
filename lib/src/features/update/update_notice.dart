@@ -7,6 +7,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 
@@ -272,16 +273,31 @@ final class FileUpdateNoticeStore implements UpdateNoticeStore {
     return File('${dir.path}${Platform.pathSeparator}$kUpdateNoticeFileName');
   }
 
+  /// The state kept; nothing kept when the file is missing or cannot be
+  /// read. A damaged file is set aside ([setAsideDamagedFile]): read as
+  /// nothing kept again and again, it would never be written over while
+  /// nothing changed.
   @override
   Future<UpdateNoticeState> read() async {
+    final File file;
+    final String text;
     try {
-      final File file = await _file();
+      file = await _file();
       if (!await file.exists()) {
         return const UpdateNoticeState();
       }
-      return UpdateNoticeState.fromJson(jsonDecode(await file.readAsString()));
+      text = await file.readAsString();
+    } on FormatException catch (error) {
+      await setAsideDamagedFile(await _file(), error);
+      return const UpdateNoticeState();
     } on Object catch (error) {
       logZenWarning('Reading the update check state failed: $error');
+      return const UpdateNoticeState();
+    }
+    try {
+      return UpdateNoticeState.fromJson(jsonDecode(text));
+    } on Object catch (error) {
+      await setAsideDamagedFile(file, error);
       return const UpdateNoticeState();
     }
   }
