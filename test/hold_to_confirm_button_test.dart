@@ -139,4 +139,23 @@ void main() {
     expect(confirmed, 0);
     expect(ring(tester), 0);
   });
+
+  testWidgets('animations turned off do not shorten the ten seconds', (
+    WidgetTester tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await pumpButton(tester);
+    final TestGesture gesture = await tester.startGesture(
+      tester.getCenter(find.byType(HoldToConfirmButton)),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 9));
+    expect(confirmed, 0);
+    expect(ring(tester), closeTo(0.9, 0.001));
+    await tester.pump(const Duration(seconds: 1));
+    expect(confirmed, 1);
+    await gesture.up();
+  });
 }

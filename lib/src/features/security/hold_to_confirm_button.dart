@@ -46,6 +46,10 @@ class _HoldToConfirmButtonState extends State<HoldToConfirmButton>
   late final AnimationController _progress = AnimationController(
     vsync: this,
     duration: widget.duration,
+    // A safety delay, not an animation: with "remove animations" turned on
+    // Android asks Flutter to shorten normal animations 20x, which made the
+    // 10-second hold finish in half a second.
+    animationBehavior: AnimationBehavior.preserve,
   )..addListener(_onTick);
 
   bool _done = false;
