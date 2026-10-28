@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/quiet_timer.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
@@ -314,7 +315,9 @@ final class FriendPostNotifier {
     required this.privacy,
     this.announcesFar = _never,
     this.farPosts = _noPosts,
-    this.quiet = const Duration(seconds: 10),
+    this.farChanges,
+    this.quiet = const Duration(seconds: 5),
+    this.atMost = const Duration(seconds: 30),
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -351,6 +354,11 @@ final class FriendPostNotifier {
   /// [announcesFar].
   final List<FeedPost> Function() farPosts;
 
+  /// Fires when a post passed on from friends of friends came (they never
+  /// come as entries of this phone's own ledger): its notification follows
+  /// the same quiet time as a friend's post.
+  final Stream<void>? farChanges;
+
   static bool _never() => false;
 
   static List<FeedPost> _noPosts() => const <FeedPost>[];
@@ -358,11 +366,22 @@ final class FriendPostNotifier {
   /// Quiet time before a burst of posts is announced, so a friend's
   /// catching up comes as one notification.
   final Duration quiet;
+
+  /// The longest a post waits for its notification while more keep coming.
+  final Duration atMost;
   final int Function() _now;
 
   StreamSubscription<LogEntry>? _added;
   StreamSubscription<void>? _opened;
-  Timer? _timer;
+  StreamSubscription<void>? _far;
+  late final QuietTimer _timer = QuietTimer(
+    quiet: quiet,
+    atMost: atMost,
+    action: () => unawaitedLogged(
+      check(),
+      context: 'Powiadomienia o postach nie powiodły się',
+    ),
+  );
 
   /// The check under way: the next one waits for it, never runs beside it.
   Future<int>? _running;
@@ -376,6 +395,7 @@ final class FriendPostNotifier {
     });
     // A friends-only post becomes readable once its key arrives.
     _opened ??= node.openedChanges.listen((_) => _schedule());
+    _far ??= farChanges?.listen((_) => _schedule());
     _schedule();
   }
 
@@ -383,14 +403,7 @@ final class FriendPostNotifier {
     if (_disposed) {
       return;
     }
-    _timer?.cancel();
-    _timer = Timer(
-      quiet,
-      () => unawaitedLogged(
-        check(),
-        context: 'Powiadomienia o postach nie powiodły się',
-      ),
-    );
+    _timer.nudge();
   }
 
   /// Once a minute from the app's clock: a look at the Tablica since the
@@ -555,10 +568,12 @@ final class FriendPostNotifier {
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
+    _timer.cancel();
     unawaited(_added?.cancel());
     unawaited(_opened?.cancel());
+    unawaited(_far?.cancel());
     _added = null;
     _opened = null;
+    _far = null;
   }
 }

@@ -120,6 +120,37 @@ void main() {
     expect(posted, hasLength(1));
   });
 
+  test('a steady trickle of reactions is told of while it lasts, not only '
+      'once it calms down', () async {
+    final (LedgerNode a, LedgerNode b) = await pair();
+    final List<RuntimeSystemNotification> posted =
+        <RuntimeSystemNotification>[];
+    final ReactionSystemNotifier notifier = ReactionSystemNotifier(
+      node: a,
+      nameOf: (String address) => address == bob ? 'Bob' : address,
+      notify: (RuntimeSystemNotification n) async => posted.add(n),
+      shouldNotify: () => true,
+      quiet: const Duration(milliseconds: 150),
+      atMost: const Duration(milliseconds: 400),
+    );
+    addTearDown(notifier.dispose);
+    final LogEntry post = await a.publish(kPostKind, newPostBody('Hej'));
+    await _settle();
+    // The first round only learns what is there.
+    expect(await notifier.check(), 0);
+    notifier.start();
+    // A comment every 50 ms for well over a second: never 150 ms of quiet.
+    for (int i = 0; i < 30 && posted.isEmpty; i++) {
+      await b.publish(
+        kCommentKind,
+        commentBody(post.id, 'Komentarz $i'),
+        spaceKind: 'acts',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(posted, isNotEmpty);
+  });
+
   test('the notification title is one that the privacy setting redacts', () {
     const ReactionNotice n = ReactionNotice(
       postId: 'p1',

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/quiet_timer.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_digest.dart';
@@ -32,7 +33,8 @@ final class ReactionSystemNotifier {
     required this.nameOf,
     required this.notify,
     required this.shouldNotify,
-    this.quiet = const Duration(seconds: 20),
+    this.quiet = const Duration(seconds: 5),
+    this.atMost = const Duration(seconds: 30),
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -45,11 +47,25 @@ final class ReactionSystemNotifier {
 
   /// Quiet time before a burst of reactions is announced.
   final Duration quiet;
+
+  /// The longest a reaction waits for its notification while more keep
+  /// coming.
+  final Duration atMost;
   final int Function() _now;
 
   StreamSubscription<LogEntry>? _added;
-  Timer? _timer;
+  late final QuietTimer _timer = QuietTimer(
+    quiet: quiet,
+    atMost: atMost,
+    action: () => unawaitedLogged(
+      check(),
+      context: 'Powiadomienia o reakcjach nie powiodły się',
+    ),
+  );
   bool _busy = false;
+
+  /// News came while a check ran: another one follows it.
+  bool _again = false;
   bool _disposed = false;
 
   void start() {
@@ -68,20 +84,17 @@ final class ReactionSystemNotifier {
     if (_disposed) {
       return;
     }
-    _timer?.cancel();
-    _timer = Timer(
-      quiet,
-      () => unawaitedLogged(
-        check(),
-        context: 'Powiadomienia o reakcjach nie powiodły się',
-      ),
-    );
+    _timer.nudge();
   }
 
   /// Announces what is new under your posts since the last time; returns how
   /// many notifications were posted.
   Future<int> check() async {
-    if (_busy || _disposed) {
+    if (_disposed) {
+      return 0;
+    }
+    if (_busy) {
+      _again = true;
       return 0;
     }
     _busy = true;
@@ -111,12 +124,16 @@ final class ReactionSystemNotifier {
       return notices.length;
     } finally {
       _busy = false;
+      if (_again) {
+        _again = false;
+        _schedule();
+      }
     }
   }
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
+    _timer.cancel();
     unawaited(_added?.cancel());
     _added = null;
   }

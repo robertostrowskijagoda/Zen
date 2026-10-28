@@ -299,6 +299,9 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
               p.degree <= (reach?.depth ?? kDefaultFeedDepth))
             p,
       ],
+      // Told of as soon as such a post is fetched, not only with the next
+      // friend's post.
+      farChanges: reach?.changes,
       privacyOf: friendPrivacy,
       privacy: () =>
           shared(ref.read(appSettingsControllerProvider).notificationPrivacy),

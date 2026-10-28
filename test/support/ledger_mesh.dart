@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -24,6 +25,10 @@ final class LedgerMesh {
 
   /// Phone name → frame type → how many it sent.
   final Map<String, Map<String, int>> sent = <String, Map<String, int>>{};
+
+  /// Set by a test that stops the nodes itself (one on a fake clock, where
+  /// a stop at the tear-down would wait for that clock in vain).
+  bool stoppedByTest = false;
 
   /// The mesh address of phone [name].
   String address(String name) => _addresses.putIfAbsent(
@@ -69,11 +74,13 @@ final class LedgerMesh {
 
   /// Starts the ledger of phone [name] (friends as set so far, and any
   /// set later). With [knowsOwnAddress] the node knows its own mesh
-  /// address, as in the app.
+  /// address, as in the app; with [wallClock] the node reads the time from
+  /// it (a test's fake clock) instead of the device's.
   Future<LedgerNode> add(
     String name, {
     bool autoDownload = true,
     bool knowsOwnAddress = false,
+    int Function()? wallClock,
   }) async {
     final String me = address(name);
     final LedgerMeshLink link = _links[me] = LedgerMeshLink._(this, name, me);
@@ -89,8 +96,9 @@ final class LedgerMesh {
       helloInterval: Duration.zero,
       syncInterval: Duration.zero,
       localAddress: knowsOwnAddress ? () => me : null,
+      clock: wallClock == null ? null : HlcClock(wallClock: wallClock),
     );
-    addTearDown(node.stop);
+    addTearDown(() => stoppedByTest ? null : node.stop());
     await node.start();
     return nodes[name] = node;
   }
