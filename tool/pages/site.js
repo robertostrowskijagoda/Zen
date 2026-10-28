@@ -376,10 +376,45 @@
       if (!Zen.os) { document.getElementById("others").classList.add("hidden"); return; }
       pick.addEventListener("change", function () { show(pick.value || Zen.os); });
     },
-    // Marks the entry of the table of contents (.toc) of the section being read.
+    // The table of contents (.toc): on phones one button with the section
+    // being read that opens the list, and the entry of that section marked.
     toc: function () {
+      var nav = document.querySelector(".toc");
       var links = Array.prototype.slice.call(document.querySelectorAll(".toc a"));
-      if (!links.length || !("IntersectionObserver" in window)) { return; }
+      if (!nav || !links.length) { return; }
+      var list = nav.querySelector("ul");
+      list.id = list.id || "toc-list";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "toc-btn";
+      btn.setAttribute("aria-expanded", "false");
+      btn.setAttribute("aria-controls", list.id);
+      var label = document.createElement("small");
+      var current = document.createElement("span");
+      btn.appendChild(label);
+      btn.appendChild(current);
+      nav.insertBefore(btn, list);
+      nav.classList.add("js");
+      function show(a) {
+        label.textContent = nav.getAttribute("aria-label") + (a ? ":" : "");
+        current.textContent = a ? a.textContent : "";
+      }
+      function open(yes) {
+        nav.classList.toggle("open", yes);
+        btn.setAttribute("aria-expanded", yes ? "true" : "false");
+      }
+      show(null);
+      btn.addEventListener("click", function () { open(!nav.classList.contains("open")); });
+      links.forEach(function (a) { a.addEventListener("click", function () { open(false); }); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape") { open(false); } });
+      document.addEventListener("click", function (e) { if (!nav.contains(e.target)) { open(false); } });
+      // The language switch rewrites the texts: the button follows.
+      var watch = new MutationObserver(function () {
+        show(nav.querySelector('a[aria-current="location"]'));
+      });
+      watch.observe(list, { subtree: true, characterData: true, childList: true });
+      watch.observe(nav, { attributes: true, attributeFilter: ["aria-label"] });
+      if (!("IntersectionObserver" in window)) { return; }
       var byId = {};
       links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
       var observer = new IntersectionObserver(function (entries) {
@@ -388,9 +423,7 @@
           links.forEach(function (a) { a.removeAttribute("aria-current"); });
           var a = byId[e.target.id];
           a.setAttribute("aria-current", "location");
-          // The narrow, scrolling bar keeps the current entry in view.
-          var list = a.parentNode.parentNode;
-          if (list.scrollWidth > list.clientWidth) { list.scrollLeft = a.offsetLeft - 16; }
+          show(a);
         });
       }, { rootMargin: "-20% 0px -70% 0px" });
       Object.keys(byId).forEach(function (id) {
