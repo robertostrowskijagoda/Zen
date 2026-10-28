@@ -22,14 +22,25 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// The gates as the setup sees them, without the introductions service.
 final class _Gates extends ChangeNotifier implements GateDefaults {
-  GateDefault? value = GateDefault.of(GateSettings());
+  @override
+  GateTerms? terms = GateSettings().sameForAll;
 
   @override
-  GateDefault? get current => value;
+  bool member = false;
 
   @override
-  Future<void> set(GateDefault next) async {
-    value = next;
+  GateDefault? get current => switch (terms) {
+    GateTerms.standard => GateDefault.open,
+    GateTerms.freeWithConsent => GateDefault.consent,
+    _ => null,
+  };
+
+  @override
+  Future<void> set(GateDefault next) => setTerms(next.terms);
+
+  @override
+  Future<void> setTerms(GateTerms next) async {
+    terms = next;
     notifyListeners();
   }
 
@@ -161,6 +172,132 @@ void main() {
           .setupPending,
       isTrue,
     );
+  });
+
+  test('a copy of the account taken here keeps this device\'s setup, lock '
+      'and first-start steps; the account\'s choices come from the copy', () {
+    // This device: the setup gone through, a lock, no password chosen.
+    final AppSettings device = const AppSettings().copyWith(
+      setupRevision: kSetupRevision,
+      permissionsSetupDone: true,
+      lockMode: AppLockMode.appClose,
+      allowNoAppPassword: true,
+      legalAcceptedVersion: 'v-now',
+      bluetoothLinks: true,
+    );
+    // A copy from before the setup revisions, with the account's choices.
+    final AppSettings copy = const AppSettings().copyWith(
+      lockMode: AppLockMode.never,
+      legalAcceptedVersion: 'v-old',
+      accentTheme: AppAccentTheme.values.last,
+      notificationPrivacy: NotificationPrivacy.generic,
+      disguiseIcon: true,
+    );
+    final AppSettings taken = device.takingCopy(copy);
+    expect(taken.setupRevision, kSetupRevision);
+    expect(taken.setupPending, isFalse);
+    expect(taken.permissionsSetupDone, isTrue);
+    expect(taken.lockMode, AppLockMode.appClose);
+    expect(taken.allowNoAppPassword, isTrue);
+    expect(taken.legalAcceptedVersion, 'v-now');
+    expect(taken.bluetoothLinks, isTrue);
+    expect(taken.disguiseIcon, isFalse, reason: 'this device\'s launcher');
+    expect(taken.accentTheme, AppAccentTheme.values.last);
+    expect(taken.notificationPrivacy, NotificationPrivacy.generic);
+    // Taken again (the restore picked up after a restart): still done.
+    expect(taken.takingCopy(copy).setupPending, isFalse);
+
+    // A fresh device that skipped nothing yet takes the copy's revision
+    // and terms.
+    final AppSettings fresh = const AppSettings().takingCopy(
+      copy.copyWith(setupRevision: kSetupRevision),
+    );
+    expect(fresh.setupPending, isFalse);
+    expect(fresh.legalAcceptedVersion, 'v-old');
+  });
+
+  test('restoring a copy\'s settings does not bring the setup back', () async {
+    final MemoryAppSettingsStore store = MemoryAppSettingsStore();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        appSettingsStoreProvider.overrideWithValue(store),
+        appSettingsInitialStateProvider.overrideWithValue(
+          const AppSettings(setupRevision: kSetupRevision),
+        ),
+        appSettingsHydrationEnabledProvider.overrideWithValue(false),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(appSettingsControllerProvider.notifier)
+        .restoreFromCopy(AppSettings(palette: AppPalette.values.last));
+    final AppSettings now = container.read(appSettingsControllerProvider);
+    expect(now.setupPending, isFalse);
+    expect(now.palette, AppPalette.values.last);
+    expect((await store.load())!.setupPending, isFalse);
+  });
+
+  testWidgets('the gates step sets a price with the gates\' own editor; '
+      'open for free stays the default', (WidgetTester tester) async {
+    _tallScreen(tester);
+    final _Gates gates = _Gates();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsInitialStateProvider.overrideWithValue(
+            const AppSettings(),
+          ),
+          appSettingsHydrationEnabledProvider.overrideWithValue(false),
+          permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+          gateDefaultsProvider.overrideWithValue(gates),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: const FirstRunSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (int i = 0; i < 2; i++) {
+      await tester.tap(find.byKey(const Key('first-run-next')));
+      await tester.pumpAndSettle();
+    }
+    expect(find.byKey(const Key('first-run-step-gates')), findsOneWidget);
+    ChoiceChip chip(String name) =>
+        tester.widget<ChoiceChip>(find.byKey(Key('first-run-gates-$name')));
+    expect(chip('open').selected, isTrue);
+    expect(chip('paid').selected, isFalse);
+
+    // Cancelled: nothing changes.
+    await tester.tap(find.byKey(const Key('first-run-gates-paid')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('gate-terms-dialog')), findsOneWidget);
+    await tester.tap(find.text('Anuluj'));
+    await tester.pumpAndSettle();
+    expect(gates.terms, GateTerms.standard);
+
+    // The editor opens on a price; saved, every tier gets it.
+    await tester.tap(find.byKey(const Key('first-run-gates-paid')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('gate-price-field')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('gate-price-field')), '5');
+    await tester.tap(find.byKey(const Key('gate-terms-save')));
+    await tester.pumpAndSettle();
+    expect(gates.terms, const GateTerms(price: 500));
+    expect(chip('paid').selected, isTrue);
+    expect(chip('open').selected, isFalse);
+    expect(find.textContaining('5 pkt'), findsOneWidget);
+    // Not in the pyramid: said that nobody outside it can pay.
+    expect(
+      find.textContaining('tylko między członkami piramidy'),
+      findsOneWidget,
+    );
+
+    // Back to free with one tap.
+    await tester.tap(find.byKey(const Key('first-run-gates-open')));
+    await tester.pumpAndSettle();
+    expect(gates.terms, GateTerms.standard);
+    expect(chip('paid').selected, isFalse);
   });
 
   testWidgets('every step can be skipped, and Back (the button and the '
@@ -356,7 +493,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('first-run-gates-consent')));
     await tester.pumpAndSettle();
-    expect(gates.value, GateDefault.consent);
+    expect(gates.current, GateDefault.consent);
     await tester.tap(find.byKey(const Key('first-run-next')));
     await tester.pumpAndSettle();
 
