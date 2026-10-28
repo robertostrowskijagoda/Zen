@@ -186,7 +186,7 @@ class ChatSearchNavigator extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 6, 8, 6),
           child: Row(
             children: <Widget>[
               if (search.busy)
