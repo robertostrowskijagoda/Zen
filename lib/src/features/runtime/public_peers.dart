@@ -431,13 +431,22 @@ class PublicPeersStore {
 
   final Future<File> Function() _file;
 
+  /// The list kept; null for the built-in one. A file that is not JSON is
+  /// set aside ([setAsideDamagedFile]) rather than tried at every start.
   Future<PublicPeerList?> load() async {
     try {
       final File file = await _file();
       if (!await file.exists()) {
         return null;
       }
-      return PublicPeerList.fromJson(jsonDecode(await file.readAsString()));
+      final Object? json;
+      try {
+        json = jsonDecode(await file.readAsString());
+      } on FormatException catch (error) {
+        await setAsideDamagedFile(file, error);
+        return null;
+      }
+      return PublicPeerList.fromJson(json);
     } on Object catch (error) {
       logZenWarning('The public peer list is unreadable: $error');
       return null;
