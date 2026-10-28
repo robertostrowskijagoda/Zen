@@ -30,6 +30,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -282,6 +283,11 @@ final class ZenBootstrapper {
              keyVault: ZenAccounts.current.isDefault
                  ? platformKeyVault()
                  : SharedKeyVault(platformKeyVault()),
+             // Staying open after closing: the default account only (a
+             // start always opens that one).
+             resumeVault: ZenAccounts.current.isDefault
+                 ? platformResumeSessionVault()
+                 : null,
            )),
        _appSettingsStoreBuilder =
            appSettingsStoreBuilder ?? buildZenAppSettingsStoreForDirectory,

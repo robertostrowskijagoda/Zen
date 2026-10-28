@@ -185,12 +185,21 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         // From the first of the two (hidden comes before paused).
+        final bool leaving = _pausedAt == null;
         _pausedAt ??= DateTime.now();
         _startBackgroundLock(security);
+        if (leaving) {
+          // "Nie blokuj od razu po zamknięciu aplikacji": should the system
+          // close Zen now, a start before the delay is over still opens.
+          unawaited(security.keepResumeSession());
+        }
         break;
       case AppLifecycleState.detached:
         if (security.lockMode == AppLockMode.appClose) {
           security.lock();
+        } else if (_pausedAt == null) {
+          // Closed straight from the screen (a computer's window).
+          unawaited(security.keepResumeSession());
         }
         break;
       case AppLifecycleState.resumed:
@@ -201,6 +210,9 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
             DateTime.now().difference(_pausedAt!) >
                 Duration(seconds: security.backgroundLockDelaySeconds)) {
           security.lock();
+        } else {
+          // Back in time, the key in memory: nothing waits outside it.
+          unawaited(security.dropResumeSession());
         }
         _pausedAt = null;
         break;

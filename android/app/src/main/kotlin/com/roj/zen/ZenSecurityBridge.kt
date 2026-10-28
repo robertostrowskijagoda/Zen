@@ -1,11 +1,14 @@
 package com.roj.zen
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -19,6 +22,7 @@ import androidx.fragment.app.FragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.nio.ByteBuffer
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -40,6 +44,12 @@ import javax.crypto.spec.PSource
  *    public key; unwrapping needs the private key, which the Keystore
  *    releases only after a strong biometric check in the system prompt and
  *    which is destroyed when a new fingerprint or face is enrolled;
+ *  - `zen/resume_session`: "Nie blokuj od razu po zamknięciu aplikacji" —
+ *    the master key sealed for the lock delay by an RSA key pair that opens
+ *    only while the phone is unlocked, on the same boot, before the delay
+ *    is over on the clock since boot, and with the screen lock as it was.
+ *    Registered on the app's engine only: the background service's engine
+ *    never has it;
  *  - `zen/integrity`: signs of a rooted or modified phone (a warning only),
  *    and of someone inside this very process — a debugger, Frida, Xposed or
  *    LSPosed hooks (device_integrity.dart then also refuses payments and the
@@ -55,6 +65,18 @@ object ZenSecurityBridge {
     private const val SECURE_WINDOW_CHANNEL = "zen/secure_window"
     private const val KEYVAULT_CHANNEL = "zen/keyvault"
     private const val INTEGRITY_CHANNEL = "zen/integrity"
+    private const val RESUME_CHANNEL = "zen/resume_session"
+    private const val RESUME_ALIAS = "zen_resume_wrap_v1"
+    private const val RESUME_FORMAT: Byte = 1
+
+    /** The longest lock delay (an hour), and a minute to spare. */
+    private const val RESUME_LONGEST_MS = 3_660_000L
+
+    /** How far the boot's start may seem to move when its count is unknown. */
+    private const val BOOT_SLACK_MS = 10_000L
+
+    /** Key generation and RSA work for [RESUME_CHANNEL]: never on the main thread. */
+    private val resumeWork = Executors.newSingleThreadExecutor { Thread(it, "zen-resume") }
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -126,6 +148,42 @@ object ZenSecurityBridge {
             }
         }
         val app = activity.applicationContext
+        MethodChannel(messenger, RESUME_CHANNEL).setMethodCallHandler { call, result ->
+            val data = call.argument<ByteArray>("data")
+            val ttl = call.argument<Number>("ttlMs")?.toLong()
+            val work: (() -> Any?)? = when (call.method) {
+                "seal" -> fun(): Any? =
+                    if (data == null || ttl == null) null else resumeSeal(app, data, ttl)
+                "open" -> fun(): Any? = if (data == null) null else resumeOpen(app, data)
+                "wipe" -> fun(): Any? {
+                    keyStore().deleteEntry(RESUME_ALIAS)
+                    return true
+                }
+                else -> null
+            }
+            if (work == null) {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            try {
+                resumeWork.execute {
+                    val answer = try {
+                        Result.success(work())
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Resume session ${call.method} failed", error)
+                        Result.failure(error)
+                    }
+                    main.post {
+                        answer.fold(
+                            onSuccess = { result.success(it) },
+                            onFailure = { result.error("resume", it.message, null) },
+                        )
+                    }
+                }
+            } catch (error: RejectedExecutionException) {
+                result.error("resume", error.message, null)
+            }
+        }
         MethodChannel(messenger, INTEGRITY_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "check" -> {
@@ -160,7 +218,7 @@ object ZenSecurityBridge {
     /** [engine] is going away: its handlers (they hold the Activity) go with it. */
     fun unregister(engine: FlutterEngine) {
         val messenger = engine.dartExecutor.binaryMessenger
-        for (name in listOf(SECURE_WINDOW_CHANNEL, KEYVAULT_CHANNEL, INTEGRITY_CHANNEL)) {
+        for (name in listOf(SECURE_WINDOW_CHANNEL, KEYVAULT_CHANNEL, RESUME_CHANNEL, INTEGRITY_CHANNEL)) {
             messenger.setMessageHandler(name, null)
         }
     }
@@ -334,6 +392,141 @@ object ZenSecurityBridge {
                 .build()
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
         }
+    }
+
+    /**
+     * The key pair for [RESUME_CHANNEL]: no prompt, but its private key works
+     * only while the phone is unlocked (Android 9+). A phone that refuses
+     * that gets one without it.
+     */
+    private fun ensureResumeKeyPair() {
+        if (keyStore().containsAlias(RESUME_ALIAS)) {
+            return
+        }
+        fun spec(unlockedOnly: Boolean): KeyGenParameterSpec {
+            val builder = KeyGenParameterSpec.Builder(
+                RESUME_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setKeySize(2048)
+                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA1)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+            if (unlockedOnly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                builder.setUnlockedDeviceRequired(true)
+            }
+            return builder.build()
+        }
+        val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, KEYSTORE)
+        try {
+            generator.initialize(spec(unlockedOnly = true))
+            generator.generateKeyPair()
+        } catch (error: Exception) {
+            Log.w(TAG, "An unlocked-only resume key was refused", error)
+            generator.initialize(spec(unlockedOnly = false))
+            generator.generateKeyPair()
+        }
+    }
+
+    /** How many times the phone has started; -1 where Android does not tell. */
+    private fun bootCount(context: Context): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT)
+            } catch (_: Exception) {
+                -1
+            }
+        } else {
+            -1
+        }
+
+    /** When this boot started, on the wall clock. */
+    private fun bootWallMillis(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+
+    private fun screenLockOn(context: Context): Boolean {
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            keyguard.isDeviceSecure
+        } else {
+            keyguard.isKeyguardSecure
+        }
+    }
+
+    /**
+     * [data] sealed with this boot, the end of [ttlMs] on the clock since
+     * boot and the screen lock's state; `null` for a lifetime out of range.
+     */
+    private fun resumeSeal(context: Context, data: ByteArray, ttlMs: Long): ByteArray? {
+        if (ttlMs <= 0 || ttlMs > RESUME_LONGEST_MS || data.size > 64 ||
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+        ) {
+            return null
+        }
+        ensureResumeKeyPair()
+        val now = SystemClock.elapsedRealtime()
+        val plain = ByteBuffer.allocate(1 + 4 + 8 + 8 + 8 + 1 + 1 + data.size)
+            .put(RESUME_FORMAT)
+            .putInt(bootCount(context))
+            .putLong(bootWallMillis())
+            .putLong(now)
+            .putLong(now + ttlMs)
+            .put(if (screenLockOn(context)) 1.toByte() else 0.toByte())
+            .put(data.size.toByte())
+            .put(data)
+            .array()
+        val stored = keyStore().getCertificate(RESUME_ALIAS).publicKey
+        // A plain copy of the public key: sealing works with the phone locked.
+        val publicKey = KeyFactory.getInstance(stored.algorithm)
+            .generatePublic(X509EncodedKeySpec(stored.encoded))
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaep)
+        return cipher.doFinal(plain)
+    }
+
+    /**
+     * What [resumeSeal] sealed, while it holds: the same boot, before its
+     * end, the screen lock as it was. `null` otherwise, or when the key
+     * refuses (the phone locked, the key gone).
+     */
+    private fun resumeOpen(context: Context, sealed: ByteArray): ByteArray? {
+        val key = keyStore().getKey(RESUME_ALIAS, null) as? PrivateKey ?: return null
+        val plain = try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, oaep)
+            cipher.doFinal(sealed)
+        } catch (error: KeyPermanentlyInvalidatedException) {
+            keyStore().deleteEntry(RESUME_ALIAS)
+            return null
+        } catch (error: Exception) {
+            Log.w(TAG, "Opening the resume session failed", error)
+            return null
+        }
+        val buffer = ByteBuffer.wrap(plain)
+        if (plain.size < 32 || buffer.get() != RESUME_FORMAT) {
+            return null
+        }
+        val boots = buffer.getInt()
+        val bootWall = buffer.getLong()
+        val sealedAt = buffer.getLong()
+        val until = buffer.getLong()
+        val lock = buffer.get() == 1.toByte()
+        val size = buffer.get().toInt()
+        if (size <= 0 || size != buffer.remaining()) {
+            return null
+        }
+        val now = SystemClock.elapsedRealtime()
+        val bootsNow = bootCount(context)
+        val sameBoot = if (boots >= 0 && bootsNow >= 0) {
+            boots == bootsNow
+        } else {
+            Math.abs(bootWallMillis() - bootWall) <= BOOT_SLACK_MS
+        }
+        if (!sameBoot || now < sealedAt || now > until ||
+            until - sealedAt > RESUME_LONGEST_MS || lock != screenLockOn(context)
+        ) {
+            return null
+        }
+        return ByteArray(size).also { buffer.get(it) }
     }
 
     /** Worker thread ([checks]): file reads and package manager calls. */

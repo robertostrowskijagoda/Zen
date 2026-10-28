@@ -6,6 +6,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -89,6 +90,65 @@ void main() {
     await tester.pump(const Duration(minutes: 5));
     expect(security.isLocked, isFalse);
     expect(find.text('aplikacja'), findsOneWidget);
+  });
+
+  testWidgets('"Nie blokuj od razu po zamknięciu aplikacji": the key waits '
+      'sealed while Zen is away, and goes when it is back or locked', (
+    WidgetTester tester,
+  ) async {
+    const AppSettings settings = AppSettings(
+      lockMode: AppLockMode.background,
+      backgroundLockDelaySeconds: 30,
+      keepUnlockedAfterClose: true,
+    );
+    final MemorySecurityCredentialsStore credentials =
+        MemorySecurityCredentialsStore();
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      settings: settings,
+      credentialsStore: credentials,
+      hasPassword: true,
+      passwordIterations: 10,
+      resumeVault: ClockResumeSessionVault(
+        sinceBootMillis: () => 60 * 60 * 1000,
+        now: () => DateTime.utc(2026, 10, 28, 12),
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(settings),
+          ),
+          appSecurityServiceProvider.overrideWithValue(security),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          builder: (BuildContext context, Widget? child) =>
+              AppSecurityGate(child: child!),
+          home: const Scaffold(body: Text('aplikacja')),
+        ),
+      ),
+    );
+    await tester.pump();
+    Future<String?> kept() =>
+        credentials.read(appSecurityResumeSessionStorageKey);
+
+    expect(await kept(), isNull);
+    leave(tester);
+    await tester.pump();
+    expect(await kept(), isNotNull);
+    await comeBack(tester);
+    await tester.pump();
+    expect(await kept(), isNull);
+    expect(security.isLocked, isFalse);
+
+    leave(tester);
+    await tester.pump();
+    expect(await kept(), isNotNull);
+    await tester.pump(const Duration(seconds: 31));
+    expect(security.isLocked, isTrue);
+    await tester.pump();
+    expect(await kept(), isNull);
   });
 
   testWidgets('other lock modes do not lock in the background', (

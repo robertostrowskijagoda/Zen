@@ -11,7 +11,8 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 /// This keeps what protects the user out of reach of whoever can write
 /// that file:
 ///
-/// * the lock mode and its delay, screenshot blocking, the notification
+/// * the lock mode, its delay and whether the app stays open after it was
+///   closed, screenshot blocking, the notification
 ///   privacy level and the "no password" consent are also kept in secure
 ///   storage (Android Keystore / Windows credential storage) and that copy
 ///   wins over the file;
@@ -41,6 +42,7 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
     'v': _version,
     'lock': settings.lockMode.name,
     'delay': settings.backgroundLockDelaySeconds,
+    'resume': settings.keepUnlockedAfterClose,
     'secure': settings.secureScreens,
     'notify': settings.notificationPrivacy.name,
     'noPassword': settings.allowNoAppPassword,
@@ -68,6 +70,7 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
       }
     }
     final Object? delay = json['delay'];
+    final Object? resume = json['resume'];
     final Object? secure = json['secure'];
     NotificationPrivacy? notify;
     for (final NotificationPrivacy level in NotificationPrivacy.values) {
@@ -79,6 +82,9 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
     return settings.copyWith(
       lockMode: lockMode,
       backgroundLockDelaySeconds: delay is int ? delay : null,
+      // On only where the protected copy says so (a copy from before the
+      // setting existed: off).
+      keepUnlockedAfterClose: resume == true,
       secureScreens: secure is bool ? secure : null,
       notificationPrivacy: notify,
       allowNoAppPassword: noPassword is bool ? noPassword : null,

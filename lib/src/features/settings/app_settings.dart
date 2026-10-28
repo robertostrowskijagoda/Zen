@@ -28,6 +28,7 @@ const Set<String> kDeviceSettingKeys = <String>{
   'legalAcceptedAtMillis',
   'lockMode',
   'backgroundLockDelaySeconds',
+  'keepUnlockedAfterClose',
   'allowNoAppPassword',
   'disguiseIcon',
   'bridgeEnabled',
@@ -442,6 +443,7 @@ final class AppSettings {
     this.autoCleanupDays = defaultAutoCleanupDays,
     this.lockMode = defaultLockMode,
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
+    this.keepUnlockedAfterClose = false,
     this.themeMode = defaultThemeMode,
     this.accentTheme = defaultAccentTheme,
     this.palette = defaultPalette,
@@ -502,6 +504,13 @@ final class AppSettings {
   final int autoCleanupDays;
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
+
+  /// "Nie blokuj od razu po zamknięciu aplikacji" (with "Po wyjściu z
+  /// aplikacji"): Zen closed by the person or the system opens without the
+  /// password until [backgroundLockDelaySeconds] after it left the screen,
+  /// as it would have stayed open in the background. Off by default: who
+  /// takes the unlocked phone meanwhile opens Zen too.
+  final bool keepUnlockedAfterClose;
   final AppThemeMode themeMode;
 
   /// The accent of the [AppPalette.classic] palette.
@@ -726,6 +735,7 @@ final class AppSettings {
     int? autoCleanupDays,
     AppLockMode? lockMode,
     int? backgroundLockDelaySeconds,
+    bool? keepUnlockedAfterClose,
     AppThemeMode? themeMode,
     AppAccentTheme? accentTheme,
     AppPalette? palette,
@@ -770,6 +780,8 @@ final class AppSettings {
       backgroundLockDelaySeconds: normalizeBackgroundLockDelaySeconds(
         backgroundLockDelaySeconds ?? this.backgroundLockDelaySeconds,
       ),
+      keepUnlockedAfterClose:
+          keepUnlockedAfterClose ?? this.keepUnlockedAfterClose,
       themeMode: themeMode ?? this.themeMode,
       accentTheme: accentTheme ?? this.accentTheme,
       palette: palette ?? this.palette,
@@ -862,6 +874,7 @@ final class AppSettings {
     'autoCleanupDays': autoCleanupDays,
     'lockMode': lockMode.name,
     'backgroundLockDelaySeconds': backgroundLockDelaySeconds,
+    'keepUnlockedAfterClose': keepUnlockedAfterClose,
     'themeMode': themeMode.name,
     'accentTheme': accentTheme.name,
     'palette': palette.name,
@@ -921,6 +934,7 @@ final class AppSettings {
       autoCleanupDays: pick<int>('autoCleanupDays'),
       lockMode: byName(AppLockMode.values, 'lockMode'),
       backgroundLockDelaySeconds: pick<int>('backgroundLockDelaySeconds'),
+      keepUnlockedAfterClose: pick<bool>('keepUnlockedAfterClose'),
       themeMode: byName(AppThemeMode.values, 'themeMode'),
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       palette: byName(AppPalette.values, 'palette'),
