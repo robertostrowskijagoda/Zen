@@ -782,13 +782,19 @@ final class AppSettings {
   /// only when the backup's is older than this app's), the radios, the
   /// disguised icon. Only the terms keep the latest acceptance, here or in
   /// the backup: accepted on either side, they count.
-  AppSettings restoringWhole(AppSettings copy) =>
-      legalAcceptedAtMillis > copy.legalAcceptedAtMillis
-      ? copy.copyWith(
-          legalAcceptedVersion: legalAcceptedVersion,
-          legalAcceptedAtMillis: legalAcceptedAtMillis,
-        )
-      : copy;
+  AppSettings restoringWhole(AppSettings copy) {
+    // The system's permissions belong to this phone, not to the copy: the
+    // permissions step stays as it is here.
+    final AppSettings whole = copy.copyWith(
+      permissionsSetupDone: permissionsSetupDone,
+    );
+    return legalAcceptedAtMillis > copy.legalAcceptedAtMillis
+        ? whole.copyWith(
+            legalAcceptedVersion: legalAcceptedVersion,
+            legalAcceptedAtMillis: legalAcceptedAtMillis,
+          )
+        : whole;
+  }
 
   /// Named fields: an unknown field is ignored and a missing one keeps its
   /// default, so a new setting needs no format version.

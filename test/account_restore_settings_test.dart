@@ -113,7 +113,8 @@ ProviderContainer _container(
 
 void main() {
   test('a backup of the whole app puts every setting back as it was, '
-      'before the restart; only the latest terms acceptance stays', () async {
+      'before the restart; only the latest terms acceptance and this '
+      'phone\'s permissions step stay', () async {
     final MemoryAppSettingsStore store = MemoryAppSettingsStore(_device);
     final _Launcher launcher = _Launcher(takes: true);
     final ProviderContainer container = _container(store, launcher: launcher);
@@ -128,7 +129,11 @@ void main() {
     expect(
       now.toJson(),
       _old()
-          .copyWith(legalAcceptedVersion: 'v2', legalAcceptedAtMillis: 200)
+          .copyWith(
+            legalAcceptedVersion: 'v2',
+            legalAcceptedAtMillis: 200,
+            permissionsSetupDone: false,
+          )
           .toJson(),
     );
     expect(now.setupPending, isFalse, reason: 'no setup after the restore');
