@@ -692,9 +692,8 @@ final class AppSettings {
   /// fewer pointless wake-ups.
   Duration get signalWaitTimeout => const Duration(seconds: 30);
 
-  String get inboxLimitLabel => inboxUnlimited
-      ? t('Bez limitu')
-      : storageLimitLabel(inboxLimitMb);
+  String get inboxLimitLabel =>
+      inboxUnlimited ? t('Bez limitu') : storageLimitLabel(inboxLimitMb);
 
   /// `512 MB` / `1 GB` / `1.5 GB` for a limit in MB.
   static String storageLimitLabel(int mb) {
