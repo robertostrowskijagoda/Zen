@@ -613,7 +613,12 @@ void main() {
       await tester.tap(find.byKey(const Key('chats-status-chip')));
       await _route(tester);
       final Finder security = find.byKey(const Key('settings-nav-security'));
-      await tester.ensureVisible(security);
+      // The settings list builds lazily: scroll until the row is built.
+      await tester.scrollUntilVisible(
+        security,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pump();
       await tester.tap(security);
       await _route(tester);
