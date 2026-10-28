@@ -228,6 +228,7 @@
   "Brak pasujących osób": "没有匹配的人",
   "Brak postów.": "还没有帖子。",
   "Brak powiadomień": "无通知",
+  "Brak połączenia z siecią — status nieznany": "无网络连接 — 状态未知",
   "Brak połączeń lokalnych.": "没有本地连接。",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "没有连接到网络。请检查网络或 Wi-Fi；Zen 稍后会重试。",
   "Brak relacji.": "暂无关系。",
@@ -3155,6 +3156,7 @@
   "Stan": "状态",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "截至 {date}：好友 {people}，当面见过 {met}",
   "Stany Zjednoczone": "美国",
+  "Starsza wersja Zen — status nieznany": "Zen 版本较旧 — 状态未知",
   "Start": "首页",
   "Start aplikacji nie powiódł się.": "应用启动失败。",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "旧码将失效（例如搬家后，或落入他人之手时）。已经认识你们的邻居会保留。需要打印新的贴纸。",
@@ -4832,6 +4834,8 @@
   "ostatnio otwierał(a) {n} min temu": {
     "other": "上次打开是 {n} 分钟前"
   },
+  "ostatnio w sieci {ago}": "最后在线 {ago}",
+  "ostatnio w tle {ago}": "最后在后台 {ago}",
   "osób": {
     "other": "人"
   },
@@ -4899,6 +4903,7 @@
   "stal / tusz": "钢灰 / 墨汁",
   "starsze telefony 32-bitowe": "较旧的 32 位手机",
   "stary odtwarzacz: LCD / zieleń / chrom": "老式播放器：LCD / 绿色 / 铬色",
+  "status nieznany": "状态未知",
   "swat": "红娘",
   "szałwia i papier, listki w kształcie ramek": "鼠尾草绿和纸，边框形的小叶子",
   "szczyt": "塔尖",

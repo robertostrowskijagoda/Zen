@@ -229,6 +229,7 @@
   "Brak pasujących osób": "कोई मेल खाता व्यक्ति नहीं",
   "Brak postów.": "कोई पोस्ट नहीं।",
   "Brak powiadomień": "कोई नोटिफ़िकेशन नहीं",
+  "Brak połączenia z siecią — status nieznany": "नेटवर्क कनेक्शन नहीं — स्थिति अज्ञात",
   "Brak połączeń lokalnych.": "कोई लोकल कनेक्शन नहीं है।",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "नेटवर्क से कनेक्शन नहीं है। इंटरनेट या Wi-Fi जाँचें; Zen थोड़ी देर में फिर कोशिश करेगा।",
   "Brak relacji.": "कोई रिश्ता नहीं।",
@@ -3197,6 +3198,7 @@
   "Stan": "स्थिति",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "{date} की स्थिति: दोस्त {people}, आमने-सामने मिले {met}",
   "Stany Zjednoczone": "संयुक्त राज्य अमेरिका",
+  "Starsza wersja Zen — status nieznany": "Zen का पुराना संस्करण — स्थिति अज्ञात",
   "Start": "शुरू करें",
   "Start aplikacji nie powiódł się.": "ऐप शुरू नहीं हो सका।",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "पुराना कोड काम करना बंद कर देगा (जैसे शिफ़्ट होने के बाद या जब वह गलत हाथों में चला गया हो)। जिन पड़ोसियों के पास आप पहले से हैं, वे बने रहेंगे। नया स्टिकर प्रिंट करना होगा।",
@@ -4895,6 +4897,8 @@
     "one": "आख़िरी बार {n} मिनट पहले खोला",
     "other": "आख़िरी बार {n} मिनट पहले खोला"
   },
+  "ostatnio w sieci {ago}": "आख़िरी बार ऑनलाइन {ago}",
+  "ostatnio w tle {ago}": "आख़िरी बार बैकग्राउंड में {ago}",
   "osób": {
     "one": "व्यक्ति",
     "other": "लोग"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "स्टील / इंक",
   "starsze telefony 32-bitowe": "पुराने 32-बिट फ़ोन",
   "stary odtwarzacz: LCD / zieleń / chrom": "पुराना प्लेयर: LCD / हरा / क्रोम",
+  "status nieznany": "स्थिति अज्ञात",
   "swat": "मिलवाने वाला",
   "szałwia i papier, listki w kształcie ramek": "सेज और काग़ज़, फ़्रेम के आकार की पत्तियाँ",
   "szczyt": "शीर्ष",

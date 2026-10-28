@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Nenhuma pessoa correspondente",
   "Brak postów.": "Nenhum post.",
   "Brak powiadomień": "Sem notificações",
+  "Brak połączenia z siecią — status nieznany": "Sem conexão com a rede — status desconhecido",
   "Brak połączeń lokalnych.": "Sem conexões locais.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Sem conexão com a rede. Verifique a internet ou o Wi-Fi; o Zen tenta de novo daqui a pouco.",
   "Brak relacji.": "Nenhuma relação.",
@@ -3197,6 +3198,7 @@
   "Stan": "Estado",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Em {date}: amigos {people}, conhecidos pessoalmente {met}",
   "Stany Zjednoczone": "Estados Unidos",
+  "Starsza wersja Zen — status nieznany": "Versão mais antiga do Zen — status desconhecido",
   "Start": "Início",
   "Start aplikacji nie powiódł się.": "Não foi possível iniciar o app.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "O código antigo vai parar de funcionar (p. ex., depois de uma mudança ou se caiu em mãos erradas). Os vizinhos que já têm vocês continuam. Será preciso imprimir um novo adesivo.",
@@ -4895,6 +4897,8 @@
     "one": "abriu o app pela última vez há {n} min",
     "other": "abriu o app pela última vez há {n} min"
   },
+  "ostatnio w sieci {ago}": "online pela última vez {ago}",
+  "ostatnio w tle {ago}": "em segundo plano pela última vez {ago}",
   "osób": {
     "one": "pessoa",
     "other": "pessoas"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "aço / nanquim",
   "starsze telefony 32-bitowe": "telefones antigos de 32 bits",
   "stary odtwarzacz: LCD / zieleń / chrom": "player antigo: LCD / verde / cromo",
+  "status nieznany": "status desconhecido",
   "swat": "cupido",
   "szałwia i papier, listki w kształcie ramek": "sálvia e papel, folhinhas em forma de moldura",
   "szczyt": "topo",

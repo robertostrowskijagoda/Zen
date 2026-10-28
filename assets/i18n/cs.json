@@ -230,6 +230,7 @@
   "Brak pasujących osób": "Žádní odpovídající lidé",
   "Brak postów.": "Žádné příspěvky.",
   "Brak powiadomień": "Žádná oznámení",
+  "Brak połączenia z siecią — status nieznany": "Bez připojení k síti — stav neznámý",
   "Brak połączeń lokalnych.": "Žádná místní spojení.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Žádné připojení k síti. Zkontroluj internet nebo Wi-Fi; Zen to za chvíli zkusí znovu.",
   "Brak relacji.": "Žádné vztahy.",
@@ -3239,6 +3240,7 @@
   "Stan": "Stav",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Stav k {date}: známí {people}, osobně potkaní {met}",
   "Stany Zjednoczone": "Spojené státy",
+  "Starsza wersja Zen — status nieznany": "Starší verze Zen — stav neznámý",
   "Start": "Start",
   "Start aplikacji nie powiódł się.": "Aplikaci se nepodařilo spustit.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Starý kód přestane fungovat (např. po stěhování nebo když se dostal do nepovolaných rukou). Sousedé, kteří vás už mají, zůstanou. Bude třeba vytisknout novou nálepku.",
@@ -4958,6 +4960,8 @@
     "few": "naposledy otevřel(a) před {n} min",
     "other": "naposledy otevřel(a) před {n} min"
   },
+  "ostatnio w sieci {ago}": "naposledy online {ago}",
+  "ostatnio w tle {ago}": "naposledy na pozadí {ago}",
   "osób": {
     "one": "osoba",
     "few": "osoby",
@@ -5033,6 +5037,7 @@
   "stal / tusz": "ocel / tuš",
   "starsze telefony 32-bitowe": "starší 32bitové telefony",
   "stary odtwarzacz: LCD / zieleń / chrom": "starý přehrávač: LCD / zelená / chrom",
+  "status nieznany": "stav neznámý",
   "swat": "dohazovač",
   "szałwia i papier, listki w kształcie ramek": "šalvěj a papír, lístky ve tvaru rámečků",
   "szczyt": "vrchol",

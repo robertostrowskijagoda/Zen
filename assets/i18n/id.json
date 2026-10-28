@@ -228,6 +228,7 @@
   "Brak pasujących osób": "Tidak ada orang yang cocok",
   "Brak postów.": "Belum ada postingan.",
   "Brak powiadomień": "Tanpa notifikasi",
+  "Brak połączenia z siecią — status nieznany": "Tidak ada koneksi jaringan — status tidak diketahui",
   "Brak połączeń lokalnych.": "Tidak ada koneksi lokal.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Tidak ada koneksi ke jaringan. Periksa internet atau Wi-Fi; Zen akan mencoba lagi sebentar lagi.",
   "Brak relacji.": "Belum ada hubungan.",
@@ -3155,6 +3156,7 @@
   "Stan": "Status",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Per {date}: teman {people}, bertemu langsung {met}",
   "Stany Zjednoczone": "Amerika Serikat",
+  "Starsza wersja Zen — status nieznany": "Versi Zen lama — status tidak diketahui",
   "Start": "Mulai",
   "Start aplikacji nie powiódł się.": "Aplikasi gagal dimulai.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Kode lama akan berhenti berfungsi (mis. setelah pindahan atau jika jatuh ke tangan yang salah). Tetangga yang sudah mengenal Anda tetap ada. Stiker baru harus dicetak.",
@@ -4832,6 +4834,8 @@
   "ostatnio otwierał(a) {n} min temu": {
     "other": "terakhir membuka {n} mnt lalu"
   },
+  "ostatnio w sieci {ago}": "terakhir online {ago}",
+  "ostatnio w tle {ago}": "terakhir di latar belakang {ago}",
   "osób": {
     "other": "orang"
   },
@@ -4899,6 +4903,7 @@
   "stal / tusz": "baja / tinta",
   "starsze telefony 32-bitowe": "ponsel 32-bit yang lebih lama",
   "stary odtwarzacz: LCD / zieleń / chrom": "pemutar lama: LCD / hijau / krom",
+  "status nieznany": "status tidak diketahui",
   "swat": "mak comblang",
   "szałwia i papier, listki w kształcie ramek": "sage dan kertas, daun berbentuk bingkai",
   "szczyt": "puncak",

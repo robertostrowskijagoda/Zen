@@ -228,6 +228,7 @@
   "Brak pasujących osób": "一致する人がいません",
   "Brak postów.": "投稿はありません。",
   "Brak powiadomień": "通知なし",
+  "Brak połączenia z siecią — status nieznany": "ネットワークに接続していません — ステータス不明",
   "Brak połączeń lokalnych.": "ローカル接続はありません。",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "ネットワークに接続されていません。インターネットかWi-Fiを確認してください。Zenがまもなく再試行します。",
   "Brak relacji.": "つながりはありません。",
@@ -3155,6 +3156,7 @@
   "Stan": "状態",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "{date}時点：友だち{people}人、直接会った人{met}人",
   "Stany Zjednoczone": "アメリカ",
+  "Starsza wersja Zen — status nieznany": "古いバージョンの Zen — ステータス不明",
   "Start": "開始",
   "Start aplikacji nie powiódł się.": "アプリを起動できませんでした。",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "古いコードは使えなくなります（例：引っ越し後や、他人の手に渡ったとき）。すでにあなたたちを登録しているご近所さんは残ります。新しいステッカーの印刷が必要です。",
@@ -4832,6 +4834,8 @@
   "ostatnio otwierał(a) {n} min temu": {
     "other": "最後に開いたのは{n}分前"
   },
+  "ostatnio w sieci {ago}": "最終オンライン {ago}",
+  "ostatnio w tle {ago}": "最終バックグラウンド {ago}",
   "osób": {
     "other": "人"
   },
@@ -4899,6 +4903,7 @@
   "stal / tusz": "鋼 / 墨",
   "starsze telefony 32-bitowe": "古い32ビット端末",
   "stary odtwarzacz: LCD / zieleń / chrom": "古いプレーヤー：LCD / グリーン / クローム",
+  "status nieznany": "ステータス不明",
   "swat": "仲人",
   "szałwia i papier, listki w kształcie ramek": "セージと紙、枠の形をした葉",
   "szczyt": "頂点",

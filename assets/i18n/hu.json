@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Nincs találat",
   "Brak postów.": "Nincs bejegyzés.",
   "Brak powiadomień": "Nincs értesítés",
+  "Brak połączenia z siecią — status nieznany": "Nincs hálózati kapcsolat — állapot ismeretlen",
   "Brak połączeń lokalnych.": "Nincs helyi kapcsolat.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Nincs hálózati kapcsolat. Ellenőrizd az internetet vagy a Wi-Fit; a Zen mindjárt újra próbálkozik.",
   "Brak relacji.": "Nincsenek kapcsolatok.",
@@ -3197,6 +3198,7 @@
   "Stan": "Állapot",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Állapot ({date}): {people} ismerős, {met} személyesen találkozott",
   "Stany Zjednoczone": "Egyesült Államok",
+  "Starsza wersja Zen — status nieznany": "Régebbi Zen-verzió — állapot ismeretlen",
   "Start": "Indítás",
   "Start aplikacji nie powiódł się.": "Az alkalmazás indítása nem sikerült.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "A régi kód nem fog többé működni (pl. költözés után, vagy ha illetéktelen kezekbe került). Azok a szomszédok, akik már felvettek titeket, megmaradnak. Új matricát kell majd nyomtatni.",
@@ -4895,6 +4897,8 @@
     "one": "utoljára {n} perce nyitotta meg",
     "other": "utoljára {n} perce nyitotta meg"
   },
+  "ostatnio w sieci {ago}": "utoljára online: {ago}",
+  "ostatnio w tle {ago}": "utoljára a háttérben: {ago}",
   "osób": {
     "one": "fő",
     "other": "fő"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "acél / tus",
   "starsze telefony 32-bitowe": "régebbi 32 bites telefonok",
   "stary odtwarzacz: LCD / zieleń / chrom": "régi lejátszó: LCD / zöld / króm",
+  "status nieznany": "állapot ismeretlen",
   "swat": "összehozó",
   "szałwia i papier, listki w kształcie ramek": "zsálya és papír, keret alakú levélkék",
   "szczyt": "csúcs",

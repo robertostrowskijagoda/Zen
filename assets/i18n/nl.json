@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Geen passende personen",
   "Brak postów.": "Geen posts.",
   "Brak powiadomień": "Geen meldingen",
+  "Brak połączenia z siecią — status nieznany": "Geen netwerkverbinding — status onbekend",
   "Brak połączeń lokalnych.": "Geen lokale verbindingen.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Geen verbinding met het netwerk. Controleer je internet of wifi; Zen probeert het zo opnieuw.",
   "Brak relacji.": "Geen contacten.",
@@ -3197,6 +3198,7 @@
   "Stan": "Status",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Stand op {date}: vrienden {people}, persoonlijk ontmoet {met}",
   "Stany Zjednoczone": "Verenigde Staten",
+  "Starsza wersja Zen — status nieznany": "Oudere Zen-versie — status onbekend",
   "Start": "Start",
   "Start aplikacji nie powiódł się.": "De app kon niet starten.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "De oude code werkt niet meer (bijv. na een verhuizing of als hij in verkeerde handen is gevallen). Buren die jullie al hebben, blijven. Je moet een nieuwe sticker printen.",
@@ -4895,6 +4897,8 @@
     "one": "laatst geopend {n} min geleden",
     "other": "laatst geopend {n} min geleden"
   },
+  "ostatnio w sieci {ago}": "laatst online {ago}",
+  "ostatnio w tle {ago}": "laatst op de achtergrond {ago}",
   "osób": {
     "one": "persoon",
     "other": "personen"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "staal / inkt",
   "starsze telefony 32-bitowe": "oudere 32-bit-telefoons",
   "stary odtwarzacz: LCD / zieleń / chrom": "oude speler: LCD / groen / chroom",
+  "status nieznany": "status onbekend",
   "swat": "koppelaar",
   "szałwia i papier, listki w kształcie ramek": "salie en papier, bladeren in de vorm van kaders",
   "szczyt": "top",

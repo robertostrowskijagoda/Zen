@@ -229,6 +229,7 @@
   "Brak pasujących osób": "No matching people",
   "Brak postów.": "No posts.",
   "Brak powiadomień": "No notifications",
+  "Brak połączenia z siecią — status nieznany": "No network connection — status unknown",
   "Brak połączeń lokalnych.": "No local connections.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "No network connections. Check your internet or Wi-Fi; Zen will try again in a moment.",
   "Brak relacji.": "No connections.",
@@ -3197,6 +3198,7 @@
   "Stan": "Status",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "As of {date}: friends {people}, met in person {met}",
   "Stany Zjednoczone": "United States",
+  "Starsza wersja Zen — status nieznany": "Older Zen version — status unknown",
   "Start": "Start",
   "Start aplikacji nie powiódł się.": "The app failed to start.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "The old code will stop working (e.g. after a move, or if it fell into the wrong hands). Neighbors who already have you will stay. You’ll need to print a new sticker.",
@@ -4895,6 +4897,8 @@
     "one": "last opened {n} min ago",
     "other": "last opened {n} min ago"
   },
+  "ostatnio w sieci {ago}": "last online {ago}",
+  "ostatnio w tle {ago}": "last in the background {ago}",
   "osób": {
     "one": "person",
     "other": "people"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "steel / ink",
   "starsze telefony 32-bitowe": "older 32-bit phones",
   "stary odtwarzacz: LCD / zieleń / chrom": "old music player: LCD / green / chrome",
+  "status nieznany": "status unknown",
   "swat": "matchmaker",
   "szałwia i papier, listki w kształcie ramek": "sage and paper, frame-shaped leaves",
   "szczyt": "top",

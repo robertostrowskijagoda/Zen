@@ -233,6 +233,7 @@
   "Brak pasujących osób": "لا يوجد أشخاص مطابقون",
   "Brak postów.": "لا توجد منشورات.",
   "Brak powiadomień": "بلا إشعارات",
+  "Brak połączenia z siecią — status nieznany": "لا يوجد اتصال بالشبكة — الحالة غير معروفة",
   "Brak połączeń lokalnych.": "لا توجد اتصالات محلية.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "لا يوجد اتصال بالشبكة. تحقق من الإنترنت أو Wi-Fi؛ سيحاول Zen مجددًا بعد قليل.",
   "Brak relacji.": "لا توجد علاقات.",
@@ -3365,6 +3366,7 @@
   "Stan": "الحالة",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "حتى {date}: الأصدقاء {people}، التقيتهم شخصيًا {met}",
   "Stany Zjednoczone": "الولايات المتحدة",
+  "Starsza wersja Zen — status nieznany": "إصدار أقدم من Zen — الحالة غير معروفة",
   "Start": "البداية",
   "Start aplikacji nie powiódł się.": "فشل تشغيل التطبيق.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "سيتوقف الرمز القديم عن العمل (مثلًا بعد الانتقال أو إذا وقع في أيدٍ غير مخوّلة). الجيران الذين أضافوكم بالفعل يبقون. وسيلزم طباعة ملصق جديد.",
@@ -5147,6 +5149,8 @@
     "many": "آخر فتح قبل {n} د",
     "other": "آخر فتح قبل {n} د"
   },
+  "ostatnio w sieci {ago}": "آخر اتصال {ago}",
+  "ostatnio w tle {ago}": "آخر مرة في الخلفية {ago}",
   "osób": {
     "zero": "شخص",
     "one": "شخص",
@@ -5234,6 +5238,7 @@
   "stal / tusz": "فولاذ / حبر صيني",
   "starsze telefony 32-bitowe": "هواتف أقدم بنظام 32 بت",
   "stary odtwarzacz: LCD / zieleń / chrom": "مشغّل قديم: LCD / أخضر / كروم",
+  "status nieznany": "الحالة غير معروفة",
   "swat": "وسيط",
   "szałwia i papier, listki w kształcie ramek": "مريمية وورق، أوراق على شكل أطر",
   "szczyt": "القمة",

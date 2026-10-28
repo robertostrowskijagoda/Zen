@@ -231,6 +231,7 @@
   "Brak pasujących osób": "Підхожих людей немає",
   "Brak postów.": "Немає дописів.",
   "Brak powiadomień": "Без сповіщень",
+  "Brak połączenia z siecią — status nieznany": "Немає з’єднання з мережею — статус невідомий",
   "Brak połączeń lokalnych.": "Локальних з’єднань немає.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Немає з’єднання з мережею. Перевір інтернет або Wi-Fi; за мить Zen спробує ще раз.",
   "Brak relacji.": "Немає зв’язків.",
@@ -3281,6 +3282,7 @@
   "Stan": "Стан",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "На {date}: друзів {people}, зустрічалися особисто {met}",
   "Stany Zjednoczone": "США",
+  "Starsza wersja Zen — status nieznany": "Старіша версія Zen — статус невідомий",
   "Start": "Старт",
   "Start aplikacji nie powiódł się.": "Не вдалося запустити застосунок.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Старий код перестане працювати (наприклад, після переїзду або якщо він потрапив не в ті руки). Сусіди, які вже мають вас, залишаються. Доведеться роздрукувати нову наклейку.",
@@ -5021,6 +5023,8 @@
     "many": "заходив(-ла) {n} хв тому",
     "other": "заходив(-ла) {n} хв тому"
   },
+  "ostatnio w sieci {ago}": "був(ла) онлайн {ago}",
+  "ostatnio w tle {ago}": "був(ла) у фоні {ago}",
   "osób": {
     "one": "особа",
     "few": "особи",
@@ -5100,6 +5104,7 @@
   "stal / tusz": "сталь / туш",
   "starsze telefony 32-bitowe": "старіші 32-бітні телефони",
   "stary odtwarzacz: LCD / zieleń / chrom": "старий програвач: LCD / зелень / хром",
+  "status nieznany": "статус невідомий",
   "swat": "сват",
   "szałwia i papier, listki w kształcie ramek": "шавлія й папір, листочки у формі рамок",
   "szczyt": "вершина",

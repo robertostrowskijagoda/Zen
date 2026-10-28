@@ -228,6 +228,7 @@
   "Brak pasujących osób": "Không có ai phù hợp",
   "Brak postów.": "Chưa có bài đăng.",
   "Brak powiadomień": "Không có thông báo",
+  "Brak połączenia z siecią — status nieznany": "Không có kết nối mạng — không rõ trạng thái",
   "Brak połączeń lokalnych.": "Không có kết nối cục bộ.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Không có kết nối mạng. Kiểm tra internet hoặc Wi-Fi; Zen sẽ thử lại sau ít phút.",
   "Brak relacji.": "Chưa có mối quan hệ nào.",
@@ -3155,6 +3156,7 @@
   "Stan": "Trạng thái",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Tính đến {date}: bạn bè {people}, đã gặp trực tiếp {met}",
   "Stany Zjednoczone": "Hoa Kỳ",
+  "Starsza wersja Zen — status nieznany": "Phiên bản Zen cũ — không rõ trạng thái",
   "Start": "Bắt đầu",
   "Start aplikacji nie powiódł się.": "Không khởi động được ứng dụng.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Mã cũ sẽ ngừng hoạt động (ví dụ sau khi chuyển nhà hoặc khi rơi vào tay người lạ). Hàng xóm đã có các bạn vẫn giữ nguyên. Sẽ cần in nhãn dán mới.",
@@ -4832,6 +4834,8 @@
   "ostatnio otwierał(a) {n} min temu": {
     "other": "mở lần gần nhất {n} phút trước"
   },
+  "ostatnio w sieci {ago}": "trực tuyến lần cuối {ago}",
+  "ostatnio w tle {ago}": "trong nền lần cuối {ago}",
   "osób": {
     "other": "người"
   },
@@ -4899,6 +4903,7 @@
   "stal / tusz": "thép / mực tàu",
   "starsze telefony 32-bitowe": "điện thoại 32-bit đời cũ",
   "stary odtwarzacz: LCD / zieleń / chrom": "máy phát nhạc cũ: LCD / xanh lá / chrome",
+  "status nieznany": "không rõ trạng thái",
   "swat": "mai mối",
   "szałwia i papier, listki w kształcie ramek": "xô thơm và giấy, những chiếc lá hình khung",
   "szczyt": "đỉnh",

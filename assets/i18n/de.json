@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Keine passenden Personen",
   "Brak postów.": "Keine Beiträge.",
   "Brak powiadomień": "Keine Benachrichtigungen",
+  "Brak połączenia z siecią — status nieznany": "Keine Netzwerkverbindung – Status unbekannt",
   "Brak połączeń lokalnych.": "Keine lokalen Verbindungen.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Keine Netzverbindung. Prüfe Internet oder WLAN; Zen versucht es gleich noch einmal.",
   "Brak relacji.": "Keine Freundschaften.",
@@ -3197,6 +3198,7 @@
   "Stan": "Status",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Stand {date}: Freunde {people}, persönlich getroffen {met}",
   "Stany Zjednoczone": "Vereinigte Staaten",
+  "Starsza wersja Zen — status nieznany": "Ältere Zen-Version – Status unbekannt",
   "Start": "Start",
   "Start aplikacji nie powiódł się.": "Die App konnte nicht gestartet werden.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Der alte Code funktioniert nicht mehr (z. B. nach einem Umzug oder wenn er in falsche Hände geraten ist). Nachbarn, die euch schon haben, bleiben. Ihr müsst einen neuen Aufkleber ausdrucken.",
@@ -4895,6 +4897,8 @@
     "one": "zuletzt vor {n} Min. geöffnet",
     "other": "zuletzt vor {n} Min. geöffnet"
   },
+  "ostatnio w sieci {ago}": "zuletzt online {ago}",
+  "ostatnio w tle {ago}": "zuletzt im Hintergrund {ago}",
   "osób": {
     "one": "Person",
     "other": "Personen"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "Stahl / Tusche",
   "starsze telefony 32-bitowe": "ältere 32-Bit-Handys",
   "stary odtwarzacz: LCD / zieleń / chrom": "alter Musikplayer: LCD / Grün / Chrom",
+  "status nieznany": "Status unbekannt",
   "swat": "Vermittler",
   "szałwia i papier, listki w kształcie ramek": "Salbei und Papier, rahmenförmige Blättchen",
   "szczyt": "Spitze",

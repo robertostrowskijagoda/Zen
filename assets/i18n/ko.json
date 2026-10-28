@@ -228,6 +228,7 @@
   "Brak pasujących osób": "일치하는 사람이 없어요",
   "Brak postów.": "게시물이 없어요.",
   "Brak powiadomień": "알림 없음",
+  "Brak połączenia z siecią — status nieznany": "네트워크 연결 없음 — 상태 알 수 없음",
   "Brak połączeń lokalnych.": "로컬 연결이 없어요.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "네트워크에 연결되지 않았어요. 인터넷이나 Wi-Fi를 확인해 보세요. Zen이 잠시 후 다시 시도해요.",
   "Brak relacji.": "관계가 없어요.",
@@ -3155,6 +3156,7 @@
   "Stan": "상태",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "{date} 기준: 친구 {people}, 직접 만남 {met}",
   "Stany Zjednoczone": "미국",
+  "Starsza wersja Zen — status nieznany": "이전 버전의 Zen — 상태 알 수 없음",
   "Start": "시작",
   "Start aplikacji nie powiódł się.": "앱을 시작하지 못했어요.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "이전 코드는 작동하지 않게 돼요(예: 이사했거나 남의 손에 들어갔을 때). 이미 우리를 추가한 이웃은 그대로예요. 새 스티커를 인쇄해야 해요.",
@@ -4832,6 +4834,8 @@
   "ostatnio otwierał(a) {n} min temu": {
     "other": "마지막으로 연 지 {n}분 전"
   },
+  "ostatnio w sieci {ago}": "마지막 온라인 {ago}",
+  "ostatnio w tle {ago}": "마지막 백그라운드 {ago}",
   "osób": {
     "other": "명"
   },
@@ -4899,6 +4903,7 @@
   "stal / tusz": "강철 / 먹",
   "starsze telefony 32-bitowe": "오래된 32비트 휴대폰",
   "stary odtwarzacz: LCD / zieleń / chrom": "오래된 플레이어: LCD / 초록 / 크롬",
+  "status nieznany": "상태 알 수 없음",
   "swat": "소개자",
   "szałwia i papier, listki w kształcie ramek": "세이지와 종이, 테두리 모양의 작은 잎",
   "szczyt": "꼭대기",

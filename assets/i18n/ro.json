@@ -230,6 +230,7 @@
   "Brak pasujących osób": "Nicio persoană potrivită",
   "Brak postów.": "Nicio postare.",
   "Brak powiadomień": "Fără notificări",
+  "Brak połączenia z siecią — status nieznany": "Fără conexiune la rețea — stare necunoscută",
   "Brak połączeń lokalnych.": "Nicio conexiune locală.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Nu există conexiune la rețea. Verifică internetul sau Wi-Fi; Zen încearcă din nou imediat.",
   "Brak relacji.": "Nicio relație.",
@@ -3239,6 +3240,7 @@
   "Stan": "Stare",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Situația la {date}: prieteni {people}, întâlniți în persoană {met}",
   "Stany Zjednoczone": "Statele Unite",
+  "Starsza wersja Zen — status nieznany": "Versiune Zen mai veche — stare necunoscută",
   "Start": "Start",
   "Start aplikacji nie powiódł się.": "Aplicația nu a putut porni.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Codul vechi nu va mai funcționa (de ex. după o mutare sau dacă a ajuns pe mâna cuiva nepotrivit). Vecinii care vă au deja rămân. Va trebui să printați un autocolant nou.",
@@ -4958,6 +4960,8 @@
     "few": "ultima deschidere acum {n} min",
     "other": "ultima deschidere acum {n} min"
   },
+  "ostatnio w sieci {ago}": "ultima dată online {ago}",
+  "ostatnio w tle {ago}": "ultima dată în fundal {ago}",
   "osób": {
     "one": "persoană",
     "few": "persoane",
@@ -5033,6 +5037,7 @@
   "stal / tusz": "oțel / tuș",
   "starsze telefony 32-bitowe": "telefoane mai vechi pe 32 de biți",
   "stary odtwarzacz: LCD / zieleń / chrom": "player vechi: LCD / verde / crom",
+  "status nieznany": "stare necunoscută",
   "swat": "cupidon",
   "szałwia i papier, listki w kształcie ramek": "salvie și hârtie, frunzulițe în formă de rame",
   "szczyt": "vârf",

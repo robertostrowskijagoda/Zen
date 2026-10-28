@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Eşleşen kimse yok",
   "Brak postów.": "Gönderi yok.",
   "Brak powiadomień": "Bildirim yok",
+  "Brak połączenia z siecią — status nieznany": "Ağ bağlantısı yok — durum bilinmiyor",
   "Brak połączeń lokalnych.": "Yerel bağlantı yok.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Ağ bağlantısı yok. İnternetini ya da Wi-Fi'ni kontrol et; Zen birazdan yeniden deneyecek.",
   "Brak relacji.": "Arkadaşlık yok.",
@@ -3197,6 +3198,7 @@
   "Stan": "Durum",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "{date} itibarıyla: {people} arkadaş, {met} yüz yüze görüşülen",
   "Stany Zjednoczone": "ABD",
+  "Starsza wersja Zen — status nieznany": "Eski Zen sürümü — durum bilinmiyor",
   "Start": "Başla",
   "Start aplikacji nie powiódł się.": "Uygulama başlatılamadı.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "Eski kod çalışmayı bırakacak (örneğin taşındıktan sonra ya da yanlış ellere geçtiyse). Sizi zaten ekleyen komşular kalır. Yeni bir çıkartma yazdırmanız gerekecek.",
@@ -4895,6 +4897,8 @@
     "one": "uygulamayı en son {n} dk önce açtı",
     "other": "uygulamayı en son {n} dk önce açtı"
   },
+  "ostatnio w sieci {ago}": "son çevrimiçi: {ago}",
+  "ostatnio w tle {ago}": "son arka planda: {ago}",
   "osób": {
     "one": "kişi",
     "other": "kişi"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "çelik / siyah mürekkep",
   "starsze telefony 32-bitowe": "eski 32 bit telefonlar",
   "stary odtwarzacz: LCD / zieleń / chrom": "eski çalar: LCD / yeşil / krom",
+  "status nieznany": "durum bilinmiyor",
   "swat": "çöpçatan",
   "szałwia i papier, listki w kształcie ramek": "adaçayı ve kâğıt, çerçeve biçimli yapraklar",
   "szczyt": "tepe",

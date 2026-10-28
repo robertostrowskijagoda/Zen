@@ -229,6 +229,7 @@
   "Brak pasujących osób": "Aucune personne correspondante",
   "Brak postów.": "Aucune publication.",
   "Brak powiadomień": "Aucune notification",
+  "Brak połączenia z siecią — status nieznany": "Pas de connexion au réseau — statut inconnu",
   "Brak połączeń lokalnych.": "Aucune connexion locale.",
   "Brak połączeń z siecią. Sprawdź internet albo Wi-Fi; za chwilę Zen spróbuje ponownie.": "Aucune connexion au réseau. Vérifiez Internet ou le Wi-Fi ; Zen réessaiera dans un instant.",
   "Brak relacji.": "Aucune relation.",
@@ -3197,6 +3198,7 @@
   "Stan": "État",
   "Stan na {date}: znajomi {people}, spotkani osobiście {met}": "Au {date} : amis {people}, vus en personne {met}",
   "Stany Zjednoczone": "États-Unis",
+  "Starsza wersja Zen — status nieznany": "Ancienne version de Zen — statut inconnu",
   "Start": "Accueil",
   "Start aplikacji nie powiódł się.": "Le démarrage de l’application a échoué.",
   "Stary kod przestanie działać (np. po przeprowadzce albo gdy trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, zostają. Trzeba będzie wydrukować nową naklejkę.": "L’ancien code cessera de fonctionner (par ex. après un déménagement ou s’il est tombé entre de mauvaises mains). Les voisins qui vous ont déjà restent. Il faudra imprimer un nouvel autocollant.",
@@ -4895,6 +4897,8 @@
     "one": "a ouvert l’app pour la dernière fois il y a {n} min",
     "other": "a ouvert l’app pour la dernière fois il y a {n} min"
   },
+  "ostatnio w sieci {ago}": "en ligne pour la dernière fois {ago}",
+  "ostatnio w tle {ago}": "en arrière-plan pour la dernière fois {ago}",
   "osób": {
     "one": "personne",
     "other": "personnes"
@@ -4966,6 +4970,7 @@
   "stal / tusz": "acier / encre de Chine",
   "starsze telefony 32-bitowe": "anciens téléphones 32 bits",
   "stary odtwarzacz: LCD / zieleń / chrom": "ancien lecteur : LCD / vert / chrome",
+  "status nieznany": "statut inconnu",
   "swat": "cupidon",
   "szałwia i papier, listki w kształcie ramek": "sauge et papier, petites feuilles en forme de cadres",
   "szczyt": "sommet",
