@@ -32,6 +32,7 @@ abstract final class ZenSingleInstance {
   static ServerSocket? _server;
   static StreamSubscription<Socket>? _subscription;
   static Future<void> Function()? _onActivateRequested;
+  static Future<void> Function(String path)? _onOpenRequested;
 
   /// True on the platforms where the lock applies (desktop only — Android and
   /// iOS already guarantee a single process per app).
@@ -44,14 +45,51 @@ abstract final class ZenSingleInstance {
     _onActivateRequested = handler;
   }
 
+  /// Registers what should happen with a file another launch was started
+  /// with ("Otwórz za pomocą" while Zen already runs): the running instance
+  /// opens it.
+  static void setOpenHandler(Future<void> Function(String path)? handler) {
+    _onOpenRequested = handler;
+  }
+
+  /// The activation request, with the file a launch was started with
+  /// ([open], base64url of its UTF-8 path, so spaces stay inside one word).
+  @visibleForTesting
+  static String activationRequest({String? open}) => open == null
+      ? '$_hello $_activate'
+      : '$_hello $_activate ${base64Url.encode(utf8.encode(open))}';
+
+  /// Reads [request]: `null` when it is not an activation request, else
+  /// the file it carries (an empty string for none).
+  @visibleForTesting
+  static String? parseActivationRequest(String request) {
+    final List<String> words = request.trim().split(' ');
+    if (words.length < 2 ||
+        words.length > 3 ||
+        words[0] != _hello ||
+        words[1] != _activate) {
+      return null;
+    }
+    if (words.length == 2) {
+      return '';
+    }
+    try {
+      return utf8.decode(base64Url.decode(words[2]));
+    } on FormatException {
+      // Activation still; the file is unreadable.
+      return '';
+    }
+  }
+
   /// Tries to become the one and only instance.
   ///
   /// Returns `true` when this process owns the lock (or the platform has no
   /// need for one). Returns `false` when another Zen instance is already
   /// running — the caller should quit immediately.
   ///
-  /// [port] exists for tests; production always uses [lockPort].
-  static Future<bool> acquire({int port = lockPort}) async {
+  /// [port] exists for tests; production always uses [lockPort]. [open]:
+  /// the file this launch was started with, handed to the running instance.
+  static Future<bool> acquire({int port = lockPort, String? open}) async {
     if (!isSupported || _server != null) {
       return true;
     }
@@ -77,7 +115,10 @@ abstract final class ZenSingleInstance {
       );
     }
     // The port is taken. Probing the owner.
-    final bool ownedByZen = await _requestActivationFromRunningInstance(port);
+    final bool ownedByZen = await _requestActivationFromRunningInstance(
+      port,
+      open,
+    );
     if (!ownedByZen && Platform.isWindows && port == lockPort) {
       // The port was busy, but whatever was on the port did NOT complete
       // the Zen handshake (or answered without a window). Only hung copies
@@ -256,7 +297,10 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
   static Future<void> _handleConnection(Socket socket) async {
     try {
       final String? request = await _readHandshakeLine(socket);
-      if (request == null || request.trim() != '$_hello $_activate') {
+      final String? open = request == null
+          ? null
+          : parseActivationRequest(request);
+      if (open == null) {
         return;
       }
       socket.write('$_hello $_ack\n');
@@ -264,6 +308,10 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
       final Future<void> Function()? handler = _onActivateRequested;
       if (handler != null) {
         await handler();
+      }
+      final Future<void> Function(String path)? opener = _onOpenRequested;
+      if (open.isNotEmpty && opener != null) {
+        await opener(open);
       }
     } catch (error, stackTrace) {
       logZenError(
@@ -281,7 +329,10 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
     }
   }
 
-  static Future<bool> _requestActivationFromRunningInstance(int port) async {
+  static Future<bool> _requestActivationFromRunningInstance(
+    int port,
+    String? open,
+  ) async {
     Socket? socket;
     try {
       socket = await Socket.connect(
@@ -289,7 +340,7 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
         port,
         timeout: _handshakeTimeout,
       );
-      socket.write('$_hello $_activate\n');
+      socket.write('${activationRequest(open: open)}\n');
       await socket.flush();
       final String? response = await _readHandshakeLine(socket);
       final bool acknowledged = response?.trim() == '$_hello $_ack';
