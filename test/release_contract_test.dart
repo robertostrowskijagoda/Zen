@@ -373,17 +373,27 @@ void main() {
       final String yml = File(
         '.github/workflows/release.yml',
       ).readAsStringSync();
-      // The pins are checked in the tag-only android job, before any key.
+      // The pins are checked at once in the tag-only android jobs (which
+      // have no key), and in the sign job before any key.
       final int android = yml.indexOf('\n  android:\n');
       final int windows = yml.indexOf('\n  windows:\n');
       final String androidJob = yml.substring(android, windows);
       expect(androidJob, contains('dart run tool/release.dart pinned'));
+      expect(androidJob, isNot(contains('secrets.')));
+      final int sign = yml.indexOf('\n  sign:\n');
+      final String signJob = yml.substring(
+        sign,
+        yml.indexOf('\n  attach:\n', sign),
+      );
       expect(
-        androidJob.indexOf('tool/release.dart pinned'),
-        lessThan(androidJob.indexOf('name: Release key')),
+        signJob.indexOf('dart run tool/release.dart pinned'),
+        allOf(greaterThan(0), lessThan(signJob.indexOf('name: Release keys'))),
+      );
+      expect(
+        signJob.indexOf('name: Release keys'),
+        lessThan(signJob.indexOf('secrets.')),
       );
       // The signature is checked against the pins.
-      final String signJob = yml.substring(yml.indexOf('\n  sign:\n'));
       expect(
         signJob,
         contains(

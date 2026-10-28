@@ -159,7 +159,11 @@ key, so every release must be signed with this key.
    `main` only through pull requests), wait for green CI and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
    `main`). Then `git push origin v1.12.0`. Approve the `release`
-   environment when GitHub asks (the APK key and the signing key).
+   environment when GitHub asks. It asks once, when every build is done
+   (about half an hour after the push; Actions → the run → "Review
+   deployments"), and that one approval lets the sign job use both the APK
+   key and the signing key. Until then nothing has a key; the request
+   waits up to 30 days.
    `release.yml` refuses a tag that differs from the version in
    `pubspec.yaml` / `app_version.dart` (otherwise every build would keep
    offering the release as an update).
@@ -208,34 +212,47 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    `dart run tool/go_licenses.dart` (the test `go_licenses_test.dart` reminds
    you).
 3. **Building:** pushing a tag `v<version>` runs
-   `.github/workflows/release.yml`: Android (a separate job) and Windows x64
-   on `windows-latest`, Windows ARM64 on `windows-11-arm`, Linux x64 on
-   `ubuntu-22.04`, Linux ARM64 on `ubuntu-22.04-arm` (section 3.4), the
-   Flatpak, checksums, signing and attaching on `ubuntu-24.04`, macOS on
-   `macos-latest` and iPhone (`ios.yml`, called from `release.yml`). No
-   Linux job uses the moving `ubuntu-latest` label. Each job
-   stores its files as an artifact; the second-to-last job gathers them and
-   computes `SHA256SUMS`, and the last one attaches everything to the draft
-   release. The APK signing key is in the secrets of the **`release`
-   environment** (Settings → Environments; not the repository secrets):
-   `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
+   `.github/workflows/release.yml`. Every build runs at the same time:
+   Android in three jobs, one per ABI, on `ubuntu-24.04` (each builds only
+   its own Go bridge), Windows x64 on `windows-latest`, Windows ARM64 on
+   `windows-11-arm`, Linux x64 on `ubuntu-22.04`, Linux ARM64 on
+   `ubuntu-22.04-arm` (section 3.4), the Flatpak (after Linux x64) on
+   `ubuntu-24.04`, macOS on `macos-latest` and iPhone (`ios.yml`, called
+   from `release.yml`). No Linux job uses the moving `ubuntu-latest` label.
+   Each job stores its files as an artifact. The Android jobs build without
+   any key, so Gradle signs their APKs with the runner's own throwaway
+   debug key; they stay artifacts named `unsigned-apk-<abi>` and never
+   carry a release file name. When every build is done, the **sign** job
+   replaces that signature with the release key (`apksigner`, APK
+   Signature Scheme v2 and v3), checks the certificate against the pin and
+   the 16 KB alignment, writes `whats-new.json`, computes `SHA256SUMS` over
+   all files and signs it (`SHA256SUMS.sig`); the last job attaches
+   everything to the draft release. The keys are in the secrets of the
+   **`release` environment** (Settings → Environments; not the repository
+   secrets): `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-   — without them the workflow skips the APKs — and
+   — without them the APKs are left out (a warning) — and
    `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
    `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
-   warning). Only the `android` and `sign` jobs use the environment. It
+   warning). Only the `sign` job uses the environment, so a tag run asks
+   for one approval. The environment
    requires an approver (the maintainer) and has a rule for `v*` tags
    only; the keys go only to a run of a `v*` tag after approval (described
    at the top of `release.yml`). The workflow's token is read-only
    (`permissions: {}` at the top, `contents: read` per job); only the
-   `attach` job, for tags, may write. The `checksums` job, which has no
-   environment, fails the run when any signing secret
+   `attach` job, for tags, may write. The `preflight` job ("Keys and
+   version"), which has no environment and which the sign job waits for,
+   fails the run when any signing secret
    (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
    `ANDROID_KEY_PASSWORD`, `ZEN_RELEASE_SIGNING_KEY`) is also visible as a
    repository or organization secret: the keys must live only in the
    environment. Environments with required reviewers are free for public
    repositories. A manual run from a branch builds the other files as
-   artifacts, without the APKs and without a release. **Windows ARM64 is
+   artifacts (its `checksums` job adds their `SHA256SUMS`), without the
+   APKs, without signing and without a release. No job of `release.yml`
+   uses a cache (no Flutter, pub, Gradle or Go cache): a cache another run
+   wrote could change what gets signed; the run is fast because the builds
+   run side by side. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
@@ -243,8 +260,10 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    "Building from source").
 4. **Files under exactly these names** (what `release.yml` produces):
    - `Zen-arm64-v8a.apk`, `Zen-armeabi-v7a.apk`, `Zen-x86_64.apk` — one APK
-     per ABI (`flutter build apk --release --split-per-abi`, from
-     `build/app/outputs/flutter-apk/app-<abi>-release.apk`): arm64-v8a for
+     per ABI (`flutter build apk --release --split-per-abi --target-platform
+     android-<arch>`, one job each, from
+     `build/app/outputs/flutter-apk/app-<abi>-release.apk`, signed by the
+     sign job with `apksigner`): arm64-v8a for
      most phones, armeabi-v7a for older 32-bit phones, x86_64 for
      Chromebooks and emulators; no universal APK and no x86 (Flutter has no
      x86 release engine);
@@ -318,14 +337,16 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    `Zen-Windows-arm64.zip`,
    `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, the `.deb` files, `Zen-Linux-x64.flatpak` and
    `Zen-macOS.zip`).
-5. **Checksums:** `SHA256SUMS` is computed by the last-but-one job of
-   `release.yml` over all release files (`sha256sum` format; check with
+5. **Checksums:** `SHA256SUMS` is computed by the sign job of
+   `release.yml` over all release files, the signed APKs included
+   (`sha256sum` format; check with
    `sha256sum -c SHA256SUMS`, on Windows
    `Get-FileHash -Algorithm SHA256 Zen-arm64-v8a.apk`). Anyone may redistribute copies, and the
    sums let people check that a copy is the official one, so they must accompany
    every release — also after replacing a file by hand they must be computed
    and signed again (section 8.6). The job runs only when the required builds
-   succeeded (Windows, Linux, macOS, iOS; Android unless it was skipped).
+   succeeded (Android, Windows, Linux, Flatpak, macOS, iOS) and the
+   preflight passed.
    The attach job never replaces a file already attached (no `--clobber`)
    and stops if the release is already published; to redo a file, delete it
    from the draft by hand and re-run the job.
@@ -371,9 +392,12 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
   version number, not by name.
 - **Without Go** (or without NDK / a C compiler) the existing library is used
   with a warning; without it the build aborts, saying what is missing.
-  `ZEN_SKIP_GO_BRIDGE=1` skips the check. Automatic rebuilding of the `.so`
-  works only on Windows (the script uses the Windows NDK); `build_android.sh`
-  does it on Linux (as in CI).
+  `ZEN_SKIP_GO_BRIDGE=1` skips the check. On Linux and macOS Gradle calls
+  `build_if_changed.sh`, the twin of the Windows script, which builds with
+  `build_android.sh` (the NDK's Linux or macOS toolchain); CI's
+  `android-bridge` job and the release's Android jobs build there, the
+  release calling `build_if_changed.sh <abi>` first so its output is in the
+  log and Gradle finds the library up to date.
 - **Windows ARM64:** `build_windows.ps1 -Arch x64|arm64` (default: the
   computer's architecture); the ARM64 DLL goes to `bin\windows-arm64\`, x64
   stays in `bin\`; CMake picks by `FLUTTER_TARGET_PLATFORM` / the generator
@@ -497,7 +521,9 @@ which follows every release). App identifier: `com.roj.zen`. iOS 15+. Locally on
   the same tag twice and compare with `sha256sum`. Full reproducibility
   (F-Droid) would also need reproducible Flutter and Go builds.
 - Python tests of these tools run in CI: `tool/ci/test_ci_checks.py` (ELF and
-  APK alignment, PE imports, glibc, pinned runners, the environment),
+  APK alignment, PE imports, glibc, pinned runners, only the sign job in the
+  environment, no caches in the release, the CI test jobs behind the
+  required check),
   `tool/ci/test_release_source.py`, `tool/ci/test_check_libwebrtc.py`.
 
 ### 3.5. What's new (the note in the update notice)
@@ -1164,9 +1190,10 @@ installing (and showing the note of section 3.5) checks it.
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
 "sigs": [{"k", "s"}]}` (hybrid id and hybrid signature, as in section 8). The
 `sign` job of `release.yml` (with Go for the signature) makes it on every
-`v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (in the
-`release` environment, so it waits for the same approval as the Android
-job); without the secret it is skipped with a warning. The job then runs
+`v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (the
+only job in the `release` environment; it signs the APKs too, so one
+approval covers both keys); without the secret it is skipped with a
+warning. The job then runs
 `zen_release.dart verify --pinned`: a signature by a key that is not in
 `kReleaseMaintainers` of the tagged app stops the run (every installed
 computer would refuse such a release). By hand:

@@ -10,33 +10,43 @@
 # (the short note from CHANGELOG.md the app shows with the update notice),
 # SHA256SUMS of all of them and
 # SHA256SUMS.sig (SHA256SUMS signed with the release signing key), and
-# attaches them to a draft release of that tag. Every build job uploads its
-# files as an artifact; the checksums job gathers them and writes SHA256SUMS,
-# the sign job signs it, and the last job attaches everything. Publish the
-# draft by hand after checking it (docs/RELEASES.md, section 3). Publishing
-# it starts pages.yml, which rebuilds the install page data and the
+# attaches them to a draft release of that tag.
+#
+# How a tag run goes: every build runs at the same time, each in its own
+# job, and uploads its files as an artifact; the three APKs are built in
+# three jobs, without any key. When all builds are done, the sign job (the
+# only job with the keys) signs the APKs, writes whats-new.json and
+# SHA256SUMS and signs SHA256SUMS, and the last job attaches everything.
+# GitHub asks for one approval, when the sign job is about to start (so
+# about half an hour after the push, not at the start). Publish the draft
+# by hand after checking it (docs/RELEASES.md, section 3). Publishing it
+# starts pages.yml, which rebuilds the install page data and the
 # SideStore / AltStore source (apps.json) for the new Zen-unsigned.ipa.
 #
-# The release key:
-# - Only a run of a tag v* ever touches it. The android job runs only for
-#   refs/tags/v*, and its "Release key" step checks the ref once more.
-#   Actions -> Release -> Run workflow from a BRANCH still builds the other
-#   files (unsigned, as always: Windows, Linux, macOS ad hoc, iOS) as
-#   artifacts of the run, with SHA256SUMS, but no APK and nothing is
-#   attached to a release. Without the key the release APK would be signed
-#   with the debug key (android/app/build.gradle.kts), and such a file must
-#   never look like a release file. For a signed APK push a tag (or run the
-#   workflow from the tag).
-# - The android job runs in the environment "release". Create it once in
+# The release keys:
+# - Only a run of a tag v* ever touches them. The android jobs and the sign
+#   job run only for refs/tags/v*, and the sign job never runs from a
+#   branch. Actions -> Release -> Run workflow from a BRANCH still builds
+#   the other files (unsigned, as always: Windows, Linux, macOS ad hoc,
+#   iOS) as artifacts of the run, with SHA256SUMS (the checksums job), but
+#   no APK and nothing is signed or attached to a release. For a signed APK
+#   push a tag (or run the workflow from the tag).
+# - The android jobs build without the key, so Gradle signs their APKs with
+#   the runner's own throwaway debug key (android/app/build.gradle.kts).
+#   Such a file must never look like a release file: it stays an artifact
+#   named unsigned-apk-<abi> holding app-<abi>-release.apk, and only the
+#   sign job turns it into Zen-<abi>.apk, by replacing that signature with
+#   the release key (apksigner).
+# - The sign job runs in the environment "release". Create it once in
 #   Settings -> Environments -> New environment "release":
-#     * Required reviewers: the maintainer, so every tag run waits for an
-#       approval before the job (and the key) starts;
+#     * Required reviewers: the maintainer, so every tag run waits for one
+#       approval before the sign job (and the keys) starts;
 #     * Deployment branches and tags: "Selected branches and tags", one tag
 #       rule "v*";
 #     * Environment secrets: ANDROID_KEYSTORE_BASE64 (the .jks file, base64),
 #       ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD;
 #       then delete them from the repository secrets, so that no other job
-#       can read them. Without them no APK is built (a warning).
+#       can read them. Without them the APKs are left out (a warning).
 #     * ZEN_RELEASE_SIGNING_KEY: the release signing key (the contents of
 #       the file `dart run tool/zen_release.dart keygen` wrote; its hybrid
 #       id is in kReleaseMaintainers, docs/RELEASES.md, section 8.6). The sign job
@@ -44,24 +54,28 @@
 #       kReleaseMaintainers pins. Without it SHA256SUMS.sig is not made (a
 #       warning), and builds that know a release key refuse to update
 #       themselves from that release.
-# - A tag run stops at once (android job, before any key) while the app
-#   pins no release key or APK certificate (tool/release.dart pinned).
+# - A tag run stops at once (in the android jobs, and in the sign job
+#   before any key) while the app pins no release key or APK certificate
+#   (tool/release.dart pinned).
 #   Environments with reviewers are free for public repositories. A private
 #   repository needs a paid plan for environments (Pro, Team or Enterprise),
 #   and GitHub Enterprise for required reviewers. Until the environment
 #   exists GitHub creates an empty one (no reviewers, no rules) at the first
 #   run; the tag condition holds anyway.
 # - Every action is pinned to a full commit SHA (Dependabot keeps them
-#   current: .github/dependabot.yml). No caches in this workflow: a cache
-#   written by another run could change what is built and signed, and
-#   flutter-action's own cache step uses actions/cache by tag, not by SHA.
+#   current: .github/dependabot.yml). No caches in this workflow (no
+#   Flutter, pub, Gradle or Go cache): a cache written by another run could
+#   change what is built and signed, and flutter-action's own cache step
+#   uses actions/cache by tag, not by SHA. The run is fast because the
+#   builds run side by side, not because anything is reused.
 # - GITHUB_TOKEN: read-only in every job; contents: write only in the last
 #   job, which runs only for tags and does nothing but attach the files.
 #   It never replaces a file already attached (no --clobber) and never
 #   touches a release that is already published.
-# - The signing keys live only in the environment "release": the checksums
+# - The signing keys live only in the environment "release": the preflight
 #   job (no environment) fails the run when any of them is also a
-#   repository or organization secret, which every job could read.
+#   repository or organization secret, which every job could read, and the
+#   sign job starts only after it passed.
 # - Linux is built on Ubuntu 22.04 (glibc 2.35), so the files run on
 #   Ubuntu 22.04+, Debian 12+ and Linux Mint 21+; tool/ci/check_linux_abi.sh
 #   fails the build when a binary needs a newer glibc or libstdc++. Every
@@ -91,17 +105,76 @@ env:
   FLUTTER_VERSION: '3.47.1'
 
 jobs:
-  android:
-    name: Android (signed)
-    # Never from a branch (see the top).
-    if: startsWith(github.ref, 'refs/tags/v')
-    # Windows: the Go bridge for Android rebuilds itself only there
-    # (docs/RELEASES.md, section 3.1).
-    runs-on: windows-latest
-    timeout-minutes: 60
-    environment: release
+  # Before anything is signed: the signing keys are where they belong and
+  # the tag is the version of the build. The sign job starts only after
+  # this passed.
+  preflight:
+    name: Keys and version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
+    steps:
+      # This job has no environment: it sees only repository and
+      # organization secrets, where a signing key must never be (every job
+      # of every workflow could read it there, without an approval).
+      - name: The signing keys are only in the environment "release"
+        env:
+          K1: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          K2: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          K3: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          K4: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -n "$K1$K2$K3$K4" ]; then
+            echo "::error::A signing secret is also a repository or organization secret: delete it there (Settings -> Secrets and variables -> Actions) and keep it only in the environment 'release'."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The app reports the version of pubspec.yaml and treats the tag as
+      # the release's version: if they differ, every build would keep
+      # offering this release as an update (tool/release.dart prepare sets
+      # both).
+      - name: The tag is the version of the build
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version: *\([0-9][0-9.]*\)+.*$/\1/p' pubspec.yaml)
+          app=$(sed -n "s/^const String kAppVersion = '\(.*\)';$/\1/p" lib/src/app/app_version.dart)
+          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$app" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME, pubspec.yaml $version, app_version.dart $app: they must agree (dart run tool/release.dart prepare)."
+            exit 1
+          fi
+
+  # One APK per ABI (a universal one carries all three and is much bigger),
+  # each ABI in its own job at the same time, with only its own Go bridge.
+  # The app picks the APK of its device's ABI (android_abi.dart), as does
+  # Obtainium (by the ABI in the file name). The version code is the same
+  # in all three (android/gradle.properties). No key here: the sign job
+  # signs them (see the top).
+  android:
+    name: Android (${{ matrix.abi }})
+    # Never from a branch (see the top).
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Linux, as CI's android-bridge job: Gradle and the Go bridge build
+    # there much faster than on Windows (build_if_changed.sh, the twin of
+    # the Windows script, docs/RELEASES.md, section 3.1).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            platform: android-arm64
+          - abi: armeabi-v7a
+            platform: android-arm
+          - abi: x86_64
+            platform: android-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,83 +203,47 @@ jobs:
       # (kReleaseMaintainers, kOfficialApkCertificatesSha256): without them
       # the computers would take an update whose SHA256SUMS nobody signed.
       # `tool/release.dart prepare` checks the same, but a tag can be pushed
-      # without it. A run from a branch never gets here (no keys needed).
+      # without it. Checked first, so such a tag stops within minutes.
       - name: The app pins its release keys
         if: startsWith(github.ref, 'refs/tags/v')
         run: dart run tool/release.dart pinned
 
-      - name: Release key
-        id: key
-        # Only a tag run gets the key, even if the job condition above is
-        # ever changed.
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+      # Built on its own, with its output in the log, and with the newest
+      # NDK as in CI; it leaves the stamp that tells Gradle's buildGoBridge
+      # the library is up to date. Each 64-bit library must work with 16 KB
+      # pages (Google Play, Android 15+).
+      - name: Go bridge (${{ matrix.abi }})
         env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ABI: ${{ matrix.abi }}
         run: |
-          if (-not $env:KEYSTORE) {
-            Write-Output "::warning::No release key in the secrets of the environment 'release': the APKs are not built."
-            "ready=false" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
-          $jks = Join-Path $env:RUNNER_TEMP 'zen-release.jks'
-          [IO.File]::WriteAllBytes($jks, [Convert]::FromBase64String($env:KEYSTORE))
-          @(
-            "storeFile=$($jks -replace '\\', '/')"
-            "storePassword=$env:STORE_PASSWORD"
-            "keyAlias=$env:KEY_ALIAS"
-            "keyPassword=$env:KEY_PASSWORD"
-          ) | Set-Content -Encoding ascii android/key.properties
-          "ready=true" >> $env:GITHUB_OUTPUT
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          sh native/yggdrasil_bridge/build_if_changed.sh "$ABI"
+          lib="android/app/src/main/jniLibs/$ABI/libyggdrasil_bridge.so"
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" \
+            -D --defined-only "$lib" | grep -q ' YggStartNode$'
+          ls -l "$lib"
+          python3 tool/ci/check_page_alignment.py "android/app/src/main/jniLibs/$ABI"
 
-      # One APK per ABI (a universal one carries all three and is much
-      # bigger); Gradle builds the Go bridge for each of the three ABIs. The
-      # app picks the APK of its device's ABI (android_abi.dart), as does
-      # Obtainium (by the ABI in the file name). The version code is the
-      # same in all three (android/gradle.properties).
-      - name: Build (the Go bridge builds itself)
-        if: steps.key.outputs.ready == 'true'
-        run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64
+      - name: Build
+        run: flutter build apk --release --split-per-abi --target-platform ${{ matrix.platform }}
 
-      - name: Release files
-        if: steps.key.outputs.ready == 'true'
-        shell: pwsh
+      # Gradle signed it with this runner's debug key (there is no
+      # android/key.properties here): kept under Flutter's name, never as
+      # a release file, for the sign job only.
+      - name: APK for the sign job
+        env:
+          ABI: ${{ matrix.abi }}
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/Zen-arm64-v8a.apk
-          Copy-Item build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/Zen-armeabi-v7a.apk
-          Copy-Item build/app/outputs/flutter-apk/app-x86_64-release.apk dist/Zen-x86_64.apk
-
-      # All three signed with one and the same certificate (the app checks
-      # an update against its own certificate; the install page shows one),
-      # and it is the one the app of this tag pins
-      # (kOfficialApkCertificatesSha256): another keystore in the
-      # environment would make every phone refuse the update.
-      - name: One signing certificate, the pinned one
-        if: steps.key.outputs.ready == 'true'
-        run: dart run tool/zen_release.dart fingerprint --pinned dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
-
-      # 16 KB pages: every 64-bit library's LOAD segments aligned to 0x4000
-      # and stored on a 16 KB boundary of the APK (Google Play, Android 15+).
-      - name: 16 KB page alignment
-        if: steps.key.outputs.ready == 'true'
-        run: python tool/ci/check_page_alignment.py dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
-
-      - name: Forget the release key
-        if: always()
-        shell: pwsh
-        run: |
-          Remove-Item -Force -ErrorAction SilentlyContinue android/key.properties
-          Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'zen-release.jks')
+          test ! -e android/key.properties
+          mkdir -p apk
+          cp "build/app/outputs/flutter-apk/app-$ABI-release.apk" apk/
+          ls -l apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.key.outputs.ready == 'true'
         with:
-          name: release-android
-          path: dist/
+          name: unsigned-apk-${{ matrix.abi }}
+          path: apk/
+          retention-days: 7
           if-no-files-found: error
 
   windows:
@@ -310,7 +347,7 @@ jobs:
   # ARM64 computer), the Go bridge with llvm-mingw (MSVC's clang cannot
   # build cgo). Not required for a release yet: until its first green run
   # a failure here leaves out Zen-Windows-arm64.zip and nothing else (see
-  # the checksums job). The x64 Zen-Windows.zip also runs there, emulated.
+  # the sign job). The x64 Zen-Windows.zip also runs there, emulated.
   windows-arm64:
     name: Windows (ARM64)
     runs-on: windows-11-arm
@@ -650,57 +687,59 @@ jobs:
       contents: read
     uses: ./.github/workflows/ios.yml
 
-  checksums:
-    name: SHA256SUMS
-    needs: [android, windows, windows-arm64, linux, flatpak, macos, ios]
-    # Also when the android job was skipped (a run from a branch); never
-    # after a failed or cancelled build of a required file. windows-arm64
-    # is not required yet (see that job): its file is included when built.
+  # The only job with the release keys, and so the only one GitHub asks to
+  # approve (the environment "release", see the top). It starts when every
+  # required build is done and the preflight passed; never after a failed
+  # or cancelled build. windows-arm64 is not required yet (see that job):
+  # its file is included when built.
+  # In this order: the APKs are signed with the release key and checked;
+  # whats-new.json and the licences join the other files; SHA256SUMS lists
+  # all of them (the signed APKs too); SHA256SUMS.sig signs SHA256SUMS
+  # (lib/src/features/update/release.dart, SignedSums, checks it before
+  # the app updates itself from GitHub). Everything else of the tag that
+  # builds or runs code runs before a key is on disk, and each key is
+  # deleted right after its use.
+  sign:
+    name: Sign
+    needs: [preflight, android, windows, windows-arm64, linux, flatpak, macos, ios]
     if: >-
       !cancelled()
-      && needs.android.result != 'failure' && needs.android.result != 'cancelled'
+      && startsWith(github.ref, 'refs/tags/v')
+      && needs.preflight.result == 'success'
+      && needs.android.result == 'success'
       && needs.windows.result == 'success'
       && needs.linux.result == 'success'
       && needs.flatpak.result == 'success'
       && needs.macos.result == 'success'
       && needs.ios.result == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    environment: release
     permissions:
       contents: read
     steps:
-      # This job has no environment: it sees only repository and
-      # organization secrets, where a signing key must never be (every job
-      # of every workflow could read it there, without an approval).
-      - name: The signing keys are only in the environment "release"
-        env:
-          K1: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          K2: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          K3: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          K4: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
-        run: |
-          if [ -n "$K1$K2$K3$K4" ]; then
-            echo "::error::A signing secret is also a repository or organization secret: delete it there (Settings -> Secrets and variables -> Actions) and keep it only in the environment 'release'."
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # The app reports the version of pubspec.yaml and treats the tag as
-      # the release's version: if they differ, every build would keep
-      # offering this release as an update (tool/release.dart prepare sets
-      # both).
-      - name: The tag is the version of the build
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          version=$(sed -n 's/^version: *\([0-9][0-9.]*\)+.*$/\1/p' pubspec.yaml)
-          app=$(sed -n "s/^const String kAppVersion = '\(.*\)';$/\1/p" lib/src/app/app_version.dart)
-          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$app" != "$version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME, pubspec.yaml $version, app_version.dart $app: they must agree (dart run tool/release.dart prepare)."
-            exit 1
-          fi
+      # apksigner (from the runner's Android SDK) runs on Java.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      # The signature is hybrid (Ed25519 + ML-DSA-65): the tool signs with
+      # the bridge's Go (native/yggdrasil_bridge/cmd/zensig).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -713,40 +752,132 @@ jobs:
           name: Zen-unsigned-ipa
           path: dist
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: unsigned-apk-*
+          path: apk
+          merge-multiple: true
+
       # The short note the app shows with the update notice: the "### What's
       # new" part of this version in CHANGELOG.md (tool/release.dart
       # prepare requires it). Made before SHA256SUMS, so SHA256SUMS.sig
-      # signs it with every other file.
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: false
-
-      - name: What's new
-        if: startsWith(github.ref, 'refs/tags/v')
+      # signs it with every other file. The iPhone file must be there: the
+      # SideStore / AltStore source (apps.json on GitHub Pages, pages.yml)
+      # points to it.
+      - name: Prepare
         env:
           TAG: ${{ github.ref_name }}
         run: |
           flutter pub get --enforce-lockfile
+          dart run tool/release.dart pinned
+          (cd native/yggdrasil_bridge && go build -o /dev/null ./cmd/zensig)
           dart run tool/release.dart whats-new --version "${TAG#v}" \
             --out dist/whats-new.json
           cat dist/whats-new.json
+          test -s dist/Zen-unsigned.ipa || { echo "::error::Zen-unsigned.ipa is missing"; exit 1; }
+          rm -f dist/*.sha256
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n 1)
+          apksigner="$ANDROID_HOME/build-tools/$tools/apksigner"
+          "$apksigner" --version
+          echo "APKSIGNER=$apksigner" >> "$GITHUB_ENV"
+
+      - name: Release keys
+        id: key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
+        run: |
+          apk=true
+          sums=true
+          if [ -z "$KEYSTORE" ]; then
+            echo "::warning::No release key in the secrets of the environment 'release': the APKs are left out."
+            apk=false
+          fi
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::No ZEN_RELEASE_SIGNING_KEY in the secrets of the environment 'release': SHA256SUMS.sig is not made, and builds that know a release key will not update themselves from this release."
+            sums=false
+          fi
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          echo "sums=$sums" >> "$GITHUB_OUTPUT"
+
+      # The APKs of the android jobs carry the runner's debug signature;
+      # apksigner replaces it with the release key's (APK Signature Scheme
+      # v2 and v3, as the app reads them: apk_signing_block.dart; no v4
+      # .idsig file). The passwords reach apksigner through the
+      # environment, never on its command line.
+      - name: Sign the APKs
+        if: steps.key.outputs.apk == 'true'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          jks="$RUNNER_TEMP/zen-release.jks"
+          trap 'rm -f "$jks"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE" | tr -d ' \t\r\n' | base64 -d > "$jks"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            "$APKSIGNER" sign --ks "$jks" --ks-pass env:STORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD \
+              --v4-signing-enabled false \
+              --out "dist/Zen-$abi.apk" "apk/app-$abi-release.apk"
+          done
+          rm -f "$jks"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            "$APKSIGNER" verify --verbose "dist/Zen-$abi.apk"
+          done
+          ls -l dist/*.apk
+
+      # All three signed with one and the same certificate (the app checks
+      # an update against its own certificate; the install page shows one),
+      # and it is the one the app of this tag pins
+      # (kOfficialApkCertificatesSha256): another keystore in the
+      # environment would make every phone refuse the update.
+      - name: One signing certificate, the pinned one
+        if: steps.key.outputs.apk == 'true'
+        run: dart run tool/zen_release.dart fingerprint --pinned dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
+
+      # 16 KB pages: every 64-bit library's LOAD segments aligned to 0x4000
+      # and stored on a 16 KB boundary of the APK (Google Play, Android 15+).
+      - name: 16 KB page alignment
+        if: steps.key.outputs.apk == 'true'
+        run: python3 tool/ci/check_page_alignment.py dist/Zen-arm64-v8a.apk dist/Zen-armeabi-v7a.apk dist/Zen-x86_64.apk
 
       - name: Licenses and SHA256SUMS
         run: |
           export LC_ALL=C
-          # The iPhone file must be there: the SideStore / AltStore source
-          # (apps.json on GitHub Pages, pages.yml) points to it.
-          test -s dist/Zen-unsigned.ipa || { echo "::error::Zen-unsigned.ipa is missing"; exit 1; }
-          rm -f dist/*.sha256
           cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE \
             THIRD_PARTY_NOTICES.md dist/
           cd dist
           sums=$(sha256sum -- *)
           printf '%s\n' "$sums" > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Sign SHA256SUMS
+        if: steps.key.outputs.sums == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
+        run: |
+          mkdir -p signed
+          dart run tool/zen_release.dart sums-manifest --version "${TAG#v}" \
+            --out signed/SHA256SUMS.sig dist/SHA256SUMS
+          key="$RUNNER_TEMP/zen-release.key"
+          trap 'rm -f "$key"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_KEY" > "$key"
+          dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$key"
+          rm -f "$key"
+          # Signed with a key the app of this tag pins (kReleaseMaintainers),
+          # or the run stops: a release signed with another key would be
+          # refused by every computer.
+          dart run tool/zen_release.dart verify --pinned signed/SHA256SUMS.sig
+          mv signed/SHA256SUMS.sig dist/
+
+      - name: Forget the keys
+        if: always()
+        run: rm -f "$RUNNER_TEMP/zen-release.jks" "$RUNNER_TEMP/zen-release.key"
 
       # Every file with its size and SHA-256 on the run's summary page.
       - name: Summary
@@ -759,132 +890,26 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # Signs SHA256SUMS with the release signing key (an environment secret,
-  # see the top): SHA256SUMS.sig, which the app checks before it updates
-  # itself from GitHub (lib/src/features/update/release.dart, SignedSums).
-  # In the environment "release", so it waits for the approval like the
-  # android job.
-  sign:
-    name: Sign SHA256SUMS
-    needs: checksums
-    if: >-
-      !cancelled()
-      && needs.checksums.result == 'success'
-      && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: release
-    permissions:
-      contents: read
-    outputs:
-      signed: ${{ steps.key.outputs.ready }}
-    steps:
-      - name: Signing key
-        id: key
-        env:
-          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
-        run: |
-          if [ -z "$SIGNING_KEY" ]; then
-            echo "::warning::No ZEN_RELEASE_SIGNING_KEY in the secrets of the environment 'release': SHA256SUMS.sig is not made, and builds that know a release key will not update themselves from this release."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.key.outputs.ready == 'true'
-        with:
-          persist-credentials: false
-
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        if: steps.key.outputs.ready == 'true'
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: false
-
-      # The signature is hybrid (Ed25519 + ML-DSA-65): the tool signs with
-      # the bridge's Go (native/yggdrasil_bridge/cmd/zensig).
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: steps.key.outputs.ready == 'true'
-        with:
-          go-version-file: native/yggdrasil_bridge/go.mod
-          cache: false
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: steps.key.outputs.ready == 'true'
-        with:
-          name: zen-release
-          path: dist
-
-      # Everything of the tag that builds or runs code (the locked
-      # dependencies and their build hooks, the tool, the Go signer) runs
-      # before the key is on disk.
-      - name: Prepare
-        if: steps.key.outputs.ready == 'true'
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          flutter pub get --enforce-lockfile
-          (cd native/yggdrasil_bridge && go build -o /dev/null ./cmd/zensig)
-          mkdir -p signed
-          dart run tool/zen_release.dart sums-manifest --version "${TAG#v}" \
-            --out signed/SHA256SUMS.sig dist/SHA256SUMS
-
-      - name: Sign
-        if: steps.key.outputs.ready == 'true'
-        env:
-          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
-        run: |
-          key="$RUNNER_TEMP/zen-release.key"
-          trap 'rm -f "$key"' EXIT
-          umask 077
-          printf '%s' "$SIGNING_KEY" > "$key"
-          dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$key"
-          rm -f "$key"
-          # Signed with a key the app of this tag pins (kReleaseMaintainers),
-          # or the run stops: a release signed with another key would be
-          # refused by every computer.
-          dart run tool/zen_release.dart verify --pinned signed/SHA256SUMS.sig
-
-      - name: Forget the signing key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/zen-release.key"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.key.outputs.ready == 'true'
-        with:
-          name: zen-release-signature
-          path: signed/
-          if-no-files-found: error
-
   attach:
     name: Draft release
-    needs: [checksums, sign]
+    needs: sign
     # !cancelled(): the optional windows-arm64 job may have failed further
     # up, which alone would skip this job. A failed signing stops it; a
-    # missing signing key only leaves SHA256SUMS.sig out (a warning above).
+    # missing key only leaves its files out (a warning above).
     if: >-
       !cancelled()
-      && needs.checksums.result == 'success'
       && needs.sign.result == 'success'
       && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The only job that can write: it creates the draft and attaches the
-    # files, without checking out or building anything.
+    # files, without checking out or building anything, and without keys.
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: zen-release
-          path: dist
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: needs.sign.outputs.signed == 'true'
-        with:
-          name: zen-release-signature
           path: dist
 
       # Never --clobber: a file once attached is not replaced by a re-run
@@ -913,3 +938,60 @@ jobs:
               --repo "$GITHUB_REPOSITORY"
           fi
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"
+
+  # A run from a branch has no APKs and signs nothing: the other files with
+  # their SHA256SUMS, as an artifact of the run (to try a build before
+  # tagging it).
+  checksums:
+    name: SHA256SUMS
+    needs: [preflight, windows, windows-arm64, linux, flatpak, macos, ios]
+    if: >-
+      !cancelled()
+      && !startsWith(github.ref, 'refs/tags/v')
+      && needs.preflight.result == 'success'
+      && needs.windows.result == 'success'
+      && needs.linux.result == 'success'
+      && needs.flatpak.result == 'success'
+      && needs.macos.result == 'success'
+      && needs.ios.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Zen-unsigned-ipa
+          path: dist
+
+      - name: Licenses and SHA256SUMS
+        run: |
+          export LC_ALL=C
+          test -s dist/Zen-unsigned.ipa || { echo "::error::Zen-unsigned.ipa is missing"; exit 1; }
+          rm -f dist/*.sha256
+          cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE \
+            THIRD_PARTY_NOTICES.md dist/
+          cd dist
+          sums=$(sha256sum -- *)
+          printf '%s\n' "$sums" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: python3 tool/ci/ci_summary.py files --dir dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zen-release
+          path: dist/
+          if-no-files-found: error
