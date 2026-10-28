@@ -20,6 +20,7 @@ final class NodeLook {
     this.tagTone,
     this.label = false,
     this.hollow = false,
+    this.unknown = false,
   });
 
   /// The dot (a dimmed person has a see-through colour).
@@ -41,6 +42,10 @@ final class NodeLook {
 
   /// Drawn as an empty ring in [fill] only (offline).
   final bool hollow;
+
+  /// Drawn as a faint disc in [fill] with a ring and a question mark
+  /// (presence not known now).
+  final bool unknown;
 }
 
 /// How one line is drawn in the current mode.
@@ -465,6 +470,18 @@ class GraphPainter extends CustomPainter {
       }
       if (l.hollow) {
         canvas.drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        continue;
+      }
+      if (l.unknown) {
+        canvas
+          ..drawCircle(
+            p,
+            l.radius - 0.8,
+            fill..color = l.fill.withValues(alpha: 0.3),
+          )
+          ..drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        final TextPainter mark = labels.get('?', l.fill, bold: true);
+        mark.paint(canvas, p - Offset(mark.width / 2, mark.height / 2));
         continue;
       }
       if (l.radius <= 5 && l.ring == null && l.dot == null) {

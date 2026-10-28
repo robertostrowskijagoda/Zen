@@ -313,8 +313,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       friend: friend,
       peerAddress: widget.peerAddress,
     );
-    // The presence dot: only for a friend who shows it.
-    final PeerPresence presence = friend?.presence ?? PeerPresence.hidden;
+    // The presence dot: only for a friend who shows it ("status nieznany"
+    // while it is not known now).
+    final PeerPresence presence = friend?.shownPresence ?? PeerPresence.hidden;
     final bool showsPresence =
         friend?.status == FriendRelationshipStatus.accepted &&
         presence != PeerPresence.hidden;
@@ -378,8 +379,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   address: widget.peerAddress,
                   name: conversationTitle,
                   size: 40,
-                  online: presence == PeerPresence.online,
-                  away: presence == PeerPresence.background,
+                  presence: presence,
                   showStatus: showsPresence,
                 ),
                 const SizedBox(width: 12),

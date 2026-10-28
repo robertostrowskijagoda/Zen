@@ -800,6 +800,30 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   final Map<String, int> _presenceConfirmedAt = <String, int>{};
   final Map<String, int> _openedAt = <String, int>{};
 
+  /// [hub] as saved: each friend's presence with its latest confirmation
+  /// from memory, so what is shown after a restart ("ostatnio w sieci
+  /// 3 min temu") is not older than it was.
+  SocialHubState _withConfirmedPresence(SocialHubState hub) {
+    Map<String, FriendProfile>? friends;
+    for (final MapEntry<String, FriendProfile> entry in hub.friends.entries) {
+      final FriendProfile friend = entry.value;
+      final String key = PeerShareCodec.normalizeAddress(friend.address);
+      final int confirmed = _presenceConfirmedAt[key] ?? 0;
+      final int seen = _presenceSeenAt[key] ?? 0;
+      if (confirmed <= friend.presenceAtMillis &&
+          seen <= friend.lastPresenceAtMillis) {
+        continue;
+      }
+      (friends ??= Map<String, FriendProfile>.from(
+        hub.friends,
+      ))[entry.key] = friend.copyWith(
+        presenceAtMillis: max(confirmed, friend.presenceAtMillis),
+        lastPresenceAtMillis: max(seen, friend.lastPresenceAtMillis),
+      );
+    }
+    return friends == null ? hub : hub.copyWith(friends: friends);
+  }
+
   Timer? _persistSoonTimer;
 
   /// Saves the state a moment later, once for a burst of small changes
@@ -848,7 +872,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         }
         return;
       }
-      await _snapshotStore.save(state);
+      await _snapshotStore.save(_withConfirmedPresence(state));
     } catch (error, stackTrace) {
       logZenError('Saving social hub state snapshot failed', error, stackTrace);
     } finally {

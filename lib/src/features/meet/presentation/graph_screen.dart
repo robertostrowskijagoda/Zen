@@ -226,14 +226,16 @@ GraphLook graphLook({
     String? tag;
     Color? tagTone;
     bool hollow = false;
+    bool unknown = false;
     switch (mode) {
       case GraphMode.friends:
       case GraphMode.gates:
         break;
       case GraphMode.presence:
-        // The three looks of the presence dots: filled green (online), a
-        // blue ring with a dot ("w tle"), an empty grey ring (offline).
-        // Weak acquaintances and friends who hide it show nothing.
+        // The four looks of the presence dots: filled green (online), a
+        // blue ring with a dot ("w tle"), an empty grey ring (offline), a
+        // faint grey dot with a question mark (not known now). Weak
+        // acquaintances and friends who hide it show nothing.
         final PeerPresence presence = n.isFriend && n.ring <= 2
             ? facts.presenceOf(a)
             : PeerPresence.hidden;
@@ -247,6 +249,9 @@ GraphLook graphLook({
           case PeerPresence.offline:
             fill = zen.textMuted;
             hollow = true;
+          case PeerPresence.unknown:
+            fill = zen.textMuted;
+            unknown = true;
           case PeerPresence.hidden:
             fill = dim(fill, n.isFriend ? 0.3 : 0.18);
         }
@@ -321,6 +326,7 @@ GraphLook graphLook({
         tagTone: tagTone,
         label: lit,
         hollow: hollow && !lit,
+        unknown: unknown && !lit,
       ),
     );
   }
@@ -1403,11 +1409,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final Map<String, PyramidMark> pyr = pyramidMarks(pyramid);
     final GraphFacts facts = GraphFacts(
       statusOf: (String a) => meet.book.intentOf(a, nowMs),
-      // Zen open on their screen (in the background is not online).
+      // Zen open on their screen (in the background is not online), as
+      // known now.
       online: (String a) =>
-          byAddress[a]?.friend?.presence == PeerPresence.online,
+          byAddress[a]?.friend?.shownPresence == PeerPresence.online,
       presence: (String a) =>
-          byAddress[a]?.friend?.presence ?? PeerPresence.hidden,
+          byAddress[a]?.friend?.shownPresence ?? PeerPresence.hidden,
       openOf: open.openOf,
       met: data.met.contains,
       nearby: near.contains,
@@ -2606,6 +2613,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           ring: true,
         ),
         _LegendDot(
+          key: const Key('graph-legend-unknown'),
+          color: zen.textMuted,
+          label: presenceStateLabel(PeerPresence.unknown)!,
+          question: true,
+        ),
+        _LegendDot(
           color: zen.accent.withValues(alpha: 0.3),
           label: t('słabi znajomi — bez statusu'),
           small: true,
@@ -2860,6 +2873,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                             <String>[
                               _ringLabel(n.ring),
                               if (friend != null &&
+                                  friend.shownPresence == PeerPresence.unknown)
+                                // Not known now, and why.
+                                unknownPresenceLine(friend, meet.now)
+                              else if (friend != null &&
                                   friend.presence != PeerPresence.hidden &&
                                   friend.presence != PeerPresence.offline)
                                 presenceStateLabel(friend.presence)!
@@ -3351,11 +3368,13 @@ class _ListsDiagnostics extends StatelessWidget {
 /// One entry of the legend: a dot.
 class _LegendDot extends StatelessWidget {
   const _LegendDot({
+    super.key,
     required this.color,
     required this.label,
     this.small = false,
     this.ring = false,
     this.dotted = false,
+    this.question = false,
   });
 
   final Color color;
@@ -3366,6 +3385,9 @@ class _LegendDot extends StatelessWidget {
   /// A ring with a dot in it ("w tle").
   final bool dotted;
 
+  /// A faint dot with a question mark (presence not known now).
+  final bool question;
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -3374,12 +3396,18 @@ class _LegendDot extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Container(
-          width: ring ? 12 : d,
-          height: ring ? 12 : d,
+          width: ring || question ? 12 : d,
+          height: ring || question ? 12 : d,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: ring ? null : color,
-            border: ring ? Border.all(color: color, width: 1.5) : null,
+            color: ring
+                ? null
+                : question
+                ? color.withValues(alpha: 0.3)
+                : color,
+            border: ring || question
+                ? Border.all(color: color, width: 1.5)
+                : null,
           ),
           child: dotted
               ? Center(
@@ -3391,6 +3419,8 @@ class _LegendDot extends StatelessWidget {
                     child: const SizedBox.square(dimension: 5),
                   ),
                 )
+              : question
+              ? Icon(Icons.question_mark_rounded, size: 8, color: color)
               : null,
         ),
         const SizedBox(width: 5),

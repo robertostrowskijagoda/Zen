@@ -478,11 +478,12 @@ final class SocialHubState {
       if (unreadDelta != 0) {
         return unreadDelta;
       }
-      // Online first, then in the background (a friend hiding it counts as
-      // offline here).
-      final int presenceDelta = right.presence.index.compareTo(
-        left.presence.index,
-      );
+      // Online first, then in the background, as last known (a friend
+      // hiding it comes after the offline ones; one whose Zen is too old to
+      // tell it counts as offline here).
+      final int presenceDelta = _presenceRank(
+        right.presence,
+      ).compareTo(_presenceRank(left.presence));
       if (presenceDelta != 0) {
         return presenceDelta;
       }
@@ -491,3 +492,10 @@ final class SocialHubState {
     return entries;
   }
 }
+
+int _presenceRank(PeerPresence presence) => switch (presence) {
+  PeerPresence.online => 3,
+  PeerPresence.background => 2,
+  PeerPresence.offline || PeerPresence.unknown => 1,
+  PeerPresence.hidden => 0,
+};

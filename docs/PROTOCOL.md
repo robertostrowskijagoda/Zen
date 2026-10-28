@@ -290,10 +290,10 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 |---|---|---|
 | `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen (once more when the node first reaches the mesh, if that round went out before it did), at once to a target just added, then every 2 min (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
 | `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 3 min 30 s (`kLockedPongEvery`: the first ping after a quiet while at once, then every other one), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
-| `away` | presence: `state`, `lo` | Sent when the app leaves the screen ("leaving"), only to friends who see presence, at most once every 4 min (`kPresenceAwayEvery`): one held back goes out when that time is over, unless Zen is back on the screen by then. Never mailboxed; ignored by a locked phone. |
+| `away` | presence: `state`, `lo` | A one-way presence announcement, despite its name for any change of the sender's state: leaving the screen (`"background"`, or `"asleep"` on an iPhone iOS suspends), coming back before the next round (`"foreground"`), quitting Zen on a computer (`"asleep"`), and what was held back while the node had no network, once it has. Sent only to friends who see presence and have Zen open now (their last `ping`, `pong` or `away` in this run, within 5 min, said `"foreground"`), and only when they were last told another state; at most one per state per friend every 30 s (`kPresenceNoticeEvery`), changes within 2 s told as one (`kPresenceNoticeDelay`). One held back goes when its time is over, unless the state is back to what they were told. An iPhone's `"asleep"` goes to every friend who sees presence (their mail should go to the mailboxes now), to one without Zen open at most every 4 min (`kPresenceAwayEvery`). Never mailboxed; ignored by a locked phone (which says `"background"` in its pongs, so it never gets one). A 1.13 Zen applies whatever `state` an `away` names. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
 
-Presence fields ride on the frames above; nothing is sent only for them.
+Presence fields ride on the frames above; nothing is polled only for them.
 They go only to accepted friends who may see statuses (not to a friend at
 the "weak acquaintance" level, and never to group members or strangers); to
 anyone else a `ping` or `pong` carries neither field.
@@ -302,7 +302,8 @@ anyone else a `ping` or `pong` carries neither field.
   (off the screen but still receiving: Android's background service, a
   computer's tray, an iPhone with the keep-alive) or `"asleep"` (off the
   screen and about to stop receiving: an iPhone iOS suspends). A frame
-  without `state` says nothing about presence; the receiver shows none.
+  without `state` says nothing about presence; the receiver shows none
+  (unknown for a Zen older than 1.13.0, see below).
 - `lo`: seconds since Zen was last open on the sender's screen (0 while it
   is open). Left out when the sender turned off "show when I last opened
   the app", or does not know (a computer that started in the tray).
@@ -319,6 +320,25 @@ online. A locked Android phone takes `state` and `lo` for its pongs from a
 presence kit the app writes, sealed with the background key, whenever Zen
 leaves the screen (`presence-kit.zenbg`: the friends who may see presence
 and when Zen was last open).
+
+The receiver shows a fourth state, *unknown*, while it cannot tell; the
+last state known is kept underneath and nothing is sent for it:
+
+- *No network*: this device has not reached the mesh for 30 s
+  (`kPresenceNoNetworkAfter`). Nothing expires into *offline* meanwhile.
+  Back on the mesh, the friends who had Zen open are pinged at once (they
+  hear this device and answer); the others are settled 20 s after the next
+  round (`kPresenceSettleAfterResume`).
+- *Not checked*: the state remembered from before a start (kept per friend
+  in the encrypted social snapshot: the state, when it was last confirmed,
+  the last opening), until the friend's next frame, or until 20 s after the
+  second round of pings that could arrive (about 2 min after the node
+  reached the mesh), when it shows what that state is worth by then. The
+  same after coming back to the screen for a state that would have expired
+  meanwhile.
+- *Too old*: a friend whose `ping` or `pong` names a `ver` older than
+  1.13.0 and no `state` (a newer Zen without `state` hides its presence from
+  this person, which shows nothing).
 
 ### 2.2 Friends and profile
 

@@ -30,6 +30,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ### Presence and network
 - **Presence shows up sooner**: a new round of pings goes out as soon as the node reaches the network, a new friend is pinged at once, pings run every 2 minutes while Zen is open, and a friend counts as offline after 5 minutes (10 when they were in the background).
+- **Changes are told at once, without more pings**: leaving Zen, coming back, closing it on a computer and getting the network back go straight to the friends who have Zen open (at most once per state every 30 seconds); a locked phone gets nothing more than before.
+- **A fourth state, "status nieznany"** (a grey dot with a question mark): while this device has no network, after a start until friends answer (with what they showed last, e.g. "ostatnio w sieci 12 min temu"), and for a friend whose Zen is too old to tell it. Friends no longer look offline just because Zen has not asked them yet.
 - **Public peers**: every built-in peer is on and shows what the device does with it (in use, connecting, not connecting, in reserve, paused by the transit guard). A phone keeps the whole list in reserve and replaces a peer that stays down for about 2 minutes.
 - **Wi-Fi Direct and Bluetooth links are on by default** and the first-start permissions ask for "Nearby devices"; both run only when there is a friend's device or another of your devices to link with.
 - "Share mailboxes with group members" is on by default.

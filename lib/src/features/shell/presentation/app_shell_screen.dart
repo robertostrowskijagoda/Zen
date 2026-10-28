@@ -296,7 +296,7 @@ final class ConversationPreview {
     required this.timeLabel,
     required this.unreadCount,
     this.presence = PeerPresence.offline,
-    this.lastOpenedAtMillis = 0,
+    this.presenceLine,
     this.isTyping = false,
     this.avatarPath,
     this.nickname = '',
@@ -315,10 +315,12 @@ final class ConversationPreview {
   final String timeLabel;
   final int unreadCount;
 
-  /// What the friend's Zen is doing ([PeerPresence.hidden]: they do not
-  /// show it), and when it was last open there (0: not known).
+  /// What the friend's Zen is doing as shown ([PeerPresence.hidden]: they
+  /// do not show it; [PeerPresence.unknown]: not known now), and that in
+  /// words, as the list was built ("w tle · ostatnio otwierał(a) 5 min
+  /// temu", "status nieznany · ostatnio w sieci 12 min temu").
   final PeerPresence presence;
-  final int lastOpenedAtMillis;
+  final String? presenceLine;
   final bool isTyping;
 
   /// Zen is open on their screen now.

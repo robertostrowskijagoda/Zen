@@ -506,7 +506,7 @@ class _RelayFriendTile extends StatelessWidget {
           Text(
             friendPresenceLine(friend, now) ?? friend.lastActivityLabel,
             style: TextStyle(
-              color: switch (friend.presence) {
+              color: switch (friend.shownPresence) {
                 PeerPresence.online => zen.success,
                 PeerPresence.background => zen.tone(ZenTone.network),
                 _ => zen.textSecondary,
@@ -536,8 +536,9 @@ class _RelayFriendTile extends StatelessWidget {
       ),
       secondary: ZenBlobAvatar(
         name: friend.displayLabel,
-        online: friend.presence == PeerPresence.online,
-        away: friend.presence == PeerPresence.background,
+        online: friend.shownPresence == PeerPresence.online,
+        away: friend.shownPresence == PeerPresence.background,
+        unknown: friend.shownPresence == PeerPresence.unknown,
         showStatus: friend.presence != PeerPresence.hidden,
         size: 40,
       ),

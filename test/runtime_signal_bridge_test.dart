@@ -93,11 +93,14 @@ void main() {
   testWidgets('presence pings stop off the screen; friends hear "away" and '
       '"I am here"', (WidgetTester tester) async {
     final MemorySignalTransport transport = MemorySignalTransport();
+    final ValueNotifier<bool> reachable = ValueNotifier<bool>(true);
+    addTearDown(reachable.dispose);
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           signalTransportProvider.overrideWithValue(transport),
+          meshReachableProvider.overrideWithValue(reachable),
           socialHubSeedProvider.overrideWithValue(_seedState()),
         ],
         child: const ZenRewriteApp(),
@@ -108,6 +111,12 @@ void main() {
         .where((entry) => entry.payload['type'] == type)
         .length;
     expect(sent('ping'), 1);
+    // Ada has Zen open: she hears when it leaves this screen.
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{'type': 'ping', 'state': 'foreground'},
+    );
+    await tester.pumpAndSettle();
 
     for (final AppLifecycleState state in <AppLifecycleState>[
       AppLifecycleState.inactive,
@@ -117,7 +126,7 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(state);
     }
     await tester.pump();
-    await tester.pump();
+    await tester.pump(kPresenceNoticeDelay);
     expect(sent('away'), 1);
     expect(
       transport.sentSignals
@@ -143,20 +152,34 @@ void main() {
     expect(sent('ping'), 3);
   });
 
-  testWidgets('a glance at another app pings no one again, and leaving '
-      'again sends no second "away"', (WidgetTester tester) async {
+  testWidgets('a glance at another app pings no one again; a friend who has '
+      'Zen open hears "away" and "I am here" instead, each at most every '
+      '30 s', (WidgetTester tester) async {
     final MemorySignalTransport transport = MemorySignalTransport();
+    final ValueNotifier<bool> reachable = ValueNotifier<bool>(true);
+    addTearDown(reachable.dispose);
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           signalTransportProvider.overrideWithValue(transport),
+          meshReachableProvider.overrideWithValue(reachable),
           socialHubSeedProvider.overrideWithValue(_seedState()),
         ],
         child: const ZenRewriteApp(),
       ),
     );
     await tester.pumpAndSettle();
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{'type': 'ping', 'state': 'foreground'},
+    );
+    await tester.pumpAndSettle();
+    String lastAway() =>
+        transport.sentSignals
+                .lastWhere((entry) => entry.payload['type'] == 'away')
+                .payload['state']
+            as String;
     int sent(String type) => transport.sentSignals
         .where((entry) => entry.payload['type'] == type)
         .length;
@@ -183,33 +206,31 @@ void main() {
     expect(sent('ping'), 1);
     leave();
     await tester.pump();
-    await tester.pump();
+    await tester.pump(kPresenceNoticeDelay);
     expect(sent('away'), 1);
+    expect(lastAway(), 'background');
 
     await tester.pump(const Duration(seconds: 20));
     comeBack();
     await tester.pump();
-    await tester.pump();
+    await tester.pump(kPresenceNoticeDelay);
     expect(sent('ping'), 1, reason: 'pinged lately: the next round on time');
+    expect(sent('away'), 2, reason: '"I am here" to Ada instead');
+    expect(lastAway(), 'foreground');
 
     leave();
     await tester.pump();
-    await tester.pump();
-    expect(sent('away'), 1, reason: 'friends already saw "away"');
+    await tester.pump(kPresenceNoticeDelay);
+    expect(sent('away'), 2, reason: '"w tle" went to Ada lately');
+    await tester.pump(kPresenceNoticeEvery);
+    expect(sent('away'), 3);
+    expect(lastAway(), 'background');
 
     comeBack();
     await tester.pump();
     // The round comes a ping interval after the last one.
     await tester.pump(kPresencePingInterval);
     expect(sent('ping'), 2);
-    leave();
-    await tester.pump();
-    await tester.pump();
-    // Owed again after the round, but an "away" went out lately: this one
-    // goes when kPresenceAwayEvery is over.
-    expect(sent('away'), 1);
-    await tester.pump(kPresenceAwayEvery);
-    expect(sent('away'), 2);
   });
 
   testWidgets('a friend\'s ping and "away" show at once', (

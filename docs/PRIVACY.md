@@ -53,6 +53,10 @@ Contact: see section 13.
   gallery, "gratitude cards".
 - **Contacts and conversations:** friends and their levels, groups, messages,
   voice notes, photos, videos and files, your posts, likes and comments.
+  For each friend who shows it, their last presence (open, in the
+  background, offline), when it was last confirmed and when they last
+  opened Zen, so that after a start it can be shown as not checked yet
+  instead of offline; it is replaced by their next answer.
 - **Features data:** "Right now" statuses, events, alarms (including location
   and recorded sound, if you use them), neighbours (flats), dating profile and
   decisions, pyramid records and balances, and the ledger of signed entries.
@@ -104,7 +108,7 @@ Everything below is sent device to device over the Yggdrasil network.
 | You do this | Who receives what |
 |---|---|
 | Send a friend request | The other person: your Zen address, display name and the note you wrote. |
-| Be a friend | Friends can see your profile (name, status, bio, avatar), whether Zen is open on your screen, in the background or offline, and when you last opened it (carried by the presence pings, every 2 min while Zen is on the screen, and their answers; not shown to a weak acquaintance; the time can be turned off in Settings), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
+| Be a friend | Friends can see your profile (name, status, bio, avatar), whether Zen is open on your screen, in the background or offline, and when you last opened it (carried by the presence pings, every 2 min while Zen is on the screen, and their answers, and told at once to the friends who have Zen open when you leave Zen, come back, quit it on a computer or get the network back; not shown to a weak acquaintance; the time can be turned off in Settings), your current "Right now" status if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
 | Like, comment or write to someone who is not your friend | The author of the post and the friends who passed it on get your signed like or comment together with a small signed copy of your profile (name and photo). A first message to a non-friend (only if their settings allow it) carries the same. |
 | Chat | The recipient: message text, attachments, timestamps, typing indicator, delivery and read receipts, disappearing-message timers. |
 | Groups | Every member (up to 256) gets each message. Members learn the group's member list. |

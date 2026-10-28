@@ -608,8 +608,10 @@ void main() {
       await tapKey(Key('graph-hit-$address'));
     }
 
-    // The presence of friends is the first look at the graph.
+    // The presence of friends is the first look at the graph, with its
+    // fourth look: not known now.
     expect(find.byKey(const Key('graph-legend-presence')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-unknown')), findsOneWidget);
     expect(find.byKey(const Key('graph-legend-friends')), findsNothing);
     await tapKey(const Key('graph-mode-friends'));
     expect(find.byKey(const Key('graph-legend-friends')), findsOneWidget);

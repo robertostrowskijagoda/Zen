@@ -8,7 +8,21 @@ import 'package:flutter/foundation.dart';
 /// [offline]: no sign of life lately, or a device that stops receiving off
 /// the screen (an iPhone iOS suspends). [hidden]: the friend does not show
 /// it to this person (a weak acquaintance there sees no statuses).
-enum PeerPresence { hidden, offline, background, online }
+/// [unknown]: not known now (see [PresenceDoubt]); kept for a friend only
+/// when their Zen is too old to tell it ([kPresenceSinceVersion]), never
+/// sent. Last in the list, so the stored indexes of the others stay.
+enum PeerPresence { hidden, offline, background, online, unknown }
+
+/// Why a friend's presence shows as [PeerPresence.unknown] while the last
+/// one known is kept: [unchecked], not confirmed since Zen started (or came
+/// back to the screen after a while, or got the network back); [noNetwork],
+/// this device has had no connection to the network for a while, so nothing
+/// from friends can come.
+enum PresenceDoubt { unchecked, noNetwork }
+
+/// The first Zen that tells its presence: a friend's ping or pong without a
+/// state from an older one says nothing about whether they hide it.
+const String kPresenceSinceVersion = '1.13.0';
 
 /// The key of the presence state in `ping`, `pong` and `away`.
 const String kPresenceStateKey = 'state';
@@ -17,7 +31,9 @@ const String kPresenceStateKey = 'state';
 const String kPresenceOpenedKey = 'lo';
 
 /// The values of [kPresenceStateKey]: open on the screen, off the screen
-/// but receiving, off the screen and about to stop receiving.
+/// but receiving, off the screen and about to stop receiving. Any of them
+/// may come in a `ping`, a `pong` or an `away` (despite its name, also
+/// "back on the screen" and "closing").
 const String kPresenceForeground = 'foreground';
 const String kPresenceBackground = 'background';
 const String kPresenceAsleep = 'asleep';
@@ -75,7 +91,8 @@ final class PresenceReport {
 /// [PeerPresence.online] (on the screen), [PeerPresence.background] (off
 /// it, still receiving) or [PeerPresence.offline] (off it and about to stop
 /// receiving); [openedAgo] how long ago Zen was last open, `null` to keep
-/// it to itself. [PeerPresence.hidden] says nothing at all.
+/// it to itself. [PeerPresence.hidden] (and [PeerPresence.unknown]) says
+/// nothing at all.
 Map<String, dynamic> presenceFields({
   required PeerPresence own,
   Duration? openedAgo,
@@ -84,7 +101,7 @@ Map<String, dynamic> presenceFields({
     PeerPresence.online => kPresenceForeground,
     PeerPresence.background => kPresenceBackground,
     PeerPresence.offline => kPresenceAsleep,
-    PeerPresence.hidden => null,
+    PeerPresence.hidden || PeerPresence.unknown => null,
   };
   if (state == null) {
     return const <String, dynamic>{};

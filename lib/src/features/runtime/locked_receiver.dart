@@ -168,8 +168,9 @@ Duration nextMailboxPollWait({
 /// so however the timings drift, an answer comes every 4 min.
 const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
 
-/// "I am leaving the screen": sent to friends when Zen goes to the
-/// background (runtime_signal_module.dart). Nothing to keep for later.
+/// A one-way presence announcement ("leaving the screen", "back", "closing"):
+/// sent to friends who have Zen open when this device's state changes
+/// (runtime_signal_module.dart). Nothing to keep for later.
 const String kPresenceAwayType = 'away';
 
 /// What came to a door while the app was locked, per run of the receiver

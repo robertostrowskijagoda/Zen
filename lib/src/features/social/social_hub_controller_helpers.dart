@@ -1674,6 +1674,20 @@ void _removeFriend(Map<String, FriendProfile> friends, String address) {
   }
 }
 
+/// [friends] with each one's [FriendProfile.presenceDoubt] set to
+/// [doubtOf] (only friends who show presence can be in doubt).
+Map<String, FriendProfile> _withPresenceDoubts(
+  Map<String, FriendProfile> friends,
+  PresenceDoubt? Function(FriendProfile friend) doubtOf,
+) {
+  return <String, FriendProfile>{
+    for (final MapEntry<String, FriendProfile> e in friends.entries)
+      e.key: e.value.presence == PeerPresence.hidden
+          ? e.value
+          : e.value.copyWith(presenceDoubt: doubtOf(e.value)),
+  };
+}
+
 Map<String, FriendProfile> _canonicalizeFriends(
   Map<String, FriendProfile> friends,
 ) {

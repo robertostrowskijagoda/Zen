@@ -439,6 +439,8 @@ void main() {
     expect(offline.hollow, isTrue);
     expect(offline.fill, zen.textMuted);
     expect(offline.ring, isNull);
+    expect(offline.unknown, isFalse);
+    expect(online.unknown, isFalse);
     // Weak acquaintances and people further away show nothing.
     for (final NodeLook l in look.nodes.skip(3)) {
       expect(l.hollow, isFalse);
@@ -466,6 +468,41 @@ void main() {
     // The first look of the graph is the presence.
     expect(GraphMode.values.first, GraphMode.presence);
     expect(const GraphView().mode, GraphMode.presence);
+  });
+
+  test('presence: a fourth look for a friend whose presence is not known '
+      'now, unlike offline', () {
+    final List<GraphNode> nodes = <GraphNode>[
+      GraphNode(
+        address: _ania,
+        name: 'Ania',
+        ring: 1,
+        friend: _friend(_ania, 'Ania'),
+      ),
+      GraphNode(
+        address: _bartek,
+        name: 'Bartek',
+        ring: 2,
+        friend: _friend(_bartek, 'Bartek'),
+      ),
+    ];
+    final Map<String, PeerPresence> shown = <String, PeerPresence>{
+      _ania: PeerPresence.unknown,
+      _bartek: PeerPresence.offline,
+    };
+    final GraphLook look = graphLook(
+      scene: _scene(nodes),
+      mode: GraphMode.presence,
+      facts: GraphFacts(presence: (String a) => shown[a]!),
+      zen: zen,
+    );
+    final NodeLook unknown = look.nodes[0];
+    final NodeLook offline = look.nodes[1];
+    expect(unknown.unknown, isTrue);
+    expect(unknown.hollow, isFalse, reason: 'not the empty ring of offline');
+    expect(unknown.fill, zen.textMuted);
+    expect(offline.unknown, isFalse);
+    expect(offline.hollow, isTrue);
   });
 
   test('layout: everyone gets a place, crowded rings spread, and the mode '
