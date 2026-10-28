@@ -36,6 +36,9 @@ func responseError(err error) *C.char {
 func withNode(handle C.int, fn func(*bridgeNode) *C.char) *C.char {
 	value, ok := nodes.Load(int32(handle))
 	if !ok {
+		if err := takenOverError(int32(handle)); err != nil {
+			return responseError(err)
+		}
 		return responseError(fmt.Errorf("node handle %d does not exist", int(handle)))
 	}
 	node := value.(*bridgeNode)
@@ -55,13 +58,14 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
 	configJSON, peerTarget := takeZenPeerTarget(configJSON)
+	configJSON, owner := takeZenNodeOwner(configJSON)
 	if err := cfg.UnmarshalHJSON([]byte(configJSON)); err != nil {
 		return nil, err
 	}
 	// One node per identity in this process (node_identity.go).
-	identity, err := claimNodeIdentity(nodeIdentityKey(cfg))
+	identity, err := claimNodeIdentity(nodeIdentityKey(cfg), owner)
 	if err != nil {
-		logger.Warnf("not starting a second node with this identity: another one still runs in this process")
+		logger.Warnf("not starting a second node with this identity (%s): %v", owner.Role, err)
 		return nil, err
 	}
 	started := false
