@@ -539,7 +539,9 @@ final class LockedReceiver {
     this.mailboxPollMax = kLockedMailboxPollMaxInterval,
     this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
+    WakeBeat? beat,
   }) : _transport = transport,
+       _beat = beat,
        _capability = capability,
        _inbox = inbox,
        _notices = notices,
@@ -556,6 +558,9 @@ final class LockedReceiver {
   final BackgroundCapability _capability;
   final SealedInboxWriter _inbox;
   final RuntimeSystemNotificationService _notices;
+
+  /// The beat the mailbox polls go on (`null`: the app's, [ZenWake.beat]).
+  final WakeBeat? _beat;
 
   /// What came to the doors the node runs (`RuntimeNodeRuntime.doorFrames`);
   /// `null`: no doors.
@@ -671,12 +676,22 @@ final class LockedReceiver {
       // account (and a look around nearby, the outbox's rounds), held for
       // the polls and their first answers and let go then. Polls that find
       // nothing come less and less often ([nextMailboxPollWait]).
-      _pollTimer = ZenWake.beat(
-        'mailbox-poll',
-        mailboxPollInterval,
-        _pollOnWake,
-        hold: const Duration(seconds: 10),
-      );
+      const Duration hold = Duration(seconds: 10);
+      final WakeBeat? beat = _beat;
+      _pollTimer = beat == null
+          ? ZenWake.beat(
+              'mailbox-poll',
+              mailboxPollInterval,
+              _pollOnWake,
+              hold: hold,
+            )
+          : beat.add(
+              'mailbox-poll',
+              mailboxPollInterval,
+              _pollOnWake,
+              hold: hold,
+              whileIdle: true,
+            );
     }
     logZenMessage(
       'Locked receiver runs (no master key; '
