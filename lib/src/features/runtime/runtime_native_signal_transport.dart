@@ -2024,6 +2024,17 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
   }
 }
 
+/// How many public peers a phone node dials while it only receives: the
+/// locked receiver of the default account and the extra accounts' nodes in
+/// the background service. Every peer passes on the tree's signed updates
+/// (each node renews its own every few minutes) and each of them is
+/// answered, so on a locked phone the peers are what wakes the radio most
+/// (about a thousand small packets an hour each way with four); two halve
+/// that and are what Yggdrasil advises for end nodes. A peer that stays
+/// down is swapped for the next of the pool (phone_peers.go). The app on
+/// screen dials the bridge's own number (four).
+const int kReceiveOnlyPeerTarget = 2;
+
 final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({
     this.waitTimeout = const Duration(seconds: 30),
@@ -2034,8 +2045,8 @@ final class RuntimeSignalBootstrapConfig {
   });
 
   /// How many public peers a phone node dials at once; `null`: the
-  /// bridge's own number (4). The extra accounts the background service
-  /// receives for ask for fewer (phone_peers.go in the bridge).
+  /// bridge's own number (4). Nodes that only receive ask for fewer
+  /// ([kReceiveOnlyPeerTarget]; phone_peers.go in the bridge).
   final int? peerTarget;
 
   /// The folder of the account whose node this is; `null`: the account

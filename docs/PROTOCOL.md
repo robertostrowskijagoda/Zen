@@ -36,7 +36,8 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   (`PeerShareCodec.inviteCodeForAddress` / `addressFromInviteCode` [P]). Links:
   `zen://c/CODE` and `https://robertostrowskijagoda.github.io/Zen/#CODE`.
 - Peering: a built-in list of public peers (`public_peers.go`; a phone
-  dials 4 at once, a TLS-only subset first, the rest of the encrypted list
+  dials 4 at once, 2 while it only receives in the background, a TLS-only
+  subset first, the rest of the encrypted list
   in reserve for the peers that stop answering), local links with friends' and own devices without
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and

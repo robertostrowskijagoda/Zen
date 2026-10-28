@@ -87,8 +87,9 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
-- A phone keeps links to 4 peers at a time: its 16 first picks, then the
-  rest of the list in reserve. A peer that stops answering is swapped for
+- A phone keeps links to 4 peers at a time (2 while Zen only receives in
+  the background): its 16 first picks, then the rest of the list in
+  reserve. A peer that stops answering is swapped for
   the next one (less often when there is no network at all), so a phone
   whose first picks went quiet moves on to peers that still answer. A
   computer uses about 20, and only 4 while it runs on battery. Computers

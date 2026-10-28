@@ -389,9 +389,9 @@ final class BackgroundAccountNode {
         nodeConfigProtector: BackgroundKeyProtector(credentials),
         fallbackPollInterval: const Duration(seconds: 2),
         supportDirectory: folder,
-        // Only receives: two public peers do (a phone's main node dials
+        // Only receives: fewer public peers do (the app on screen dials
         // four; computers keep their own number).
-        peerTarget: 2,
+        peerTarget: kReceiveOnlyPeerTarget,
       ),
       // The account open in the app keeps its node there; this one starts
       // again once the identity is free (node_identity.go).

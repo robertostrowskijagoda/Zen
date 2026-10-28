@@ -36,6 +36,25 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
+  test('the locked receiver dials fewer public peers than the app', () {
+    final RuntimeSignalBootstrapConfig config = lockedReceiverNodeConfig(
+      waitTimeout: const Duration(seconds: 30),
+      credentials: MemorySecurityCredentialsStore(),
+    );
+    expect(config.peerTarget, kReceiveOnlyPeerTarget);
+    // The bridge's own number for the app on screen is four.
+    expect(kReceiveOnlyPeerTarget, inInclusiveRange(1, 3));
+    expect(config.waitTimeout, const Duration(seconds: 30));
+    expect(config.fallbackPollInterval, const Duration(seconds: 2));
+    expect(config.nodeConfigProtector, isA<BackgroundKeyProtector>());
+    expect(
+      jsonDecode(
+        withNodePeerTarget('{"Peers":[]}', config.peerTarget),
+      )['ZenPeerTarget'],
+      kReceiveOnlyPeerTarget,
+    );
+  });
+
   testWidgets(
     'the unlocked app keeps the node in the background; a lock hands it to '
     'the service without any key',
