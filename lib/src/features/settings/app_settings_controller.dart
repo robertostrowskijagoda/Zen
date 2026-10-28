@@ -292,8 +292,16 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(const AppSettings());
   }
 
-  /// All the settings at once (the circle copy after a recovery).
+  /// All the settings at once (the account's own devices keeping them the
+  /// same).
   Future<void> restoreAll(AppSettings settings) => _save(settings);
+
+  /// The settings of a copy of the account (a backup file, the recovery
+  /// circle): the account's choices from it, this device's own as they are
+  /// ([AppSettings.takingCopy]) — a setup gone through here is not asked
+  /// again because of the copy.
+  Future<void> restoreFromCopy(AppSettings copy) =>
+      _save(state.takingCopy(copy));
 
   Future<void> _save(AppSettings next) async {
     state = next;

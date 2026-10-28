@@ -10,6 +10,31 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// rewritten behind the person's back.
 const int kSetupRevision = 1;
 
+/// Settings of this device rather than of the account: a copy of the
+/// account taken here (a backup file, the recovery circle) never replaces
+/// them ([AppSettings.takingCopy]). The first-start steps (gone through
+/// here, they are not asked again because of an older copy and the
+/// restarts a restore makes), the lock, the disguised icon (this device's
+/// launcher), offering this device as a bridge, and the radios and
+/// background reception (this device's permissions and battery).
+const Set<String> kDeviceSettingKeys = <String>{
+  'setupRevision',
+  'permissionsSetupDone',
+  'accountSecureOffered',
+  'legalAcceptedVersion',
+  'legalAcceptedAtMillis',
+  'lockMode',
+  'backgroundLockDelaySeconds',
+  'allowNoAppPassword',
+  'disguiseIcon',
+  'bridgeEnabled',
+  'lanDiscovery',
+  'wifiDirect',
+  'bluetoothLinks',
+  'multipeerLinks',
+  'keepReceivingInBackground',
+};
+
 enum AppLockMode {
   never,
   background,
@@ -722,6 +747,31 @@ final class AppSettings {
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
     );
+  }
+
+  /// [copy] (the settings in a copy of the account) as this device takes
+  /// it: the account's choices from [copy], this device's own
+  /// ([kDeviceSettingKeys]) as they are here. The setup counts as gone
+  /// through when it was on either side; terms accepted here stay (the
+  /// copy's only when none were accepted here yet).
+  AppSettings takingCopy(AppSettings copy) {
+    final Map<String, Object> here = toJson();
+    final Map<String, Object> merged = copy.toJson();
+    for (final String key in kDeviceSettingKeys) {
+      merged.remove(key);
+      final Object? value = here[key];
+      if (value != null) {
+        merged[key] = value;
+      }
+    }
+    if (legalAcceptedVersion.isEmpty) {
+      merged['legalAcceptedVersion'] = copy.legalAcceptedVersion;
+      merged['legalAcceptedAtMillis'] = copy.legalAcceptedAtMillis;
+    }
+    merged['setupRevision'] = setupRevision > copy.setupRevision
+        ? setupRevision
+        : copy.setupRevision;
+    return AppSettings.fromJson(merged);
   }
 
   /// Named fields: an unknown field is ignored and a missing one keeps its

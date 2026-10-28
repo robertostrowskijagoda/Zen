@@ -243,7 +243,7 @@ final class AppCircleBackupData implements CircleBackupData {
     if (settings is Map<String, dynamic>) {
       await ref
           .read(appSettingsControllerProvider.notifier)
-          .restoreAll(AppSettings.fromJson(settings));
+          .restoreFromCopy(AppSettings.fromJson(settings));
     }
     step();
     final Object? profile = content.sections[CircleBackupSections.profile];

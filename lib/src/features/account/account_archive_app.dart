@@ -211,7 +211,9 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       final AppSettingsController controller = ref.read(
         appSettingsControllerProvider.notifier,
       );
-      await controller.restoreAll(AppSettings.fromJson(settings));
+      // This device's own settings (its setup, lock, permissions) stay:
+      // a setup gone through here is not asked again because of the copy.
+      await controller.restoreFromCopy(AppSettings.fromJson(settings));
       // The first start of this device is over either way.
       await controller.setAccountSecureOffered(true);
     }
