@@ -318,6 +318,34 @@ func TestAWaveWithoutNetworkComesDueOnTheFirstLookAfterASleep(t *testing.T) {
 	w.untilUp(2, time.Minute)
 }
 
+// The app sends on a wake while no peer is up (the poll of the mailboxes
+// after an outage): the core redials everything at once, also between the
+// waves, but at most once a minute, and never while a peer is up.
+func TestASendWithNoPeerUpRedialsAtMostOnceAMinute(t *testing.T) {
+	pool := testPool(16)
+	w := newPeerWorld(t, pool, 2)
+	w.untilUp(2, time.Minute)
+	if w.rotation.redialOnWake(w.now) {
+		t.Fatal("peers are up: no redial")
+	}
+	for _, peer := range pool {
+		w.dead[peer] = true
+	}
+	w.look()
+	w.run(time.Hour)
+	// Asleep for 5 minutes, less than the wait for the next wave.
+	w.now = w.now.Add(5 * time.Minute)
+	if !w.rotation.redialOnWake(w.now) {
+		t.Fatal("no redial on the send of a wake")
+	}
+	if w.rotation.redialOnWake(w.now.Add(30 * time.Second)) {
+		t.Fatal("a second redial within a minute")
+	}
+	if !w.rotation.redialOnWake(w.now.Add(61 * time.Second)) {
+		t.Fatal("no redial a minute later")
+	}
+}
+
 // A phone that holds (transit_guard.go) keeps one peer: its stand-in is
 // never one the hold set aside, unless nothing else is left.
 func TestAHoldingPhoneSkipsThePeersSetAside(t *testing.T) {

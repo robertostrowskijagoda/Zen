@@ -540,8 +540,12 @@ final class LockedReceiver {
     this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
     WakeBeat? beat,
+    Future<bool> Function()? meshLinked,
+    this.relinkWait = const Duration(seconds: 10),
+    this.relinkStep = const Duration(milliseconds: 500),
   }) : _transport = transport,
        _beat = beat,
+       _meshLinked = meshLinked,
        _capability = capability,
        _inbox = inbox,
        _notices = notices,
@@ -602,6 +606,22 @@ final class LockedReceiver {
   /// How long a poll's wake waits for the mailboxes' first answers (later
   /// ones wake the phone themselves, like any frame).
   final Duration pollAnswerGrace;
+
+  /// Whether the node has a link to the mesh now (`null`: not known). A
+  /// wake's poll that went out without one, and that no mailbox answered,
+  /// is sent once more in the same wake as soon as a link is up, waiting at
+  /// most [relinkWait] for it (looking every [relinkStep]).
+  final Future<bool> Function()? _meshLinked;
+  final Duration relinkWait;
+  final Duration relinkStep;
+
+  /// A mailbox sent something since the wake's poll went out.
+  bool _mailboxAnswered = false;
+
+  late final Set<String> _mailboxSet = <String>{
+    for (final String m in _capability.mailboxes)
+      PeerShareCodec.normalizeAddress(m),
+  };
 
   /// A contact's pings get a pong at most this often: friends ping only
   /// while Zen is on their screen; the first ping after a quiet while gets
@@ -826,6 +846,10 @@ final class LockedReceiver {
       }
     }
     _keptAtPoll = _keptCount;
+    // Without a link to the mesh the poll goes nowhere: the first wake
+    // after an outage, while the node redials (phone_peers.go).
+    final bool linked = await _meshLinkedNow();
+    _mailboxAnswered = false;
     try {
       await _pollMailboxes();
     } on Object catch (error, stackTrace) {
@@ -834,6 +858,45 @@ final class LockedReceiver {
     if (_running) {
       await Future<void>.delayed(pollAnswerGrace);
     }
+    if (!linked && !_mailboxAnswered && _running) {
+      // Asked once more in the same wake as soon as a link is up, rather
+      // than a whole poll period later.
+      await ZenWake.holdWhile(
+        _pollAgainOnceLinked,
+        tag: 'relink',
+        limit: relinkWait + pollAnswerGrace + const Duration(seconds: 2),
+      );
+    }
+  }
+
+  /// Whether the node has a link to the mesh now (`true` when that is not
+  /// known: nothing more is done then).
+  Future<bool> _meshLinkedNow() async {
+    final Future<bool> Function()? meshLinked = _meshLinked;
+    if (meshLinked == null) {
+      return true;
+    }
+    try {
+      return await meshLinked();
+    } on Object {
+      return true;
+    }
+  }
+
+  /// Waits up to [relinkWait] for a link to the mesh, then polls again.
+  Future<void> _pollAgainOnceLinked() async {
+    final Stopwatch waited = Stopwatch()..start();
+    while (!await _meshLinkedNow()) {
+      if (!_running || waited.elapsed >= relinkWait) {
+        return;
+      }
+      await Future<void>.delayed(relinkStep);
+    }
+    if (!_running || _mailboxAnswered) {
+      return;
+    }
+    await _pollMailboxes();
+    await Future<void>.delayed(pollAnswerGrace);
   }
 
   /// Asks every mailbox for what it holds now, outside the beat (an
@@ -871,6 +934,9 @@ final class LockedReceiver {
       return;
     }
     final bool contact = kind != BackgroundContactKind.stranger;
+    if (_mailboxSet.contains(from)) {
+      _mailboxAnswered = true;
+    }
     // Friends' confirmations and answers, and mailboxes (possibly strangers
     // here) taking their copy of the alarm.
     _alarm?.observe(frame);

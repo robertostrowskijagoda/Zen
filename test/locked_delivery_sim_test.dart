@@ -105,12 +105,19 @@ final class _SimAlarm implements WakeTimer {
   void cancel() => cancelled = true;
 }
 
-/// What a phone's node sends: nothing leaves a phone without network.
+/// What a phone's node sends: nothing leaves a phone without network or
+/// without a link to the mesh. A phone whose network came back while it
+/// slept has no link until it wakes and sends: that send has the node
+/// redial (phone_peers.go), and what it sends before the links are up, 2 s
+/// later, is lost.
 final class _SimLink implements SignalTransport {
-  _SimLink(this.sim, this.onSend);
+  _SimLink(this.device, this.world, this.onSend);
 
-  final SimPhone sim;
+  final _Device device;
+  final _BackgroundWorld world;
   final void Function(String to, Map<String, dynamic> payload) onSend;
+
+  SimPhone get sim => device.sim;
 
   @override
   Stream<SignalTransportFrame> get frames =>
@@ -128,6 +135,9 @@ final class _SimLink implements SignalTransport {
     required Map<String, dynamic> payload,
   }) async {
     if (!sim.online) {
+      if (device.network && device.linkUpAt == null) {
+        world.relink(device);
+      }
       return;
     }
     onSend(remoteAddress, payload);
@@ -171,6 +181,16 @@ final class _Device {
   final SimPhone sim;
   final bool iphone;
   final WakeBeat beat = WakeBeat();
+
+  /// Whether the phone has network; its node has links only once it sent
+  /// something since the network came back ([SimPhone.online]).
+  bool network = true;
+
+  /// When the links came up again after the network came back.
+  final List<int> linkedAt = <int>[];
+
+  /// When the links the node redials now are up (`null`: not redialling).
+  int? linkUpAt;
   late final Uint8List masterKey;
   late final File inboxFile;
   late final LockedReceiver receiver;
@@ -264,7 +284,7 @@ final class _BackgroundWorld {
           List<int>.generate(32, (int i) => i ^ d.name.codeUnitAt(0)),
         ),
       );
-      final _SimLink link = _SimLink(d.sim, (
+      final _SimLink link = _SimLink(d, this, (
         String to,
         Map<String, dynamic> p,
       ) {
@@ -305,6 +325,10 @@ final class _BackgroundWorld {
             ? Duration.zero
             : kLockedMailboxPollInterval,
         beat: d.beat,
+        meshLinked: () => meshLinked(d),
+        // The wait goes by the virtual clock (meshLinked), not real time.
+        relinkWait: const Duration(milliseconds: 50),
+        relinkStep: const Duration(milliseconds: 1),
       );
       d.sim.attach((SignalTransportFrame frame) async {
         await d.receiver.handleFrame(frame);
@@ -312,6 +336,7 @@ final class _BackgroundWorld {
         return true;
       });
       if (d.iphone) {
+        d.network = false;
         d.sim.online = false;
       }
     }
@@ -364,7 +389,7 @@ final class _BackgroundWorld {
         _queued[d.name] ?? const <LockedOutboxItem>[];
     if (items.isNotEmpty) {
       d.outbox = LockedOutbox(
-        transport: _SimLink(d.sim, (_, _) {}),
+        transport: _SimLink(d, this, (_, _) {}),
         kit: LockedOutboxKit(items: items, writtenAtMillis: now),
         now: () => net.now,
         beat: d.beat,
@@ -378,10 +403,41 @@ final class _BackgroundWorld {
       _events.add((at: net.now + after.inMilliseconds, run: run));
 
   /// [name] has no network from [from] for [lasting].
+  /// Its node is linked again only once it sends on a wake.
   void offline(String name, Duration from, Duration lasting) {
-    final SimPhone sim = this[name].sim;
-    at_(from, () async => net.setOnline(sim, false));
-    at_(from + lasting, () async => net.setOnline(sim, true));
+    final _Device d = this[name];
+    at_(from, () async {
+      d.network = false;
+      d.linkUpAt = null;
+      net.setOnline(d.sim, false);
+    });
+    at_(from + lasting, () async => d.network = true);
+  }
+
+  /// [d]'s node redials: its links are up 2 s from now.
+  void relink(_Device d) {
+    d.linkUpAt = net.now + 2000;
+    at_(const Duration(seconds: 2), () async => _linkUp(d));
+  }
+
+  void _linkUp(_Device d) {
+    final int? at = d.linkUpAt;
+    if (at == null || net.now < at || !d.network) {
+      return;
+    }
+    d.linkUpAt = null;
+    net.setOnline(d.sim, true);
+    d.linkedAt.add(net.now);
+  }
+
+  /// Whether [d]'s node has a link; each look while it redials takes half
+  /// a second of the virtual clock (what arrives meanwhile is delivered).
+  Future<bool> meshLinked(_Device d) async {
+    if (!d.sim.online && d.linkUpAt != null) {
+      await net.run(forAtMost: const Duration(milliseconds: 500));
+      _linkUp(d);
+    }
+    return d.sim.online;
   }
 
   /// The iPhone [name] is opened at [at] for [lasting]: it asks its
@@ -389,10 +445,15 @@ final class _BackgroundWorld {
   void open(String name, Duration at, Duration lasting) {
     final _Device d = this[name];
     at_(at, () async {
+      // The app starts its node and polls once it is linked.
+      d.network = true;
       net.setOnline(d.sim, true);
       await d.receiver.pollMailboxes();
     });
-    at_(at + lasting, () async => net.setOnline(d.sim, false));
+    at_(at + lasting, () async {
+      d.network = false;
+      net.setOnline(d.sim, false);
+    });
   }
 
   /// Lets everything in flight land and every handler finish (inbox writes
@@ -637,16 +698,18 @@ void main() {
     });
   }
 
-  // A recipient back on the network gets what waits at its mailboxes at its
-  // next poll: at most the longest wait between polls (30 minutes) put off
-  // by an inexact alarm (75%).
+  // A recipient back on the network sleeps until its next wake: at most the
+  // longest wait between polls (30 minutes) put off by an inexact alarm
+  // (75%). That wake's poll goes out before the node has its links again
+  // and is lost; it is sent once more as soon as they are up, so what waits
+  // at the mailboxes arrives on that same wake, not a poll period later.
   const Duration pollBound = Duration(minutes: 52, seconds: 30);
 
   for (final int seed in <int>[11, 12, 13, 14, 15]) {
     test('a locked phone three hours without network, its senders and '
         'mailboxes locked too: everything waits at the mailboxes and arrives '
-        'once, at most ${pollBound.inMinutes} minutes after it is back (seed '
-        '$seed)', () async {
+        'once, on its first wake after it is back, at most '
+        '${pollBound.inMinutes} minutes later (seed $seed)', () async {
       final _BackgroundWorld w = _BackgroundWorld(seed);
       _useWorldWake(w);
       await w.setUp(<String, bool>{for (final String p in _phones) p: false});
@@ -673,11 +736,28 @@ void main() {
         expect(at, greaterThan(back), reason: '$id reached B without network');
         latest = max(latest, at! - back);
       }
-      expect(latest, lessThanOrEqualTo(pollBound.inMilliseconds));
+      // The links come up 2 s into the first wake after the network came
+      // back, and everything arrives on that wake.
+      const int relink = 2000;
+      expect(
+        latest,
+        lessThanOrEqualTo(pollBound.inMilliseconds + relink + 1000),
+      );
+      final int linked = w['B'].linkedAt.firstWhere((int at) => at >= back);
+      final int woke = linked - relink;
+      expect(woke - back, lessThanOrEqualTo(pollBound.inMilliseconds));
+      for (final String id in _meantFor(w, 'B')) {
+        expect(
+          w.keptAt[id]! - woke,
+          lessThan(const Duration(seconds: 10).inMilliseconds),
+          reason: '$id came ${w.keptAt[id]! - woke} ms after the first wake',
+        );
+      }
       await _expectEachKeptOnce(w);
       debugPrint(
-        'seed $seed: B had everything '
-        '${Duration(milliseconds: latest).inMinutes} min after it was back',
+        'seed $seed: B woke ${Duration(milliseconds: woke - back).inMinutes} '
+        'min after the network was back and had everything '
+        '${Duration(milliseconds: latest - (woke - back)).inSeconds} s later',
       );
       await w.stop();
     });

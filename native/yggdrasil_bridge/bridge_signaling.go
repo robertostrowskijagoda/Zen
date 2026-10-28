@@ -116,7 +116,7 @@ func sendSignal(node *bridgeNode, remoteAddress string, payload string) error {
 	}
 
 	// The phone is awake: its peers get a look (peer_keepers.go).
-	node.phonePeers.lookNow()
+	node.phonePeers.appSends()
 	// Compressed first: sealed text no longer compresses.
 	wirePayload := buildSignalWirePayload(payload)
 	debugf("[ZEN-GO] sendSignal to=%s rawLen=%d wireLen=%d\n",

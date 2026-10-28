@@ -44,6 +44,10 @@ const (
 	phonePeerOfflineFirst   = 5 * time.Second
 	phonePeerOfflineWave    = 15 * time.Second
 	phonePeerOfflineWaveMax = 15 * time.Minute
+	// The app sends while no peer is up: the phone is awake (a wake after
+	// an outage asks the mailboxes for mail), so the core redials every
+	// peer at once, between the waves too, at most this often.
+	phonePeerWakeRedialEvery = time.Minute
 	// The key in the node config the app may add to ask for a number of
 	// public peers (a node that only receives asks for fewer).
 	zenPeerTargetKey = "ZenPeerTarget"
@@ -137,6 +141,19 @@ type peerRotation struct {
 	offlineSince time.Time
 	nextWave     time.Time
 	waves        int
+	// When the core last redialled every peer (a wave, or a wake).
+	lastRedial time.Time
+}
+
+// redialOnWake reports whether the core should redial every peer now that
+// the app sends while none of the dialled peers is up (redialled at most
+// every phonePeerWakeRedialEvery, waves included).
+func (r *peerRotation) redialOnWake(now time.Time) bool {
+	if r.offlineSince.IsZero() || now.Sub(r.lastRedial) < phonePeerWakeRedialEvery {
+		return false
+	}
+	r.lastRedial = now
+	return true
 }
 
 func newPeerRotation(pool []string, target int) *peerRotation {
@@ -261,6 +278,7 @@ func (r *peerRotation) check(now time.Time, dialled []string, up func(string) bo
 		}
 		r.nextWave = now.Add(offlineWait(r.waves))
 		r.waves++
+		r.lastRedial = now
 		wave = true
 	} else {
 		r.offlineSince = time.Time{}

@@ -413,6 +413,7 @@ final class BackgroundAccountNode {
         capability: capability,
         inbox: inbox,
         notices: notices,
+        meshLinked: runtime.meshLinked,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
       ),

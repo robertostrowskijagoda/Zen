@@ -588,6 +588,103 @@ void main() {
       expect(receiver.mailboxPollWait, const Duration(minutes: 10));
     });
 
+    group('a wake whose poll went out without a link to the mesh', () {
+      late _BeatAlarms wake;
+      late List<bool> links;
+      int clock = 0;
+
+      setUp(() {
+        wake = _BeatAlarms();
+        ZenWake.platform = wake;
+        ZenWake.nowMillis = () => clock;
+      });
+
+      tearDown(() {
+        ZenWake.resetForTest();
+        ZenWake.platform = const TimerWakePlatform();
+        ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
+      });
+
+      /// Starts the receiver; the node tells [links] in turn whether it has
+      /// a link (the last one stays).
+      Future<void> start(
+        List<bool> answers, {
+        Duration relinkWait = const Duration(seconds: 10),
+      }) async {
+        links = List<bool>.of(answers);
+        final BackgroundCapability capability = await publishFor(_masterKey());
+        transport = MemorySignalTransport();
+        notices = MemoryRuntimeSystemNotificationService();
+        receiver = LockedReceiver(
+          transport: transport,
+          capability: capability,
+          inbox: SealedInboxWriter(
+            file: await serviceVault.inboxFile(),
+            recipientPublicKey: capability.inboxPublicKey,
+          ),
+          notices: notices,
+          pollAnswerGrace: const Duration(milliseconds: 100),
+          relinkStep: const Duration(milliseconds: 5),
+          relinkWait: relinkWait,
+          meshLinked: () async =>
+              links.length > 1 ? links.removeAt(0) : links.single,
+        );
+        await receiver.start();
+      }
+
+      int polls() => transport.sentSignals
+          .where((s) => s.payload['type'] == 'rly_poll')
+          .length;
+
+      /// Rings the next poll; [during] runs while it waits for answers.
+      Future<int> wakeAndCount({Future<void> Function()? during}) async {
+        final int before = polls();
+        final WakeTimer alarm = wake.live.single;
+        clock += wake.delayOf(alarm).inMilliseconds;
+        final Future<void> ringing = wake.ring(alarm);
+        if (during != null) {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          await during();
+        }
+        await ringing;
+        return polls() - before;
+      }
+
+      test('asks once more as soon as a link is up, once', () async {
+        // Down at the wake, up three looks later.
+        await start(<bool>[false, false, false, true]);
+        expect(await wakeAndCount(), 2);
+        // The next wake is linked: one poll.
+        expect(await wakeAndCount(), 1);
+      });
+
+      test('a mailbox that answered the poll: no second one', () async {
+        await start(<bool>[false, true]);
+        expect(
+          await wakeAndCount(
+            during: () =>
+                receive(_mailbox, const <String, dynamic>{'type': 'rly_here'}),
+          ),
+          1,
+        );
+      });
+
+      test(
+        'linked at the wake: no second poll, also without an answer',
+        () async {
+          await start(<bool>[true]);
+          expect(await wakeAndCount(), 1);
+        },
+      );
+
+      test('no link within the wait: no second poll', () async {
+        await start(<bool>[
+          false,
+        ], relinkWait: const Duration(milliseconds: 50));
+        expect(await wakeAndCount(), 1);
+      });
+    });
+
     test('the wait between polls doubles up to its longest', () {
       Duration wait = kLockedMailboxPollInterval;
       final List<int> minutes = <int>[];

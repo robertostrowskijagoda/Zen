@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
@@ -16,7 +17,9 @@ type phonePeerKeeper struct {
 	rotation *peerRotation
 	dialled  []string
 	// Something worth a look now (lookNow).
-	events   chan struct{}
+	events chan struct{}
+	// The app sent something since the last look (appSends).
+	sent     atomic.Bool
 	stop     chan struct{}
 	stopOnce sync.Once
 }
@@ -35,10 +38,19 @@ func (keeper *phonePeerKeeper) stopWatch() {
 	keeper.stopOnce.Do(func() { close(keeper.stop) })
 }
 
-// lookNow has the keeper look at its peers now: one of the node's links came
-// up or went down, or the app sends something (so the phone is awake, and a
-// wave without network that came due while it slept goes out at once). It
-// never blocks.
+// appSends tells the keeper the app sends something: the phone is awake, so
+// a wave without network that came due while it slept goes out at once, and
+// with no peer up the core redials them all (redialOnWake). Never blocks.
+func (keeper *phonePeerKeeper) appSends() {
+	if keeper == nil {
+		return
+	}
+	keeper.sent.Store(true)
+	keeper.lookNow()
+}
+
+// lookNow has the keeper look at its peers now (one of the node's links came
+// up or went down, or the app sends). It never blocks.
 func (keeper *phonePeerKeeper) lookNow() {
 	if keeper == nil {
 		return
@@ -132,13 +144,15 @@ func (node *bridgeNode) checkPhonePeers(now time.Time) {
 	if changed {
 		keeper.dialled = after
 	}
+	woke := keeper.sent.Swap(false)
+	redial := wave || (woke && !changed && keeper.rotation.redialOnWake(now))
 	keeper.mu.Unlock()
 	switch {
 	case changed:
 		node.logger.Infof("public peers: %d dialled, %d of them up before", len(after), countUp(before, up))
 		// Redials every peer at once too.
 		node.swapPublicPeers(before, after)
-	case wave:
+	case redial:
 		node.core.RetryPeersNow()
 	}
 }

@@ -1041,6 +1041,21 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// a start.
   Stream<RuntimeNodeYield> get ownerYields => _yields.stream;
 
+  /// Whether the node has a link to the mesh now (asks the node, from
+  /// memory; false while it does not run).
+  Future<bool> meshLinked() async {
+    final Future<RuntimeTransportSnapshot> Function()? read =
+        _session?.refreshSnapshot;
+    if (read == null) {
+      return false;
+    }
+    try {
+      return (await read()).peers > 0;
+    } on Object {
+      return false;
+    }
+  }
+
   @override
   Stream<SignalTransportFrame> get frames => _frames.stream;
 
