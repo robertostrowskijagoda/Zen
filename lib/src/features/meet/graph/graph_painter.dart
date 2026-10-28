@@ -243,8 +243,13 @@ const int _maxLabels = 220;
 /// Line labels drawn at most in one paint.
 const int _maxEdgeTags = 200;
 
-/// Share of the timeline over which someone new grows to full size.
+/// Share of the timeline over which someone new grows to full size (and
+/// their lines fade in).
 const double _growSpan = 0.05;
+
+/// Steps of the fading in of a line: lines in the same step and colour are
+/// still drawn in one call.
+const double _fadeSteps = 8;
 
 /// The graph. Level of detail: many people are dots drawn in a few batched
 /// calls, names show by zoom and only inside [visible]; positions move
@@ -252,6 +257,8 @@ const double _growSpan = 0.05;
 /// [timeline], people appear as [clock] (0…1 of its span) passes the day
 /// they came, and a ring in [metTone] marks a meeting in person once its
 /// day has passed — the layout stays, so playing it is only repainting.
+/// [still]: no growing or fading in (animations are off), everyone is
+/// there or not.
 class GraphPainter extends CustomPainter {
   GraphPainter({
     required this.scene,
@@ -269,6 +276,7 @@ class GraphPainter extends CustomPainter {
     this.clock,
     this.metTone,
     this.labelRadius = 8,
+    this.still = false,
   }) : super(
          repaint: clock == null
              ? progress
@@ -301,6 +309,9 @@ class GraphPainter extends CustomPainter {
   /// The corner of a name label (the theme's corner, see `ZenLook.radius`).
   final double labelRadius;
 
+  /// People and lines on the [timeline] come at once, without growing.
+  final bool still;
+
   /// Whether person [i] was met in person by [at].
   bool _metBy(int i, double at) {
     final GraphTimeline? tl = timeline;
@@ -320,8 +331,23 @@ class GraphPainter extends CustomPainter {
     if (b > at) {
       return 0;
     }
+    if (still) {
+      return 1;
+    }
     return ((at - b) / _growSpan).clamp(0.0, 1.0);
   }
+
+  /// How far line [e] has faded in (0: not there, 1: fully): it comes with
+  /// the later of its two people.
+  double _edgeShown(int from, int to, double at) =>
+      min(from < 0 ? 1.0 : _grown(from, at), _grown(to, at));
+
+  /// [color] faded in to [shown], in a few steps.
+  static Color _faded(Color color, double shown) => shown >= 1
+      ? color
+      : color.withValues(
+          alpha: color.a * ((shown * _fadeSteps).ceil() / _fadeSteps),
+        );
 
   Float32List _positions(double phase) {
     final Float32List to = scene.layout.xy;
@@ -371,10 +397,24 @@ class GraphPainter extends CustomPainter {
         <(int, double), List<double>>{};
     final int edges = scene.edgeCount;
     for (int e = 0; e < edges; e++) {
-      final EdgeLook l = look.edges[e];
-      if (l.color.a == 0 ||
-          (timed && (!there(scene.edgeFrom[e]) || !there(scene.edgeTo[e])))) {
+      EdgeLook l = look.edges[e];
+      if (l.color.a == 0) {
         continue;
+      }
+      Color color = l.color;
+      if (timed) {
+        final double shown = _edgeShown(
+          scene.edgeFrom[e],
+          scene.edgeTo[e],
+          now,
+        );
+        if (shown <= 0) {
+          continue;
+        }
+        color = _faded(color, shown);
+        if (l.dashed && shown < 1) {
+          l = EdgeLook(color: color, width: l.width, dashed: true);
+        }
       }
       final Offset a = at(scene.edgeFrom[e]);
       final Offset b = at(scene.edgeTo[e]);
@@ -382,9 +422,9 @@ class GraphPainter extends CustomPainter {
         _dashed(canvas, a, b, l);
         continue;
       }
-      batches
-          .putIfAbsent((l.color.toARGB32(), l.width), () => <double>[])
-          .addAll(<double>[a.dx, a.dy, b.dx, b.dy]);
+      batches.putIfAbsent((color.toARGB32(), l.width), () => <double>[]).addAll(
+        <double>[a.dx, a.dy, b.dx, b.dy],
+      );
     }
     final Paint edge = Paint()..strokeCap = StrokeCap.round;
     batches.forEach(((int, double) k, List<double> pts) {
@@ -423,8 +463,13 @@ class GraphPainter extends CustomPainter {
         canvas.drawRawPoints(ui.PointMode.lines, pts, link);
       } else {
         final Path curves = Path();
+        // Lines fading in: one path per step of the fade.
+        final Map<int, Path> fading = <int, Path>{};
         for (int i = 0; i < linkCount; i++) {
-          if (timed && (!there(links[2 * i]) || !there(links[2 * i + 1]))) {
+          final double shown = timed
+              ? _edgeShown(links[2 * i], links[2 * i + 1], now)
+              : 1;
+          if (shown <= 0) {
             continue;
           }
           final Offset x = at(links[2 * i]);
@@ -434,11 +479,23 @@ class GraphPainter extends CustomPainter {
           final Offset control = away.distance < 1
               ? mid + const Offset(0, -40)
               : mid + away * 0.35;
-          curves
+          final Path into = shown >= 1
+              ? curves
+              : fading.putIfAbsent((shown * _fadeSteps).ceil(), Path.new);
+          into
             ..moveTo(x.dx, x.dy)
             ..quadraticBezierTo(control.dx, control.dy, y.dx, y.dy);
         }
         canvas.drawPath(curves, link);
+        fading.forEach((int step, Path path) {
+          canvas.drawPath(
+            path,
+            Paint()
+              ..color = _faded(look.link, step / _fadeSteps)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.9,
+          );
+        });
       }
     }
 
@@ -459,7 +516,13 @@ class GraphPainter extends CustomPainter {
     }
 
     // Line labels (gate prices): by zoom, on screen only, capped.
-    _edgeTags(canvas, at, shown);
+    _edgeTags(
+      canvas,
+      at,
+      shown,
+      (int e) =>
+          !timed || _edgeShown(scene.edgeFrom[e], scene.edgeTo[e], now) >= 1,
+    );
 
     // "Ty".
     canvas
@@ -489,9 +552,13 @@ class GraphPainter extends CustomPainter {
         }
         final bool metBy = _metBy(i, now);
         if (g < 1 || metBy) {
-          // Growing, or met by now: drawn on its own.
+          // Growing and fading in, or met by now: drawn on its own.
           final double r = l.radius * (0.4 + 0.6 * g);
-          canvas.drawCircle(p, r, fill..color = l.fill);
+          canvas.drawCircle(
+            p,
+            r,
+            fill..color = l.fill.withValues(alpha: l.fill.a * g),
+          );
           if (metBy) {
             canvas.drawCircle(p, r + 3.5, metRing);
           }
@@ -644,6 +711,7 @@ class GraphPainter extends CustomPainter {
     Canvas canvas,
     Offset Function(int) at,
     bool Function(Offset) shown,
+    bool Function(int) there,
   ) {
     int tagged = 0;
     for (final EdgeLook l in look.edges) {
@@ -659,7 +727,7 @@ class GraphPainter extends CustomPainter {
     for (int e = 0; e < scene.edgeCount && drawn < _maxEdgeTags; e++) {
       final EdgeLook l = look.edges[e];
       final int from = scene.edgeFrom[e];
-      if (l.tag == null || (from >= 0 && !far)) {
+      if (l.tag == null || (from >= 0 && !far) || !there(e)) {
         continue;
       }
       final Offset mid = (at(from) + at(scene.edgeTo[e])) / 2;
@@ -774,6 +842,7 @@ class GraphPainter extends CustomPainter {
       !identical(old.scene, scene) ||
       !identical(old.look, look) ||
       !identical(old.timeline, timeline) ||
+      old.still != still ||
       old.scale != scale ||
       old.visible != visible ||
       old.me != me ||

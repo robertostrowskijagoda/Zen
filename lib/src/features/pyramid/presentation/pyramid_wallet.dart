@@ -557,7 +557,7 @@ class PyramidWallet extends StatelessWidget {
                   icon: Icons.toll_outlined,
                   text: t(
                     'Cenę pierwszej wiadomości od osób spoza znajomych '
-                    'ustawiasz w: Ustawienia → Wiadomości spoza znajomych. '
+                    'ustawiasz w: Ustawienia → Kontakt i widoczność. '
                     'Bramy do Twoich znajomych (przedstawienia) — w Grafie.',
                   ),
                 ),

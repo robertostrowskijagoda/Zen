@@ -106,7 +106,7 @@ enum AppAnimations {
 
 /// How much a notification about a conversation tells: on the lock screen,
 /// in the shade and in the system's notification history (Ustawienia →
-/// Prywatność, and per conversation). Calls and alarms always say who it
+/// Powiadomienia i dźwięki, and per conversation). Calls and alarms always say who it
 /// is: without that they could not be answered.
 enum NotificationPrivacy {
   /// Who wrote and a short preview of what (the default).

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -83,6 +84,8 @@ import 'package:zen/src/features/runtime/presentation/ios_background_section.dar
 import 'package:zen/src/features/runtime/presentation/offline_links_section.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/search/presentation/message_search_results.dart';
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/device_integrity.dart';
 import 'package:zen/src/features/security/secure_screen.dart';

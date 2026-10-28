@@ -1,7 +1,10 @@
 part of 'app_shell_screen.dart';
 
-// Ustawienia → Powiadomienia i dźwięki: the sounds (in the app, and of the
-// system notifications) and one switch per kind of news ([NoticeKind]).
+// Ustawienia → Powiadomienia i dźwięki: everything about notifications in
+// one place. What a notification says (the level of its preview), the
+// sounds (in the app, and of the system notifications), one switch per kind
+// of news ([NoticeKind]), the people whose posts are muted, and whether
+// notifications reach the phone in the background.
 
 IconData _noticeKindIcon(NoticeKind kind) => switch (kind) {
   NoticeKind.message => Icons.chat_bubble_outline_rounded,
@@ -34,6 +37,26 @@ class _NotificationSettingsSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        ZenSection(t('Treść powiadomień'), top: 8),
+        _Panel(
+          key: const Key('settings-notification-privacy'),
+          accentTone: zen.tone(ZenTone.privacy),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _SectionIntro(
+                title: t('Co mówi powiadomienie'),
+                caption: t(
+                  'Na ekranie blokady, w zasłonce i w historii '
+                  'powiadomień systemu. Rozmowa może mieć własny '
+                  'poziom (menu rozmowy → Treść powiadomień).',
+                ),
+              ),
+              const SizedBox(height: 10),
+              const NotificationPrivacySettingChoice(),
+            ],
+          ),
+        ),
         _SettingsGroup(
           title: t('Dźwięki'),
           tiles: <Widget>[
@@ -109,6 +132,57 @@ class _NotificationSettingsSection extends ConsumerWidget {
             'Wiadomości, połączenia, zaproszenia, wzmianki i reakcje nadal '
             'są na liście powiadomień w aplikacji (dzwonek na górze).',
           ),
+        ),
+        _SettingsGroup(
+          title: t('Więcej'),
+          tiles: <Widget>[
+            _SettingsNavTile(
+              key: const Key('settings-nav-muted-post-authors'),
+              icon: Icons.notifications_off_outlined,
+              tone: ZenTone.communication,
+              title: t('Wyciszone osoby'),
+              subtitle: settings.mutedPostAuthors.isEmpty
+                  ? t('Nikogo nie wyciszono')
+                  : tn(
+                      settings.mutedPostAuthors.length,
+                      one: 'Bez powiadomień o postach: {n} osoba',
+                      few: 'Bez powiadomień o postach: {n} osoby',
+                      many: 'Bez powiadomień o postach: {n} osób',
+                    ),
+              pageTitle: t('Wyciszone osoby'),
+              pageChildren: const <Widget>[_MutedPostAuthorsSection()],
+            ),
+            // Whether the notifications reach the phone at all while Zen is
+            // in the background.
+            if (Platform.isAndroid)
+              _SettingsNavTile(
+                key: const Key('settings-nav-delivery'),
+                icon: Icons.notifications_active_outlined,
+                tone: ZenTone.communication,
+                title: t('Powiadomienia i praca w tle'),
+                subtitle: t('Uprawnienia, dostarczanie w tle, ekran połączeń'),
+                pageTitle: t('Powiadomienia i praca w tle'),
+                pageChildren: const <Widget>[
+                  _BackgroundDeliverySection(),
+                  SizedBox(height: 12),
+                  _BatteryOptimizationSection(),
+                  SizedBox(height: 12),
+                  _FullScreenCallSection(),
+                ],
+              ),
+            if (Platform.isIOS)
+              _SettingsNavTile(
+                key: const Key('settings-nav-ios-background'),
+                icon: Icons.notifications_active_outlined,
+                tone: ZenTone.communication,
+                title: t('Praca w tle'),
+                subtitle: t('Sprawdzanie skrzynek w tle, odbieranie cały czas'),
+                pageTitle: t('Praca w tle'),
+                pageChildren: const <Widget>[
+                  _Panel(child: IosBackgroundSection()),
+                ],
+              ),
+          ],
         ),
       ],
     );

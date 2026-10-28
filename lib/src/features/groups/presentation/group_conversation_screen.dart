@@ -25,6 +25,7 @@ import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dar
 import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
+import 'package:zen/src/features/chat/presentation/reveal_message.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
@@ -32,6 +33,9 @@ import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/search/chat_search_controller.dart';
+import 'package:zen/src/features/search/presentation/chat_search_bar.dart';
+import 'package:zen/src/features/search/presentation/search_highlight.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/composer_drafts.dart';
@@ -56,13 +60,19 @@ class GroupConversationScreen extends ConsumerStatefulWidget {
     required this.groupId,
     required this.groupName,
     this.initialMessageId,
+    this.searchText,
   });
 
   final String groupId;
   final String groupName;
 
-  /// The message to show first (a mention's notification was tapped).
+  /// The message to show first (a mention's notification or a search
+  /// result on the chat list was tapped).
   final String? initialMessageId;
+
+  /// Opens with the chat's search showing these words (the search on the
+  /// chat list that led here).
+  final String? searchText;
 
   @override
   ConsumerState<GroupConversationScreen> createState() =>
@@ -80,7 +90,17 @@ class _GroupConversationScreenState
 
   /// The message to scroll to once the chat is loaded
   /// ([GroupConversationScreen.initialMessageId]).
-  late String? _pendingJump = widget.initialMessageId;
+  late String? _pendingJump = widget.searchText == null
+      ? widget.initialMessageId
+      : null;
+
+  /// Search inside this chat (the app bar's magnifier, Ctrl+F).
+  final ChatSearchController _search = ChatSearchController();
+  int _searchJumps = 0;
+
+  /// Bumped with each scroll to a match: an earlier one still on its way
+  /// stops.
+  int _searchReveals = 0;
 
   /// Keeps the chat at the newest message while it is there.
   final ChatScrollController _scrollController = ChatScrollController(
@@ -122,6 +142,48 @@ class _GroupConversationScreenState
 
   GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
 
+  /// The search moved to another match, or closed.
+  void _onSearchChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      // The search is in the chat, not on the board.
+      if (_search.active) {
+        _boardTab = false;
+      }
+    });
+    if (_search.jumps == _searchJumps) {
+      return;
+    }
+    _searchJumps = _search.jumps;
+    final String? id = _search.currentId;
+    final List<ChatMessage>? messages = ref
+        .read(groupMessagesProvider(widget.groupId))
+        .asData
+        ?.value;
+    if (id == null || messages == null) {
+      return;
+    }
+    final int reveal = ++_searchReveals;
+    unawaited(
+      revealChatMessage(
+        controller: _scrollController,
+        bubbleKeys: _bubbleKeys,
+        ids: <String>[for (final ChatMessage m in messages) m.id],
+        id: id,
+        reversed: true,
+        alignment: 0.5,
+        stillWanted: () => mounted && reveal == _searchReveals,
+      ),
+    );
+  }
+
+  /// [bubble] with the searched words marked when it is a match.
+  Widget _searchMarks(String id, Widget bubble) => _search.isMatch(id)
+      ? SearchHighlight(query: _search.query, child: bubble)
+      : bubble;
+
   /// Who [who] is in this group (`self`, a member's address).
   String _nameOf(String who) {
     if (who == 'self') {
@@ -144,27 +206,16 @@ class _GroupConversationScreenState
       );
       return;
     }
-    BuildContext? target = _bubbleKeys[id]?.currentContext;
-    if (target == null && _scrollController.hasClients) {
-      // The list is reversed: the newest message is at offset 0.
-      final int fromEnd = messages.length - 1 - index;
-      await _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent *
-            fromEnd /
-            (messages.length > 1 ? messages.length - 1 : 1),
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-      await WidgetsBinding.instance.endOfFrame;
-      target = _bubbleKeys[id]?.currentContext;
-    }
-    if (target != null && target.mounted) {
-      await Scrollable.ensureVisible(
-        target,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 250),
-      );
-    }
+    // Not built yet when off screen: the list finds it (it is reversed,
+    // the newest message at offset 0).
+    await revealChatMessage(
+      controller: _scrollController,
+      bubbleKeys: _bubbleKeys,
+      ids: <String>[for (final ChatMessage m in messages) m.id],
+      id: id,
+      reversed: true,
+      alignment: 0.5,
+    );
     if (!mounted) {
       return;
     }
@@ -329,6 +380,11 @@ class _GroupConversationScreenState
     _socialHub = ref.read(socialHubControllerProvider.notifier);
     _drafts = ref.read(composerDraftsProvider);
     _composerController.addListener(_keepDraft);
+    _search.addListener(_onSearchChanged);
+    final String? searchText = widget.searchText;
+    if (searchText != null) {
+      _search.open(text: searchText, at: widget.initialMessageId);
+    }
     _restoreDraft();
     // Opening the chat reads it: clears the unread badge and keeps new
     // messages for this group from notifying while it is on screen.
@@ -378,6 +434,9 @@ class _GroupConversationScreenState
   @override
   void dispose() {
     _highlightTimer?.cancel();
+    _search
+      ..removeListener(_onSearchChanged)
+      ..dispose();
     _socialHub.leaveGroupConversation(widget.groupId);
     _composerController.removeListener(_keepDraft);
     _composerController.dispose();
@@ -655,8 +714,13 @@ class _GroupConversationScreenState
   }
 
   @override
-  Widget build(BuildContext context) =>
-      SecureScreen(child: Builder(builder: _buildScreen));
+  Widget build(BuildContext context) => SecureScreen(
+    // Ctrl+F searches, Esc closes the search.
+    child: ChatSearchShortcuts(
+      search: _search,
+      child: Builder(builder: _buildScreen),
+    ),
+  );
 
   Widget _buildScreen(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -709,10 +773,18 @@ class _GroupConversationScreenState
     final Map<String, String> memberNames =
         group?.memberNames ?? const <String, String>{};
 
+    final bool hasMessages = messagesAsync.asData?.value.isNotEmpty ?? false;
+    // On a narrow phone the magnifier would push the name out of the bar:
+    // the search is in the menu there (when there is a menu).
+    final bool searchInBar =
+        !isMember || MediaQuery.sizeOf(context).width >= 400;
+
     return Scaffold(
       backgroundColor: zen.background,
       appBar: AppBar(
         titleSpacing: 0,
+        // While searching: the field (and closing it) under the title.
+        bottom: _search.active ? ChatSearchBar(search: _search) : null,
         title: Row(
           children: <Widget>[
             const ZenIconBadge(icon: Icons.groups_rounded, size: 40),
@@ -790,11 +862,15 @@ class _GroupConversationScreenState
               ],
             ),
           ),
+          if (hasMessages && searchInBar) ChatSearchButton(search: _search),
           if (isMember)
             PopupMenuButton<String>(
+              key: const Key('group-menu-button'),
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: (String action) {
-                if (action == 'add_member') {
+                if (action == 'search') {
+                  _search.open();
+                } else if (action == 'add_member') {
                   _showAddMemberDialog(group);
                 } else if (action == 'leave') {
                   unawaited(_confirmLeave());
@@ -810,13 +886,25 @@ class _GroupConversationScreenState
                 }
               },
               itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                if (hasMessages && !searchInBar)
+                  PopupMenuItem<String>(
+                    key: const Key('group-search-menu'),
+                    value: 'search',
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.search_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(t('Szukaj w rozmowie'))),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem<String>(
                   value: 'add_member',
                   child: Row(
                     children: <Widget>[
                       const Icon(Icons.person_add_rounded, size: 18),
                       const SizedBox(width: 8),
-                      Text(t('Dodaj członka')),
+                      Flexible(child: Text(t('Dodaj członka'))),
                     ],
                   ),
                 ),
@@ -865,9 +953,11 @@ class _GroupConversationScreenState
                     children: <Widget>[
                       Icon(Icons.logout_rounded, size: 18, color: zen.danger),
                       const SizedBox(width: 8),
-                      Text(
-                        t('Opuść grupę'),
-                        style: TextStyle(color: zen.danger),
+                      Flexible(
+                        child: Text(
+                          t('Opuść grupę'),
+                          style: TextStyle(color: zen.danger),
+                        ),
                       ),
                     ],
                   ),
@@ -961,6 +1051,12 @@ class _GroupConversationScreenState
                           ),
                         ),
                         data: (List<ChatMessage> messages) {
+                          _search.updateThread(
+                            messages,
+                            hidden: (ChatMessage m) =>
+                                hiddenByMe.hides(id: m.id),
+                            hiddenVersion: hiddenByMe,
+                          );
                           final bool animateEntrance =
                               !_messageEntrancePlayed && messages.isNotEmpty;
                           if (messages.isNotEmpty) {
@@ -1194,7 +1290,9 @@ class _GroupConversationScreenState
                                                 color: zen.outlineSoft,
                                               ),
                                             )),
-                                  foregroundDecoration: _highlightId == msg.id
+                                  foregroundDecoration:
+                                      _highlightId == msg.id ||
+                                          _search.currentId == msg.id
                                       ? BoxDecoration(
                                           borderRadius: look.bubbleRadius(
                                             outgoing: isSelf,
@@ -1391,13 +1489,13 @@ class _GroupConversationScreenState
                                   offset: Offset(isSelf ? 10 : -10, 6),
                                   child: KeyedSubtree(
                                     key: _bubbleKey(msg.id),
-                                    child: bubble,
+                                    child: _searchMarks(msg.id, bubble),
                                   ),
                                 );
                               }
                               return KeyedSubtree(
                                 key: _bubbleKey(msg.id),
-                                child: bubble,
+                                child: _searchMarks(msg.id, bubble),
                               );
                             },
                           );
@@ -1405,8 +1503,12 @@ class _GroupConversationScreenState
                       ),
                     ),
             ),
+            // While searching: the matches and arrows instead of the
+            // field to write in.
+            if (_search.active)
+              ChatSearchNavigator(search: _search)
             // Composer Bar
-            if (!isMember)
+            else if (!isMember)
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),

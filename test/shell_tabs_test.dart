@@ -248,7 +248,7 @@ void main() {
     expect(
       about,
       lessThan(
-        tester.getTopLeft(find.byKey(const Key('settings-nav-security'))).dy,
+        tester.getTopLeft(find.byKey(const Key('settings-nav-accounts'))).dy,
       ),
     );
     // The project's GitHub page and its Discord server, in the top group.
@@ -451,9 +451,8 @@ void main() {
     await tapSwitch('settings-in-app-sounds');
     expect(settings().inAppSounds, isFalse);
 
-    // Nobody muted yet; a muted person is listed and comes back with one tap.
-    await tester.pageBack();
-    await _route(tester);
+    // The muted people are on the same page as the switches. Nobody muted
+    // yet; a muted person is listed and comes back with one tap.
     final Finder muted = find.byKey(
       const Key('settings-nav-muted-post-authors'),
     );
@@ -614,7 +613,12 @@ void main() {
       await tester.tap(find.byKey(const Key('chats-status-chip')));
       await _route(tester);
       final Finder security = find.byKey(const Key('settings-nav-security'));
-      await tester.ensureVisible(security);
+      // The settings list builds lazily: scroll until the row is built.
+      await tester.scrollUntilVisible(
+        security,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pump();
       await tester.tap(security);
       await _route(tester);

@@ -864,11 +864,13 @@ void main() {
     expect(container.read(graphNotesProvider).notes.neglectWeeks, 4);
     await tapKey(const Key('graph-mode-time'));
     expect(find.byKey(const Key('graph-time-bar')), findsOneWidget);
-    await tapKey(const Key('graph-time-3'));
+    tester
+        .widget<Slider>(find.byKey(const Key('graph-time-slider')))
+        .onChanged!(0.5);
     await tester.pump();
     expect(find.byKey(const Key('graph-time-state')), findsOneWidget);
     await tapKey(const Key('graph-time-play'));
-    await tester.pump(const Duration(seconds: 7));
+    await tester.pump(const Duration(seconds: 13));
     await tester.pump();
 
     await tester.pumpWidget(const SizedBox.shrink());

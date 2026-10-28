@@ -571,17 +571,31 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   );
   final GraphLabelCache _labels = GraphLabelCache();
 
-  /// Where the timeline is (0: 12 months ago … 1: now); runs when played.
+  /// Where the timeline is (0: its start … 1: now); runs when played.
   late final AnimationController _clock = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 6),
+    duration: kGraphTimePlay,
     value: 1,
   );
 
-  /// Months back the timeline shows (0: now).
-  int _timeMonths = 0;
+  /// The timeline is shown over a mode other than "Oś czasu".
+  bool _timelineOn = false;
+
+  /// How fast the timeline plays (one of [kGraphTimeSpeeds]).
+  int _timeSpeed = 1;
+
+  /// With the animations off, the timeline steps instead of gliding.
+  Timer? _stepper;
   GraphTimeline? _timeline;
   Object? _timelineKey;
+
+  /// The timeline is on: in "Oś czasu", or opened over another mode.
+  bool get _timed => _mode == GraphMode.time || _timelineOn;
+
+  bool get _timePlaying => _clock.isAnimating || _stepper != null;
+
+  /// The animations are off: people come at once, the timeline steps.
+  bool get _still => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
 
   /// People further away, read again only when friends passed on more.
   Map<String, FarPerson> _far = const <String, FarPerson>{};
@@ -620,12 +634,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     _filters = v.filters;
     _goal = v.goal;
     _selected = v.selected;
-    _timeMonths = v.timeMonths;
+    _timelineOn = v.timeline;
+    _clock.value = v.timeAt;
     _focus = v.focus;
     _focusName = v.focusName;
-    if (_mode == GraphMode.time) {
-      _clock.value = timelinePhase(_timeMonths);
-    }
     if (widget.fullScreen) {
       _chrome = ref.read(graphFullScreenChromeProvider);
       unawaited(_chrome!.enter());
@@ -659,7 +671,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     filters: _filters,
     goal: _goal,
     selected: _selected,
-    timeMonths: _timeMonths,
+    timeline: _timelineOn,
+    timeAt: _clock.value,
     focus: _focus,
     focusName: _focusName,
   );
@@ -703,11 +716,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       _filters = v.filters;
       _goal = v.goal;
       _selected = v.selected;
-      _timeMonths = v.timeMonths;
+      _timelineOn = v.timeline;
     });
-    if (_mode == GraphMode.time) {
-      _clock.value = timelinePhase(_timeMonths);
-    }
+    _pauseTime();
+    _clock.value = v.timeAt;
   }
 
   /// A touch, a click or the mouse moving: the controls come back for a
@@ -784,17 +796,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                       _modeBar(context, modes),
                       if (_mode == GraphMode.route)
                         _routeBar(context, route, selected, all, meet),
-                      if (timed)
-                        GraphTimeBar(
-                          months: _timeMonths,
-                          onMonths: _setTime,
-                          playing: _clock.isAnimating,
-                          onPlay: _playTime,
-                          clock: _clock,
-                          timeline: _timeline,
-                          nodes: _scene?.layout.nodes ?? const <GraphNode>[],
-                          baseline: kept.baseline,
-                        ),
+                      if (timed) _timeBar(kept),
                     ],
                   ),
                 ),
@@ -809,6 +811,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   @override
   void dispose() {
     _hide?.cancel();
+    _stepper?.cancel();
     final FullScreenChrome? chrome = _chrome;
     if (chrome != null) {
       unawaited(chrome.exit());
@@ -897,38 +900,113 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     if (mode == _mode) {
       return;
     }
-    if (_clock.isAnimating) {
-      _clock.stop();
-    }
+    _pauseTime();
     setState(() => _mode = mode);
-    if (mode == GraphMode.time) {
-      _clock.value = timelinePhase(_timeMonths);
+  }
+
+  /// Pauses the timeline where it is.
+  void _pauseTime() {
+    _stepper?.cancel();
+    _stepper = null;
+    if (_clock.isAnimating) {
+      _clock.stop();
     }
   }
 
-  /// The timeline at [months] back (0: now).
-  void _setTime(int months) {
-    _clock.stop();
-    setState(() => _timeMonths = months);
-    _clock.value = timelinePhase(months);
+  /// The slider moved: the picture shows that day.
+  void _scrubTime(double phase) {
+    _pauseTime();
+    setState(() => _clock.value = phase);
   }
 
-  /// Plays how the graph grew over the last 12 months (or stops it).
+  /// Plays how the graph grew from where the slider is (from the start
+  /// when it is at the end), or pauses it.
   void _playTime() {
-    if (_clock.isAnimating) {
-      _clock.stop();
+    if (_timePlaying) {
+      _pauseTime();
       setState(() {});
       return;
     }
-    setState(() => _timeMonths = 0);
+    if (_clock.value >= 1) {
+      _clock.value = 0;
+    }
+    _runTime();
+    setState(() {});
+  }
+
+  /// Runs the timeline from where it is at the chosen speed: gliding, or
+  /// with the animations off, stepping from one event to the next (a day
+  /// someone came or was met) without anything growing in between.
+  void _runTime() {
+    if (_still) {
+      _stepper = Timer.periodic(kGraphTimeStep ~/ _timeSpeed, (_) {
+        final GraphTimeline? tl = _timeline;
+        if (tl == null) {
+          return;
+        }
+        final double next = tl.nextStep(_clock.value);
+        _clock.value = next;
+        if (next >= 1) {
+          _stepper?.cancel();
+          _stepper = null;
+          if (mounted) {
+            setState(() {});
+          }
+        }
+      });
+      return;
+    }
+    _clock.duration = kGraphTimePlay ~/ _timeSpeed;
     unawaited(
-      _clock.forward(from: 0).whenComplete(() {
+      _clock.forward().whenComplete(() {
         if (mounted) {
           setState(() {});
         }
       }),
     );
   }
+
+  /// The next speed; a playing timeline goes on at it.
+  void _nextTimeSpeed() {
+    final bool playing = _timePlaying;
+    _pauseTime();
+    final int i = kGraphTimeSpeeds.indexOf(_timeSpeed);
+    setState(
+      () => _timeSpeed = kGraphTimeSpeeds[(i + 1) % kGraphTimeSpeeds.length],
+    );
+    if (playing) {
+      _runTime();
+    }
+  }
+
+  /// Shows the timeline over the mode and plays it from the start.
+  void _openTimeline() {
+    _pauseTime();
+    setState(() => _timelineOn = true);
+    _clock.value = 0;
+    _runTime();
+  }
+
+  /// Hides the timeline: everyone, as now.
+  void _closeTimeline() {
+    _pauseTime();
+    setState(() => _timelineOn = false);
+    _clock.value = 1;
+  }
+
+  /// The timeline's controls under the mode bar.
+  Widget _timeBar(GraphNotes kept) => GraphTimeBar(
+    clock: _clock,
+    timeline: _timeline,
+    nodes: _scene?.layout.nodes ?? const <GraphNode>[],
+    baseline: kept.baseline,
+    playing: _timePlaying,
+    onPlay: _playTime,
+    onScrub: _scrubTime,
+    speed: _timeSpeed,
+    onSpeed: _nextTimeSpeed,
+    onClose: _mode == GraphMode.time ? null : _closeTimeline,
+  );
 
   /// People further away: friends of gatekeepers friends passed on, and
   /// people open to meet further out (as far as the graph reaches).
@@ -1465,7 +1543,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       for (final GraphNode h in hits) h.address,
     };
     // What the modes about this person's own circle need.
-    final bool timed = _mode == GraphMode.time;
+    final bool timed = _timed;
     final Map<String, int> metAt = timed || _mode == GraphMode.neglect
         ? _metDaysFor(node, data)
         : const <String, int>{};
@@ -1595,7 +1673,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 size,
                 openPerson,
                 timeline: timed
-                    ? _timelineFor(scene, notes, metAt, nowMs)
+                    ? _timelineFor(scene, notes, metAt, nowMs, social)
                     : null,
               );
             },
@@ -1708,17 +1786,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             _modeBar(context, modes),
             if (_mode == GraphMode.route)
               _routeBar(context, route, selected, all, meet),
-            if (timed)
-              GraphTimeBar(
-                months: _timeMonths,
-                onMonths: _setTime,
-                playing: _clock.isAnimating,
-                onPlay: _playTime,
-                clock: _clock,
-                timeline: _timeline,
-                nodes: _scene?.layout.nodes ?? const <GraphNode>[],
-                baseline: kept.baseline,
-              ),
+            if (timed) _timeBar(kept),
             SizedBox(
               height: graphHeight,
               child: Container(
@@ -1896,33 +1964,35 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     );
   }
 
-  /// The timeline of [scene] over the last 12 months, built again only
-  /// when the people, the notes or the day change.
+  /// The whole story of [scene] ([graphGrowth]), built again only when the
+  /// people, the notes, the groups or the day change; never per frame (the
+  /// layout stays, playing only repaints).
   GraphTimeline _timelineFor(
     GraphScene scene,
     GraphNotesService notes,
     Map<String, int> metAt,
     int nowMs,
+    SocialHubState social,
   ) {
     const int day = 24 * 3600 * 1000;
-    final int to = nowMs - nowMs % day + day;
     final Object key = Object.hash(
       identityHashCode(scene),
       notes.revision,
       identityHashCode(metAt),
-      to,
+      identityHashCode(social.groups),
+      nowMs ~/ day,
     );
     final GraphTimeline? had = _timeline;
     if (had != null && key == _timelineKey) {
       return had;
     }
     _timelineKey = key;
-    final GraphTimeline made = graphTimeline(
+    final GraphTimeline made = graphGrowth(
       scene.layout.nodes,
       notes.notes,
-      from: monthsBack(to, 12),
-      to: to,
+      now: nowMs,
       metAt: metAt,
+      firstContact: groupContactDays(social.groups.values),
     );
     _timeline = made;
     // The bar above the picture shows what the new timeline says.
@@ -2295,30 +2365,43 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
               setState(() => _selected = null);
             }
           },
-          child: RepaintBoundary(
-            child: CustomPaint(
+          // Screen readers: every person on the picture is a button; on the
+          // timeline, only those already there on its day.
+          child: ListenableBuilder(
+            listenable: timeline == null
+                ? const AlwaysStoppedAnimation<double>(1)
+                : _clock,
+            builder: (BuildContext context, Widget? child) => CustomPaint(
               size: size,
-              // Screen readers: every person is a button.
               foregroundPainter: _GraphSemantics(
                 nodes: nodes,
                 onOpen: openPerson,
-              ),
-              painter: GraphPainter(
-                scene: scene,
-                look: look,
-                progress: _move,
-                labels: _labels..direction = Directionality.of(context),
-                me: zen.accent,
-                meText: zen.onAccent,
-                text: zen.textPrimary,
-                labelBg: zen.surfaceRaised,
-                guide: zen.outlineSoft,
-                scale: lod,
-                visible: visible,
                 timeline: timeline,
-                clock: timeline == null ? null : _clock,
-                metTone: zen.success,
-                labelRadius: ZenLook.of(context).radius(8),
+                at: _clock.value,
+              ),
+              child: child,
+            ),
+            child: RepaintBoundary(
+              child: CustomPaint(
+                size: size,
+                painter: GraphPainter(
+                  scene: scene,
+                  look: look,
+                  progress: _move,
+                  labels: _labels..direction = Directionality.of(context),
+                  me: zen.accent,
+                  meText: zen.onAccent,
+                  text: zen.textPrimary,
+                  labelBg: zen.surfaceRaised,
+                  guide: zen.outlineSoft,
+                  scale: lod,
+                  visible: visible,
+                  timeline: timeline,
+                  clock: timeline == null ? null : _clock,
+                  metTone: zen.success,
+                  labelRadius: ZenLook.of(context).radius(8),
+                  still: _still,
+                ),
               ),
             ),
           ),
@@ -2350,6 +2433,14 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
+                    // How the graph grew, over any mode.
+                    if (!_timed)
+                      IconButton.filledTonal(
+                        key: const Key('graph-timeline-toggle'),
+                        tooltip: t('Pokaż, jak rósł graf'),
+                        onPressed: _openTimeline,
+                        icon: const Icon(Icons.history_rounded),
+                      ),
                     IconButton.filledTonal(
                       key: const Key('graph-full-toggle'),
                       tooltip: widget.fullScreen
@@ -3542,10 +3633,40 @@ class _LegendTag extends StatelessWidget {
 /// becomes a button with the name and the circle they belong to. Paints
 /// nothing.
 class _GraphSemantics extends CustomPainter {
-  _GraphSemantics({required this.nodes, required this.onOpen});
+  _GraphSemantics({
+    required this.nodes,
+    required this.onOpen,
+    this.timeline,
+    this.at = 1,
+  }) : known = _knownCount(nodes, timeline, at);
 
   final List<GraphNode> nodes;
   final void Function(GraphNode) onOpen;
+
+  /// The timeline shown, and where on it the picture is.
+  final GraphTimeline? timeline;
+  final double at;
+
+  /// How many people are there at [at]: they come in order, so the count
+  /// says who (the semantics are built again only when it changes).
+  final int known;
+
+  static int _knownCount(
+    List<GraphNode> nodes,
+    GraphTimeline? timeline,
+    double at,
+  ) {
+    if (timeline == null) {
+      return nodes.length;
+    }
+    int out = 0;
+    for (int i = 0; i < nodes.length; i++) {
+      if (timeline.knownAt(i, at)) {
+        out++;
+      }
+    }
+    return out;
+  }
 
   /// The first nodes (closest friends first) — enough to browse, light on
   /// the accessibility tree.
@@ -3567,12 +3688,19 @@ class _GraphSemantics extends CustomPainter {
 
   @override
   bool shouldRebuildSemantics(_GraphSemantics oldDelegate) =>
-      !identical(oldDelegate.nodes, nodes);
+      !identical(oldDelegate.nodes, nodes) ||
+      !identical(oldDelegate.timeline, timeline) ||
+      oldDelegate.known != known;
 
   @override
   SemanticsBuilderCallback get semanticsBuilder =>
       (Size size) => <CustomPainterSemantics>[
-        for (final GraphNode n in nodes.take(maxNodes))
+        for (final (int _, GraphNode n)
+            in nodes.indexed
+                .where(
+                  ((int, GraphNode) e) => timeline?.knownAt(e.$1, at) ?? true,
+                )
+                .take(maxNodes))
           CustomPainterSemantics(
             key: ValueKey<String>(n.address),
             rect: Rect.fromCenter(center: n.at, width: 44, height: 44),
