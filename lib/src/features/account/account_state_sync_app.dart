@@ -31,6 +31,7 @@ import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -682,10 +683,13 @@ final class AccountDevicesKeeper {
       strangers,
       ?mailboxes,
     ]);
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
     final AccountStateSync sync = AccountStateSync(
       channel: LedgerAccountSyncChannel(node),
       disk: disk,
       domains: <AccountSyncDomain>[..._domains, household],
+      // Locked: the stores do not open (nothing to scan until the unlock).
+      mayRead: () async => await security.currentEncryptionKey() != null,
     );
     _sync = sync;
     await sync.start();

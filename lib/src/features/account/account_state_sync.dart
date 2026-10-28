@@ -265,6 +265,7 @@ final class AccountStateSync {
     required List<AccountSyncDomain> domains,
     this.delay = const Duration(seconds: 2),
     this.scanEvery = kAccountSyncScanEvery,
+    this.mayRead,
   }) : _domains = <String, AccountSyncDomain>{
          for (final AccountSyncDomain d in domains) d.id: d,
        };
@@ -279,6 +280,12 @@ final class AccountStateSync {
   /// How often every state is looked at anyway (a safety net: every
   /// domain tells its changes, which are sent [delay] after they come).
   final Duration scanEvery;
+
+  /// Whether the states can be read now (`null`: always). A locked app's
+  /// stores do not open without its key, so the periodic scan is skipped
+  /// then instead of failing every [scanEvery]; changes after the unlock
+  /// are sent as they come, and the next scan looks at everything again.
+  final Future<bool> Function()? mayRead;
 
   static const String _stateKey = 'account/sync/state';
 
@@ -323,8 +330,17 @@ final class AccountStateSync {
     for (final AccountSyncDomain d in _domains.values) {
       _subs.add(d.changes.listen((_) => _schedule()));
     }
-    _periodic = Timer.periodic(scanEvery, (_) => _enqueue(_scan));
+    _periodic = Timer.periodic(scanEvery, (_) => _enqueue(_periodicScan));
     _enqueue(_scan);
+  }
+
+  /// The periodic safety net: a scan unless the states cannot be read now.
+  Future<void> _periodicScan() async {
+    final Future<bool> Function()? mayRead = this.mayRead;
+    if (mayRead != null && !await mayRead()) {
+      return;
+    }
+    await _scan();
   }
 
   Future<void> stop() async {

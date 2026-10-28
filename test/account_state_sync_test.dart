@@ -18,13 +18,17 @@ final class _Domain implements AccountSyncDomain {
   Map<String, Object?> state;
   final Set<String> drop;
   int writes = 0;
+  int reads = 0;
   final StreamController<void> _changes = StreamController<void>.broadcast();
 
   @override
   Set<String> get wholeKeys => const <String>{'order'};
 
   @override
-  Future<Map<String, Object?>?> read() async => _copy(state);
+  Future<Map<String, Object?>?> read() async {
+    reads++;
+    return _copy(state);
+  }
 
   @override
   Future<void> write(Map<String, Object?> next) async {
@@ -325,5 +329,37 @@ void main() {
     expect(a.settings.state['extra'], 7, reason: 'the default did not win');
     await a.sync.stop();
     await updated.stop();
+  });
+
+  test('the periodic scan waits while the states cannot be read', () async {
+    final _Net net = _Net();
+    final _Channel channel = _Channel(net, 'dev-a');
+    final _Domain settings = _Domain('settings', <String, Object?>{'a': 1});
+    bool readable = true;
+    final AccountStateSync sync = AccountStateSync(
+      channel: channel,
+      disk: MemoryLedgerDisk(),
+      domains: <AccountSyncDomain>[settings],
+      scanEvery: const Duration(milliseconds: 20),
+      mayRead: () async => readable,
+    );
+    await sync.start();
+    await sync.idle;
+    expect(settings.reads, greaterThan(0), reason: 'a scan runs at start');
+
+    // Locked: the scans that come meanwhile do not touch the stores.
+    readable = false;
+    await sync.idle;
+    final int locked = settings.reads;
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    await sync.idle;
+    expect(settings.reads, locked);
+
+    // Unlocked: the next scan reads again.
+    readable = true;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await sync.idle;
+    expect(settings.reads, greaterThan(locked));
+    await sync.stop();
   });
 }
