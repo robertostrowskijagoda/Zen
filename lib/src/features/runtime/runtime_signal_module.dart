@@ -33,26 +33,29 @@ final Provider<RuntimePresenceConfig> runtimePresenceConfigProvider =
     });
 
 /// How often friends are pinged while Zen is on the screen. Every ping wakes
-/// the radio of each friend's phone, which answers, so rarely; the moments
-/// that matter are told at once: "I am here" (a ping) when Zen comes on the
-/// screen and "away" when it leaves it.
-const Duration kPresencePingInterval = Duration(minutes: 2, seconds: 30);
+/// the radio of each friend's phone, which answers, so not often; the
+/// moments that matter are told at once: "I am here" (a ping) when Zen
+/// comes on the screen, again once the node reaches the mesh if it did not
+/// yet, to a friend as soon as they are added, and "away" when Zen leaves
+/// the screen.
+const Duration kPresencePingInterval = Duration(minutes: 2);
 
 /// A friend "w tle" with no sign of life for this long counts as offline
 /// (and no longer reachable directly). A phone in the background never
 /// pings; it only answers this phone's pings, which go out only while Zen
 /// is on this screen, every [kPresencePingInterval], and a locked phone
-/// answers one contact at most every kLockedPongEvery (4 min): an answer
-/// comes about every 5 min, up to 6.5 min after coming back on the screen
-/// between two rounds. Twice that, so one lost answer is not "offline".
-const Duration kPresenceOfflineAfter = Duration(minutes: 12);
+/// answers one contact at most every kLockedPongEvery (3.5 min): the first
+/// ping after a quiet while at once, then every other one, so an answer
+/// comes every 4 min. Twice that and a bit, so one lost answer is not
+/// "offline".
+const Duration kPresenceOfflineAfter = Duration(minutes: 10);
 
 /// A friend "online" with no new sign for this long counts as offline. A
 /// friend on the screen pings every [kPresencePingInterval] and answers
 /// this phone's pings at once, and tells "away" when Zen leaves their
 /// screen (an "away" lost: the next answer says "w tle"). Silence for two
 /// rounds and a bit means Zen was closed or the phone lost the network.
-const Duration kPresenceForegroundFor = Duration(minutes: 6);
+const Duration kPresenceForegroundFor = Duration(minutes: 5);
 
 /// After coming back on the screen, how long the answers to the first pings
 /// may take before friends who did not answer count as offline.
@@ -64,7 +67,29 @@ const Duration kPresenceSettleAfterResume = Duration(seconds: 20);
 /// screen by then (friends then rightly still see it "online"). Shorter
 /// than [kPresenceForegroundFor], so a friend never sees this phone
 /// offline meanwhile.
-const Duration kPresenceAwayEvery = Duration(minutes: 5);
+const Duration kPresenceAwayEvery = Duration(minutes: 4);
+
+/// Whether the node reaches the mesh: running, with a peer up.
+bool meshReachable(RuntimeTransportSnapshot snapshot) =>
+    snapshot.health == RuntimeTransportHealth.active && snapshot.peers > 0;
+
+/// Whether the node reaches the mesh now ([meshReachable]), as it changes:
+/// pings sent before it did went nowhere, so a round goes out again once it
+/// does (a fake in tests).
+final Provider<ValueListenable<bool>> meshReachableProvider =
+    Provider<ValueListenable<bool>>((Ref ref) {
+      final RuntimeNodeRuntime runtime = ref.watch(runtimeNodeRuntimeProvider);
+      final ValueNotifier<bool> reachable = ValueNotifier<bool>(
+        meshReachable(runtime.snapshot),
+      );
+      void update() => reachable.value = meshReachable(runtime.snapshot);
+      runtime.addListener(update);
+      ref.onDispose(() {
+        runtime.removeListener(update);
+        reachable.dispose();
+      });
+      return reachable;
+    });
 
 final class RuntimePresenceConfig {
   const RuntimePresenceConfig({
@@ -124,7 +149,9 @@ bool isSecurityBlockingUi(AppSecurityService security) {
 /// The core's first module: the signal transport, frames into the social
 /// state, and friends' presence while Zen is on the screen: a ping to each
 /// friend now and then ([kPresencePingInterval]), "I am here" when it
-/// comes on the screen and "away" when it leaves it. Off the screen it
+/// comes on the screen (again once the node reaches the mesh, when the
+/// first round went out before it did), a ping to a friend as soon as
+/// they are added, and "away" when it leaves the screen. Off the screen it
 /// pings no one; it still answers friends' pings.
 ///
 /// Each ping, pong and "away" to a friend who may see it says this
@@ -178,6 +205,17 @@ final class RuntimeSignalModule extends ZenModule {
   /// [_answersWeak]).
   final Map<String, int> _weakPongedAt = <String, int>{};
 
+  /// Whether the node reaches the mesh ([meshReachableProvider]), and
+  /// whether it did not when the last round of pings went out.
+  ValueListenable<bool>? _reachable;
+  bool _wasReachable = true;
+  bool _pingedUnreachable = false;
+
+  /// Who the last round went to (`null`: none yet in this run): someone new
+  /// among the targets later is pinged at once ([_onFriendsChanged]).
+  Set<String>? _pingTargets;
+  ProviderSubscription<SocialHubState>? _friendsSubscription;
+
   @override
   String get id => 'signal';
 
@@ -193,6 +231,15 @@ final class RuntimeSignalModule extends ZenModule {
       onError: (Object error, StackTrace stackTrace) {
         logZenError('Runtime signal frame stream error', error, stackTrace);
       },
+    );
+    final ValueListenable<bool> reachable = _ref.read(meshReachableProvider);
+    _reachable = reachable;
+    _wasReachable = reachable.value;
+    reachable.addListener(_onReachableChanged);
+    _friendsSubscription = _ref.listen<SocialHubState>(
+      socialHubControllerProvider,
+      (SocialHubState? previous, SocialHubState next) =>
+          _onFriendsChanged(next),
     );
     try {
       await transport.start();
@@ -222,6 +269,11 @@ final class RuntimeSignalModule extends ZenModule {
     _awayLately = null;
     _awayLater?.cancel();
     _awayLater = null;
+    _reachable?.removeListener(_onReachableChanged);
+    _reachable = null;
+    _friendsSubscription?.close();
+    _friendsSubscription = null;
+    _pingTargets = null;
     final StreamSubscription<SignalTransportFrame>? subscription =
         _subscription;
     _subscription = null;
@@ -307,21 +359,60 @@ final class RuntimeSignalModule extends ZenModule {
       if (!pingNow) {
         return;
       }
-      // "I am here": a ping to every friend now. Who did not answer counts
-      // as offline only once the answers had time to come.
-      unawaitedLogged(
-        _tickPresenceLoop(decay: false),
-        context: 'Runtime presence tick failed after resume',
-      );
-      _settleTimer?.cancel();
-      _settleTimer = Timer(kPresenceSettleAfterResume, () {
-        _settleTimer = null;
-        unawaitedLogged(
-          _decayPresence(),
-          context: 'Runtime presence decay failed after resume',
-        );
-      });
+      _hereNow(context: 'Runtime presence tick failed after resume');
     });
+  }
+
+  /// "I am here": a ping to every friend now. Who did not answer counts as
+  /// offline only once the answers had time to come.
+  void _hereNow({required String context}) {
+    unawaitedLogged(_tickPresenceLoop(decay: false), context: context);
+    _settleTimer?.cancel();
+    _settleTimer = Timer(kPresenceSettleAfterResume, () {
+      _settleTimer = null;
+      unawaitedLogged(
+        _decayPresence(),
+        context: 'Runtime presence decay failed after resume',
+      );
+    });
+  }
+
+  /// The node reached the mesh, or lost it. A round of pings that went out
+  /// while it did not went nowhere (a cold start: Zen on the screen before
+  /// the node has a peer), so "I am here" goes out again now rather than a
+  /// whole interval later.
+  void _onReachableChanged() {
+    final bool reachable = _reachable?.value ?? false;
+    final bool came = reachable && !_wasReachable;
+    _wasReachable = reachable;
+    if (!came || !_pingedUnreachable || !_running || !_presenceRuns()) {
+      return;
+    }
+    _pingedUnreachable = false;
+    _restartPresenceLoop();
+    _hereNow(context: 'Runtime presence tick failed once reachable');
+  }
+
+  /// Someone new among the ping targets (a friend just accepted, a group
+  /// invite just sent) is pinged at once while Zen is on the screen, not at
+  /// the next round: one ping each, the others are not pinged again.
+  void _onFriendsChanged(SocialHubState state) {
+    final Set<String>? known = _pingTargets;
+    // No round yet in this run: the first one pings everybody. Off the
+    // screen nobody is pinged; the next round reaches the new ones.
+    if (known == null || !_running || !_presenceRuns()) {
+      return;
+    }
+    final Set<String> targets = presencePingTargets(state);
+    final Set<String> added = targets.difference(known);
+    _pingTargets = targets;
+    if (added.isEmpty) {
+      return;
+    }
+    unawaitedLogged(
+      _pingAll(added, state),
+      context: 'Runtime presence ping of a new friend failed',
+    );
   }
 
   Future<void> _handleFrame(SignalTransportFrame frame) async {
@@ -482,20 +573,33 @@ final class RuntimeSignalModule extends ZenModule {
   }
 
   Future<void> _sendPresencePings() async {
+    if (_transport == null) {
+      return;
+    }
+    final SocialHubState hubState = _ref.read(socialHubControllerProvider);
+    final Set<String> peersToPing = presencePingTargets(hubState);
+    _notePingRound();
+    _pingTargets = peersToPing;
+    _pingedUnreachable = !(_reachable?.value ?? true);
+    await _pingAll(peersToPing, hubState);
+  }
+
+  /// A ping to each of [targets] who may hear one.
+  Future<void> _pingAll(
+    Iterable<String> targets,
+    SocialHubState hubState,
+  ) async {
     final SignalTransport? transport = _transport;
     if (transport == null) {
       return;
     }
-    final SocialHubState hubState = _ref.read(socialHubControllerProvider);
     final String localAddr = _ref
         .read(runtimeNodeSnapshotProvider)
         .localAddress;
     final SocialHubController hub = _ref.read(
       socialHubControllerProvider.notifier,
     );
-    final Set<String> peersToPing = presencePingTargets(hubState);
-    _notePingRound();
-    for (final String address in peersToPing) {
+    for (final String address in targets) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(address, localAddr)) {
         continue;

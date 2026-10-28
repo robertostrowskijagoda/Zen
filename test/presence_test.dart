@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -319,6 +319,7 @@ void main() {
       AppSettings settings = const AppSettings(),
       FriendLevel? Function(String address)? levelOf,
       bool asleepOffScreen = false,
+      ValueListenable<bool>? reachable,
       Map<String, FriendProfile> friends = const <String, FriendProfile>{
         _ada: FriendProfile(
           address: _ada,
@@ -336,6 +337,8 @@ void main() {
               MemoryAppSettingsStore(settings),
             ),
             presenceAsleepOffScreenProvider.overrideWithValue(asleepOffScreen),
+            if (reachable != null)
+              meshReachableProvider.overrideWithValue(reachable),
             if (levelOf != null)
               friendLevelLookupProvider.overrideWithValue(
                 FriendLevelLookup()..levelOf = levelOf,
@@ -589,6 +592,73 @@ void main() {
       await tester.pump();
       await tester.pump(kPresenceAwayEvery);
       expect(aways(), 3);
+    });
+
+    testWidgets('pings that went out before the node reached the mesh go out '
+        'again once it does', (WidgetTester tester) async {
+      final ValueNotifier<bool> reachable = ValueNotifier<bool>(false);
+      addTearDown(reachable.dispose);
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        reachable: reachable,
+      );
+      int pings() => transport.sentSignals
+          .where((e) => e.payload['type'] == 'ping')
+          .length;
+      expect(pings(), 1, reason: '"I am here" as Zen came on the screen');
+
+      reachable.value = true;
+      await tester.pump();
+      await tester.pump();
+      expect(pings(), 2, reason: 'again, now that it can arrive');
+      expect(last(transport, 'ping'), containsPair('state', 'foreground'));
+
+      // A short loss of the network after a round that did arrive: nothing
+      // new, the next round comes on time.
+      reachable.value = false;
+      await tester.pump();
+      reachable.value = true;
+      await tester.pump();
+      await tester.pump();
+      expect(pings(), 2);
+      await tester.pump(kPresencePingInterval);
+      await tester.pump();
+      expect(pings(), 3);
+    });
+
+    testWidgets('a friend just added is pinged at once, the others are not '
+        'pinged again', (WidgetTester tester) async {
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        friends: const <String, FriendProfile>{
+          _ada: FriendProfile(
+            address: _ada,
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.accepted,
+          ),
+          _bob: FriendProfile(
+            address: _bob,
+            displayName: 'Bob',
+            status: FriendRelationshipStatus.pendingIncoming,
+          ),
+        },
+      );
+      List<String> pinged() => <String>[
+        for (final e in transport.sentSignals)
+          if (e.payload['type'] == 'ping') e.remoteAddress,
+      ];
+      expect(pinged(), <String>[_ada]);
+
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(ZenRewriteApp)),
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .acceptFriendRequest(peerAddress: _bob);
+      await tester.pump();
+      await tester.pump();
+      expect(pinged(), <String>[_ada, _bob]);
+      expect(last(transport, 'ping'), containsPair('state', 'foreground'));
     });
   });
 

@@ -161,8 +161,12 @@ Duration nextMailboxPollWait({
   return doubled > max ? max : doubled;
 }
 
-/// How often a locked phone answers one contact's pings at most.
-const Duration kLockedPongEvery = Duration(minutes: 4);
+/// How often a locked phone answers one contact's pings at most. A contact
+/// pings every kPresencePingInterval (2 min) while Zen is on their screen:
+/// the first ping after a quiet while (Zen just came on their screen) is
+/// answered at once, then every other one — a little under two intervals,
+/// so however the timings drift, an answer comes every 4 min.
+const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
 
 /// "I am leaving the screen": sent to friends when Zen goes to the
 /// background (runtime_signal_module.dart). Nothing to keep for later.
@@ -594,8 +598,9 @@ final class LockedReceiver {
   final Duration pollAnswerGrace;
 
   /// A contact's pings get a pong at most this often: friends ping only
-  /// while Zen is on their screen, and a pong every other ping keeps this
-  /// phone reachable, "w tle", for them (kPresenceOfflineAfter).
+  /// while Zen is on their screen; the first ping after a quiet while gets
+  /// one at once, and a pong every other ping keeps this phone reachable,
+  /// "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
   final Map<String, int> _pongedAt = <String, int>{};
 

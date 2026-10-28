@@ -1027,15 +1027,23 @@ void main() {
           .where((sent) => sent.payload['type'] == 'pong')
           .length;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
-      expect(pongs(), 1);
+      expect(pongs(), 1, reason: 'the first ping: an answer at once');
       // The next ping, one interval later: no answer needed yet.
-      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      clock += kPresencePingInterval.inMilliseconds;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
       expect(pongs(), 1);
-      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      // Every other ping gets one, even when it comes a little early.
+      clock += kPresencePingInterval.inMilliseconds - 20000;
       await receive(_ada, <String, dynamic>{'type': 'ping'});
       expect(pongs(), 2);
-      expect(kLockedPongEvery, lessThan(kPresenceOfflineAfter));
+      // Zen left Ada's screen and came back a while later: her first ping
+      // is answered at once again.
+      clock += const Duration(minutes: 7).inMilliseconds;
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(pongs(), 3);
+      expect(kLockedPongEvery, lessThan(kPresencePingInterval * 2));
+      // An answer every two intervals; one of them lost is not "offline".
+      expect(kPresencePingInterval * 4, lessThan(kPresenceOfflineAfter));
       await receive(_ada, <String, dynamic>{'type': kPresenceAwayType});
       expect(receiver.keptCount, 0);
     });
