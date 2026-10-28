@@ -2,8 +2,10 @@ package main
 
 import (
 	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
@@ -108,5 +110,66 @@ func TestSplitBridges(t *testing.T) {
 	kept, aside = splitBridges([]string{"a"}, 1)
 	if len(kept) != 1 || aside != nil {
 		t.Fatalf("got %v / %v", kept, aside)
+	}
+}
+
+// deadPeerURI is a peer nobody answers at (a port just closed).
+func deadPeerURI(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	return "tcp://" + addr
+}
+
+// A phone node that only receives dials two public peers. One goes away
+// (its node stops): the core's log line tells the keeper, which dials
+// stand-ins at once, past a dead candidate in line, and two links are up
+// again within seconds, back to two peers.
+func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
+	coreA, uriA := listeningCore(t)
+	coreB, uriB := listeningCore(t)
+	coreC, uriC := listeningCore(t)
+	keeper := newPhonePeerKeeper([]string{uriA, uriB, deadPeerURI(t), uriC}, phoneExtraAccountPeerCount)
+	cfg := config.GenerateConfig()
+	yggCore, err := core.New(cfg.Certificate, withPeerEvents(log.New(io.Discard, "", 0), keeper))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(yggCore.Stop)
+	node := &bridgeNode{
+		core:        yggCore,
+		config:      cfg,
+		logger:      log.New(io.Discard, "", 0),
+		publicPeers: map[string]bool{},
+		phonePeers:  keeper,
+	}
+	node.swapPublicPeers(nil, keeper.dialled)
+	waitForPeer(t, yggCore, coreA.PublicKey(), true)
+	waitForPeer(t, yggCore, coreB.PublicKey(), true)
+	go node.watchPhonePeers()
+	t.Cleanup(keeper.stopWatch)
+
+	started := time.Now()
+	coreA.Stop()
+	waitForPeer(t, yggCore, coreC.PublicKey(), true)
+	took := time.Since(started)
+	t.Logf("two links up again %v after a peer went away", took)
+	if took > 15*time.Second {
+		t.Fatalf("two links up again only after %v", took)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		dialled := node.dialledPublicPeers()
+		if len(dialled) == 2 && dialled[0] == uriB && dialled[1] == uriC {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("back to two peers, got %v", dialled)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

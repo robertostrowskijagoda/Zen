@@ -154,14 +154,16 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		activeListen = append(activeListen, listenAddr)
 	}
 
-	yggCore, err := core.New(cfg.Certificate, logger, append(options, listenOptions...)...)
+	// A phone's keeper hears of every link that comes or goes.
+	coreLogger := withPeerEvents(logger, phonePeers)
+	yggCore, err := core.New(cfg.Certificate, coreLogger, append(options, listenOptions...)...)
 	if err != nil && len(listenOptions) > 0 {
 		// Same as above, for a listener the node binds itself. Falling back
 		// to a leaf node keeps the mesh reachable through outbound peers
 		// instead of leaving the user with no network at all.
 		logger.Warnf("listen address unavailable (%v), starting without an inbound listener", err)
 		closePeerGuards()
-		yggCore, err = core.New(cfg.Certificate, logger, options...)
+		yggCore, err = core.New(cfg.Certificate, coreLogger, options...)
 		activeListen = []string{}
 	}
 	if err != nil {

@@ -89,9 +89,13 @@ cannot read it.
   which mesh keys your node talks to.
 - A phone keeps links to 4 peers at a time (2 while Zen only receives in
   the background): its 16 first picks, then the rest of the list in
-  reserve. A peer that stops answering is swapped for
-  the next one (less often when there is no network at all), so a phone
-  whose first picks went quiet moves on to peers that still answer. A
+  reserve. When a link goes down the phone dials the next two of the list
+  at once and keeps whichever comes up first; a peer that does not
+  connect within 8 seconds is replaced by the next one. So the links are
+  back within seconds, also when the next peer in line is down too. With
+  no network at all the phone tries again in waves, less and less often
+  (up to every 15 minutes), so a phone whose first picks went quiet moves
+  on to peers that still answer without dialling round and round. A
   computer uses about 20, and only 4 while it runs on battery. Computers
   check which peer answers fastest every 6 hours, never on battery.
 - Every peer of the built-in list is switched on; most of them simply wait

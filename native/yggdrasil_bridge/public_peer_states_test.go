@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 func TestAPhoneKeepsTheWholePoolInReserveBehindItsPicks(t *testing.T) {
@@ -44,12 +45,12 @@ func TestAPhoneWhosePicksAreDeadMovesOnToItsReserve(t *testing.T) {
 	for _, uri := range selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize) {
 		picks[uri] = true
 	}
-	rotation := newPeerRotation(candidates, phonePeerCount)
-	dialled := rotation.initial()
-	up := func(uri string) bool { return !picks[uri] }
-	for check := 0; check < 4*phonePeerPoolSize; check++ {
-		dialled, _ = rotation.check(dialled, up)
+	w := newPeerWorld(t, candidates, phonePeerCount)
+	for uri := range picks {
+		w.dead[uri] = true
 	}
+	w.run(10 * time.Minute)
+	dialled := w.dialled
 	for _, uri := range dialled {
 		if picks[uri] {
 			t.Fatalf("still dials the dead pick %s: %v", uri, dialled)

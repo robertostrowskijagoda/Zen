@@ -2,16 +2,21 @@ package main
 
 import (
 	"net/url"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
 
 // phonePeerKeeper is a phone node's share of the public pool: what it dials
-// now and the rotation that swaps a peer that stays down (phone_peers.go).
+// now and the rotation that replaces a peer that goes down (phone_peers.go).
 type phonePeerKeeper struct {
 	mu       sync.Mutex
 	rotation *peerRotation
 	dialled  []string
+	// Something worth a look now (lookNow).
+	events   chan struct{}
 	stop     chan struct{}
 	stopOnce sync.Once
 }
@@ -21,12 +26,54 @@ func newPhonePeerKeeper(pool []string, target int) *phonePeerKeeper {
 	return &phonePeerKeeper{
 		rotation: rotation,
 		dialled:  rotation.initial(),
+		events:   make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 	}
 }
 
 func (keeper *phonePeerKeeper) stopWatch() {
 	keeper.stopOnce.Do(func() { close(keeper.stop) })
+}
+
+// lookNow has the keeper look at its peers now: one of the node's links came
+// up or went down, or the app sends something (so the phone is awake, and a
+// wave without network that came due while it slept goes out at once). It
+// never blocks.
+func (keeper *phonePeerKeeper) lookNow() {
+	if keeper == nil {
+		return
+	}
+	select {
+	case keeper.events <- struct{}{}:
+	default:
+	}
+}
+
+// peerEventLogger passes the core's log on and tells the phone's keeper
+// each time a link comes up or goes down (the core's "Connected ..." and
+// "Disconnected ..." lines, link.go in yggdrasil-go; it has no other hook).
+// The packet that ends a link wakes a sleeping phone, so the stand-ins are
+// dialled right then, not at the next look. Should the core word its lines
+// otherwise, the keeper still looks every phonePeerCheckInterval.
+type peerEventLogger struct {
+	core.Logger
+	keeper *phonePeerKeeper
+}
+
+func (logger peerEventLogger) Infof(format string, args ...interface{}) {
+	logger.Logger.Infof(format, args...)
+	if strings.HasPrefix(format, "Connected ") || strings.HasPrefix(format, "Disconnected ") {
+		logger.keeper.lookNow()
+	}
+}
+
+// withPeerEvents is logger for the core of a node: on a phone it also tells
+// keeper about links that come and go.
+func withPeerEvents(logger core.Logger, keeper *phonePeerKeeper) core.Logger {
+	if keeper == nil {
+		return logger
+	}
+	return peerEventLogger{Logger: logger, keeper: keeper}
 }
 
 // upPeers are the peerings that are up now, as GetPeers lists them.
@@ -40,9 +87,10 @@ func (node *bridgeNode) upPeers() map[string]bool {
 	return up
 }
 
-// watchPhonePeers swaps the phone's public peers that stay down for others
-// of its pool. A ticker of the Go runtime: it does not wake a sleeping
-// phone, it only runs while the phone is awake anyway.
+// watchPhonePeers keeps the phone's public peers up: it looks each time a
+// link comes up or goes down, and every phonePeerCheckInterval. A ticker of
+// the Go runtime: it does not wake a sleeping phone, it only runs while the
+// phone is awake anyway.
 func (node *bridgeNode) watchPhonePeers() {
 	keeper := node.phonePeers
 	if keeper == nil {
@@ -50,28 +98,60 @@ func (node *bridgeNode) watchPhonePeers() {
 	}
 	ticker := time.NewTicker(phonePeerCheckInterval)
 	defer ticker.Stop()
+	var sampled time.Time
 	for {
 		select {
 		case <-keeper.stop:
 			return
 		case <-ticker.C:
+		case <-keeper.events:
 		}
-		node.sampleTraffic()
-		up := node.upPeers()
-		keeper.mu.Lock()
-		before := keeper.dialled
-		after, changed := keeper.rotation.check(before, func(uri string) bool {
-			return up[peerURIBase(uri)]
-		})
-		if changed {
-			keeper.dialled = after
+		now := time.Now()
+		if now.Sub(sampled) >= time.Minute {
+			sampled = now
+			node.sampleTraffic()
 		}
-		keeper.mu.Unlock()
-		if changed {
-			node.logger.Infof("public peers down for a while; dialling %d others of the pool", len(after))
-			node.swapPublicPeers(before, after)
+		// The wall clock: the time the phone slept counts.
+		node.checkPhonePeers(now.Round(0))
+	}
+}
+
+// checkPhonePeers takes one look at the phone's public peers and dials
+// what its rotation says.
+func (node *bridgeNode) checkPhonePeers(now time.Time) {
+	keeper := node.phonePeers
+	if keeper == nil {
+		return
+	}
+	up := node.upPeers()
+	keeper.mu.Lock()
+	before := keeper.dialled
+	after, changed, wave := keeper.rotation.check(now, before, func(uri string) bool {
+		return up[peerURIBase(uri)]
+	})
+	if changed {
+		keeper.dialled = after
+	}
+	keeper.mu.Unlock()
+	switch {
+	case changed:
+		node.logger.Infof("public peers: %d dialled, %d of them up before", len(after), countUp(before, up))
+		// Redials every peer at once too.
+		node.swapPublicPeers(before, after)
+	case wave:
+		node.core.RetryPeersNow()
+	}
+}
+
+// countUp is how many of peers are up.
+func countUp(peers []string, up map[string]bool) int {
+	count := 0
+	for _, peer := range peers {
+		if up[peerURIBase(peer)] {
+			count++
 		}
 	}
+	return count
 }
 
 // swapPublicPeers stops dialling the public peers of before that are not in

@@ -38,7 +38,15 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
 - Peering: a built-in list of public peers (`public_peers.go`; a phone
   dials 4 at once, 2 while it only receives in the background, a TLS-only
   subset first, the rest of the encrypted list
-  in reserve for the peers that stop answering), local links with friends' and own devices without
+  in reserve for the peers that stop answering; `phone_peers.go`: a link
+  that goes down gets two stand-ins dialled in parallel at once, told by
+  the core's "Disconnected" log line, a candidate not up within 8 s is
+  replaced, the surplus goes once the target is up again, at most twice
+  the target are dialled at once, peers the transit guard set aside are
+  no candidates; with no peer up, waves of fresh candidates after 5 s,
+  then 15 s doubling up to 15 min by the wall clock, each one also
+  redialling every kept peer, and the first send after a wake looks at
+  once), local links with friends' and own devices without
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and
   "bridge" announcements in the ledger (`lg_bridges`).

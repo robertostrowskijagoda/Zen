@@ -431,6 +431,10 @@ func (node *bridgeNode) beginTransitHold(hold time.Duration, rate uint64) {
 				aside = append(aside, peer)
 			}
 		}
+		// A stand-in for the peer kept is never one set aside.
+		keeper.mu.Lock()
+		keeper.rotation.setAside(aside)
+		keeper.mu.Unlock()
 		node.transitHoldMu.Lock()
 		state.target = target
 		state.setAside = len(aside)
@@ -463,6 +467,7 @@ func (node *bridgeNode) endTransitHold() {
 	if keeper := node.phonePeers; keeper != nil {
 		keeper.mu.Lock()
 		keeper.rotation.target = state.target
+		keeper.rotation.setAside(nil)
 		before := keeper.dialled
 		after := keeper.rotation.fill(before)
 		keeper.dialled = after
