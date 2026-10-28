@@ -81,7 +81,8 @@ final class GraphView {
     this.filters = const GraphFilters(),
     this.goal = RouteGoal.shortest,
     this.selected,
-    this.timeMonths = 0,
+    this.timeline = false,
+    this.timeAt = 1,
     this.focus = const <String>{},
     this.focusName = '',
   });
@@ -90,7 +91,12 @@ final class GraphView {
   final GraphFilters filters;
   final RouteGoal goal;
   final String? selected;
-  final int timeMonths;
+
+  /// The timeline is shown over a mode other than "Oś czasu".
+  final bool timeline;
+
+  /// Where on the timeline the picture is (0: its start, 1: now).
+  final double timeAt;
 
   /// People lit in the "Ścieżka" mode: the trusted friends this person and
   /// a dating match [focusName] both know ("Bezpieczna randka").

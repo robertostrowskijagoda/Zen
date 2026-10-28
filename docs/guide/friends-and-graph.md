@@ -50,7 +50,7 @@ Modes (chips above the graph):
 | Pyramid | your pyramid's line and levels |
 | Gates | prices on the lines for introductions ([gates](introductions-and-gates.md)) |
 | Path | the shortest or cheapest way to a person |
-| Timeline | your graph 3, 6 and 12 months ago; *Show how the graph grew* animates it |
+| Timeline | how your graph grew, from the earliest day this phone knows about to today (see below) |
 | Bridges | friends who alone connect two of your groups of friends, and groups with no link; Zen suggests introducing two people |
 | Long ago | friends you have not talked to or met for 4, 8, 12 or 26 weeks, with a gentle *Message* or *Remind me later* |
 
@@ -66,6 +66,18 @@ Also on the graph:
   name never leaves the phone.
 - **Graph snapshot**: a 1080 x 1080 picture with initials and group
   colours only, no names or addresses, to save or send.
+- **How the graph grew**: the *Timeline* mode, or the clock button next to
+  the zoom buttons in any other mode (the mode keeps its colours). Play
+  shows friends and friends of friends appearing on the day they came, with
+  their lines fading in; pause, drag the slider to any day (the date and
+  how many friends and meetings there were then are under it), and switch
+  the speed between 1×, 2× and 4×. A friend comes on the earliest day this
+  phone knows: the friendship, your first message, or the start of a group
+  you are both in. A friend of a friend comes when you first saw them, and
+  never before the friend who connects you. With animations off (Settings →
+  App → Appearance → Animations), it steps from one such day to the next
+  instead of gliding. People not there yet on the chosen day cannot be
+  tapped and are not read out by a screen reader.
 - **Full screen**: the button next to the zoom buttons, F11 on a computer
   (Esc leaves). The controls fade after 3 seconds and come back on a touch.
   Mode, filters and the selected person carry over.

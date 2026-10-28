@@ -101,31 +101,35 @@ class _Head extends StatelessWidget {
 
 // ---- "Oś czasu" ----
 
-/// The positions of the timeline: months back (0: now).
-const List<int> kTimelineMonths = <int>[12, 6, 3, 0];
+/// How fast the timeline can play (times its normal pace).
+const List<int> kGraphTimeSpeeds = <int>[1, 2, 4];
 
-/// The timeline's phase of [months] back on a span of 12 months.
-double timelinePhase(int months) => (12 - months.clamp(0, 12)) / 12;
+/// The whole story plays in this long at the normal pace.
+const Duration kGraphTimePlay = Duration(seconds: 12);
 
-/// The timeline's controls: when (3, 6, 12 months ago, now), playing the
-/// growth, and what the graph had then.
+/// With the animations off, the timeline steps from one event to the next
+/// this often at the normal pace.
+const Duration kGraphTimeStep = Duration(milliseconds: 900);
+
+/// The timeline's controls, in every mode: play and pause, a slider to any
+/// day (the date and what the graph had then under it), the speed, and
+/// closing it (outside "Oś czasu").
 class GraphTimeBar extends StatelessWidget {
   const GraphTimeBar({
-    required this.months,
-    required this.onMonths,
-    required this.playing,
-    required this.onPlay,
     required this.clock,
     required this.timeline,
     required this.nodes,
     required this.baseline,
+    required this.playing,
+    required this.onPlay,
+    required this.onScrub,
+    required this.speed,
+    required this.onSpeed,
+    this.onClose,
     super.key,
   });
 
-  final int months;
-  final ValueChanged<int> onMonths;
-  final bool playing;
-  final VoidCallback onPlay;
+  /// Where on the [timeline] the picture is (0…1).
   final Animation<double> clock;
   final GraphTimeline? timeline;
   final List<GraphNode> nodes;
@@ -133,50 +137,80 @@ class GraphTimeBar extends StatelessWidget {
   /// Since when dates are kept on this phone (0: not yet).
   final int baseline;
 
+  final bool playing;
+
+  /// Plays from where the slider is (from the start when at the end), or
+  /// pauses.
+  final VoidCallback onPlay;
+
+  /// The slider was moved to this point of the span.
+  final ValueChanged<double> onScrub;
+
+  /// One of [kGraphTimeSpeeds].
+  final int speed;
+
+  /// The next speed.
+  final VoidCallback onSpeed;
+
+  /// Hides the timeline (null: it belongs to the mode).
+  final VoidCallback? onClose;
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final GraphTimeline? tl = timeline;
     return Padding(
       key: const Key('graph-time-bar'),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Row(
             children: <Widget>[
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    for (final int m in kTimelineMonths)
-                      ChoiceChip(
-                        key: Key('graph-time-$m'),
-                        showCheckmark: false,
-                        label: Text(
-                          m == 0 ? t('Teraz') : t('{n} mies. temu', {'n': m}),
-                        ),
-                        selected: !playing && months == m,
-                        onSelected: (_) => onMonths(m),
-                      ),
-                  ],
-                ),
-              ),
               IconButton.filledTonal(
                 key: const Key('graph-time-play'),
-                tooltip: playing ? t('Zatrzymaj') : t('Pokaż, jak rósł graf'),
-                onPressed: onPlay,
+                tooltip: playing ? t('Pauza') : t('Pokaż, jak rósł graf'),
+                onPressed: tl == null ? null : onPlay,
                 icon: Icon(
-                  playing ? Icons.stop_rounded : Icons.play_arrow_rounded,
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 ),
               ),
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: clock,
+                  builder: (BuildContext context, Widget? _) => Slider(
+                    key: const Key('graph-time-slider'),
+                    value: clock.value.clamp(0.0, 1.0),
+                    semanticFormatterCallback: (double v) =>
+                        tl == null ? '' : graphDate(tl.timeAt(v)),
+                    onChanged: tl == null ? null : onScrub,
+                  ),
+                ),
+              ),
+              TextButton(
+                key: const Key('graph-time-speed'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: onSpeed,
+                child: Text(
+                  t('{n}×', {'n': speed}),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (onClose != null)
+                IconButton(
+                  key: const Key('graph-time-close'),
+                  tooltip: t('Zamknij'),
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close_rounded),
+                ),
             ],
           ),
-          const SizedBox(height: 6),
           AnimatedBuilder(
             animation: clock,
             builder: (BuildContext context, Widget? _) {
-              final GraphTimeline? tl = timeline;
               if (tl == null) {
                 return const SizedBox.shrink();
               }
@@ -196,7 +230,7 @@ class GraphTimeBar extends StatelessWidget {
               );
             },
           ),
-          if (baseline > 0 && timeline != null && baseline > timeline!.from)
+          if (baseline > 0 && tl != null && baseline > tl.from)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(

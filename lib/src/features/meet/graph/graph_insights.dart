@@ -3,10 +3,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
 import 'package:zen/src/features/meet/graph/graph_notes.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 // What the graph can tell from what this phone already knows: how it grew,
 // whom it may be worth meeting, who connects the circles, whom this person
@@ -27,17 +29,49 @@ const double kTimelineNever = 2;
 /// not yet at [to], [kTimelineNever]: never).
 @immutable
 final class GraphTimeline {
-  const GraphTimeline({
+  GraphTimeline({
     required this.from,
     required this.to,
     required this.born,
     required this.met,
-  });
+  }) : order = _orderOf(born),
+       steps = _stepsOf(born, met);
 
   final int from;
   final int to;
   final Float32List born;
   final Float32List met;
+
+  /// The people who come during the span (index into the layout), in the
+  /// order they came; a tie keeps the layout's order.
+  final Int32List order;
+
+  /// The moments something happens on the span (someone comes, someone is
+  /// met), each once, in order: where the timeline stops when it steps
+  /// instead of gliding.
+  final Float32List steps;
+
+  static Int32List _orderOf(Float32List born) {
+    final List<int> out =
+        <int>[
+          for (int i = 0; i < born.length; i++)
+            if (born[i] >= 0 && born[i] <= 1) i,
+        ]..sort((int a, int b) {
+          final int byTime = born[a].compareTo(born[b]);
+          return byTime != 0 ? byTime : a.compareTo(b);
+        });
+    return Int32List.fromList(out);
+  }
+
+  static Float32List _stepsOf(Float32List born, Float32List met) {
+    final Set<double> at = <double>{
+      for (final double b in born)
+        if (b >= 0 && b <= 1) b,
+      for (final double m in met)
+        if (m >= 0 && m <= 1) m,
+    };
+    return Float32List.fromList(at.toList()..sort());
+  }
 
   /// The share of the span [at] is.
   double phaseOf(int at) =>
@@ -45,6 +79,21 @@ final class GraphTimeline {
 
   /// The moment at [phase].
   int timeAt(double phase) => from + ((to - from) * phase).round();
+
+  /// Whether person [i] is on the graph at [phase].
+  bool knownAt(int i, double phase) =>
+      i < 0 || i >= born.length || born[i] <= phase;
+
+  /// The first moment after [phase] when something happens (1: nothing
+  /// more, the end).
+  double nextStep(double phase) {
+    for (final double s in steps) {
+      if (s > phase + 1e-6) {
+        return s;
+      }
+    }
+    return 1;
+  }
 
   /// Friends drawn and meetings at [phase] (for the counts under it).
   ({int people, int met}) countAt(double phase, List<GraphNode> nodes) {
@@ -63,16 +112,31 @@ final class GraphTimeline {
   }
 }
 
+/// The earliest of the dates above zero (0 when there is none).
+int _earliest(Iterable<int> times) {
+  int out = 0;
+  for (final int at in times) {
+    if (at > 0 && (out == 0 || at < out)) {
+      out = at;
+    }
+  }
+  return out;
+}
+
 /// The timeline of [nodes] from [from] to [to] out of [notes] (friends and
-/// friends of friends seen since the dates were kept) and [metAt] (the day
-/// a friend was met in person, from the signed attestations). A friend of
-/// a friend appears no earlier than the first friend who connects them.
+/// friends of friends seen since the dates were kept, a friend's first
+/// message), [firstContact] (other first contact with a friend: a group
+/// both are in) and [metAt] (the day a friend was met in person, from the
+/// signed attestations). A friend comes on the earliest of these; a friend
+/// of a friend comes when first seen, and no earlier than the first friend
+/// who connects them.
 GraphTimeline graphTimeline(
   List<GraphNode> nodes,
   GraphNotes notes, {
   required int from,
   required int to,
   Map<String, int> metAt = const <String, int>{},
+  Map<String, int> firstContact = const <String, int>{},
 }) {
   final double span = max(1, to - from).toDouble();
   double phase(int at) => at <= 0 ? -1 : (at - from) / span;
@@ -83,7 +147,12 @@ GraphTimeline graphTimeline(
     final GraphNode n = nodes[i];
     double b;
     if (n.isFriend) {
-      b = phase(notes.friendSince[n.address] ?? 0);
+      b = phase(
+        _earliest(<int>[
+          notes.friendSince[n.address] ?? 0,
+          firstContact[n.address] ?? 0,
+        ]),
+      );
     } else {
       b = phase(notes.farSince[n.address] ?? 0);
       double earliestVia = double.infinity;
@@ -100,6 +169,61 @@ GraphTimeline graphTimeline(
     met[i] = m == null || m <= 0 ? kTimelineNever : max(b, phase(m));
   }
   return GraphTimeline(from: from, to: to, born: born, met: met);
+}
+
+/// The earliest day each person shares a group with this person (the day
+/// the group was started), out of the groups joined: a first contact that
+/// can be older than the friendship. Invitations not yet accepted count
+/// for nothing.
+Map<String, int> groupContactDays(Iterable<GroupProfile> groups) {
+  final Map<String, int> out = <String, int>{};
+  for (final GroupProfile g in groups) {
+    if (g.isInvitePending || g.createdAtMillis <= 0) {
+      continue;
+    }
+    for (final String member in g.memberAddresses) {
+      final String a = PeerShareCodec.normalizeAddress(member);
+      final int? had = out[a];
+      if (had == null || g.createdAtMillis < had) {
+        out[a] = g.createdAtMillis;
+      }
+    }
+  }
+  return out;
+}
+
+/// The whole story of [nodes]: from the day before the earliest date known
+/// about anyone on them to the end of the day of [now] ([graphTimeline]).
+/// With no dates at all, the last 12 months.
+GraphTimeline graphGrowth(
+  List<GraphNode> nodes,
+  GraphNotes notes, {
+  required int now,
+  Map<String, int> metAt = const <String, int>{},
+  Map<String, int> firstContact = const <String, int>{},
+}) {
+  final int to = now - now % _dayMs + _dayMs;
+  final int first = _earliest(<int>[
+    for (final GraphNode n in nodes) ...<int>[
+      if (n.isFriend) ...<int>[
+        notes.friendSince[n.address] ?? 0,
+        firstContact[n.address] ?? 0,
+        metAt[n.address] ?? 0,
+      ] else
+        notes.farSince[n.address] ?? 0,
+    ],
+  ]);
+  final int from = first == 0 || first >= to
+      ? monthsBack(to, 12)
+      : first - first % _dayMs - _dayMs;
+  return graphTimeline(
+    nodes,
+    notes,
+    from: from,
+    to: to,
+    metAt: metAt,
+    firstContact: firstContact,
+  );
 }
 
 // ---- "Kogo warto poznać" ----
