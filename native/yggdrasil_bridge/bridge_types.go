@@ -182,8 +182,9 @@ const (
 	// the bridges). "[::]" listens on IPv6 and IPv4 together; Go
 	// falls back to IPv4 alone where the computer has no IPv6.
 	defaultDesktopPeerListen = "tls://[::]:32913"
-	// A phone's candidates from the public pool (or the user's list); it
-	// dials only phonePeerCount of them at once (phone_peers.go).
+	// A phone's first picks from the built-in pool; the rest of the pool
+	// waits behind them in reserve (phonePeerCandidates), and the phone
+	// dials only phonePeerCount at once (phone_peers.go).
 	phonePeerPoolSize              = 16
 	desktopPublicPeerCount         = 20
 	desktopPeerProbeCandidateLimit = 40

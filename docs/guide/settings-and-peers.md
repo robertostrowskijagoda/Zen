@@ -87,14 +87,20 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
-- A phone keeps links to 4 peers at a time, taken from up to 16 enabled
-  ones; a peer that stops answering is swapped for the next one (less
-  often when there is no network at all). A computer uses about 20, and
-  only 4 while it runs on battery. Computers check which peer answers
-  fastest every 6 hours, never on battery.
+- A phone keeps links to 4 peers at a time: its 16 first picks, then the
+  rest of the list in reserve. A peer that stops answering is swapped for
+  the next one (less often when there is no network at all), so a phone
+  whose first picks went quiet moves on to peers that still answer. A
+  computer uses about 20, and only 4 while it runs on battery. Computers
+  check which peer answers fastest every 6 hours, never on battery.
+- Every peer of the built-in list is switched on; most of them simply wait
+  in reserve. Each one says what the device does with it now: *In use*,
+  *Connecting…*, *Not connecting* (a phone soon tries another one), *In
+  reserve*, or *Paused for a while* (a phone keeps a single link for a
+  while after too much of other people's mesh traffic passed through it).
 - **Settings → Advanced → Public peers:** see the list (the default one or
   your own), add a peer (the address is checked strictly), remove one,
-  switch one off, **Check peers** (reachable? latency in ms, does the key
+  switch one off (it is then never used), **Check peers** (reachable? latency in ms, does the key
   match?), **Pin key** (adds the `?key=` seen during the check, so a peer
   can't be swapped), **Restore defaults**. Changes apply at once. At least
   one peer must stay on.

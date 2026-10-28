@@ -11,10 +11,11 @@ import (
 // and every link has its own keepalives, so each extra link means more small
 // packets that wake the mobile radio with nobody writing. Yggdrasil's own
 // advice for end nodes is two or three peers. A phone dials phonePeerCount
-// of its pool (phonePeerPoolSize candidates); a node of an extra account
-// that only receives in the background dials phoneExtraAccountPeerCount.
-// The rest of the pool waits: a dialled peer that stays down is swapped for
-// the next candidate (peerRotation).
+// of its pool (its picks first, then the rest of the public pool in
+// reserve: phonePeerCandidates); a node of an extra account that only
+// receives in the background dials phoneExtraAccountPeerCount. The rest of
+// the pool waits: a dialled peer that stays down is swapped for the next
+// candidate (peerRotation).
 const (
 	phonePeerCount             = 4
 	phoneExtraAccountPeerCount = 2

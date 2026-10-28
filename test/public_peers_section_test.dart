@@ -6,6 +6,7 @@ import 'package:zen/src/features/settings/presentation/public_peers_section.dart
 
 final class _Bridge implements PublicPeersBridge {
   final List<List<String>?> applied = <List<String>?>[];
+  Map<String, PublicPeerState> live = <String, PublicPeerState>{};
 
   @override
   List<PublicPeer> builtIn() => const <PublicPeer>[
@@ -24,6 +25,9 @@ final class _Bridge implements PublicPeersBridge {
         ),
         'tcp://203.0.113.5:1514': const PublicPeerProbe(reachable: false),
       };
+
+  @override
+  Map<String, PublicPeerState> states() => live;
 }
 
 final class _Store implements PublicPeersStore {
@@ -121,5 +125,68 @@ void main() {
     expect(find.text('tcp://203.0.113.5:1514'), findsNothing);
     expect(bridge.applied.last, isNull);
     expect(store.kept, isNull);
+  });
+
+  testWidgets('each peer says what the device does with it now', (
+    WidgetTester tester,
+  ) async {
+    final _Bridge bridge = _Bridge()
+      ..live = <String, PublicPeerState>{
+        'tls://203.0.113.1:443': PublicPeerState.up,
+      };
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          publicPeersBridgeProvider.overrideWithValue(bridge),
+          publicPeersStoreProvider.overrideWithValue(_Store()),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: PublicPeersSection()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('W użyciu · Poland'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('public-peers-live'))).data,
+      startsWith('W użyciu: 1, łączę: 0, w rezerwie: 0.'),
+    );
+
+    // Read again every few seconds while the list is on the screen.
+    bridge.live = <String, PublicPeerState>{
+      'tls://203.0.113.1:443': PublicPeerState.failing,
+    };
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.text('Nie łączy się · Poland'), findsOneWidget);
+    bridge.live = <String, PublicPeerState>{
+      'tls://203.0.113.1:443': PublicPeerState.aside,
+    };
+    await tester.pump(const Duration(seconds: 5));
+    expect(
+      find.text('Wstrzymany na chwilę: za dużo cudzego ruchu · Poland'),
+      findsOneWidget,
+    );
+  });
+
+  test('the states read plainly, and a switched-off peer tells none', () {
+    const PublicPeer on = PublicPeer(uri: 'tls://203.0.113.1:443');
+    expect(
+      publicPeerStatusText(on, null, live: PublicPeerState.standby),
+      'W rezerwie',
+    );
+    expect(
+      publicPeerStatusText(on, null, live: PublicPeerState.connecting),
+      'Łączę…',
+    );
+    expect(
+      publicPeerStatusText(
+        on.withEnabled(false),
+        null,
+        live: PublicPeerState.standby,
+      ),
+      isEmpty,
+    );
   });
 }

@@ -72,11 +72,14 @@ func countNonLoopbackPeers(peers []string) int {
 	return count
 }
 
+// androidBootstrapPeers is a phone's pool, in the order it tries the peers:
+// the user's list when they made one, else phonePeerCandidates of the
+// built-in pool. It dials only a few of them at once (phone_peers.go).
 func androidBootstrapPeers() []string {
-	if uris, ok := firstUserPeers(phonePeerPoolSize); ok {
+	if uris, set := currentUserPublicPeers(); set {
 		return uris
 	}
-	return selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+	return phonePeerCandidates(publicPeerPool)
 }
 
 func ipv4LiteralPublicPeers() []string {

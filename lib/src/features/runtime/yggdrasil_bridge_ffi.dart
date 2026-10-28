@@ -72,6 +72,11 @@ abstract interface class NodeSignalBridge
   /// reachable, latencyMs, key, keyMatches, error}]}`.
   Map<String, dynamic> probePeers(String requestJson);
 
+  /// What this device does with each public peer of its pool now, across
+  /// its running nodes: `{states: {uri: up | connecting | failing | aside |
+  /// standby}}` (read from memory, no network).
+  Map<String, dynamic> publicPeerStates();
+
   /// The device keys the node pinned per address: `{pins: {address:
   /// fingerprint}, own}` (pq_session.go).
   Map<String, dynamic> pqPins(int handle);
@@ -259,6 +264,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
           .lookupFunction<_NativeStringArgCall, _DartStringArgCall>(
             'YggProbePeersJson',
           ),
+      _publicPeerStates = library
+          .lookupFunction<_NativeNoArgCall, _DartNoArgCall>(
+            'YggPublicPeerStatesJson',
+          ),
       _pqPins = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
         'YggPqPinsJson',
       ),
@@ -297,6 +306,7 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function() _defaultPublicPeers;
   final Pointer<Utf8> Function(Pointer<Utf8>) _setPublicPeers;
   final Pointer<Utf8> Function(Pointer<Utf8>) _probePeers;
+  final Pointer<Utf8> Function() _publicPeerStates;
   final Pointer<Utf8> Function(int) _pqPins;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _setPqPins;
 
@@ -555,6 +565,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   @override
   Map<String, dynamic> probePeers(String requestJson) =>
       _callWithStringOnly(_probePeers, requestJson);
+
+  @override
+  Map<String, dynamic> publicPeerStates() =>
+      _extractMap(_readEnvelope(_publicPeerStates()));
 
   @override
   Map<String, dynamic> pqPins(int handle) =>
