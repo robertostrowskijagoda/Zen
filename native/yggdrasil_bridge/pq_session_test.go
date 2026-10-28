@@ -26,6 +26,13 @@ type pqTestNet struct {
 	sent      []pqTestFrame
 	delivered map[string][]string
 	clock     time.Time
+	timers    []pqTestTimer
+}
+
+// pqTestTimer is an endpoint's timer, run by advance.
+type pqTestTimer struct {
+	at time.Time
+	f  func()
 }
 
 type pqTestFrame struct {
@@ -56,6 +63,9 @@ func (n *pqTestNet) add(fill byte) (*pqEndpoint, net.IP) {
 		n.t.Fatal(err)
 	}
 	endpoint.now = func() time.Time { return n.clock }
+	endpoint.after = func(d time.Duration, f func()) {
+		n.timers = append(n.timers, pqTestTimer{at: n.clock.Add(d), f: f})
+	}
 	n.endpoints[ip.String()] = endpoint
 	return endpoint, ip
 }
@@ -75,6 +85,42 @@ func (n *pqTestNet) pump() {
 	for len(n.queue) > 0 {
 		frame := n.queue[0]
 		n.queue = n.queue[1:]
+		n.deliver(frame)
+	}
+}
+
+// advance moves the clock on by d, running the timers that come due on
+// the way (in their order), each followed by delivering what it sent
+// unless drop says otherwise.
+func (n *pqTestNet) advance(d time.Duration, drop func(pqTestFrame) bool) {
+	end := n.clock.Add(d)
+	for {
+		next := -1
+		for index, timer := range n.timers {
+			if !timer.at.After(end) && (next < 0 || timer.at.Before(n.timers[next].at)) {
+				next = index
+			}
+		}
+		if next < 0 {
+			break
+		}
+		timer := n.timers[next]
+		n.timers = append(n.timers[:next], n.timers[next+1:]...)
+		n.clock = timer.at
+		timer.f()
+		n.pumpDropping(drop)
+	}
+	n.clock = end
+}
+
+// pumpDropping is pump, losing the frames drop picks.
+func (n *pqTestNet) pumpDropping(drop func(pqTestFrame) bool) {
+	for len(n.queue) > 0 {
+		frame := n.queue[0]
+		n.queue = n.queue[1:]
+		if drop != nil && drop(frame) {
+			continue
+		}
 		n.deliver(frame)
 	}
 }
@@ -317,6 +363,67 @@ func TestPQPendingFramesAreBounded(t *testing.T) {
 	mustSend(t, a, silent, "last")
 	if len(peer.pending) != 1 || a.pendingBytes != len("last") {
 		t.Fatalf("expired frames stayed: %d held, %d bytes", len(peer.pending), a.pendingBytes)
+	}
+}
+
+func TestPQFirstContactAsksAgainWhenTheKeyExchangeIsLost(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	keys := func(from net.IP) func(pqTestFrame) bool {
+		return func(frame pqTestFrame) bool {
+			return frame.from.Equal(from) && frame.wire[len(pqMagic)] == pqKindKeys
+		}
+	}
+
+	// A's request: lost on the way (the mesh was still looking B up).
+	mustSend(t, a, bIP, "zaproszenie")
+	network.pumpDropping(keys(aIP))
+	// Asked again within pqKeyRequestInterval, not at the app's next send;
+	// B's answer is lost in turn (its way back was not known yet).
+	network.advance(pqKeyRequestInterval, keys(bIP))
+	if got := network.take(bIP); len(got) != 0 {
+		t.Fatalf("B got %q without a session", got)
+	}
+	// And again: this time everything arrives, the held frame with it.
+	network.advance(2*pqKeyRequestInterval, nil)
+	if got := network.take(bIP); len(got) != 1 || got[0] != "zaproszenie" {
+		t.Fatalf("B got %q", got)
+	}
+	if peer := a.peers[bIP.String()]; len(peer.pending) != 0 || peer.reasks != 0 {
+		t.Fatalf("still %d held, %d asks", len(peer.pending), peer.reasks)
+	}
+	// A timer still armed asks nothing more.
+	sent := len(network.sent)
+	network.advance(pqPendingTTL, nil)
+	if len(network.sent) != sent || len(network.timers) != 0 {
+		t.Fatalf("%d more frames, %d timers once the session is there", len(network.sent)-sent, len(network.timers))
+	}
+	_ = b
+}
+
+func TestPQAsksAgainOnlyAFewTimesForAPeerThatIsNotThere(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, silent := pqTestNode(t, 9) // never answers
+	mustSend(t, a, silent, "hej")
+	network.advance(pqPendingTTL+time.Second, nil)
+	requests := 0
+	for _, frame := range network.sent {
+		if frame.wire[len(pqMagic)] == pqKindKeys {
+			requests++
+		}
+	}
+	if requests != 1+pqKeyReasks {
+		t.Fatalf("%d key requests for one held frame", requests)
+	}
+	if len(network.timers) != 0 {
+		t.Fatalf("%d timers left for a peer that never answered", len(network.timers))
+	}
+	// A later frame starts over.
+	mustSend(t, a, silent, "znowu")
+	if a.peers[silent.String()].reasks != 0 || len(network.timers) != 1 {
+		t.Fatal("a new frame must be asked for again")
 	}
 }
 

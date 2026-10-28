@@ -40,6 +40,9 @@ func (n *pqTestNet) pqImpostor(nodeKey ed25519.PrivateKey, ip net.IP) *pqEndpoin
 			return nil
 		},
 		now: func() time.Time { return n.clock },
+		after: func(d time.Duration, f func()) {
+			n.timers = append(n.timers, pqTestTimer{at: n.clock.Add(d), f: f})
+		},
 	}
 }
 

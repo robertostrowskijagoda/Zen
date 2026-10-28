@@ -101,8 +101,12 @@ const (
 	pqReplayWindow         = 1024
 	// Media of several calls with one peer shares a session; a wider
 	// window keeps reordered packets of a busy video call.
-	pqMediaReplayWindow    = 4096
-	pqKeyRequestInterval   = 2 * time.Second
+	pqMediaReplayWindow  = 4096
+	pqKeyRequestInterval = 2 * time.Second
+	// While frames wait for a peer's record, it is asked again this many
+	// times (after pqKeyRequestInterval, then twice and four times that),
+	// without waiting for the app's next send.
+	pqKeyReasks            = 3
 	pqKeyReplyInterval     = time.Second
 	pqUnknownReplyInterval = time.Second
 	pqAckInterval          = 250 * time.Millisecond
@@ -211,9 +215,13 @@ type pqPeer struct {
 	challenge    *pqChallenge
 	pending      []pqPendingFrame
 	pendingBytes int
-	keysAskedAt  time.Time
-	keysSentAt   time.Time
-	unknownAt    time.Time
+	// Asks again for the record armed while frames wait, and how many
+	// were made for the frames waiting now (see reask).
+	reaskArmed  bool
+	reasks      int
+	keysAskedAt time.Time
+	keysSentAt  time.Time
+	unknownAt   time.Time
 	// New KEM openings in the current minute (a stranger cannot make this
 	// node decapsulate without end).
 	sessionsMinute time.Time
@@ -257,6 +265,8 @@ type pqEndpoint struct {
 	// Sends a signal text (already sealed, or a control message) to a peer.
 	write func(destination net.IP, wire []byte) error
 	now   func() time.Time
+	// Runs f after d (time.AfterFunc; tests run it by hand).
+	after func(d time.Duration, f func())
 }
 
 func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, []byte) error) (*pqEndpoint, error) {
@@ -287,6 +297,7 @@ func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, 
 		pins:        make(map[string]*pqPin),
 		write:       write,
 		now:         time.Now,
+		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 	}, nil
 }
 
@@ -616,8 +627,13 @@ func (e *pqEndpoint) send(destination net.IP, wire []byte) error {
 		return err
 	}
 	if session == nil {
+		e.dropExpiredLocked(peer, now)
+		if len(peer.pending) == 0 {
+			peer.reasks = 0
+		}
 		e.holdLocked(peer, wire, now)
 		ask := e.askLocked(peer, now, pqKeyRequestInterval)
+		e.armReaskLocked(peer)
 		e.mu.Unlock()
 		if ask {
 			return e.write(destination16, e.keysFrame(true, nil, nil))
@@ -665,6 +681,49 @@ func (e *pqEndpoint) sealMedia(destination net.IP, frame []byte) ([]byte, error)
 		_ = e.write(destination16, e.keysFrame(true, nil, nil))
 	}
 	return job.seal(e.local), nil
+}
+
+// armReaskLocked asks peer again for its record (and a challenge) a while
+// from now, while frames wait for it. A first contact loses its first
+// tries: the mesh keeps only the last packet for an address whose key or
+// path it is still looking up, a key request is two packets and the
+// answer three, and the answer looks up its own way back. Only the app's
+// next send asked again before, and a friend request waited for the relay
+// engine's backoff (10 s, 30 s, minutes) although the way was found within
+// a second or two.
+func (e *pqEndpoint) armReaskLocked(peer *pqPeer) {
+	if peer.reaskArmed || peer.reasks >= pqKeyReasks || len(peer.pending) == 0 {
+		return
+	}
+	peer.reaskArmed = true
+	ip := bytes.Clone(peer.ip)
+	e.after(pqKeyRequestInterval<<peer.reasks, func() { e.reask(ip) })
+}
+
+// reask is armReaskLocked's timer: asks again while frames still wait for
+// ip's record or challenge.
+func (e *pqEndpoint) reask(ip net.IP) {
+	e.mu.Lock()
+	peer := e.peers[ip.String()]
+	if peer == nil {
+		e.mu.Unlock()
+		return
+	}
+	peer.reaskArmed = false
+	now := e.now()
+	e.dropExpiredLocked(peer, now)
+	if len(peer.pending) == 0 || (peer.publicKey != nil && peer.usableChallenge(now) != nil) {
+		peer.reasks = 0
+		e.mu.Unlock()
+		return
+	}
+	peer.reasks++
+	ask := e.askLocked(peer, now, pqKeyRequestInterval)
+	e.armReaskLocked(peer)
+	e.mu.Unlock()
+	if ask {
+		_ = e.write(ip, e.keysFrame(true, nil, nil))
+	}
 }
 
 // holdLocked keeps wire for peer until its key record arrives, within
@@ -718,6 +777,7 @@ func (e *pqEndpoint) flushLocked(peer *pqPeer, now time.Time) []pqSealJob {
 	e.pendingBytes -= peer.pendingBytes
 	peer.pending = nil
 	peer.pendingBytes = 0
+	peer.reasks = 0
 	return jobs
 }
 
