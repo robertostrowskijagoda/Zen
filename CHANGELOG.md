@@ -38,6 +38,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Wi-Fi Direct and Bluetooth links are on by default** and the first-start permissions ask for "Nearby devices"; both run only when there is a friend's device or another of your devices to link with.
 - "Share mailboxes with group members" is on by default.
 
+### Speed
+- **Posts of friends of friends arrive within seconds**: a friend passes a post on about 3 seconds after getting it (it was 20–40 seconds, and up to 10 minutes for the next post), a waiting pass no longer holds up fetches, and an ask whose answer got lost is repeated after a minute (it was 10–20 minutes). Their notification comes within about 15 seconds; before, it only showed once a friend's post arrived later.
+- Notifications of friends' posts and of likes and comments come after 5 seconds of quiet (at most 30 seconds in a busy thread); before, every new reaction pushed them back again.
+
 ### Graph and profile
 - **The graph opens on a presence view**: online, in the background and offline at a glance; weak acquaintances have no status. The camera and filter buttons sit below the modes instead of over them.
 - The follower count includes every friend, and the followers list shows them.
