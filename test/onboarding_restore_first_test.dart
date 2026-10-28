@@ -16,15 +16,18 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 
 /// The first start of a person who already has an account: the way back is
-/// offered on the password step already, opens right after the password
-/// (the setup and the permissions wait for the account), and its screen
-/// comes up without the app flashing up first.
+/// offered on the password step already and opens instead of it (a backup
+/// of the whole app brings its own password; the setup and the permissions
+/// wait for the account), and its screen comes up without the app flashing
+/// up first.
 void main() {
+  late LocalAppSecurityService security;
+
   Future<MemoryAppSettingsStore> pumpFirstStart(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 3200);
     tester.view.devicePixelRatio = 2.0;
     addTearDown(tester.view.reset);
-    final LocalAppSecurityService security = LocalAppSecurityService(
+    security = LocalAppSecurityService(
       credentialsStore: MemorySecurityCredentialsStore(),
       passwordIterations: 10,
       keyVault: MemoryKeyVault(available: false),
@@ -76,19 +79,23 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('"Mam już konto" on the password step: right after the '
-      'password the ways back, the backup screen without the app showing '
-      'first; left, the first start goes on', (WidgetTester tester) async {
+  testWidgets('"Mam już konto" on the password step: the ways back at once, '
+      'no password asked yet; the backup screen without the app showing '
+      'first; left, the first start starts over', (WidgetTester tester) async {
     final MemoryAppSettingsStore store = await pumpFirstStart(tester);
     await tester.tap(find.byKey(const Key('app-password-have-account')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('app-password-restore-note')), findsOneWidget);
-
-    await setPassword(tester);
-    // Neither the setup nor the permissions: the ways back.
+    // No password, no setup, no permissions: the ways back, saying the
+    // password comes with a backup of the whole app.
+    expect(find.byKey(const Key('app-password-setup')), findsNothing);
     expect(find.byKey(const Key('first-run-setup')), findsNothing);
     expect(find.byKey(const Key('permissions-setup')), findsNothing);
     expect(find.byKey(const Key('account-start-stage')), findsOneWidget);
+    expect(
+      find.byKey(const Key('account-start-password-note')),
+      findsOneWidget,
+    );
+    expect(security.hasPassword, isFalse);
 
     final Finder app = find.text('aplikacja', skipOffstage: false);
     final Finder cover = find.byKey(const Key('gate-start-cover'));
@@ -111,42 +118,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(restore, findsOneWidget);
     expect(cover, findsNothing);
+    expect(find.byKey(const Key('app-password-setup')), findsNothing);
     expect(find.byKey(const Key('first-run-setup')), findsNothing);
 
-    // Left without a copy: back to the first start, the setup first now.
+    // Left without a copy: back to the first start, the password first.
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(restore, findsNothing);
-    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+    expect(find.byKey(const Key('app-password-setup')), findsOneWidget);
     expect((await store.load())!.accountSecureOffered, isFalse);
-  });
-
-  testWidgets('"Mam już konto" taken back: the usual order, the setup right '
-      'after the password', (WidgetTester tester) async {
-    await pumpFirstStart(tester);
-    await tester.tap(find.byKey(const Key('app-password-have-account')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('app-password-restore-cancel')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('app-password-have-account')), findsOneWidget);
     await setPassword(tester);
     expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
   });
 
-  testWidgets('"Nowe konto" after "Mam już konto": the setup and the '
-      'permissions come first, then straight to the name', (
+  testWidgets('"Nowe konto" after "Mam już konto": the password, the setup '
+      'and the permissions come first', (WidgetTester tester) async {
+    await pumpFirstStart(tester);
+    await tester.tap(find.byKey(const Key('app-password-have-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('account-start-new')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-password-setup')), findsOneWidget);
+    expect(find.byKey(const Key('app-password-have-account')), findsOneWidget);
+    await setPassword(tester);
+    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('first-run-skip')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('permissions-setup')), findsOneWidget);
+  });
+
+  testWidgets('the recovery circle (no password in it, a day or more of '
+      'waiting): the password first, then the circle without the setup', (
     WidgetTester tester,
   ) async {
     await pumpFirstStart(tester);
     await tester.tap(find.byKey(const Key('app-password-have-account')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('account-restore-circle-open')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-password-setup')), findsOneWidget);
+    expect(find.byKey(const Key('app-password-have-account')), findsNothing);
     await setPassword(tester);
-    await tester.tap(find.byKey(const Key('account-start-new')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('first-run-skip')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('permissions-setup')), findsOneWidget);
+    expect(security.hasPassword, isTrue);
+    expect(find.byKey(const Key('app-password-setup')), findsNothing);
+    expect(find.byKey(const Key('first-run-setup')), findsNothing);
+    expect(find.byKey(const Key('permissions-setup')), findsNothing);
+    expect(find.byKey(const Key('gate-start-cover')), findsNothing);
   });
 
   testWidgets('no "Mam już konto" once the first start is over', (

@@ -289,7 +289,18 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         }
         // An additional account always has its own password.
         final bool additional = !ref.read(zenAccountProvider).isDefault;
-        if (!security.hasPassword &&
+        // "Mam już konto" on the password step: straight to the ways back.
+        // The setup and the permissions wait for the account (the restore
+        // restarts the app; they come once, then).
+        final bool restoring = plan.value == AccountStartPlan.restore;
+        // No password yet either: a backup of the whole app brings its own,
+        // and another device's copy restarts the app, which asks for one
+        // then. The recovery circle waits for friends for a day or more
+        // without restarting: the password comes first for it.
+        final bool passwordLater =
+            restoring && startAction.value != AccountStartAction.circle;
+        if (!passwordLater &&
+            !security.hasPassword &&
             ((ref.watch(appPasswordRequiredProvider) &&
                     !ref
                         .watch(appSettingsControllerProvider)
@@ -313,10 +324,6 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         if (!security.encryptionEnabled ||
             !security.hasPassword ||
             !security.isLocked) {
-          // "Mam już konto" on the password step: straight to the ways
-          // back. The setup and the permissions wait for the account (the
-          // restore restarts the app; they come once, then).
-          final bool restoring = plan.value == AccountStartPlan.restore;
           if (setupStep && !restoring) {
             // Its own Navigator, like the password step above.
             return Navigator(
@@ -1344,9 +1351,10 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
   }
 }
 
-/// "Mam już konto" on the password step: says what comes next (this
-/// device's password first, then the ways back; the setup once the account
-/// is back) and can be taken back.
+/// "Mam już konto" on the password step: straight to the ways back, before
+/// any password (a backup of the whole app brings its own; the ways
+/// without one ask for it, see the gate). "Nowe konto" there comes back
+/// here.
 class _HaveAccountChoice extends ConsumerWidget {
   const _HaveAccountChoice({required this.busy});
 
@@ -1357,44 +1365,12 @@ class _HaveAccountChoice extends ConsumerWidget {
     final ValueNotifier<AccountStartPlan> plan = ref.watch(
       accountStartPlanProvider,
     );
-    return ValueListenableBuilder<AccountStartPlan>(
-      valueListenable: plan,
-      builder: (BuildContext context, AccountStartPlan value, Widget? _) {
-        if (value != AccountStartPlan.restore) {
-          return OutlinedButton.icon(
-            key: const Key('app-password-have-account'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-            ),
-            onPressed: busy
-                ? null
-                : () => plan.value = AccountStartPlan.restore,
-            icon: const Icon(Icons.restore_page_outlined, size: 20),
-            label: Text(t('Mam już konto — przywróć je')),
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            ZenInfo(
-              key: const Key('app-password-restore-note'),
-              icon: Icons.restore_page_outlined,
-              text: t(
-                'Najpierw ustaw hasło tego urządzenia. Zaraz potem '
-                'przywrócisz konto: z kopii, z drugiego urządzenia albo z '
-                'pomocą kręgu. Konfigurację przejdziesz po przywróceniu.',
-              ),
-            ),
-            TextButton(
-              key: const Key('app-password-restore-cancel'),
-              onPressed: busy
-                  ? null
-                  : () => plan.value = AccountStartPlan.undecided,
-              child: Text(t('Jednak zakładam nowe konto')),
-            ),
-          ],
-        );
-      },
+    return OutlinedButton.icon(
+      key: const Key('app-password-have-account'),
+      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      onPressed: busy ? null : () => plan.value = AccountStartPlan.restore,
+      icon: const Icon(Icons.restore_page_outlined, size: 20),
+      label: Text(t('Mam już konto — przywróć je')),
     );
   }
 }

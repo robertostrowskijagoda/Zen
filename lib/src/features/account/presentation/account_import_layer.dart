@@ -35,7 +35,8 @@ enum AccountStartPlan {
   undecided,
 
   /// "Mam już konto" (on the password step already): straight to the ways
-  /// back; the setup and the permissions wait until the account is back.
+  /// back, before any password — a backup of the whole app brings its
+  /// own; the setup and the permissions wait until the account is back.
   restore,
 
   /// "Nowe konto": the setup, the permissions, then the name.
