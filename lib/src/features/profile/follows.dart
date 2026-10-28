@@ -417,9 +417,17 @@ final class FollowLedger {
     ]..sort((Follower a, Follower b) => b.since.compareTo(a.since));
   }
 
-  /// Everyone following: friends (automatically) and the others.
-  int get followerCount =>
-      node.friendAccounts.values.toSet().length + followers.length;
+  /// Friends follow automatically: everyone on the friend list, also
+  /// one whose account is not known yet (their device has not greeted).
+  int get friendCount => node
+      .friendAddresses()
+      .map(PeerShareCodec.normalizeAddress)
+      .toSet()
+      .length;
+
+  /// Everyone following: friends (automatically) and the others. It
+  /// matches the friend count and the list of followers.
+  int get followerCount => friendCount + followers.length;
 
   /// Blocked followers: account → name.
   Map<String, String> get blocked => Map<String, String>.unmodifiable(_blocked);
