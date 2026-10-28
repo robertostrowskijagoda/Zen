@@ -263,14 +263,19 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 
 	// B starts again (a restart, the other process of the device): same
 	// key, no sessions, no challenges.
-	network.clock = network.clock.Add(pqKeyRequestInterval)
+	network.clock = network.clock.Add(pqResendWindow + pqKeyRequestInterval)
 	network.add(2)
-	mustSend(t, a, bIP, "lost")
+	stale := a.peers[bIP.String()].send.id
+	mustSend(t, a, bIP, "first after the restart")
 	network.pump()
-	if got := network.take(bIP); len(got) != 0 {
-		t.Fatalf("a frame of a session B does not know opened: %q", got)
+	// The frame of the old session does not open at B, B says it does not
+	// know the session, and the frame goes again under a new one: not lost
+	// (a pong to a friend whose app just started again, which a locked
+	// phone would not send again for minutes).
+	if got := network.take(bIP); len(got) != 1 || got[0] != "first after the restart" {
+		t.Fatalf("B got %q", got)
 	}
-	if a.peers[bIP.String()].send != nil {
+	if session := a.peers[bIP.String()].send; session == nil || session.id == stale {
 		t.Fatal("B's answer must make A start a new session")
 	}
 	mustSend(t, a, bIP, "again")
@@ -279,6 +284,58 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 		t.Fatalf("B got %q", got)
 	}
 	_ = aIP
+}
+
+func TestPQFramesResentAfterARestartAreOnlyTheLatest(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, bIP := network.add(2)
+	mustSend(t, a, bIP, "opened before")
+	network.pump()
+	network.take(bIP)
+
+	// Sent well before B restarted: B may have opened it, so it is not
+	// sent again.
+	mustSend(t, a, bIP, "long ago")
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	network.queue = nil
+	network.add(2)
+	mustSend(t, a, bIP, "just now")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "just now" {
+		t.Fatalf("B got %q", got)
+	}
+	// Sent again once: B knowing the new session, nothing comes twice.
+	mustSend(t, a, bIP, "next")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "next" {
+		t.Fatalf("B got %q", got)
+	}
+	peer := a.peers[bIP.String()]
+	if peer.sentBytes <= 0 || a.sentBytes != peer.sentBytes {
+		t.Fatalf("kept %d bytes for B, %d in all", peer.sentBytes, a.sentBytes)
+	}
+}
+
+func TestPQFramesKeptForResendingAreBounded(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, bIP := network.add(2)
+	mustSend(t, a, bIP, "hello")
+	network.pump()
+	for index := 0; index < 3*pqResendPerPeer; index++ {
+		mustSend(t, a, bIP, fmt.Sprintf("frame %d", index))
+	}
+	network.pump()
+	peer := a.peers[bIP.String()]
+	if len(peer.sent) != pqResendPerPeer {
+		t.Fatalf("%d frames kept, at most %d", len(peer.sent), pqResendPerPeer)
+	}
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	mustSend(t, a, bIP, "later")
+	if len(peer.sent) != 1 || a.sentBytes != len("later") {
+		t.Fatalf("old frames kept: %d (%d bytes)", len(peer.sent), a.sentBytes)
+	}
 }
 
 func TestPQSessionsRotate(t *testing.T) {

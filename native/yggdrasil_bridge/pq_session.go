@@ -114,7 +114,17 @@ const (
 	pqPendingPerPeer       = 64
 	pqPendingBytesPerPeer  = 4 * 1024 * 1024
 	pqPendingBytesTotal    = 16 * 1024 * 1024
-	pqMaxPeers             = 4096
+	// Signal frames sent lately are kept this long (within these limits):
+	// when the peer answers that it does not know their session (it
+	// restarted, or the other process of the device took its address
+	// over), they go again under a new one instead of being lost. A
+	// peer answers at once, so a short while is enough, and it keeps a
+	// frame the peer did open before it restarted from coming twice.
+	pqResendWindow       = 10 * time.Second
+	pqResendPerPeer      = 16
+	pqResendBytesPerPeer = 256 * 1024
+	pqResendBytesTotal   = 4 * 1024 * 1024
+	pqMaxPeers           = 4096
 	// A challenge given to a peer is kept this long (a session opened with
 	// it must reach this node within that time) ...
 	pqChallengeKeep  = 6 * time.Hour
@@ -201,6 +211,14 @@ type pqPendingFrame struct {
 	until time.Time
 }
 
+// pqSentFrame is a signal frame sent lately under session (see
+// pqResendWindow).
+type pqSentFrame struct {
+	wire    []byte
+	session pqSessionID
+	at      time.Time
+}
+
 type pqPeer struct {
 	ip net.IP
 	// The peer's device key, from its verified record (nil: not known yet),
@@ -217,8 +235,12 @@ type pqPeer struct {
 	pendingBytes int
 	// Asks again for the record armed while frames wait, and how many
 	// were made for the frames waiting now (see reask).
-	reaskArmed  bool
-	reasks      int
+	reaskArmed bool
+	reasks     int
+	// Signal frames sent lately, oldest first, to send again under a new
+	// session should the peer not know theirs.
+	sent        []pqSentFrame
+	sentBytes   int
 	keysAskedAt time.Time
 	keysSentAt  time.Time
 	unknownAt   time.Time
@@ -261,6 +283,7 @@ type pqEndpoint struct {
 	pins         map[string]*pqPin
 	newPins      pqBucket
 	pendingBytes int
+	sentBytes    int
 	foreignKEM   pqBucket
 	// Sends a signal text (already sealed, or a control message) to a peer.
 	write func(destination net.IP, wire []byte) error
@@ -382,6 +405,7 @@ func (e *pqEndpoint) evictPeerLocked() {
 	}
 	if oldest != nil {
 		e.pendingBytes -= oldest.pendingBytes
+		e.sentBytes -= oldest.sentBytes
 		delete(e.peers, oldestKey)
 	}
 }
@@ -641,12 +665,84 @@ func (e *pqEndpoint) send(destination net.IP, wire []byte) error {
 		return nil
 	}
 	job := e.frameLocked(peer, session, pqKindData, wire)
+	e.keepSentLocked(peer, session.id, bytes.Clone(wire), now)
 	refresh := e.refreshLocked(peer, now)
 	e.mu.Unlock()
 	if refresh {
 		_ = e.write(destination16, e.keysFrame(true, nil, nil))
 	}
 	return e.write(destination16, job.seal(e.local))
+}
+
+// keepSentLocked keeps wire, just sent to peer under session, for
+// pqResendWindow within the limits; older frames go first.
+func (e *pqEndpoint) keepSentLocked(peer *pqPeer, session pqSessionID, wire []byte, now time.Time) {
+	e.dropOldSentLocked(peer, now)
+	if len(wire) > pqResendBytesPerPeer {
+		return
+	}
+	for len(peer.sent) > 0 &&
+		(len(peer.sent) >= pqResendPerPeer ||
+			peer.sentBytes+len(wire) > pqResendBytesPerPeer ||
+			e.sentBytes+len(wire) > pqResendBytesTotal) {
+		e.dropFirstSentLocked(peer)
+	}
+	if e.sentBytes+len(wire) > pqResendBytesTotal {
+		return
+	}
+	peer.sent = append(peer.sent, pqSentFrame{wire: wire, session: session, at: now})
+	peer.sentBytes += len(wire)
+	e.sentBytes += len(wire)
+}
+
+func (e *pqEndpoint) dropFirstSentLocked(peer *pqPeer) {
+	size := len(peer.sent[0].wire)
+	peer.sent = peer.sent[1:]
+	peer.sentBytes -= size
+	e.sentBytes -= size
+}
+
+func (e *pqEndpoint) dropOldSentLocked(peer *pqPeer, now time.Time) {
+	for len(peer.sent) > 0 && now.Sub(peer.sent[0].at) > pqResendWindow {
+		e.dropFirstSentLocked(peer)
+	}
+}
+
+// resendLocked puts the frames sent lately under session (which the peer
+// does not know) back in front of what peer holds, to go under the next
+// session; they are not kept for it any more.
+func (e *pqEndpoint) resendLocked(peer *pqPeer, session pqSessionID, now time.Time) {
+	e.dropOldSentLocked(peer, now)
+	var again []pqPendingFrame
+	kept := peer.sent[:0:0]
+	for _, sent := range peer.sent {
+		if sent.session == session {
+			again = append(again, pqPendingFrame{wire: sent.wire, until: now.Add(pqPendingTTL)})
+		} else {
+			kept = append(kept, sent)
+		}
+	}
+	if len(again) == 0 {
+		return
+	}
+	peer.sent = kept
+	e.sentBytes -= peer.sentBytes
+	peer.sentBytes = 0
+	for _, sent := range kept {
+		peer.sentBytes += len(sent.wire)
+	}
+	e.sentBytes += peer.sentBytes
+	for _, frame := range again {
+		peer.pendingBytes += len(frame.wire)
+		e.pendingBytes += len(frame.wire)
+	}
+	peer.pending = append(again, peer.pending...)
+	for len(peer.pending) > 0 &&
+		(len(peer.pending) > pqPendingPerPeer ||
+			peer.pendingBytes > pqPendingBytesPerPeer ||
+			e.pendingBytes > pqPendingBytesTotal) {
+		e.dropFirstPendingLocked(peer)
+	}
 }
 
 // sealMedia seals a relay frame (call media) for destination. Media is
@@ -773,6 +869,7 @@ func (e *pqEndpoint) flushLocked(peer *pqPeer, now time.Time) []pqSealJob {
 	jobs := make([]pqSealJob, 0, len(peer.pending))
 	for _, pending := range peer.pending {
 		jobs = append(jobs, e.frameLocked(peer, session, pqKindData, pending.wire))
+		e.keepSentLocked(peer, session.id, pending.wire, now)
 	}
 	e.pendingBytes -= peer.pendingBytes
 	peer.pending = nil
@@ -976,6 +1073,9 @@ func (e *pqEndpoint) receiveUnknown(source net.IP, body []byte) {
 		return
 	}
 	peer.send = nil
+	// What went lately under it did not open there: it goes again under
+	// the next session (a pong to a friend whose app just started again).
+	e.resendLocked(peer, id, now)
 	if hasChallenge && peer.publicKey != nil {
 		e.takeChallengeLocked(peer, body[1+pqSessionIDSize:], now)
 	} else {
