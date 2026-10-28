@@ -108,6 +108,25 @@ key, so every release must be signed with this key.
 > them with the update notice. If the block is missing, `release.dart
 > prepare` stops and tells you. Section 3.5 has the details.
 
+> **Try it on real phones before everyone gets it.** When the Release run
+> has made the draft, publish it as a **pre-release** first. The app only
+> looks at the latest full release, so nobody is offered it yet. Install the
+> APK from the release page on two phones and go through this list:
+>
+> 1. Update over the previous version (keep the data) and start Zen.
+> 2. Send a message, a photo and a GIF both ways; the ticks turn into ✓ / ✓✓.
+> 3. Lock one phone, turn its screen off and wait 6 minutes; a message to it
+>    gives exactly one notification, and after unlocking it is in the chat once.
+> 4. Swipe Zen away on one phone; messages still arrive within a minute.
+> 5. Restore an account from a backup on a phone (or a clean install):
+>    the setup appears once, friends see you online and see your name.
+> 6. Settings → Diagnostics: save the log; read it for `ERROR` lines,
+>    "already runs" or "Flutter framework error".
+>
+> Only when all of it works, edit the release, untick "pre-release" and tick
+> "Set as the latest release". If something fails, delete the pre-release and
+> its tag, fix it and release again.
+
 **In short** (the details follow in items 1–7):
 
 1. Make sure `main` is green in CI and the "Unreleased" part of
@@ -245,8 +264,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    - `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz` — the folder
      `build/linux/<x64|arm64>/release/bundle` as `Zen/` with its
      `zen-app.marker` (started with
-     `Zen/zen`; includes `install-desktop-entry.sh`, which adds the menu entry
-     and `zen://` links for the current user);
+     `Zen/zen`; includes `install-desktop-entry.sh`, which adds the menu entry,
+     `zen://` links and Zen's file types for the current user);
    - `Zen-Linux-x64.deb`, `Zen-Linux-arm64.deb` — the same bundle packaged by
      `linux/packaging/build_deb.sh` (`/opt/zen`, `/usr/bin/zen`, `.desktop`
      file, AppStream; dependencies from `dpkg-shlibdeps`; AAC/H.264 playback

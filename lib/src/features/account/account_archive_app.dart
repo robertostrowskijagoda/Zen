@@ -95,6 +95,10 @@ final class AppAccountArchiveSource implements AccountArchiveSource {
       ref.read(appSettingsControllerProvider).toJson();
 
   @override
+  Future<Map<String, Object>?> appLock() async =>
+      (await ref.read(appSecurityServiceProvider).lockCopy())?.toJson();
+
+  @override
   Map<String, dynamic>? pyramid() =>
       ref.read(pyramidServiceProvider).sharedState();
 
@@ -172,10 +176,12 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       // Its place and wallet come back from the pyramid's people.
       await PyramidService.markRecovered(node.disk);
     }
+    final AppSettingsController settings = ref.read(
+      appSettingsControllerProvider.notifier,
+    );
+    await takeAccountArchiveSettings(settings, archive, beforeRestart: true);
     // Not "Zabezpiecz konto" again: the account was there before.
-    await ref
-        .read(appSettingsControllerProvider.notifier)
-        .setAccountSecureOffered(true);
+    await settings.setAccountSecureOffered(true);
   }
 
   @override
@@ -206,12 +212,15 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
     int files = 0;
     int bytes = 0;
 
-    final Object? settings = s[CircleBackupSections.settings];
-    if (settings is Map<String, dynamic> && !merge) {
+    if (s[CircleBackupSections.settings] is Map<String, dynamic> && !merge) {
       final AppSettingsController controller = ref.read(
         appSettingsControllerProvider.notifier,
       );
-      await controller.restoreAll(AppSettings.fromJson(settings));
+      await takeAccountArchiveSettings(
+        controller,
+        archive,
+        beforeRestart: false,
+      );
       // The first start of this device is over either way.
       await controller.setAccountSecureOffered(true);
     }
@@ -372,11 +381,43 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
   }
 }
 
-/// Builds a copy of the account on this device ([buildAccountArchive]).
+/// The app's lock [archive] carries ([kAccountAppLock]): only a backup
+/// file with the settings has it. Null without one — a copy from another
+/// device, or a backup without the settings.
+AppLockCopy? accountArchiveAppLock(AccountArchive archive) =>
+    AppLockCopy.fromJson(archive.sections[kAccountAppLock]);
+
+/// Takes the settings of [archive], adopted by this device: a backup of
+/// the whole app (it brings the app's lock along, whose password the
+/// person gave already) puts them back as they were, before the restart
+/// ([beforeRestart]) so the app starts on them — the setup shows only when
+/// the backup's is older than this app's. Any other copy, after the
+/// restart, leaves this device's own settings as they are
+/// ([AppSettings.takingCopy]); the app then asks for a password of its own.
+Future<void> takeAccountArchiveSettings(
+  AppSettingsController controller,
+  AccountArchive archive, {
+  required bool beforeRestart,
+}) async {
+  final Object? settings = archive.sections[CircleBackupSections.settings];
+  if (settings is! Map<String, dynamic>) {
+    return;
+  }
+  final bool whole = accountArchiveAppLock(archive) != null;
+  if (whole && beforeRestart) {
+    await controller.restoreWhole(AppSettings.fromJson(settings));
+  } else if (!whole && !beforeRestart) {
+    await controller.restoreFromCopy(AppSettings.fromJson(settings));
+  }
+}
+
+/// Builds a copy of the account on this device ([buildAccountArchive]);
+/// [appLock] for a backup file.
 typedef AccountArchiveCollector =
     Future<AccountArchiveBuild> Function(
       Set<AccountScope> scope, {
       bool measureOnly,
+      bool appLock,
     });
 
 /// The collector of this account's copies; null while there is no account.
@@ -386,12 +427,17 @@ final Provider<AccountArchiveCollector?> accountArchiveCollectorProvider =
       if (node == null) {
         return null;
       }
-      return (Set<AccountScope> scope, {bool measureOnly = false}) async {
+      return (
+        Set<AccountScope> scope, {
+        bool measureOnly = false,
+        bool appLock = false,
+      }) async {
         await node.start();
         return buildAccountArchive(
           AppAccountArchiveSource(ref, node),
           scope,
           measureOnly: measureOnly,
+          appLock: appLock,
         );
       };
     });

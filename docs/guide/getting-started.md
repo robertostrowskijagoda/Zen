@@ -55,7 +55,11 @@ to the install page and the same steps for every system.
    created on the device. When a document changes later, Zen asks again.
 2. **The app password.** It encrypts everything Zen keeps on this device and
    unlocks Zen here. You can also unlock with biometrics. *No password* is
-   possible for the default account, but not recommended.
+   possible for the default account, but not recommended. Already have an
+   account? **I already have an account — restore it** goes straight to the
+   ways back (step 5), before any password: a full account copy brings its
+   own. Restored from another device, Zen asks for a new password
+   afterwards; with the circle's help, right away.
 3. **Setup.** A few questions, each with a sensible default, that you can
    skip: when Zen locks itself (with what *Never* really means; choosing it
    asks for the password you have just set once more), what
@@ -237,6 +241,28 @@ it, you included. A copy larger than 1 GB is saved in parts
 On the same account the data is merged (nothing is deleted); a copy of a
 different account is refused on a device that already has an account with
 data. A copy made by a newer Zen asks you to update first.
+With *Settings* ticked the copy restores the whole app on a new device:
+every setting as it was (the lock, connections, the setup — which shows
+once more only when the copy comes from an older setup) and the app
+password. Zen asks once for the app password of the old device and checks
+it against the copy; from then on it opens Zen on the new device too (a
+panic password comes along). The copy holds only what checks that
+password, never the password or the key it opens. Biometric unlock and
+*Never* belong to the old device: turn them on again on the new one.
+Don't remember the old password? Choose **I don't remember**: the account
+comes back without it, the new device keeps its own settings and asks for
+a new password.
+
+**Opening Zen's files directly.** Tapping a full account copy
+(`.zenbackup`), a key file (`.zenkey`) or an update file (`.zenupdate`) in
+Files, a mail or a chat opens it in Zen, on the right screen with the file
+already chosen — after you unlock Zen, and on the first start once the
+setup is done. On Android Zen is offered for other unnamed files too; it
+then only tells you the file is not one of its own. On Windows choose
+**Open with** → Zen (`zen.exe`) once; on Linux the `.deb`, the Flatpak and
+`install-desktop-entry.sh` register the file types. A copy saved in parts
+opens this way only on a computer (the other parts lie next to it); on a
+phone choose it with **I have a copy** → **Choose file**.
 
 **Key copy (paper or file).** Account and recovery → **Key copy**: a paper
 with a code (56 characters, also as a QR code) or a key file with a

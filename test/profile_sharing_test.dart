@@ -150,6 +150,53 @@ void main() {
     }
   });
 
+  test('on screen a friend goes by their own name; "Kontakt Zen" only when '
+      'no name of theirs is known at all', () {
+    final String named = PeerShareCodec.normalizeAddress('200::a1');
+    final String nameless = PeerShareCodec.normalizeAddress('200::a2');
+    final String member = PeerShareCodec.normalizeAddress('200::a3');
+    final SocialHubState state =
+        SocialHubState.empty(
+          lifecycle: const LifecycleSnapshot(
+            visibility: AppVisibilityState.foreground,
+            generation: 1,
+            capturedAtMillis: 0,
+          ),
+        ).copyWith(
+          friends: <String, FriendProfile>{
+            named: FriendProfile(
+              address: named,
+              status: FriendRelationshipStatus.accepted,
+            ),
+            nameless: FriendProfile(
+              address: nameless,
+              status: FriendRelationshipStatus.accepted,
+            ),
+          },
+          peerProfiles: <String, PeerPublicProfile>{
+            named: PeerPublicProfile(address: named, version: 1, name: 'Ada'),
+          },
+        );
+    // Their newest profile, over the name they gave in a group.
+    expect(
+      state.displayNameOf(named, selfNamed: 'Ada z grupy', fallback: '?'),
+      'Ada',
+    );
+    // A friend whose name never came: the one they gave themselves in the
+    // group, not a placeholder.
+    expect(
+      state.displayNameOf(nameless, selfNamed: 'Bartek', fallback: '?'),
+      'Bartek',
+    );
+    expect(state.displayNameOf(nameless, fallback: 'Uczestnik'), 'Kontakt Zen');
+    // Not a friend: what they call themselves, else the fallback.
+    expect(
+      state.displayNameOf(member, selfNamed: '  Ola ', fallback: '?'),
+      'Ola',
+    );
+    expect(state.displayNameOf(member, fallback: 'Uczestnik'), 'Uczestnik');
+  });
+
   group('receiving', () {
     test('a friend\'s profile is kept, photo included', () async {
       final _Harness h = _Harness(dir);

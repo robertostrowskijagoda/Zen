@@ -19,14 +19,21 @@ import 'package:zen/src/features/social/peer_qr_scanner.dart';
 /// code. As with recovery through the circle, nothing is taken before the
 /// person confirms the account by its fingerprint.
 class KeyRestoreScreen extends ConsumerStatefulWidget {
-  const KeyRestoreScreen({super.key});
+  const KeyRestoreScreen({this.fileBytes, super.key});
 
-  /// Opened from "Konto i odzyskiwanie", which has asked who the person is.
-  static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) => const KeyRestoreScreen(),
-    ),
-  );
+  /// A key backup file opened in Zen from outside (opened_files.dart):
+  /// chosen already, its password is what is left.
+  final Uint8List? fileBytes;
+
+  /// Opened from "Konto i odzyskiwanie", which has asked who the person is,
+  /// or with a key backup file opened in Zen.
+  static Future<void> open(BuildContext context, {Uint8List? fileBytes}) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              KeyRestoreScreen(fileBytes: fileBytes),
+        ),
+      );
 
   @override
   ConsumerState<KeyRestoreScreen> createState() => _KeyRestoreScreenState();
@@ -35,7 +42,7 @@ class KeyRestoreScreen extends ConsumerStatefulWidget {
 class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
   final TextEditingController _input = TextEditingController();
   final TextEditingController _filePassword = TextEditingController();
-  Uint8List? _fileBytes;
+  late Uint8List? _fileBytes = widget.fileBytes;
   PaperBackupAccount? _found;
   bool _busy = false;
   bool _restored = false;

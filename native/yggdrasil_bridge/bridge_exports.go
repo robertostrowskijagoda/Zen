@@ -98,11 +98,32 @@ func YggStartNode(configJSON *C.char) *C.char {
 	node.touch()
 	nodes.Store(handle, node)
 	node.identity.running(handle, node)
-	return responseOK(normalizeNodeState(handle, node))
+	state := normalizeNodeState(handle, node)
+	// The owner's number, which its later starts name (node_identity.go).
+	state["ownerEngine"] = node.identity.engine()
+	return responseOK(state)
+}
+
+// YggSetNodeOnScreen tells whether the app that runs the node is on screen
+// (onScreen 1) or not: the background service never takes the identity of a
+// node over while its app is on screen (node_identity.go).
+//
+//export YggSetNodeOnScreen
+func YggSetNodeOnScreen(handle C.int, onScreen C.int) *C.char {
+	return withNode(handle, func(node *bridgeNode) *C.char {
+		node.identity.setOnScreen(onScreen != 0)
+		return responseOK(map[string]any{"onScreen": onScreen != 0})
+	})
 }
 
 //export YggStopNode
 func YggStopNode(handle C.int) *C.char {
+	if _, taken := takenOverHandles.Load(int32(handle)); taken {
+		if _, running := nodes.Load(int32(handle)); !running {
+			// A newer owner stopped it already.
+			return responseOK(map[string]any{"stopped": true, "takenOver": true})
+		}
+	}
 	return withNode(handle, func(node *bridgeNode) *C.char {
 		if err := node.shutdown(int32(handle)); err != nil {
 			return responseError(err)

@@ -12,6 +12,7 @@ void main() {
   group('ZenSingleInstance', () {
     tearDown(() async {
       ZenSingleInstance.setActivationHandler(null);
+      ZenSingleInstance.setOpenHandler(null);
       await ZenSingleInstance.release();
     });
 
@@ -45,6 +46,63 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
       expect(activations, 1);
+    });
+
+    test('a launch with a file hands it to the running instance', () async {
+      if (!ZenSingleInstance.isSupported) {
+        return;
+      }
+      int activations = 0;
+      final List<String> opened = <String>[];
+      ZenSingleInstance.setActivationHandler(() async => activations += 1);
+      ZenSingleInstance.setOpenHandler((String path) async => opened.add(path));
+      expect(await ZenSingleInstance.acquire(port: _testPort), isTrue);
+
+      const String file = r'C:\Users\Ala Kowalska\zen-konto.zenbackup';
+      final Socket client = await Socket.connect(
+        InternetAddress.loopbackIPv4,
+        _testPort,
+      );
+      client.write('${ZenSingleInstance.activationRequest(open: file)}\n');
+      await client.flush();
+      final String response = await client
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .first;
+      client.destroy();
+
+      expect(response.trim(), 'ZEN-SINGLE-INSTANCE/1 ACK');
+      for (int i = 0; i < 50 && opened.isEmpty; i += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(activations, 1);
+      expect(opened, <String>[file]);
+    });
+
+    test('the activation request carries the file in one word', () {
+      const String file = '/home/ala/moje kopie/zażółć.zenkey';
+      final String request = ZenSingleInstance.activationRequest(open: file);
+      expect(request.split(' '), hasLength(3));
+      expect(ZenSingleInstance.parseActivationRequest(request), file);
+      expect(
+        ZenSingleInstance.parseActivationRequest(
+          ZenSingleInstance.activationRequest(),
+        ),
+        '',
+      );
+      // Activation still, the damaged file left out.
+      expect(
+        ZenSingleInstance.parseActivationRequest(
+          'ZEN-SINGLE-INSTANCE/1 ACTIVATE %%%',
+        ),
+        '',
+      );
+      expect(ZenSingleInstance.parseActivationRequest('HELLO'), isNull);
+      expect(
+        ZenSingleInstance.parseActivationRequest('ZEN-SINGLE-INSTANCE/1 ACK'),
+        isNull,
+      );
     });
 
     test('a second launch is refused while the lock is held', () async {

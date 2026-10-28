@@ -148,7 +148,10 @@ final class ChatAttachmentTransportCodec {
   }) {
     final ChatMessageType resolvedType =
         type ?? inferType(mimeType: mimeType, fileName: fileName);
-    return resolvedType == ChatMessageType.voice ||
+    // Compressed already (a GIF, a JPEG, a film, a voice message): zstd
+    // would only spend the phone's time.
+    return resolvedType == ChatMessageType.image ||
+        resolvedType == ChatMessageType.voice ||
         resolvedType == ChatMessageType.video;
   }
 }

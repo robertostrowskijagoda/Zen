@@ -920,6 +920,9 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// over, and that it did.
   StreamSubscription<AndroidBackgroundServiceEvent>? _serviceEvents;
 
+  /// Another owner of the identity taking this isolate's running node.
+  StreamSubscription<RuntimeNodeYield>? _nodeYields;
+
   /// Runs the sync again after the service did not confirm the mode it
   /// was asked for.
   Timer? _standbyRetry;
@@ -1008,11 +1011,21 @@ final class _AndroidBackgroundRuntimeBridgeState
     // Nothing in this isolate starts the node before the service confirmed
     // it runs none (the core starts with the first frame, and a launch or
     // an unlock may come while the service still runs it).
-    ref.read(runtimeNodeRuntimeProvider).holdForService();
+    final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+    runtime.holdForService();
     _serviceEvents = ref
         .read(androidBackgroundServiceControllerProvider)
         .events
         .listen(_onServiceEvent);
+    // The service took the running node without its word reaching this
+    // isolate: let go the same way. A newer engine of the app taking it
+    // retires this one for good, and nothing here starts it again.
+    _nodeYields = runtime.ownerYields
+        .where(
+          (RuntimeNodeYield yielded) =>
+              yielded.wasRunning && !yielded.byNewerApp,
+        )
+        .listen((_) => _onServiceEvent(AndroidBackgroundServiceEvent.tookNode));
     unawaitedLogged(
       _initialize(),
       context: 'Android background runtime bridge initialization failed',
@@ -1060,6 +1073,8 @@ final class _AndroidBackgroundRuntimeBridgeState
     _heartbeatTimer = null;
     unawaited(_serviceEvents?.cancel());
     _serviceEvents = null;
+    unawaited(_nodeYields?.cancel());
+    _nodeYields = null;
     _standbyRetry?.cancel();
     _standbyRetry = null;
     _cancelReceiveOnlyWake();
@@ -2117,6 +2132,15 @@ final class LockedReceiverSession {
   /// What the node receives (`null`: no node of the default account).
   Stream<SignalTransportFrame>? get frames => _runtime?.frames;
 
+  /// The default account's node did not start, or was taken over, because
+  /// the app runs it (on screen, or a newer engine of it): this session
+  /// only gets in the way then.
+  bool get nodeYielded => _runtime?.yieldedToOtherOwner ?? false;
+
+  /// Each time the app took the default account's node, or refused it.
+  Stream<RuntimeNodeYield> get nodeYields =>
+      _runtime?.ownerYields ?? const Stream<RuntimeNodeYield>.empty();
+
   /// Asks the mailboxes for held mail and sends what waits in the outbox
   /// now, without waiting for the beat: an iPhone's background wake may be
   /// the only moment for either.
@@ -2204,6 +2228,8 @@ final class LockedReceiverSession {
         // isolate of its own); this slow poll runs only if that wait fails.
         fallbackPollInterval: const Duration(seconds: 2),
       ),
+      // Never takes the identity from the app on screen (node_identity.go).
+      role: RuntimeNodeRole.service,
     );
     // Shown nearby on the shared Wi-Fi too (safe before the node is up).
     final String? localLinks = lockedLocalLinksJson(
@@ -2419,6 +2445,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
 
   /// The app's engine went away (ZenPower "appGone").
   StreamSubscription<void>? _appGone;
+
+  /// The app taking the running node over ([_watchNodeYields]).
+  StreamSubscription<RuntimeNodeYield>? _nodeYields;
 
   /// Where the service's own notices go (tests); `null`: the system's.
   final RuntimeSystemNotificationService Function()? _noticeServiceFactory;
@@ -2653,6 +2682,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
     await _appGone?.cancel();
     _appGone = null;
+    await _nodeYields?.cancel();
+    _nodeYields = null;
     if (isTimeout) {
       logZenWarning(
         'Android ended the background service: its type ran out of time.',
@@ -2835,8 +2866,22 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         } else {
           _session = session;
           await session.start();
-          _lockedParkNoticeShown = false;
-          await _updateServiceNotification(AndroidBackgroundRuntimeMode.active);
+          if (session.nodeYielded) {
+            // The app runs the node (on screen, or opened again): reported
+            // "active", the service would sit in receive-only with no node
+            // at all. Parked, its watchdog keeps looking.
+            logZenWarning('The app runs the node: the service stays parked.');
+            mode = AndroidBackgroundRuntimeMode.standby;
+            if (identical(_desired, payload)) {
+              _desired = payload.withMode(AndroidBackgroundRuntimeMode.standby);
+            }
+          } else {
+            _watchNodeYields(session);
+            _lockedParkNoticeShown = false;
+            await _updateServiceNotification(
+              AndroidBackgroundRuntimeMode.active,
+            );
+          }
         }
       } catch (error, stackTrace) {
         // Leaving a half-built session in place would wedge the task
@@ -2864,6 +2909,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (mode == AndroidBackgroundRuntimeMode.standby) {
       final LockedReceiverSession? session = _session;
       _session = null;
+      unawaited(_nodeYields?.cancel());
+      _nodeYields = null;
       if (session != null) {
         await session.dispose();
       }
@@ -2878,6 +2925,21 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (mode == AndroidBackgroundRuntimeMode.active) {
       await _servePowerShortcut();
     }
+  }
+
+  /// The app takes the node over while this service runs it (back on
+  /// screen without asking first, or opened again): the service parks
+  /// instead of holding a session whose node is gone.
+  void _watchNodeYields(LockedReceiverSession session) {
+    unawaited(_nodeYields?.cancel());
+    _nodeYields = session.nodeYields.listen((_) {
+      final AndroidBackgroundBootstrapPayload? desired = _desired;
+      if (!identical(_session, session) || _destroyed || desired == null) {
+        return;
+      }
+      logZenWarning('The app took the node over: the service parks.');
+      _request(desired.withMode(AndroidBackgroundRuntimeMode.standby));
+    });
   }
 
   /// Tells the user the parked service cannot take calls until they unlock.

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Adds Zen from this unpacked folder (Zen-Linux-*.tar.gz) to the applications
-# menu of the current user and lets it open zen:// links. Not needed with the
-# .deb, which installs the same files for everyone.
+# menu of the current user and lets it open zen:// links and Zen's own files
+# (backups, key backups, updates). Not needed with the .deb, which installs
+# the same files for everyone.
 #
 #   ./install-desktop-entry.sh            add (again after moving the folder)
 #   ./install-desktop-entry.sh --remove   take it away
@@ -13,6 +14,8 @@ apps="$data_home/applications"
 icons="$data_home/icons/hicolor"
 desktop="$apps/com.roj.zen.desktop"
 icon="$icons/256x256/apps/com.roj.zen.png"
+mime="$data_home/mime"
+types="$mime/packages/com.roj.zen.xml"
 
 refresh() {
   if command -v update-desktop-database > /dev/null 2>&1; then
@@ -21,10 +24,13 @@ refresh() {
   if command -v gtk-update-icon-cache > /dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f "$icons" > /dev/null 2>&1 || true
   fi
+  if command -v update-mime-database > /dev/null 2>&1 && [ -d "$mime/packages" ]; then
+    update-mime-database "$mime" > /dev/null 2>&1 || true
+  fi
 }
 
 if [ "${1:-}" = "--remove" ]; then
-  rm -f "$desktop" "$icon"
+  rm -f "$desktop" "$icon" "$types"
   refresh
   echo "Zen removed from the applications menu."
   exit 0
@@ -35,8 +41,9 @@ if [ ! -x "$here/zen" ] || [ ! -f "$here/data/com.roj.zen.desktop" ]; then
   exit 1
 fi
 
-mkdir -p "$apps" "$(dirname "$icon")"
+mkdir -p "$apps" "$(dirname "$icon")" "$(dirname "$types")"
 cp "$here/data/app_icon.png" "$icon"
+cp "$here/data/com.roj.zen.mime.xml" "$types"
 
 # Exec= with the absolute path in double quotes. Inside the quotes " ` $ and
 # \ get a backslash, and every backslash is then doubled once more for the
@@ -56,4 +63,4 @@ refresh
 if command -v xdg-mime > /dev/null 2>&1; then
   xdg-mime default com.roj.zen.desktop x-scheme-handler/zen || true
 fi
-echo "Zen added to the applications menu; zen:// links now open it."
+echo "Zen added to the applications menu; zen:// links and Zen's files now open it."

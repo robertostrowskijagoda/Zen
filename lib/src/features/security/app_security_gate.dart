@@ -14,6 +14,7 @@ import 'package:zen/src/features/about/presentation/legal_consent_stage.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
+import 'package:zen/src/features/account/presentation/account_import_layer.dart';
 import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
@@ -249,8 +250,19 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     bool permissionsStep,
     bool accountStep,
   ) {
+    final ValueNotifier<AccountStartPlan> plan = ref.watch(
+      accountStartPlanProvider,
+    );
+    final ValueNotifier<AccountStartAction?> startAction = ref.watch(
+      accountStartActionProvider,
+    );
     return AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[security, _wiping]),
+      animation: Listenable.merge(<Listenable>[
+        security,
+        _wiping,
+        plan,
+        startAction,
+      ]),
       builder: (BuildContext context, Widget? child) {
         if (!security.isReady) {
           return const Scaffold(
@@ -277,7 +289,18 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         }
         // An additional account always has its own password.
         final bool additional = !ref.read(zenAccountProvider).isDefault;
-        if (!security.hasPassword &&
+        // "Mam już konto" on the password step: straight to the ways back.
+        // The setup and the permissions wait for the account (the restore
+        // restarts the app; they come once, then).
+        final bool restoring = plan.value == AccountStartPlan.restore;
+        // No password yet either: a backup of the whole app brings its own,
+        // and another device's copy restarts the app, which asks for one
+        // then. The recovery circle waits for friends for a day or more
+        // without restarting: the password comes first for it.
+        final bool passwordLater =
+            restoring && startAction.value != AccountStartAction.circle;
+        if (!passwordLater &&
+            !security.hasPassword &&
             ((ref.watch(appPasswordRequiredProvider) &&
                     !ref
                         .watch(appSettingsControllerProvider)
@@ -301,7 +324,7 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         if (!security.encryptionEnabled ||
             !security.hasPassword ||
             !security.isLocked) {
-          if (setupStep) {
+          if (setupStep && !restoring) {
             // Its own Navigator, like the password step above.
             return Navigator(
               key: const ValueKey<String>('gate-first-run-setup'),
@@ -311,7 +334,7 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
               ),
             );
           }
-          if (permissionsStep) {
+          if (permissionsStep && !restoring) {
             // The setup said hello already.
             final bool welcome = !ref.read(firstRunSetupRequiredProvider);
             return Navigator(
@@ -332,7 +355,23 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
               ),
             );
           }
-          return child!;
+          // A way back was picked on the first start: its screen opens in
+          // the app (AccountImportLayer); until it is drawn, the first
+          // start's surface stays over the app instead of the app flashing
+          // up. Always the same Stack, so the app below keeps its state.
+          return Stack(
+            fit: StackFit.passthrough,
+            children: <Widget>[
+              child!,
+              if (startAction.value != null)
+                const Positioned.fill(
+                  child: Scaffold(
+                    key: Key('gate-start-cover'),
+                    body: Center(child: CircularProgressIndicator()),
+                  ),
+                ),
+            ],
+          );
         }
         if (!ref.read(zenAccountProvider).isDefault) {
           // An additional account never shows a lock screen of its own
@@ -1186,6 +1225,18 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
     }
   }
 
+  /// The first start of this device: the way back to an existing account
+  /// is offered here already, not only after the setup.
+  bool _offersRestore() =>
+      ref.watch(zenAccountProvider).isDefault &&
+      ref.watch(accountSecureStepRequiredProvider) &&
+      ref.watch(ledgerNodeEnabledProvider) &&
+      !ref.watch(
+        appSettingsControllerProvider.select(
+          (AppSettings s) => s.accountSecureOffered,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -1282,6 +1333,10 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
                 : const Icon(Icons.lock_rounded, size: 20),
             label: Text(_busy ? t('Ustawiam…') : t('Ustaw hasło')),
           ),
+          if (_offersRestore()) ...<Widget>[
+            const SizedBox(height: 10),
+            _HaveAccountChoice(busy: _busy),
+          ],
           if (ref.watch(zenAccountProvider).isDefault) ...<Widget>[
             const SizedBox(height: 6),
             TextButton(
@@ -1292,6 +1347,30 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// "Mam już konto" on the password step: straight to the ways back, before
+/// any password (a backup of the whole app brings its own; the ways
+/// without one ask for it, see the gate). "Nowe konto" there comes back
+/// here.
+class _HaveAccountChoice extends ConsumerWidget {
+  const _HaveAccountChoice({required this.busy});
+
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ValueNotifier<AccountStartPlan> plan = ref.watch(
+      accountStartPlanProvider,
+    );
+    return OutlinedButton.icon(
+      key: const Key('app-password-have-account'),
+      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      onPressed: busy ? null : () => plan.value = AccountStartPlan.restore,
+      icon: const Icon(Icons.restore_page_outlined, size: 20),
+      label: Text(t('Mam już konto — przywróć je')),
     );
   }
 }

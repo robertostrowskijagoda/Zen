@@ -2070,6 +2070,92 @@ void main() {
       expect(engine.wantsFrequentTicks, isFalse);
     });
   });
+
+  // Magda's phone sent 24 MB of its own signals in five minutes: the friend
+  // it wrote to kept talking (a node of another engine answered for the
+  // phone) but never confirmed, and every sighting sent the queue again.
+  group('traffic to a device that talks but never confirms', () {
+    test('the queue goes out on its backoff, not at every sighting', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      int direct = 0;
+      mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+        if (to != bob) {
+          return p;
+        }
+        if (from == alice && p['type'] == 'message') {
+          direct++;
+        }
+        return null; // bob's app hears nothing
+      };
+      await mesh.nodes[alice]!.engine.submit(bob, _text('jesteś?'));
+      await mesh.settle();
+      expect(direct, 1);
+
+      // Ten minutes of bob talking every six seconds.
+      for (int i = 0; i < 100; i++) {
+        await mesh.nodes[alice]!.receive(bob, <String, dynamic>{
+          'type': 'typing',
+        });
+        await mesh.advance(const Duration(seconds: 6));
+      }
+      // The schedule's 3 s, 10 s, 30 s, 2 min, 10 min (it was a hundred).
+      expect(direct, lessThanOrEqualTo(6));
+      expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
+      // Twenty minutes more: once every ten at most, so a device that gets
+      // well while it keeps talking does not wait hours either.
+      final int afterTen = direct;
+      for (int i = 0; i < 200; i++) {
+        await mesh.nodes[alice]!.receive(bob, <String, dynamic>{
+          'type': 'typing',
+        });
+        await mesh.advance(const Duration(seconds: 6));
+      }
+      expect(direct - afterTen, inInclusiveRange(1, 3));
+
+      // Back after a silence: tried again at once.
+      final int before = direct;
+      mesh.now += const Duration(minutes: 2).inMilliseconds;
+      await mesh.nodes[alice]!.receive(bob, <String, dynamic>{
+        'type': 'typing',
+      });
+      await mesh.settle();
+      expect(direct, before + 1);
+    });
+
+    test(
+      'a mailbox gets an envelope again on the deposit spacing only',
+      () async {
+        final _SimMesh mesh = await _meshWithRelays();
+        final String relay =
+            (await mesh.nodes[bob]!.state()).currentRelays.first;
+        await mesh.goOffline(bob);
+        int deposits = 0;
+        mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+          if (from == alice && to == relay && p['type'] == 'rly_deposit') {
+            deposits++;
+          }
+          // The mailbox takes it but its confirmations never arrive.
+          if (from == relay && to == alice && p['type'] == 'rly_deposit_ack') {
+            return null;
+          }
+          return p;
+        };
+        await mesh.nodes[alice]!.engine.submit(bob, _text('poczekaj'));
+        await mesh.settle();
+        await mesh.advance(const Duration(seconds: 5)); // past depositAfter
+        expect(deposits, 1);
+
+        for (int i = 0; i < 100; i++) {
+          await mesh.nodes[alice]!.receive(relay, <String, dynamic>{
+            'type': 'typing',
+          });
+          await mesh.advance(const Duration(seconds: 6));
+        }
+        // Every two minutes at most (it was a hundred).
+        expect(deposits, lessThanOrEqualTo(6));
+      },
+    );
+  });
 }
 
 Map<String, dynamic> _fakeEnvelope({

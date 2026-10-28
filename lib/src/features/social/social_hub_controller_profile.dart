@@ -42,6 +42,20 @@ mixin _SocialHubProfileMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Sends the profile to the accepted friend [peerAddress] (as the app
+  /// knows them) now: a device of theirs was just met for the first time,
+  /// or they first met this one (an account restored or moved here). A
+  /// profile otherwise goes only when a friendship starts and on edits, so
+  /// neither side would see the other's name and photo there before that.
+  Future<void> shareOwnProfileWith(String peerAddress) =>
+      _enqueueStateWork(() async {
+        if (state.friendByAddress(peerAddress)?.status !=
+            FriendRelationshipStatus.accepted) {
+          return;
+        }
+        await _sendOwnProfileTo(peerAddress);
+      });
+
   @override
   Future<void> _sendOwnProfileTo(String peerAddress) async {
     final UserProfile profile = ref.read(userProfileControllerProvider);

@@ -5,7 +5,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/chat/chat_attachment_transport_codec.dart';
 import 'package:zen/src/features/chat/remote_media_guard.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -69,16 +71,66 @@ final class DisabledGifDownloader implements GifDownloader {
       throw StateError('GIF search is turned off');
 }
 
+/// The largest catalog GIF sent when the catalog has a copy this small. It
+/// goes in the chat message itself (well within
+/// [kInlineAttachmentTransportMaxBytes]), like a GIF from the keyboard, and
+/// a phone whose background service receives keeps such a message at once
+/// (`kSealedInboxMaxRecordBytes`, the GIF taking a third more in the
+/// message). A bigger copy would go as a chunked transfer: sealed for up to
+/// three of the recipient's mailboxes and waiting there until the app
+/// itself fetches it, for a picture a smaller copy shows just as well.
+const int kMaxCatalogGifSendBytes = 180 * 1024;
+
 final class GifCatalogEntry {
   const GifCatalogEntry({
     required this.previewUrl,
     required this.sendUrl,
+    this.smallerSendUrls = const <String>[],
     this.label,
   });
 
   final String previewUrl;
+
+  /// The copy to send: the largest one the catalog says fits
+  /// [kMaxCatalogGifSendBytes].
   final String sendUrl;
+
+  /// Smaller copies of the same GIF, largest first: sent instead when
+  /// [sendUrl] turns out too large or cannot be fetched.
+  final List<String> smallerSendUrls;
   final String? label;
+}
+
+/// The GIF to send for [entry], fetched with [downloader]: checked and
+/// stripped of its metadata like a GIF from the gallery or the keyboard
+/// ([preparePickedGif]), and within [kMaxCatalogGifSendBytes] when one of
+/// its copies is. Throws when no copy can be sent.
+Future<Uint8List> downloadGifToSend(
+  GifDownloader downloader,
+  GifCatalogEntry entry,
+) async {
+  Object? failure;
+  // A copy that can be sent but is larger: kept in case no smaller one can.
+  Uint8List? large;
+  for (final String url in <String>[entry.sendUrl, ...entry.smallerSendUrls]) {
+    try {
+      final PickedGif gif = preparePickedGif(await downloader.download(url));
+      final Uint8List? bytes = gif.bytes;
+      if (gif.status != PickedGifStatus.ready || bytes == null) {
+        failure = FormatException('GIF cannot be sent: ${gif.status.name}.');
+      } else if (bytes.length <= kMaxCatalogGifSendBytes) {
+        return bytes;
+      } else {
+        large ??= bytes;
+      }
+    } on Object catch (error) {
+      failure = error;
+    }
+  }
+  if (large != null) {
+    return large;
+  }
+  throw failure ?? const FormatException('GIF has no copy to send.');
 }
 
 abstract interface class GifCatalog {
@@ -133,6 +185,10 @@ const Map<String, String> _klipyLocales = <String, String>{
   'ko': 'ko_KR',
 };
 
+/// One copy of a catalog GIF: its URL and size in bytes (when the catalog
+/// gives it).
+typedef _GifCopy = ({String url, int? size});
+
 final class KlipyGifCatalog implements GifCatalog {
   const KlipyGifCatalog({
     required this.apiKey,
@@ -152,7 +208,7 @@ final class KlipyGifCatalog implements GifCatalog {
   Uri featuredUri() => Uri.parse(
     'https://api.klipy.com/v2/featured'
     '?key=$apiKey&client_key=$_clientKey'
-    '&limit=30&media_filter=tinygif,gif&locale=$_locale',
+    '&limit=30&media_filter=$_mediaFilter&locale=$_locale',
   );
 
   /// The request for GIFs matching [query] (already trimmed, non-empty).
@@ -160,8 +216,12 @@ final class KlipyGifCatalog implements GifCatalog {
     'https://api.klipy.com/v2/search'
     '?q=${Uri.encodeComponent(query)}'
     '&key=$apiKey&client_key=$_clientKey'
-    '&limit=30&media_filter=tinygif,gif&locale=$_locale',
+    '&limit=30&media_filter=$_mediaFilter&locale=$_locale',
   );
+
+  /// The copies asked for: the small one for the picker, and every size
+  /// one may be sent in.
+  static const String _mediaFilter = 'tinygif,mediumgif,gif';
 
   @override
   Future<List<GifCatalogEntry>> loadFeatured() => _fetch(featuredUri());
@@ -220,22 +280,58 @@ final class KlipyGifCatalog implements GifCatalog {
       'tinygif',
       'gif',
     ]);
-    final String? sendUrl = _readMediaUrl(mediaFormats, const <String>[
-      'gif',
-      'mediumgif',
-      'tinygif',
-    ]);
-    if (previewUrl == null || sendUrl == null) {
+    // The copies of the GIF, largest first.
+    final List<_GifCopy> copies = <_GifCopy>[
+      for (final String key in _sendFormats) ?_readCopy(mediaFormats, key),
+    ];
+    if (previewUrl == null || copies.isEmpty) {
       return null;
     }
+    final int first = _copyToSend(copies);
     final String? label = (data['content_description'] as String?)
         ?.trim()
         .replaceAll(RegExp(r'\s+'), ' ');
     return GifCatalogEntry(
       previewUrl: previewUrl,
-      sendUrl: sendUrl,
+      sendUrl: copies[first].url,
+      smallerSendUrls: <String>[
+        for (final _GifCopy copy in copies.skip(first + 1)) copy.url,
+      ],
       label: label == null || label.isEmpty ? null : label,
     );
+  }
+
+  /// The copies of a GIF that may be sent, largest first.
+  static const List<String> _sendFormats = <String>[
+    'gif',
+    'mediumgif',
+    'tinygif',
+  ];
+
+  /// Which of [copies] (largest first) to send: the largest whose size the
+  /// catalog gives within [kMaxCatalogGifSendBytes], else the smallest (as
+  /// also when no size is given: the picker's own preview).
+  static int _copyToSend(List<_GifCopy> copies) {
+    final int fitting = copies.indexWhere(
+      (_GifCopy copy) =>
+          copy.size != null && copy.size! <= kMaxCatalogGifSendBytes,
+    );
+    return fitting >= 0 ? fitting : copies.length - 1;
+  }
+
+  /// The copy [format] of a result, when it has a URL.
+  static _GifCopy? _readCopy(Map<String, dynamic> mediaFormats, String format) {
+    final Object? raw = mediaFormats[format];
+    if (raw is! Map) {
+      return null;
+    }
+    final Object? url = raw['url'];
+    final String trimmed = url is String ? url.trim() : '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final Object? size = raw['size'];
+    return (url: trimmed, size: size is num && size > 0 ? size.toInt() : null);
   }
 
   static String? _readMediaUrl(

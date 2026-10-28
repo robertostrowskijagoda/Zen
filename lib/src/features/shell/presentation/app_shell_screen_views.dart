@@ -3310,6 +3310,7 @@ const int _shownEntries = 500;
 class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   String? _contents;
   int _total = 0;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -3332,24 +3333,53 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) {
+      return;
+    }
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final AccountBackupPlaces places = ProviderScope.containerOf(
+      context,
+      listen: false,
+    ).read(accountBackupPlacesProvider);
+    setState(() => _saving = true);
     try {
-      final String? path = await saveDiagnosticsLog();
-      if (path != null) {
+      final AccountBackupSaved? saved = await saveDiagnosticsLog(
+        places: places,
+      );
+      if (saved != null) {
+        messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
+            key: const Key('diagnostics-saved'),
+            duration: const Duration(seconds: 8),
+            // With an action a snack bar stays until dismissed by default.
+            persist: false,
             content: Text(
-              t('Zapisano bez szyfrowania: {path}', {'path': path}),
+              t('Zapisano bez szyfrowania: {path}', {
+                'path': saved.shown.join(', '),
+              }),
             ),
+            action: saved.canOpen
+                ? SnackBarAction(
+                    key: const Key('diagnostics-saved-open'),
+                    label: t('Otwórz folder'),
+                    onPressed: () => unawaited(places.open(saved)),
+                  )
+                : null,
           ),
         );
       }
     } on Object catch (error, stackTrace) {
       logZenError('Saving the diagnostics log failed', error, stackTrace);
       // What went wrong is in the log above, not in the snackbar.
+      messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text(t('Nie udało się zapisać pliku.'))),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -3470,7 +3500,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                           ),
                           OutlinedButton.icon(
                             key: const Key('diagnostics-save'),
-                            onPressed: _save,
+                            onPressed: _saving ? null : _save,
                             icon: const Icon(Icons.save_alt_rounded, size: 18),
                             label: Text(t('Zapisz plik')),
                           ),

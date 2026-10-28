@@ -127,11 +127,14 @@ Where the receiver runs:
   runs too: an engine without an Activity that reads only what the
   background key opens. If Zen comes to the screen meanwhile, the engine is
   told to stop; it answers `done` only once its node stopped, and the app's
-  node waits for that before it starts. The bridge also refuses to start a
-  second node with a key that already runs in the process, so a hand-over
-  that slips leaves the app retrying instead of two nodes with one identity;
-  only a node nobody has called on for a minute (its engine went away
-  without stopping it) is stopped to make room.
+  node waits for that before it starts. The bridge also never runs two
+  nodes with one key in the process: every start names its owner (the app
+  or a background engine), and the newest legitimate owner wins at once. The
+  app's start takes the identity over from the background engine, whose
+  node stops and which then stays quiet; a background engine never takes it
+  from the app on screen; an app engine replaced by a newer one never starts
+  its node again. A node nobody has called on for a minute (its engine went
+  away without stopping it) is stopped for any start.
 
 With the keep-alive on and Zen locked, the receiver keeps running, so
 messages arrive within seconds with notifications also while Zen is locked.

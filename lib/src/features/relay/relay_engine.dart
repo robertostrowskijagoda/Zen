@@ -111,6 +111,7 @@ final class RelayConfig {
     this.depositRetryInterval = const Duration(minutes: 2),
     this.depositRetryMaxInterval = const Duration(minutes: 30),
     this.networkQuietGap = const Duration(minutes: 10),
+    this.sightingRetryAfter = const Duration(minutes: 10),
     this.maxTrackedMessages = 1000,
     this.announceRetryInterval = const Duration(minutes: 2),
     this.pollInterval = const Duration(minutes: 5),
@@ -176,9 +177,10 @@ final class RelayConfig {
   /// How long a direct send may go unacknowledged before relays get a copy.
   final Duration depositAfter;
 
-  /// Waits between direct tries of one payload; the last one repeats. Any
-  /// sign of life from the recipient starts it over, so the long steps only
-  /// spare the battery while the recipient is really away.
+  /// Waits between direct tries of one payload; the last one repeats. The
+  /// recipient coming back after a silence starts it over, so the long
+  /// steps only spare the battery while the recipient is really away; one
+  /// that stays around without confirming is tried on the schedule.
   final List<Duration> directRetrySchedule;
 
   /// Wait between deposit tries at a mailbox that did not confirm, for the
@@ -192,6 +194,13 @@ final class RelayConfig {
   /// probably gone (or changed), so everything queued is tried again now
   /// instead of at the end of its backoff.
   final Duration networkQuietGap;
+
+  /// A recipient seen while it was around anyway gets a payload again before
+  /// its backoff is over once the last try is this long ago: a device that
+  /// talked without confirming and then got well (its app opened again)
+  /// does not wait hours, and one that stays unwell gets each payload at
+  /// most this often.
+  final Duration sightingRetryAfter;
 
   /// Outgoing chat messages whose delivery is kept for the chat
   /// ([RelayTrackedMessage]); settled ones go first.
@@ -834,6 +843,10 @@ final class RelayEngine {
   /// that is offline.
   final Map<String, int> _blobDepositAt = <String, int>{};
 
+  /// Windows in a row a mailbox left unanswered per `blobId|relay`: the
+  /// wait before the next one grows with them, sightings or not.
+  final Map<String, int> _blobDepositMisses = <String, int>{};
+
   /// Collection progress per incoming blob (`sender|blobId`).
   final Map<String, _BlobPull> _blobPulls = <String, _BlobPull>{};
 
@@ -858,6 +871,7 @@ final class RelayEngine {
     return _locked(() async {
       _state = null;
       _blobDeposits.clear();
+      _blobDepositMisses.clear();
       _blobPulls.clear();
       final RelayState state = await _load();
       _active = true;
@@ -2827,13 +2841,25 @@ final class RelayEngine {
     }
     _lastSeenHandledAt[address] = now;
     bool changed = false;
-    // 1. Our own undelivered payloads for it: straight away, backoff reset.
+    // 1. Our own undelivered payloads for it. Back after a silence:
+    // straight away, backoff reset. Seen while it was around anyway: only
+    // what is due on its backoff — a device that keeps talking but never
+    // confirms (its app not listening, a node of another engine answering
+    // for it) got the whole queue again every few seconds, megabytes.
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
-      if (entry.recipient == address && !_isPart(entry)) {
+      if (entry.recipient != address || _isPart(entry)) {
+        continue;
+      }
+      if (cameBack) {
         state.outbox[entry.rid] = await _attemptDirect(
           entry.copyWith(directAttempts: 0),
           now,
         );
+        changed = true;
+      } else if (now >= entry.nextDirectAttemptAtMillis ||
+          now - _lastDirectAttemptAt(entry) >=
+              config.sightingRetryAfter.inMilliseconds) {
+        state.outbox[entry.rid] = await _attemptDirect(entry, now);
         changed = true;
       }
     }
@@ -2841,8 +2867,11 @@ final class RelayEngine {
     await _pushMail(state, address, force: cameBack);
     // 3. It holds mail for someone we also serve: compare notes.
     await _syncWithCoRelay(state, address);
-    // 4. It is a relay for recipients of our pending payloads.
-    changed = await _depositPending(state, onlyRelay: address) || changed;
+    // 4. It is a relay for recipients of our pending payloads: at once when
+    // it is back, on the deposit spacing while it was around.
+    changed =
+        await _depositPending(state, onlyRelay: address, cameBack: cameBack) ||
+        changed;
     // 5. It has not confirmed our latest relay set.
     if (_shouldAnnounceTo(state, address) &&
         state.announcedVersions[address] != state.relaySetVersion) {
@@ -2860,7 +2889,7 @@ final class RelayEngine {
     }
     // 7. Attachments: chunks for it to hold, and chunks to collect from it.
     if (_blobs != null) {
-      await _depositBlobs(state, onlyRelay: address);
+      await _depositBlobs(state, onlyRelay: address, cameBack: cameBack);
       await _resumeBlobPulls(state, now, onlySource: address);
     }
     return changed;
@@ -3088,6 +3117,17 @@ final class RelayEngine {
     return _scheduleNextDirect(entry, now);
   }
 
+  /// When [entry] was last tried directly (0: never), as its backoff tells.
+  int _lastDirectAttemptAt(RelayOutboxEntry entry) {
+    final List<Duration> schedule = config.directRetrySchedule;
+    if (entry.directAttempts == 0 || schedule.isEmpty) {
+      return 0;
+    }
+    final Duration wait =
+        schedule[min(entry.directAttempts - 1, schedule.length - 1)];
+    return entry.nextDirectAttemptAtMillis - wait.inMilliseconds;
+  }
+
   /// [entry] counted as tried now, with its next try on the backoff.
   RelayOutboxEntry _scheduleNextDirect(RelayOutboxEntry entry, int now) {
     final List<Duration> schedule = config.directRetrySchedule;
@@ -3101,7 +3141,15 @@ final class RelayEngine {
   }
 
   /// Deposits unacknowledged relayable payloads with the recipients' relays.
-  Future<bool> _depositPending(RelayState state, {String? onlyRelay}) async {
+  /// A sighting of one relay ([onlyRelay]) hands it what it misses at once
+  /// only when it is back after a silence ([cameBack]); otherwise on the
+  /// deposit spacing, like the tick: a mailbox that is around but does not
+  /// confirm must not get every pending envelope again at each sighting.
+  Future<bool> _depositPending(
+    RelayState state, {
+    String? onlyRelay,
+    bool cameBack = false,
+  }) async {
     final RelayIdentity? identity = state.identity;
     if (identity == null) {
       return false;
@@ -3181,7 +3229,7 @@ final class RelayEngine {
                 (partMailboxes?.contains(relay) ?? true) &&
                 !entry.depositedTo.contains(relay) &&
                 (onlyRelay == null || relay == onlyRelay) &&
-                (onlyRelay != null ||
+                ((onlyRelay != null && cameBack) ||
                     dueNow ||
                     now - (entry.depositAttemptAtMillis[relay] ?? 0) >=
                         spacing),

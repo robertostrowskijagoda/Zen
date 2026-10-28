@@ -186,51 +186,84 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       },
     );
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    final FriendProfile updated = _friendReducer
-        .applyAccepted(current: current)
-        .copyWith(
-          isOnline: true,
-          lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
-          lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-          lastActivityLabel: t('Teraz'),
-        );
-    _putFriend(friends, _withAppRetentionDefaults(updated, _appSettings));
-    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
-      state.inbox,
-      peerAddress,
-      types: const <InboxEntryType>{InboxEntryType.friendRequest},
-    );
-    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
-      state.backgroundAlerts,
-      peerAddress,
-      types: const <InboxEntryType>{InboxEntryType.friendRequest},
-    );
-    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
-    await _dismissForegroundNotifications(
-      peerAddress,
-      types: const <ZenSignalType>{ZenSignalType.friendRequest},
-    );
-    state = state.copyWith(
-      friends: friends,
-      inbox: nextInbox,
-      backgroundAlerts: nextAlerts,
-    );
-    await _appendSystemMessage(
-      peerAddress: peerAddress,
-      event: SocialEventText('chat.connected', <String, String>{
-        'name': updated.displayLabel,
-      }),
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-    );
-    await _persistState();
-    // A new friend should see who they are talking to.
-    unawaitedLogged(
-      _sendOwnProfileTo(peerAddress),
-      context: 'Sending the profile to a new friend failed',
-    );
+    final String peer = peerAddress;
+    bool accepted = false;
+    // In turn with the signals and the re-read of the stored state when
+    // the app comes back (the queue): run beside them, a re-read that
+    // started before would put the request back over the answer.
+    await _enqueueStateWork(() async {
+      final FriendProfile? waiting = state.friendByAddress(peer);
+      if (waiting == null ||
+          waiting.status != FriendRelationshipStatus.pendingIncoming) {
+        return;
+      }
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      final FriendProfile updated = _friendReducer
+          .applyAccepted(current: waiting)
+          .copyWith(
+            isOnline: true,
+            lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
+            lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
+            lastActivityLabel: t('Teraz'),
+          );
+      _putFriend(friends, _withAppRetentionDefaults(updated, _appSettings));
+      final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+        state.inbox,
+        peer,
+        types: const <InboxEntryType>{InboxEntryType.friendRequest},
+      );
+      final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+        state.backgroundAlerts,
+        peer,
+        types: const <InboxEntryType>{InboxEntryType.friendRequest},
+      );
+      await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+      await _dismissForegroundNotifications(
+        peer,
+        types: const <ZenSignalType>{ZenSignalType.friendRequest},
+      );
+      // The invitation is answered: its copy kept for the app's return
+      // must not be replayed over the answer.
+      await _dropQueuedFriendRequests(peer);
+      state = state.copyWith(
+        friends: friends,
+        inbox: nextInbox,
+        backgroundAlerts: nextAlerts,
+      );
+      await _appendSystemMessage(
+        peerAddress: peer,
+        event: SocialEventText('chat.connected', <String, String>{
+          'name': updated.displayLabel,
+        }),
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+      await _persistState();
+      accepted = true;
+    });
+    if (accepted) {
+      // A new friend should see who they are talking to.
+      unawaitedLogged(
+        _sendOwnProfileTo(peer),
+        context: 'Sending the profile to a new friend failed',
+      );
+    }
+  }
+
+  /// Drops the copies of [peer]'s invitations kept in the queue for when
+  /// the app comes back (the invitation was answered here).
+  Future<void> _dropQueuedFriendRequests(String peer) async {
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> rest = queue
+        .where(
+          (QueuedSignal q) =>
+              q.signal.type != ZenSignalType.friendRequest ||
+              !PeerShareCodec.addressesEqual(q.signal.sender, peer),
+        )
+        .toList(growable: false);
+    if (rest.length != queue.length) {
+      await _queueStore.save(rest);
+    }
   }
 
   Future<void> rejectFriendRequest({required String peerAddress}) async {
@@ -246,31 +279,39 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       payload: const <String, dynamic>{'type': 'friend_reject'},
     );
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _removeFriend(friends, canonical);
-    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
-      state.inbox,
-      canonical,
-      types: const <InboxEntryType>{InboxEntryType.friendRequest},
-    );
-    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
-      state.backgroundAlerts,
-      canonical,
-      types: const <InboxEntryType>{InboxEntryType.friendRequest},
-    );
-    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
-    await _dismissForegroundNotifications(
-      canonical,
-      types: const <ZenSignalType>{ZenSignalType.friendRequest},
-    );
-    state = state.copyWith(
-      friends: friends,
-      inbox: nextInbox,
-      backgroundAlerts: nextAlerts,
-    );
-    await _persistState();
+    // In turn with the signals and the re-read of the stored state (see
+    // acceptFriendRequest).
+    await _enqueueStateWork(() async {
+      if (state.friendByAddress(canonical)?.status !=
+          FriendRelationshipStatus.pendingIncoming) {
+        return;
+      }
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      _removeFriend(friends, canonical);
+      final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+        state.inbox,
+        canonical,
+        types: const <InboxEntryType>{InboxEntryType.friendRequest},
+      );
+      final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+        state.backgroundAlerts,
+        canonical,
+        types: const <InboxEntryType>{InboxEntryType.friendRequest},
+      );
+      await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+      await _dismissForegroundNotifications(
+        canonical,
+        types: const <ZenSignalType>{ZenSignalType.friendRequest},
+      );
+      await _dropQueuedFriendRequests(canonical);
+      state = state.copyWith(
+        friends: friends,
+        inbox: nextInbox,
+        backgroundAlerts: nextAlerts,
+      );
+      await _persistState();
+    });
   }
 
   Future<void> cancelOutgoingRequest({required String peerAddress}) async {

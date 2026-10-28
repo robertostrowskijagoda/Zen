@@ -10,6 +10,33 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// rewritten behind the person's back.
 const int kSetupRevision = 1;
 
+/// Settings of this device rather than of the account: a copy of the
+/// account that does not bring the app's lock along (the recovery circle,
+/// another device, a backup file without it) never replaces them
+/// ([AppSettings.takingCopy]); a backup of the whole app does
+/// ([AppSettings.restoringWhole]). The first-start steps (gone through
+/// here, they are not asked again because of an older copy and the
+/// restarts a restore makes), the lock, the disguised icon (this device's
+/// launcher), offering this device as a bridge, and the radios and
+/// background reception (this device's permissions and battery).
+const Set<String> kDeviceSettingKeys = <String>{
+  'setupRevision',
+  'permissionsSetupDone',
+  'accountSecureOffered',
+  'legalAcceptedVersion',
+  'legalAcceptedAtMillis',
+  'lockMode',
+  'backgroundLockDelaySeconds',
+  'allowNoAppPassword',
+  'disguiseIcon',
+  'bridgeEnabled',
+  'lanDiscovery',
+  'wifiDirect',
+  'bluetoothLinks',
+  'multipeerLinks',
+  'keepReceivingInBackground',
+};
+
 enum AppLockMode {
   never,
   background,
@@ -722,6 +749,51 @@ final class AppSettings {
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
     );
+  }
+
+  /// [copy] (the settings in a copy of the account) as this device takes
+  /// it: the account's choices from [copy], this device's own
+  /// ([kDeviceSettingKeys]) as they are here. The setup counts as gone
+  /// through when it was on either side; terms accepted here stay (the
+  /// copy's only when none were accepted here yet).
+  AppSettings takingCopy(AppSettings copy) {
+    final Map<String, Object> here = toJson();
+    final Map<String, Object> merged = copy.toJson();
+    for (final String key in kDeviceSettingKeys) {
+      merged.remove(key);
+      final Object? value = here[key];
+      if (value != null) {
+        merged[key] = value;
+      }
+    }
+    if (legalAcceptedVersion.isEmpty) {
+      merged['legalAcceptedVersion'] = copy.legalAcceptedVersion;
+      merged['legalAcceptedAtMillis'] = copy.legalAcceptedAtMillis;
+    }
+    merged['setupRevision'] = setupRevision > copy.setupRevision
+        ? setupRevision
+        : copy.setupRevision;
+    return AppSettings.fromJson(merged);
+  }
+
+  /// [copy] (the settings in a backup of the whole app, which brings the
+  /// app password along) as this device takes it: as they were — the lock,
+  /// the first-start steps and the setup's revision (the setup shows once
+  /// only when the backup's is older than this app's), the radios, the
+  /// disguised icon. Only the terms keep the latest acceptance, here or in
+  /// the backup: accepted on either side, they count.
+  AppSettings restoringWhole(AppSettings copy) {
+    // The system's permissions belong to this phone, not to the copy: the
+    // permissions step stays as it is here.
+    final AppSettings whole = copy.copyWith(
+      permissionsSetupDone: permissionsSetupDone,
+    );
+    return legalAcceptedAtMillis > copy.legalAcceptedAtMillis
+        ? whole.copyWith(
+            legalAcceptedVersion: legalAcceptedVersion,
+            legalAcceptedAtMillis: legalAcceptedAtMillis,
+          )
+        : whole;
   }
 
   /// Named fields: an unknown field is ignored and a missing one keeps its

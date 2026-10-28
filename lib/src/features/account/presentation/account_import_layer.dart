@@ -12,11 +12,14 @@ import 'package:zen/src/features/account/presentation/account_copy_common.dart';
 import 'package:zen/src/features/account/presentation/account_copy_screen.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// A way back to an existing account picked on the first start.
 enum AccountStartAction { backup, device, circle }
 
-/// The way back picked on the first start, opened once the app runs.
+/// The way back picked on the first start, opened once the app runs. While
+/// it is set the security gate keeps the first start's surface over the
+/// app, so the app does not flash up before the screen of the way back.
 final Provider<ValueNotifier<AccountStartAction?>> accountStartActionProvider =
     Provider<ValueNotifier<AccountStartAction?>>((Ref ref) {
       final ValueNotifier<AccountStartAction?> action =
@@ -24,6 +27,37 @@ final Provider<ValueNotifier<AccountStartAction?>> accountStartActionProvider =
       ref.onDispose(action.dispose);
       return action;
     });
+
+/// How the person starts, as said on the first start's screens (in memory:
+/// a restore restarts the app, and the device's own steps follow then).
+enum AccountStartPlan {
+  /// Not said yet: the setup and the permissions come first.
+  undecided,
+
+  /// "Mam już konto" (on the password step already): straight to the ways
+  /// back, before any password — a backup of the whole app brings its
+  /// own; the setup and the permissions wait until the account is back.
+  restore,
+
+  /// "Nowe konto": the setup, the permissions, then the name.
+  fresh,
+}
+
+final Provider<ValueNotifier<AccountStartPlan>> accountStartPlanProvider =
+    Provider<ValueNotifier<AccountStartPlan>>((Ref ref) {
+      final ValueNotifier<AccountStartPlan> plan =
+          ValueNotifier<AccountStartPlan>(AccountStartPlan.undecided);
+      ref.onDispose(plan.dispose);
+      return plan;
+    });
+
+/// A screen of a way back, shown at once (no slide over the app).
+final class _InstantRoute<T> extends MaterialPageRoute<T> {
+  _InstantRoute({required super.builder});
+
+  @override
+  Duration get transitionDuration => Duration.zero;
+}
 
 /// Over the app after it started again on a copy of the account: how far
 /// taking the rest in is, then what came back. Also opens the way back
@@ -39,6 +73,7 @@ class AccountImportLayer extends ConsumerStatefulWidget {
 
 class _AccountImportLayerState extends ConsumerState<AccountImportLayer> {
   late final ValueNotifier<AccountStartAction?> _start;
+  bool _opening = false;
 
   @override
   void initState() {
@@ -54,18 +89,53 @@ class _AccountImportLayerState extends ConsumerState<AccountImportLayer> {
   }
 
   /// The way back chosen on the first start, once the app runs (the
-  /// network is up only then).
+  /// network is up only then). Pushed at once; the first start's surface
+  /// over the app goes once the screen is drawn under it.
   void _open() {
     final AccountStartAction? action = _start.value;
-    if (action == null || !mounted) {
+    if (action == null || _opening || !mounted) {
       return;
     }
-    _start.value = null;
-    unawaited(switch (action) {
-      AccountStartAction.backup => AccountBackupRestoreScreen.open(context),
-      AccountStartAction.device => AccountCopyReceiveScreen.open(context),
+    _opening = true;
+    final NavigatorState navigator = Navigator.of(context);
+    final Future<void> shown = switch (action) {
+      AccountStartAction.backup => navigator.push(
+        _InstantRoute<void>(
+          builder: (BuildContext context) => const AccountBackupRestoreScreen(),
+        ),
+      ),
+      AccountStartAction.device => navigator.push(
+        _InstantRoute<void>(
+          builder: (BuildContext context) => const AccountCopyReceiveScreen(),
+        ),
+      ),
+      // It asks who it is first (a dialog over the app).
       AccountStartAction.circle => AccountRecoveryScreen.open(context),
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _opening = false;
+      if (mounted) {
+        _start.value = null;
+      }
     });
+    WidgetsBinding.instance.scheduleFrame();
+    unawaited(shown.then((_) => _closed(action)));
+  }
+
+  /// The screen of a way back was left without the account coming back
+  /// (taking it restarts the app, and this is gone by then): back to the
+  /// first start's "Jak zaczynasz?". Not after the recovery circle: that
+  /// waits for friends, and the person comes back to it from the app.
+  void _closed(AccountStartAction action) {
+    if (!mounted || action == AccountStartAction.circle) {
+      return;
+    }
+    ref.read(accountStartPlanProvider).value = AccountStartPlan.undecided;
+    unawaited(
+      ref
+          .read(appSettingsControllerProvider.notifier)
+          .setAccountSecureOffered(false),
+    );
   }
 
   @override

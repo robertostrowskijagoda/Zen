@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/widgets.dart' show AsyncSnapshot, ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_bootstrap.dart';
 import 'package:zen/src/app/persistent_stores.dart';
@@ -8,6 +9,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -126,6 +128,70 @@ void main() {
     expect(result.runtimeConfig.waitTimeout, settings.signalWaitTimeout);
     expect(result.appSecurityService.isReady, isTrue);
     expect(result.stores.appSettingsStore, same(store));
+  });
+
+  // Robert's phone after a restore: the account left was built again under
+  // the next account's key while its bootstrap ran, and its node runtime
+  // (never disposed) kept the identity's node up beside the next one.
+  test('while the next account opens, the account left is not shown again, '
+      'and its node runtime never starts again', () async {
+    int starts = 0;
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async {
+        starts += 1;
+        return RuntimeNodeSession(
+          transport: MemorySignalTransport(),
+          snapshot: RuntimeTransportSnapshot.started(
+            localAddress: '200::1',
+            peers: 1,
+          ),
+        );
+      },
+    );
+    final ZenBootstrapResult left = ZenBootstrapResult(
+      runtime: runtime,
+      runtimeConfig: RuntimeSignalBootstrapConfig(),
+      appSecurityService: MemoryAppSecurityService(),
+      initialSettings: const AppSettings(),
+      stores: ZenPersistentStores(
+        signalQueueStore: MemorySignalQueueStore(),
+        socialSnapshotStore: MemorySocialSnapshotStore(),
+        messageTimelineStore: MemoryMessageTimelineStore(),
+        attachmentTransferStore: MemoryAttachmentTransferStore(),
+        appSettingsStore: MemoryAppSettingsStore(const AppSettings()),
+      ),
+    );
+    // The next account's bootstrap runs: the snapshot still holds the
+    // result left.
+    expect(
+      settledBootstrapResult(
+        AsyncSnapshot<ZenBootstrapResult>.withData(
+          ConnectionState.waiting,
+          left,
+        ),
+      ),
+      isNull,
+    );
+    expect(
+      settledBootstrapResult(
+        AsyncSnapshot<ZenBootstrapResult>.withData(ConnectionState.done, left),
+      ),
+      same(left),
+    );
+    expect(
+      settledBootstrapResult(
+        AsyncSnapshot<ZenBootstrapResult>.withError(
+          ConnectionState.done,
+          StateError('failed'),
+        ),
+      ),
+      isNull,
+    );
+
+    retireBootstrapResult(left);
+    await runtime.start();
+    expect(starts, 0);
+    expect(runtime.snapshot.serviceRunning, isFalse);
   });
 
   group('zenStartupGatesRequired', () {

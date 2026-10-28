@@ -161,12 +161,14 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/app_icon.png"
   COMPONENT Runtime)
 
 # Desktop integration (linux/packaging): the .desktop file (menu entry,
-# zen:// links, the icon on Wayland) and the AppStream metadata, with a
+# zen:// links and Zen's own files, the icon on Wayland), the types of those
+# files (shared-mime-info) and the AppStream metadata, with a
 # script that adds them for the current user when Zen runs from the unpacked
 # tar.gz. The .deb installs them to /usr/share instead (build_deb.sh).
 install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/packaging/com.roj.zen.desktop"
   "${CMAKE_CURRENT_SOURCE_DIR}/packaging/com.roj.zen.metainfo.xml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/com.roj.zen.mime.xml"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/install-desktop-entry.sh"

@@ -3,7 +3,11 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
@@ -12,6 +16,8 @@ import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
 import 'support/friends_world.dart';
@@ -125,6 +131,68 @@ void main() {
         );
       },
     );
+
+    // A GIF from the picker to a friend whose app was open showed "waiting
+    // in the mailbox" on the sender's side: it has to go straight there.
+    test('a GIF to a friend with the app open arrives directly, never '
+        'through the mailboxes', () async {
+      final FriendsWorld w = await _withMailboxes(
+        <String>['A', 'B', 'M1', 'M2'],
+        'B',
+        <String>['M1', 'M2'],
+      );
+      final Uint8List gif = Uint8List.fromList(<int>[
+        ...'GIF89a'.codeUnits,
+        ...List<int>.generate(120 * 1000, (int i) => (i * 13 + 5) & 0xff),
+      ]);
+      await w['A'].hub.sendLocalAttachment(
+        peerAddress: w['B'].address,
+        bytes: gif,
+        fileName: 'kot.gif',
+        mimeType: 'image/gif',
+        type: ChatMessageType.image,
+        sentAtMillis: w.now,
+      );
+      await w.settle();
+      await w.until(
+        () async => (await w['B'].thread(
+          w['A'],
+        )).any((ChatMessage m) => m.attachmentPath != null),
+        reason: 'the GIF reaching B',
+        within: const Duration(seconds: 30),
+      );
+      final ChatMessage got = (await w['B'].thread(
+        w['A'],
+      )).firstWhere((ChatMessage m) => m.attachmentPath != null);
+      expect(
+        await w['B'].container
+            .read(mediaVaultProvider)
+            .read(got.attachmentPath!),
+        gif,
+      );
+      await w.until(
+        () async => (await w['A'].thread(w['B'])).any(
+          (ChatMessage m) =>
+              m.direction == ChatMessageDirection.outgoing &&
+              m.deliveryState == ChatMessageDeliveryState.delivered,
+        ),
+        reason: 'the delivery mark',
+        within: const Duration(seconds: 30),
+      );
+      for (final String mailbox in <String>['M1', 'M2']) {
+        final RelayState held = await w[mailbox].relayStore.load();
+        expect(
+          held.heldBlobs[w['B'].address] ?? const <String, Object>{},
+          isEmpty,
+          reason: '$mailbox holds no copy',
+        );
+        expect(
+          held.mailbox[w['B'].address] ?? const <String, Object>{},
+          isEmpty,
+          reason: '$mailbox holds no mail',
+        );
+      }
+    });
   });
 
   group('mail for a friend who is offline', () {
@@ -326,6 +394,110 @@ void main() {
             (await w['A'].thread('group:$id')).single.deliveryState ==
             ChatMessageDeliveryState.delivered,
         reason: 'the group message turning delivered',
+      );
+    });
+  });
+
+  group('a new friendship', () {
+    LifecycleSnapshot foreground(FriendsWorld w) => LifecycleSnapshot(
+      visibility: AppVisibilityState.foreground,
+      generation: 99,
+      capturedAtMillis: w.now,
+    );
+
+    test('stays when the app comes to the screen: the invitation kept for '
+        'that moment is not replayed over the answer', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+      for (final (FriendsPhone me, FriendsPhone friend)
+          in <(FriendsPhone, FriendsPhone)>[
+            (w['B'], w['A']),
+            (w['A'], w['B']),
+          ]) {
+        await me.hub.setLifecycle(foreground(w));
+        expect(
+          me.state.friendByAddress(friend.address)?.status,
+          FriendRelationshipStatus.accepted,
+          reason: '${me.name} about ${friend.name}',
+        );
+      }
+      // Still friends in what is stored too, and messages go both ways.
+      await w.send(w['A'], w['B'], 'po powrocie');
+      await w.assertDelivered(w['B'], 'po powrocie', from: w['A']);
+    });
+
+    test('an answer given while the app comes back is not undone by the '
+        'stored state read at that moment', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+      ], allFriends: false);
+      await w['A'].hub.sendFriendRequest(
+        peerAddress: w['B'].address,
+        senderDisplayName: 'A',
+      );
+      await w.settle();
+      expect(
+        w['B'].state.friendByAddress(w['A'].address)?.status,
+        FriendRelationshipStatus.pendingIncoming,
+      );
+      // Both at once: the app comes to the screen and the person accepts.
+      final Future<void> back = w['B'].hub.setLifecycle(foreground(w));
+      final Future<void> yes = w['B'].hub.acceptFriendRequest(
+        peerAddress: w['A'].address,
+        senderDisplayName: 'B',
+      );
+      await Future.wait(<Future<void>>[back, yes]);
+      await w.settle();
+      expect(
+        w['B'].state.friendByAddress(w['A'].address)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(
+        w['A'].state.friendByAddress(w['B'].address)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      // And again later: nothing replayed.
+      await w['B'].hub.setLifecycle(
+        LifecycleSnapshot(
+          visibility: AppVisibilityState.background,
+          generation: 100,
+          capturedAtMillis: w.now,
+        ),
+      );
+      await w['B'].hub.setLifecycle(
+        LifecycleSnapshot(
+          visibility: AppVisibilityState.foreground,
+          generation: 101,
+          capturedAtMillis: w.now,
+        ),
+      );
+      expect(
+        w['B'].state.friendByAddress(w['A'].address)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+    });
+
+    test('a friend asking again (our answer got lost) stays a friend and '
+        'gets the answer again, without a new request', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+      final int inbox = w['B'].state.inbox.length;
+      await w['B'].hub.receiveSignal(
+        ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: w['A'].address,
+          displayName: 'A',
+        ),
+        receivedAtMillis: w.now,
+      );
+      await w.settle();
+      expect(
+        w['B'].state.friendByAddress(w['A'].address)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(w['B'].state.inbox.length, inbox);
+      expect(
+        w['A'].state.friendByAddress(w['B'].address)?.status,
+        FriendRelationshipStatus.accepted,
       );
     });
   });
@@ -815,6 +987,97 @@ void main() {
           w['C'],
         )).where((ChatMessage m) => m.direction != ChatMessageDirection.system),
         hasLength(1),
+      );
+    });
+  });
+
+  group('an account restored on a new phone', () {
+    test('its friends know the new phone within a minute of it being online, '
+        'though its first greetings were lost: they see it present and '
+        'messages go both ways', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+        'C',
+      ], ledgers: true);
+      final String account = w['A'].ledger!.account;
+      expect(w['B'].accounts.accountOf(w['A'].address), account);
+
+      // A's phone is lost; the account comes back on A2 (a new address),
+      // whose node is down at first: its greetings go nowhere.
+      final FriendsPhone a2 = await w.restoreOnNewDevice(
+        w['A'],
+        'A2',
+        online: false,
+      );
+      expect(a2.ledger!.account, account);
+      await w.advance(const Duration(minutes: 3));
+      expect(w['B'].accounts.accountOf(a2.address), isNull);
+
+      await w.setOnline(a2, true);
+      await w.until(
+        () async =>
+            w['B'].accounts.accountOf(a2.address) == account &&
+            w['C'].accounts.accountOf(a2.address) == account,
+        within: const Duration(minutes: 1),
+        reason: 'the friends knowing the restored phone as A',
+      );
+
+      // A2's ping is A's presence on B's phone; B's answer reaches A2.
+      await w.ping(a2, w['B']);
+      expect(
+        w['B'].state.friendByAddress(w['A'].address)!.presence,
+        PeerPresence.online,
+      );
+      expect(
+        a2.state.friendByAddress(w['B'].address)!.presence,
+        PeerPresence.online,
+      );
+
+      // Messages: from A2 into B's chat with A, and from B (writing to A
+      // as it knows A) to A2.
+      await w.send(a2, w['B'], 'wróciłem');
+      await w.assertDelivered(w['B'], 'wróciłem', from: w['A']);
+      await w.send(w['B'], w['A'], 'witaj z powrotem');
+      await w.until(
+        () async => (await a2.textsFrom(w['B'])).contains('witaj z powrotem'),
+        reason: 'B\'s message reaching the restored phone',
+      );
+    });
+
+    test('names and photos go both ways as soon as the friends know the new '
+        'phone: a copy brings the friends back, not their profiles', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+      ], ledgers: true);
+      await w['B'].container
+          .read(userProfileControllerProvider.notifier)
+          .updateProfile(displayName: 'Bartek');
+      await w.settle();
+
+      final FriendsPhone a2 = await w.restoreOnNewDevice(
+        w['A'],
+        'A2',
+        online: false,
+      );
+      expect(a2.state.peerProfileOf(w['B'].address), isNull);
+      // The restore brings the person's own profile back.
+      await a2.container
+          .read(userProfileControllerProvider.notifier)
+          .updateProfile(displayName: 'Ania');
+      await w.setOnline(a2, true);
+
+      await w.until(
+        () async =>
+            a2.state.peerProfileOf(w['B'].address)?.name == 'Bartek' &&
+            w['B'].state.friendByAddress(w['A'].address)?.displayName == 'Ania',
+        within: const Duration(minutes: 1),
+        reason: 'the profiles crossing',
+      );
+      expect(
+        a2.state.nameFor(a2.state.friendByAddress(w['B'].address)!),
+        'Bartek',
       );
     });
   });

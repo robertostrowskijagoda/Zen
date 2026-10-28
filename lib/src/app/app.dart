@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
+import 'package:zen/src/app/platform_route_guard.dart';
 import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -20,6 +21,7 @@ import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/locked_notice_kit_bridge.dart';
+import 'package:zen/src/features/runtime/opened_file_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_route_bridge.dart';
@@ -114,10 +116,12 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
         }
       },
     );
-    return MaterialApp(
+    final Widget app = MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Zen',
       navigatorKey: zenRootNavigatorKey,
+      // Zen has no named pages; anything asked for by name closes again.
+      onUnknownRoute: zenUnknownRoute,
       theme: ZenTheme.light(settings.accentTheme, settings.palette),
       darkTheme: ZenTheme.dark(settings.accentTheme, settings.palette),
       themeMode: settings.themeMode.materialThemeMode,
@@ -172,9 +176,15 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                           // Android and iPhone: what the locked
                           // receiver's message notices may say.
                           child: LockedNoticeKitBridge(
-                            // After a restore: its progress and what came
-                            // back.
-                            child: AccountImportLayer(child: AppShellScreen()),
+                            // A backup, key backup or update file opened
+                            // in Zen from outside: its screen.
+                            child: OpenedFileBridge(
+                              // After a restore: its progress and what
+                              // came back.
+                              child: AccountImportLayer(
+                                child: AppShellScreen(),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -187,6 +197,9 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
         ),
       ),
     );
+    // Above the app: a page name the system pushes (a link Flutter's own
+    // routing caught) is taken here, never pushed onto the navigator.
+    return PlatformRouteGuard(child: app);
   }
 }
 

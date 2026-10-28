@@ -768,15 +768,17 @@ class GateRunsTile extends ConsumerWidget {
 
 /// Edits one set of gate terms: free or a price, and whether this
 /// person's consent is needed (by default not when there is a price).
-/// Null when cancelled.
+/// [askPrice]: opens on "za cenę" (the price still to be typed) even when
+/// [initial] is free. Null when cancelled.
 Future<GateTerms?> editGateTerms(
   BuildContext context, {
   required GateTerms initial,
   required String title,
   required bool member,
+  bool askPrice = false,
 }) async {
-  bool paid = !initial.free;
-  bool consent = initial.consent;
+  bool paid = askPrice || !initial.free;
+  bool consent = initial.free && askPrice ? false : initial.consent;
   final TextEditingController price = TextEditingController(
     text: initial.free ? '' : formatMoney(initial.price),
   );

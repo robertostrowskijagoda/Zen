@@ -12,9 +12,11 @@ import 'package:zen/src/features/account/presentation/account_import_layer.dart'
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/name_step.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// The first start, right after the permissions step: first "Jak
+/// The first start, right after the permissions step (or instead of the
+/// password, when "Mam już konto" was said there): first "Jak
 /// zaczynasz?" — a new account, or one brought back (a backup, another
 /// device, the recovery circle); then, for a new account, "Zabezpiecz
 /// konto": the recovery circle and the backup of the key (file or code),
@@ -28,10 +30,20 @@ class AccountSecureStage extends ConsumerStatefulWidget {
 }
 
 class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
-  bool _fresh = false;
+  /// "Nowe konto" was picked (here, or before the setup).
+  late bool _fresh =
+      ref.read(accountStartPlanProvider).value == AccountStartPlan.fresh;
 
   /// The name step was answered (saved or skipped).
   bool _nameDone = false;
+
+  /// A new account after all. Said before the setup ("Mam już konto" on
+  /// the password step), the password, the setup and the permissions come
+  /// first now: the gate shows them and then this stage again, at the name.
+  void _startFresh() {
+    ref.read(accountStartPlanProvider).value = AccountStartPlan.fresh;
+    setState(() => _fresh = true);
+  }
 
   Future<void> _answer() => ref
       .read(appSettingsControllerProvider.notifier)
@@ -66,12 +78,24 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
               ),
-              onPressed: () => setState(() => _fresh = true),
+              onPressed: _startFresh,
               icon: const Icon(Icons.person_add_alt_1_rounded),
               label: Text(t('Nowe konto')),
             ),
             const SizedBox(height: 12),
             Text(t('MAM JUŻ KONTO'), style: zen.label(color: zen.textMuted)),
+            if (!ref.watch(appSecurityServiceProvider).hasPassword &&
+                ref.watch(accountStartPlanProvider).value ==
+                    AccountStartPlan.restore)
+              ZenInfo(
+                key: const Key('account-start-password-note'),
+                icon: Icons.password_rounded,
+                text: t(
+                  'Hasło aplikacji wróci razem z kopią całego konta. Przy '
+                  'przywracaniu z innego urządzenia albo z pomocą kręgu '
+                  'ustawisz nowe.',
+                ),
+              ),
             AccountCopyActions(
               backup: false,
               circle: () => _restore(AccountStartAction.circle),

@@ -31,6 +31,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
+import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';

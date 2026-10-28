@@ -36,6 +36,9 @@ class _HoldToConfirmButtonState extends State<HoldToConfirmButton>
   late final AnimationController _fill = AnimationController(
     vsync: this,
     duration: widget.hold,
+    // A safety delay, not an animation: "remove animations" must not shorten
+    // the hold.
+    animationBehavior: AnimationBehavior.preserve,
   )..addStatusListener(_onStatus);
   bool _done = false;
 

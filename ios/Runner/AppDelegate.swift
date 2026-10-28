@@ -49,6 +49,10 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenBackgroundBridge") {
       ZenBackgroundBridge.register(with: registrar.messenger())
     }
+    // Zen's own files opened in Zen (SceneDelegate.swift).
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenOpenedFilesBridge") {
+      ZenOpenedFilesBridge.register(with: registrar)
+    }
   }
 }
 

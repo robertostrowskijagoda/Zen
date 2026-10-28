@@ -322,10 +322,18 @@ extension _RelayEngineBlobs on RelayEngine {
   /// window to each, unless one is still unanswered. A mailbox that did not
   /// answer is tried again after [RelayConfig.depositRetryInterval], or as
   /// soon as it shows up ([onlyRelay]).
+  /// Hands the mailboxes the next window of each outgoing blob. A sighting
+  /// of one mailbox ([onlyRelay]) sends at once unless that mailbox left a
+  /// window unanswered: then only when it is back after a silence
+  /// ([cameBack]) or the growing wait is over ([_blobDepositSpacing]). A
+  /// mailbox that is around but never confirms (a node of another engine
+  /// answering for its phone) used to get half a megabyte at every
+  /// sighting past the window's timeout.
   Future<void> _depositBlobs(
     RelayState state, {
     String? onlyRelay,
     String? onlyBlob,
+    bool cameBack = false,
   }) async {
     if (_blobs == null || state.outBlobs.isEmpty) {
       return;
@@ -348,17 +356,44 @@ extension _RelayEngineBlobs on RelayEngine {
                 config.blobRequestTimeout.inMilliseconds) {
           continue;
         }
+        if (window != null && window.indexes.isNotEmpty) {
+          // Unanswered within its time: counted once.
+          _blobDepositMisses[slot] = (_blobDepositMisses[slot] ?? 0) + 1;
+        }
         _blobDeposits.remove(slot);
+        final int misses = _blobDepositMisses[slot] ?? 0;
         final int? last = _blobDepositAt[slot];
-        if (onlyRelay == null &&
-            onlyBlob == null &&
-            last != null &&
-            now - last < config.depositRetryInterval.inMilliseconds) {
+        final bool waited =
+            last == null ||
+            now - last >= _blobDepositSpacing(misses).inMilliseconds;
+        final bool send;
+        if (onlyBlob != null) {
+          send = true;
+        } else if (onlyRelay != null) {
+          send = cameBack || misses == 0 || waited;
+        } else {
+          send = waited;
+        }
+        if (!send) {
           continue;
         }
         await _sendBlobWindow(state, blob, relay, now);
       }
     }
+  }
+
+  /// The wait before the next window to a mailbox that left [misses]
+  /// windows in a row unanswered: the deposit retry interval, doubling
+  /// from the second miss on, up to the longest deposit wait.
+  Duration _blobDepositSpacing(int misses) {
+    final Duration base = config.depositRetryInterval;
+    if (misses <= 1) {
+      return base;
+    }
+    final Duration grown = base * (1 << min(misses - 1, 10));
+    return grown > config.depositRetryMaxInterval
+        ? config.depositRetryMaxInterval
+        : grown;
   }
 
   /// The mailboxes that still need a copy of [blob]: at most
@@ -469,6 +504,8 @@ extension _RelayEngineBlobs on RelayEngine {
       changed = true;
     }
     final String slot = '${blob.blobId}|$from';
+    // The mailbox answers: its next windows come without a wait.
+    _blobDepositMisses.remove(slot);
     final _BlobWindow? window = _blobDeposits[slot];
     if (window != null) {
       window.indexes.remove(index);
@@ -560,6 +597,9 @@ extension _RelayEngineBlobs on RelayEngine {
       (String slot, _BlobWindow _) => slot.startsWith('${blob.blobId}|'),
     );
     _blobDepositAt.removeWhere(
+      (String slot, int _) => slot.startsWith('${blob.blobId}|'),
+    );
+    _blobDepositMisses.removeWhere(
       (String slot, int _) => slot.startsWith('${blob.blobId}|'),
     );
     await _deleteChunks(

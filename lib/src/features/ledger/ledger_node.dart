@@ -163,6 +163,13 @@ const List<String> kFollowedFriendSpaces = <String>[
 /// who was heard from lately (an hour with the default 10 min rounds).
 const int kLedgerGreetAllEvery = 6;
 
+/// A friend whose hello never came (its account is not known here: a new
+/// friend, or this device is new — an account restored or moved here) is
+/// greeted again this soon, then after twice as long each time it stays
+/// silent, up to the hello interval. Until its hello comes it does not
+/// know this device: it neither answers its pings nor takes its messages.
+const Duration kLedgerUnknownHelloFirst = Duration(seconds: 30);
+
 /// Spaces anyone may read (followers who are not friends).
 const List<String> kPublicSpaceKinds = <String>['feed', 'profile'];
 
@@ -507,7 +514,20 @@ final class LedgerNode {
   /// warns in the conversation with that friend.
   void Function(String address)? onDeviceUnlinked;
 
+  /// A proven hello told for the first time which account [address]
+  /// belongs to: a friend's address whose account was not known (this
+  /// device is new — an account restored or moved here — or the friend
+  /// is), or a new device of a friend's account. Never this account's own
+  /// devices. The app sends its profile there: neither side would get the
+  /// other's otherwise until someone edits theirs.
+  void Function(String address, String account)? onPeerLearnt;
+
   final Map<String, int> _helloSentAt = <String, int>{};
+
+  /// Friends whose hello never came: normalised address → hellos sent to
+  /// them since ([greetUnknown]).
+  final Map<String, int> _unknownTries = <String, int>{};
+  Timer? _unknownTimer;
 
   /// Addresses that hold this device's whole certificate: their last
   /// proven hello said so (`kc` naming this device), so hellos to them
@@ -802,6 +822,75 @@ final class LedgerNode {
     });
   }
 
+  /// Friends on the list whose hello never came (their account is not
+  /// known here), normalised.
+  Iterable<String> _unknownFriends() => friendAddresses()
+      .map(PeerShareCodec.normalizeAddress)
+      .where(
+        (String f) =>
+            f.isNotEmpty &&
+            f != _ownAddress &&
+            !_accounts.containsKey(f) &&
+            !_unlinked.containsKey(f) &&
+            _liveDevice(f) == null,
+      );
+
+  /// While some friend's hello never came, [greetUnknown] runs every
+  /// [kLedgerUnknownHelloFirst] (with the periodic rounds: not in tests,
+  /// which call it themselves); it stops once all are known.
+  void _armUnknownGreeting() {
+    if (syncInterval <= Duration.zero ||
+        _suspended ||
+        _stopped ||
+        _unknownTimer != null ||
+        _unknownFriends().isEmpty) {
+      return;
+    }
+    _unknownTimer = Timer.periodic(kLedgerUnknownHelloFirst, (Timer timer) {
+      if (_suspended || _stopped || _unknownFriends().isEmpty) {
+        timer.cancel();
+        _unknownTimer = null;
+        return;
+      }
+      unawaitedLogged(
+        greetUnknown(),
+        context: 'Powitanie nowych znajomych nie wyszło',
+      );
+    });
+  }
+
+  /// Greets the friends whose hello never came again: each
+  /// [kLedgerUnknownHelloFirst] after the last hello, then twice as long
+  /// after each one that stayed unanswered, up to [helloInterval]. Their
+  /// side knows this device only from its hello (a restored or moved
+  /// account's new device, a friend's phone that was off): this way they
+  /// know it within a minute of both being online, not at the next hourly
+  /// round.
+  Future<void> greetUnknown() async {
+    if (_suspended || _stopped) {
+      return;
+    }
+    final Set<String> unknown = _unknownFriends().toSet();
+    _unknownTries.removeWhere((String a, int _) => !unknown.contains(a));
+    final int now = _clock.wallMillis();
+    final int cap = helloInterval.inMilliseconds < 1000
+        ? 1000
+        : helloInterval.inMilliseconds;
+    for (final String friend in unknown) {
+      final int tries = _unknownTries[friend] ?? 0;
+      final int? last = _helloSentAt[friend];
+      final int gap = min(
+        kLedgerUnknownHelloFirst.inMilliseconds * (1 << min(tries, 16)),
+        cap,
+      );
+      if (last != null && now - last < gap) {
+        continue;
+      }
+      _unknownTries[friend] = tries + 1;
+      _hello(friend, force: true);
+    }
+  }
+
   /// Hands the ledger on disk to another process: stops listening, saves
   /// everything and stops writing until [resume].
   Future<void> suspend() async {
@@ -812,6 +901,8 @@ final class LedgerNode {
     _suspended = true;
     _resumed = Completer<void>();
     _syncTimer?.cancel();
+    _unknownTimer?.cancel();
+    _unknownTimer = null;
     await _frames?.cancel();
     _frames = null;
     if (_loaded) {
@@ -882,6 +973,8 @@ final class LedgerNode {
         _hello(address, force: true);
       }
     }
+    // Friends whose hello never came are greeted again soon.
+    _armUnknownGreeting();
   }
 
   /// Whether anything came from [address] within three sync rounds (half
@@ -1474,6 +1567,11 @@ final class LedgerNode {
     _deviceSeeds.remove(n);
     await _saveDevices();
     _emitDevices();
+    final bool learnt =
+        had == null || had.account != acc || had.device != device;
+    if (learnt && acc != account) {
+      onPeerLearnt?.call(n, acc);
+    }
     return true;
   }
 
@@ -1904,23 +2002,39 @@ final class LedgerNode {
       // ... and holds the post-quantum device key that seals this frame.
       final String key = _ownSessionKey;
       final String proof = await _proofFor(me, key);
-      _send(friend, <String, dynamic>{
-        ...?helloExtras?.call(normalized),
-        if (friendly) 'caps': kZenCaps,
-        'type': kLedgerHelloType,
-        if (named)
-          'cd': <String, dynamic>{'a': cert.account, 'd': cert.device}
-        else
-          'cert': cert.toJson(),
-        'p': <String, dynamic>{
-          'f': me,
-          if (key.isNotEmpty) 'k': key,
-          's': proof,
-        },
-        'kc': ?held,
-        if (reply) 'r': 1,
-        if (askCertificate) 'nc': 1,
-      });
+      if (_stopped || _unlinked.containsKey(normalized)) {
+        return;
+      }
+      try {
+        await transport.send(
+          remoteAddress: friend,
+          payload: <String, dynamic>{
+            ...?helloExtras?.call(normalized),
+            if (friendly) 'caps': kZenCaps,
+            'type': kLedgerHelloType,
+            if (named)
+              'cd': <String, dynamic>{'a': cert.account, 'd': cert.device}
+            else
+              'cert': cert.toJson(),
+            'p': <String, dynamic>{
+              'f': me,
+              if (key.isNotEmpty) 'k': key,
+              's': proof,
+            },
+            'kc': ?held,
+            if (reply) 'r': 1,
+            if (askCertificate) 'nc': 1,
+          },
+        );
+      } on Object {
+        // Not sent at all (the node was down, e.g. while a restored
+        // account restarts the app): it does not count as greeted, the
+        // next round greets again instead of waiting the whole interval.
+        if (_helloSentAt[normalized] == now) {
+          _helloSentAt.remove(normalized);
+        }
+        rethrow;
+      }
     }(), context: 'Powitanie dziennika nie wyszło');
   }
 
@@ -2582,6 +2696,9 @@ final class LedgerNode {
       if (isNew) {
         // Make sure they learn about us too, then catch up both ways.
         _hello(from, force: true);
+        if (cert.account != account) {
+          onPeerLearnt?.call(normalized, cert.account);
+        }
       }
     }
     // The device its record put here answered from here: proven now.
@@ -3006,6 +3123,8 @@ final class LedgerNode {
     _stopped = true;
     _settle();
     _syncTimer?.cancel();
+    _unknownTimer?.cancel();
+    _unknownTimer = null;
     await _storeChanged?.cancel();
     await _devicesChanged.close();
     await _contactsChanged.close();

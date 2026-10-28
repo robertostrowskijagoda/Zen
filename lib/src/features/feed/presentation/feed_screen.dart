@@ -448,6 +448,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         SnackBar(
           key: const Key('feed-published'),
           content: Text(t('Opublikowano. Twoje posty są na Twoim profilu.')),
+          // With an action a snack bar stays until dismissed by default.
+          persist: false,
           action: SnackBarAction(
             key: const Key('feed-published-show'),
             label: t('Pokaż'),

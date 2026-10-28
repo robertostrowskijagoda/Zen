@@ -245,6 +245,31 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
           .warnDeviceUnlinked(address),
       context: 'Ostrzeżenie o odłączonym urządzeniu',
     );
+  // A friend met on a new device (theirs, or this one after a restore):
+  // the profiles go both ways, so names and photos are there at once.
+  node.onPeerLearnt = (String address, String account) {
+    final SocialHubState social = ref.read(socialHubControllerProvider);
+    String? friend;
+    if (social.friendByAddress(address)?.status ==
+        FriendRelationshipStatus.accepted) {
+      friend = address;
+    } else {
+      for (final String f in acceptedFriendAddresses(social)) {
+        if (node.accountOf(f) == account) {
+          friend = f;
+          break;
+        }
+      }
+    }
+    if (friend != null) {
+      unawaitedLogged(
+        ref
+            .read(socialHubControllerProvider.notifier)
+            .shareOwnProfileWith(friend),
+        context: 'Wysłanie profilu nowemu urządzeniu',
+      );
+    }
+  };
   final StreamSubscription<String> keyConflicts = runtime.sessionKeyConflicts
       .listen(warnKeyMismatch);
   ref.onDispose(keyConflicts.cancel);

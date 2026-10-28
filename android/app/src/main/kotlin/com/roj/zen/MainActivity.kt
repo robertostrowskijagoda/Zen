@@ -74,6 +74,13 @@ class MainActivity : FlutterFragmentActivity() {
         setIntent(intent)
     }
 
+    // Links and opened files reach Dart through app_links only. Flutter's
+    // own routing reads its switch from the manifest entry the app was
+    // started through (a launcher alias, not this activity), and with it on
+    // every link that came while Zen ran was pushed as a page name the app
+    // does not have: a crash on coming back to the foreground.
+    override fun shouldHandleDeeplinking(): Boolean = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ZenCallBridge.register(flutterEngine, this)
