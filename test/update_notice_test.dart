@@ -12,6 +12,7 @@ import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/update/background_update_check.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
@@ -186,11 +187,6 @@ void main() {
       expect(n.slotKey, kUpdateNoticeSlot);
       expect(n.routeKey, buildUpdatesRouteKey());
       expect(zenSoundFor(n), isNull);
-      final AndroidNotificationChannel channel =
-          FlutterLocalRuntimeSystemNotificationService.androidChannelFor(n);
-      expect(channel.id, 'zen_updates');
-      expect(channel.importance, Importance.low);
-      expect(channel.playSound, isFalse);
       final RuntimeSystemNotification redacted =
           PrivacyRedactingNotificationService(
             _Notices(),
@@ -198,6 +194,109 @@ void main() {
           ).redact(n);
       expect(redacted.body, contains('1.12.0'));
       expect(redacted.title, n.title);
+    });
+
+    test('goes to a channel of its own that shows in the status bar, '
+        'quietly', () {
+      final RuntimeSystemNotification n = updateAvailableNotification(
+        '1.12.0',
+        createdAtMillis: 1,
+      );
+      final AndroidNotificationChannel channel =
+          FlutterLocalRuntimeSystemNotificationService.androidChannelFor(n);
+      // Not low: Samsung and Pixel put a low channel among the silent
+      // notifications, with no icon in the status bar, and it went unseen.
+      expect(channel.importance, Importance.defaultImportance);
+      expect(channel.playSound, isFalse);
+      expect(channel.enableVibration, isFalse);
+      // A channel keeps the importance it was made with: a new id.
+      expect(channel.id, isNot('zen_updates'));
+      final List<AndroidNotificationChannel> channels =
+          FlutterLocalRuntimeSystemNotificationService.androidChannels();
+      expect(
+        channels.where(
+          (AndroidNotificationChannel c) =>
+              FlutterLocalRuntimeSystemNotificationService
+                  .retiredAndroidChannelIds
+                  .contains(c.id),
+        ),
+        isEmpty,
+      );
+      expect(
+        FlutterLocalRuntimeSystemNotificationService.retiredAndroidChannelIds,
+        contains('zen_updates'),
+      );
+      // Nothing else shares it: a transfer stays where it was.
+      for (final RuntimeSystemNotificationCategory category
+          in RuntimeSystemNotificationCategory.values) {
+        if (category == RuntimeSystemNotificationCategory.update) {
+          continue;
+        }
+        final RuntimeSystemNotification other = RuntimeSystemNotification(
+          id: 'x-${category.name}',
+          title: 'Zen',
+          body: 'x',
+          createdAtMillis: 1,
+          category: category,
+        );
+        expect(
+          FlutterLocalRuntimeSystemNotificationService.androidChannelFor(
+            other,
+          ).id,
+          isNot(channel.id),
+          reason: category.name,
+        );
+      }
+      expect(
+        FlutterLocalRuntimeSystemNotificationService.androidChannelFor(
+          const RuntimeSystemNotification(
+            id: 'x',
+            title: 'Zen',
+            body: 'x',
+            createdAtMillis: 1,
+            category: RuntimeSystemNotificationCategory.transfer,
+          ),
+        ).id,
+        'zen_transfers',
+      );
+      // The notification itself asks for the same importance, and makes
+      // no sound.
+      final AndroidNotificationDetails details =
+          FlutterLocalRuntimeSystemNotificationService()
+              .debugDetailsFor(n)
+              .android!;
+      expect(details.channelId, channel.id);
+      expect(details.importance, Importance.defaultImportance);
+      expect(details.priority, Priority.defaultPriority);
+      expect(details.playSound, isFalse);
+    });
+
+    test('"Aktualizacje Zen" off posts nothing, "Dźwięk powiadomień" off '
+        'posts it quietly', () async {
+      final RuntimeSystemNotification n = updateAvailableNotification(
+        '1.12.0',
+        createdAtMillis: 1,
+      );
+      expect(
+        applyNoticeSettings(
+          n,
+          muted: (NoticeKind kind) => kind == NoticeKind.update,
+          sounds: true,
+        ),
+        isNull,
+      );
+      final RuntimeSystemNotification? quiet = applyNoticeSettings(
+        n,
+        muted: (_) => false,
+        sounds: false,
+      );
+      expect(quiet?.silent, isTrue);
+      expect(
+        FlutterLocalRuntimeSystemNotificationService.androidChannelFor(
+          quiet!,
+        ).id,
+        FlutterLocalRuntimeSystemNotificationService.androidChannelFor(n).id,
+      );
     });
 
     test('tapping it leads to "Aktualizacje i Podaj dalej"', () {
