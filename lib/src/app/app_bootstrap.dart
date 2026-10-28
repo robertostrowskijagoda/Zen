@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AsyncSnapshot, ConnectionState;
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -194,6 +195,29 @@ final class ZenBootstrapResult {
       ),
     ];
   }
+}
+
+/// The bootstrap result whose app may be shown for [snapshot]: only one
+/// that finished. While the next account's bootstrap runs, the snapshot
+/// still carries the previous result; built again under the new account's
+/// key, the account just left would come back to life with fresh providers
+/// beside the next one — its node runtime, never stopped, started its node
+/// again and kept calling on it, and the next account's node could not
+/// start (the identity ran already).
+ZenBootstrapResult? settledBootstrapResult(
+  AsyncSnapshot<ZenBootstrapResult> snapshot,
+) {
+  if (snapshot.connectionState != ConnectionState.done) {
+    return null;
+  }
+  return snapshot.data;
+}
+
+/// Ends what the app of an account that was left keeps running after its
+/// providers are gone: its node runtime is overridden by value, so the
+/// provider scope never disposes it.
+void retireBootstrapResult(ZenBootstrapResult result) {
+  result.runtime.dispose();
 }
 
 /// Whether the app password and the permissions step are

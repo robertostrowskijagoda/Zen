@@ -109,6 +109,9 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
   /// Bumped when another account opens: its app gets fresh providers.
   int _accountGeneration = 0;
 
+  /// The result whose app is on screen now.
+  ZenBootstrapResult? _shown;
+
   @override
   void initState() {
     super.initState();
@@ -122,12 +125,23 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
     super.dispose();
   }
 
-  /// Another account was asked for (the account menu, the lock screen):
-  /// the app starts again for it, in this process.
+  /// Another account was asked for (the account menu, the lock screen, a
+  /// restored copy): the app starts again for it, in this process.
+  ///
+  /// The app of the account left goes at once: its providers with the
+  /// splash that replaces it, its node runtime right after (nothing of it
+  /// may start that account's node again beside the next one).
   void _openAccount() {
     final ZenAccountOpening? opening = ZenAccountHost.instance.take();
     if (opening == null) {
       return;
+    }
+    final ZenBootstrapResult? left = _shown;
+    _shown = null;
+    if (left != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        retireBootstrapResult(left);
+      });
     }
     setState(() {
       _accountGeneration += 1;
@@ -149,15 +163,19 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
         future: _bootstrapFuture,
         builder:
             (BuildContext context, AsyncSnapshot<ZenBootstrapResult> snapshot) {
-              if (snapshot.hasData) {
-                final ZenBootstrapResult result = snapshot.data!;
+              final ZenBootstrapResult? result = settledBootstrapResult(
+                snapshot,
+              );
+              if (result != null) {
+                _shown = result;
                 return ProviderScope(
                   key: ValueKey<int>(_accountGeneration),
                   overrides: [...result.buildProviderOverrides()],
                   child: const ZenRewriteApp(),
                 );
               }
-              if (snapshot.hasError) {
+              if (snapshot.connectionState == ConnectionState.done &&
+                  snapshot.hasError) {
                 final _BootstrapFailurePresentation failure =
                     _presentBootstrapFailure(snapshot.error);
                 return _BootstrapSurface(
