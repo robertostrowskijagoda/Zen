@@ -10,6 +10,41 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Settings → Notifications and sounds: choose which kinds of notifications you get, and hear soft sounds for messages, likes and posts.
+- [en] Friends show up as online or in the background much sooner, and the graph opens on a presence view.
+- [en] See how much room Zen takes (1 GB by default), and keep unsent messages, comments and posts after a restart.
+- [pl] Ustawienia → Powiadomienia i dźwięki: wybierasz, o czym Zen powiadamia, i słyszysz ciche dźwięki wiadomości, polubień i postów.
+- [pl] Znajomi dużo szybciej pokazują się jako online lub w tle, a graf otwiera się na widoku obecności.
+- [pl] Widzisz, ile miejsca zajmuje Zen (domyślnie 1 GB), a niewysłane wiadomości, komentarze i posty zostają po ponownym uruchomieniu.
+
+### Notifications and sounds
+- **One page for notifications and sounds**: in-app sounds, a "notification sound" switch (off: notifications arrive silently; a ringing call and a friend's alarm are always heard) and one switch per kind: messages, group messages, calls, mentions, reactions, friends' posts, posts of further friends (off by default), invitations and updates. The rules also hold while Zen is locked.
+- **In-app sounds where they were missing**: sending in a group, a message arriving in the open chat, a like or reaction, a published post and a new entry in the notification list. On Android nothing plays in silent, vibrate or "Do not disturb" mode, and the diagnostics log now says so.
+- Every notice at the bottom of the screen can be swiped away to either side.
+
+### Presence and network
+- **Presence shows up sooner**: a new round of pings goes out as soon as the node reaches the network, a new friend is pinged at once, pings run every 2 minutes while Zen is open, and a friend counts as offline after 5 minutes (10 when they were in the background).
+- **Public peers**: every built-in peer is on and shows what the device does with it (in use, connecting, not connecting, in reserve, paused by the transit guard). A phone keeps the whole list in reserve and replaces a peer that stays down for about 2 minutes.
+- **Wi-Fi Direct and Bluetooth links are on by default** and the first-start permissions ask for "Nearby devices"; both run only when there is a friend's device or another of your devices to link with.
+- "Share mailboxes with group members" is on by default.
+
+### Graph and profile
+- **The graph opens on a presence view**: online, in the background and offline at a glance; weak acquaintances have no status. The camera and filter buttons sit below the modes instead of over them.
+- The follower count includes every friend, and the followers list shows them.
+
+### Settings and storage
+- **One "Data and storage" page**: how much room Zen takes, with a breakdown, the total limit (1 GB by default, from 10 MB to 10 GB) and an optional separate limit for friends' photos and videos, where the oldest go first and your own posts are never touched.
+- "Run the setup again" is the first item in Settings.
+
+### Fixes
+- The offline mailboxes, the meeting hub and several sheets no longer hide their last items under the system bar.
+- Holding the alarm and delete buttons no longer selects text.
+
+### Development
+- The tests run in parallel groups (`dart run tool/test.dart`), about twice as fast; CI splits them into four jobs and runs the tests that need Linux or the Go bridge on Linux.
+- A release needs one approval: the APKs are built in parallel without keys and everything is signed in one approved job.
+
 ## 1.13.1 — 28.10.2026
 
 ### What's new
