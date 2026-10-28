@@ -291,13 +291,17 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
     super.dispose();
   }
 
+  /// The conversations whose name (or the nickname given) has every word
+  /// typed, with or without Polish letters.
   List<ConversationPreview> _filter(List<ConversationPreview> source) {
-    final String query = _searchController.text.trim().toLowerCase();
+    final SearchQuery query = SearchQuery.parse(_searchController.text);
     if (query.isEmpty) {
       return source;
     }
     return source
-        .where((ConversationPreview c) => c.name.toLowerCase().contains(query))
+        .where(
+          (ConversationPreview c) => query.matches('${c.name} ${c.nickname}'),
+        )
         .toList(growable: false);
   }
 
@@ -354,7 +358,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
             .toList(growable: false),
       _ChatFilter.all => allAcceptedConversations,
     };
-    final String groupQuery = _searchController.text.trim().toLowerCase();
+    final SearchQuery groupQuery = SearchQuery.parse(_searchController.text);
+    // Long enough to look through messages too: they are listed under the
+    // conversations (MessageSearchResults), which then also says when
+    // nothing was found.
+    final bool searchingMessages = groupQuery.searchesMessages;
     ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.groups,
@@ -364,8 +372,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
         .read(socialHubControllerProvider)
         .groupList
         .where(
-          (GroupProfile g) =>
-              groupQuery.isEmpty || g.name.toLowerCase().contains(groupQuery),
+          (GroupProfile g) => groupQuery.isEmpty || groupQuery.matches(g.name),
         )
         .where(
           (GroupProfile g) =>
@@ -390,6 +397,12 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
             child: ListView(
               key: const Key('chats-tab-body'),
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
+              // While messages are searched the whole list stays built:
+              // the results at its end keep reading (and what they read)
+              // also off screen. It is short then: only what matches.
+              scrollCacheExtent: searchingMessages
+                  ? const ScrollCacheExtent.pixels(20000)
+                  : null,
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -402,7 +415,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                         onChanged: (_) => setState(() {}),
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          hintText: t('Szukaj rozmowy'),
+                          hintText: t('Szukaj rozmów i wiadomości'),
                           // Wraps rather than ending in "…" (French,
                           // Italian on a narrow phone).
                           hintMaxLines: 2,
@@ -595,17 +608,20 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       in pendingConversations)
                     _ConversationCard(conversation: conversation),
                 ],
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: ZenSection(t('Rozmowy'), top: 12),
-                ),
+                if (!searchingMessages || conversations.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: ZenSection(t('Rozmowy'), top: 12),
+                  ),
                 AnimatedSwitcher(
                   duration: ZenMotion.enabled && !ZenMotion.offIn(context)
                       ? const Duration(milliseconds: 240)
                       : Duration.zero,
                   switchInCurve: Curves.easeOutCubic,
                   switchOutCurve: Curves.easeInCubic,
-                  child: conversations.isEmpty
+                  child: conversations.isEmpty && searchingMessages
+                      ? const SizedBox.shrink()
+                      : conversations.isEmpty
                       ? _EmptyChats(
                           key: ValueKey<String>(
                             'empty-${_selectedFilter.name}-${_searchController.text.isEmpty}',
@@ -637,6 +653,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                               ),
                           ],
                         ),
+                ),
+                // Messages of every conversation with the words typed.
+                MessageSearchResults(
+                  key: const Key('chats-message-search'),
+                  query: _searchController.text,
                 ),
               ],
             ),
@@ -778,11 +799,78 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _SettingsScreen extends ConsumerWidget {
+class _SettingsScreen extends ConsumerStatefulWidget {
   const _SettingsScreen();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
+  /// Finds a setting by its name (or what is written under it).
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// [sections] as they are, or, while something is typed in the search
+  /// field, only the rows that match it (in their groups).
+  List<Widget> _searched(List<Widget> sections) {
+    final ZenColors zen = ZenColors.of(context);
+    final SearchQuery query = SearchQuery.parse(_search.text);
+    final Widget field = Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        key: const Key('settings-search-field'),
+        controller: _search,
+        onChanged: (_) => setState(() {}),
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: t('Szukaj ustawienia'),
+          hintMaxLines: 2,
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: _search.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: t('Wyczyść'),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  color: zen.textMuted,
+                  onPressed: () {
+                    _search.clear();
+                    setState(() {});
+                  },
+                ),
+        ),
+      ),
+    );
+    if (query.isEmpty) {
+      return <Widget>[field, ...sections];
+    }
+    final List<Widget> found = <Widget>[
+      for (final _SettingsGroup group in sections.whereType<_SettingsGroup>())
+        if (group.matching(query) case final _SettingsGroup shown) shown,
+    ];
+    return <Widget>[
+      field,
+      if (found.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            t('Nie ma ustawienia „{query}”.', {'query': _search.text.trim()}),
+            key: const Key('settings-search-empty'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: zen.textSecondary),
+          ),
+        ),
+      ...found,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final AppShellState state = ref.watch(appShellControllerProvider);
     final AppSettings settings = ref.watch(appSettingsControllerProvider);
     final int blockedCount = ref.watch(
@@ -799,7 +887,7 @@ class _SettingsScreen extends ConsumerWidget {
           child: ListView(
             key: const Key('settings-tab-body'),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
+            children: _searched(<Widget>[
               // The first-start setup again, every step, with what is set
               // now.
               FilledButton.tonalIcon(
@@ -1150,7 +1238,7 @@ class _SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-            ],
+            ]),
           ),
         ),
       ),
@@ -1164,6 +1252,19 @@ class _SettingsGroup extends StatelessWidget {
 
   final String title;
   final List<Widget> tiles;
+
+  /// The group with only the rows [query] matches (all of them when the
+  /// group's own title does); `null` when none does.
+  _SettingsGroup? matching(SearchQuery query) {
+    if (title.isNotEmpty && query.matches(title)) {
+      return this;
+    }
+    final List<Widget> shown = <Widget>[
+      for (final Widget tile in tiles)
+        if (query.matches(_settingsRowText(tile))) tile,
+    ];
+    return shown.isEmpty ? null : _SettingsGroup(title: title, tiles: shown);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1198,6 +1299,19 @@ class _SettingsGroup extends StatelessWidget {
     );
   }
 }
+
+/// What the settings search looks at in a row: its title, what is written
+/// under it and the title of the page it opens.
+String _settingsRowText(Widget tile) => switch (tile) {
+  _SettingsNavTile(:final String title, :final String subtitle) =>
+    '$title $subtitle ${tile.pageTitle ?? ''}',
+  _SettingsSwitchTile(:final String title, :final String subtitle) =>
+    '$title $subtitle',
+  _RelayNavTile() =>
+    '${t('Skrzynki offline')} '
+        '${t('Znajomi, którzy przechowają Twoje wiadomości')}',
+  _ => '',
+};
 
 /// The shared layout of a settings row: badge, title, subtitle, and
 /// whatever sits on the right (a chevron or a switch).

@@ -3,6 +3,7 @@ part of 'conversation_screen.dart';
 enum _CaptureOption { photo, video, gallery, audio }
 
 enum _ConversationMenuAction {
+  search,
   acceptRequest,
   rejectRequest,
   cancelRequest,
@@ -332,9 +333,13 @@ class _MessageBubble extends StatelessWidget {
     this.nameOf,
     this.peerName,
     this.highlighted = false,
+    this.searched,
   });
 
   final ChatMessage message;
+
+  /// A search found this message: its words are marked.
+  final SearchQuery? searched;
 
   /// The friend's name once it is known: the chat's notes about them say
   /// it (see [chatMessageText]).
@@ -367,6 +372,13 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final SearchQuery? searched = this.searched;
+    return searched == null
+        ? _bubble(context)
+        : SearchHighlight(query: searched, child: _bubble(context));
+  }
+
+  Widget _bubble(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     if (message.isSystem) {
       return Center(
