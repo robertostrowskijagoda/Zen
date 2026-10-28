@@ -7,7 +7,9 @@
 # Only dpkg-deb is needed (dpkg-shlibdeps from dpkg-dev, when present, works
 # out the library dependencies; otherwise a fixed list is used). The app goes
 # to /opt/zen, a zen command to /usr/bin, the .desktop file (menu, zen://
-# links, the Wayland icon), the icon and the AppStream metadata to /usr/share.
+# links and Zen's own files, the Wayland icon), the types of those files, the
+# icon and the AppStream metadata to /usr/share (dpkg's triggers refresh the
+# menu and the file types).
 # The release workflow (.github/workflows/release.yml) runs this.
 set -eu
 export LC_ALL=C
@@ -51,7 +53,7 @@ trap 'rm -rf "$work"' EXIT
 root="$work/root"
 share="$root/usr/share"
 mkdir -p "$root/DEBIAN" "$root/opt/zen" "$root/usr/bin" \
-  "$share/applications" "$share/metainfo" "$share/doc/zen" \
+  "$share/applications" "$share/metainfo" "$share/doc/zen" "$share/mime/packages" \
   "$share/icons/hicolor/256x256/apps"
 
 cp -R "$bundle/." "$root/opt/zen/"
@@ -65,6 +67,7 @@ sed 's|^Exec=.*|Exec=/opt/zen/zen %u|' "$here/com.roj.zen.desktop" \
 sed "s|<release version=\"[^\"]*\" date=\"[^\"]*\"/>|<release version=\"$version\" date=\"$date\"/>|" \
   "$here/com.roj.zen.metainfo.xml" > "$share/metainfo/com.roj.zen.metainfo.xml"
 cp "$bundle/data/app_icon.png" "$share/icons/hicolor/256x256/apps/com.roj.zen.png"
+cp "$bundle/data/com.roj.zen.mime.xml" "$share/mime/packages/com.roj.zen.xml"
 cat "$project/NOTICE" "$project/LICENSE" > "$share/doc/zen/copyright"
 find "$share" -type f -exec chmod 0644 {} +
 

@@ -30,6 +30,6 @@ Icon=com.roj.zen
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 Keywords=messenger;chat;mesh;friends;komunikator;znajomi;
-MimeType=x-scheme-handler/zen;
+MimeType=x-scheme-handler/zen;application/x-zen-backup;application/x-zen-key;application/x-zen-update;
 StartupNotify=true
 StartupWMClass=com.roj.zen

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Zen's own files (shared-mime-info), so a file manager opens them in Zen
+     (MimeType= in com.roj.zen.desktop): an account backup, a key backup and
+     an update. Told apart by their first bytes, then by the name. The .deb
+     installs this as /usr/share/mime/packages/com.roj.zen.xml, the Flatpak
+     under /app/share, install-desktop-entry.sh for the current user. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-zen-backup">
+    <comment>Zen account backup</comment>
+    <comment xml:lang="pl">Kopia konta Zen</comment>
+    <generic-icon name="application-x-generic"/>
+    <magic priority="60">
+      <match type="string" offset="0" value="ZENACCT"/>
+    </magic>
+    <glob pattern="*.zenbackup"/>
+  </mime-type>
+  <mime-type type="application/x-zen-key">
+    <comment>Zen key backup</comment>
+    <comment xml:lang="pl">Kopia klucza Zen</comment>
+    <generic-icon name="application-x-generic"/>
+    <magic priority="60">
+      <match type="string" offset="0" value="ZENKEY"/>
+    </magic>
+    <glob pattern="*.zenkey"/>
+  </mime-type>
+  <mime-type type="application/x-zen-update">
+    <comment>Zen update</comment>
+    <comment xml:lang="pl">Aktualizacja Zen</comment>
+    <generic-icon name="application-x-generic"/>
+    <magic priority="60">
+      <match type="string" offset="0" value="ZENUPD1"/>
+    </magic>
+    <glob pattern="*.zenupdate"/>
+  </mime-type>
+</mime-info>
