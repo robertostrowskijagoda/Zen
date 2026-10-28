@@ -241,6 +241,10 @@ final class AppCircleBackupData implements CircleBackupData {
     void step() => progress(++done, total);
     final Object? settings = content.sections[CircleBackupSections.settings];
     if (settings is Map<String, dynamic>) {
+      // Not as they were (unlike a backup file of the whole app): the
+      // circle's copy carries no app password, and this device was set up
+      // with a password of its own before friends gave the account back —
+      // its lock, setup and permissions stay.
       await ref
           .read(appSettingsControllerProvider.notifier)
           .restoreFromCopy(AppSettings.fromJson(settings));

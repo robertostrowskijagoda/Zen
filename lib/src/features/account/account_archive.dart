@@ -213,6 +213,18 @@ final class AccountArchive {
     files: files,
   );
 
+  /// Without the section [key].
+  AccountArchive withoutSection(String key) => AccountArchive(
+    account: account,
+    createdAt: createdAt,
+    scope: scope,
+    seed: seed,
+    sections: <String, Object?>{...sections}..remove(key),
+    chats: chats,
+    raw: raw,
+    files: files,
+  );
+
   /// Without the key (what another device of the account syncs).
   AccountArchive withoutSeed() => AccountArchive(
     account: account,
@@ -1150,6 +1162,9 @@ enum AccountImportOutcome {
 
   /// A copy without the account key, for a device without that account.
   noKey,
+
+  /// The person stopped before anything was taken.
+  cancelled,
 }
 
 /// Takes copies in: from a backup file, another device of the account, or
@@ -1182,6 +1197,11 @@ final class AccountArchiveImporter {
     }
     return null;
   }
+
+  /// Whether [take] would make this device [archive]'s account (taking all
+  /// of it, its settings too) rather than merge it into the one here.
+  Future<bool> adopts(AccountArchive archive) async =>
+      await sink.currentAccount() != archive.account;
 
   /// Takes [archive] (its files staged already). Another account's copy
   /// with its key makes this device that account's new device (only on a

@@ -9,6 +9,7 @@ import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
+import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
@@ -17,6 +18,7 @@ import 'package:zen/src/features/account/presentation/account_restore_info.dart'
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 
 /// Argon2id cost of new backup files (lighter in tests).
@@ -222,10 +224,12 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
       _total = 0;
     });
     try {
+      // A backup of the whole app: with the settings goes the app's lock,
+      // so the restored app opens with the same password.
       final AccountArchiveBuild build = await collect(<AccountScope>{
         ..._scope,
         AccountScope.keys,
-      });
+      }, appLock: true);
       _saved = await saveAccountBackup(
         places: places,
         folder: folder,
@@ -531,6 +535,11 @@ class _AccountBackupRestoreScreenState
       setState(() => _message = t('Konto nie jest jeszcze gotowe.'));
       return;
     }
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    // The app's lock of the backup and its password, once the person gave
+    // it: it becomes this app's password right before the copy is taken.
+    AppLockCopy? lock;
+    String? lockPassword;
     setState(() {
       _busy = true;
       _message = null;
@@ -541,10 +550,50 @@ class _AccountBackupRestoreScreenState
         password: _password.text,
         importer: importer,
         acceptedCosts: ref.read(accountBackupAcceptedCostsProvider),
+        prepare: (AccountArchive archive) async {
+          final AppLockCopy? copied = accountArchiveAppLock(archive);
+          final AppPasswordCheck? check = copied?.password;
+          if (check == null || !await importer.adopts(archive)) {
+            // No app password in it, or the same account merges: this
+            // app's password and settings stay as they are.
+            return archive;
+          }
+          if (!mounted) {
+            return null;
+          }
+          final _AppPasswordAnswer? answer = await _AppPasswordDialog.ask(
+            context,
+            check,
+          );
+          if (answer == null) {
+            return null;
+          }
+          final String? given = answer.password;
+          if (given == null) {
+            // Forgotten: the account comes back without the lock, this
+            // device's own settings stay and it asks for a new password.
+            return archive.withoutSection(kAccountAppLock);
+          }
+          lock = copied;
+          lockPassword = given;
+          return archive;
+        },
+        beforeTake: () async {
+          final AppLockCopy? copied = lock;
+          final String? given = lockPassword;
+          if (copied != null &&
+              given != null &&
+              !await security.takeLockCopy(copied, given)) {
+            throw StateError('The app password of the backup was not taken.');
+          }
+        },
       );
       final AccountBackupError? error = result.error;
       final String? refused = accountImportRefusal(result.outcome);
       if (!mounted) {
+        return;
+      }
+      if (result.outcome == AccountImportOutcome.cancelled) {
         return;
       }
       setState(() {
@@ -709,6 +758,136 @@ class _AccountBackupRestoreScreenState
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The answer for the app password of a backup: the password (it matched),
+/// or null — the person does not remember it.
+typedef _AppPasswordAnswer = ({String? password});
+
+/// The app password of a backup being restored, asked once: checked
+/// against the backup before anything is taken, as it will open Zen here.
+class _AppPasswordDialog extends StatefulWidget {
+  const _AppPasswordDialog({required this.check});
+
+  final AppPasswordCheck check;
+
+  /// Null when the person cancels the restore.
+  static Future<_AppPasswordAnswer?> ask(
+    BuildContext context,
+    AppPasswordCheck check,
+  ) => showDialog<_AppPasswordAnswer>(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext context) => _AppPasswordDialog(check: check),
+  );
+
+  @override
+  State<_AppPasswordDialog> createState() => _AppPasswordDialogState();
+}
+
+class _AppPasswordDialogState extends State<_AppPasswordDialog> {
+  final TextEditingController _password = TextEditingController();
+  bool _busy = false;
+  bool _wrong = false;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) {
+      return;
+    }
+    final String given = _password.text;
+    setState(() {
+      _busy = true;
+      _wrong = false;
+    });
+    final bool matches = await widget.check.matches(given);
+    if (!mounted) {
+      return;
+    }
+    if (matches) {
+      Navigator.of(context).pop<_AppPasswordAnswer>((password: given));
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _wrong = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return AlertDialog(
+      key: const Key('account-restore-app-password-dialog'),
+      scrollable: true,
+      title: Text(t('Hasło aplikacji z kopii')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            t(
+              'Ta kopia przywraca też hasło aplikacji. Wpisz hasło, którym '
+              'otwierał się Zen na urządzeniu, z którego jest kopia — po '
+              'przywróceniu otworzy Zen także tutaj.',
+            ),
+            style: TextStyle(color: zen.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('account-restore-app-password'),
+            controller: _password,
+            obscureText: true,
+            autofocus: true,
+            enabled: !_busy,
+            enableIMEPersonalizedLearning: false,
+            decoration: InputDecoration(
+              labelText: t('Hasło aplikacji'),
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              errorText: _wrong
+                  ? t('To nie jest hasło aplikacji z tej kopii.')
+                  : null,
+            ),
+            onSubmitted: (_) => unawaited(_submit()),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            t(
+              'Nie pamiętasz go? Konto wróci i bez niego, a Zen poprosi o '
+              'nowe hasło.',
+            ),
+            style: TextStyle(color: zen.textMuted, fontSize: 12.5, height: 1.4),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          key: const Key('account-restore-app-password-forgot'),
+          onPressed: _busy
+              ? null
+              : () => Navigator.of(
+                  context,
+                ).pop<_AppPasswordAnswer>((password: null)),
+          child: Text(t('Nie pamiętam')),
+        ),
+        TextButton(
+          key: const Key('account-restore-app-password-cancel'),
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          child: Text(t('Anuluj')),
+        ),
+        FilledButton(
+          key: const Key('account-restore-app-password-ok'),
+          onPressed: _busy ? null : () => unawaited(_submit()),
+          child: Text(_busy ? t('Sprawdzam…') : t('Dalej')),
+        ),
+      ],
     );
   }
 }

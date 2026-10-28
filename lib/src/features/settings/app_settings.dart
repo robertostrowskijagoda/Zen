@@ -11,8 +11,10 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 const int kSetupRevision = 1;
 
 /// Settings of this device rather than of the account: a copy of the
-/// account taken here (a backup file, the recovery circle) never replaces
-/// them ([AppSettings.takingCopy]). The first-start steps (gone through
+/// account that does not bring the app's lock along (the recovery circle,
+/// another device, a backup file without it) never replaces them
+/// ([AppSettings.takingCopy]); a backup of the whole app does
+/// ([AppSettings.restoringWhole]). The first-start steps (gone through
 /// here, they are not asked again because of an older copy and the
 /// restarts a restore makes), the lock, the disguised icon (this device's
 /// launcher), offering this device as a bridge, and the radios and
@@ -773,6 +775,20 @@ final class AppSettings {
         : copy.setupRevision;
     return AppSettings.fromJson(merged);
   }
+
+  /// [copy] (the settings in a backup of the whole app, which brings the
+  /// app password along) as this device takes it: as they were — the lock,
+  /// the first-start steps and the setup's revision (the setup shows once
+  /// only when the backup's is older than this app's), the radios, the
+  /// disguised icon. Only the terms keep the latest acceptance, here or in
+  /// the backup: accepted on either side, they count.
+  AppSettings restoringWhole(AppSettings copy) =>
+      legalAcceptedAtMillis > copy.legalAcceptedAtMillis
+      ? copy.copyWith(
+          legalAcceptedVersion: legalAcceptedVersion,
+          legalAcceptedAtMillis: legalAcceptedAtMillis,
+        )
+      : copy;
 
   /// Named fields: an unknown field is ignored and a missing one keeps its
   /// default, so a new setting needs no format version.

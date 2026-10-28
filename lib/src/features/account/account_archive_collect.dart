@@ -11,6 +11,12 @@ import 'package:zen/src/features/account/device_chat_sync.dart';
 const String kAccountAvatarFile = 'avatar_file';
 const String kAccountCoverFile = 'cover_file';
 
+/// The section with the app's lock (the app password and the panic
+/// password, as `AppLockCopy` carries them): only in a backup file with
+/// the settings, which then restores the whole app, its password included.
+/// A copy for another device never has it.
+const String kAccountAppLock = 'app_lock';
+
 /// Entries per segment of the account's log on disk ([LedgerArchive]).
 const int kAccountLogSegment = 200;
 
@@ -42,6 +48,9 @@ abstract interface class AccountArchiveSource {
 
   Map<String, dynamic> settings();
 
+  /// The app's lock ([kAccountAppLock]); null when it cannot be told.
+  Future<Map<String, Object>?> appLock();
+
   /// The pyramid's state and the wallet, if a member.
   Map<String, dynamic>? pyramid();
 
@@ -67,10 +76,12 @@ abstract interface class AccountArchiveSource {
 /// Collects a copy of the account from [source]: the parts in [scope],
 /// with the account key's seed when [AccountScope.keys] is in it (the key
 /// must be unlocked then). [measureOnly]: sizes only, for the estimate.
+/// [appLock]: a backup file — with the settings goes the app's lock.
 Future<AccountArchiveBuild> buildAccountArchive(
   AccountArchiveSource source,
   Set<AccountScope> scope, {
   bool measureOnly = false,
+  bool appLock = false,
   int? at,
 }) async {
   final AccountArchiveBuilder b = AccountArchiveBuilder(
@@ -138,6 +149,10 @@ Future<AccountArchiveBuild> buildAccountArchive(
   }
   if (b.has(AccountScope.settings)) {
     b.sections[CircleBackupSections.settings] = source.settings();
+    final Map<String, Object>? lock = appLock ? await source.appLock() : null;
+    if (lock != null) {
+      b.sections[kAccountAppLock] = lock;
+    }
   }
   if (b.has(AccountScope.pyramid)) {
     final Map<String, dynamic>? pyramid = source.pyramid();

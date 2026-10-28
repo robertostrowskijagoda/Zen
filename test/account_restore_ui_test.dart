@@ -9,6 +9,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
+import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
@@ -18,6 +19,8 @@ import 'package:zen/src/features/account/presentation/account_restore_info.dart'
 import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -71,22 +74,28 @@ final class _Places implements AccountBackupPlaces {
   Future<bool> open(AccountBackupSaved saved) async => true;
 }
 
-/// A device that takes copies, in memory.
+/// A device that takes copies, in memory ([fresh]: a new install).
 final class _Sink implements AccountArchiveSink {
-  _Sink(this.account);
+  _Sink(this.account, {this.fresh = false});
 
   final String account;
+  final bool fresh;
   final MemoryLedgerDisk disk = MemoryLedgerDisk();
   int applied = 0;
+
+  /// The copy this device became the account of.
+  AccountArchive? adopted;
 
   @override
   Future<String?> currentAccount() async => account;
 
   @override
-  Future<bool> isFresh() async => false;
+  Future<bool> isFresh() async => fresh;
 
   @override
-  Future<void> adoptAccount(AccountArchive archive) async {}
+  Future<void> adoptAccount(AccountArchive archive) async {
+    adopted = archive;
+  }
 
   @override
   Future<void> writeRaw(
@@ -338,6 +347,151 @@ void main() {
     expect(sink.disk.files, isEmpty);
   });
 
+  group('a backup of the whole app on a new device', () {
+    late Directory dir;
+    late String path;
+    late LocalAppSecurityService restored;
+    late _Sink sink;
+
+    /// The backup of an app whose password is "stare hasło 1", read on a
+    /// new install without a password yet; the app password is asked.
+    Future<void> pumpAsked(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      path = '${dir.path}/k.$kAccountBackupExtension';
+      await tester.runAsync(() async {
+        final LocalAppSecurityService old = LocalAppSecurityService(
+          credentialsStore: MemorySecurityCredentialsStore(),
+          passwordIterations: 10,
+          keyVault: MemoryKeyVault(available: false),
+        );
+        await old.initialize(settings: const AppSettings());
+        await old.setPassword('stare hasło 1');
+        final AccountArchiveBuild copy = _copy(
+          kAllAccountScopes,
+          account: 'old-acc',
+        );
+        copy.archive.sections[kAccountAppLock] = (await old.lockCopy())!
+            .toJson();
+        await writeAccountBackup(
+          build: copy,
+          password: 'hasło kopii 1',
+          first: path,
+          cost: _light,
+          remember: false,
+        );
+        restored = LocalAppSecurityService(
+          credentialsStore: MemorySecurityCredentialsStore(),
+          passwordIterations: 10,
+          keyVault: MemoryKeyVault(available: false),
+        );
+        await restored.initialize(settings: const AppSettings());
+      });
+      sink = _Sink('new-install', fresh: true);
+      await tester.pumpWidget(
+        _app(
+          AccountBackupRestoreScreen(path: path),
+          overrides: <Override>[
+            appSecurityServiceProvider.overrideWithValue(restored),
+            accountBackupAcceptedCostsProvider.overrideWithValue(<PasswordCost>[
+              _light,
+            ]),
+            accountArchiveImporterProvider.overrideWithValue(
+              AccountArchiveImporter(
+                sink: sink,
+                staging: AccountImportStaging(sink.disk),
+              ),
+            ),
+          ],
+        ),
+      );
+      await _real(tester);
+      await tester.enterText(
+        find.byKey(const Key('account-restore-password')),
+        'hasło kopii 1',
+      );
+      await tester.tap(find.byKey(const Key('account-restore-run')));
+      await _real(tester);
+      expect(
+        find.byKey(const Key('account-restore-app-password-dialog')),
+        findsOneWidget,
+      );
+    }
+
+    Future<void> answer(WidgetTester tester, String password) async {
+      await tester.enterText(
+        find.byKey(const Key('account-restore-app-password')),
+        password,
+      );
+      await tester.tap(
+        find.byKey(const Key('account-restore-app-password-ok')),
+      );
+      for (int i = 0; i < 3; i++) {
+        await _real(tester);
+      }
+    }
+
+    testWidgets('its app password is asked once: a wrong one is refused, the '
+        'right one opens Zen here', (WidgetTester tester) async {
+      await pumpAsked(tester);
+      await answer(tester, 'złe hasło 1');
+      expect(
+        find.text('To nie jest hasło aplikacji z tej kopii.'),
+        findsOneWidget,
+      );
+      expect(sink.adopted, isNull);
+      expect(restored.hasPassword, isFalse);
+
+      await answer(tester, 'stare hasło 1');
+      expect(
+        find.byKey(const Key('account-restore-app-password-dialog')),
+        findsNothing,
+      );
+      expect(find.textContaining('Kopia przyjęta'), findsOneWidget);
+      expect(sink.adopted!.sections, contains(kAccountAppLock));
+      // The app is open now and opens with the old password from here on.
+      expect(restored.hasPassword, isTrue);
+      expect(restored.isLocked, isFalse);
+      bool unlocked = false;
+      await tester.runAsync(() async {
+        restored.lock();
+        unlocked =
+            !await restored.unlock('złe hasło 1') &&
+            await restored.unlock('stare hasło 1');
+      });
+      expect(unlocked, isTrue);
+    });
+
+    testWidgets('forgotten: the account comes back without the lock and a '
+        'new password is asked for', (WidgetTester tester) async {
+      await pumpAsked(tester);
+      await tester.tap(
+        find.byKey(const Key('account-restore-app-password-forgot')),
+      );
+      for (int i = 0; i < 3; i++) {
+        await _real(tester);
+      }
+      expect(find.textContaining('Kopia przyjęta'), findsOneWidget);
+      expect(sink.adopted!.sections, isNot(contains(kAccountAppLock)));
+      expect(restored.hasPassword, isFalse);
+    });
+
+    testWidgets('cancelled: nothing is taken', (WidgetTester tester) async {
+      await pumpAsked(tester);
+      await tester.tap(
+        find.byKey(const Key('account-restore-app-password-cancel')),
+      );
+      await _real(tester);
+      expect(sink.adopted, isNull);
+      expect(sink.disk.files, isEmpty);
+      expect(find.byKey(const Key('account-restore-message')), findsNothing);
+      expect(find.byKey(const Key('account-restore-run')), findsOneWidget);
+    });
+  });
+
   testWidgets('"Utwórz kopię zapasową": the chosen parts, the size and the '
       'file', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(900, 3200);
@@ -360,6 +514,7 @@ void main() {
           accountArchiveCollectorProvider.overrideWithValue((
             Set<AccountScope> scope, {
             bool measureOnly = false,
+            bool appLock = false,
           }) async {
             asked.add(<AccountScope>{...scope});
             return _copy(scope);
@@ -450,8 +605,11 @@ void main() {
             accountBackupPlacesProvider.overrideWithValue(places),
             accountBackupCostProvider.overrideWithValue(_light),
             accountArchiveCollectorProvider.overrideWithValue(
-              (Set<AccountScope> scope, {bool measureOnly = false}) async =>
-                  _copy(scope),
+              (
+                Set<AccountScope> scope, {
+                bool measureOnly = false,
+                bool appLock = false,
+              }) async => _copy(scope),
             ),
           ],
         ),

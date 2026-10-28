@@ -160,6 +160,10 @@ final class _Source implements AccountArchiveSource {
   @override
   Map<String, dynamic> settings() => <String, dynamic>{'look': 'calm'};
 
+  /// The app's lock (an app used without a password).
+  @override
+  Future<Map<String, Object>?> appLock() async => <String, Object>{};
+
   @override
   Map<String, dynamic>? pyramid() => <String, dynamic>{'wallet': 5};
 
@@ -206,9 +210,12 @@ final class _Sink implements AccountArchiveSink {
   @override
   Future<bool> isFresh() async => fresh;
 
+  AccountArchive? adopted;
+
   @override
   Future<void> adoptAccount(AccountArchive archive) async {
     calls.add('adopt');
+    adopted = archive;
     account = archive.account;
   }
 
@@ -441,6 +448,41 @@ void main() {
       expect(films.raw.keys, contains('films/state'));
       expect(films.raw.keys, contains(LedgerArchive.indexKey));
     });
+
+    test(
+      'the app\'s lock goes only into a backup file with the settings',
+      () async {
+        final _Source source = _Source();
+        await source.fill();
+        Future<AccountArchive> build(
+          Set<AccountScope> scope, {
+          required bool appLock,
+        }) async => (await buildAccountArchive(
+          source,
+          scope,
+          appLock: appLock,
+          at: 1,
+        )).archive;
+
+        expect(
+          (await build(kAllAccountScopes, appLock: true)).sections,
+          contains(kAccountAppLock),
+        );
+        // A copy for another device.
+        expect(
+          (await build(kAllAccountScopes, appLock: false)).sections,
+          isNot(contains(kAccountAppLock)),
+        );
+        // A backup without the settings.
+        expect(
+          (await build(<AccountScope>{
+            AccountScope.keys,
+            AccountScope.contacts,
+          }, appLock: true)).sections,
+          isNot(contains(kAccountAppLock)),
+        );
+      },
+    );
 
     test('the estimate measures without reading the files', () async {
       final _Source source = _Source();
@@ -712,6 +754,78 @@ void main() {
       expect(sink.calls, isEmpty);
       expect(sink.disk.files, isEmpty);
     });
+
+    test('the person asked before the files are read: stopped, nothing is '
+        'taken', () async {
+      final _Sink sink = _Sink(account: 'fresh-1');
+      final AccountArchiveImporter importer = AccountArchiveImporter(
+        sink: sink,
+        staging: AccountImportStaging(sink.disk),
+      );
+      expect(await importer.adopts(build.archive), isTrue);
+      bool before = false;
+      final AccountBackupRestore r = await restoreAccountBackup(
+        paths: paths,
+        password: 'dobre hasło 1',
+        importer: importer,
+        acceptedCosts: _accepted,
+        prepare: (AccountArchive archive) async => null,
+        beforeTake: () async => before = true,
+      );
+      expect(r.error, isNull);
+      expect(r.outcome, AccountImportOutcome.cancelled);
+      expect(before, isFalse);
+      expect(sink.calls, isEmpty);
+      expect(sink.disk.files, isEmpty);
+    });
+
+    test('what the person answers is what is taken, after the last step '
+        'before it', () async {
+      final _Sink sink = _Sink(account: 'fresh-1');
+      final AccountArchiveImporter importer = AccountArchiveImporter(
+        sink: sink,
+        staging: AccountImportStaging(sink.disk),
+      );
+      final AccountBackupRestore r = await restoreAccountBackup(
+        paths: paths,
+        password: 'dobre hasło 1',
+        importer: importer,
+        acceptedCosts: _accepted,
+        prepare: (AccountArchive archive) async =>
+            archive.withoutSection(CircleBackupSections.settings),
+        beforeTake: () async => sink.calls.add('before'),
+      );
+      expect(r.outcome, AccountImportOutcome.restarting);
+      expect(sink.calls, <String>['before', 'stop', 'adopt', 'restart']);
+      expect(
+        sink.adopted!.sections,
+        isNot(contains(CircleBackupSections.settings)),
+      );
+      expect(sink.adopted!.files, build.archive.files);
+    });
+
+    test(
+      'a last step that fails takes nothing and leaves nothing staged',
+      () async {
+        final _Sink sink = _Sink(account: 'fresh-1');
+        final AccountArchiveImporter importer = AccountArchiveImporter(
+          sink: sink,
+          staging: AccountImportStaging(sink.disk),
+        );
+        await expectLater(
+          restoreAccountBackup(
+            paths: paths,
+            password: 'dobre hasło 1',
+            importer: importer,
+            acceptedCosts: _accepted,
+            beforeTake: () async => throw StateError('no'),
+          ),
+          throwsStateError,
+        );
+        expect(sink.calls, isEmpty);
+        expect(sink.disk.files, isEmpty);
+      },
+    );
 
     test('a copy without the key is refused for another account', () async {
       final _Sink sink = _Sink(account: 'fresh-1');

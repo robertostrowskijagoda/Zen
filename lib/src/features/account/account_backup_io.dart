@@ -140,14 +140,22 @@ typedef AccountBackupRestore = ({
 /// [importer]: the manifest is checked first (another account's copy is
 /// refused before its files are read), then its files wait in the
 /// importer's staging until they are taken in.
+///
+/// [prepare] sees the manifest of a copy that would be taken, before its
+/// files are read: it answers the copy as it is to be taken (the same, or
+/// with less in it), or null to stop ([AccountImportOutcome.cancelled]).
+/// [beforeTake] runs once all of it was read, right before it is taken.
 Future<AccountBackupRestore> restoreAccountBackup({
   required List<String> paths,
   required String password,
   required AccountArchiveImporter importer,
   List<PasswordCost> acceptedCosts = kAcceptedRecoveryCosts,
+  Future<AccountArchive?> Function(AccountArchive archive)? prepare,
+  Future<void> Function()? beforeTake,
 }) async {
   AccountImportOutcome? refused;
   AccountArchive? seen;
+  AccountArchive? taken;
   final ({AccountArchive? archive, AccountBackupError? error}) read =
       await AccountBackupFile.read(
         chunks: readAccountBackupParts(paths),
@@ -161,6 +169,11 @@ Future<AccountBackupRestore> restoreAccountBackup({
             archive.account,
             withKey: archive.seed != null,
           );
+          if (refused != null) {
+            return false;
+          }
+          taken = prepare == null ? archive : await prepare(archive);
+          refused = taken == null ? AccountImportOutcome.cancelled : null;
           return refused == null;
         },
       );
@@ -173,5 +186,11 @@ Future<AccountBackupRestore> restoreAccountBackup({
   if (refused != null) {
     return (error: null, outcome: refused);
   }
-  return (error: null, outcome: await importer.take(archive));
+  try {
+    await beforeTake?.call();
+  } on Object {
+    await importer.staging.clear(archive);
+    rethrow;
+  }
+  return (error: null, outcome: await importer.take(taken ?? archive));
 }

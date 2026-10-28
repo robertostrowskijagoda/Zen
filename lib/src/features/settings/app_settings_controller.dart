@@ -296,12 +296,26 @@ final class AppSettingsController extends Notifier<AppSettings> {
   /// same).
   Future<void> restoreAll(AppSettings settings) => _save(settings);
 
-  /// The settings of a copy of the account (a backup file, the recovery
-  /// circle): the account's choices from it, this device's own as they are
-  /// ([AppSettings.takingCopy]) — a setup gone through here is not asked
-  /// again because of the copy.
+  /// The settings of a copy of the account without the app's lock (the
+  /// recovery circle, another device): the account's choices from it, this
+  /// device's own as they are ([AppSettings.takingCopy]) — a setup gone
+  /// through here is not asked again because of the copy.
   Future<void> restoreFromCopy(AppSettings copy) =>
       _save(state.takingCopy(copy));
+
+  /// The settings of a backup of the whole app, as they were
+  /// ([AppSettings.restoringWhole]). The disguised icon is switched on the
+  /// launcher too; where the phone does not take it, it stays as it is here.
+  Future<void> restoreWhole(AppSettings copy) async {
+    AppSettings next = state.restoringWhole(copy);
+    if (next.disguiseIcon != state.disguiseIcon &&
+        !await ref
+            .read(launcherDisguiseProvider)
+            .set(enabled: next.disguiseIcon)) {
+      next = next.copyWith(disguiseIcon: state.disguiseIcon);
+    }
+    await _save(next);
+  }
 
   Future<void> _save(AppSettings next) async {
     state = next;
