@@ -223,4 +223,108 @@ void main() {
     await _settle();
     expect(ta.hellosTo(quiet), hasLength(1));
   });
+
+  test('a hello that could not be sent at all does not count: the next '
+      'round greets again', () async {
+    final String a = _a('200::a');
+    final String b = _a('200::b');
+    final _Down ta = _Down(a);
+    _Linked.nodes[a] = ta;
+    await ta.start();
+    int now = 1700000000000;
+    final LedgerNode ania = LedgerNode(
+      transport: ta,
+      disk: MemoryLedgerDisk(),
+      friendAddresses: () => <String>[b],
+      bridges: BridgeBook(probe: (String _) async => null),
+      localAddress: () => a,
+      syncInterval: Duration.zero,
+      clock: HlcClock(wallClock: () => now),
+    );
+    addTearDown(ania.stop);
+    // The node is down while the ledger starts (a restored account
+    // restarting the app): the hello fails.
+    ta.down = true;
+    await ania.start();
+    await _settle();
+    expect(ta.hellosTo(b), isEmpty);
+
+    ta.down = false;
+    now += 1000;
+    await ania.greetFriends(onlyHeard: false);
+    await _settle();
+    expect(ta.hellosTo(b), hasLength(1), reason: 'not the 10 minutes later');
+  });
+
+  test('a friend whose hello never came is greeted again after 30 s, then '
+      'twice as long each time, and no more once it answered', () async {
+    final String a = _a('200::a');
+    final String b = _a('200::b');
+    final _Linked ta = await _transport(a);
+    int now = 1700000000000;
+    final HlcClock clock = HlcClock(wallClock: () => now);
+    final LedgerNode ania = LedgerNode(
+      transport: ta,
+      disk: MemoryLedgerDisk(),
+      friendAddresses: () => <String>[b],
+      bridges: BridgeBook(probe: (String _) async => null),
+      localAddress: () => a,
+      syncInterval: Duration.zero,
+      clock: clock,
+    );
+    addTearDown(ania.stop);
+    await ania.start();
+    await _settle();
+    expect(ta.hellosTo(b), hasLength(1));
+
+    Future<int> at(int seconds) async {
+      now = 1700000000000 + seconds * 1000;
+      await ania.greetUnknown();
+      await _settle(10);
+      return ta.hellosTo(b).length;
+    }
+
+    expect(await at(10), 1);
+    expect(await at(30), 2);
+    expect(await at(60), 2, reason: '60 s after the last one now');
+    expect(await at(90), 3);
+    expect(await at(200), 3);
+    expect(await at(210), 4);
+
+    // B comes up and answers: known now, no more extra hellos.
+    final _Linked tb = await _transport(b);
+    final LedgerNode bob = LedgerNode(
+      transport: tb,
+      disk: MemoryLedgerDisk(),
+      friendAddresses: () => <String>[a],
+      bridges: BridgeBook(probe: (String _) async => null),
+      localAddress: () => b,
+      syncInterval: Duration.zero,
+      clock: clock,
+    );
+    addTearDown(bob.stop);
+    await bob.start();
+    await _settle();
+    expect(ania.accountOfAddress(b), bob.account);
+    final int known = ta.hellosTo(b).length;
+    expect(await at(5000), known);
+  });
+}
+
+/// A transport whose node is not running while [down]: sends fail.
+final class _Down extends _Linked {
+  _Down(super.address);
+
+  bool down = false;
+
+  @override
+  Future<void> send({
+    required String remoteAddress,
+    required Map<String, dynamic> payload,
+  }) async {
+    if (down) {
+      throw StateError('Runtime node is not running');
+    }
+    await super.send(remoteAddress: remoteAddress, payload: payload);
+  }
 }
