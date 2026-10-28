@@ -10,6 +10,12 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Search
+- **Search in a chat and in a group**: the magnifier in the title bar (in the menu on a narrow phone) or Ctrl+F on a computer. The words found are marked in the messages, "3 z 12" says which match is shown, the arrows (or Enter and Shift+Enter) go to older and newer ones and the chat scrolls there, also far back in a long history. Esc closes it.
+- **Search on the chat list**: the field above the chats finds people and groups by name or by the nickname you gave, and messages of every conversation, grouped by conversation with the newest match first. A tap opens the chat at that message with its search on.
+- **Search on the Tablica** (posts, their authors and the comments you can see) and **in the settings** (a setting by its name or the line under it).
+- Case and Polish letters do not matter ("zolw" finds "żółw"), and every word typed has to be there. Search runs only on this device over what is already decrypted for the screen: nothing typed is sent anywhere or written down, and what was read for it is dropped when the field is cleared or the screen closed. Long histories are prepared in the background and searched in pieces, so the app stays smooth with tens of thousands of messages.
+
 ## 1.14.0 — 28.10.2026
 
 ### What's new
