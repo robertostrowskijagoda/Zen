@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.14.0 — 28.10.2026
+
 ### What's new
 - [en] Settings → Notifications and sounds: choose which kinds of notifications you get, and hear soft sounds for messages, likes and posts.
 - [en] Friends show up as online or in the background much sooner, and the graph opens on a presence view.
