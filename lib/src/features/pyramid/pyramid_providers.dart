@@ -87,7 +87,7 @@ final Provider<PyramidService> pyramidServiceProvider =
           await pyramid.greet();
           await devices?.start();
         }),
-        context: 'Odczyt piramidy',
+        context: 'Reading the pyramid',
       );
       listenFrames(ref, pyramid.handle, 'Piramida');
       void onWave(Map<dynamic, dynamic> json) => unawaitedLogged(
@@ -100,7 +100,7 @@ final Provider<PyramidService> pyramidServiceProvider =
         nearby.otherWaveHandlers.remove(onWave);
         unawaitedLogged(
           devices?.stop(),
-          context: 'Piramida na urządzeniach konta',
+          context: 'Pyramid on the account devices',
         );
         pyramid.dispose();
       });
@@ -111,10 +111,10 @@ final Provider<PyramidService> pyramidServiceProvider =
 /// every 5 minutes, hello to friends every 3 hours.
 void pyramidMinute(PyramidService pyramid, int minute) {
   if (minute % 5 == 0) {
-    unawaitedLogged(pyramid.duties(), context: 'Piramida: obowiązki');
+    unawaitedLogged(pyramid.duties(), context: 'Pyramid: duties');
   }
   if (minute % 180 == 0) {
-    unawaitedLogged(pyramid.greet(), context: 'Piramida: powitanie');
+    unawaitedLogged(pyramid.greet(), context: 'Pyramid: greeting');
   }
 }
 
@@ -142,7 +142,7 @@ Future<bool> reshareOrderedPost(
     );
     return true;
   } on Object catch (error, stack) {
-    logZenError('Udostępnienie na zamówienie', error, stack);
+    logZenError('Sharing on request', error, stack);
     return false;
   }
 }

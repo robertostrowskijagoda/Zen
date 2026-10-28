@@ -94,7 +94,7 @@ final class HiddenByMeNotifier extends Notifier<HiddenByMe> {
   @override
   HiddenByMe build() {
     _disk = ref.read(ledgerDiskProvider);
-    unawaitedLogged(_load(), context: 'Odczyt ukrytych treści');
+    unawaitedLogged(_load(), context: 'Reading hidden content');
     return const HiddenByMe();
   }
 
@@ -178,7 +178,7 @@ final class HiddenByMeNotifier extends Notifier<HiddenByMe> {
     _writing = run.then<void>(
       (_) {},
       onError: (Object error, StackTrace stackTrace) {
-        logZenError('Zapis ukrytych treści', error, stackTrace);
+        logZenError('Saving hidden content', error, stackTrace);
       },
     );
     return _writing;

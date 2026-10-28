@@ -417,7 +417,7 @@ final class TableService extends ChangeNotifier {
       }
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt Stołu na sześć', error, stack);
+      logZenError('Reading Table for six', error, stack);
     }
   }
 
@@ -986,7 +986,7 @@ final class TableService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Stół na sześć: do $to: $error');
+      logZenWarning('Table for six: to $to: $error');
     }
   }
 }

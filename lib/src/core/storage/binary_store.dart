@@ -369,7 +369,7 @@ final class FileBinaryStore {
 
   Future<File> write(String key, Uint8List payload) async {
     if (_heldNewer.contains(_canonicalKey(key))) {
-      logZenWarning('Zapis pominięty: plik zapisała nowsza wersja Zen.');
+      logZenWarning('Save skipped: a newer Zen wrote the file.');
       return _fileFor(key);
     }
     final _StorePlace place = await _placeOf(key);

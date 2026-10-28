@@ -41,12 +41,12 @@ final Provider<PlanService> planServiceProvider = Provider<PlanService>((
         );
   };
   Future<void> refresh() => plans.load().then((_) => plans.checkThresholds());
-  unawaitedLogged(refresh(), context: 'Odczyt planów');
+  unawaitedLogged(refresh(), context: 'Reading plans');
   listenFrames(ref, plans.handle, 'Plan na weekend');
   // The Android background service may take answers while the app is
   // away; plans that reached their threshold meanwhile convert here.
   final AppLifecycleListener life = AppLifecycleListener(
-    onResume: () => unawaitedLogged(refresh(), context: 'Odczyt planów'),
+    onResume: () => unawaitedLogged(refresh(), context: 'Reading plans'),
   );
   ref.onDispose(() {
     life.dispose();

@@ -320,7 +320,7 @@ final class AskService extends ChangeNotifier {
       }
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt pytań', error, stack);
+      logZenError('Reading questions', error, stack);
     }
   }
 
@@ -495,7 +495,7 @@ final class AskService extends ChangeNotifier {
         'a': answerer,
       };
     } on Object catch (error, stack) {
-      logZenError('Zapytaj sieć: podpis', error, stack);
+      logZenError('Ask the network: signature', error, stack);
       return null;
     }
   }
@@ -578,7 +578,7 @@ final class AskService extends ChangeNotifier {
         await _onAnswer(from, frame.payload);
       }
     } on Object catch (error, stack) {
-      logZenError('Zapytaj sieć', error, stack);
+      logZenError('Ask the network', error, stack);
     }
     return true;
   }
@@ -751,7 +751,7 @@ final class AskService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Zapytaj sieć: ${payload['type']} do $to: $error');
+      logZenWarning('Ask the network: ${payload['type']} to $to: $error');
     }
   }
 }

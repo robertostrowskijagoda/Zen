@@ -1744,7 +1744,7 @@ class _BridgeHostStatusCard extends StatelessWidget {
                       ? null
                       : () => unawaitedLogged(
                           host.runOnce(),
-                          context: 'Sprawdzenie mostu nie udało się',
+                          context: 'Checking the bridge failed',
                         ),
                   icon: const Icon(Icons.refresh_rounded),
                 ),

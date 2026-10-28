@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -90,22 +89,10 @@ void main(List<String> args) {
       runApp(const ZenBootstrapApp());
     },
     (Object error, StackTrace stackTrace) {
-      logZenError('Uncaught asynchronous error', error, stackTrace);
+      // With its whole stack: nothing caught it.
+      logZenUncaught('Uncaught asynchronous error', error, stackTrace);
     },
   );
 }
 
-void _installGlobalErrorHandlers() {
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details);
-    logZenError(
-      'Flutter framework error',
-      details.exception,
-      details.stack ?? StackTrace.current,
-    );
-  };
-  PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
-    logZenError('Platform dispatcher error', error, stackTrace);
-    return true;
-  };
-}
+void _installGlobalErrorHandlers() => installZenErrorLogging();

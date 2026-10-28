@@ -127,7 +127,7 @@ Future<List<InternetAddress>> systemAddresses() async {
       out.addAll(i.addresses);
     }
   } on Object catch (error) {
-    logZenWarning('Nie odczytałem adresów komputera: $error');
+    logZenWarning('Could not read the computer addresses: $error');
   }
   return out;
 }
@@ -190,10 +190,7 @@ final class BridgeHost {
       return;
     }
     _timer = Timer(after, () {
-      unawaitedLogged(
-        runOnce(),
-        context: 'Most sieci: sprawdzenie nie udało się',
-      );
+      unawaitedLogged(runOnce(), context: 'Network bridge: the check failed');
     });
   }
 

@@ -2391,6 +2391,9 @@ void _androidBackgroundRuntimeTaskEntryPoint() {
     () {
       WidgetsFlutterBinding.ensureInitialized();
       DartPluginRegistrant.ensureInitialized();
+      // This isolate's own handlers: what its framework or platform
+      // dispatcher does not catch reaches the log too.
+      installZenErrorLogging();
       // The service's own notices (and the channels it registers) speak the
       // person's language, not the source Polish.
       unawaitedLogged(
@@ -2402,8 +2405,8 @@ void _androidBackgroundRuntimeTaskEntryPoint() {
       );
     },
     (Object error, StackTrace stackTrace) {
-      logZenError(
-        'Android background runtime entrypoint failed',
+      logZenUncaught(
+        'Uncaught error in the background service',
         error,
         stackTrace,
       );

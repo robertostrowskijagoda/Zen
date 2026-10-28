@@ -737,7 +737,7 @@ final class IntroService extends ChangeNotifier {
       heldAsNewerOn(disk, _key, json, current: 1);
       if (json != null && (json is! Map || json['v'] != 1)) {
         // A newer app's file (or damage): never written over.
-        logZenWarning('Przedstawienia: nieznany zapis');
+        logZenWarning('Introductions: unknown record');
         return;
       }
       _cases.clear();
@@ -786,7 +786,7 @@ final class IntroService extends ChangeNotifier {
       _diskUnreadable = false;
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt przedstawień', error, stack);
+      logZenError('Reading introductions', error, stack);
     }
     _watchWallet();
   }
@@ -1074,7 +1074,7 @@ final class IntroService extends ChangeNotifier {
         note: words.isNotEmpty ? words : t('Znamy się przez znajomych.'),
       );
     } on Object catch (error, stack) {
-      logZenError('Graf: zaproszenie do znajomych', error, stack);
+      logZenError('Graph: friend invitation', error, stack);
       return null;
     }
     _cases[c.id] = c;
@@ -1182,7 +1182,7 @@ final class IntroService extends ChangeNotifier {
         'n': name,
       };
     } on Object catch (error, stack) {
-      logZenError('Przedstawienia: podpis', error, stack);
+      logZenError('Introductions: signature', error, stack);
       return null;
     }
   }
@@ -2655,7 +2655,7 @@ final class IntroService extends ChangeNotifier {
       _walletAgain = true;
       return;
     }
-    unawaitedLogged(_walletPass(), context: 'Bramy: płatności');
+    unawaitedLogged(_walletPass(), context: 'Gates: payments');
   }
 
   Future<void> _walletPass() async {
@@ -2729,7 +2729,7 @@ final class IntroService extends ChangeNotifier {
           await _onMoreBack(from, frame.payload);
       }
     } on Object catch (error, stack) {
-      logZenError('Przedstawienia: $type', error, stack);
+      logZenError('Introductions: $type', error, stack);
     }
     return true;
   }
@@ -3033,7 +3033,7 @@ final class IntroService extends ChangeNotifier {
     );
     if (!check.valid || _cases.containsKey(id)) {
       if (!check.valid) {
-        logZenWarning('Przedstawienia: podpis nadawcy się nie zgadza');
+        logZenWarning('Introductions: sender signature does not match');
       }
       return;
     }
@@ -3284,7 +3284,7 @@ final class IntroService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Przedstawienia: ${payload['type']} do $to: $error');
+      logZenWarning('Introductions: ${payload['type']} to $to: $error');
     }
   }
 }

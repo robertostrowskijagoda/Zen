@@ -594,7 +594,7 @@ final class EventService extends ChangeNotifier {
       }
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt wydarzeń', error, stack);
+      logZenError('Reading events', error, stack);
     }
   }
 
@@ -674,7 +674,7 @@ final class EventService extends ChangeNotifier {
       try {
         await work();
       } on Object catch (error, stack) {
-        logZenError('Wydarzenia', error, stack);
+        logZenError('Events', error, stack);
       }
     });
   }
@@ -1831,7 +1831,7 @@ final class EventService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Wydarzenia: ${payload['type']} do $to: $error');
+      logZenWarning('Events: ${payload['type']} to $to: $error');
     }
   }
 }

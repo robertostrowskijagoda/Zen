@@ -267,7 +267,7 @@ final class LedgerArchive {
     try {
       index = jsonDecode(utf8.decode(raw));
     } on FormatException {
-      logZenWarning('Indeks dziennika jest uszkodzony; zaczynam od zera.');
+      logZenWarning('The ledger index is damaged; starting from scratch.');
       return (index: null, unreadable: true);
     }
     if (heldAsNewerOn(disk, indexKey, index, current: formatVersion)) {
@@ -275,7 +275,7 @@ final class LedgerArchive {
       return (index: null, unreadable: true);
     }
     if (index is! Map || !isReadableFormat(index, current: formatVersion)) {
-      logZenWarning('Indeks dziennika jest nieczytelny; zaczynam od zera.');
+      logZenWarning('The ledger index is unreadable; starting from scratch.');
       return (index: null, unreadable: true);
     }
     return (index: index, unreadable: false);
@@ -332,7 +332,9 @@ final class LedgerArchive {
         '$certificatesPrefix$name',
       );
       if (file == null) {
-        logZenWarning('Certyfikaty urządzeń nieczytelne; dotrą od innych.');
+        logZenWarning(
+          'Device certificates unreadable; they will come from others.',
+        );
         continue;
       }
       final List<DeviceCertificate> certs = <DeviceCertificate>[
@@ -440,8 +442,8 @@ final class LedgerArchive {
       if (restored < count) {
         incompleteLogs.add('$space|$writer');
         logZenWarning(
-          'Dziennik $space odtworzony częściowo (${restored - base} z '
-          '${count - base}); reszta dotrze od innych.',
+          'Ledger $space partly restored (${restored - base} of '
+          '${count - base}); the rest will come from others.',
         );
       }
     }
@@ -512,7 +514,7 @@ final class LedgerArchive {
     _flushQueued = true;
     scheduleMicrotask(() {
       _flushQueued = false;
-      unawaitedLogged(flush(), context: 'Zapis dziennika nie udał się');
+      unawaitedLogged(flush(), context: 'Saving the ledger failed');
     });
   }
 
@@ -817,7 +819,9 @@ final class LedgerArchive {
         }
       }
     } on FormatException {
-      logZenWarning('Indeks dziennika nieczytelny; zostaje stan z pamięci.');
+      logZenWarning(
+        'The ledger index is unreadable; keeping the state in memory.',
+      );
     } finally {
       _paused = _heldNewer;
     }

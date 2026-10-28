@@ -96,7 +96,7 @@ final class MediaStreamServer {
       try {
         await (await starting).close(force: true);
       } on Object catch (error) {
-        logZenWarning('Serwer filmów: zamknięcie: $error');
+        logZenWarning('Film server: closing: $error');
       }
     }
   }
@@ -108,8 +108,8 @@ final class MediaStreamServer {
     );
     server.listen(
       (HttpRequest request) =>
-          unawaitedLogged(_serve(request), context: 'Serwer filmów: żądanie'),
-      onError: (Object error) => logZenWarning('Serwer filmów: $error'),
+          unawaitedLogged(_serve(request), context: 'Film server: request'),
+      onError: (Object error) => logZenWarning('Film server: $error'),
     );
     return server;
   }
@@ -191,7 +191,7 @@ final class MediaStreamServer {
       await response.close();
     } on Object catch (error) {
       // The player went away mid-way (a seek, the screen closed).
-      logZenWarning('Serwer filmów: $error');
+      logZenWarning('Film server: $error');
       try {
         await response.close();
       } on Object {

@@ -276,7 +276,7 @@ final class FollowLedger {
     final bool on = e.body['on'] == 1;
     unawaitedLogged(
       on ? node.follow(addr) : node.unfollow(addr),
-      context: 'Obserwowanie z innego urządzenia nie udało się',
+      context: 'Following from another device failed',
     );
   }
 
@@ -318,7 +318,7 @@ final class FollowLedger {
         notice,
         certificate: DeviceCertificate.fromJson(payload['cert']),
       ),
-      context: 'Odczyt obserwowania nie udał się',
+      context: 'Reading follows failed',
     );
   }
 
@@ -505,7 +505,7 @@ final class FollowLedger {
         }
       }
     } on FormatException {
-      logZenWarning('Lista obserwujących jest uszkodzona.');
+      logZenWarning('The list of followers is damaged.');
     }
   }
 

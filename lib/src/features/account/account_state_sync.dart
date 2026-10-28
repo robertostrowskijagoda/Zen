@@ -384,7 +384,7 @@ final class AccountStateSync {
       try {
         await work();
       } on Object catch (error, stack) {
-        logZenError('Stan konta na urządzeniach', error, stack);
+        logZenError('Account state on devices', error, stack);
       }
     });
   }
@@ -631,7 +631,7 @@ final class AccountStateSync {
       await d.write(unflattenAccountState(units, current));
     } on Object catch (error) {
       // Not now (the file of a photo has not come yet…): again later.
-      logZenWarning('Stan konta ${d.id}: $error');
+      logZenWarning('Account state ${d.id}: $error');
       _units[d.id] = before;
       _deferred.add(body);
       return;
@@ -687,7 +687,7 @@ final class AccountStateSync {
     try {
       await d.write(unflattenAccountState(merged, state));
     } on Object catch (error) {
-      logZenWarning('Stan konta ${d.id}: $error');
+      logZenWarning('Account state ${d.id}: $error');
       return false;
     }
     final Map<String, Object?>? after = await d.read();

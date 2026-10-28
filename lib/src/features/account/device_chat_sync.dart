@@ -124,7 +124,7 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
       try {
         onNewOutgoing?.call(peer, m);
       } on Object catch (error, stack) {
-        logZenError('Kopia wiadomości dla innych urządzeń', error, stack);
+        logZenError('Message copies for other devices', error, stack);
       }
     }
   }
@@ -250,7 +250,7 @@ final class DeviceChatSync {
       try {
         await work();
       } on Object catch (error, stack) {
-        logZenError('Wspólne rozmowy urządzeń', error, stack);
+        logZenError('Shared device conversations', error, stack);
       }
     });
   }

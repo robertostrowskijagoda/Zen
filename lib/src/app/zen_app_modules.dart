@@ -87,7 +87,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       // on all the account's devices.
       unawaitedLogged(
         ref.read(accountDevicesKeeperProvider).start(),
-        context: 'Stan konta na urządzeniach',
+        context: 'Account state on devices',
       );
       ref.read(nearbyServiceProvider);
       ref.read(eventServiceProvider);

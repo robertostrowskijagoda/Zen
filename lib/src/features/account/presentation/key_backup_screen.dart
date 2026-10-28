@@ -98,7 +98,7 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
     try {
       await node.start();
     } on Object catch (error, stack) {
-      logZenError('Kopia klucza konta', error, stack);
+      logZenError('Account key backup', error, stack);
     }
     if (!mounted) {
       return;

@@ -38,7 +38,7 @@ class LauncherDisguise {
           }) ??
           false;
     } on Object catch (error) {
-      logZenWarning('Kamuflaż ikony: $error');
+      logZenWarning('Icon disguise: $error');
       return false;
     }
   }

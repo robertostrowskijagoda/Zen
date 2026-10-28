@@ -47,7 +47,7 @@ final class PlatformFullScreenChrome implements FullScreenChrome {
         await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       }
     } on Object catch (error) {
-      logZenWarning('Graf: pełny ekran: $error');
+      logZenWarning('Graph: full screen: $error');
     }
   }
 
@@ -65,7 +65,7 @@ final class PlatformFullScreenChrome implements FullScreenChrome {
         );
       }
     } on Object catch (error) {
-      logZenWarning('Graf: koniec pełnego ekranu: $error');
+      logZenWarning('Graph: leaving full screen: $error');
     }
   }
 }

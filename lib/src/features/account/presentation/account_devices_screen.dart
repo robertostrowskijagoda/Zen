@@ -593,7 +593,7 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
         );
       });
     } on Object catch (error) {
-      logZenWarning('Podłączenie urządzenia: $error');
+      logZenWarning('Linking a device: $error');
       setState(
         () => _message = '$error'.replaceFirst('TimeoutException: ', ''),
       );

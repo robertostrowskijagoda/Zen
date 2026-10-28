@@ -401,7 +401,7 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
         _disappearAt = null;
         unawaitedLogged(
           sweepDisappearingMessages(),
-          context: 'Usuwanie znikających wiadomości',
+          context: 'Deleting disappearing messages',
         );
       },
     );

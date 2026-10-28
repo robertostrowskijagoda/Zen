@@ -148,7 +148,7 @@ final class ZenFormatGuard extends ChangeNotifier {
     if (area.isEmpty || !_areas.add(area)) {
       return;
     }
-    logZenWarning('Dane "$area" zapisała nowsza wersja Zen; bez zmian.');
+    logZenWarning('Data "$area" was written by a newer Zen; left as it is.');
     notifyListeners();
   }
 

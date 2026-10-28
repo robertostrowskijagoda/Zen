@@ -205,10 +205,10 @@ final class FilmsController extends FilmsBackend {
       ..add(node.mediaCompleted.listen(_onMediaDone));
     _housekeeping = Timer.periodic(
       const Duration(minutes: 10),
-      (_) => unawaitedLogged(_houseKeep(), context: 'Filmy: porządki'),
+      (_) => unawaitedLogged(_houseKeep(), context: 'Films: clean-up'),
     );
     await _rebuild();
-    unawaitedLogged(_houseKeep(), context: 'Filmy: porządki');
+    unawaitedLogged(_houseKeep(), context: 'Films: clean-up');
   }
 
   @override

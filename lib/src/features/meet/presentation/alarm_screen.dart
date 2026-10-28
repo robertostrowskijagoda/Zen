@@ -1481,7 +1481,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
         friend: nearby.friendOfToken(json['t']),
         source: device,
       ),
-      context: 'Alarm w pobliżu',
+      context: 'Alarm nearby',
     );
   }
 
@@ -1500,7 +1500,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
     // 5× the power button: the phone counts and tells the app while
     // it runs the network itself (otherwise the background service).
     _powerShortcut = const AlarmShortcutChannel().presses.listen((_) {
-      unawaitedLogged(_onPowerShortcut(), context: 'Skrót alarmu');
+      unawaitedLogged(_onPowerShortcut(), context: 'Alarm shortcut');
     });
     // Friends nearby marked met in person without the "W pobliżu" screen,
     // when allowed: here while the app is unlocked (on screen or in the
@@ -1515,7 +1515,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
           ref.read(zenCoreProvider).isStarted,
     );
     _keeper = keeper;
-    unawaitedLogged(keeper.start(), context: 'W pobliżu: rozglądanie');
+    unawaitedLogged(keeper.start(), context: 'Nearby: looking around');
     // An alarm raised while the app was away is followed from here.
     _minute = Timer.periodic(
       const Duration(minutes: 1),
@@ -1535,7 +1535,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
     if (powerShortcut != null) {
       unawaited(powerShortcut.cancel());
     }
-    unawaitedLogged(_keeper?.close(), context: 'W pobliżu: rozglądanie');
+    unawaitedLogged(_keeper?.close(), context: 'Nearby: looking around');
     _keeper = null;
     super.dispose();
   }
@@ -1548,7 +1548,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
       return;
     }
     final ShortcutAlarmResult result = await raiseAlarmFromShortcut(service);
-    logZenMessage('Skrót alarmu w aplikacji: ${result.name}.');
+    logZenMessage('Alarm shortcut in the app: ${result.name}.');
     if (result == ShortcutAlarmResult.raised) {
       await followOwnAlarm(service);
     }
@@ -1578,7 +1578,7 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
     if (service == null || own == null || service.now - own.at < 10000) {
       return;
     }
-    unawaitedLogged(followOwnAlarm(service), context: 'Alarm: położenie');
+    unawaitedLogged(followOwnAlarm(service), context: 'Alarm: location');
   }
 
   void _check() {

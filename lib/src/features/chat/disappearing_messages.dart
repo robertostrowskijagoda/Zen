@@ -159,7 +159,7 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
     try {
       await onExpired?.call(key, m);
     } on Object catch (error, stack) {
-      logZenError('Usuwanie znikającej wiadomości', error, stack);
+      logZenError('Deleting a disappearing message', error, stack);
     }
   }
 

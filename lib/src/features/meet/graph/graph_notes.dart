@@ -252,7 +252,7 @@ final class GraphNotesService extends ChangeNotifier {
       _notes = json == null ? GraphNotes() : GraphNotes.fromJson(json);
       _unreadable = false;
     } on Object catch (error, stack) {
-      logZenError('Graf: odczyt notatek', error, stack);
+      logZenError('Graph: reading notes', error, stack);
     }
     _changed();
   }
@@ -268,7 +268,7 @@ final class GraphNotesService extends ChangeNotifier {
         Uint8List.fromList(utf8.encode(jsonEncode(_notes.toJson()))),
       );
     } on Object catch (error, stack) {
-      logZenError('Graf: zapis notatek', error, stack);
+      logZenError('Graph: saving notes', error, stack);
     }
     _changed();
   }

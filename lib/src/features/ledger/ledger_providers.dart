@@ -237,7 +237,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     ref
         .read(socialHubControllerProvider.notifier)
         .warnDeviceKeyMismatch(address),
-    context: 'Ostrzeżenie o kluczu urządzenia',
+    context: 'Device key warning',
   );
   node
     ..onSessionKeys = (Map<String, String> keys, {bool force = false}) {
@@ -250,7 +250,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       ref
           .read(socialHubControllerProvider.notifier)
           .warnDeviceUnlinked(address),
-      context: 'Ostrzeżenie o odłączonym urządzeniu',
+      context: 'Unlinked device warning',
     );
   // A friend met on a new device (theirs, or this one after a restore):
   // the profiles go both ways, so names and photos are there at once.
@@ -273,7 +273,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
         ref
             .read(socialHubControllerProvider.notifier)
             .shareOwnProfileWith(friend),
-        context: 'Wysłanie profilu nowemu urządzeniu',
+        context: 'Sending the profile to a new device',
       );
     }
   };
@@ -286,7 +286,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       .read(accountDirectoryHolderProvider)
       .expectLedger();
   unawaited(node.settled.then((_) => ledgerLoaded()));
-  unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
+  unawaitedLogged(node.start(), context: 'Starting the ledger failed');
   // Files shared in groups travel as blocks of this store.
   final ChatMediaBlocksHolder mediaBlocks = ref.read(
     chatMediaBlocksHolderProvider,
@@ -338,13 +338,13 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       node.publishForOwnDevices(kContactRemovedKind, <String, dynamic>{
         'a': address,
       }, spaceKind: 'private'),
-      context: 'Zapis usunięcia znajomego nie udał się',
+      context: 'Saving a friend removal failed',
     ))
     ..groupLeft = ((String groupId) => unawaitedLogged(
       node.publishForOwnDevices(kContactRemovedKind, <String, dynamic>{
         'g': groupId,
       }, spaceKind: 'private'),
-      context: 'Zapis wyjścia z grupy nie udał się',
+      context: 'Saving leaving a group failed',
     ));
   // The social hub asks friends' levels without starting the ledger.
   final FriendLevelLookup levels = ref.read(friendLevelLookupProvider)
@@ -366,7 +366,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     // Big files wait for Wi-Fi when "Media tylko przez Wi-Fi" is on.
     policy: ref.read(accountMediaPolicyProvider),
   );
-  unawaitedLogged(chatSync.start(), context: 'Wspólne rozmowy urządzeń');
+  unawaitedLogged(chatSync.start(), context: 'Shared device conversations');
   final MessageTimelineStore timelines = DisappearingTimelineStore.unwrap(
     ref.read(messageTimelineStoreProvider),
   );
@@ -392,12 +392,12 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
 
   unawaitedLogged(
     node.start().then((_) => takeContacts()),
-    context: 'Odczyt kopii znajomych nie udał się',
+    context: 'Reading the friends backup failed',
   );
   final StreamSubscription<void> contactsSub = node.contactsChanged.listen(
     (_) => unawaitedLogged(
       takeContacts(),
-      context: 'Odczyt kopii znajomych nie udał się',
+      context: 'Reading the friends backup failed',
     ),
   );
   ref.listen<String>(
@@ -411,7 +411,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
           node.publishContacts(
             ref.read(socialHubControllerProvider.notifier).contactsBackup(),
           ),
-          context: 'Zapis kopii znajomych nie udał się',
+          context: 'Saving the friends backup failed',
         );
       });
     },
@@ -420,7 +420,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     const Duration(seconds: 45),
     () => unawaitedLogged(
       node.resumeIfUnmanaged(),
-      context: 'Awaryjny start dziennika nie udał się',
+      context: 'Emergency start of the ledger failed',
     ),
   );
   ref.listen<String>(
@@ -432,7 +432,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       if (previous != next) {
         unawaitedLogged(
           node.onFriendsChanged(),
-          context: 'Odświeżenie znajomych w dzienniku nie udało się',
+          context: 'Refreshing friends in the ledger failed',
         );
       }
     },
@@ -463,7 +463,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
 
   void mirrorProfile() => unawaitedLogged(
     publishProfile(),
-    context: 'Zapis profilu w dzienniku nie udał się',
+    context: 'Saving the profile in the ledger failed',
   );
   // The numbers of friends and followers are profile fields too.
   final StreamSubscription<void> followersSub = follows.changes.listen(
@@ -488,7 +488,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   ref.onDispose(() => unawaited(profileAddressSub.cancel()));
   unawaitedLogged(
     node.start().then((_) => mirrorProfile()),
-    context: 'Zapis profilu w dzienniku nie udał się',
+    context: 'Saving the profile in the ledger failed',
   );
   ref.listen<UserProfile>(
     userProfileControllerProvider,
@@ -502,7 +502,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       mirrorProfile();
       unawaitedLogged(
         node.publishOwnDevice(),
-        context: 'Zapis adresu urządzenia nie udał się',
+        context: 'Saving the device address failed',
       );
     },
   );
@@ -521,7 +521,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
             return f == null ? '' : social.nameFor(f);
           },
         ),
-        context: 'Przekazanie reakcji nie udało się',
+        context: 'Passing on a reaction failed',
       );
     },
   );
@@ -545,7 +545,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     relayTimer.cancel();
     contactsTimer?.cancel();
     unawaitedLogged(contactsSub.cancel(), context: 'Zatrzymanie kopii');
-    unawaitedLogged(chatSync.stop(), context: 'Zatrzymanie wspólnych rozmów');
+    unawaitedLogged(chatSync.stop(), context: 'Stopping shared conversations');
     if (timelines is SyncingMessageTimelineStore &&
         timelines.onNewOutgoing == chatSync.onOutgoing) {
       timelines.onNewOutgoing = null;
@@ -560,10 +560,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
         ..groupLeft = null;
     }
     unawaitedLogged(relaySub.cancel(), context: 'Zatrzymanie przekazywania');
-    unawaitedLogged(
-      node.stop(),
-      context: 'Zatrzymanie dziennika nie udało się',
-    );
+    unawaitedLogged(node.stop(), context: 'Stopping the ledger failed');
   });
   return node;
 });

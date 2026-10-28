@@ -1022,7 +1022,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             if (!n.isFriend) n.address,
         ],
       ),
-      context: 'Graf: daty',
+      context: 'Graph: dates',
     );
     return data;
   }
@@ -1360,7 +1360,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             all: true,
           );
         }
-      }(), context: 'Graf: daty z rozmów');
+      }(), context: 'Graph: dates from conversations');
     });
   }
 

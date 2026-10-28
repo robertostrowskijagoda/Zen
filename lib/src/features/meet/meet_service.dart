@@ -302,7 +302,7 @@ final class MeetService extends ChangeNotifier {
     } on Object catch (error, stack) {
       // Keep what is in memory; the next reload (e.g. after unlocking) reads
       // again.
-      logZenError('Odczyt spotkań', error, stack);
+      logZenError('Reading meetings', error, stack);
       return;
     }
     notifyListeners();
@@ -371,7 +371,7 @@ final class MeetService extends ChangeNotifier {
             await _onOwnAlarmAudio(frame.payload);
           }
         } on Object catch (error, stack) {
-          logZenError('Spotkania: $type', error, stack);
+          logZenError('Meetings: $type', error, stack);
         }
       }
       return true;
@@ -408,7 +408,7 @@ final class MeetService extends ChangeNotifier {
           }
       }
     } on Object catch (error, stack) {
-      logZenError('Spotkania: $type', error, stack);
+      logZenError('Meetings: $type', error, stack);
     }
     return true;
   }
@@ -642,7 +642,9 @@ final class MeetService extends ChangeNotifier {
 
   Future<void> _onAlarm(String from, Map<String, dynamic> payload) async {
     if (!await _alarmSignatureHolds(from, payload)) {
-      logZenWarning('Spotkania: alarm ze złym podpisem od $from odrzucony.');
+      logZenWarning(
+        'Meetings: an alarm with a bad signature from $from refused.',
+      );
       return;
     }
     // The copy a friend's locked phone sealed in advance for the mailboxes
@@ -855,7 +857,7 @@ final class MeetService extends ChangeNotifier {
     try {
       return await _update<bool>((MeetBook b) => b.putAlarm(alarm));
     } on Object catch (error, stack) {
-      logZenError('Zapis alarmu znajomego', error, stack);
+      logZenError('Saving an alarm of a friend', error, stack);
       final bool kept = _book.putAlarm(alarm);
       notifyListeners();
       return kept;
@@ -889,7 +891,7 @@ final class MeetService extends ChangeNotifier {
         b.putAlarm(stored == null ? alarm : merge(stored));
       });
     } on Object catch (error, stack) {
-      logZenError('Zapis alarmu', error, stack);
+      logZenError('Saving the alarm', error, stack);
       _unsaved = alarm;
     }
   }
@@ -1032,7 +1034,7 @@ final class MeetService extends ChangeNotifier {
     }
     final Future<int> wave = _waveNearby(alarm);
     pendingNearbyWave = wave;
-    unawaitedLogged(wave.then<void>((int _) {}), context: 'Alarm w pobliżu');
+    unawaitedLogged(wave.then<void>((int _) {}), context: 'Alarm nearby');
   }
 
   /// A fresh position for this person's running alarm (sent first, saved
@@ -1233,7 +1235,7 @@ final class MeetService extends ChangeNotifier {
     );
     if (cert == null ||
         !await cert.verify(from: from, account: accountOf?.call(from))) {
-      logZenWarning('Spotkania: niesprawdzony klucz alarmu od $from.');
+      logZenWarning('Meetings: unverified alarm key from $from.');
       return;
     }
     final List<String> had = _book.friendAlarmKeys[from] ?? const <String>[];
@@ -1399,7 +1401,7 @@ final class MeetService extends ChangeNotifier {
     _keepInMemory(adopted);
     await _saveOwnAlarm(adopted, merge);
     if (had == null) {
-      logZenMessage('Alarm z zablokowanego telefonu przejęty.');
+      logZenMessage('Alarm from a locked phone taken over.');
       await _broadcastAlarm(adopted);
     }
   }
@@ -1590,7 +1592,7 @@ final class MeetService extends ChangeNotifier {
     try {
       return await send(alarmWave(alarm));
     } on Object catch (error) {
-      logZenWarning('Alarm w pobliżu: $error');
+      logZenWarning('Alarm nearby: $error');
       return 0;
     }
   }
@@ -1826,7 +1828,7 @@ final class MeetService extends ChangeNotifier {
           });
         } on Object catch (error, stack) {
           // Not saved: it still goes out (B10).
-          logZenError('Zapis alarmu', error, stack);
+          logZenError('Saving the alarm', error, stack);
           current = widen(before);
           _keepInMemory(current);
           _unsaved = current;
@@ -1878,7 +1880,7 @@ final class MeetService extends ChangeNotifier {
         (MeetBook b) => b.putAlarm(answered(b.alarm(alarmId) ?? alarm)),
       );
     } on Object catch (error, stack) {
-      logZenError('Zapis odpowiedzi na alarm', error, stack);
+      logZenError('Saving an alarm answer', error, stack);
     }
   }
 
@@ -2084,7 +2086,7 @@ final class MeetService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Spotkania: wysłanie ${payload['type']} do $to: $error');
+      logZenWarning('Meetings: sending ${payload['type']} to $to: $error');
     }
   }
 }

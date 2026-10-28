@@ -734,7 +734,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       await send(remoteAddress, payload);
       return true;
     } on Object catch (error) {
-      logZenWarning('Drzwi mieszkania nie wysłały: $error');
+      logZenWarning('Home door did not send: $error');
       return false;
     }
   }
@@ -887,7 +887,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
           address = session.startDoor?.call(seed);
         }
       } on Object catch (error) {
-        logZenWarning('Drzwi mieszkania nie ruszyły: $error');
+        logZenWarning('Home door did not start: $error');
       }
     }
     _setDoorAddress(address);
@@ -915,7 +915,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       session.setMailboxDoors?.call(_mailboxSeeds);
     } on Object catch (error) {
-      logZenWarning('Drzwi znajomych nie ruszyły: $error');
+      logZenWarning('Friend doors did not start: $error');
     }
   }
 
@@ -965,7 +965,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       add(uri);
     } catch (error) {
-      logZenWarning('Dodanie mostu $uri nie udało się: $error');
+      logZenWarning('Adding bridge $uri failed: $error');
     }
   }
 
@@ -977,7 +977,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       remove(uri);
     } catch (error) {
-      logZenWarning('Usunięcie mostu $uri nie udało się: $error');
+      logZenWarning('Removing bridge $uri failed: $error');
     }
   }
 
@@ -1355,7 +1355,13 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       } catch (error, stackTrace) {
         lastError = error;
         final bool outranked = isNodeOwnerYield(error);
-        if (!outranked) {
+        if (!outranked && attempt < maxAttempts) {
+          // Tried again: a warning; only the last attempt is an error.
+          logZenWarning(
+            'Runtime live bootstrap attempt $attempt/$maxAttempts failed: '
+            '$error',
+          );
+        } else if (!outranked) {
           logZenError(
             'Runtime live bootstrap attempt $attempt/$maxAttempts failed',
             error,

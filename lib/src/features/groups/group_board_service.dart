@@ -98,7 +98,7 @@ final class GroupBoardService extends ChangeNotifier {
         board = GroupBoard.fromJson(jsonDecode(utf8.decode(raw)));
       }
     } on Object catch (error, stack) {
-      logZenError('Tablica grupy: odczyt', error, stack);
+      logZenError('Group board: reading', error, stack);
     }
     return _boards[groupId] = board;
   }
@@ -245,7 +245,7 @@ final class GroupBoardService extends ChangeNotifier {
           'p': post.toJson(),
         });
       } on Object catch (error, stack) {
-        logZenError('Tablica grupy: wysyłka', error, stack);
+        logZenError('Group board: sending', error, stack);
       }
     }
   }
@@ -275,7 +275,7 @@ final class GroupBoardService extends ChangeNotifier {
           'h': have,
         });
       } on Object catch (error, stack) {
-        logZenError('Tablica grupy: synchronizacja', error, stack);
+        logZenError('Group board: syncing', error, stack);
       }
     }
   }

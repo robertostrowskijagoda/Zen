@@ -247,7 +247,9 @@ final class LedgerNode {
   /// bridge failed early): take the disk after all.
   Future<void> resumeIfUnmanaged() async {
     if (!_ownershipManaged && _suspended && !_loaded) {
-      logZenWarning('Dziennik nie dostał zgody na start; startuję sam.');
+      logZenWarning(
+        'The ledger got no go-ahead to start; starting on its own.',
+      );
       await resume();
     }
   }
@@ -707,7 +709,7 @@ final class LedgerNode {
       // Our own log did not come back whole: entries others hold may be
       // missing here, and writing on would number new ones like them (a
       // fork everyone refuses for good). A new log goes on cleanly.
-      logZenWarning('Własny dziennik niepełny; zaczynam nowy.');
+      logZenWarning('Own ledger incomplete; starting a new one.');
       loaded = await loaded.withNewWriter(disk);
     }
     identity = loaded;
@@ -745,7 +747,7 @@ final class LedgerNode {
       if (isSealed(e.body)) {
         unawaitedLogged(
           _open(<LogEntry>[e]),
-          context: 'Odszyfrowanie wpisu nie udało się',
+          context: 'Decrypting an entry failed',
         );
       }
       if (e.account != account && autoDownloadMedia()) {
@@ -760,7 +762,7 @@ final class LedgerNode {
       if (e.kind == kDeviceRecordKind) {
         unawaitedLogged(
           _onDeviceRecord(e),
-          context: 'Odczyt urządzenia konta nie udał się',
+          context: 'Reading an account device failed',
         );
       }
     });
@@ -795,7 +797,7 @@ final class LedgerNode {
     _frames = transport.frames.listen(
       (SignalTransportFrame frame) => unawaitedLogged(
         _onFrame(frame),
-        context: 'Obsługa wiadomości dziennika nie udała się',
+        context: 'Handling a ledger message failed',
       ),
     );
   }
@@ -812,11 +814,11 @@ final class LedgerNode {
         _syncRound += 1;
         unawaitedLogged(
           greetFriends(onlyHeard: _syncRound % kLedgerGreetAllEvery != 0),
-          context: 'Okresowa synchronizacja dziennika nie udała się',
+          context: 'Periodic ledger sync failed',
         );
         unawaitedLogged(
           maintainBridges(),
-          context: 'Sprawdzenie mostów nie udało się',
+          context: 'Checking the bridges failed',
         );
       }
     });
@@ -854,7 +856,7 @@ final class LedgerNode {
       }
       unawaitedLogged(
         greetUnknown(),
-        context: 'Powitanie nowych znajomych nie wyszło',
+        context: 'Greeting new friends was not sent',
       );
     });
   }
@@ -1203,7 +1205,7 @@ final class LedgerNode {
         });
       }
     } on FormatException {
-      logZenWarning('Lista spotkań osobiście jest uszkodzona.');
+      logZenWarning('The list of in-person meetings is damaged.');
     }
   }
 
@@ -1771,7 +1773,7 @@ final class LedgerNode {
           store.directory.isRevoked(acc, e.value)) {
         unawaitedLogged(
           _cutOff(e.key, acc),
-          context: 'Odłączenie urządzenia znajomego',
+          context: 'Unlinking a device of a friend',
         );
       }
     }
@@ -1783,7 +1785,7 @@ final class LedgerNode {
       (_, _DeviceRef r) => store.directory.isRevoked(r.account, r.device),
     );
     if (_devices.length != before) {
-      unawaitedLogged(_saveDevices(), context: 'Zapis urządzeń konta');
+      unawaitedLogged(_saveDevices(), context: 'Saving the account devices');
       _emitDevices();
     }
   }
@@ -1807,7 +1809,7 @@ final class LedgerNode {
     _addressDevices.remove(normalized);
     _certificateKnownBy.remove(normalized);
     await _savePeers();
-    logZenWarning('Dziennik: właściciel odłączył urządzenie pod $normalized.');
+    logZenWarning('Ledger: the owner unlinked the device at $normalized.');
     final Set<Audience> readable = audiencesFor(levelOf(normalized));
     if (readable.isNotEmpty) {
       for (final Audience a in readable) {
@@ -1866,7 +1868,9 @@ final class LedgerNode {
         _deviceSeeds.addAll(seeds.whereType<String>());
       }
     } on FormatException {
-      logZenWarning('Lista urządzeń konta jest uszkodzona; zaczynam od zera.');
+      logZenWarning(
+        'The account device list is damaged; starting from scratch.',
+      );
     }
   }
 
@@ -1958,9 +1962,15 @@ final class LedgerNode {
       // Nothing of the ledger goes to a device its owner cut off.
       return;
     }
-    unawaitedLogged(
-      transport.send(remoteAddress: peer, payload: message),
-      context: 'Wysłanie wiadomości dziennika nie udało się',
+    // Not sent (the node is down, the peer out of reach): the ledger asks
+    // again later, so a warning, not an error with its stack.
+    unawaited(
+      transport
+          .send(remoteAddress: peer, payload: message)
+          .catchError(
+            (Object error) =>
+                logZenWarning('Sending a ledger message failed: $error'),
+          ),
     );
   }
 
@@ -2231,7 +2241,7 @@ final class LedgerNode {
     String signedKey,
   ) {
     logZenWarning(
-      'Dziennik: klucz urządzenia pod $address nie zgadza się z sesją.',
+      'Ledger: the device key at $address does not match the session.',
     );
     // The device signed its key: when it is the device (or account) this
     // node knows there, that key is the one to trust, and the session that
@@ -2814,7 +2824,7 @@ final class LedgerNode {
         heldAsNewerOn(disk, _keyringKey, json, current: 1);
         keyring.restore(json);
       } on FormatException {
-        logZenWarning('Klucze odbiorców są uszkodzone.');
+        logZenWarning('Recipient keys are damaged.');
       }
     }
     if (keyring.ensureOwn(_clock.wallMillis())) {
@@ -2833,7 +2843,7 @@ final class LedgerNode {
           });
         }
       } on FormatException {
-        logZenWarning('Poziomy znajomych są uszkodzone.');
+        logZenWarning('Friend levels are damaged.');
       }
     }
   }
@@ -3039,7 +3049,7 @@ final class LedgerNode {
       heldAsNewerOn(disk, _bridgesKey, json, current: 1);
       bridges.restore(json);
     } on FormatException {
-      logZenWarning('Książka mostów jest uszkodzona; zaczynam od zera.');
+      logZenWarning('The bridge book is damaged; starting from scratch.');
     }
   }
 
@@ -3071,7 +3081,7 @@ final class LedgerNode {
         into(_unlinked, json['x']);
       }
     } on FormatException {
-      logZenWarning('Lista kont znajomych w dzienniku jest uszkodzona.');
+      logZenWarning('The ledger list of friend accounts is damaged.');
     }
   }
 
@@ -3090,7 +3100,7 @@ final class LedgerNode {
         });
       }
     } on FormatException {
-      logZenWarning('Lista obserwowanych jest uszkodzona.');
+      logZenWarning('The list of followed people is damaged.');
     }
   }
 

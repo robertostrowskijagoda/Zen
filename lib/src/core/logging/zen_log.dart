@@ -17,6 +17,15 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 /// [fileLimitBytes] it becomes `<file>.1` (replacing the one before) and a
 /// new one starts. The settings screen reads all of them back as one log,
 /// in time order.
+///
+/// Every entry starts with its local time and UTC offset
+/// ([diagnosticsTimestamp]), so the log reads right across a change of
+/// summer time and merges by the moment, not by the text. An entry is at
+/// most [entryLimitChars] long (cut between characters, never inside
+/// one); the same line again within [repeatWindow] is counted, not
+/// written again ("repeated N more times"), and an error with the same
+/// stack within [stackRepeatWindow] names the earlier one instead of
+/// repeating the stack ([logZenError]).
 abstract final class ZenDiagnosticsLog {
   /// What every file of the log is named after.
   static const String filePrefix = 'zen-diagnostics';
@@ -47,45 +56,78 @@ abstract final class ZenDiagnosticsLog {
   /// How many lines written before [attach] are kept for it.
   static const int earlyLineLimit = 200;
 
+  /// The longest entry, in characters (a line with its stack frames).
+  static const int entryLimitChars = 4000;
+
+  /// The same line again within this is counted, not written again.
+  static const Duration repeatWindow = Duration(minutes: 10);
+
+  /// An error with the same stack within this does not repeat the stack.
+  static const Duration stackRepeatWindow = Duration(hours: 1);
+
+  /// The last line written, when it was first written, and how often it
+  /// came again since (not written yet: [_flushRepeats]).
+  static String? _lastLine;
+  static DateTime? _lastLineAt;
+  static DateTime? _lastRepeatAt;
+  static int _repeats = 0;
+
   static File? get file => _file;
 
   /// Completes once every line this isolate queued so far is written.
-  static Future<void> get settled => _writes;
+  static Future<void> get settled {
+    _flushRepeats();
+    return _writes;
+  }
 
-  /// Points the log at [supportDirectory]. [source] names this isolate's
-  /// file and tags every line, so the two isolates can be told apart when
-  /// reading the log back.
+  /// Points the log at [supportDirectory] (for an additional account's
+  /// folder, the app's own folder above it: [diagnosticsLogFolder]).
+  /// [source] names this isolate's file and tags every line, so the
+  /// isolates can be told apart when reading the log back.
   static Future<void> attach(
     Directory supportDirectory, {
     required String source,
   }) async {
     try {
+      final Directory folder = diagnosticsLogFolder(supportDirectory);
       final File target = File(
-        '${supportDirectory.path}${Platform.pathSeparator}'
-        '${fileNameFor(source)}',
+        '${folder.path}${Platform.pathSeparator}${fileNameFor(source)}',
       );
       await target.parent.create(recursive: true);
+      // A count still to write belongs to the file before; the new file
+      // starts counting afresh.
+      _flushRepeats();
+      _lastLine = null;
+      _lastLineAt = null;
       _source = source;
-      _privatePlaces = diagnosticsPrivatePlaces(supportDirectory.path);
+      _privatePlaces = diagnosticsPrivatePlaces(folder.path);
       _home = _homeDirectory();
       _file = target;
-      write(
-        '--- $source attached (Zen $kAppVersion+$kAppBuild, '
-        '${Platform.operatingSystemVersion}) ---',
-      );
+      if (folder.path != supportDirectory.path) {
+        // Logs earlier builds kept in the account's own folder: plain text
+        // that told that folder apart from the decoys around it.
+        await _delete(supportDirectory);
+      }
       final List<(DateTime, String)> early = List<(DateTime, String)>.of(
         _early,
       );
       _early.clear();
       // In one write: a slow disk (or a scanner holding the file) then
-      // costs one wait, not one per line.
+      // costs one wait, not one per line. The lines written before the
+      // attach go first, so the file stays in time order (the log is
+      // merged on that).
       final StringBuffer batch = StringBuffer();
       for (final (DateTime time, String line) in early) {
         batch.write(_entry(time, line));
       }
-      if (batch.isNotEmpty) {
-        _queue(target, batch.toString());
-      }
+      batch.write(
+        _entry(
+          DateTime.now(),
+          '--- $source attached (Zen $kAppVersion+$kAppBuild, '
+          '${Platform.operatingSystemVersion}) ---',
+        ),
+      );
+      _queue(target, batch.toString());
     } catch (error) {
       _console('[ZEN] Attaching the diagnostics log failed: $error');
     }
@@ -111,32 +153,56 @@ abstract final class ZenDiagnosticsLog {
   /// Appends one line. Fire-and-forget: logging must never fail a caller, and
   /// must never block the runtime it is observing.
   static void write(String line) {
+    final DateTime now = DateTime.now();
+    final DateTime? first = _lastLineAt;
+    // Technical samples come on their own schedule: each is kept.
+    if (line == _lastLine &&
+        !line.startsWith('TECH ') &&
+        first != null &&
+        now.difference(first) < repeatWindow) {
+      _repeats++;
+      _lastRepeatAt = now;
+      return;
+    }
+    _flushRepeats();
+    _lastLine = line;
+    _lastLineAt = now;
+    _write(now, line);
+  }
+
+  static void _write(DateTime time, String line) {
     final File? target = _file;
     if (target == null) {
       if (_early.length >= earlyLineLimit) {
         _early.removeAt(0);
       }
-      _early.add((DateTime.now(), line));
+      _early.add((time, line));
       return;
     }
-    _append(target, DateTime.now(), line);
-  }
-
-  /// Queues [line], written at [time], for [target] (redacted here: an
-  /// early line only once the app's folders are known).
-  static void _append(File target, DateTime time, String line) {
     _queue(target, _entry(time, line));
   }
 
-  /// One line of the file, redacted.
+  /// Writes how often the last line came again, if it did.
+  static void _flushRepeats() {
+    final int repeats = _repeats;
+    final DateTime? at = _lastRepeatAt;
+    _repeats = 0;
+    _lastRepeatAt = null;
+    if (repeats > 0 && at != null) {
+      // Not a line of its own for the counting: the next one is new.
+      _write(at, 'INFO  (the line before came $repeats more times)');
+    }
+  }
+
+  /// One entry of the file, redacted and cut to [entryLimitChars].
   static String _entry(DateTime time, String line) {
     final String redacted = redactDiagnosticsText(
-      line,
+      withoutFormatSources(line),
       privatePlaces: _privatePlaces,
       homeDirectory: _home,
     );
-    return '${time.toIso8601String()} [$_source] '
-        '$redacted\n';
+    return '${diagnosticsTimestamp(time)} [$_source] '
+        '${cutOnCharacters(redacted, entryLimitChars)}\n';
   }
 
   /// Appends [entry] after everything queued before it.
@@ -220,6 +286,9 @@ abstract final class ZenDiagnosticsLog {
           _entry(time, line).trimRight(),
       ];
     }
+    // A count still to write goes in the queue (not waited for: the screen
+    // reads what is on the disk; a saved copy waits for [settled]).
+    _flushRepeats();
     final List<String> texts = <String>[];
     for (final List<File> files in (await _files(target.parent)).values) {
       final StringBuffer text = StringBuffer();
@@ -255,6 +324,11 @@ abstract final class ZenDiagnosticsLog {
   /// afterwards.
   static Future<void> clear() async {
     _early.clear();
+    _repeats = 0;
+    _lastRepeatAt = null;
+    _lastLine = null;
+    _lastLineAt = null;
+    _stacksSeen.clear();
     final File? target = _file;
     if (target == null) {
       return;
@@ -291,6 +365,11 @@ List<String> mergeDiagnosticsLogs(List<String> texts) {
   final List<List<String>> logs = <List<String>>[
     for (final String text in texts) _entriesOf(text),
   ];
+  // The moment of each entry (an entry without a readable time takes the
+  // one before it in its log).
+  final List<List<int>> moments = <List<int>>[
+    for (final List<String> log in logs) _momentsOf(log),
+  ];
   final List<int> next = List<int>.filled(logs.length, 0);
   final List<String> merged = <String>[];
   while (true) {
@@ -299,9 +378,7 @@ List<String> mergeDiagnosticsLogs(List<String> texts) {
       if (next[i] >= logs[i].length) {
         continue;
       }
-      if (pick == null ||
-          _timeOf(logs[i][next[i]]).compareTo(_timeOf(logs[pick][next[pick]])) <
-              0) {
+      if (pick == null || moments[i][next[i]] < moments[pick][next[pick]]) {
         pick = i;
       }
     }
@@ -311,6 +388,101 @@ List<String> mergeDiagnosticsLogs(List<String> texts) {
     merged.add(logs[pick][next[pick]]);
     next[pick] += 1;
   }
+}
+
+List<int> _momentsOf(List<String> log) {
+  int last = 0;
+  return <int>[
+    for (final String entry in log)
+      last = DateTime.tryParse(_timeOf(entry))?.microsecondsSinceEpoch ?? last,
+  ];
+}
+
+/// [time] as an entry of the log starts: local time with its UTC offset,
+/// `2026-10-28T12:34:56.789012+01:00` (an hour that comes twice when summer
+/// time ends still reads, and sorts, right).
+String diagnosticsTimestamp(DateTime time) {
+  final DateTime local = time.toLocal();
+  final int minutes = local.timeZoneOffset.inMinutes;
+  final String sign = minutes < 0 ? '-' : '+';
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${local.toIso8601String()}$sign'
+      '${two(minutes.abs() ~/ 60)}:${two(minutes.abs() % 60)}';
+}
+
+/// [text] cut to at most [limit] characters, between characters (a letter
+/// outside the basic plane, such as an emoji, is never split into half a
+/// pair, which would be written as "�"), with how much was left out.
+String cutOnCharacters(String text, int limit) {
+  if (text.length <= limit) {
+    return text;
+  }
+  int end = limit;
+  final int last = text.codeUnitAt(end - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) {
+    // The first half of a pair: the pair goes whole, or not at all.
+    end -= 1;
+  }
+  return '${text.substring(0, end)}… (${text.length - end} more characters)';
+}
+
+/// [text] without what a `FormatException` quotes of its source after its
+/// message (the text that did not parse, which can be a message or a key):
+/// the lines under a line with `FormatException` up to the next stack
+/// frame.
+String withoutFormatSources(String text) {
+  if (!text.contains('FormatException')) {
+    return text;
+  }
+  final List<String> kept = <String>[];
+  bool inSource = false;
+  for (final String line in text.split('\n')) {
+    if (inSource && !_stackFrame.hasMatch(line)) {
+      continue;
+    }
+    inSource = line.contains('FormatException');
+    kept.add(line);
+  }
+  return kept.join('\n');
+}
+
+final RegExp _stackFrame = RegExp(r'^\s+(#\d|\(|<asynchronous)');
+
+/// [error] as an entry of the log names it: a `FormatException` without
+/// the source text it quotes, an `ArgumentError` without the value it
+/// quotes (both can be what someone wrote, or a key); anything else as it
+/// describes itself.
+String describeErrorForLog(Object error) {
+  if (error is FormatException) {
+    final int? offset = error.offset;
+    return 'FormatException: ${error.message}'
+        '${offset == null ? '' : ' (at $offset)'}';
+  }
+  if (error is ArgumentError && error is! RangeError) {
+    final String? name = error.name;
+    return 'Invalid argument${name == null ? '' : ' ($name)'}: '
+        '${error.message ?? 'refused'}';
+  }
+  return '$error';
+}
+
+/// The folder the log goes to for the data folder [support]: the app's
+/// own folder, also when an additional account is open (its folder is in
+/// `accounts`): one log for the device, which the background service (it
+/// always serves the default account) writes beside, and no plain file
+/// that tells an account's folder apart from the decoys.
+Directory diagnosticsLogFolder(Directory support) {
+  final String path = support.path.replaceFirst(RegExp(r'[/\\]+$'), '');
+  final List<String> parts = path.split(RegExp(r'[/\\]'));
+  if (parts.length >= 3 && parts[parts.length - 2] == 'accounts') {
+    return Directory(
+      path.substring(
+        0,
+        path.length - parts.last.length - 'accounts'.length - 2,
+      ),
+    );
+  }
+  return support;
 }
 
 final RegExp _entryStart = RegExp(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d');
@@ -330,8 +502,7 @@ List<String> _entriesOf(String text) {
   return entries;
 }
 
-/// The time an entry starts with (ISO 8601, local: such times sort as
-/// text).
+/// The time an entry starts with (ISO 8601, local, with its offset).
 String _timeOf(String entry) {
   final int space = entry.indexOf(' ');
   return space < 0 ? entry : entry.substring(0, space);
@@ -515,6 +686,14 @@ final RegExp _ipv6Pattern = RegExp(
   r')(?![0-9A-Za-z_:])',
 );
 
+/// Stacks of errors written lately (with the first time): the same stack
+/// again names that time instead of repeating it.
+final Map<String, DateTime> _stacksSeen = <String, DateTime>{};
+
+/// An error with the top of its stack. An error with the same stack (the
+/// same kind of error from the same place) within
+/// [ZenDiagnosticsLog.stackRepeatWindow] names the time of the first one
+/// instead: a retry loop writes one stack, not one per attempt.
 void logZenError(
   String message,
   Object error,
@@ -525,7 +704,64 @@ void logZenError(
   if (!kReleaseMode) {
     debugPrintStack(label: '[$tag] $message', stackTrace: stackTrace);
   }
-  ZenDiagnosticsLog.write('ERROR $message: $error\n${_topFrames(stackTrace)}');
+  final String frames = _topFrames(stackTrace);
+  final String described = describeErrorForLog(error);
+  final DateTime now = DateTime.now();
+  final String key = '${error.runtimeType}\n$frames';
+  final DateTime? seen = _stacksSeen[key];
+  if (frames.isNotEmpty &&
+      seen != null &&
+      now.difference(seen) < ZenDiagnosticsLog.stackRepeatWindow) {
+    ZenDiagnosticsLog.write(
+      'ERROR $message: $described\n'
+      '    (the same stack as at ${diagnosticsTimestamp(seen)})',
+    );
+    return;
+  }
+  if (_stacksSeen.length >= 64) {
+    _stacksSeen.clear();
+  }
+  _stacksSeen[key] = now;
+  ZenDiagnosticsLog.write('ERROR $message: $described\n$frames');
+}
+
+/// An error nothing caught (the zone's handler, Flutter's, the platform
+/// dispatcher's): with its whole stack (up to [_uncaughtFrames] frames),
+/// every time.
+void logZenUncaught(
+  String message,
+  Object error,
+  StackTrace stackTrace, {
+  String tag = 'ZEN',
+}) {
+  _console('[$tag] $message: $error');
+  if (!kReleaseMode) {
+    debugPrintStack(label: '[$tag] $message', stackTrace: stackTrace);
+  }
+  ZenDiagnosticsLog.write(
+    'ERROR $message: ${describeErrorForLog(error)}\n'
+    '${_topFrames(stackTrace, count: _uncaughtFrames)}',
+  );
+}
+
+const int _uncaughtFrames = 60;
+
+/// Logs what this isolate's framework and platform dispatcher do not
+/// catch ([logZenUncaught]); each isolate (the app's, the background
+/// service's) has its own handlers.
+void installZenErrorLogging() {
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    logZenUncaught(
+      'Flutter framework error',
+      details.exception,
+      details.stack ?? StackTrace.current,
+    );
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
+    logZenUncaught('Platform dispatcher error', error, stackTrace);
+    return true;
+  };
 }
 
 void logZenMessage(String message, {String tag = 'ZEN'}) {

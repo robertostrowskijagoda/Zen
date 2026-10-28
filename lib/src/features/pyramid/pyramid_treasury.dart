@@ -103,7 +103,7 @@ final class _Treasury {
       raw = await pyr.disk.read(_key);
     } on Object catch (error, stack) {
       _unreadable = true;
-      logZenError('Piramida: prywatna księga', error, stack);
+      logZenError('Pyramid: private ledger', error, stack);
       return;
     }
     _unreadable = false;
@@ -137,7 +137,7 @@ final class _Treasury {
       }
     } on Object catch (error, stack) {
       // Damaged: it comes back from the treasurers.
-      logZenError('Piramida: prywatna księga', error, stack);
+      logZenError('Pyramid: private ledger', error, stack);
     }
     _rev++;
   }

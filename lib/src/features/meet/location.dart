@@ -209,7 +209,7 @@ Future<GeoFix?> lastKnownFix() async {
       return null;
     }
   } on Object catch (error) {
-    logZenWarning('Położenie: $error');
+    logZenWarning('Location: $error');
     return null;
   }
   return _last(source);
@@ -237,7 +237,7 @@ Future<GeoFix?> currentFix({
     }
     return await source.current(timeout);
   } on Object catch (error) {
-    logZenWarning('Położenie: $error');
+    logZenWarning('Location: $error');
     return _last(source);
   }
 }
@@ -261,7 +261,7 @@ Future<GeoFix?> currentFixInBackground({
     }
     return await source.currentUnderService(timeout);
   } on Object catch (error) {
-    logZenWarning('Położenie w tle: $error');
+    logZenWarning('Location in the background: $error');
     return _last(source);
   }
 }

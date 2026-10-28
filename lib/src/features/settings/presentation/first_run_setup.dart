@@ -248,7 +248,7 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
       // The gate goes on to the next step as soon as this is set.
       await ref.read(appSettingsControllerProvider.notifier).setSetupDone();
     } on Object catch (error, stack) {
-      logZenError('Zapis ustawień', error, stack);
+      logZenError('Saving settings', error, stack);
       if (mounted) {
         setState(() {
           _finishing = false;

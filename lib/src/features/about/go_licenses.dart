@@ -186,7 +186,7 @@ Future<String?> _load(AssetBundle assets, String key) async {
   try {
     return await assets.loadString(key);
   } on Object catch (error) {
-    logZenWarning('Licencje: nie wczytałem $key: $error');
+    logZenWarning('Licenses: $key not loaded: $error');
     return null;
   }
 }

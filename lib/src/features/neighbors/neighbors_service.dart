@@ -658,7 +658,7 @@ final class NeighborsService extends ChangeNotifier {
       try {
         await _syncSlots();
       } on Object catch (error, stack) {
-        logZenError('Sąsiedzi: skrzynki', error, stack);
+        logZenError('Neighbours: mailboxes', error, stack);
       }
       done.complete();
     });
@@ -779,7 +779,7 @@ final class NeighborsService extends ChangeNotifier {
         try {
           await work();
         } on Object catch (error, stack) {
-          logZenError('Sąsiedzi', error, stack);
+          logZenError('Neighbours', error, stack);
         }
       }),
     );
@@ -1094,7 +1094,7 @@ final class NeighborsService extends ChangeNotifier {
       await _syncOwnDoor();
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt sąsiadów', error, stack);
+      logZenError('Reading neighbours', error, stack);
     } finally {
       _loading = false;
     }
@@ -1748,7 +1748,7 @@ final class NeighborsService extends ChangeNotifier {
     try {
       sent = await doorSend?.call(out.to, out.payload) ?? false;
     } on Object catch (error) {
-      logZenWarning('Sąsiedzi: ${out.payload['type']} do ${out.to}: $error');
+      logZenWarning('Neighbours: ${out.payload['type']} to ${out.to}: $error');
     }
     if (sent) {
       out.tries++;
@@ -1821,7 +1821,7 @@ final class NeighborsService extends ChangeNotifier {
             'id': rid,
           });
         } on Object catch (error) {
-          logZenWarning('Sąsiedzi: potwierdzenie do $to: $error');
+          logZenWarning('Neighbours: confirmation to $to: $error');
         }
       }),
     );
@@ -1831,7 +1831,7 @@ final class NeighborsService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Sąsiedzi: ${payload['type']} do $to: $error');
+      logZenWarning('Neighbours: ${payload['type']} to $to: $error');
     }
   }
 
@@ -2580,7 +2580,7 @@ final class NeighborsService extends ChangeNotifier {
       try {
         await _takeAccountCopy(_plain(state));
       } on Object catch (error, stack) {
-        logZenError('Sąsiedzi: kopia z innego urządzenia', error, stack);
+        logZenError('Neighbours: copy from another device', error, stack);
       }
       done.complete();
     });
@@ -3491,7 +3491,7 @@ final class NeighborsService extends ChangeNotifier {
       try {
         await _handle(type, frame);
       } on Object catch (error, stack) {
-        logZenError('Sąsiedzi', error, stack);
+        logZenError('Neighbours', error, stack);
       }
       done.complete(true);
       if (_ownDoorStale) {
@@ -3803,7 +3803,7 @@ final class NeighborsService extends ChangeNotifier {
     try {
       await dismissNotification?.call('flat-knock:$flat');
     } on Object catch (error) {
-      logZenWarning('Sąsiedzi: powiadomienie o pukaniu: $error');
+      logZenWarning('Neighbours: knock notification: $error');
     }
   }
 
@@ -4879,7 +4879,7 @@ final class NeighborsService extends ChangeNotifier {
     try {
       await dismissNotification?.call(slot);
     } on Object catch (error) {
-      logZenWarning('Sąsiedzi: powiadomienie: $error');
+      logZenWarning('Neighbours: notification: $error');
     }
   }
 

@@ -378,7 +378,7 @@ final class UpnpPortMapper {
                 'NewProtocol': 'TCP',
               });
             } on Object catch (error) {
-              logZenWarning('UPnP: zamknięcie portu: $error');
+              logZenWarning('UPnP: closing the port: $error');
             }
           },
         );
@@ -523,7 +523,7 @@ Future<List<InternetAddress>> systemGateways() async {
       return ip == null ? <InternetAddress>[] : <InternetAddress>[ip];
     }
   } on Object catch (error) {
-    logZenWarning('Nie znalazłem bramy sieci: $error');
+    logZenWarning('Network gateway not found: $error');
   }
   return <InternetAddress>[];
 }

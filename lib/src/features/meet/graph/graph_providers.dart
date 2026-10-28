@@ -32,7 +32,7 @@ final Provider<OpenToMeetService> openToMeetServiceProvider =
         // People across opened gates: they see the flag, theirs shows here.
         gateContacts: () => datingGateContacts(ref),
       );
-      unawaitedLogged(open.load(), context: 'Graf: otwarci na poznanie');
+      unawaitedLogged(open.load(), context: 'Graph: open to meet');
       listenFrames(ref, open.handle, 'Graf: otwarci na poznanie');
       // New or gone friends, a changed level or friend-list audience: each
       // friend gets what changed for them (digest-checked, so mostly
@@ -42,10 +42,8 @@ final Provider<OpenToMeetService> openToMeetServiceProvider =
         soon?.cancel();
         soon = Timer(
           const Duration(seconds: 3),
-          () => unawaitedLogged(
-            open.shareAll(),
-            context: 'Graf: otwarci na poznanie',
-          ),
+          () =>
+              unawaitedLogged(open.shareAll(), context: 'Graph: open to meet'),
         );
       }
 
@@ -88,7 +86,7 @@ final Provider<GraphNotesService> graphNotesProvider =
       final GraphNotesService notes = GraphNotesService(
         disk: ref.read(ledgerDiskProvider),
       );
-      unawaitedLogged(notes.load(), context: 'Graf: notatki');
+      unawaitedLogged(notes.load(), context: 'Graph: notes');
       ref.listen<String>(
         socialHubControllerProvider.select(
           (SocialHubState s) => (acceptedFriendAddresses(s)..sort()).join(','),
@@ -99,7 +97,7 @@ final Provider<GraphNotesService> graphNotesProvider =
           }
           unawaitedLogged(
             notes.observe(friends: next.split(',')),
-            context: 'Graf: daty znajomych',
+            context: 'Graph: dates of friends',
           );
         },
         fireImmediately: true,

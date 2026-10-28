@@ -41,7 +41,7 @@ class _PlanScreenState extends ConsumerState<PlanScreen> {
     final PlanService plans = ref.read(planServiceProvider);
     unawaitedLogged(
       plans.load().then((_) => plans.checkThresholds()),
-      context: 'Odczyt planów',
+      context: 'Reading plans',
     );
   }
 

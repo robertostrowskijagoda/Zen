@@ -63,21 +63,21 @@ void main() {
 
   test('the file is named after the date and time', () {
     expect(
-      diagnosticsLogFileName(DateTime(2026, 3, 9, 7, 5)),
-      'zen-dziennik-20260309-0705.txt',
+      diagnosticsLogFileName(DateTime(2026, 3, 9, 7, 5, 9)),
+      'zen-dziennik-20260309-070509.txt',
     );
   });
 
   test('Android 10+: the log goes to Downloads and the staged copy is '
       'removed', () async {
     answer = (MethodCall call) => <String, Object>{
-      'names': <String>['zen-dziennik-20260309-0705.txt'],
+      'names': <String>['zen-dziennik-20260309-070509.txt'],
       'uris': <String>['content://downloads/1'],
     };
     final AccountBackupSaved? saved = await saveDiagnosticsLog(
       places: places(sdk: 30),
       system: AccountBackupSystem.android,
-      now: DateTime(2026, 3, 9, 7, 5),
+      now: DateTime(2026, 3, 9, 7, 5, 9),
     );
 
     final MethodCall export = calls.singleWhere(
@@ -85,11 +85,11 @@ void main() {
     );
     expect(
       (export.arguments as Map<Object?, Object?>)['name'],
-      'zen-dziennik-20260309-0705.txt',
+      'zen-dziennik-20260309-070509.txt',
     );
     expect(stagedText.single, contains('something happened'));
     expect(saved!.folder.kind, AccountBackupFolderKind.downloads);
-    expect(saved.shown, <String>['Pobrane/zen-dziennik-20260309-0705.txt']);
+    expect(saved.shown, <String>['Pobrane/zen-dziennik-20260309-070509.txt']);
     expect(saved.canOpen, isTrue);
     final Directory tmp = Directory('${root.path}/tmp');
     expect(tmp.listSync(), isEmpty);
@@ -123,11 +123,11 @@ void main() {
     final AccountBackupSaved? saved = await saveDiagnosticsLog(
       places: places(sdk: 28),
       system: AccountBackupSystem.android,
-      now: DateTime(2026, 3, 9, 7, 5),
+      now: DateTime(2026, 3, 9, 7, 5, 9),
     );
     expect(calls, isEmpty);
     final String path = saved!.shown.single;
-    expect(path, endsWith('zen-dziennik-20260309-0705.txt'));
+    expect(path, endsWith('zen-dziennik-20260309-070509.txt'));
     expect(path, contains('Zen'));
     expect(await File(path).readAsString(), contains('something happened'));
   });

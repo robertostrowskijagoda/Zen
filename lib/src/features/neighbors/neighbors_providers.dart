@@ -64,14 +64,14 @@ final Provider<NeighborsService> neighborsServiceProvider =
 
       neighbors.addListener(syncDoorKey);
       runtime.addListener(onRuntime);
-      unawaitedLogged(neighbors.load(), context: 'Odczyt sąsiadów');
+      unawaitedLogged(neighbors.load(), context: 'Reading neighbours');
       listenFrames(ref, neighbors.handle, 'Sąsiedzi');
       // What went out from the door and was not confirmed yet is retried.
       final Timer retries = Timer.periodic(
         const Duration(seconds: 30),
         (_) => unawaitedLogged(
           neighbors.retryDoorSends(),
-          context: 'Sąsiedzi: ponowienia',
+          context: 'Neighbours: retries',
         ),
       );
       // What comes to the doors comes only here (never to the other
@@ -85,7 +85,7 @@ final Provider<NeighborsService> neighborsServiceProvider =
       final NearbyService nearby = ref.watch(nearbyServiceProvider);
       void onWave(Map<dynamic, dynamic> json) => unawaitedLogged(
         neighbors.onNearbyWave(json),
-        context: 'Zaproszenie w pobliżu',
+        context: 'Invitation nearby',
       );
       nearby.otherWaveHandlers.add(onWave);
       ref.onDispose(() {
