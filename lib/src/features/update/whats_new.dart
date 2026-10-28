@@ -142,7 +142,7 @@ Future<WhatsNew?> fetchWhatsNew(
   required Sha256SumsFetcher fetchText,
   List<String> maintainers = kReleaseMaintainers,
 }) async {
-  if (!release.assets.containsKey(kWhatsNewAssetName)) {
+  if (!release.mayHave(kWhatsNewAssetName)) {
     return null;
   }
   final String text = await fetchText(release.assetUri(kWhatsNewAssetName));

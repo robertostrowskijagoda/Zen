@@ -222,15 +222,18 @@ key, so every release must be signed with this key.
    ping and pong) and/or put a line `zen-min: X.Y.Z` in the release
    description; older builds then show "update to X.Y.Z or newer".
 7. Publish the draft as a full release: not a pre-release, with "Set as
-   the latest release" ticked (the app asks only for `releases/latest`,
-   which never shows a draft or a pre-release). This starts `pages.yml`,
+   the latest release" ticked (the app asks only for the latest release,
+   through the pages' `release.json` and `releases/latest`, which never
+   show a draft or a pre-release). This starts `pages.yml`,
    which refreshes the install page data and the SideStore / AltStore
    source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
    finds the release within an hour, and at once when it starts or comes
    back to the screen an hour or more after its last check; an Android
-   phone that receives in the background finds it within about 4 to 5
+   phone that receives in the background finds it within about 2 to 2.5
    hours also while Zen is closed (Doze can put that off to its next
-   window). A phone whose friend already runs the new version asks GitHub
+   window). The app asks the pages' `release.json` first, so the release
+   reaches it once the Pages run after the release has finished (a few
+   minutes); builds up to 1.14.0 ask GitHub's API only. A phone whose friend already runs the new version asks GitHub
    as soon as that friend's version reaches it (section 8.5).
 
 The checks behind it: `test/release_contract_test.dart` (the app's file
@@ -1174,32 +1177,47 @@ marker spreading by gossip is not done.
 
 ### 8.5 Updates from GitHub (on)
 
-Independent of section 8: every build except the store one asks
-`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` (one GET,
-only the User-Agent `Zen`;
-`lib/src/features/update/github_update_service.dart`) whenever GitHub's
-last answer is an hour old or older (`kGithubCheckEvery`): 20 s after
-start, when the app comes back to the screen and every hour while it
-stays open. On Android the background service
-(`background_update_check.dart`, started in every mode of the service,
-also while the app is locked) asks while Zen is closed once the last
-answer is 4 h old (`kBackgroundGithubCheckEvery`): it rides the service's
-shared wake as work that does not wake the phone in Doze, looks every hour
-whether a check is due (one small file, `update_check.json`, which the app
-and the service share, so whoever asked last counts) and asks at most once
-in those 4 h. A friend whose ping or pong names a newer version than any
-known here makes the app ask at once (once per version, not within 2
-minutes of the last attempt): the friend's claim is unsigned, GitHub's
-answer decides. A release that 2 maintainers signed, coming from friends
-(section 8, off today), is announced at once. It sends `If-None-Match`
-with the last `ETag`, so an unchanged answer (304) costs no rate limit.
-At one request an hour per device, about 60 devices behind one address
-(a mobile operator's shared IP) may meet GitHub's limit of 60 requests an
-hour; the app then waits as GitHub asks. On an error it retries after
-GitHub's `Retry-After` (or the `x-ratelimit-reset` time when
-`x-ratelimit-remaining` is 0) plus a minute, otherwise after 15 min, 30,
-60 (never later than the next regular check), and shows when; a good
-answer clears the backoff. A 404 is its own state ("no published release
+Independent of section 8: every build except the store one looks for the
+newest release (`lib/src/features/update/latest_release.dart`; only the
+User-Agent `Zen` and `If-None-Match` with the last `ETag`) in this order:
+the pages' `release.json` (written by `pages.yml` from the latest release,
+`tool/ci/release_source.py`: tag, files and sizes, `minVersion`; GitHub
+Pages has no rate limit), then
+`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` when the
+pages do not answer, then, when the API refuses or does not answer either
+(not for its 404), the redirect of
+`github.com/robertostrowskijagoda/Zen/releases/latest` to
+`…/releases/tag/vX.Y.Z`, which names the version alone (no API quota). No
+source is trusted for more than the version: every file is checked against
+that tag's `SHA256SUMS` (and signature, and on Android the certificate),
+downloaded from github.com; a version known from the redirect alone is
+downloaded without a known size. Builds up to 1.14.0 asked the API only:
+GitHub allows 60 unauthenticated requests an hour per IP address, which a
+mobile operator's shared address often has used up (403 or 429), and such
+a phone then found nothing for hours. The app looks
+(`github_update_service.dart`) whenever the last answer is an hour old or
+older (`kGithubCheckEvery`): 20 s after start, when the app comes back to
+the screen and every hour while it stays open. On Android the background
+service (`background_update_check.dart`, started in every mode of the
+service, also while the app is locked) looks while Zen is closed once the
+last answer is 2 h old (`kBackgroundGithubCheckEvery`): it rides the
+service's shared wake as work that does not wake the phone in Doze, looks
+every 30 minutes whether a check is due (one small file,
+`update_check.json`, which the app and the service share, so whoever asked
+last counts) and asks at most once in those 2 h when checks succeed; a
+failed check is tried again on the next beat, or once the wait GitHub
+asked for is over. The file also keeps the last successful check and the
+last error (time and text), which the updates screen shows ("Sprawdzono …",
+"Ostatni błąd …"), and the version the service found, which the app shows
+at once. A friend whose ping or pong names a newer version than any
+known here makes the app ask at once (once per version; within 2 minutes
+of the last attempt it asks when those 2 minutes are over): the friend's
+claim is unsigned, the answer decides. A release that 2 maintainers
+signed, coming from friends (section 8, off today), is announced at once.
+On an error the app retries after GitHub's `Retry-After` (or the
+`x-ratelimit-reset` time when `x-ratelimit-remaining` is 0) plus a minute,
+otherwise after 15 min, 30, 60 (never later than the next regular check),
+and shows when; a good answer clears the backoff. A 404 is its own state ("no published release
 of Zen on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the
 release description is the oldest version still supported (section 3,
 step 6). A newer version is announced once with a quiet notification,

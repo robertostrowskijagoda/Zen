@@ -13,15 +13,19 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 /// How old GitHub's last answer may get while the app runs before the app
 /// asks again: at start, when it comes back to the screen and while it
 /// stays open. Whoever asked last (the app, the Android background
-/// service) counts. One request an hour per device is far below GitHub's
-/// limit of 60 an hour per IP address, and an unchanged release answered
-/// 304 (`If-None-Match`) does not count at all.
+/// service) counts. A check asks the project's pages first, which have no
+/// rate limit; GitHub's API (60 requests an hour per IP address, shared
+/// behind a mobile operator's address) only when they do not answer.
 const Duration kGithubCheckEvery = Duration(hours: 1);
 
-/// How old GitHub's last answer may get before the Android background
-/// service asks while the app is closed. The service's look rides wakes
-/// that come anyway (the mailbox polls), so it adds no alarm of its own.
-const Duration kBackgroundGithubCheckEvery = Duration(hours: 4);
+/// How old the last answer may get before the Android background service
+/// asks while the app is closed. The service's look rides wakes that come
+/// anyway (the mailbox polls), so it adds no alarm of its own, and asks the
+/// project's pages first, which have no rate limit (latest_release.dart).
+const Duration kBackgroundGithubCheckEvery = Duration(hours: 2);
+
+/// The longest error text [UpdateNoticeState.error] keeps.
+const int kUpdateNoticeErrorChars = 160;
 
 /// The notification slot of "Jest nowa wersja Zen": a newer version takes
 /// the place of the one before.
@@ -30,7 +34,8 @@ const String kUpdateNoticeSlot = 'app-update';
 /// The file in the app's data folder (a profile's own folder with
 /// `--zen-profile`) that holds [UpdateNoticeState]. A plain file: the
 /// Android background service reads and writes it too, also while the app
-/// is locked, and nothing in it is private (versions and a time).
+/// is locked, and nothing in it is private (versions, times and the last
+/// error of a request to GitHub).
 const String kUpdateNoticeFileName = 'update_check.json';
 
 /// What the app and the Android background service share about the look
@@ -43,22 +48,32 @@ final class UpdateNoticeState {
     this.newestVersion,
     this.notifiedVersion,
     this.dismissedVersion,
+    this.failedAtMillis,
+    this.error,
+    this.retryAtMillis,
   });
 
   static UpdateNoticeState fromJson(Object? json) {
     if (json is! Map) {
       return const UpdateNoticeState();
     }
-    final Object? at = json['checkedAt'];
+    int? millis(Object? value) => value is int ? value : null;
+    final Object? error = json['error'];
     return UpdateNoticeState(
-      checkedAtMillis: at is int ? at : null,
+      checkedAtMillis: millis(json['checkedAt']),
       newestVersion: _version(json['newest']),
       notifiedVersion: _version(json['notified']),
       dismissedVersion: _version(json['dismissed']),
+      failedAtMillis: millis(json['failedAt']),
+      error: error is String && error.isNotEmpty
+          ? updateNoticeErrorText(error)
+          : null,
+      retryAtMillis: millis(json['retryAt']),
     );
   }
 
-  /// When GitHub last answered a check (wall time, milliseconds).
+  /// When a check last got an answer (wall time, milliseconds): the last
+  /// successful check, whoever made it.
   final int? checkedAtMillis;
 
   /// The newest release newer than this build that a check found.
@@ -69,6 +84,16 @@ final class UpdateNoticeState {
 
   /// The version whose banner the person closed.
   final String? dismissedVersion;
+
+  /// When a check last failed (nothing answered, or only with an error),
+  /// and what went wrong ([updateNoticeErrorText]); kept after a later
+  /// success, for the updates screen.
+  final int? failedAtMillis;
+  final String? error;
+
+  /// Not before this time (wall time, milliseconds): the wait GitHub asked
+  /// for after its rate limit. Cleared by an answer.
+  final int? retryAtMillis;
 
   UpdateNoticeState copyWith({
     int? checkedAtMillis,
@@ -81,17 +106,40 @@ final class UpdateNoticeState {
       newestVersion: newestVersion ?? this.newestVersion,
       notifiedVersion: notifiedVersion ?? this.notifiedVersion,
       dismissedVersion: dismissedVersion ?? this.dismissedVersion,
+      failedAtMillis: failedAtMillis,
+      error: error,
+      retryAtMillis: retryAtMillis,
     );
   }
 
-  /// GitHub answered at [at]: [newest] is the release newer than this
-  /// build it named (null: none, which forgets an earlier one).
+  /// A check got an answer at [at]: [newest] is the release newer than
+  /// this build it named (null: none, which forgets an earlier one).
   UpdateNoticeState answered({required int at, String? newest}) {
     return UpdateNoticeState(
       checkedAtMillis: at,
       newestVersion: newest,
       notifiedVersion: notifiedVersion,
       dismissedVersion: dismissedVersion,
+      failedAtMillis: failedAtMillis,
+      error: error,
+    );
+  }
+
+  /// A check failed at [at] with [error]; [retryAt]: not again before then
+  /// (GitHub's rate limit).
+  UpdateNoticeState failed({
+    required int at,
+    required Object error,
+    int? retryAt,
+  }) {
+    return UpdateNoticeState(
+      checkedAtMillis: checkedAtMillis,
+      newestVersion: newestVersion,
+      notifiedVersion: notifiedVersion,
+      dismissedVersion: dismissedVersion,
+      failedAtMillis: at,
+      error: updateNoticeErrorText(error),
+      retryAtMillis: retryAt,
     );
   }
 
@@ -105,6 +153,9 @@ final class UpdateNoticeState {
       newestVersion: over(newestVersion) ? null : newestVersion,
       notifiedVersion: over(notifiedVersion) ? null : notifiedVersion,
       dismissedVersion: over(dismissedVersion) ? null : dismissedVersion,
+      failedAtMillis: failedAtMillis,
+      error: error,
+      retryAtMillis: retryAtMillis,
     );
   }
 
@@ -113,6 +164,9 @@ final class UpdateNoticeState {
     'newest': ?newestVersion,
     'notified': ?notifiedVersion,
     'dismissed': ?dismissedVersion,
+    'failedAt': ?failedAtMillis,
+    'error': ?error,
+    'retryAt': ?retryAtMillis,
   };
 
   @override
@@ -121,7 +175,10 @@ final class UpdateNoticeState {
       other.checkedAtMillis == checkedAtMillis &&
       other.newestVersion == newestVersion &&
       other.notifiedVersion == notifiedVersion &&
-      other.dismissedVersion == dismissedVersion;
+      other.dismissedVersion == dismissedVersion &&
+      other.failedAtMillis == failedAtMillis &&
+      other.error == error &&
+      other.retryAtMillis == retryAtMillis;
 
   @override
   int get hashCode => Object.hash(
@@ -129,6 +186,9 @@ final class UpdateNoticeState {
     newestVersion,
     notifiedVersion,
     dismissedVersion,
+    failedAtMillis,
+    error,
+    retryAtMillis,
   );
 
   static String? _version(Object? value) =>
@@ -147,6 +207,18 @@ bool updateCheckDue(
   }
   final int age = nowMillis - checkedAtMillis;
   return age < 0 || age >= every.inMilliseconds;
+}
+
+/// [error] as [UpdateNoticeState.error] keeps it: one line, at most
+/// [kUpdateNoticeErrorChars] characters. An error of a request to GitHub or
+/// the project's pages: a status, an exception's name and the host.
+String updateNoticeErrorText(Object error) {
+  final String line = '$error'.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (line.length <= kUpdateNoticeErrorChars) {
+    return line;
+  }
+  final Runes runes = line.runes;
+  return '${String.fromCharCodes(runes.take(kUpdateNoticeErrorChars - 1))}…';
 }
 
 /// Whether [seen] is [version] or newer.

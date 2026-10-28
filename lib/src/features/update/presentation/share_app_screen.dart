@@ -390,7 +390,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
         setState(() => _sha256 = hex);
       }
     } on Object catch (error) {
-      logZenWarning('Podaj dalej: suma kontrolna: $error');
+      logZenWarning('Pass it on: checksum: $error');
     }
   }
 

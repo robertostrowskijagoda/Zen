@@ -95,15 +95,13 @@ final class ShareAppServer {
         _servers.add(server);
         served.add(address);
         server.listen(
-          (HttpRequest request) => unawaitedLogged(
-            _handle(request),
-            context: 'Podaj dalej: zapytanie',
-          ),
+          (HttpRequest request) =>
+              unawaitedLogged(_handle(request), context: 'Pass it on: request'),
         );
       } on SocketException catch (error) {
         failure = error;
         logZenWarning(
-          'Podaj dalej: nie można nasłuchiwać na ${address.address}: $error',
+          'Pass it on: cannot listen on ${address.address}: $error',
         );
       }
     }
@@ -174,7 +172,7 @@ final class ShareAppServer {
         _downloadsChanged.add(_downloads);
       }
     } on Object catch (error) {
-      logZenWarning('Podaj dalej: przerwane pobieranie: $error');
+      logZenWarning('Pass it on: download interrupted: $error');
     }
   }
 

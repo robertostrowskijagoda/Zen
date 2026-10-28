@@ -13,9 +13,25 @@ import 'package:zen/src/features/update/github_redirects.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 
 /// The newest published release of the project on GitHub (drafts and
-/// pre-releases are never "latest").
+/// pre-releases are never "latest"). GitHub's API: 60 requests an hour per
+/// IP address without an account, shared by everyone behind the same mobile
+/// operator's address, so only the second place Zen asks
+/// (latest_release.dart).
 final Uri kGithubLatestReleaseUri = Uri.parse(
   'https://api.github.com/repos/robertostrowskijagoda/Zen/releases/latest',
+);
+
+/// The newest published release as the project's pages describe it
+/// (`release.json`, written by the Pages workflow from the release whenever
+/// one is published, and once a day: tool/ci/release_source.py). Served by
+/// GitHub Pages, with no rate limit: the first place Zen asks.
+final Uri kZenReleaseInfoUri = Uri.parse('${kZenPagesBase}release.json');
+
+/// GitHub's page of the newest release: it answers with a redirect to
+/// `…/releases/tag/<tag>`, which names the version and costs nothing of the
+/// API's rate limit. The last place Zen asks, for the version alone.
+final Uri kGithubLatestReleasePageUri = Uri.parse(
+  '$kZenRepositoryUrl/releases/latest',
 );
 
 /// The only header Zen adds to its GitHub requests (GitHub's API refuses a
@@ -97,7 +113,7 @@ bool isUnreachableError(Object error) =>
     error is TlsException ||
     error is HttpException;
 
-/// One release as GitHub's API describes it.
+/// One release as GitHub's API or the project's pages describe it.
 @immutable
 final class GithubRelease {
   const GithubRelease({
@@ -105,7 +121,23 @@ final class GithubRelease {
     required this.version,
     required this.assets,
     this.minVersion,
+    this.detailed = true,
   });
+
+  /// A release known by its tag alone (GitHub's redirect to it, or what the
+  /// other isolate found): its files and their sizes are not known
+  /// ([detailed] false). Null for a tag that is not `v<major.minor.patch>`.
+  static GithubRelease? fromTag(String tag) {
+    if (!tag.startsWith('v') || !isValidAppVersion(tag.substring(1))) {
+      return null;
+    }
+    return GithubRelease(
+      tag: tag,
+      version: tag.substring(1),
+      assets: const <String, int>{},
+      detailed: false,
+    );
+  }
 
   /// `v1.12.0`.
   final String tag;
@@ -121,13 +153,25 @@ final class GithubRelease {
   /// older than this tells the person it must be updated.
   final String? minVersion;
 
-  /// Reads the `releases/latest` answer; null for a draft, a pre-release, a
-  /// tag that is not `v<major.minor.patch>` or anything malformed.
+  /// Whether [assets] lists the release's files; false for a release known
+  /// by its tag alone ([fromTag]).
+  final bool detailed;
+
+  /// Whether the release has (or, not [detailed], may have) the file
+  /// [name]: the download decides, and every file is still checked against
+  /// the release's `SHA256SUMS`.
+  bool mayHave(String name) => !detailed || assets.containsKey(name);
+
+  /// Reads the `releases/latest` answer of GitHub's API, or the project's
+  /// `release.json` ([kZenReleaseInfoUri]: `tag`, `assets` as name →
+  /// `{"size": …}`, `minVersion`); null for a draft, a pre-release, a tag
+  /// that is not `v<major.minor.patch>` (or none: no release yet) or
+  /// anything malformed.
   static GithubRelease? fromJson(Object? json) {
     if (json is! Map) {
       return null;
     }
-    final Object? tag = json['tag_name'];
+    final Object? tag = json['tag_name'] ?? json['tag'];
     if (tag is! String ||
         !tag.startsWith('v') ||
         json['draft'] == true ||
@@ -141,25 +185,34 @@ final class GithubRelease {
       return null;
     }
     final Map<String, int> assets = <String, int>{};
+    void add(Object? name, Object? size) {
+      if (name is String &&
+          _safeAssetName.hasMatch(name) &&
+          size is int &&
+          size > 0 &&
+          size <= kMaxGithubAssetBytes) {
+        assets[name] = size;
+      }
+    }
+
     final Object? list = json['assets'];
     if (list is List) {
       for (final Object? a in list) {
-        if (a is! Map) {
-          continue;
+        if (a is Map) {
+          add(a['name'], a['size']);
         }
-        final Object? name = a['name'];
-        final Object? size = a['size'];
-        if (name is String &&
-            _safeAssetName.hasMatch(name) &&
-            size is int &&
-            size > 0 &&
-            size <= kMaxGithubAssetBytes) {
-          assets[name] = size;
-        }
+      }
+    } else if (list is Map) {
+      for (final MapEntry<Object?, Object?> a in list.entries) {
+        final Object? value = a.value;
+        add(a.key, value is Map ? value['size'] : value);
       }
     }
     final Object? body = json['body'];
-    final String? min = body is String
+    final Object? named = json['minVersion'];
+    final String? min = named is String && isValidAppVersion(named)
+        ? named
+        : body is String
         ? kZenMinLine.firstMatch(body)?.group(1)
         : null;
     return GithubRelease(
@@ -323,7 +376,7 @@ GithubUpdateRoute githubUpdateRoute({
   UpdateTarget.flatpak => GithubUpdateRoute.flatpak,
   UpdateTarget.other => GithubUpdateRoute.releasePage,
   _ =>
-    assetName != null && release.assets.containsKey(assetName)
+    assetName != null && release.mayHave(assetName)
         ? GithubUpdateRoute.download
         : GithubUpdateRoute.releasePage,
 };
@@ -352,8 +405,7 @@ String sideStoreInstallLink(String ipaUrl) => 'sidestore://install?url=$ipaUrl';
 
 /// The address of [release]'s IPA, pinned to that very version (Safari
 /// saves it to Files); null when the release has no IPA.
-String? iosIpaUrl(GithubRelease release) =>
-    release.assets.containsKey(kIosIpaAssetName)
+String? iosIpaUrl(GithubRelease release) => release.mayHave(kIosIpaAssetName)
     ? release.assetUri(kIosIpaAssetName).toString()
     : null;
 
@@ -383,11 +435,13 @@ HttpClient _client() => HttpClient()
   ..connectionTimeout = kGithubTimeout
   ..userAgent = kGithubUserAgent;
 
-/// Redirects are followed only to GitHub's own hosts ([kGithubHosts]).
+/// Redirects are followed only to GitHub's own hosts ([kGithubHosts]), and
+/// to the project's pages where [allowed] lets them ([isReleaseInfoUri]).
 Future<HttpClientResponse> _get(
   HttpClient client,
   Uri uri, {
   Map<String, String> headers = const <String, String>{},
+  bool Function(Uri uri) allowed = isGithubUri,
 }) async {
   try {
     return await getFromGithub(
@@ -395,6 +449,7 @@ Future<HttpClientResponse> _get(
       uri,
       timeout: kGithubTimeout,
       headers: headers,
+      allowed: allowed,
     );
   } on Object catch (error) {
     if (isUnreachableError(error)) {
@@ -416,11 +471,11 @@ final class GithubJsonAnswer {
   final bool notModified;
 }
 
-/// GETs [uri] and decodes its JSON. With [etag] it asks
-/// `If-None-Match` and a 304 comes back as [GithubJsonAnswer.notModified].
-/// Throws [GithubUnreachableException] when the server cannot be reached
-/// and [GithubStatusException] (with GitHub's time to wait, if it gave
-/// one) for any other answer but 200.
+/// GETs [uri] (GitHub, or the project's pages) and decodes its JSON. With
+/// [etag] it asks `If-None-Match` and a 304 comes back as
+/// [GithubJsonAnswer.notModified]. Throws [GithubUnreachableException] when
+/// the server cannot be reached and [GithubStatusException] (with GitHub's
+/// time to wait, if it gave one) for any other answer but 200.
 Future<GithubJsonAnswer> fetchGithubJsonAnswer(Uri uri, {String? etag}) async {
   final HttpClient client = _client();
   try {
@@ -430,6 +485,7 @@ Future<GithubJsonAnswer> fetchGithubJsonAnswer(Uri uri, {String? etag}) async {
       headers: <String, String>{
         if (etag != null && etag.isNotEmpty) 'If-None-Match': etag,
       },
+      allowed: isReleaseInfoUri,
     );
     final String? newEtag = response.headers.value('etag');
     if (response.statusCode == HttpStatus.notModified && etag != null) {
@@ -501,6 +557,61 @@ final class GithubJsonCache {
     }
     return answer.json;
   }
+}
+
+/// The tag GitHub's page of the newest release ([uri],
+/// [kGithubLatestReleasePageUri]) redirects to (`…/releases/tag/<tag>`),
+/// without following it; null when it leads anywhere else (no release
+/// yet: the list of releases). Throws [GithubUnreachableException] when
+/// github.com cannot be reached and [GithubStatusException] for an answer
+/// that is not a redirect.
+Future<String?> fetchLatestReleaseTag(Uri uri) async {
+  if (!isGithubUri(uri)) {
+    throw ArgumentError.value(uri, 'uri', 'HTTPS to GitHub only');
+  }
+  final HttpClient client = _client();
+  try {
+    final HttpClientResponse response;
+    try {
+      final HttpClientRequest request = await client
+          .getUrl(uri)
+          .timeout(kGithubTimeout);
+      request.followRedirects = false;
+      response = await request.close().timeout(kGithubTimeout);
+    } on Object catch (error) {
+      if (isUnreachableError(error)) {
+        throw GithubUnreachableException(error);
+      }
+      rethrow;
+    }
+    final String? location = response.headers.value(HttpHeaders.locationHeader);
+    await _drainQuietly(response);
+    if (!response.isRedirect) {
+      throw GithubStatusException(response.statusCode);
+    }
+    return releaseTagOfLocation(uri, location);
+  } finally {
+    client.close(force: true);
+  }
+}
+
+/// The tag in [location], the redirect of the newest release's page
+/// [from]: `<repository>/releases/tag/<tag>` on github.com; null for any
+/// other address.
+String? releaseTagOfLocation(Uri from, String? location) {
+  final Uri? to = location == null ? null : Uri.tryParse(location);
+  if (to == null) {
+    return null;
+  }
+  final Uri target = from.resolveUri(to);
+  final String prefix = '${Uri.parse(kZenRepositoryUrl).path}/releases/tag/';
+  if (!isGithubUri(target) ||
+      target.host.toLowerCase() != 'github.com' ||
+      !target.path.startsWith(prefix)) {
+    return null;
+  }
+  final String tag = Uri.decodeComponent(target.path.substring(prefix.length));
+  return GithubRelease.fromTag(tag)?.tag;
 }
 
 Future<void> _drainQuietly(HttpClientResponse response) async {

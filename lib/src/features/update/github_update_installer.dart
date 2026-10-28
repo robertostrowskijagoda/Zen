@@ -322,7 +322,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
         return _Swap.failed;
       }
     } else if (!await isOwnAppFolder(appDir, exeName: exeName)) {
-      logZenWarning('Aktualizacja w miejscu: folder nie jest folderem Zen');
+      logZenWarning('In-place update: the folder is not a Zen folder');
       return _Swap.notOwnFolder;
     } else if (await Directory(oldDir).exists() &&
         !await isOwnAppFolder(Directory(oldDir), exeName: exeName)) {
@@ -422,7 +422,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       await _deleteQuietly(archive);
       return _Swap.swapped;
     } on Object catch (error, stack) {
-      logZenError('Aktualizacja w miejscu', error, stack);
+      logZenError('In-place update', error, stack);
       try {
         if (await staging.exists()) {
           await staging.delete(recursive: true);
@@ -628,7 +628,7 @@ Future<void> _quitForUpdate() async {
     await ZenSingleInstance.release();
     await windowManager.destroy();
   } on Object catch (error) {
-    logZenWarning('Zamykanie przed aktualizacją: $error');
+    logZenWarning('Closing before the update: $error');
   }
   exit(0);
 }

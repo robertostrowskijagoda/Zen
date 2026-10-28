@@ -50,7 +50,7 @@ class _SideStoreSourceOptionState extends State<SideStoreSourceOption> {
     try {
       await widget.copy(kSideStoreSourceUrl);
     } on Object catch (error) {
-      logZenWarning('Kopiowanie adresu źródła SideStore: $error');
+      logZenWarning('Copying the SideStore source address: $error');
     }
     _say(
       message ??

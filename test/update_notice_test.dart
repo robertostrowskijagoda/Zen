@@ -278,7 +278,7 @@ void main() {
       expect(
         updateCheckDue(
           0,
-          nowMillis: 4 * _hour - 1,
+          nowMillis: 2 * _hour - 1,
           every: kBackgroundGithubCheckEvery,
         ),
         isFalse,
@@ -499,7 +499,10 @@ void main() {
         notices: _Notices(),
         now: () => now,
         fetchJson: (Uri uri) async {
-          asked++;
+          // One check asks the pages, then GitHub's API.
+          if (uri == kZenReleaseInfoUri) {
+            asked++;
+          }
           throw TimeoutException('offline');
         },
       );
@@ -530,7 +533,7 @@ void main() {
     });
 
     test('rides the shared beat without waking the phone in Doze, and asks '
-        'GitHub at most every 4 hours', () async {
+        'at most every 2 hours', () async {
       final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
         UpdateNoticeState(checkedAtMillis: now),
       );
@@ -549,28 +552,28 @@ void main() {
       )..start();
       addTearDown(check.stop);
 
-      expect(check.every, const Duration(hours: 4));
-      expect(check.beatEvery, const Duration(hours: 1));
+      expect(check.every, const Duration(hours: 2));
+      expect(check.beatEvery, const Duration(minutes: 30));
       final _Alarm wake = platform.live.single;
       expect(wake.whileIdle, isFalse);
-      expect(wake.delay, const Duration(hours: 1));
+      expect(wake.delay, const Duration(minutes: 30));
 
-      // On the beat, before the 4 hours are up: nothing is asked.
+      // On the beat, before the 2 hours are up: nothing is asked.
       for (int h = 1; h < 4; h++) {
-        now += _hour;
+        now += _hour ~/ 2;
         await check.checkIfDue();
       }
       expect(asked, 0);
 
-      now += _hour;
+      now += _hour ~/ 2;
       await check.checkIfDue();
       expect(asked, 1);
       expect(notices.shown, hasLength(1));
       expect(notices.shown.single.routeKey, buildUpdatesRouteKey());
       expect(store.state.checkedAtMillis, now);
 
-      // Four hours later the same version: asked again, not announced.
-      now += 4 * _hour;
+      // Two hours later the same version: asked again, not announced.
+      now += 2 * _hour;
       await check.checkIfDue();
       expect(asked, 2);
       expect(notices.shown, hasLength(1));
@@ -613,12 +616,16 @@ void main() {
         now: () => now,
         currentVersion: '1.11.0',
         fetchJson: (Uri uri) async {
-          asked++;
+          if (uri == kZenReleaseInfoUri) {
+            asked++;
+          }
           throw const SocketException('offline');
         },
       );
       await check.checkIfDue();
       expect(store.state.checkedAtMillis, isNull);
+      expect(store.state.failedAtMillis, now);
+      expect(store.state.error, contains('offline'));
       now += 3 * _hour;
       await check.checkIfDue();
       expect(asked, 2);
