@@ -33,8 +33,8 @@ void main() {
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());
-      // iPhone: Zen downloads nothing; Safari saves the release's IPA and
-      // Scarlet installs it.
+      // iPhone: Zen downloads nothing; SideStore installs the release's
+      // IPA.
       expect(
         githubAssetName(releasePlatform: 'ios', abi: Abi.iosArm64),
         isNull,
@@ -47,14 +47,14 @@ void main() {
       }
     });
 
-    test('no link into Scarlet is guessed in the app', () {
-      // Scarlet documents no link that installs a file: the update goes
-      // through Safari and "Sideload IPA" instead. The only Scarlet link is
-      // the one that adds Zen's source, always shown with the steps by hand.
-      const String source =
-          'scarlet://source=https://robertostrowskijagoda.github.io/Zen/'
-          'scarlet.json';
-      final RegExp other = RegExp(r'scarlet://(?!source=)');
+    test('only the documented SideStore links are used', () {
+      // docs.sidestore.io ("URL Schema") documents two links: one adds a
+      // source, one installs an IPA. The app uses nothing else of SideStore,
+      // and iOS opens exactly the source link and install links of this
+      // repository's release IPAs.
+      final RegExp undocumented = RegExp(
+        r'sidestore://(?!source\?url=|install\?url=)\w',
+      );
       final List<String> found = <String>[
         for (final String root in <String>['lib', 'ios/Runner'])
           for (final FileSystemEntity f in Directory(
@@ -62,19 +62,64 @@ void main() {
           ).listSync(recursive: true))
             // latin1: images and sounds read without failing.
             if (f is File &&
-                other.hasMatch(
+                undocumented.hasMatch(
                   latin1.decode(f.readAsBytesSync()).toLowerCase(),
                 ))
               f.path,
       ];
       expect(found, isEmpty);
-      // iOS opens exactly that link and the app asks for exactly it.
       final String swift = File(
         'ios/Runner/AppDelegate.swift',
       ).readAsStringSync();
-      expect(swift, contains('"$source"'));
-      expect('scarlet://'.allMatches(swift.toLowerCase()), hasLength(1));
-      expect(kScarletSourceLink, source);
+      expect(swift, contains('"$kSideStoreSourceLink"'));
+      expect('sidestore://'.allMatches(swift), hasLength(2));
+      expect(
+        kSideStoreSourceLink,
+        'sidestore://source?url=https://robertostrowskijagoda.github.io/Zen/'
+        'apps.json',
+      );
+    });
+
+    test('Scarlet is gone from the app, the iPhone code, the website and the '
+        'guide', () {
+      // The iPhone build installs with SideStore only; the released
+      // sections of CHANGELOG.md keep their history. The public peer list
+      // (native/) has a host of that name, which is not the app.
+      final List<String> found = <String>[
+        for (final String root in <String>[
+          'lib',
+          'ios/Runner',
+          'tool/pages',
+          'tool/ci',
+          'docs/guide',
+        ])
+          for (final FileSystemEntity f in Directory(
+            root,
+          ).listSync(recursive: true))
+            if (f is File &&
+                latin1
+                    .decode(f.readAsBytesSync())
+                    .toLowerCase()
+                    .contains('scarlet'))
+              f.path,
+        for (final String path in <String>[
+          'README.md',
+          'docs/RELEASES.md',
+          'docs/IOS_BACKGROUND.md',
+          '.github/workflows/pages.yml',
+          '.github/workflows/release.yml',
+          'tool/release_contract.dart',
+        ])
+          if (File(path).readAsStringSync().toLowerCase().contains('scarlet'))
+            path,
+      ];
+      expect(found, isEmpty);
+      final String changelog = File('CHANGELOG.md').readAsStringSync();
+      final String unreleased = changelog.substring(
+        changelog.indexOf('## Unreleased'),
+        changelog.indexOf('\n## ', changelog.indexOf('## Unreleased') + 1),
+      );
+      expect(unreleased.toLowerCase(), isNot(contains('scarlet')));
     });
 
     test('release.yml produces every one of them', () {

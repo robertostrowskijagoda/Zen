@@ -7,7 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 // The addresses people were given stay; every page can be read on a phone,
 // is drawn in the shared look, has the app icon and the language picker; the
 // downloads are links that follow each release by themselves and the iPhone
-// page installs with Scarlet, the other ways only as other ways.
+// page installs with SideStore, step by step with drawn pictures, the other
+// ways only as other ways.
 
 const String _site = 'tool/pages';
 
@@ -82,18 +83,24 @@ void main() {
       expect(home, contains('zen-icon.png'));
     });
 
-    test('the iPhone sources are made from the release, not kept here', () {
+    test('the iPhone source is made from the release, not kept here', () {
       expect(File('$_site/apps.json').existsSync(), isFalse);
-      expect(File('$_site/scarlet.json').existsSync(), isFalse);
       final String workflow = File(
         '.github/workflows/pages.yml',
       ).readAsStringSync();
       expect(workflow, contains('apps.json'));
-      expect(workflow, contains('scarlet.json'));
       expect(workflow, contains('release_source.py'));
+      final String script = File(
+        'tool/ci/release_source.py',
+      ).readAsStringSync();
+      expect(script, contains('"apps.json"'));
+      // SideStore's source is the only one published.
       expect(
-        File('tool/ci/release_source.py').readAsStringSync(),
-        contains('"scarlet.json"'),
+        <String?>{
+          for (final RegExpMatch m in RegExp(r'"\w+\.json"').allMatches(script))
+            m[0],
+        },
+        <String>{'"apps.json"', '"release.json"'},
       );
     });
   });
@@ -294,39 +301,176 @@ void main() {
       }
     });
 
-    test('iPhone: Scarlet is the way, at its own address, and the other '
-        'stores are other ways', () {
+    test('iPhone: SideStore is the way, in seven steps after what is needed, '
+        'the other stores only as other ways', () {
       final String iphone = _read('install/iphone/index.html');
-      expect(iphone, contains('https://usescarlet.com/'));
-      expect(iphone.indexOf('Scarlet'), lessThan(iphone.indexOf('SideStore')));
-      expect(iphone, contains('Zen-unsigned.ipa'));
-      // The page warns that a certificate can be revoked.
-      expect(iphone, contains('revoke'));
-      // The about page thanks Yggdrasil and Scarlet.
-      expect(_read('site.js'), contains('https://usescarlet.com/'));
+      final int need = iphone.indexOf('id="need"');
+      final int steps = iphone.indexOf('<ol class="how"');
+      final int stepsEnd = iphone.indexOf('\n  </ol>', steps);
+      expect(need, greaterThan(0));
+      expect(need, lessThan(steps));
+      for (final String n in <String>['need1', 'need2', 'need3', 'need4']) {
+        final int at = iphone.indexOf('data-i="$n"');
+        expect(at, inInclusiveRange(need, steps), reason: n);
+      }
+      // The steps, in this order, each with its own words.
+      final List<(String, List<String>)> order = <(String, List<String>)>[
+        ('step-vpn', <String>['LocalDevVPN', 'Connect']),
+        ('step-computer', <String>['iloader', 'Install SideStore (Stable)']),
+        (
+          'step-trust',
+          <String>['VPN &amp; Device Management', 'Developer Mode'],
+        ),
+        ('step-refresh', <String>['My Apps', '7 DAYS', 'Refresh Now']),
+        (
+          'step-source',
+          <String>[
+            'href="sidestore://source?url=https%3A%2F%2Frobertostrowskijagoda'
+                '.github.io%2FZen%2Fapps.json"',
+            'id="copySource"',
+          ],
+        ),
+        ('step-auto', <String>['Set VPN', 'Refresh All Apps']),
+        ('step-updates', <String>['Update']),
+      ];
+      int last = steps;
+      for (int i = 0; i < order.length; i++) {
+        final (String id, List<String> words) = order[i];
+        final int at = iphone.indexOf('<li id="$id">');
+        expect(at, greaterThan(last), reason: id);
+        final int end = i + 1 < order.length
+            ? iphone.indexOf('<li id="${order[i + 1].$1}">')
+            : stepsEnd;
+        final String step = iphone.substring(at, end);
+        for (final String word in words) {
+          expect(step, contains(word), reason: '$id: $word');
+        }
+        last = at;
+      }
+      expect(
+        RegExp(r'<li id="step-').allMatches(iphone.substring(steps, stepsEnd)),
+        hasLength(7),
+      );
+      // AltStore and the bare file only under "Other ways", after the steps.
+      final int other = iphone.indexOf('data-i="otherWays"');
+      expect(other, greaterThan(stepsEnd));
+      expect(iphone.indexOf('altstore://'), greaterThan(other));
+      expect(
+        iphone.indexOf('releases/latest/download/Zen-unsigned.ipa'),
+        greaterThan(other),
+      );
+      // Help for what goes wrong: the pairing file, at SideStore's own page.
+      expect(
+        iphone,
+        contains('https://docs.sidestore.io/docs/advanced/pairing-file'),
+      );
     });
 
-    test('iPhone: the Scarlet source is only another way, after the steps, '
-        'with the address to paste', () {
-      final String iphone = _read('install/iphone/index.html');
-      const String source =
-          'https://robertostrowskijagoda.github.io/Zen/scarlet.json';
-      expect(iphone, contains('href="scarlet://source=$source"'));
-      // The four steps stay as they are; the source comes under "Other
-      // ways", never as a step.
-      final int steps = iphone.indexOf('</ol>');
-      expect(iphone.indexOf('scarlet://'), greaterThan(steps));
-      expect(
-        iphone.indexOf('scarlet://'),
-        greaterThan(iphone.indexOf('data-i="otherWays"')),
+    test('iPhone: every language adds the source by hand, sets up the '
+        'automatic refresh and names the limit of a free account', () {
+      final Map<String, Map<String, String>> texts = _texts(
+        'install/iphone/index.html',
       );
-      expect('<li>'.allMatches(iphone.substring(0, steps)), hasLength(4));
-      // Every language says how to add it by hand, with the address.
-      final String texts = iphone.substring(iphone.indexOf('var TEXTS'));
-      expect('"scarletSource": '.allMatches(texts), hasLength(21));
-      expect('"addScarlet": '.allMatches(texts), hasLength(21));
-      expect('**Add Repo**'.allMatches(texts), hasLength(21));
-      expect('`$source`'.allMatches(texts), hasLength(21));
+      const String source =
+          '`https://robertostrowskijagoda.github.io/Zen/apps.json`';
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        final Map<String, String> t = lang.value;
+        expect(t['s5d'], allOf(contains(source), contains('**Sources**')));
+        expect(
+          t['s5d'],
+          contains('**${t['addSideStore']}**'),
+          reason: lang.key,
+        );
+        expect(t['s4d'], contains('**7 DAYS**'), reason: lang.key);
+        expect(
+          t['a2'],
+          allOf(contains('**Set VPN**'), contains('**LocalDevVPN**')),
+          reason: lang.key,
+        );
+        expect(t['a3'], contains('**Refresh All Apps**'), reason: lang.key);
+        expect(t['freeLimit'], allOf(contains('3'), contains('10')));
+        expect(t['s6d'], contains('7'), reason: lang.key);
+      }
+      expect(texts['en']!['s6d'], contains('no computer'));
+      expect(texts['pl']!['s6d'], contains('bez komputera'));
+      expect(texts['pl']!['s3d'], contains('VPN i zarządzanie urządzeniem'));
+      expect(texts['pl']!['s3d'], contains('Tryb dewelopera'));
+    });
+
+    test('iPhone: the pictures are drawn on the page, hidden from screen '
+        'readers, one per step', () {
+      final String iphone = _read('install/iphone/index.html');
+      final String steps = iphone.substring(
+        iphone.indexOf('<ol class="how"'),
+        iphone.indexOf('\n  </ol>'),
+      );
+      final List<String> figures = <String>[
+        for (final RegExpMatch m in RegExp(
+          r'<figure class="fig"[^>]*>(.*?)</figure>',
+        ).allMatches(steps))
+          m[0]!,
+      ];
+      expect(figures, hasLength(7));
+      for (final String figure in figures) {
+        expect(figure, contains('aria-hidden="true"'));
+        expect(figure, contains('<svg viewBox='));
+        // Drawn in the site's colours (light and dark), no picture files.
+        expect(figure, isNot(contains('<img')));
+        expect(figure, isNot(contains('href="http')));
+        expect(figure, isNot(matches(RegExp(r'fill="#|stroke="#'))));
+      }
+      // The only image of the page is the app icon.
+      expect(
+        RegExp(r'<img ').allMatches(iphone).length,
+        1,
+        reason: 'the hero icon',
+      );
+      final String css = _read('site.css');
+      for (final String token in <String>[
+        '.fig .crd',
+        '.fig .pillo',
+        '.need',
+      ]) {
+        expect(css, contains(token), reason: token);
+      }
+    });
+
+    test('Scarlet is gone from the website, and SideStore is thanked', () {
+      for (final FileSystemEntity f in Directory(
+        _site,
+      ).listSync(recursive: true)) {
+        if (f is! File || f.path.endsWith('.png')) {
+          continue;
+        }
+        final String text = f.readAsStringSync().toLowerCase();
+        expect(text, isNot(contains('scarlet')), reason: f.path);
+        expect(text, isNot(contains('usescarlet')), reason: f.path);
+      }
+      final Map<String, Map<String, String>> common = _texts('site.js');
+      for (final MapEntry<String, Map<String, String>> lang in common.entries) {
+        expect(
+          lang.value['thanks_1'],
+          allOf(
+            contains('|https://yggdrasil-network.github.io/]'),
+            // Declined in some languages ("SideStoru").
+            contains('[SideStor'),
+            contains('|https://sidestore.io/]'),
+          ),
+          reason: lang.key,
+        );
+      }
+      for (final String page in <String>[
+        'about/index.html',
+        'features/index.html',
+      ]) {
+        expect(
+          _read(page),
+          contains(
+            '<a href="https://sidestore.io/" rel="noopener">SideStore</a>',
+          ),
+          reason: page,
+        );
+      }
     });
 
     test('every system page has a download or the steps, and a way on', () {

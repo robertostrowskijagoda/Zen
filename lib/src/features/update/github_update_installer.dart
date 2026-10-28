@@ -56,36 +56,42 @@ String get flatpakUpdateHint => t(
   'flatpak install --user ./Zen-Linux-x64.flatpak',
 );
 
-/// The label of the iPhone and iPad update button, which opens the IPA of
-/// [version] in Safari.
+/// The label of the iPhone and iPad update button, which hands the IPA of
+/// the new version to SideStore.
+String get iosSideStoreLabel => t('Zaktualizuj w SideStore');
+
+/// The label of the quieter iPhone and iPad button, which opens the IPA of
+/// [version] in Safari (for the "+" in SideStore's "My Apps").
 String iosDownloadLabel(String version) =>
     t('Pobierz Zen {version}', {'version': version});
 
 /// Said on iPhone and iPad above [iosUpdateSteps] (Zen downloads nothing
-/// there: Safari saves the IPA, Scarlet installs it).
+/// there: SideStore installs the IPA).
 String get iosUpdateHint => t(
   'Na iPhonie i iPadzie Zen nie zainstaluje się sam. Zaktualizujesz go '
-  'przez Scarlet:',
+  'w SideStore:',
 );
 
 /// The update of an iPhone or iPad to [version], step by step, in the words
 /// of the iPhone install page and the install guide.
 List<String> iosUpdateSteps(String version) => <String>[
+  t('Otwórz LocalDevVPN i stuknij „Connect”.'),
   t(
-    'Stuknij „Pobierz Zen {version}”: Safari zapisze plik Zen-unsigned.ipa '
-    'w aplikacji Pliki.',
+    'Stuknij „Zaktualizuj w SideStore”: SideStore pobierze Zen {version} '
+    'i go zainstaluje.',
     {'version': version},
   ),
-  t(
-    'Otwórz Scarlet, przytrzymaj strzałkę pobierania i wybierz „Sideload IPA”.',
-  ),
-  t('Wskaż Zen-unsigned.ipa i stuknij „Install”.'),
   t('Nie usuwaj wcześniej obecnego Zen: nowa wersja zastąpi starą.'),
 ];
 
-/// Said on iPhone and iPad below [iosUpdateSteps].
-String get iosOtherSignersHint =>
-    t('Instalujesz przez SideStore lub AltStore? Zaktualizuj Zen tam.');
+/// Said on iPhone and iPad below [iosUpdateSteps]: the other ways in
+/// SideStore itself.
+String iosOtherWaysHint(String version) => t(
+  'Ze źródłem Zen w SideStore wystarczy też „My Apps” → „Update” przy Zen. '
+  'Bez SideStore pod ręką: stuknij „Pobierz Zen {version}”, a potem w '
+  'SideStore w „My Apps” stuknij „+” i wybierz Zen-unsigned.ipa.',
+  {'version': version},
+);
 
 /// What "Aktualizuj" will do on [target] with the release file [file],
 /// said before it is tapped; null where Zen downloads nothing.
@@ -196,8 +202,8 @@ LinuxInstall currentLinuxInstall() {
 /// * Flatpak: nothing ([assetName] is null). The sandbox can neither write
 ///   to Downloads nor run `flatpak install`; the banner opens the release
 ///   page instead ([flatpakUpdateHint]).
-/// * iOS: nothing ([assetName] is null); the banner opens the release's
-///   IPA in Safari, for Scarlet to install ([GithubUpdateRoute.sideload]).
+/// * iOS: nothing ([assetName] is null); the banner hands the release's
+///   IPA to SideStore ([GithubUpdateRoute.sideload]).
 final class SystemGithubInstaller implements GithubUpdateInstaller {
   SystemGithubInstaller({Future<void> Function()? quit})
     : _quit = quit ?? _quitForUpdate {

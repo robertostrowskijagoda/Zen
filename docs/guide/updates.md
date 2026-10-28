@@ -54,30 +54,36 @@ aligned for phones with 16 KB memory pages. Details:
     checked `.deb` is saved to Downloads; open it with the package
     installer or run the `sudo apt install …` line Zen shows.
   - **iPhone and iPad:** an iOS app can't install another, so Zen downloads
-    nothing itself. The card shows the steps, numbered, in the words of the
-    iPhone install page:
-    1. Tap **Download Zen 1.x.y**: Safari saves that version's
-       `Zen-unsigned.ipa` (pinned to the announced release) to the Files app.
-    2. Open Scarlet, press and hold the download arrow and choose
-       **Sideload IPA**.
-    3. Pick `Zen-unsigned.ipa` and tap **Install**.
-    4. Don't delete the current Zen first: the new version replaces it.
+    nothing itself; SideStore installs the update. The card shows the
+    steps, numbered, in the words of the iPhone install page:
+    1. Open LocalDevVPN and tap **Connect**.
+    2. Tap **Update in SideStore**: SideStore downloads that version's
+       `Zen-unsigned.ipa` (pinned to the announced release) and installs it.
+       This is SideStore's documented link `sidestore://install?url=…`.
+    3. Don't delete the current Zen first: the new version replaces it.
 
-    After the tap Zen repeats the next step in Scarlet. When the release has
-    no IPA, or no browser opens it, the iPhone install page opens instead
-    (its address is copied when that fails too); **Open install page** is
-    always there. With SideStore or AltStore, update Zen there (the Zen
-    source, below). Safari downloads the file, so Zen's checksum and
-    signature check doesn't apply to it.
+    Below the steps: with Zen's source in SideStore, **My Apps → Update**
+    next to Zen does the same; without SideStore at hand, **Download Zen
+    1.x.y** saves the IPA to Files through Safari, and in SideStore **My
+    Apps → +** picks it. When SideStore doesn't open, Zen says so and points
+    to the download; when the release has no IPA, or no browser opens it,
+    the iPhone install page opens instead (its address is copied when that
+    fails too); **Open install page** is always there. SideStore (or Safari)
+    downloads the file, so Zen's checksum and signature check doesn't apply
+    to it.
 
-    A quieter way, under the steps on the updates screen (and in the
-    iPhone steps of "How to install Zen" on an iPhone): **Add Zen source
-    to Scarlet**, so new versions are installed in Scarlet itself, without
-    downloading the file in Safari. Scarlet doesn't document the link that
-    adds a source, so **Copy source address** and the step by hand are
-    always there: in Scarlet hold the download arrow, choose **Add Repo**
-    and paste `https://robertostrowskijagoda.github.io/Zen/scarlet.json`.
-    When Scarlet doesn't open, the address is copied.
+    Under the steps on the updates screen (and in the iPhone steps of "How
+    to install Zen" on an iPhone): **Add Zen source to SideStore**
+    (`sidestore://source?url=…`, SideStore's documented link), so SideStore
+    itself shows new versions in **My Apps**. **Copy source address** and
+    the step by hand are always there: in SideStore open **Sources**, tap
+    **+** and paste `https://robertostrowskijagoda.github.io/Zen/apps.json`.
+    When SideStore doesn't open, the address is copied.
+
+    An app signed with a free Apple Account opens for 7 days. From two days
+    before, a card in Chats says so: turn on LocalDevVPN and tap the day
+    counter next to Zen in SideStore's **My Apps** (or **Refresh All**), or
+    let a daily Shortcuts automation do it (the iPhone install page, step 6).
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
@@ -103,21 +109,22 @@ aligned for phones with 16 KB memory pages. Details:
 - If github.com cannot be reached at all, Zen tells you, in case someone is
   blocking it.
 
-## The install page and the iPhone sources
+## The install page and the iPhone source
 
 GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 (steps for every system, the downloads, the Android signing certificate
-fingerprint; one recommended way and its own page for each system),
-**`apps.json`**, a SideStore / AltStore source, and **`scarlet.json`**, the
-same app as a Scarlet source (the iPhone page offers it under "Other ways",
-with the address to paste in Scarlet's **Add Repo**). All are
+fingerprint; one recommended way and its own page for each system) and
+**`apps.json`**, a SideStore / AltStore source (the iPhone page adds it in
+step 5, with the address to paste in SideStore's **Sources → +**). Both are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
 version, date, size and checksum, and the permissions read from that very
 file. SideStore checks the source, offers the update, and signs the file
-with the person's own Apple ID. With a free Apple ID that signature expires
-after 7 days: once a week turn on LocalDevVPN, open SideStore and tap
-**Refresh**. Zen shows a reminder in Chats 2 days before the date.
+with the person's own Apple Account. With a free Apple Account that
+signature expires after 7 days: SideStore renews it on the phone whenever
+LocalDevVPN is connected (tap the counter in **My Apps**, or a daily
+Shortcuts automation with **Set VPN** and **Refresh All Apps**, step 6 of
+the iPhone page). Zen shows a reminder in Chats 2 days before the date.
 
 ## Pass it on
 
@@ -150,9 +157,9 @@ already.
   on only as a link (never as an APK) and has no launcher disguise. Because
   the store signs it, it also skips the check of its own signing
   certificate.
-- On iPhone and iPad Zen updates through the signer you installed it with
-  (Scarlet: **Download Zen**, then **Sideload IPA**; SideStore: the source
-  above), not by itself.
+- On iPhone and iPad Zen updates through SideStore (**Update in SideStore**,
+  or the source above), not by itself; with AltStore Classic, update it
+  there.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it

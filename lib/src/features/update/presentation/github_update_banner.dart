@@ -9,7 +9,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
-import 'package:zen/src/features/update/presentation/scarlet_source_option.dart';
+import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
 /// Across the top of the app: "Jest nowa wersja … — warto zaktualizować"
@@ -202,8 +202,8 @@ class _WhatsNewLines extends StatelessWidget {
 
 /// What this installation updates with ([GithubUpdateService.route]):
 /// "Aktualizuj" with the download's progress where Zen installs the file
-/// itself, "Pobierz Zen …" in Safari with the numbered steps for Scarlet on
-/// iPhone and iPad, the release page in a Flatpak or when the release lacks
+/// itself, "Zaktualizuj w SideStore" with the numbered steps on iPhone and
+/// iPad, the release page in a Flatpak or when the release lacks
 /// this device's file; then the result (and "Szczegóły" in the banner).
 class _UpdateProgress extends StatelessWidget {
   const _UpdateProgress({required this.service, this.compact = false});
@@ -312,10 +312,15 @@ class _UpdateProgress extends StatelessWidget {
               if (newer != null &&
                   route == GithubUpdateRoute.sideload) ...<Widget>[
                 FilledButton.icon(
+                  key: const Key('github-update-sidestore'),
+                  onPressed: () => unawaited(service.openInSideStore()),
+                  icon: const Icon(Icons.system_update_rounded, size: 18),
+                  label: Text(iosSideStoreLabel),
+                ),
+                TextButton(
                   key: const Key('github-update-ipa'),
                   onPressed: () => unawaited(service.openIpaInSafari()),
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: Text(iosDownloadLabel(newer.version)),
+                  child: Text(iosDownloadLabel(newer.version)),
                 ),
                 TextButton(
                   key: const Key('github-update-install-page'),
@@ -346,8 +351,8 @@ class _UpdateProgress extends StatelessWidget {
 }
 
 /// iPhone and iPad: the update to [version] as numbered steps (one line
-/// each, so they read well on a narrow phone with large text), then where
-/// SideStore and AltStore users update.
+/// each, so they read well on a narrow phone with large text), then the
+/// other ways in SideStore ("Update" with the source, "+" with the file).
 class _SideloadSteps extends StatelessWidget {
   const _SideloadSteps({required this.version});
 
@@ -394,7 +399,11 @@ class _SideloadSteps extends StatelessWidget {
             ),
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(iosOtherSignersHint, style: style),
+            child: Text(
+              iosOtherWaysHint(version),
+              key: const Key('github-update-ios-other-ways'),
+              style: style,
+            ),
           ),
         ],
       ),
@@ -556,10 +565,10 @@ class GithubUpdateCard extends ConsumerWidget {
                         style: TextStyle(color: zen.textSecondary),
                       ),
                     ),
-                  // iPhone and iPad: the source in Scarlet, a quieter way
-                  // than the steps above.
+                  // iPhone and iPad: Zen's source in SideStore, so that
+                  // SideStore itself shows the next versions.
                   if (service.installer.target == UpdateTarget.ios)
-                    const ScarletSourceOption(),
+                    const SideStoreSourceOption(),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     key: const Key('github-check-now'),
@@ -596,8 +605,8 @@ class GithubUpdateCard extends ConsumerWidget {
                           'Zen sprawdza najnowsze wydanie na github.com przy '
                           'starcie i co godzinę i o nowej wersji powiadamia '
                           'raz. Na iPhonie i iPadzie sam niczego nie pobiera '
-                          'ani nie instaluje: plik wydania pobierasz w Safari '
-                          'i instalujesz przez Scarlet (albo SideStore).',
+                          'ani nie instaluje: nową wersję instaluje '
+                          'SideStore.',
                         ),
                         UpdateTarget.flatpak => t(
                           'Zen sprawdza najnowsze wydanie na github.com przy '

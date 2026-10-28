@@ -86,9 +86,10 @@ bool githubUpdatesEnabledFor({
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
 /// also checks the signing certificate). On iPhone and iPad it downloads
-/// nothing: Safari downloads the release's IPA for the signing app
-/// ([openIpaInSafari]); in a Flatpak, and for a release without this
-/// device's file, it points to the release page.
+/// nothing: SideStore installs the release's IPA ([openInSideStore]), or
+/// Safari saves it for SideStore ([openIpaInSafari]); in a Flatpak, and
+/// for a release without this device's file, it points to the release
+/// page.
 ///
 /// Only one request to api.github.com per check, with no header but the
 /// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer:
@@ -107,6 +108,7 @@ final class GithubUpdateService extends ChangeNotifier {
     GithubDownloader? download,
     this.beforeDownload,
     Future<bool> Function(String url)? openPage,
+    Future<bool> Function(String link)? openSideStore,
     Future<void> Function(String text)? copy,
     bool Function()? internetWorks,
     DateTime Function()? now,
@@ -123,6 +125,7 @@ final class GithubUpdateService extends ChangeNotifier {
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
        _openPage = openPage ?? openWebLink,
+       _openSideStore = openSideStore ?? openSideStoreLink,
        _copy = copy ?? copyWithExpiry,
        _internetWorks = internetWorks ?? (() => true),
        _now = now ?? DateTime.now,
@@ -168,6 +171,9 @@ final class GithubUpdateService extends ChangeNotifier {
 
   /// Opens an https page (false: it could not be opened).
   final Future<bool> Function(String url) _openPage;
+
+  /// Opens a `sidestore://` link (false: SideStore is not installed).
+  final Future<bool> Function(String link) _openSideStore;
   final Future<void> Function(String text) _copy;
   final bool Function() _internetWorks;
   final DateTime Function() _now;
@@ -732,11 +738,48 @@ final class GithubUpdateService extends ChangeNotifier {
     }
   }
 
-  /// iPhone and iPad ([GithubUpdateRoute.sideload]): opens the IPA of
-  /// [newer] (pinned to that version) in Safari, which saves it to Files;
-  /// the person then installs it with Scarlet ("Sideload IPA"). Where the
-  /// release has no IPA, or no browser opens it, the iPhone install page
-  /// opens instead ([openInstallPage]). Zen itself downloads nothing.
+  /// iPhone and iPad ([GithubUpdateRoute.sideload]): opens SideStore with
+  /// the link that downloads and installs the IPA of [newer] (pinned to
+  /// that version; [sideStoreInstallLink]). Where SideStore does not open
+  /// (not installed), the person is told to download the file instead;
+  /// where the release has no IPA, the iPhone install page opens
+  /// ([openInstallPage]). Zen itself downloads nothing.
+  Future<void> openInSideStore() async {
+    final GithubRelease? release = newer;
+    if (release == null || route != GithubUpdateRoute.sideload) {
+      return;
+    }
+    final String? url = iosIpaUrl(release);
+    if (url == null) {
+      await openInstallPage();
+      return;
+    }
+    if (await _openSideStore(sideStoreInstallLink(url))) {
+      _finish(
+        GithubInstallState.done,
+        t(
+          'Otwarto SideStore. Jeśli instalacja Zen {version} nie ruszy, '
+          'sprawdź, czy LocalDevVPN jest połączony, i spróbuj jeszcze raz.',
+          {'version': release.version},
+        ),
+      );
+      return;
+    }
+    _finish(
+      GithubInstallState.failed,
+      t(
+        'Nie udało się otworzyć SideStore. Stuknij „Pobierz Zen {version}” '
+        'i zainstaluj plik w SideStore albo tak, jak instalowano Zen.',
+        {'version': release.version},
+      ),
+    );
+  }
+
+  /// iPhone and iPad ([GithubUpdateRoute.sideload]), without SideStore's
+  /// link: opens the IPA of [newer] (pinned to that version) in Safari,
+  /// which saves it to Files; the person then adds it with the "+" in
+  /// SideStore's "My Apps". Where the release has no IPA, or no browser
+  /// opens it, the iPhone install page opens instead ([openInstallPage]).
   Future<void> openIpaInSafari() async {
     final GithubRelease? release = newer;
     if (release == null || route != GithubUpdateRoute.sideload) {
@@ -748,8 +791,8 @@ final class GithubUpdateService extends ChangeNotifier {
         GithubInstallState.done,
         t(
           'Safari pobiera Zen {version}: plik Zen-unsigned.ipa zapisze się '
-          'w aplikacji Pliki. Teraz otwórz Scarlet, przytrzymaj strzałkę '
-          'pobierania i wybierz „Sideload IPA”.',
+          'w aplikacji Pliki. Teraz w SideStore otwórz „My Apps”, stuknij '
+          '„+” i wybierz ten plik.',
           {'version': release.version},
         ),
       );
@@ -758,7 +801,7 @@ final class GithubUpdateService extends ChangeNotifier {
     await openInstallPage();
   }
 
-  /// iPhone and iPad: opens the iPhone install page (Scarlet's steps).
+  /// iPhone and iPad: opens the iPhone install page (SideStore's steps).
   /// Where no browser opens it, its address is copied.
   Future<void> openInstallPage() async {
     if (await _openPage(kIphoneInstallPageUrl)) {

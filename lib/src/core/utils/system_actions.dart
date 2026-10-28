@@ -111,11 +111,12 @@ Future<bool> openWebLink(String url) async {
   }
 }
 
-/// iPhone and iPad: opens Scarlet with [link], the link that adds Zen's
-/// source (kScarletSourceLink; iOS opens no other Scarlet link). Returns
-/// `false` where nothing opened it (Scarlet is not installed) or elsewhere.
-Future<bool> openScarletSourceLink(String link) async {
-  if (kIsWeb || !Platform.isIOS || !link.startsWith('scarlet://source=')) {
+/// iPhone and iPad: opens SideStore with [link], one of its documented
+/// links (kSideStoreSourceLink, sideStoreInstallLink; iOS opens no other
+/// SideStore link). Returns `false` where nothing opened it (SideStore is
+/// not installed) or elsewhere.
+Future<bool> openSideStoreLink(String link) async {
+  if (kIsWeb || !Platform.isIOS || !link.startsWith('sidestore://')) {
     return false;
   }
   try {
@@ -124,7 +125,7 @@ Future<bool> openScarletSourceLink(String link) async {
         }) ??
         false;
   } on Object catch (error) {
-    logZenWarning('Otwieranie Scarlet: $error');
+    logZenWarning('Otwieranie SideStore: $error');
     return false;
   }
 }

@@ -3,8 +3,8 @@
 Zen has no servers, so it cannot use push notifications: Apple delivers
 pushes only from a server that holds an APNs key. Everything in this document
 is what an app can do on its own, on an iPhone that installed Zen by
-sideloading (Scarlet, SideStore or AltStore: the unsigned IPA re-signed with a
-certificate of the signer).
+sideloading (SideStore or AltStore: the unsigned IPA re-signed with the
+person's own Apple Account).
 
 Short version:
 

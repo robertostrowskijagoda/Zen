@@ -34,6 +34,9 @@ const String kTermsOfUseUrl =
 /// The Yggdrasil project (the network Zen runs on).
 const String kYggdrasilUrl = 'https://yggdrasil-network.github.io/';
 
+/// SideStore, which installs Zen on iPhone and iPad and keeps it signed.
+const String kSideStoreUrl = 'https://sidestore.io/';
+
 /// Where public Yggdrasil nodes are listed (Zen's builds take theirs from
 /// here).
 const String kYggdrasilPublicPeersUrl =
@@ -353,8 +356,8 @@ class _Paragraph extends StatelessWidget {
   }
 }
 
-/// The thanks: Yggdrasil first and Scarlet second, in bold, then everyone
-/// else whose work Zen stands on.
+/// The thanks: Yggdrasil first and SideStore second, in bold, then
+/// everyone else whose work Zen stands on.
 class _Thanks extends StatelessWidget {
   const _Thanks();
 
@@ -383,11 +386,11 @@ class _Thanks extends StatelessWidget {
               ),
             ),
             const TextSpan(text: '\n\n'),
-            TextSpan(text: 'Scarlet', style: bold),
+            TextSpan(text: 'SideStore', style: bold),
             TextSpan(
               text: t(
-                ' — dzięki niemu Zen da się prosto zainstalować na iPhonie '
-                'bez sklepu.',
+                ' — dzięki niemu Zen da się zainstalować na iPhonie bez '
+                'sklepu i odnawiać na samym telefonie.',
               ),
             ),
             const TextSpan(text: '\n\n'),
@@ -962,6 +965,14 @@ class _LicencesPage extends StatelessWidget {
           title: t('Sieć Yggdrasil'),
           subtitle: 'yggdrasil-network.github.io',
           url: kYggdrasilUrl,
+        ),
+        _LinkTile(
+          key: const Key('about-sidestore'),
+          icon: Icons.phone_iphone_rounded,
+          tone: zenTone(zen, 1),
+          title: 'SideStore',
+          subtitle: 'sidestore.io',
+          url: kSideStoreUrl,
         ),
       ],
     );

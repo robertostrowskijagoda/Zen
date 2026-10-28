@@ -52,8 +52,10 @@ class SigningExpiryBanner extends ConsumerWidget {
                     ),
               text: t(
                 'Podpis tej kopii Zen wygasa {date}. Włącz LocalDevVPN, '
-                'otwórz SideStore i stuknij „Odśwież” przy Zen (albo „Refresh '
-                'All”). Twoje dane zostają.',
+                'otwórz SideStore → „My Apps” i stuknij licznik dni przy Zen '
+                '(albo „Refresh All”). Twoje dane zostają. Żeby działo się to '
+                'samo, ustaw automatyzację w Skrótach (strona instalacji na '
+                'iPhone’a, krok 6).',
                 <String, Object?>{'date': ZenFormat.dayMonthTime(expiry)},
               ),
             ),

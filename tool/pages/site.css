@@ -338,6 +338,8 @@ main.prose { max-width: 780px; }
 .fig .accl { fill: none; stroke: var(--btn1); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .fig .ink { fill: none; stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .fig .inkm { fill: none; stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.fig .crd { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.fig .pillo { fill: none; stroke: var(--link); stroke-width: 1.5; }
 .fig .wht { fill: #fff; }
 .fig .whts { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .fig .ring { fill: none; stroke: var(--btn2); stroke-width: 3; stroke-dasharray: 6 5; }
@@ -348,7 +350,28 @@ main.prose { max-width: 780px; }
 .fig text.t2 { fill: var(--text); }
 .fig text.tw { fill: #fff; }
 .fig text.mono { font-family: var(--mono); font-weight: 600; }
+.fig text.lnkt { fill: var(--link); }
 .fig-slot { position: relative; }
+/* What is needed before the steps (iPhone), steps inside a step, buttons side by side. */
+.need {
+  margin: 0 0 22px; padding: 16px 18px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
+}
+.need h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 19px; }
+.need h2 .ico { width: 24px; height: 24px; color: var(--link); }
+.need ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.need li { display: flex; align-items: flex-start; gap: 12px; color: var(--muted); font-size: 15.5px; }
+.need li .ico {
+  flex: none; width: 20px; height: 20px; padding: 8px; box-sizing: content-box;
+  border-radius: 12px; background: var(--soft); color: var(--link);
+}
+.need li span { padding-top: 6px; min-width: 0; }
+.need li b { color: var(--text); }
+@media (min-width: 700px) { .need ul { grid-template-columns: 1fr 1fr; } }
+.how ol.sub { margin: 10px 0 0; padding-inline-start: 22px; color: var(--muted); font-size: 15.5px; display: grid; gap: 6px; }
+.how ol.sub li::marker { color: var(--link); font-weight: 800; }
+.how .btns { display: flex; flex-wrap: wrap; gap: 0 10px; }
+.how p.small { margin-top: 10px; font-size: 14.5px; }
 
 /* Troubleshooting and other ways: native disclosure widgets. */
 .accs { display: grid; gap: 10px; }

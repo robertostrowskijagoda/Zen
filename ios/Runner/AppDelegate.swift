@@ -53,8 +53,8 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenOpenedFilesBridge") {
       ZenOpenedFilesBridge.register(with: registrar)
     }
-    // Links: web pages (and the update's IPA) in Safari, Zen's source in
-    // Scarlet.
+    // Links: web pages (and the update's IPA) in Safari, Zen's source and
+    // the update in SideStore.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenSystemLinks") {
       ZenSystemLinks.register(with: registrar.messenger())
     }
@@ -63,15 +63,20 @@ import UserNotifications
 
 /// `zen/system` on iOS: `openUrl` {url} → Bool, the same as on Android.
 /// Only https links are opened (Safari: web pages, and the release's IPA,
-/// which Safari saves to Files), and of Scarlet's links exactly the one
-/// that adds Zen's source (kScarletSourceLink in github_release.dart).
-/// False when nothing opened the link, which for Scarlet means it is not
-/// installed (`open` needs no LSApplicationQueriesSchemes entry, unlike
+/// which Safari saves to Files), and of SideStore's documented links
+/// exactly the one that adds Zen's source (kSideStoreSourceLink in
+/// github_release.dart) and the ones that install a release's
+/// Zen-unsigned.ipa of this repository (sideStoreInstallLink). False when
+/// nothing opened the link, which for SideStore means it is not installed
+/// (`open` needs no LSApplicationQueriesSchemes entry, unlike
 /// `canOpenURL`).
 enum ZenSystemLinks {
   private static var channel: FlutterMethodChannel?
-  private static let scarletSource =
-    "scarlet://source=https://robertostrowskijagoda.github.io/Zen/scarlet.json"
+  private static let sideStoreSource =
+    "sidestore://source?url=https://robertostrowskijagoda.github.io/Zen/apps.json"
+  private static let sideStoreInstallStart =
+    "sidestore://install?url=https://github.com/robertostrowskijagoda/Zen/releases/download/"
+  private static let sideStoreInstallEnd = "/Zen-unsigned.ipa"
 
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "zen/system", binaryMessenger: messenger)
@@ -93,8 +98,13 @@ enum ZenSystemLinks {
   }
 
   private static func allowed(_ link: String, _ url: URL) -> Bool {
-    if link == scarletSource {
+    if link == sideStoreSource {
       return true
+    }
+    if link.hasPrefix(sideStoreInstallStart) && link.hasSuffix(sideStoreInstallEnd) {
+      // Only a release tag in between (v1.2.3, v1.2.3-canary.1).
+      let tag = link.dropFirst(sideStoreInstallStart.count).dropLast(sideStoreInstallEnd.count)
+      return !tag.isEmpty && tag.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }
     }
     return url.scheme?.lowercased() == "https" && !(url.host ?? "").isEmpty
   }

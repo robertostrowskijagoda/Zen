@@ -267,10 +267,9 @@ enum UpdateTarget {
   /// `flatpak`, so it is updated outside Zen.
   flatpak,
 
-  /// iPhone and iPad: a signing app (Scarlet, SideStore, AltStore)
-  /// installed Zen, and an iOS app cannot install another one; Zen opens
-  /// the release's IPA in Safari instead, for the signing app to install
-  /// ([GithubUpdateRoute.sideload]).
+  /// iPhone and iPad: SideStore (or AltStore) installed Zen, and an iOS
+  /// app cannot install another one; Zen hands the release's IPA to
+  /// SideStore instead ([GithubUpdateRoute.sideload]).
   ios,
 
   /// Anything else (the web): only the release page.
@@ -300,10 +299,10 @@ enum GithubUpdateRoute {
   /// Zen downloads this device's file, checks it and installs it.
   download,
 
-  /// iPhone and iPad: Safari downloads the release's IPA to Files (the
-  /// iPhone install page when the release has none), and the person
-  /// installs it with the signing app ("Sideload IPA" in Scarlet). Zen
-  /// downloads nothing.
+  /// iPhone and iPad: SideStore downloads and installs the release's IPA
+  /// ([sideStoreInstallLink]); without SideStore, Safari saves the IPA to
+  /// Files for the "+" of SideStore's "My Apps" (the iPhone install page
+  /// when the release has no IPA). Zen downloads nothing.
   sideload,
 
   /// Flatpak: the command and the release page. Nothing is downloaded.
@@ -333,17 +332,23 @@ GithubUpdateRoute githubUpdateRoute({
 /// unsigned: the signing app signs it on the phone).
 const String kIosIpaAssetName = 'Zen-unsigned.ipa';
 
-/// The steps for iPhone on the project's pages (Scarlet first).
+/// The steps for iPhone on the project's pages (SideStore).
 const String kIphoneInstallPageUrl = '${kZenPagesBase}install/iphone/';
 
-/// Zen's Scarlet source (made by the Pages workflow from the latest release,
-/// next to the SideStore / AltStore source apps.json).
-const String kScarletSourceUrl = '${kZenPagesBase}scarlet.json';
+/// Zen's SideStore source (made by the Pages workflow from the latest
+/// release; AltStore reads the same file).
+const String kSideStoreSourceUrl = '${kZenPagesBase}apps.json';
 
-/// The link that adds [kScarletSourceUrl] to Scarlet. Scarlet does not
-/// document it, so the address and the steps by hand are always shown with
-/// it; AppDelegate.swift opens this link and no other of Scarlet's.
-const String kScarletSourceLink = 'scarlet://source=$kScarletSourceUrl';
+/// The link that adds [kSideStoreSourceUrl] to SideStore, in the form
+/// SideStore documents (docs.sidestore.io, "URL Schema").
+/// AppDelegate.swift opens exactly this one of SideStore's source links.
+const String kSideStoreSourceLink =
+    'sidestore://source?url=$kSideStoreSourceUrl';
+
+/// The link that makes SideStore download and install the IPA at [ipaUrl]
+/// (documented next to [kSideStoreSourceLink]). AppDelegate.swift opens it
+/// only for a Zen-unsigned.ipa of this repository's releases.
+String sideStoreInstallLink(String ipaUrl) => 'sidestore://install?url=$ipaUrl';
 
 /// The address of [release]'s IPA, pinned to that very version (Safari
 /// saves it to Files); null when the release has no IPA.

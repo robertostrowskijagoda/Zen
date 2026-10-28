@@ -9,9 +9,6 @@ Used by .github/workflows/pages.yml (Python 3, standard library only):
   link on the install page). It names the unsigned iPhone file of the
   latest published release; SideStore signs it with the person's own
   Apple ID when it installs it.
-- `scarlet.json`: the same app as a Scarlet repo (a `META` block and an
-  `Apps` list), for "Add Zen to Scarlet" on the iPhone install page and
-  in the app.
 - `release.json`: the version, date, files and sizes of that release and
   the Android signing certificate fingerprint, for the install page.
 
@@ -487,29 +484,6 @@ def sources(args):
     return source, page
 
 
-def scarlet_repo(source):
-    """The apps of [source] (apps.json) as a Scarlet repo: `META` (name and
-    icon) and one `Apps` list, each app with its IPA pinned to the release
-    tag in `down`. No app in [source]: an empty list, still a valid repo."""
-    return {
-        "META": {"repoName": source["name"], "repoIcon": source["iconURL"]},
-        "Apps": [
-            {
-                "name": app["name"],
-                "version": app["version"],
-                "down": app["downloadURL"],
-                "icon": app["iconURL"],
-                "dev": app["developerName"],
-                "category": "Social",
-                "description": app["localizedDescription"],
-                "bundleID": app["bundleIdentifier"],
-                "changelog": app["versionDescription"],
-            }
-            for app in source["apps"]
-        ],
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True)
@@ -521,14 +495,11 @@ def main():
     with open(os.path.join(args.site, "apps.json"), "w", encoding="utf-8") as f:
         json.dump(source, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    with open(os.path.join(args.site, "scarlet.json"), "w", encoding="utf-8") as f:
-        json.dump(scarlet_repo(source), f, ensure_ascii=False, indent=2)
-        f.write("\n")
     with open(os.path.join(args.site, "release.json"), "w", encoding="utf-8") as f:
         json.dump(page, f, ensure_ascii=False, indent=2)
         f.write("\n")
     print(f"release_source: {page['tag'] or 'no release'}, "
-          f"{len(source['apps'])} app(s) in apps.json and scarlet.json")
+          f"{len(source['apps'])} app(s) in apps.json")
 
 
 if __name__ == "__main__":
