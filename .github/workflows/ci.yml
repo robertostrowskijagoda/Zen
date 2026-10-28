@@ -179,6 +179,62 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  # Several real Zen devices in one test process on Linux: each runs the
+  # app's own start-up, stores in its own folder, its own Yggdrasil node
+  # from the Go bridge and the app's modules, on a mesh of this runner only
+  # (a hub node on 127.0.0.1, no public peer). User journeys: an invitation
+  # by QR code, names, messages both ways, the background and its
+  # notifications, presence, a removed friend, mailboxes for a friend who
+  # is away, a post two steps away, restarts and a crash while writing
+  # (docs/TESTING.md, "End-to-end on real nodes"). tool/e2e.dart builds the
+  # bridge (with the zene2e tag: its goroutines go into the log when a test
+  # hangs) and zstd for `flutter test`, then runs the files one at a time.
+  # About 6-8 minutes. Not required by the branch rules yet: it finds bugs
+  # that are being fixed (test/regressions); add it to "Analyze and test"
+  # once it is green.
+  e2e:
+    name: End-to-end on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Real-node tests
+        run: dart run tool/e2e.dart --results test-results --minutes 18
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 tool/ci/ci_summary.py flutter --format skipped
+          --analyze skipped --test '${{ job.status }}'
+          --tests $(find test-results -name '*.json' 2> /dev/null | sort)
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: ci-e2e-results
+          path: |
+            test-results/
+            build/e2e/goroutines.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
   # The check the branch rules require: green only when format, analyzer,
   # the release contract and every test job passed. It runs even when one
   # of them failed (a skipped required check would count as passed), and

@@ -1,0 +1,138 @@
+# The real app on an Android emulator (x86_64, Android 14, KVM on the
+# Ubuntu runner): a fresh install must get past the logo; the previous
+# release, built from its tag, then this commit installed over its data,
+# must too, keeping the node identity and every file; then a seeded monkey
+# run (2000 random events inside Zen) without a crash or an ANR
+# (tool/ci/android_smoke.sh, integration_test/app_start_test.dart,
+# docs/TESTING.md, "Android emulator").
+#
+# On pull requests to main, for a release tag and by hand (Actions ->
+# Android emulator -> Run workflow), not on every push: it takes about
+# 25-35 minutes (two debug builds, the emulator's start, the checks). The
+# release checklist (docs/RELEASES.md) asks for a green run on the release
+# commit.
+#
+# The previous release is built from its tag, not downloaded: a release APK
+# is signed with the release key and this commit's debug build cannot be
+# installed over it, while two debug builds of one runner share its debug
+# key, as a phone's two releases share the release key.
+#
+# The emulator comes from the runner's own Android SDK (sdkmanager,
+# avdmanager, emulator), without a third-party action. Read-only token, no
+# secret.
+name: Android emulator
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.1'
+  SYSTEM_IMAGE: 'system-images;android-34;google_apis;x86_64'
+
+jobs:
+  emulator:
+    name: Start, upgrade and monkey on an emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The tags: the previous release is built from its own.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The emulator image downloads while the apps build.
+      - name: Emulator image
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
+            create avd --force -n zen -k "$SYSTEM_IMAGE" -d pixel_6
+
+      - name: The previous release (built from its tag)
+        id: previous
+        run: |
+          tag=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | head -n 1)
+          if [ -z "$tag" ]; then
+            echo "No release tag below this commit."
+            exit 0
+          fi
+          echo "Previous release: $tag"
+          git worktree add "$RUNNER_TEMP/previous" "$tag"
+          cd "$RUNNER_TEMP/previous"
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          sh native/yggdrasil_bridge/build_android.sh x86_64
+          flutter pub get --enforce-lockfile
+          flutter build apk --debug --target-platform android-x64
+          cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/previous.apk"
+          echo "apk=$RUNNER_TEMP/previous.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Packages and the Go bridge (x86_64)
+        run: |
+          flutter pub get --enforce-lockfile
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          sh native/yggdrasil_bridge/build_android.sh x86_64
+
+      - name: Start the emulator
+        run: |
+          "$ANDROID_HOME/emulator/emulator" -avd zen -no-window -no-audio \
+            -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 \
+            > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb wait-for-device
+          timeout 600 sh -c \
+            'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 5; done'
+          for scale in window_animation_scale transition_animation_scale animator_duration_scale; do
+            adb shell settings put global "$scale" 0
+          done
+          adb devices
+
+      - name: Fresh install gets past the logo
+        run: sh tool/ci/android_smoke.sh fresh
+
+      - name: Installed over the previous release
+        if: ${{ steps.previous.outputs.apk != '' }}
+        run: sh tool/ci/android_smoke.sh upgrade "${{ steps.previous.outputs.apk }}"
+
+      - name: Monkey (2000 events, no crash, no ANR)
+        run: sh tool/ci/android_smoke.sh monkey 2000 20261028
+
+      - name: Logs
+        if: ${{ failure() }}
+        run: |
+          adb logcat -d | tail -n 400 || true
+          tail -n 100 "$RUNNER_TEMP/emulator.log" || true

@@ -195,7 +195,11 @@ key, so every release must be signed with this key.
    a tag run stops at once while either list is empty
    (`dart run tool/release.dart pinned`).
 3. `git push origin HEAD`, open a pull request to `main` (changes reach
-   `main` only through pull requests), wait for green CI and merge it with
+   `main` only through pull requests), wait for green CI — including the
+   **Android emulator** workflow (a fresh install and an install over the
+   previous release get past the logo, a monkey run without a crash) and
+   the **End-to-end on Linux** job of CI (real nodes: invitations,
+   messages, mailboxes, restarts), see `docs/TESTING.md` — and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
    `main`). Then `git push origin v1.12.0`. Approve the `release`
    environment when GitHub asks. It asks once, when every build is done

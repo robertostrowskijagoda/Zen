@@ -1,0 +1,5 @@
+# Tags of the app's tests (docs/TESTING.md).
+tags:
+  # Real Zen devices with real Yggdrasil nodes on one computer (test/e2e,
+  # run by tool/e2e.dart and the "End-to-end on Linux" CI job).
+  e2e:

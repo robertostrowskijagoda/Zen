@@ -295,6 +295,115 @@ class CiWorkflowTest(unittest.TestCase):
                     self.assertIn(relative + "\n", linux)
 
 
+class EndToEndTest(unittest.TestCase):
+    """The real-node tests: their own CI job, out of the four test shards."""
+
+    def setUp(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            self.ci = f.read()
+        self.jobs = WorkflowTest.jobs(self.ci)
+
+    def test_their_job_runs_them(self):
+        e2e = self.jobs["e2e"]
+        self.assertIn("name: End-to-end on Linux\n", e2e)
+        self.assertIn("runs-on: ubuntu-24.04\n", e2e)
+        self.assertRegex(e2e, r"timeout-minutes: \d+\n")
+        self.assertIn("dart run tool/e2e.dart --results test-results", e2e)
+        self.assertIn("actions/setup-go@", e2e)
+        # The goroutines of a hang reach the run's files.
+        self.assertIn("build/e2e/goroutines.txt", e2e)
+
+    def test_they_stay_out_of_the_shards(self):
+        with open(os.path.join(ROOT, "tool/test.dart"), encoding="utf-8") as f:
+            runner = f.read()
+        self.assertIn("const String kRealNodeTests = 'test/e2e';", runner)
+        folder = os.path.join(ROOT, "test", "e2e")
+        names = [n for n in os.listdir(folder) if n.endswith("_test.dart")]
+        self.assertTrue(names)
+        for name in names:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                text = f.read()
+            # Tagged, and skipped wherever the bridge or the port is missing
+            # or nobody asked for them (ZEN_E2E=1).
+            self.assertIn("@Tags(<String>['e2e'])", text, name)
+            self.assertIn("zenMeshSkipReason()", text, name)
+        with open(os.path.join(ROOT, "dart_test.yaml"), encoding="utf-8") as f:
+            self.assertIn("\n  e2e:", f.read())
+
+    def test_the_bridge_tag_is_only_for_the_tests(self):
+        bridge = os.path.join(ROOT, "native", "yggdrasil_bridge")
+        with open(os.path.join(bridge, "stack_dump_e2e.go"), encoding="utf-8") as f:
+            self.assertTrue(f.read().startswith("//go:build zene2e\n"))
+        for name in os.listdir(bridge):
+            if name.startswith("build_") and name.endswith((".sh", ".ps1")):
+                with open(os.path.join(bridge, name), encoding="utf-8") as f:
+                    self.assertNotIn("zene2e", f.read(), name)
+        with open(os.path.join(ROOT, "tool/e2e.dart"), encoding="utf-8") as f:
+            self.assertIn("'zene2e'", f.read())
+
+
+class AndroidEmulatorTest(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(ROOT, ".github/workflows/android-emulator.yml"),
+                  encoding="utf-8") as f:
+            self.workflow = f.read()
+
+    def test_when_it_runs(self):
+        on = self.workflow[self.workflow.index("\non:\n"):self.workflow.index("\npermissions:")]
+        self.assertIn("pull_request:\n    branches: [main]", on)
+        self.assertIn("tags: ['v*']", on)
+        self.assertIn("workflow_dispatch:", on)
+        # Too slow for every push of a branch.
+        self.assertNotIn("branches: [main]\n  push:\n    branches", on)
+
+    def test_what_it_checks(self):
+        for step in ("android_smoke.sh fresh", "android_smoke.sh upgrade",
+                     "android_smoke.sh monkey 2000"):
+            self.assertIn(step, self.workflow)
+        self.assertIn("fetch-depth: 0", self.workflow)
+        self.assertIn('KERNEL=="kvm"', self.workflow)
+        self.assertIn("permissions:\n  contents: read", self.workflow)
+        self.assertNotIn("secrets.", self.workflow)
+        with open(os.path.join(ROOT, "tool/ci/android_smoke.sh"), encoding="utf-8") as f:
+            smoke = f.read()
+        self.assertIn("integration_test/app_start_test.dart", smoke)
+        self.assertIn("ZEN_OLD_NODE_CONFIG_SHA", smoke)
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "integration_test",
+                                                    "app_start_test.dart")))
+
+    def test_the_release_checklist_names_it(self):
+        with open(os.path.join(ROOT, "docs/RELEASES.md"), encoding="utf-8") as f:
+            releases = f.read()
+        self.assertIn("**Android emulator**", releases)
+        self.assertIn("**End-to-end on Linux**", releases)
+
+
+class PinnedActionsTest(unittest.TestCase):
+    def test_every_action_is_pinned_to_a_commit(self):
+        folder = os.path.join(ROOT, ".github", "workflows")
+        for name in sorted(os.listdir(folder)):
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                for line in f:
+                    match = re.match(r"\s*(?:-\s+)?uses:\s*(\S+)", line)
+                    if match and not match.group(1).startswith("./"):
+                        self.assertRegex(match.group(1), r"@[0-9a-f]{40}$",
+                                         "%s: %s" % (name, line.strip()))
+
+
+class RegressionsTest(unittest.TestCase):
+    def test_every_regression_names_its_report(self):
+        folder = os.path.join(ROOT, "test", "regressions")
+        names = sorted(n for n in os.listdir(folder) if n.endswith("_test.dart"))
+        self.assertTrue(names)
+        for name in names:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                text = f.read()
+            ids = re.findall(r"""test\(\s*'(R\d+-(?:#\d+|F\d+)):""", text)
+            self.assertTrue(ids, name)
+            if name.startswith("r5_") and name[3:5].isdigit():
+                self.assertEqual(ids, ["R5-#%d" % int(name[3:5])], name)
+
+
 class SummaryTest(unittest.TestCase):
     @staticmethod
     def report(folder, name, root, tests):
