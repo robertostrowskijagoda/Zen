@@ -17,6 +17,7 @@ import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
 import 'support/friends_world.dart';
@@ -130,6 +131,68 @@ void main() {
         );
       },
     );
+
+    // A GIF from the picker to a friend whose app was open showed "waiting
+    // in the mailbox" on the sender's side: it has to go straight there.
+    test('a GIF to a friend with the app open arrives directly, never '
+        'through the mailboxes', () async {
+      final FriendsWorld w = await _withMailboxes(
+        <String>['A', 'B', 'M1', 'M2'],
+        'B',
+        <String>['M1', 'M2'],
+      );
+      final Uint8List gif = Uint8List.fromList(<int>[
+        ...'GIF89a'.codeUnits,
+        ...List<int>.generate(120 * 1000, (int i) => (i * 13 + 5) & 0xff),
+      ]);
+      await w['A'].hub.sendLocalAttachment(
+        peerAddress: w['B'].address,
+        bytes: gif,
+        fileName: 'kot.gif',
+        mimeType: 'image/gif',
+        type: ChatMessageType.image,
+        sentAtMillis: w.now,
+      );
+      await w.settle();
+      await w.until(
+        () async => (await w['B'].thread(
+          w['A'],
+        )).any((ChatMessage m) => m.attachmentPath != null),
+        reason: 'the GIF reaching B',
+        within: const Duration(seconds: 30),
+      );
+      final ChatMessage got = (await w['B'].thread(
+        w['A'],
+      )).firstWhere((ChatMessage m) => m.attachmentPath != null);
+      expect(
+        await w['B'].container
+            .read(mediaVaultProvider)
+            .read(got.attachmentPath!),
+        gif,
+      );
+      await w.until(
+        () async => (await w['A'].thread(w['B'])).any(
+          (ChatMessage m) =>
+              m.direction == ChatMessageDirection.outgoing &&
+              m.deliveryState == ChatMessageDeliveryState.delivered,
+        ),
+        reason: 'the delivery mark',
+        within: const Duration(seconds: 30),
+      );
+      for (final String mailbox in <String>['M1', 'M2']) {
+        final RelayState held = await w[mailbox].relayStore.load();
+        expect(
+          held.heldBlobs[w['B'].address] ?? const <String, Object>{},
+          isEmpty,
+          reason: '$mailbox holds no copy',
+        );
+        expect(
+          held.mailbox[w['B'].address] ?? const <String, Object>{},
+          isEmpty,
+          reason: '$mailbox holds no mail',
+        );
+      }
+    });
   });
 
   group('mail for a friend who is offline', () {

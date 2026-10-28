@@ -17,6 +17,11 @@ abstract interface class NodeSignalBridge
 
   Map<String, dynamic> getNodeInfo(int handle);
 
+  /// Tells the bridge whether the app that runs the node [handle] is on
+  /// screen: the background service never takes the identity over from the
+  /// app on screen (node_identity.go).
+  Map<String, dynamic> setNodeOnScreen(int handle, bool onScreen);
+
   /// Adds a mesh peer (e.g. a bridge learnt from friends) at runtime.
   Map<String, dynamic> addPeer(int handle, String uri);
 
@@ -161,6 +166,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _getNodeInfo = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
         'YggGetNodeInfo',
       ),
+      _setNodeOnScreen = library
+          .lookupFunction<_NativeIntIntArgCall, _DartIntIntArgCall>(
+            'YggSetNodeOnScreen',
+          ),
       _startSignaling = library
           .lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
             'YggStartSignaling',
@@ -263,6 +272,7 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(Pointer<Utf8>) _startNode;
   final Pointer<Utf8> Function(int) _stopNode;
   final Pointer<Utf8> Function(int) _getNodeInfo;
+  final Pointer<Utf8> Function(int, int) _setNodeOnScreen;
   final Pointer<Utf8> Function(int) _startSignaling;
   final Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>) _sendSignal;
   final Pointer<Utf8> Function(int, int) _waitSignal;
@@ -383,6 +393,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   @override
   Map<String, dynamic> getNodeInfo(int handle) =>
       _extractMap(_readEnvelope(_getNodeInfo(handle)));
+
+  @override
+  Map<String, dynamic> setNodeOnScreen(int handle, bool onScreen) =>
+      _extractMap(_readEnvelope(_setNodeOnScreen(handle, onScreen ? 1 : 0)));
 
   @override
   Map<String, dynamic> startSignaling(int handle) =>

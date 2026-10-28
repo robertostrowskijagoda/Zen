@@ -393,6 +393,9 @@ final class BackgroundAccountNode {
         // four; computers keep their own number).
         peerTarget: 2,
       ),
+      // The account open in the app keeps its node there; this one starts
+      // again once the identity is free (node_identity.go).
+      role: RuntimeNodeRole.service,
     );
     if (doorKit != null && !doorKit.isEmpty) {
       runtime

@@ -301,6 +301,7 @@ final class RuntimeNodeSession {
     this.localLinks,
     this.sessionKey = '',
     this.pinSessionKeys,
+    this.setOnScreen,
   });
 
   final SignalTransport transport;
@@ -342,7 +343,110 @@ final class RuntimeNodeSession {
   /// the pinned fingerprint).
   final Map<String, String> Function(Map<String, String> pins, bool keep)?
   pinSessionKeys;
+
+  /// Tells the bridge whether the app that runs the node is on screen
+  /// (node_identity.go).
+  final void Function(bool onScreen)? setOnScreen;
 }
+
+/// Who runs a node in this process: the app, or a background engine
+/// (Android's service, an iPhone's locked receiver, a computer's tray).
+enum RuntimeNodeRole { app, service }
+
+/// The owner a node is started for, named at every start (node_identity.go
+/// in the bridge). One process may hold the app's engine, a stale engine of
+/// an app that opened again, and the background service at once; the
+/// newest legitimate owner of an identity wins, and an owner whose node was
+/// taken over goes quiet instead of starting it again ([RuntimeNodeRuntime]).
+final class RuntimeNodeOwner {
+  RuntimeNodeOwner(this.role);
+
+  final RuntimeNodeRole role;
+
+  /// The number the bridge gave this owner at its first start (0 before):
+  /// higher is newer.
+  int engine = 0;
+
+  /// The next start claims the identity (takes it from an owner this one
+  /// outranks): an owner's first start, and one its own logic asked for
+  /// after it stopped the node. Restarts of a node lost on the way do not.
+  bool claim = true;
+
+  /// The app is on screen: the service never takes the identity from it.
+  bool onScreen = false;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'role': role.name,
+    'engine': engine,
+    'claim': claim,
+    'onScreen': onScreen,
+  };
+
+  /// Notes the number a start's answer ([result]) gave this owner.
+  void started(Map<String, dynamic> result) {
+    final int given = (result['ownerEngine'] as num?)?.toInt() ?? 0;
+    if (given > 0) {
+      engine = given;
+    }
+  }
+}
+
+/// [configJson] with the [owner] the node is started for (the bridge takes
+/// the key out again before it reads the config).
+@visibleForTesting
+String withNodeOwner(String configJson, RuntimeNodeOwner? owner) {
+  if (owner == null) {
+    return configJson;
+  }
+  final Object? decoded = jsonDecode(configJson);
+  if (decoded is! Map<String, dynamic>) {
+    return configJson;
+  }
+  return jsonEncode(<String, dynamic>{
+    ...decoded,
+    'ZenNodeOwner': owner.toJson(),
+  });
+}
+
+/// The bridge's words for "another owner runs this identity in this
+/// process, and it outranks you" (node_identity.go): the start was refused,
+/// or the running node was taken over.
+const List<String> _kNodeOwnerYields = <String>[
+  'a newer owner runs this identity',
+  'a newer app engine runs this identity',
+  'taken over by a newer owner',
+  'the app runs this identity on screen',
+];
+
+/// Whether [error] says another owner of this identity runs its node in
+/// this process and outranks this one: no retry helps then.
+@visibleForTesting
+bool isNodeOwnerYield(Object? error) {
+  final String text = '$error';
+  return _kNodeOwnerYields.any(text.contains);
+}
+
+/// Another owner of this identity outranked this runtime's owner.
+@immutable
+final class RuntimeNodeYield {
+  const RuntimeNodeYield({required this.reason, required this.wasRunning});
+
+  /// The bridge's words.
+  final String reason;
+
+  /// The node ran and was taken over (otherwise a start was refused).
+  final bool wasRunning;
+
+  /// A newer app engine runs the identity: an app engine it replaced never
+  /// runs it again.
+  bool get byNewerApp =>
+      reason.contains('a newer app engine runs this identity') ||
+      reason.contains('(by the app)');
+}
+
+/// How often a background owner whose node another owner took looks again
+/// whether the identity is free (a start that takes nobody's node).
+const Duration kRuntimeYieldRetry = Duration(minutes: 1);
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
 /// and macOS app).
@@ -355,14 +459,18 @@ bool get _hasNativeBridge =>
 
 RuntimeNodeRuntime buildDefaultRuntimeNodeRuntime({
   RuntimeSignalBootstrapConfig? config,
+  RuntimeNodeRole role = RuntimeNodeRole.app,
 }) {
   if (!_hasNativeBridge) {
     return RuntimeNodeRuntime.preview();
   }
   final RuntimeSignalBootstrapConfig resolvedConfig =
       config ?? RuntimeSignalBootstrapConfig();
+  final RuntimeNodeOwner owner = RuntimeNodeOwner(role);
   return RuntimeNodeRuntime.live(
-    bootstrap: () => _bootstrapDefaultRuntimeSession(config: resolvedConfig),
+    owner: owner,
+    bootstrap: () =>
+        _bootstrapDefaultRuntimeSession(config: resolvedConfig, owner: owner),
   );
 }
 
@@ -566,15 +674,27 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   RuntimeNodeRuntime.preview()
     : _bootstrap = null,
       _previewMode = true,
+      owner = RuntimeNodeOwner(RuntimeNodeRole.app),
+      _yieldRetryAfter = kRuntimeYieldRetry,
       _snapshot = RuntimeTransportSnapshot.preview();
 
-  RuntimeNodeRuntime.live({required RuntimeNodeSessionBootstrap bootstrap})
-    : _bootstrap = bootstrap,
-      _previewMode = false,
-      _snapshot = RuntimeTransportSnapshot.stopped();
+  RuntimeNodeRuntime.live({
+    required RuntimeNodeSessionBootstrap bootstrap,
+    RuntimeNodeOwner? owner,
+    @visibleForTesting Duration yieldRetry = kRuntimeYieldRetry,
+  }) : _bootstrap = bootstrap,
+       _previewMode = false,
+       owner = owner ?? RuntimeNodeOwner(RuntimeNodeRole.app),
+       _yieldRetryAfter = yieldRetry,
+       _snapshot = RuntimeTransportSnapshot.stopped();
 
   final RuntimeNodeSessionBootstrap? _bootstrap;
   final bool _previewMode;
+  final Duration _yieldRetryAfter;
+
+  /// Whom the node is started for ([RuntimeNodeOwner]); the bootstrap names
+  /// it to the bridge.
+  final RuntimeNodeOwner owner;
   final StreamController<SignalTransportFrame> _frames =
       StreamController<SignalTransportFrame>.broadcast();
   final StreamController<SignalTransportFrame> _doorFrames =
@@ -892,12 +1012,41 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     _heldByService = false;
   }
 
+  /// Another owner of this identity runs its node in this process and
+  /// outranks this one (a newer app engine, the service that took the node
+  /// of a gone app, the app back on screen): [start] does nothing until the
+  /// owner's own logic stops the node on purpose ([stop]) and starts it
+  /// again. Restarts on their own would only fight the other owner.
+  bool _yielded = false;
+
+  /// An app engine that a newer app engine replaced (an account opened
+  /// again in this process, a new Activity): it never starts the node
+  /// again, [stop] or not.
+  bool _retired = false;
+
+  /// A background owner's look whether the identity is free again
+  /// ([kRuntimeYieldRetry]).
+  Timer? _yieldRetry;
+
+  /// The start running now is such a look ([_yieldRetry]).
+  bool _lookingAgain = false;
+  final StreamController<RuntimeNodeYield> _yields =
+      StreamController<RuntimeNodeYield>.broadcast();
+  bool _disposed = false;
+
+  /// Whether another owner of this identity took over ([_yielded]).
+  bool get yieldedToOtherOwner => _yielded || _retired;
+
+  /// Each time another owner of this identity took the node over or refused
+  /// a start.
+  Stream<RuntimeNodeYield> get ownerYields => _yields.stream;
+
   @override
   Stream<SignalTransportFrame> get frames => _frames.stream;
 
   @override
   Future<void> start() {
-    if (_heldByService) {
+    if (_heldByService || _yielded || _retired || _disposed) {
       return Future<void>.value();
     }
     if (_previewMode) {
@@ -961,6 +1110,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     await start();
   }
 
+  /// Stops the node on purpose: the owner's own logic (a lock, a handoff, an
+  /// account switch) decided it, so the next [start] claims the identity
+  /// again, also after another owner had taken it.
   @override
   Future<void> stop() async {
     if (_previewMode) {
@@ -973,6 +1125,16 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       );
       return;
     }
+    _yielded = false;
+    _lookingAgain = false;
+    _yieldRetry?.cancel();
+    _yieldRetry = null;
+    owner.claim = true;
+    await _stopNode();
+  }
+
+  /// Stops the node without a word about who may start it next.
+  Future<void> _stopNode({String? errorMessage}) async {
     _autoRecoveryEnabled = false;
     _cancelRecoveryTimer();
     _lifecycleToken += 1;
@@ -988,8 +1150,69 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       await session.transport.stop();
     }
     _setSnapshot(
-      RuntimeTransportSnapshot.stopped(localAddress: _snapshot.localAddress),
+      RuntimeTransportSnapshot.stopped(
+        localAddress: _snapshot.localAddress,
+        errorMessage: errorMessage,
+      ),
     );
+  }
+
+  /// Another owner of this identity outranks this one ([isNodeOwnerYield]):
+  /// this runtime lets go of its node (if one was left), stops every timer
+  /// of its own and stays quiet. A background owner looks now and then
+  /// whether the identity is free again, with a start that takes nobody's
+  /// node; the app waits for its own logic to start the node again.
+  Future<void> _yieldToOtherOwner(
+    Object reason, {
+    required bool wasRunning,
+  }) async {
+    final bool first = !_yielded && !_lookingAgain;
+    _yielded = true;
+    final RuntimeNodeYield yielded = RuntimeNodeYield(
+      reason: '$reason',
+      wasRunning: wasRunning,
+    );
+    if (owner.role == RuntimeNodeRole.app && yielded.byNewerApp) {
+      _retired = true;
+    }
+    if (first) {
+      logZenWarning(
+        'Another owner of this identity runs its node in this process; '
+        'this ${owner.role.name} lets go and stays quiet ($reason).',
+      );
+      ZenTechLog.event('node-yield', <String, Object?>{
+        'role': owner.role.name,
+        'running': wasRunning,
+      });
+      if (!_yields.isClosed) {
+        _yields.add(yielded);
+      }
+    }
+    try {
+      await _stopNode(errorMessage: '$reason');
+    } on Object catch (error, stackTrace) {
+      logZenError('Letting go of the node failed', error, stackTrace);
+    }
+    _scheduleYieldRetry();
+  }
+
+  void _scheduleYieldRetry() {
+    if (owner.role != RuntimeNodeRole.service || _disposed) {
+      return;
+    }
+    _yieldRetry?.cancel();
+    _yieldRetry = Timer(_yieldRetryAfter, () {
+      _yieldRetry = null;
+      if (!_yielded || _disposed) {
+        return;
+      }
+      // Never a claim: it starts only on an identity nobody runs. Refused
+      // again, it says nothing new.
+      owner.claim = false;
+      _yielded = false;
+      _lookingAgain = true;
+      unawaitedLogged(start(), context: 'Looking for a free identity failed');
+    });
   }
 
   @override
@@ -1009,14 +1232,26 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       // A silent drop here used to make messages and call invites vanish
       // without a trace; callers surface thrown errors to the user.
       throw StateError(
-        'Runtime node is not running (health: ${_snapshot.health.name}) — '
+        'Runtime node is not running (health: ${_snapshot.health.name}'
+        '${_yielded ? ', another owner runs this identity' : ''}) — '
         'signal to $remoteAddress was not sent.',
       );
     }
-    await session.transport.send(
-      remoteAddress: remoteAddress,
-      payload: payload,
-    );
+    try {
+      await session.transport.send(
+        remoteAddress: remoteAddress,
+        payload: payload,
+      );
+    } catch (error) {
+      if (isNodeOwnerYield(error) && identical(_session, session)) {
+        // Taken over: no need to wait for the next read of the node.
+        unawaitedLogged(
+          _yieldToOtherOwner(error, wasRunning: true),
+          context: 'Letting go of a node taken over failed',
+        );
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -1082,6 +1317,13 @@ final class RuntimeNodeRuntime extends ChangeNotifier
           return;
         }
         _recoveryAttempt = 0;
+        // Running: restarts of this node from now on are no claims, so an
+        // owner that takes it over is never fought back.
+        owner.claim = false;
+        _lookingAgain = false;
+        if (owner.onScreen) {
+          _tellOnScreen(session, true);
+        }
         for (final String uri in _extraPeers) {
           _addPeerNow(uri);
         }
@@ -1096,11 +1338,14 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         return;
       } catch (error, stackTrace) {
         lastError = error;
-        logZenError(
-          'Runtime live bootstrap attempt $attempt/$maxAttempts failed',
-          error,
-          stackTrace,
-        );
+        final bool outranked = isNodeOwnerYield(error);
+        if (!outranked) {
+          logZenError(
+            'Runtime live bootstrap attempt $attempt/$maxAttempts failed',
+            error,
+            stackTrace,
+          );
+        }
         await _forwardingSubscription?.cancel();
         _forwardingSubscription = null;
         _session = null;
@@ -1114,6 +1359,15 @@ final class RuntimeNodeRuntime extends ChangeNotifier
               stopStackTrace,
             );
           }
+        }
+        if (outranked) {
+          // Another owner of this identity outranks this one: no retry
+          // (nor a recovery loop) would start this node, each would only
+          // fill the log.
+          if (token == _lifecycleToken) {
+            await _yieldToOtherOwner(error, wasRunning: false);
+          }
+          return;
         }
         if (attempt < maxAttempts && token == _lifecycleToken) {
           // The peering port can stay held for a few seconds by a process that
@@ -1164,14 +1418,16 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     _recoveryTimer = null;
   }
 
+  /// Not a claim: a node lost on the way comes back only where no other
+  /// owner of the identity took over.
   Future<void> _restartAfterNodeLoss() async {
     logZenWarning('Runtime node stopped responding; restarting it');
-    await stop();
+    await _stopNode();
     await start();
   }
 
   void _setSnapshot(RuntimeTransportSnapshot value) {
-    if (value == _snapshot) {
+    if (value == _snapshot || _disposed) {
       return;
     }
     _snapshot = value;
@@ -1187,13 +1443,41 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// [kRuntimeRefreshOnScreen] then, every [kRuntimeRefreshUnseen]
   /// otherwise (the background service's node too), and every
   /// [kRuntimeRefreshConnecting] while it has no peer yet.
+  ///
+  /// The bridge hears it too: the background service never takes the
+  /// identity from the app on screen.
   void setOnScreen(bool onScreen) {
     if (onScreen == _onScreen) {
       return;
     }
     _onScreen = onScreen;
+    owner.onScreen = onScreen;
+    if (onScreen &&
+        _yielded &&
+        !_retired &&
+        !_disposed &&
+        owner.role == RuntimeNodeRole.app) {
+      // Back on screen: the app outranks a background owner that took its
+      // node meanwhile (an iPhone's engine without a screen). Android's
+      // handoff holds the start until the service let go.
+      _yielded = false;
+      owner.claim = true;
+      unawaitedLogged(start(), context: 'Taking the node back failed');
+    }
+    final RuntimeNodeSession? session = _session;
+    if (session != null) {
+      _tellOnScreen(session, onScreen);
+    }
     if (onScreen) {
       _refreshSoon?.call();
+    }
+  }
+
+  void _tellOnScreen(RuntimeNodeSession session, bool onScreen) {
+    try {
+      session.setOnScreen?.call(onScreen);
+    } on Object catch (error) {
+      logZenWarning('The bridge did not hear whether Zen is on screen: $error');
     }
   }
 
@@ -1228,6 +1512,12 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         _setSnapshot(nextSnapshot);
       } catch (error, stackTrace) {
         if (token != _lifecycleToken || !identical(_session, session)) {
+          return;
+        }
+        if (isNodeOwnerYield(error)) {
+          // A newer owner of this identity took the node: let go, no
+          // restart (it would take the node back and start a ping-pong).
+          await _yieldToOtherOwner(error, wasRunning: true);
           return;
         }
         consecutiveFailures += 1;
@@ -1281,12 +1571,26 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     );
   }
 
+  /// Ends this runtime for good: its node stops and nothing starts it again
+  /// (an account that opened again in this process has a runtime of its
+  /// own).
   @override
   void dispose() {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
     _autoRecoveryEnabled = false;
+    _lifecycleToken += 1;
+    _yieldRetry?.cancel();
+    _yieldRetry = null;
     unawaitedLogged(
       _keyConflicts.close(),
       context: 'Closing device key conflicts failed',
+    );
+    unawaitedLogged(
+      _yields.close(),
+      context: 'Closing the owner yields failed',
     );
     _cancelRecoveryTimer();
     _snapshotRefreshTimer?.cancel();
@@ -1315,6 +1619,7 @@ Future<SignalTransport> _bootstrapDefaultSignalTransport({
 
 Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   required RuntimeSignalBootstrapConfig config,
+  RuntimeNodeOwner? owner,
 }) async {
   final NodeSignalBridge bridge = YggdrasilBridgeFfi.load();
   final String configJson = await _loadOrCreateNodeConfig(
@@ -1324,9 +1629,12 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   );
   // The user's public peers (public_peers.dart) before the node dials any.
   await applyStoredPublicPeers(bridge);
+  // Whom the node is for: the bridge settles which owner of the identity
+  // runs it (node_identity.go).
   final Map<String, dynamic> startResult = bridge.startNode(
-    withNodePeerTarget(configJson, config.peerTarget),
+    withNodeOwner(withNodePeerTarget(configJson, config.peerTarget), owner),
   );
+  owner?.started(startResult);
   final int handle = _readNodeHandle(startResult);
   // The device keys pinned in earlier runs, before any signal comes in.
   final Directory runtimeDirectory = (await _runtimeConfigFile(
@@ -1390,6 +1698,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
             jsonEncode(<String, Object?>{'pins': pins, 'keep': keep}),
           ),
         ),
+    setOnScreen: (bool onScreen) => bridge.setNodeOnScreen(handle, onScreen),
   );
 }
 

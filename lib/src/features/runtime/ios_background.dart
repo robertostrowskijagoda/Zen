@@ -261,8 +261,8 @@ abstract final class IosNodeGate {
   static Completer<void>? _held;
 
   /// The longest the app's node waits for each (a receiver that never let
-  /// go must not keep the app offline for good; the bridge then refuses a
-  /// second node with the same key, and the app's start retries).
+  /// go must not keep the app offline for good; the app's start then takes
+  /// the identity over from it, node_identity.go in the bridge).
   static const Duration maxWait = Duration(seconds: 30);
 
   /// Completes once no engine without a screen runs a node (tests replace
