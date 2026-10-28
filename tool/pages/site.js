@@ -39,6 +39,14 @@
   };
   var RTL = { ar: true };
   var ALIASES = { "in": "id", "iw": "he", "nb": "en", "no": "en" };
+  // The Open Graph locale of each language (og:locale of a page's link
+  // preview).
+  var LOCALES = {
+    en: "en_US", pl: "pl_PL", id: "id_ID", cs: "cs_CZ", de: "de_DE", es: "es_ES",
+    fr: "fr_FR", it: "it_IT", hu: "hu_HU", nl: "nl_NL", pt: "pt_BR", ro: "ro_RO",
+    vi: "vi_VN", tr: "tr_TR", ru: "ru_RU", uk: "uk_UA", ar: "ar_AR", hi: "hi_IN",
+    zh: "zh_CN", ja: "ja_JP", ko: "ko_KR"
+  };
 
   // The texts every page shows (header, footer, the buttons of the home,
   // door and install pages).
@@ -259,6 +267,21 @@
     return "en";
   }
 
+  // The canonical address (and og:url) of this very address: "?lang=xx" is
+  // the page in another of its languages (the hreflang alternates of the
+  // head), its own address; without it, or with English, the page's.
+  function canonical() {
+    var link = document.querySelector('link[rel="canonical"]');
+    if (!link) { return; }
+    var base = link.getAttribute("href").replace(/[?#].*$/, "");
+    var m = /(?:^|[?&])lang=([A-Za-z-]+)/.exec(location.search);
+    var code = m ? m[1].toLowerCase() : "";
+    var url = has(NAMES, code) && code !== "en" ? base + "?lang=" + code : base;
+    link.setAttribute("href", url);
+    var og = document.querySelector('meta[property="og:url"]');
+    if (og) { og.setAttribute("content", url); }
+  }
+
   // All texts of the page; run again when the visitor picks another language.
   function apply() {
     var root = document.documentElement;
@@ -266,8 +289,23 @@
     root.dir = RTL[lang] ? "rtl" : "ltr";
     var title = lookup("title", lang);
     if (title) { document.title = title[0]; }
-    var desc = lookup("desc", lang), meta = document.querySelector('meta[name="description"]');
-    if (desc && meta) { meta.setAttribute("content", desc[0]); }
+    var desc = lookup("desc", lang);
+    // The description and the link preview (Open Graph, Twitter card) follow
+    // the language too.
+    function content(selector, value) {
+      if (!value) { return; }
+      Array.prototype.forEach.call(document.querySelectorAll(selector), function (el) {
+        el.setAttribute("content", value);
+      });
+    }
+    content('meta[property="og:title"], meta[name="twitter:title"]', title && title[0]);
+    content('meta[name="description"], meta[property="og:description"], meta[name="twitter:description"]',
+      desc && desc[0]);
+    content('meta[property="og:locale"]', LOCALES[lang]);
+    var others = Object.keys(LOCALES).filter(function (k) { return k !== lang; });
+    Array.prototype.forEach.call(document.querySelectorAll('meta[property="og:locale:alternate"]'), function (el, i) {
+      if (others[i]) { el.setAttribute("content", LOCALES[others[i]]); }
+    });
     function mark(el, translated) {
       // An English text on a right-to-left page keeps its own direction.
       if (translated || !RTL[lang]) { el.removeAttribute("dir"); } else { el.setAttribute("dir", "ltr"); }
@@ -335,6 +373,7 @@
       pageTexts = opts.texts || {};
       pageLinks = opts.links || {};
       buildChrome();
+      canonical();
       lang = pickLanguage();
       apply();
       if (document.querySelector("[data-version], [data-fp]")) {

@@ -47,6 +47,45 @@ in-app way of handing Zen to a friend).
    publishes `tool/pages/` on every change to `main`. Once in GitHub:
    **Settings → Pages → Source: GitHub Actions**. On the free plan GitHub
    Pages works only for **public** repositories.
+
+   **Search engines and link previews:** every page has its canonical
+   address, the hreflang alternates of its 21 languages (`?lang=xx`,
+   English without it), Open Graph and Twitter card tags (the picture
+   `og-image.png` and the icons of `manifest.webmanifest` are drawn by
+   `tool/ci/site_images.py`; run it again after the icon changes) and, on
+   the home, about and install pages, structured data (SoftwareApplication,
+   no ratings). At every deployment `tool/ci/site_files.py` writes
+   `sitemap.xml` (only the pages without `noindex`, so neither the
+   invitation nor the door page), `.well-known/security.txt` (it expires
+   after a year; every run renews it) and puts the latest release's version
+   into the structured data. `404.html` answers every missing address under
+   `/Zen/`. Crawlers read `robots.txt` only at the root of the host,
+   `https://robertostrowskijagoda.github.io/robots.txt`, which only a
+   repository named `robertostrowskijagoda.github.io` (with its own Pages)
+   can serve; a `robots.txt` under `/Zen/` would be ignored, so there is
+   none, and nothing announces the sitemap by itself. Once, after the
+   first deployment:
+   - **Google Search Console** (https://search.google.com/search-console):
+     add a property of the type *URL prefix*,
+     `https://robertostrowskijagoda.github.io/Zen/`, verify it with the
+     *HTML file* method (put the `google….html` file it gives into
+     `tool/pages/` and let the workflow publish it), then **Sitemaps → Add
+     a new sitemap**: `sitemap.xml`.
+   - **Bing Webmaster Tools** (https://www.bing.com/webmasters): import the
+     site from Search Console (or add and verify it the same way, with
+     `BingSiteAuth.xml`), then **Sitemaps → Submit sitemap**:
+     `https://robertostrowskijagoda.github.io/Zen/sitemap.xml`. Bing's
+     index also serves DuckDuckGo and Yahoo.
+   - **Settings → Code security → Private vulnerability reporting: Enable**,
+     or the `Contact` of security.txt (and of `SECURITY.md`) leads nowhere.
+   - Optional: the repository `robertostrowskijagoda.github.io` with a
+     `robots.txt` holding
+     `Sitemap: https://robertostrowskijagoda.github.io/Zen/sitemap.xml`
+     (crawlers then find the sitemap by themselves) and a copy of
+     `/.well-known/security.txt` (renewed there by hand before its
+     `Expires`): RFC 9116 places that file at the root
+     of the host too, so the one under `/Zen/` is found only by its
+     address (its `Canonical` field).
 3. Enable Issues in the repository settings; description: "A network of people
    who know each other — a messenger without servers, ads or an algorithm".
 4. **Contributions:** `CONTRIBUTING.md` (checks to run, and the contributor

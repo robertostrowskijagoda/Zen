@@ -21,26 +21,36 @@
   are the same.
 - The invitation and door pages start with the "Open in Zen" button, and
   the pages link the Discord server the app links.
+- site_files.py (run at deployment) lists in sitemap.xml every page that
+  may be indexed, in all 21 languages with the same hreflang alternates as
+  the pages' heads, dated by git or by the deployment; writes a
+  security.txt that follows RFC 9116 and expires in less than a year; and
+  puts the release's version into the structured data, nothing else.
 
 Standard library only.
 """
 
+import datetime
 import hashlib
 import io
 import json
 import os
 import plistlib
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 import urllib.parse
 import zipfile
+from xml.etree import ElementTree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tool", "ci"))
 
 import release_source  # noqa: E402
+import site_files  # noqa: E402
 
 
 def read(path):
@@ -460,6 +470,145 @@ class SitePagesTest(unittest.TestCase):
         for target in ("install/", "guide/", "features/", "support/", "about/"):
             self.assertIn('"' + target + '"', script)
             self.assertTrue(os.path.exists(os.path.join(ROOT, "tool/pages", target, "index.html")))
+
+
+class SiteFilesTest(unittest.TestCase):
+    """site_files.py on a copy of the site, as the Pages workflow runs it."""
+
+    NOW = datetime.datetime(2026, 10, 28, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.site = os.path.join(self.tmp.name, "_site")
+        shutil.copytree(os.path.join(ROOT, "tool", "pages"), self.site)
+        self.codes = site_files.languages(self.site)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def indexable(self):
+        return [p for p in SITE_PAGES
+                if 'content="noindex"' not in read("tool/pages/" + p)]
+
+    def parse(self, xml):
+        ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9",
+              "x": "http://www.w3.org/1999/xhtml"}
+        urls = {}
+        for url in ElementTree.fromstring(xml).findall("s:url", ns):
+            urls[url.find("s:loc", ns).text] = (
+                url.find("s:lastmod", ns).text,
+                {link.get("hreflang"): link.get("href") for link in url.findall("x:link", ns)},
+            )
+        return urls
+
+    def test_the_sitemap_lists_every_page_that_may_be_indexed_in_every_language(self):
+        self.assertEqual(len(self.codes), 21)
+        self.assertEqual(self.codes[0], "en")
+        seen = []
+        xml = site_files.sitemap(self.site, "tool/pages", self.NOW,
+                                 last_change=lambda paths: seen.append(paths) or
+                                 "2026-01-02T03:04:05+01:00")
+        urls = self.parse(xml)
+        pages = self.indexable()
+        # The invitation and door pages ask not to be indexed.
+        self.assertNotIn("index.html", pages)
+        self.assertNotIn("m/index.html", pages)
+        self.assertEqual(len(pages), len(SITE_PAGES) - 2)
+        self.assertEqual(sorted(site_files.pages(self.site)), sorted(pages))
+        expected = {}
+        for page in pages:
+            base = release_source.PAGES + page[: -len("index.html")]
+            links = {c: base if c == "en" else base + "?lang=" + c for c in self.codes}
+            links["x-default"] = base
+            for code in self.codes:
+                expected[links[code]] = ("2026-01-02T03:04:05+01:00", links)
+        self.assertEqual(urls, expected)
+        self.assertNotIn(release_source.PAGES, urls)
+        self.assertNotIn(release_source.PAGES + "m/", urls)
+        # Dated by the page and the shared script, in the sources.
+        self.assertIn([os.path.join("tool/pages", "about/index.html"),
+                       os.path.join("tool/pages", "site.js")], seen)
+
+    def test_the_sitemap_and_the_pages_name_the_same_alternates(self):
+        for page in self.indexable():
+            html = read("tool/pages/" + page)
+            url = site_files.page_url(page)
+            self.assertIn('<link rel="canonical" href="%s">' % url, html)
+            head = re.findall(r'<link rel="alternate" hreflang="([\w-]+)" href="([^"]+)">', html)
+            self.assertEqual(head, site_files.alternates(url, self.codes), page)
+
+    def test_without_git_the_date_of_the_deployment(self):
+        urls = self.parse(site_files.sitemap(self.site, "tool/pages", self.NOW,
+                                             last_change=lambda paths: ""))
+        self.assertEqual({v[0] for v in urls.values()}, {"2026-10-28T12:30:45Z"})
+
+    def test_security_txt_follows_rfc_9116(self):
+        text = site_files.security_txt(self.NOW)
+        self.assertTrue(text.endswith("\n"))
+        fields = {}
+        for line in text.splitlines():
+            name, value = line.split(": ", 1)
+            self.assertNotIn(name, fields, "each field once")
+            fields[name] = value
+        self.assertEqual(fields["Contact"],
+                         "https://github.com/robertostrowskijagoda/Zen/security/advisories/new")
+        self.assertEqual(fields["Preferred-Languages"], "pl, en")
+        self.assertEqual(fields["Canonical"],
+                         release_source.PAGES + ".well-known/security.txt")
+        self.assertTrue(fields["Policy"].startswith("https://"))
+        self.assertIn("SECURITY.md", fields["Policy"])
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "SECURITY.md")))
+        self.assertIn(fields["Contact"], read("SECURITY.md"))
+        # Expires: RFC 3339, in the future, less than a year away.
+        self.assertRegex(fields["Expires"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        expires = datetime.datetime.strptime(fields["Expires"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=datetime.timezone.utc)
+        self.assertGreater(expires, self.NOW + datetime.timedelta(days=300))
+        self.assertLess(expires, self.NOW + datetime.timedelta(days=365))
+
+    def test_the_release_version_goes_into_the_structured_data(self):
+        with open(os.path.join(self.site, "release.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": "9.8.7", "date": "2026-10-01"}, f)
+        self.assertEqual(site_files.release_version(self.site), "9.8.7")
+        changed = site_files.fill_version(self.site, "9.8.7")
+        self.assertEqual(changed, ["about/index.html", "index.html", "install/index.html"])
+        for page in changed:
+            with open(os.path.join(self.site, page), encoding="utf-8") as f:
+                html = f.read()
+            block = re.search(r'<script type="application/ld\+json">(.*?)</script>',
+                              html, re.S).group(1)
+            data = json.loads(block)
+            nodes = data.get("@graph", [data])
+            apps = [n for n in nodes if n["@type"] == "SoftwareApplication"]
+            self.assertEqual([a["softwareVersion"] for a in apps], ["9.8.7"], page)
+            self.assertTrue(all("softwareVersion" not in n for n in nodes
+                                if n["@type"] != "SoftwareApplication"), page)
+            # The rest of the page stays as it was.
+            self.assertEqual(re.sub(r"<script type=\"application/ld\+json\">.*?</script>", "",
+                                    html, flags=re.S),
+                             re.sub(r"<script type=\"application/ld\+json\">.*?</script>", "",
+                                    read("tool/pages/" + page), flags=re.S))
+
+    def test_no_release_no_version(self):
+        self.assertEqual(site_files.release_version(self.site), "")
+        for bad in ({"version": ""}, {"version": "v1<script>"}, ["1.0.0"]):
+            with open(os.path.join(self.site, "release.json"), "w", encoding="utf-8") as f:
+                json.dump(bad, f)
+            self.assertEqual(site_files.release_version(self.site), "", bad)
+
+    def test_the_script_writes_every_file(self):
+        result = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "tool", "ci", "site_files.py"),
+             "--site", self.site, "--source", os.path.join(ROOT, "tool", "pages")],
+            capture_output=True, text=True, cwd=ROOT, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("sitemap.xml", os.path.join(".well-known", "security.txt")):
+            self.assertTrue(os.path.exists(os.path.join(self.site, name)), name)
+        with open(os.path.join(self.site, "sitemap.xml"), encoding="utf-8") as f:
+            urls = self.parse(f.read())
+        self.assertEqual(len(urls), len(self.indexable()) * 21)
+        for lastmod, _ in urls.values():
+            self.assertRegex(lastmod, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:\d\d)$")
 
 
 class DiscordTest(unittest.TestCase):

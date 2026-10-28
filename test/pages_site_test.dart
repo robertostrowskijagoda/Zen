@@ -28,7 +28,88 @@ const List<String> _pages = <String>[
   'install/windows/index.html',
 ];
 
+/// Where the site is published (release_source.PAGES).
+const String _base = 'https://robertostrowskijagoda.github.io/Zen/';
+
+/// The pages that describe the app in structured data.
+const List<String> _appPages = <String>[
+  'index.html',
+  'about/index.html',
+  'install/index.html',
+];
+
 String _read(String page) => File('$_site/$page').readAsStringSync();
+
+/// The published address of [page]: its folder, with the trailing "/".
+String _url(String page) =>
+    _base + page.substring(0, page.length - 'index.html'.length);
+
+/// The language codes of the shared script (its picker), in its order.
+List<String> _codes() {
+  final String js = _read('site.js');
+  final String names = js.substring(
+    js.indexOf('var NAMES = {'),
+    js.indexOf('};', js.indexOf('var NAMES = {')),
+  );
+  return <String>[
+    for (final RegExpMatch m in RegExp(r'(\w+): "').allMatches(names)) m[1]!,
+  ];
+}
+
+/// The Open Graph locale of each language (LOCALES of the shared script).
+Map<String, String> _locales() {
+  final String js = _read('site.js');
+  final int at = js.indexOf('var LOCALES = {');
+  return <String, String>{
+    for (final RegExpMatch m in RegExp(
+      r'(\w+): "(\w+)"',
+    ).allMatches(js.substring(at, js.indexOf('};', at))))
+      m[1]!: m[2]!,
+  };
+}
+
+/// The head of a page (what comes before `</head>`).
+String _head(String page) {
+  final String html = _read(page);
+  return html.substring(0, html.indexOf('</head>'));
+}
+
+/// The content of every `<meta [attribute]="[name]" content="...">`.
+List<String> _meta(String head, String attribute, String name) => <String>[
+  for (final RegExpMatch m in RegExp(
+    '<meta $attribute="${RegExp.escape(name)}" content="([^"]*)"',
+  ).allMatches(head))
+    _unescape(m[1]!),
+];
+
+String _unescape(String s) => s
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#x27;', "'")
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
+
+/// The structured data (JSON-LD) blocks of a page.
+List<Object?> _jsonLd(String page) => <Object?>[
+  for (final RegExpMatch m in RegExp(
+    r'<script type="application/ld\+json">(.*?)</script>',
+    dotAll: true,
+  ).allMatches(_read(page)))
+    jsonDecode(m[1]!),
+];
+
+/// Width and height of a PNG file, from its IHDR chunk.
+(int, int) _pngSize(String path) {
+  final List<int> bytes = File(path).readAsBytesSync();
+  expect(bytes.sublist(0, 8), <int>[137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(ascii.decode(bytes.sublist(12, 16)), 'IHDR');
+  int word(int at) =>
+      (bytes[at] << 24) |
+      (bytes[at + 1] << 16) |
+      (bytes[at + 2] << 8) |
+      bytes[at + 3];
+  return (word(16), word(20));
+}
 
 /// The way up from [page] to the root of the site: "", "../", "../../".
 String _up(String page) => '../' * (page.split('/').length - 1);
@@ -159,7 +240,7 @@ void main() {
 
     test('every text table is valid JSON in 21 languages with the English '
         'keys, placeholders, bold and links', () {
-      for (final String file in <String>[..._pages, 'site.js']) {
+      for (final String file in <String>[..._pages, '404.html', 'site.js']) {
         final Map<String, Map<String, String>> texts = _texts(file);
         expect(texts, hasLength(21), reason: file);
         final Map<String, String> en = texts['en']!;
@@ -178,6 +259,271 @@ void main() {
             );
           }
         }
+      }
+    });
+  });
+
+  group('found by search engines and shown well in links', () {
+    for (final String page in _pages) {
+      test('$page: the canonical address, every language, the link '
+          'preview, the manifest and the bar colours', () {
+        final String head = _head(page);
+        final String url = _url(page);
+        final Map<String, String> en = _texts(page)['en']!;
+        // The English page has no "?lang".
+        expect(head, contains('<link rel="canonical" href="$url">'));
+        expect(RegExp('<link rel="canonical"').allMatches(head), hasLength(1));
+        final List<String> codes = _codes();
+        expect(codes, hasLength(21));
+        final Map<String, String> alternates = <String, String>{
+          for (final RegExpMatch m in RegExp(
+            r'<link rel="alternate" hreflang="([\w-]+)" href="([^"]+)">',
+          ).allMatches(head))
+            m[1]!: m[2]!,
+        };
+        expect(alternates, <String, String>{
+          for (final String code in codes)
+            code: code == 'en' ? url : '$url?lang=$code',
+          'x-default': url,
+        });
+
+        expect(head, contains('<title>${en['title']}</title>'));
+        expect(_meta(head, 'name', 'description'), <String>[en['desc']!]);
+        expect(_meta(head, 'property', 'og:type'), <String>['website']);
+        expect(_meta(head, 'property', 'og:site_name'), <String>['Zen']);
+        expect(_meta(head, 'property', 'og:title'), <String>[en['title']!]);
+        expect(_meta(head, 'property', 'og:description'), <String>[
+          en['desc']!,
+        ]);
+        expect(_meta(head, 'property', 'og:url'), <String>[url]);
+        expect(_meta(head, 'property', 'og:image'), <String>[
+          '${_base}og-image.png',
+        ]);
+        expect(_meta(head, 'property', 'og:image:width'), <String>['1200']);
+        expect(_meta(head, 'property', 'og:image:height'), <String>['630']);
+        expect(_meta(head, 'property', 'og:image:alt').single, isNotEmpty);
+        final Map<String, String> locales = _locales();
+        expect(locales.keys.toList(), codes);
+        expect(_meta(head, 'property', 'og:locale'), <String>[locales['en']!]);
+        expect(_meta(head, 'property', 'og:locale:alternate'), <String>[
+          for (final String code in codes.skip(1)) locales[code]!,
+        ]);
+        expect(_meta(head, 'name', 'twitter:card'), <String>[
+          'summary_large_image',
+        ]);
+        expect(_meta(head, 'name', 'twitter:title'), <String>[en['title']!]);
+        expect(_meta(head, 'name', 'twitter:description'), <String>[
+          en['desc']!,
+        ]);
+        expect(_meta(head, 'name', 'twitter:image'), <String>[
+          '${_base}og-image.png',
+        ]);
+        expect(_meta(head, 'name', 'twitter:image:alt').single, isNotEmpty);
+
+        expect(
+          head,
+          contains(
+            '<link rel="manifest" href="${_up(page)}manifest.webmanifest">',
+          ),
+        );
+        expect(
+          head,
+          contains(
+            '<meta name="theme-color" content="#f6f4fb" '
+            'media="(prefers-color-scheme: light)">',
+          ),
+        );
+        expect(
+          head,
+          contains(
+            '<meta name="theme-color" content="#0b0a10" '
+            'media="(prefers-color-scheme: dark)">',
+          ),
+        );
+      });
+    }
+
+    test('every page has its own title and description, naming Zen, in '
+        'every language', () {
+      for (final String lang in _codes()) {
+        final Set<String> titles = <String>{};
+        final Set<String> descriptions = <String>{};
+        for (final String page in <String>[..._pages, '404.html']) {
+          final Map<String, String> t = _texts(page)[lang]!;
+          expect(t['title'], contains('Zen'), reason: '$page $lang');
+          expect(t['desc']!.length, greaterThan(20), reason: '$page $lang');
+          expect(titles.add(t['title']!), isTrue, reason: '$page $lang');
+          expect(descriptions.add(t['desc']!), isTrue, reason: '$page $lang');
+        }
+      }
+    });
+
+    test('the shared script turns the link preview and the canonical '
+        'address to the language shown', () {
+      final String js = _read('site.js');
+      for (final String part in <String>[
+        'meta[property="og:title"], meta[name="twitter:title"]',
+        'meta[property="og:description"]',
+        'meta[property="og:locale"]',
+        'meta[property="og:locale:alternate"]',
+        'link[rel="canonical"]',
+        'meta[property="og:url"]',
+      ]) {
+        expect(js, contains(part), reason: part);
+      }
+    });
+
+    test('the home, about and install pages describe the app in structured '
+        'data, without made-up ratings', () {
+      for (final String page in _appPages) {
+        final List<Object?> blocks = _jsonLd(page);
+        expect(blocks, hasLength(1), reason: page);
+        final Map<String, dynamic> data =
+            blocks.single! as Map<String, dynamic>;
+        expect(data['@context'], 'https://schema.org', reason: page);
+        final List<Map<String, dynamic>> nodes = <Map<String, dynamic>>[
+          if (data['@graph'] case final List<dynamic> graph)
+            for (final dynamic node in graph) node as Map<String, dynamic>
+          else
+            data,
+        ];
+        final Map<String, dynamic> app = nodes.singleWhere(
+          (Map<String, dynamic> n) => n['@type'] == 'SoftwareApplication',
+        );
+        expect(app['name'], 'Zen');
+        expect(app['applicationCategory'], 'CommunicationApplication');
+        expect(app['operatingSystem'], 'Android, iOS, Windows, macOS, Linux');
+        expect(app['offers'], <String, dynamic>{
+          '@type': 'Offer',
+          'price': '0',
+          'priceCurrency': 'USD',
+        });
+        expect(app['license'], 'https://www.gnu.org/licenses/gpl-3.0.html');
+        expect(
+          (app['author'] as Map<String, dynamic>)['name'],
+          'Robert Ostrowski-Jagoda',
+        );
+        expect(app['downloadUrl'], '${_base}install/');
+        expect(app['url'], '${_base}about/');
+        expect(app['image'], '${_base}og-image.png');
+        // The version is the latest release's, put in at deployment.
+        expect(app.containsKey('softwareVersion'), isFalse, reason: page);
+        final String text = jsonEncode(data);
+        for (final String made in <String>[
+          'aggregateRating',
+          'review',
+          'ratingValue',
+        ]) {
+          expect(text, isNot(contains(made)), reason: '$page $made');
+        }
+      }
+      final Map<String, dynamic> home =
+          _jsonLd('index.html').single! as Map<String, dynamic>;
+      final Map<String, dynamic> site =
+          (home['@graph'] as List<dynamic>).firstWhere(
+                (dynamic n) =>
+                    (n as Map<String, dynamic>)['@type'] == 'WebSite',
+              )
+              as Map<String, dynamic>;
+      expect(site['url'], _base);
+      expect(site['inLanguage'], _codes());
+      // No organisation behind Zen: its author is a person.
+      for (final String page in _pages) {
+        expect(_read(page), isNot(contains('"Organization"')), reason: page);
+      }
+    });
+
+    test('the link picture is 1200 x 630 and small, the manifest is a '
+        'bookmark (not an installed app) with its icons', () {
+      expect(_pngSize('$_site/og-image.png'), (1200, 630));
+      expect(File('$_site/og-image.png').lengthSync(), lessThan(200 * 1024));
+      final Map<String, dynamic> manifest =
+          jsonDecode(_read('manifest.webmanifest')) as Map<String, dynamic>;
+      expect(manifest['name'], 'Zen');
+      expect(manifest['short_name'], 'Zen');
+      expect(manifest['start_url'], './');
+      expect(manifest['display'], 'browser');
+      expect(manifest['theme_color'], '#f6f4fb');
+      expect(manifest['background_color'], '#f6f4fb');
+      final List<dynamic> icons = manifest['icons'] as List<dynamic>;
+      expect(
+        icons.map((dynamic i) => (i as Map<String, dynamic>)['sizes']),
+        <String>['192x192', '512x512'],
+      );
+      for (final dynamic icon in icons) {
+        final Map<String, dynamic> i = icon as Map<String, dynamic>;
+        final int size = int.parse((i['sizes'] as String).split('x').first);
+        expect(_pngSize('$_site/${i['src']}'), (size, size));
+        expect(i['type'], 'image/png');
+      }
+      // The pictures can be drawn again.
+      expect(File('tool/ci/site_images.py').existsSync(), isTrue);
+    });
+
+    test('a missing address shows a page in the site\'s look, with every '
+        'link from the root of the site', () {
+      final String html = _read('404.html');
+      expect(html, startsWith('<!doctype html>'));
+      expect(html, contains('<meta name="robots" content="noindex">'));
+      expect(html, contains('<link rel="stylesheet" href="/Zen/site.css">'));
+      expect(html, contains('<script src="/Zen/site.js"></script>'));
+      expect(
+        html,
+        contains('<link rel="manifest" href="/Zen/manifest.webmanifest">'),
+      );
+      expect(html, contains('<header class="top" id="zenTop">'));
+      expect(html, contains('<footer class="foot" id="zenFoot"'));
+      expect(html, contains('Zen.init('));
+      expect(html, isNot(contains('rel="canonical"')));
+      // Served at any depth: no relative address.
+      final List<String> links = <String>[
+        for (final RegExpMatch m in RegExp(
+          r'(?:href|src)="([^"#]+)"',
+        ).allMatches(html))
+          m[1]!,
+      ];
+      expect(links, isNotEmpty);
+      for (final String link in links) {
+        expect(link, startsWith('/Zen/'), reason: link);
+      }
+      for (final String target in <String>[
+        '/Zen/',
+        '/Zen/install/',
+        '/Zen/guide/',
+        '/Zen/features/',
+        '/Zen/support/',
+        '/Zen/about/',
+      ]) {
+        expect(html, contains('href="$target"'), reason: target);
+      }
+    });
+
+    test('the sitemap, security.txt and the version are made at deployment, '
+        'with the hidden .well-known folder', () {
+      final String workflow = File(
+        '.github/workflows/pages.yml',
+      ).readAsStringSync();
+      expect(
+        workflow,
+        contains(
+          'python3 tool/ci/site_files.py --site _site --source tool/pages',
+        ),
+      );
+      expect(workflow, contains('include-hidden-files: true'));
+      expect(workflow, contains('fetch-depth: 0'));
+      expect(
+        workflow.indexOf('site_files.py --site'),
+        greaterThan(workflow.indexOf('release_source.py\n')),
+        reason: 'after release.json is written',
+      );
+      // Not kept in the site, where they would go stale, and no robots.txt
+      // (crawlers read only the one at the root of the host).
+      for (final String file in <String>[
+        'sitemap.xml',
+        'robots.txt',
+        '.well-known/security.txt',
+      ]) {
+        expect(File('$_site/$file').existsSync(), isFalse, reason: file);
       }
     });
   });
