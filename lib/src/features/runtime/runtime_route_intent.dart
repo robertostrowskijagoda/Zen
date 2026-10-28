@@ -31,6 +31,9 @@ enum RuntimeRouteTarget {
 
   /// "Skrzynki offline" (`zen://mailboxes`): a mailbox stopped answering.
   mailboxes,
+
+  /// "Dane i pamięć" (`zen://storage`): Zen took more than its limit.
+  storage,
 }
 
 @immutable
@@ -138,6 +141,11 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.mailboxes);
   }
 
+  /// "Dane i pamięć" (Zen took more than its limit).
+  factory RuntimeRouteIntent.storage({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.storage);
+  }
+
   /// The Tablica, filtered by [filter] (a name of the feed's filters), at
   /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
@@ -224,6 +232,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.flatKnocks => t('Otwórz Sąsiadów'),
     RuntimeRouteTarget.updates => t('Aktualizuj'),
     RuntimeRouteTarget.mailboxes => t('Wybierz skrzynkę'),
+    RuntimeRouteTarget.storage => t('Otwórz Dane i pamięć'),
   };
 }
 
@@ -234,6 +243,9 @@ String buildUpdatesRouteKey() => 'zen://updates';
 
 /// "Skrzynki offline" (a mailbox that stopped answering).
 String buildMailboxesRouteKey() => 'zen://mailboxes';
+
+/// "Dane i pamięć" (Zen took more than its limit).
+String buildStorageRouteKey() => 'zen://storage';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
@@ -361,6 +373,9 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'mailboxes') {
     return RuntimeRouteIntent.mailboxes(id: id);
+  }
+  if (uri.host == 'storage') {
+    return RuntimeRouteIntent.storage(id: id);
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/storage_limits_section.dart';
 import 'package:zen/src/features/settings/storage_breakdown.dart';
+import 'package:zen/src/features/settings/storage_limit_warning.dart';
 
 /// A slider over [AppSettings.storageLimitStepsMb]: [valueMb] snaps to the
 /// nearest step and [onChanged] gets the step in MB.
@@ -55,7 +57,9 @@ Color storageFillColor(ZenColors zen, double ratio) {
 }
 
 /// Ustawienia → Dane i pamięć: how much room Zen takes now (a bar against
-/// the limit) and by what, with the limit for other people's posts.
+/// the limit) and by what, with the limit for other people's posts. Over
+/// the limit (or when friends' photos and videos had to go for it) a
+/// warning on top offers to raise the limit.
 class StorageUsageSection extends ConsumerWidget {
   const StorageUsageSection({super.key});
 
@@ -70,6 +74,7 @@ class StorageUsageSection extends ConsumerWidget {
       storageBreakdownProvider,
     );
     final StorageBreakdown? usage = measured.value;
+    final StorageLimitWarning? warning = ref.watch(storageLimitWarningProvider);
     final Widget body;
     if (usage == null) {
       body = Padding(
@@ -87,9 +92,33 @@ class StorageUsageSection extends ConsumerWidget {
       final double ratio = settings.inboxUnlimited || limitBytes == 0
           ? 0
           : usage.totalBytes / limitBytes;
+      // What the last round told, while the limit is still the one it saw;
+      // what is measured here now decides whether Zen is still over it.
+      final StorageLimitWarning? told =
+          warning != null && warning.limitMb == settings.inboxLimitMb
+          ? warning
+          : null;
+      final bool over = !settings.inboxUnlimited && ratio > 1;
+      final bool trimmed = told != null && told.deletedFiles > 0;
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (!settings.inboxUnlimited && (over || trimmed))
+            _LimitWarning(
+              warning: over
+                  ? (told != null && told.stillOver ? told : null)
+                  : StorageLimitWarning(
+                      limitMb: told!.limitMb,
+                      deletedFiles: told.deletedFiles,
+                      deletedBytes: told.deletedBytes,
+                    ),
+              limitMb: settings.inboxLimitMb,
+              raiseToMb: raisedStorageLimitMb(
+                usage.totalBytes,
+                currentMb: settings.inboxLimitMb,
+              ),
+              onRaise: controller.setInboxLimitMb,
+            ),
           Text(
             settings.inboxUnlimited
                 ? t('Zen zajmuje {used}', {
@@ -157,7 +186,10 @@ class StorageUsageSection extends ConsumerWidget {
           subtitle: Text(
             ownLimit
                 ? t('Najstarsze zdjęcia i filmy znikają, gdy przekroczą limit.')
-                : t('Bez osobnego limitu posty dzielą z resztą cały limit.'),
+                : t(
+                    'Bez osobnego limitu zdjęcia i filmy znajomych znikają '
+                    'dopiero, gdy Zen przekroczy cały limit.',
+                  ),
             style: TextStyle(color: zen.textSecondary, height: 1.35),
           ),
           onChanged: (bool on) => controller.setFeedLimitMb(
@@ -190,14 +222,67 @@ class StorageUsageSection extends ConsumerWidget {
         const SizedBox(height: 4),
         Text(
           t(
-            'Rozmów i wiadomości nie da się policzyć osobno, bo ich pliki są '
-            'zaszyfrowane razem z resztą danych; nic z nich nie jest '
-            'usuwane samo. Kopii i eksportów nie usuwamy sami.',
+            'Gdy Zen przekroczy limit, najstarsze zdjęcia i filmy z postów '
+            'znajomych znikają same, aż Zen się w nim zmieści. Wiadomości, '
+            'rozmowy, Twoje posty, kopie i eksporty nigdy nie są usuwane '
+            'same. Rozmów i wiadomości nie da się policzyć osobno, bo ich '
+            'pliki są zaszyfrowane razem z resztą danych.',
           ),
           key: const Key('storage-usage-note'),
           style: TextStyle(color: zen.textSecondary, height: 1.35),
         ),
       ],
+    );
+  }
+}
+
+/// The warning on top of the usage: what the limit did (or that Zen is over
+/// it) and a button that raises it to [raiseToMb] (none when no step is
+/// above the limit).
+class _LimitWarning extends StatelessWidget {
+  const _LimitWarning({
+    required this.warning,
+    required this.limitMb,
+    required this.raiseToMb,
+    required this.onRaise,
+  });
+
+  final StorageLimitWarning? warning;
+  final int limitMb;
+  final int? raiseToMb;
+  final ValueChanged<int> onRaise;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final int? raiseTo = raiseToMb;
+    return Padding(
+      key: const Key('storage-limit-warning'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ZenInfo(
+            icon: Icons.storage_outlined,
+            tone: zen.warning,
+            title: storageLimitWarningTitle(warning, limitMb),
+            text: storageLimitWarningBody(warning, limitMb),
+          ),
+          if (raiseTo != null)
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                key: const Key('storage-limit-raise'),
+                onPressed: () => onRaise(raiseTo),
+                child: Text(
+                  t('Zwiększ limit do {limit}', {
+                    'limit': AppSettings.storageLimitLabel(raiseTo),
+                  }),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

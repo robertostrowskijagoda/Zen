@@ -134,31 +134,38 @@ Future<StorageBreakdown> measureStorage({
   );
 }
 
-/// What Zen takes now, or `null` when it cannot be measured here.
-final FutureProvider<StorageBreakdown?>
-storageBreakdownProvider = FutureProvider.autoDispose<StorageBreakdown?>((
-  Ref ref,
-) async {
+/// Measures the account's folder [support] and the files Zen exported
+/// (left out when the index of exports cannot be read).
+Future<StorageBreakdown> measureAccountStorage({
+  required Directory support,
+  required StorageUsage usage,
+}) async {
+  List<String> exported = const <String>[];
   try {
-    final Directory support = await ref.watch(
-      supportDirectoryResolverProvider,
-    )();
-    final StorageUsage usage =
-        (await ref.watch(storageReportProvider.future))?.usage ??
-        const StorageUsage();
-    List<String> exported = const <String>[];
-    try {
-      exported = await const ExportedFilesIndex().paths();
-    } on Object {
-      // No secure storage: the exports are not counted.
-    }
-    return await measureStorage(
-      support: support,
-      usage: usage,
-      exportedPaths: exported,
-    );
-  } on Object catch (error) {
-    logZenWarning('Measuring the storage failed: $error');
-    return null;
+    exported = await const ExportedFilesIndex().paths();
+  } on Object {
+    // No secure storage: the exports are not counted.
   }
-});
+  return measureStorage(
+    support: support,
+    usage: usage,
+    exportedPaths: exported,
+  );
+}
+
+/// What Zen takes now, or `null` when it cannot be measured here.
+final FutureProvider<StorageBreakdown?> storageBreakdownProvider =
+    FutureProvider.autoDispose<StorageBreakdown?>((Ref ref) async {
+      try {
+        final Directory support = await ref.watch(
+          supportDirectoryResolverProvider,
+        )();
+        final StorageUsage usage =
+            (await ref.watch(storageReportProvider.future))?.usage ??
+            const StorageUsage();
+        return await measureAccountStorage(support: support, usage: usage);
+      } on Object catch (error) {
+        logZenWarning('Measuring the storage failed: $error');
+        return null;
+      }
+    });

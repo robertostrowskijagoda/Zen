@@ -19,6 +19,8 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/settings/storage_breakdown.dart';
+import 'package:zen/src/features/settings/storage_limit_warning.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -35,6 +37,9 @@ final class FeedMaintenance {
     this.reach,
     this.mentions,
     this.feedLimitBytes,
+    this.zenLimitMb,
+    this.zenBytesOf,
+    this.onZenLimit,
   });
 
   final LedgerNode node;
@@ -53,6 +58,17 @@ final class FeedMaintenance {
   /// What other people's posts may take together (the limit the person
   /// set for them); `null` or `0` = no limit of their own.
   final int Function()? feedLimitBytes;
+
+  /// The limit the person set for all of Zen, in MB; `0` = no limit.
+  final int Function()? zenLimitMb;
+
+  /// Measures all of Zen ([usage]: what other people's posts take of it);
+  /// `null` when it cannot be measured.
+  final Future<int?> Function(StorageUsage usage)? zenBytesOf;
+
+  /// Told after each round what it found for the limit of all of Zen
+  /// (`null`: Zen fits it, or there is no limit).
+  final void Function(StorageLimitWarning? warning)? onZenLimit;
 
   Timer? _first;
 
@@ -95,17 +111,34 @@ final class FeedMaintenance {
     }
     _enforcing = true;
     try {
+      final int limitMb = zenLimitMb?.call() ?? 0;
       final RetentionResult result = await enforceStorageLimits(
         node,
         held: reach?.heldEntries ?? const <LogEntry>[],
         feedLimitBytes: _feedLimit(),
+        zenLimitBytes: limitMb > 0 ? limitMb * 1024 * 1024 : null,
+        zenBytesOf: zenBytesOf,
       );
       cleaned = RetentionResult(
         expiredFiles: cleaned.expiredFiles + result.expiredFiles,
         expiredBytes: cleaned.expiredBytes + result.expiredBytes,
         limitFiles: cleaned.limitFiles + result.limitFiles,
         limitBytes: cleaned.limitBytes + result.limitBytes,
+        totalFiles: cleaned.totalFiles + result.totalFiles,
+        totalBytes: cleaned.totalBytes + result.totalBytes,
       );
+      if (result.zenBytes != null) {
+        onZenLimit?.call(
+          StorageLimitWarning(
+            limitMb: limitMb,
+            deletedFiles: result.totalFiles,
+            deletedBytes: result.totalBytes,
+            stillOverBytes: result.stillOverTotalBytes,
+          ),
+        );
+      } else if (limitMb <= 0) {
+        onZenLimit?.call(null);
+      }
       return result;
     } on Object catch (error, stackTrace) {
       logZenError('Applying the storage limits failed', error, stackTrace);
@@ -165,11 +198,52 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
   );
   final PostReachService? reach = ref.watch(postReachProvider);
 
+  // Whether Zen fit its limit since it was last told of it: then the same
+  // news counts as new.
+  bool fitSince = false;
+  void zenLimit(StorageLimitWarning? warning) {
+    ref.read(storageLimitWarningProvider.notifier).report(warning);
+    if (warning == null || !warning.matters) {
+      fitSince = true;
+      return;
+    }
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    if (!storageLimitNoticeDue(
+      ref.read(socialHubControllerProvider).inbox,
+      warning,
+      nowMillis: now,
+      fitSince: fitSince,
+    )) {
+      return;
+    }
+    fitSince = false;
+    unawaitedLogged(
+      ref
+          .read(socialHubControllerProvider.notifier)
+          .putInboxEntry(storageLimitInboxEntry(warning, nowMillis: now)),
+      context: 'Powiadomienie o limicie miejsca',
+    );
+  }
+
   final FeedMaintenance maintenance = FeedMaintenance(
     node: node,
     reach: reach,
     feedLimitBytes: () =>
         ref.read(appSettingsControllerProvider).feedLimitMb * 1024 * 1024,
+    zenLimitMb: () => ref.read(appSettingsControllerProvider).inboxLimitMb,
+    zenBytesOf: (StorageUsage usage) async {
+      try {
+        final StorageBreakdown measured = await measureAccountStorage(
+          support: await ref.read(supportDirectoryResolverProvider)(),
+          usage: usage,
+        );
+        return measured.totalBytes;
+      } on Object catch (error) {
+        logZenWarning('Measuring the storage failed: $error');
+        return null;
+      }
+    },
+    onZenLimit: zenLimit,
     mentions: PostMentionService(
       node: node,
       nameOf: nameOf,
@@ -249,6 +323,8 @@ final FutureProvider<StorageReport?> storageReportProvider =
       if (maintenance == null) {
         return null;
       }
+      // Measured again when a round deleted for the limit of all of Zen.
+      ref.watch(storageLimitWarningProvider);
       await maintenance.node.start();
       return StorageReport(
         usage: storageUsageOf(

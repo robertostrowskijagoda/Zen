@@ -34,6 +34,10 @@ enum InboxEntryType {
   /// One of this device's mailboxes stopped answering and needs replacing
   /// (`mailbox_quiet_notice.dart`).
   mailbox,
+
+  /// Zen took more than its limit: friends' photos and videos were
+  /// deleted, or there are none left to delete (`storage_limit_warning.dart`).
+  storage,
 }
 
 @immutable

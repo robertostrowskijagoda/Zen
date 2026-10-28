@@ -3,13 +3,17 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/feed/feed_maintenance.dart';
 import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/feed/storage_retention.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/storage_limit_warning.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final class _Linked extends MemorySignalTransport {
@@ -152,6 +156,104 @@ void main() {
       expect(plan.overFeed, isEmpty);
     });
 
+    group('the limit of all of Zen', () {
+      final List<StoredMedia> media = <StoredMedia>[
+        _file('friend-new', 40 * _mb, 2),
+        _file('cache-old', 30 * _mb, 90, owner: StoredMediaOwner.cache),
+        _file('friend-old', 40 * _mb, 60, account: 'cela'),
+        _file('cache-new', 30 * _mb, 1, owner: StoredMediaOwner.cache),
+      ];
+
+      test('within it nothing goes', () {
+        for (final int used in <int>[500 * _mb, 1024 * _mb]) {
+          final RetentionPlan plan = planStorageRetention(
+            media,
+            nowMillis: now,
+            zenBytes: used,
+            zenLimitBytes: 1024 * _mb,
+          );
+          expect(plan.isEmpty, isTrue);
+          expect(plan.stillOverTotalBytes, 0);
+        }
+        // No limit (or no measure): nothing either.
+        expect(
+          planStorageRetention(
+            media,
+            nowMillis: now,
+            zenBytes: 5000 * _mb,
+          ).isEmpty,
+          isTrue,
+        );
+        expect(
+          planStorageRetention(
+            media,
+            nowMillis: now,
+            zenBytes: 5000 * _mb,
+            zenLimitBytes: 0,
+          ).isEmpty,
+          isTrue,
+        );
+      });
+
+      test('over it the oldest of friends\' files go until Zen fits', () {
+        // 60 MB over: the oldest (30 MB), then the next oldest (40 MB).
+        final RetentionPlan plan = planStorageRetention(
+          media,
+          nowMillis: now,
+          zenBytes: 1084 * _mb,
+          zenLimitBytes: 1024 * _mb,
+        );
+        expect(plan.overTotal.map((StoredMedia m) => m.id), <String>[
+          'cache-old',
+          'friend-old',
+        ]);
+        expect(plan.stillOverTotalBytes, 0);
+        expect(plan.expired, isEmpty);
+        expect(plan.overFeed, isEmpty);
+
+        // 1 byte over: one file is enough.
+        expect(
+          _ids(
+            planStorageRetention(
+              media,
+              nowMillis: now,
+              zenBytes: 1024 * _mb + 1,
+              zenLimitBytes: 1024 * _mb,
+            ).overTotal,
+          ),
+          <String>{'cache-old'},
+        );
+      });
+
+      test('with nothing left to delete it says how much is still over', () {
+        final RetentionPlan plan = planStorageRetention(
+          media,
+          nowMillis: now,
+          zenBytes: 1324 * _mb,
+          zenLimitBytes: 1024 * _mb,
+        );
+        // Only the 140 MB of friends' files can go; messages, chats and
+        // own posts are not in the list, so nothing else is picked.
+        expect(_ids(plan.overTotal), _ids(media));
+        expect(plan.stillOverTotalBytes, 160 * _mb);
+      });
+
+      test('what the other limits delete makes room first', () {
+        final RetentionPlan plan = planStorageRetention(
+          <StoredMedia>[
+            _file('expired', 50 * _mb, 500),
+            _file('kept', 50 * _mb, 3),
+          ],
+          nowMillis: now,
+          zenBytes: 1064 * _mb,
+          zenLimitBytes: 1024 * _mb,
+        );
+        expect(_ids(plan.expired), <String>{'expired'});
+        expect(plan.overTotal, isEmpty);
+        expect(plan.stillOverTotalBytes, 0);
+      });
+    });
+
     test('usage tells the largest friend and the cache', () {
       final StorageUsage usage = storageUsageOf(<StoredMedia>[
         _file('a', 5 * _mb, 1),
@@ -266,6 +368,94 @@ void main() {
         expect(a.blobs.isComplete(mine), isTrue);
       },
     );
+
+    test(
+      'over the limit of all of Zen the oldest friend files go, never my own',
+      () async {
+        final (LedgerNode a, LedgerNode b) = await pair();
+        final String mine = await postWithPhoto(a, 'Moje', 1);
+        final String first = await postWithPhoto(b, 'Pierwsze', 2);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final String second = await postWithPhoto(b, 'Drugie', 3);
+        await _settle();
+        final int size = storedMediaOf(a).first.bytes;
+
+        // Within the limit: nothing goes, and the measure saw both files.
+        StorageUsage? seen;
+        RetentionResult result = await enforceStorageLimits(
+          a,
+          zenLimitBytes: 100000,
+          zenBytesOf: (StorageUsage usage) async {
+            seen = usage;
+            return 50000;
+          },
+        );
+        expect(result.files, 0);
+        expect(result.zenBytes, 50000);
+        expect(seen?.feedBytes, 2 * size);
+
+        // 1000 bytes over: the older of Bob's photos (3 KB) is enough.
+        result = await enforceStorageLimits(
+          a,
+          zenLimitBytes: 100000,
+          zenBytesOf: (StorageUsage _) async => 101000,
+        );
+        expect(result.totalFiles, 1);
+        expect(result.totalBytes, size);
+        expect(result.stillOverTotalBytes, 0);
+        expect(a.blobs.isComplete(first), isFalse);
+        expect(a.blobs.isComplete(second), isTrue);
+        expect(a.blobs.isComplete(mine), isTrue);
+
+        // Far over: Bob's last photo goes too, my own stays, and Zen is
+        // still over by what nothing may delete.
+        result = await enforceStorageLimits(
+          a,
+          zenLimitBytes: 100000,
+          zenBytesOf: (StorageUsage _) async => 110000,
+        );
+        expect(result.totalFiles, 1);
+        expect(result.stillOverTotalBytes, 10000 - size);
+        expect(a.blobs.isComplete(second), isFalse);
+        expect(a.blobs.isComplete(mine), isTrue);
+      },
+    );
+
+    test('the hourly round tells what the limit of all of Zen did', () async {
+      final (LedgerNode a, LedgerNode b) = await pair();
+      await postWithPhoto(b, 'Jego', 2);
+      await _settle();
+      final int size = storedMediaOf(a).single.bytes;
+      int zenBytes = 1000;
+      final List<StorageLimitWarning?> told = <StorageLimitWarning?>[];
+      final FeedMaintenance maintenance = FeedMaintenance(
+        node: a,
+        notifier: ReactionSystemNotifier(
+          node: a,
+          nameOf: (String address) => address,
+          notify: (RuntimeSystemNotification _) async {},
+          shouldNotify: () => false,
+        ),
+        zenLimitMb: () => 1,
+        zenBytesOf: (StorageUsage _) async => zenBytes,
+        onZenLimit: told.add,
+      );
+      addTearDown(maintenance.dispose);
+
+      // Under the limit: nothing to warn of.
+      await maintenance.enforceLimits();
+      expect(told.single?.matters, isFalse);
+
+      // Over by more than there is to delete.
+      zenBytes = 2 * _mb;
+      await maintenance.enforceLimits();
+      final StorageLimitWarning warning = told.last!;
+      expect(warning.limitMb, 1);
+      expect(warning.deletedFiles, 1);
+      expect(warning.deletedBytes, size);
+      expect(warning.stillOver, isTrue);
+      expect(maintenance.cleaned.totalFiles, 1);
+    });
 
     test('the wall leaves out friends\' posts older than 12 months', () async {
       final (LedgerNode a, LedgerNode b) = await pair();

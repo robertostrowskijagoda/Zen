@@ -1178,20 +1178,7 @@ class _SettingsScreen extends ConsumerWidget {
                             },
                           ),
                     pageTitle: t('Dane i pamięć'),
-                    pageChildren: <Widget>[
-                      const _Panel(child: StorageUsageSection()),
-                      const SizedBox(height: 12),
-                      const _DataSection(),
-                      const SizedBox(height: 12),
-                      _SectionIntro(
-                        title: t('Limity przechowywania'),
-                        caption: t(
-                          'Największe dozwolone rozmiary w każdej kategorii',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const _Panel(child: StorageLimitsSection()),
-                    ],
+                    pageChildren: _storagePageChildren(),
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-updates'),
@@ -1478,6 +1465,33 @@ class _SettingsSwitchTile extends StatelessWidget {
     );
   }
 }
+
+/// Ustawienia → Dane i pamięć: how much room Zen takes, the defaults for
+/// the data and the limits.
+List<Widget> _storagePageChildren() => <Widget>[
+  const _Panel(child: StorageUsageSection()),
+  const SizedBox(height: 12),
+  const _DataSection(),
+  const SizedBox(height: 12),
+  _SectionIntro(
+    title: t('Limity przechowywania'),
+    caption: t('Największe dozwolone rozmiary w każdej kategorii'),
+  ),
+  const SizedBox(height: 8),
+  const _Panel(child: StorageLimitsSection()),
+];
+
+/// Opens "Dane i pamięć" on its own (the notice that Zen took more than its
+/// limit).
+Future<void> openStorageSettingsPage(BuildContext context) =>
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => _SettingsPage(
+          title: t('Dane i pamięć'),
+          children: _storagePageChildren(),
+        ),
+      ),
+    );
 
 /// A settings sub-page: the panels of one topic, nothing else.
 class _SettingsPage extends StatelessWidget {
