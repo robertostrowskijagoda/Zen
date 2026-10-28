@@ -8,6 +8,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
@@ -170,6 +171,14 @@ Duration nextMailboxPollWait({
 /// answered at once, then every other one — a little under two intervals,
 /// so however the timings drift, an answer comes every 4 min.
 const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
+
+/// A contact whose Zen just started marks its first pings so
+/// ([kPresenceFreshKey]): the answer this phone gave before the start went
+/// to an app that is gone, so it answers at once, whenever it answered
+/// last, but at most this often, so marking every ping buys nobody more
+/// than an answer twice a minute. The pings a start sends again in its
+/// first minute to friends who did not answer come further apart.
+const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 
 /// A one-way presence announcement ("leaving the screen", "back", "closing"):
 /// sent to friends who have Zen open when this device's state changes
@@ -542,6 +551,7 @@ final class LockedReceiver {
     this.mailboxPollMax = kLockedMailboxPollMaxInterval,
     this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
+    this.freshPongEvery = kLockedFreshPongEvery,
     WakeBeat? beat,
     Future<bool> Function()? meshLinked,
     this.relinkWait = const Duration(seconds: 10),
@@ -632,6 +642,11 @@ final class LockedReceiver {
   /// "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
   final Map<String, int> _pongedAt = <String, int>{};
+
+  /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
+  /// get a pong whenever the last one went, but at most this often.
+  final Duration freshPongEvery;
+  final Map<String, int> _freshPongedAt = <String, int>{};
 
   StreamSubscription<SignalTransportFrame>? _subscription;
   StreamSubscription<SignalTransportFrame>? _doorSubscription;
@@ -915,6 +930,31 @@ final class LockedReceiver {
     }
   }
 
+  /// Whether a contact's ping at [at] gets a pong ([pongEvery]; a ping
+  /// from a Zen that just started, [freshPongEvery]), noting it when so.
+  /// A clock set back answers at once.
+  bool _answersPing(String from, int at, Map<String, dynamic> payload) {
+    bool lately(Map<String, int> answered, Duration every) {
+      final int? last = answered[from];
+      return last != null && at >= last && at - last < every.inMilliseconds;
+    }
+
+    final bool fresh = payload[kPresenceFreshKey] == true;
+    if (lately(_pongedAt, pongEvery) &&
+        (!fresh || lately(_freshPongedAt, freshPongEvery))) {
+      return false;
+    }
+    if (_pongedAt.length >= 2000) {
+      _pongedAt.clear();
+      _freshPongedAt.clear();
+    }
+    _pongedAt[from] = at;
+    if (fresh) {
+      _freshPongedAt[from] = at;
+    }
+    return true;
+  }
+
   Future<void> _sendQuietly(String to, Map<String, dynamic> payload) async {
     try {
       await _transport.send(remoteAddress: to, payload: payload);
@@ -945,9 +985,7 @@ final class LockedReceiver {
     _alarm?.observe(frame);
     if (type == 'ping') {
       final int at = _now();
-      final int? last = _pongedAt[from];
-      if (contact && (last == null || at - last >= pongEvery.inMilliseconds)) {
-        _pongedAt[from] = at;
+      if (contact && _answersPing(from, at, frame.payload)) {
         await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
           if (kind == BackgroundContactKind.friend)

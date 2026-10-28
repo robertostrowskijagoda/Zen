@@ -605,6 +605,65 @@ void main() {
     log.dispose();
   });
 
+  test('locked, a friend\'s other device passed is that friend in "Mijani", '
+      'not someone new', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', <String>['bob']);
+    // Ania's computer: an own device of her account, an address of its own.
+    final _Phone laptop = _Phone(net, 'ania2', <String>['bob']);
+    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+    await ania.meet.shareNearbySecret('bob');
+    await laptop.meet.nearbyPrivateKey();
+    // The account routing hands its keys over as from Ania, sent by it.
+    await bob.meet.handle(
+      SignalTransportFrame(
+        from: 'ania',
+        device: 'ania2',
+        payload: <String, dynamic>{
+          'type': MeetTypes.nearbyKey,
+          'z': laptop.meet.nearbyKeysFor('bob'),
+        },
+        receivedAtMillis: 0,
+      ),
+    );
+    await bob.meet.setNearbyBackgroundScan(true);
+    bob.radio.around.add(<Object?, Object?>{
+      'type': 'seen',
+      'token': NearbyOwnKeys(
+        laptop.meet.book.nearbyPrivate!,
+      ).advert(nearbySlot(bob.clock)),
+      'rssi': -65,
+      'device': 'mac-ania2',
+    });
+    final NearbyKit kit = await _kitOf(bob);
+    expect(kit.friends.keys, containsAll(<String>['ania', 'ania2']));
+    expect(kit.owners, <String, String>{'ania2': 'ania'});
+
+    final _Kept kept = _Kept();
+    final LockedNearby locked = LockedNearby(
+      kit: kit,
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: MemoryRuntimeSystemNotificationService(),
+      lookFor: const Duration(milliseconds: 5),
+      keepEvery: Duration.zero,
+      now: () => bob.clock,
+    );
+    await locked.start();
+    expect(await locked.lookNow(), isTrue);
+    await locked.stop();
+    final Map<String, dynamic> record = kept.records.single.payload;
+    expect(
+      (record['e'] as List).map((Object? e) => (e! as Map)['f']).toList(),
+      <String>['ania'],
+    );
+    expect(
+      record['c'] ?? const <Object?>[],
+      isEmpty,
+      reason: 'nobody counted as a stranger',
+    );
+  });
+
   test('locked, no look around is planned while Bluetooth is off or not '
       'allowed', () async {
     final _Net net = _Net();

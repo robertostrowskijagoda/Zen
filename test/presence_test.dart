@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
+import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
@@ -17,8 +19,12 @@ import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/background_keys.dart';
+import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -30,9 +36,36 @@ const String _ada = '200:1111:2222:3333:4444:5555:6666:7777';
 const String _bob = '200:1111:2222:3333:4444:5555:6666:8888';
 const String _carol = '200:1111:2222:3333:4444:5555:6666:9999';
 
+/// This phone, as its friends' phones see it.
+const String _me = '200:1111:2222:3333:4444:5555:6666:1234';
+
 const int _minute = 60 * 1000;
 const int _hour = 60 * _minute;
 const int _day = 24 * _hour;
+
+/// Ada's locked phone: its Android service answering pings, with this
+/// phone ([_me]) among the friends who may see "w tle".
+LockedReceiver _lockedFriendPhone(
+  MemorySignalTransport air, {
+  required int Function() now,
+}) => LockedReceiver(
+  transport: air,
+  capability: BackgroundCapability.fromDraft(
+    BackgroundCapabilityDraft(
+      inboxPublicKey: Uint8List(32),
+      friends: const <String>{_me},
+    ),
+    backgroundKey: Uint8List.fromList(List<int>.filled(32, 7)),
+  ),
+  inbox: SealedInboxWriter(
+    file: File('${Directory.systemTemp.path}/zen-presence-unused.inbox'),
+    recipientPublicKey: Uint8List(32),
+  ),
+  notices: MemoryRuntimeSystemNotificationService(),
+  presence: const LockedPresenceKit(shownTo: <String>{_me}),
+  mailboxPollInterval: Duration.zero,
+  now: now,
+);
 
 void main() {
   group('what a frame says', () {
@@ -105,6 +138,130 @@ void main() {
       );
       expect(back.presence, PeerPresence.background);
       expect(back.openedAgo, const Duration(minutes: 3));
+      expect(back.sentAtMillis, isNull, reason: 'a 1.14.0 frame');
+      // When the sender told it: the order of what one device tells.
+      final Map<String, dynamic> told = presenceFields(
+        own: PeerPresence.online,
+        sentAtMillis: _day,
+      );
+      expect(told, <String, dynamic>{'state': 'foreground', 'sq': _day});
+      expect(PresenceReport.fromPayload(told).sentAtMillis, _day);
+      expect(
+        PresenceReport.fromPayload(<String, dynamic>{
+          'state': 'background',
+          'sq': 'soon',
+        }).sentAtMillis,
+        isNull,
+      );
+    });
+  });
+
+  group('one friend, several frames, several devices', () {
+    PresenceReport said(PeerPresence presence, [int? sentAt]) =>
+        PresenceReport(presence: presence, sentAtMillis: sentAt);
+
+    ({PresenceReport report, int at})? note(
+      PresenceDevices devices,
+      PresenceReport report, {
+      String device = _ada,
+      required int at,
+    }) => devices.note(
+      friend: _ada,
+      device: device,
+      report: report,
+      atMillis: at,
+      foregroundFor: kPresenceForegroundFor,
+      backgroundFor: kPresenceOfflineAfter,
+    );
+
+    test('a stale "online" that comes after the "w tle" told later is not '
+        'taken', () {
+      final PresenceDevices devices = PresenceDevices();
+      // The friend left the screen: "away" says "w tle" ...
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background, _day + 5000),
+          at: _day + 6000,
+        )!.report.presence,
+        PeerPresence.background,
+      );
+      // ... and the pong they sent just before, held on the way, comes
+      // after it.
+      expect(
+        note(devices, said(PeerPresence.online, _day + 1000), at: _day + 7000),
+        isNull,
+      );
+      // What they tell next is taken.
+      expect(
+        note(
+          devices,
+          said(PeerPresence.online, _day + 9000),
+          at: _day + 9500,
+        )!.report.presence,
+        PeerPresence.online,
+      );
+      // A Zen that does not tell the order: each frame as it comes.
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background),
+          at: _day + 9600,
+        )!.report.presence,
+        PeerPresence.background,
+      );
+    });
+
+    test('a clock set back by more than a minute is not stuck', () {
+      final PresenceDevices devices = PresenceDevices();
+      note(devices, said(PeerPresence.online, _day), at: _day);
+      expect(
+        note(
+          devices,
+          said(
+            PeerPresence.background,
+            _day - kPresenceReorderWindow.inMilliseconds - 1,
+          ),
+          at: _day + 1000,
+        )!.report.presence,
+        PeerPresence.background,
+      );
+    });
+
+    test('a friend\'s devices together: Zen open on one of them is online, '
+        'whatever order their answers come in', () {
+      const String laptop = '200:1111:2222:3333:4444:5555:6666:aaaa';
+      final PresenceDevices devices = PresenceDevices();
+      // The computer has Zen on its screen ...
+      note(devices, said(PeerPresence.online, _day), device: laptop, at: _day);
+      // ... the phone answers from the pocket: still online.
+      final ({PresenceReport report, int at}) both = note(
+        devices,
+        said(PeerPresence.background, _day + _minute),
+        at: _day + _minute,
+      )!;
+      expect(both.report.presence, PeerPresence.online);
+      expect(both.at, _day, reason: 'as old as the computer\'s word');
+      // Once the computer's "online" is older than "online" lasts, the
+      // phone's "w tle" is what shows.
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background, _day + 6 * _minute),
+          at: _day + 6 * _minute,
+        )!.report.presence,
+        PeerPresence.background,
+      );
+      // The computer leaves the screen: "w tle" from both.
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background, _day + 7 * _minute),
+          device: laptop,
+          at: _day + 7 * _minute,
+        )!.report.presence,
+        PeerPresence.background,
+      );
     });
   });
 
@@ -831,7 +988,9 @@ void main() {
     });
 
     testWidgets('an announcement keeps the shape a 1.13 Zen reads: an `away` '
-        'with `state` and `lo` only', (WidgetTester tester) async {
+        'with `state` and `lo`, and the order it ignores', (
+      WidgetTester tester,
+    ) async {
       final MemorySignalTransport transport = await pumpApp(tester);
       await openOn(tester, transport, _ada);
       leave(tester);
@@ -846,9 +1005,10 @@ void main() {
       ];
       expect(aways, hasLength(2));
       for (final Map<String, dynamic> away in aways) {
-        // No new type and no new field: an older Zen takes it as it took
-        // "away", whatever state it names.
-        expect(away.keys.toSet(), <String>{'type', 'state', 'lo'});
+        // No new type, and only a field an older Zen does not read (it
+        // reads fields by name): it takes it as it took "away", whatever
+        // state it names.
+        expect(away.keys.toSet(), <String>{'type', 'state', 'lo', 'sq'});
       }
       expect(
         PresenceReport.fromPayload(aways.first).presence,
@@ -1041,6 +1201,12 @@ void main() {
       await tester.pump();
       expect(pings(), 2, reason: 'again, now that it can arrive');
       expect(last(transport, 'ping'), containsPair('state', 'foreground'));
+      // Ada answers it (so she is not pinged again in the first minute).
+      await transport.injectIncoming(
+        from: _ada,
+        payload: const <String, dynamic>{'type': 'pong', 'state': 'background'},
+      );
+      await tester.pump();
 
       // A short loss of the network after a round that did arrive: nothing
       // new, the next round comes on time.
@@ -1053,6 +1219,217 @@ void main() {
       await tester.pump(kPresencePingInterval);
       await tester.pump();
       expect(pings(), 3);
+    });
+
+    testWidgets('after a start, a locked friend who answered just before it '
+        'shows "w tle" within seconds, not "status nieznany" for minutes', (
+      WidgetTester tester,
+    ) async {
+      final int start = DateTime.now().millisecondsSinceEpoch;
+      // Ada's phone is locked; its clock runs with this test's.
+      int clock = start - _minute;
+      final MemorySignalTransport adaAir = MemorySignalTransport();
+      final LockedReceiver adaPhone = _lockedFriendPhone(
+        adaAir,
+        now: () => clock,
+      );
+      await adaPhone.start();
+      addTearDown(adaPhone.stop);
+      // A minute ago this phone's Zen (gone since) pinged her, and she
+      // answered: that answer never reached anything shown here.
+      await adaPhone.handleFrame(
+        SignalTransportFrame(
+          from: _me,
+          payload: const <String, dynamic>{'type': 'ping'},
+          receivedAtMillis: clock,
+        ),
+      );
+      clock = start;
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        store: MemorySocialSnapshotStore(
+          SocialHubState.empty().copyWith(
+            friends: <String, FriendProfile>{
+              _ada:
+                  const FriendProfile(
+                    address: _ada,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ).copyWith(
+                    presence: PeerPresence.background,
+                    presenceAtMillis: start - _hour,
+                  ),
+            },
+          ),
+        ),
+      );
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
+
+      // This phone's pings reach Ada's phone; her answers come back (not
+      // the one from before the start: it went to the app that is gone).
+      int carried = 0;
+      int answered = adaAir.sentSignals.length;
+      expect(answered, 1);
+      Future<void> carry() async {
+        final List<Map<String, dynamic>> toAda = <Map<String, dynamic>>[
+          for (final e in transport.sentSignals)
+            if (e.remoteAddress == _ada && e.payload['type'] == 'ping')
+              e.payload,
+        ];
+        for (final Map<String, dynamic> payload in toAda.skip(carried)) {
+          await adaPhone.handleFrame(
+            SignalTransportFrame(
+              from: _me,
+              payload: payload,
+              receivedAtMillis: clock,
+            ),
+          );
+        }
+        carried = toAda.length;
+        final List<Map<String, dynamic>> back = <Map<String, dynamic>>[
+          for (final e in adaAir.sentSignals)
+            if (e.remoteAddress == _me) e.payload,
+        ];
+        for (final Map<String, dynamic> payload in back.skip(answered)) {
+          await transport.injectIncoming(from: _ada, payload: payload);
+        }
+        answered = back.length;
+        await tester.pumpAndSettle();
+      }
+
+      await carry();
+      expect(last(transport, 'ping'), containsPair(kPresenceFreshKey, true));
+      expect(friendIn(tester, _ada).presenceDoubt, isNull);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
+    });
+
+    testWidgets('after a start, friends who did not answer are pinged again '
+        'within the first minute, and only they', (WidgetTester tester) async {
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        friends: adaAndBob,
+      );
+      List<Map<String, dynamic>> pingsTo(String friend) =>
+          <Map<String, dynamic>>[
+            for (final e in transport.sentSignals)
+              if (e.remoteAddress == friend && e.payload['type'] == 'ping')
+                e.payload,
+          ];
+      expect(pingsTo(_ada).single, containsPair(kPresenceFreshKey, true));
+      // Bob answers; Ada's answer (or her ping) got lost on the way.
+      await transport.injectIncoming(
+        from: _bob,
+        payload: const <String, dynamic>{'type': 'pong', 'state': 'background'},
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(kPresenceStartRetries.first);
+      await tester.pump();
+      expect(pingsTo(_ada), hasLength(2));
+      expect(pingsTo(_ada).last, containsPair(kPresenceFreshKey, true));
+      expect(pingsTo(_bob), hasLength(1));
+      // Ada answers this one: nothing more for her either.
+      await transport.injectIncoming(
+        from: _ada,
+        payload: const <String, dynamic>{'type': 'pong', 'state': 'background'},
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(
+        kPresenceStartRetries.last - kPresenceStartRetries.first,
+      );
+      await tester.pump();
+      expect(pingsTo(_ada), hasLength(2));
+      // The rounds that follow are the usual ones, not marked.
+      await tester.pump(kPresencePingInterval - kPresenceStartRetries.last);
+      await tester.pump();
+      expect(pingsTo(_ada), hasLength(3));
+      expect(pingsTo(_ada).last.containsKey(kPresenceFreshKey), isFalse);
+      expect(pingsTo(_bob).last.containsKey(kPresenceFreshKey), isFalse);
+    });
+
+    testWidgets('a stale "online" that comes after "w tle" does not show '
+        'online; what each frame tells is in order of telling', (
+      WidgetTester tester,
+    ) async {
+      final MemorySignalTransport transport = await pumpApp(tester);
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      Future<void> hear(String type, String state, int sentAt) async {
+        await transport.injectIncoming(
+          from: _ada,
+          payload: <String, dynamic>{
+            'type': type,
+            'state': state,
+            kPresenceSentKey: sentAt,
+          },
+        );
+        await tester.pumpAndSettle();
+      }
+
+      // Ada leaves the screen; the pong she sent just before comes later.
+      await hear(kPresenceAwayType, 'background', now - 2000);
+      await hear('pong', 'foreground', now - 5000);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
+      // Back on her screen.
+      await hear('ping', 'foreground', now - 1000);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.online);
+      // Her outgoing pings carry the order too.
+      expect(last(transport, 'pong')[kPresenceSentKey], isA<int>());
+    });
+
+    testWidgets('the core started again (the node back from the Android '
+        'service) is a start of its own: "status nieznany" is not settled '
+        'after its first round', (WidgetTester tester) async {
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      await pumpApp(
+        tester,
+        store: MemorySocialSnapshotStore(
+          SocialHubState.empty().copyWith(
+            friends: <String, FriendProfile>{
+              _ada:
+                  const FriendProfile(
+                    address: _ada,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ).copyWith(
+                    presence: PeerPresence.background,
+                    presenceAtMillis: now - _hour,
+                  ),
+            },
+          ),
+        ),
+      );
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
+      final ZenCore core = ProviderScope.containerOf(
+        tester.element(find.byType(ZenRewriteApp)),
+      ).read(zenCoreProvider);
+      await core.stop();
+      await core.start();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(kPresenceSettleAfterResume);
+      await tester.pump();
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
+      // The second round of this run settles it.
+      await tester.pump(kPresencePingInterval);
+      await tester.pump(kPresenceSettleAfterResume);
+      await tester.pump();
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.offline);
+    });
+
+    testWidgets('leaving the screen right before the core stops (a phone '
+        'that locks hands its node over at once): the friends who have Zen '
+        'open hear "w tle" first', (WidgetTester tester) async {
+      final MemorySignalTransport transport = await pumpApp(tester);
+      await openOn(tester, transport, _ada);
+      expect(sent(transport, kPresenceAwayType), 0);
+      leave(tester);
+      await tester.pump();
+      // Within the moment a glance is given, the core stops.
+      await ProviderScope.containerOf(
+        tester.element(find.byType(ZenRewriteApp)),
+      ).read(zenCoreProvider).stop();
+      await tester.pump();
+      expect(sent(transport, kPresenceAwayType, _ada), 1);
+      expect(last(transport, kPresenceAwayType)['state'], 'background');
     });
 
     testWidgets('a friend just added is pinged at once, the others are not '
@@ -1121,6 +1498,7 @@ void main() {
       expect(kit.pongFields(_ada, _day + 2 * _minute), <String, dynamic>{
         'state': 'background',
         'lo': 120,
+        'sq': _day + 2 * _minute,
       });
       expect(kit.pongFields(_bob, _day), isEmpty);
       expect(
@@ -1130,8 +1508,59 @@ void main() {
           showLastOpened: false,
           lastOpenedAt: left,
         ).pongFields(_ada, _day),
-        <String, dynamic>{'state': 'background'},
+        <String, dynamic>{'state': 'background', 'sq': _day},
       );
+    });
+
+    test('a ping from a Zen that just started is answered at once, even '
+        'right after an answer, but at most every 20 s', () async {
+      int clock = _day;
+      final MemorySignalTransport air = MemorySignalTransport();
+      final LockedReceiver phone = _lockedFriendPhone(air, now: () => clock);
+      await phone.start();
+      addTearDown(phone.stop);
+      int pongs() =>
+          air.sentSignals.where((e) => e.payload['type'] == 'pong').length;
+      Future<void> ping({bool fresh = false}) => phone.handleFrame(
+        SignalTransportFrame(
+          from: _me,
+          payload: <String, dynamic>{
+            'type': 'ping',
+            if (fresh) kPresenceFreshKey: true,
+          },
+          receivedAtMillis: clock,
+        ),
+      );
+      await ping();
+      expect(pongs(), 1);
+      // A minute later Zen starts again there: the answer went to the app
+      // that is gone. An ordinary ping waits for its turn ...
+      clock += _minute;
+      await ping();
+      expect(pongs(), 1);
+      // ... the first ones of the new start do not.
+      await ping(fresh: true);
+      expect(pongs(), 2);
+      expect(air.sentSignals.last.payload['state'], 'background');
+      expect(air.sentSignals.last.payload['sq'], clock);
+      // Marked or not, no more than one answer every 20 s for them ...
+      clock += 10 * 1000;
+      await ping(fresh: true);
+      expect(pongs(), 2);
+      clock += kLockedFreshPongEvery.inMilliseconds;
+      await ping(fresh: true);
+      expect(pongs(), 3);
+      // ... and the ordinary pings keep the pace of a locked phone.
+      clock += _minute;
+      await ping();
+      expect(pongs(), 3);
+      clock += kLockedPongEvery.inMilliseconds;
+      await ping();
+      expect(pongs(), 4);
+      // A clock set back answers at once rather than never.
+      clock -= _hour;
+      await ping();
+      expect(pongs(), 5);
     });
   });
 

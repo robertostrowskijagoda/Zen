@@ -6,12 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
+import 'package:zen/src/features/meet/presentation/encounters_section.dart';
+import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/nearby_screen.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -234,5 +237,72 @@ void main() {
 
     await _close(tester, nearby);
     expect(net.looking, isFalse);
+  });
+
+  testWidgets('"Spotkani?" for a close friend starts at "Bliski": confirming '
+      'the meeting keeps the level they have', (WidgetTester tester) async {
+    FriendLevel? chosen;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZenTheme.light(),
+        home: Builder(
+          builder: (BuildContext context) => TextButton(
+            onPressed: () async => chosen = await showDialog<FriendLevel>(
+              context: context,
+              builder: (BuildContext context) => const MetLevelDialog(
+                name: 'Ania',
+                initial: FriendLevel.close,
+              ),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const Key('met-level-close')))
+          .selected,
+      isTrue,
+    );
+    await tester.tap(find.byKey(const Key('met-level-save')));
+    await tester.pumpAndSettle();
+    expect(chosen, FriendLevel.close);
+  });
+
+  testWidgets('"Mijani": one friend passed with two of their devices is one '
+      'row under one name', (WidgetTester tester) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final EncounterLog log = EncounterLog(
+      disk: MemoryLedgerDisk(),
+      flushAfter: const Duration(days: 1),
+    );
+    log
+      ..saw(token: 'a', at: now - 60000, friend: 'ania')
+      ..saw(token: 'b', at: now - 30000, friend: 'ania2');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZenTheme.light(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: EncountersSection(
+              log: log,
+              nameOf: (String a) => a == 'ania' ? 'Ania' : 'Ktoś',
+              friendOf: (String a) => a == 'ania2' ? 'ania' : a,
+              hasMet: (String a) => false,
+              onOpen: (String a) {},
+              onMet: (String a) {},
+              onPlace: (EncounterPlace p) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Ania'), findsOneWidget);
+    expect(find.text('Ktoś'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    log.dispose();
   });
 }

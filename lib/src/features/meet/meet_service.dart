@@ -350,7 +350,7 @@ final class MeetService extends ChangeNotifier {
     final Object? type = frame.payload['type'];
     if (type == 'ping' || type == 'pong') {
       // Presence is handled elsewhere; the hello digests are read here.
-      await onHello(frame.from, frame.payload);
+      await onHello(frame.from, frame.payload, device: frame.sender);
       return false;
     }
     if (type is! String || !MeetTypes.all.contains(type)) {
@@ -399,12 +399,19 @@ final class MeetService extends ChangeNotifier {
         case MeetTypes.request:
           await _onRequest(from, frame.payload);
         case MeetTypes.nearbyKey:
-          // `z`: the friend's keys for this phone alone.
+          // `z`: the keys for this phone alone of the friend's device that
+          // sent them (each device shows its own tokens).
           final Object? z = frame.payload['z'];
           if (z is String && FriendNearbyKey.parse(z) != null) {
-            await _update<void>(
-              (MeetBook b) => b.friendNearbySecrets[from] = z,
-            );
+            final String device = _key(frame.sender);
+            await _update<void>((MeetBook b) {
+              b.friendNearbySecrets[device] = z;
+              if (device == from) {
+                b.nearbyDeviceOwners.remove(device);
+              } else {
+                b.nearbyDeviceOwners[device] = from;
+              }
+            });
           }
       }
     } on Object catch (error, stack) {
@@ -488,8 +495,13 @@ final class MeetService extends ChangeNotifier {
     };
   }
 
-  /// A ping or pong from [from]: asks again for what does not match.
-  Future<void> onHello(String from, Map<String, dynamic> payload) async {
+  /// A ping or pong from [from] (sent by their [device], when another one
+  /// than [from]): asks again for what does not match.
+  Future<void> onHello(
+    String from,
+    Map<String, dynamic> payload, {
+    String? device,
+  }) async {
     final String friend = _key(from);
     if (!host.isFriend(friend)) {
       return;
@@ -501,10 +513,14 @@ final class MeetService extends ChangeNotifier {
         mf != _short(_book.friendListDigests[friend] ?? '')) {
       want.add('l');
     }
+    // Each device's nearby keys are its own: matched against what that
+    // device gave (two devices would otherwise ask for each other's keys
+    // at every ping, and only the last to answer would be recognised).
     final Object? mz = payload['mz'];
     if (mz is String &&
         mz.isNotEmpty &&
-        mz != _secretDigest(_book.friendNearbySecrets[friend])) {
+        mz !=
+            _secretDigest(_book.friendNearbySecrets[_key(device ?? friend)])) {
       want.add('k');
     }
     final Object? ms = payload['ms'];
@@ -1673,8 +1689,14 @@ final class MeetService extends ChangeNotifier {
       return '';
     }
     final String key = _key(friend);
-    final String? secret = _book.friendNearbySecrets[key];
-    return secret != null && wave.verify(secret) ? key : '';
+    // Whichever of the friend's devices it came from.
+    for (final MapEntry<String, String> e
+        in _book.friendNearbySecrets.entries) {
+      if (_book.nearbyOwnerOf(e.key) == key && wave.verify(e.value)) {
+        return key;
+      }
+    }
+    return '';
   }
 
   /// Remembers [key] (a wave heard at [t]). `false` when it was heard

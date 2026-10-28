@@ -156,6 +156,7 @@ final class AccountRoutingTransport implements SignalTransport {
       from: contact,
       payload: frame.payload,
       receivedAtMillis: frame.receivedAtMillis,
+      device: frame.from,
     );
   }
 

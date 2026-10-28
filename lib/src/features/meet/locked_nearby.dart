@@ -58,6 +58,7 @@ final class NearbyKit {
     this.look = false,
     this.record = false,
     this.friends = const <String, String>{},
+    this.owners = const <String, String>{},
     this.firstSlot = 0,
     this.adverts,
     this.lookMinutes = 5,
@@ -93,8 +94,13 @@ final class NearbyKit {
   final List<LockedReminder> reminders;
 
   /// Friend (normalised address) → what they gave this phone
-  /// ([FriendNearbyKey]).
+  /// ([FriendNearbyKey]): one per device, a friend's other devices by
+  /// their own address ([owners]).
   final Map<String, String> friends;
+
+  /// Of [friends], a friend's other devices → the friend
+  /// ([MeetBook.nearbyDeviceOwners]): passed, such a device is that friend.
+  final Map<String, String> owners;
 
   /// The slot of the first of [adverts].
   final int firstSlot;
@@ -135,6 +141,7 @@ final class NearbyKit {
         for (final LockedReminder r in reminders) r.toJson(),
       ],
     'f': friends,
+    if (owners.isNotEmpty) 'fo': owners,
     if (adverts case final Uint8List a) ...<String, dynamic>{
       's': firstSlot,
       'a': base64Url.encode(a),
@@ -148,6 +155,7 @@ final class NearbyKit {
     final Object? t = json['t'];
     final Object? me = json['me'];
     final Object? f = json['f'];
+    final Object? fo = json['fo'];
     final Object? s = json['s'];
     final Object? a = json['a'];
     if (t is! int || me is! String || me.isEmpty) {
@@ -181,6 +189,14 @@ final class NearbyKit {
             if (e.key is String &&
                 e.value is String &&
                 FriendNearbyKey.parse(e.value as String) != null)
+              e.key as String: e.value as String,
+      },
+      owners: <String, String>{
+        if (fo is Map)
+          for (final MapEntry<dynamic, dynamic> e in fo.entries.take(
+            kNearbyKitMaxFriends,
+          ))
+            if (e.key is String && e.value is String)
               e.key as String: e.value as String,
       },
       firstSlot: firstSlot,
@@ -265,18 +281,24 @@ final class NearbyKitKeeper {
     }
     final MeetBook book = meet.book;
     final bool visible = book.nearbyVisible;
+    // Each friend's devices, a friend's other ones under the friend.
     final List<String> addresses =
         book.friendNearbySecrets.keys
-            .where(meet.host.isFriend)
-            .map(PeerShareCodec.normalizeAddress)
+            .where((String a) => meet.host.isFriend(book.nearbyOwnerOf(a)))
             .toSet()
             .toList()
           ..sort();
     final Map<String, String> friends = <String, String>{};
+    final Map<String, String> owners = <String, String>{};
     for (final String friend in addresses) {
       final String? stored = book.friendNearbySecrets[friend];
       if (stored != null && FriendNearbyKey.parse(stored) != null) {
-        friends[friend] = stored;
+        final String device = PeerShareCodec.normalizeAddress(friend);
+        friends[device] = stored;
+        final String owner = book.nearbyOwnerOf(friend);
+        if (owner != friend) {
+          owners[device] = PeerShareCodec.normalizeAddress(owner);
+        }
       }
       if (friends.length >= kNearbyKitMaxFriends) {
         break;
@@ -300,6 +322,7 @@ final class NearbyKitKeeper {
       'lk': book.nearbyBackgroundScan,
       'rec': recording,
       'f': friends,
+      'fo': owners,
       'p': private == null
           ? null
           : crypto.sha256.convert(utf8.encode(private)).toString(),
@@ -332,6 +355,7 @@ final class NearbyKitKeeper {
         look: book.nearbyBackgroundScan,
         record: recording,
         friends: friends,
+        owners: owners,
         firstSlot: firstSlot,
         adverts: adverts,
         lookMinutes: book.nearbyLookMinutes,
@@ -887,10 +911,19 @@ final class LockedNearby {
   String? _recognise(List<int> raw, String hint) {
     for (final (String friend, int slot) in _hints[hint] ?? <(String, int)>[]) {
       if (_friends[friend]?.$1.open(raw, slot) != null) {
-        return friend;
+        return _ownerOf(friend);
       }
     }
     return null;
+  }
+
+  /// The friend [device] (a key of the kit's friends) is: a friend's other
+  /// device is the friend.
+  String _ownerOf(String device) {
+    final String? owner = kit.owners[device];
+    return owner == null || owner.isEmpty
+        ? device
+        : PeerShareCodec.normalizeAddress(owner);
   }
 
   /// Leaves what was seen since the last time in the inbox
@@ -998,7 +1031,7 @@ final class LockedNearby {
       return '';
     }
     final (FriendNearbyKey, String)? f = _friends[friend];
-    return f != null && wave.verify(f.$2) ? friend : '';
+    return f != null && wave.verify(f.$2) ? _ownerOf(friend) : '';
   }
 
   bool _rememberWave(String key, int at) {

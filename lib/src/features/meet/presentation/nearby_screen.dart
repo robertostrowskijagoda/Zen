@@ -9,6 +9,8 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
@@ -20,6 +22,29 @@ import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
+
+/// The friend whose device [address] is (a conversation started nearby,
+/// once the other side wrote over the network), or `null`: someone met
+/// nearby who is a friend already shows as that friend, and is not
+/// invited again.
+String? nearbyFriendOf(WidgetRef ref, String? address) {
+  if (address == null || address.isEmpty) {
+    return null;
+  }
+  final AccountDeviceDirectory? directory = ref
+      .read(accountDirectoryHolderProvider)
+      .directory;
+  final String? account = directory?.accountOf(address);
+  final String? contact = account == null
+      ? null
+      : directory?.contactAddressOf(account);
+  final FriendProfile? friend = ref
+      .read(socialHubControllerProvider)
+      .friendByAddress(contact ?? address);
+  return friend?.status == FriendRelationshipStatus.accepted
+      ? friend!.address
+      : null;
+}
 
 /// "Osoby w pobliżu".
 class NearbyScreen extends ConsumerStatefulWidget {
@@ -490,7 +515,10 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       ZenTile(
                         icon: Icons.forum_rounded,
                         tone: zenTone(zen, 5),
-                        title: s.pseudonym,
+                        title: switch (nearbyFriendOf(ref, s.address)) {
+                          final String friend => meet.host.nameOf(friend),
+                          null => s.pseudonym,
+                        },
                         subtitle: s.lines.isEmpty ? null : s.lines.last.text,
                         onTap: () =>
                             unawaited(NearbyChatScreen.open(context, s.id)),
@@ -515,6 +543,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     log: _encounters,
     lookingInBackground: meet.book.nearbyBackgroundScan,
     nameOf: meet.host.nameOf,
+    friendOf: (String address) => nearbyFriendOf(ref, address) ?? address,
     hasMet: (String friend) =>
         ref.read(ledgerNodeProvider)?.hasMet(friend) ?? false,
     onOpen: (String friend) => unawaited(showMiniProfile(context, friend)),
@@ -692,9 +721,14 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                 'i profilu).',
               )
             : null;
+        final String? friend = nearbyFriendOf(ref, s.address);
         return Scaffold(
           appBar: AppBar(
-            title: Text(s.pseudonym),
+            title: Text(
+              friend == null
+                  ? s.pseudonym
+                  : ref.read(meetServiceProvider).host.nameOf(friend),
+            ),
             actions: <Widget>[
               PopupMenuButton<String>(
                 onSelected: (String v) {
@@ -706,7 +740,8 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                   }
                 },
                 itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                  if (s.address != null)
+                  // A friend already: nothing to invite to.
+                  if (s.address != null && friend == null)
                     PopupMenuItem<String>(
                       value: 'invite',
                       child: Text(t('Zaproś do znajomych')),

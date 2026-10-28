@@ -10,6 +10,7 @@ import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -383,6 +384,15 @@ final class BackgroundAccountNode {
         credentials: credentials,
       ).read(),
     );
+    // What its pongs may tell friends ("w tle", when Zen was last open),
+    // as the account left it when it was last open; without it a pong
+    // says nothing of presence and the friends lose the state shown.
+    final LockedPresenceKit? presenceKit = LockedPresenceKit.fromJson(
+      await lockedPresenceKitFile(
+        supportDirectory: folder,
+        credentials: credentials,
+      ).read(),
+    );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
         waitTimeout: waitTimeout,
@@ -416,6 +426,7 @@ final class BackgroundAccountNode {
         meshLinked: runtime.meshLinked,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
+        presence: presenceKit,
       ),
       outboxKit == null || outboxKit.items.isEmpty
           ? null

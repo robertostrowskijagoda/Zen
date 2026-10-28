@@ -533,8 +533,19 @@ final class MeetBook {
   String? alarmPanicHash;
 
   /// Friends' nearby keys (address → what they gave,
-  /// [FriendNearbyKey.parse]).
+  /// [FriendNearbyKey.parse]): one per device, each showing its own
+  /// tokens, a friend's other devices (a computer next to the phone) by
+  /// their own address, see [nearbyDeviceOwners].
   final Map<String, String> friendNearbySecrets = <String, String>{};
+
+  /// Of [friendNearbySecrets], the addresses of a friend's other devices →
+  /// the friend's (the address the app knows them by): seen nearby, such
+  /// a device is that friend, under their name, never someone new.
+  final Map<String, String> nearbyDeviceOwners = <String, String>{};
+
+  /// Whose [address] (a key of [friendNearbySecrets]) is: the friend.
+  String nearbyOwnerOf(String address) =>
+      nearbyDeviceOwners[address] ?? address;
 
   /// Friends who have this person's current nearby keys.
   final Set<String> nearbyGivenTo = <String>{};
@@ -739,6 +750,7 @@ final class MeetBook {
     if (alarmPinSalt != null) 'pinSalt': alarmPinSalt,
     if (alarmPanicHash != null) 'panic': alarmPanicHash,
     'fns': friendNearbySecrets,
+    if (nearbyDeviceOwners.isNotEmpty) 'fno': nearbyDeviceOwners,
     'given': nearbyGivenTo.toList(),
     if (nearbyPrivate != null) 'np': nearbyPrivate,
     if (nearbyBlocked.isNotEmpty) 'nb': nearbyBlocked.toList(),
@@ -802,6 +814,16 @@ final class MeetBook {
       for (final MapEntry<dynamic, dynamic> e in fns.entries) {
         if (e.key is String && e.value is String) {
           book.friendNearbySecrets[e.key as String] = e.value as String;
+        }
+      }
+    }
+    final Object? fno = json['fno'];
+    if (fno is Map) {
+      for (final MapEntry<dynamic, dynamic> e in fno.entries) {
+        if (e.key is String &&
+            e.value is String &&
+            book.friendNearbySecrets.containsKey(e.key)) {
+          book.nearbyDeviceOwners[e.key as String] = e.value as String;
         }
       }
     }

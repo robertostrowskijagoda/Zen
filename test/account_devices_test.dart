@@ -274,7 +274,18 @@ void main() {
           from: 'ania2',
           payload: <String, dynamic>{'type': 'typing'},
         );
-        expect((await next).from, 'ania1');
+        final SignalTransportFrame frame = await next;
+        expect(frame.from, 'ania1');
+        // Which device it was stays known (what each device tells of
+        // itself: presence, its nearby keys).
+        expect(frame.device, 'ania2');
+        expect(frame.sender, 'ania2');
+        final Future<SignalTransportFrame> own = routed.frames.first;
+        await base.injectIncoming(
+          from: 'ania1',
+          payload: <String, dynamic>{'type': 'typing'},
+        );
+        expect((await own).device, isNull);
       },
     );
 
