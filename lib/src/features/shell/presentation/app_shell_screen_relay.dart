@@ -118,273 +118,280 @@ class _RelayMailboxScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('relay-settings-screen'),
       appBar: AppBar(title: Text(t('Skrzynki offline'))),
-      body: engine == null
-          ? const SizedBox.shrink()
-          : ValueListenableBuilder<RelayOverview>(
-              valueListenable: engine.overview,
-              builder: (BuildContext context, RelayOverview overview, Widget? _) {
-                final int max = engine.config.maxRelays;
-                Future<void> setManual(List<String>? relays) async {
-                  try {
-                    await engine.setManualRelays(relays);
-                  } catch (error) {
-                    if (!context.mounted) {
-                      return;
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          t('Nie udało się zapisać: {error}', {'error': error}),
-                        ),
-                      ),
-                    );
-                  }
-                }
-
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                  children: <Widget>[
-                    ZenHero(
-                      title: t('Wiadomości poczekają na Ciebie'),
-                      icon: Icons.markunread_mailbox_outlined,
-                      tone: zen.tone(ZenTone.network),
-                      text: t(
-                        'Kiedy jesteś offline, wiadomości do Ciebie czekają '
-                        'u wybranych znajomych. Są zaszyfrowane Twoim '
-                        'kluczem — znajomi przechowują je, ale nie mogą ich '
-                        'przeczytać. Gdy wrócisz, odbierasz wszystko '
-                        'od pierwszej skrzynki, która jest dostępna.',
-                      ),
-                    ),
-                    if (overview.quiet.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 12),
-                      for (final RelayQuietMailbox q in overview.quiet)
-                        ZenInfo(
-                          key: Key('relay-quiet-${q.device}'),
-                          icon: Icons.markunread_mailbox_outlined,
-                          tone: zen.warning,
-                          title: quietMailboxTitle(
-                            friendNameFor(watchSocialPeople(ref), q.friend),
-                            q.sinceMillis,
-                            DateTime.now().millisecondsSinceEpoch,
-                          ),
-                          text: overview.isAutomatic
-                              ? t(
-                                  'Żaden inny znajomy nie bywa online na '
-                                  'tyle, żeby zastąpić ją sam. Wyłącz wybór '
-                                  'automatyczny i zaznacz kogoś — najlepiej '
-                                  'z komputerem albo Androidem.',
-                                )
-                              : t(
-                                  'Odznacz ją i zaznacz kogoś, kto bywa '
-                                  'online — najlepiej z komputerem albo '
-                                  'Androidem.',
-                                ),
-                        ),
-                    ],
-                    ZenSection(t('Wybór skrzynek'), top: 16),
-                    ZenGroup(
-                      children: <Widget>[
-                        SwitchListTile.adaptive(
-                          key: const Key('relay-auto-switch'),
-                          secondary: ZenIconBadge(
-                            icon: Icons.auto_awesome_rounded,
-                            tone: zen.tone(ZenTone.network),
-                            size: 40,
-                          ),
-                          title: Text(t('Wybieraj automatycznie')),
-                          subtitle: Text(
-                            t('Najaktywniejsi znajomi, maksymalnie {max}.', {
-                              'max': max,
+      body: SafeArea(
+        top: false,
+        child: engine == null
+            ? const SizedBox.shrink()
+            : ValueListenableBuilder<RelayOverview>(
+                valueListenable: engine.overview,
+                builder: (BuildContext context, RelayOverview overview, Widget? _) {
+                  final int max = engine.config.maxRelays;
+                  Future<void> setManual(List<String>? relays) async {
+                    try {
+                      await engine.setManualRelays(relays);
+                    } catch (error) {
+                      if (!context.mounted) {
+                        return;
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            t('Nie udało się zapisać: {error}', {
+                              'error': error,
                             }),
-                            style: TextStyle(color: zen.textSecondary),
-                          ),
-                          value: overview.isAutomatic,
-                          onChanged: (bool automatic) => setManual(
-                            automatic
-                                ? null
-                                : List<String>.of(overview.mailboxFriends),
                           ),
                         ),
-                      ],
-                    ),
-                    ZenSection(
-                      overview.isAutomatic
-                          ? t('Aktualne skrzynki')
-                          : tn(
-                              max,
-                              one: 'Wybierz do {n} znajomego',
-                              few: 'Wybierz do {n} znajomych',
-                              many: 'Wybierz do {n} znajomych',
-                            ),
-                      top: 16,
-                    ),
-                    if (friends.isEmpty)
-                      ZenEmpty(
-                        icon: Icons.group_outlined,
-                        tone: zen.textMuted,
-                        title: t('Nie masz jeszcze znajomych.'),
+                      );
+                    }
+                  }
+
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                    children: <Widget>[
+                      ZenHero(
+                        title: t('Wiadomości poczekają na Ciebie'),
+                        icon: Icons.markunread_mailbox_outlined,
+                        tone: zen.tone(ZenTone.network),
                         text: t(
-                          'Skrzynki prowadzą znajomi — dodaj kogoś, '
-                          'a pojawi się tutaj.',
+                          'Kiedy jesteś offline, wiadomości do Ciebie czekają '
+                          'u wybranych znajomych. Są zaszyfrowane Twoim '
+                          'kluczem — znajomi przechowują je, ale nie mogą ich '
+                          'przeczytać. Gdy wrócisz, odbierasz wszystko '
+                          'od pierwszej skrzynki, która jest dostępna.',
                         ),
-                      )
-                    else
-                      ZenGroup(
-                        children: <Widget>[
-                          for (final FriendProfile friend in friends)
-                            _RelayFriendTile(
-                              friend: friend,
-                              candidate:
-                                  overview
-                                      .candidates[PeerShareCodec.normalizeAddress(
-                                    friend.address,
-                                  )],
-                              selected: overview.mailboxFriends.any(
-                                (String address) =>
-                                    PeerShareCodec.addressesEqual(
-                                      address,
-                                      friend.address,
-                                    ),
-                              ),
-                              enabled: !overview.isAutomatic,
-                              onChanged: (bool selected) {
-                                final List<String> next = overview
-                                    .mailboxFriends
-                                    .where(
-                                      (String a) =>
-                                          !PeerShareCodec.addressesEqual(
-                                            a,
-                                            friend.address,
-                                          ),
-                                    )
-                                    .toList();
-                                if (selected) {
-                                  if (next.length >= max) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          tn(
-                                            max,
-                                            one:
-                                                'Możesz wybrać najwyżej {n} '
-                                                'skrzynkę.',
-                                            few:
-                                                'Możesz wybrać najwyżej {n} '
-                                                'skrzynki.',
-                                            many:
-                                                'Możesz wybrać najwyżej {n} '
-                                                'skrzynek.',
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                  next.add(friend.address);
-                                }
-                                unawaited(setManual(next));
-                              },
-                            ),
-                        ],
                       ),
-                    ZenSection(t('Grupy'), top: 16),
-                    ZenGroup(
-                      children: <Widget>[
-                        SwitchListTile.adaptive(
-                          key: const Key('relay-share-groups-switch'),
-                          secondary: ZenIconBadge(
-                            icon: Icons.groups_rounded,
-                            tone: zen.tone(ZenTone.people),
-                            size: 40,
-                          ),
-                          title: Text(t('Ujawniaj skrzynki członkom grup')),
-                          subtitle: Text(
-                            overview.shareWithGroups
+                      if (overview.quiet.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 12),
+                        for (final RelayQuietMailbox q in overview.quiet)
+                          ZenInfo(
+                            key: Key('relay-quiet-${q.device}'),
+                            icon: Icons.markunread_mailbox_outlined,
+                            tone: zen.warning,
+                            title: quietMailboxTitle(
+                              friendNameFor(watchSocialPeople(ref), q.friend),
+                              q.sinceMillis,
+                              DateTime.now().millisecondsSinceEpoch,
+                            ),
+                            text: overview.isAutomatic
                                 ? t(
-                                    'Członkowie Twoich grup, których nie masz '
-                                    'w znajomych, dostają Twój klucz oraz '
-                                    'adresy znajomych, którzy prowadzą Twoje '
-                                    'skrzynki (do {max}). Dzięki temu mogą '
-                                    'zostawiać Ci wiadomości grupowe, gdy '
-                                    'jesteś offline — ale widzą, którzy '
-                                    'znajomi są Twoimi skrzynkami.',
-                                    {'max': max},
+                                    'Żaden inny znajomy nie bywa online na '
+                                    'tyle, żeby zastąpić ją sam. Wyłącz wybór '
+                                    'automatyczny i zaznacz kogoś — najlepiej '
+                                    'z komputerem albo Androidem.',
                                   )
                                 : t(
-                                    'Tylko znajomi znają Twoje skrzynki. '
-                                    'Członkowie grup spoza znajomych nie '
-                                    'dostają ani Twojego klucza, ani adresów '
-                                    'skrzynek, więc ich wiadomości grupowe '
-                                    'dotrą do Ciebie tylko wtedy, gdy oboje '
-                                    'jesteście online. Wyłączenie nie cofa '
-                                    'tego, co już od Ciebie dostali.',
+                                    'Odznacz ją i zaznacz kogoś, kto bywa '
+                                    'online — najlepiej z komputerem albo '
+                                    'Androidem.',
                                   ),
-                            style: TextStyle(
-                              color: zen.textSecondary,
-                              height: 1.35,
-                            ),
                           ),
-                          value: overview.shareWithGroups,
-                          onChanged: (bool share) =>
-                              unawaited(engine.setShareWithGroups(share)),
-                        ),
                       ],
-                    ),
-                    if (engine.supportsBlobs) ...<Widget>[
-                      ZenSection(t('Załączniki'), top: 16),
+                      ZenSection(t('Wybór skrzynek'), top: 16),
                       ZenGroup(
                         children: <Widget>[
-                          _RelayBlobQuotaTile(
-                            quotaBytes: overview.blobQuotaBytes,
-                            onChanged: (int bytes) =>
-                                unawaited(engine.setBlobQuota(bytes)),
+                          SwitchListTile.adaptive(
+                            key: const Key('relay-auto-switch'),
+                            secondary: ZenIconBadge(
+                              icon: Icons.auto_awesome_rounded,
+                              tone: zen.tone(ZenTone.network),
+                              size: 40,
+                            ),
+                            title: Text(t('Wybieraj automatycznie')),
+                            subtitle: Text(
+                              t('Najaktywniejsi znajomi, maksymalnie {max}.', {
+                                'max': max,
+                              }),
+                              style: TextStyle(color: zen.textSecondary),
+                            ),
+                            value: overview.isAutomatic,
+                            onChanged: (bool automatic) => setManual(
+                              automatic
+                                  ? null
+                                  : List<String>.of(overview.mailboxFriends),
+                            ),
                           ),
                         ],
                       ),
-                    ],
-                    ZenSection(t('Stan'), top: 16),
-                    ZenGroup(
-                      children: <Widget>[
-                        _RelayStatRow(
-                          icon: Icons.outbox_outlined,
-                          tone: zen.tone(ZenTone.communication),
-                          label: t('Czeka na doręczenie'),
-                          value: '${overview.outboxCount}',
+                      ZenSection(
+                        overview.isAutomatic
+                            ? t('Aktualne skrzynki')
+                            : tn(
+                                max,
+                                one: 'Wybierz do {n} znajomego',
+                                few: 'Wybierz do {n} znajomych',
+                                many: 'Wybierz do {n} znajomych',
+                              ),
+                        top: 16,
+                      ),
+                      if (friends.isEmpty)
+                        ZenEmpty(
+                          icon: Icons.group_outlined,
+                          tone: zen.textMuted,
+                          title: t('Nie masz jeszcze znajomych.'),
+                          text: t(
+                            'Skrzynki prowadzą znajomi — dodaj kogoś, '
+                            'a pojawi się tutaj.',
+                          ),
+                        )
+                      else
+                        ZenGroup(
+                          children: <Widget>[
+                            for (final FriendProfile friend in friends)
+                              _RelayFriendTile(
+                                friend: friend,
+                                candidate:
+                                    overview
+                                        .candidates[PeerShareCodec.normalizeAddress(
+                                      friend.address,
+                                    )],
+                                selected: overview.mailboxFriends.any(
+                                  (String address) =>
+                                      PeerShareCodec.addressesEqual(
+                                        address,
+                                        friend.address,
+                                      ),
+                                ),
+                                enabled: !overview.isAutomatic,
+                                onChanged: (bool selected) {
+                                  final List<String> next = overview
+                                      .mailboxFriends
+                                      .where(
+                                        (String a) =>
+                                            !PeerShareCodec.addressesEqual(
+                                              a,
+                                              friend.address,
+                                            ),
+                                      )
+                                      .toList();
+                                  if (selected) {
+                                    if (next.length >= max) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            tn(
+                                              max,
+                                              one:
+                                                  'Możesz wybrać najwyżej {n} '
+                                                  'skrzynkę.',
+                                              few:
+                                                  'Możesz wybrać najwyżej {n} '
+                                                  'skrzynki.',
+                                              many:
+                                                  'Możesz wybrać najwyżej {n} '
+                                                  'skrzynek.',
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    next.add(friend.address);
+                                  }
+                                  unawaited(setManual(next));
+                                },
+                              ),
+                          ],
                         ),
-                        _RelayStatRow(
-                          icon: Icons.inventory_2_outlined,
-                          tone: zen.tone(ZenTone.people),
-                          label: t('Przechowujesz dla znajomych'),
-                          value: t('{count} ({people} os.)', {
-                            'count': overview.heldEnvelopeCount,
-                            'people': overview.heldForPeerCount,
-                          }),
+                      ZenSection(t('Grupy'), top: 16),
+                      ZenGroup(
+                        children: <Widget>[
+                          SwitchListTile.adaptive(
+                            key: const Key('relay-share-groups-switch'),
+                            secondary: ZenIconBadge(
+                              icon: Icons.groups_rounded,
+                              tone: zen.tone(ZenTone.people),
+                              size: 40,
+                            ),
+                            title: Text(t('Ujawniaj skrzynki członkom grup')),
+                            subtitle: Text(
+                              overview.shareWithGroups
+                                  ? t(
+                                      'Członkowie Twoich grup, których nie masz '
+                                      'w znajomych, dostają Twój klucz oraz '
+                                      'adresy znajomych, którzy prowadzą Twoje '
+                                      'skrzynki (do {max}). Dzięki temu mogą '
+                                      'zostawiać Ci wiadomości grupowe, gdy '
+                                      'jesteś offline — ale widzą, którzy '
+                                      'znajomi są Twoimi skrzynkami.',
+                                      {'max': max},
+                                    )
+                                  : t(
+                                      'Tylko znajomi znają Twoje skrzynki. '
+                                      'Członkowie grup spoza znajomych nie '
+                                      'dostają ani Twojego klucza, ani adresów '
+                                      'skrzynek, więc ich wiadomości grupowe '
+                                      'dotrą do Ciebie tylko wtedy, gdy oboje '
+                                      'jesteście online. Wyłączenie nie cofa '
+                                      'tego, co już od Ciebie dostali.',
+                                    ),
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                height: 1.35,
+                              ),
+                            ),
+                            value: overview.shareWithGroups,
+                            onChanged: (bool share) =>
+                                unawaited(engine.setShareWithGroups(share)),
+                          ),
+                        ],
+                      ),
+                      if (engine.supportsBlobs) ...<Widget>[
+                        ZenSection(t('Załączniki'), top: 16),
+                        ZenGroup(
+                          children: <Widget>[
+                            _RelayBlobQuotaTile(
+                              quotaBytes: overview.blobQuotaBytes,
+                              onChanged: (int bytes) =>
+                                  unawaited(engine.setBlobQuota(bytes)),
+                            ),
+                          ],
                         ),
-                        if (overview.heldBlobBytes > 0)
+                      ],
+                      ZenSection(t('Stan'), top: 16),
+                      ZenGroup(
+                        children: <Widget>[
                           _RelayStatRow(
-                            icon: Icons.attach_file_rounded,
-                            tone: zen.tone(ZenTone.media),
-                            label: t('Załączniki znajomych u Ciebie'),
-                            value: t('{mb} MB', {
-                              'mb': (overview.heldBlobBytes / (1024 * 1024))
-                                  .toStringAsFixed(1),
+                            icon: Icons.outbox_outlined,
+                            tone: zen.tone(ZenTone.communication),
+                            label: t('Czeka na doręczenie'),
+                            value: '${overview.outboxCount}',
+                          ),
+                          _RelayStatRow(
+                            icon: Icons.inventory_2_outlined,
+                            tone: zen.tone(ZenTone.people),
+                            label: t('Przechowujesz dla znajomych'),
+                            value: t('{count} ({people} os.)', {
+                              'count': overview.heldEnvelopeCount,
+                              'people': overview.heldForPeerCount,
                             }),
                           ),
-                        if (overview.publicKeyFingerprint.isNotEmpty)
-                          _RelayStatRow(
-                            icon: Icons.fingerprint_rounded,
-                            tone: zen.tone(ZenTone.privacy),
-                            label: t('Odcisk klucza'),
-                            value: overview.publicKeyFingerprint,
-                            mono: true,
-                          ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
+                          if (overview.heldBlobBytes > 0)
+                            _RelayStatRow(
+                              icon: Icons.attach_file_rounded,
+                              tone: zen.tone(ZenTone.media),
+                              label: t('Załączniki znajomych u Ciebie'),
+                              value: t('{mb} MB', {
+                                'mb': (overview.heldBlobBytes / (1024 * 1024))
+                                    .toStringAsFixed(1),
+                              }),
+                            ),
+                          if (overview.publicKeyFingerprint.isNotEmpty)
+                            _RelayStatRow(
+                              icon: Icons.fingerprint_rounded,
+                              tone: zen.tone(ZenTone.privacy),
+                              label: t('Odcisk klucza'),
+                              value: overview.publicKeyFingerprint,
+                              mono: true,
+                            ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+      ),
     );
   }
 }
