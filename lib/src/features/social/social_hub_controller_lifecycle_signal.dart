@@ -162,6 +162,16 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       if (!ref.mounted) {
         return;
       }
+      // Back to a conversation that stayed open: what came in meanwhile
+      // (no read receipt went while nobody looked) is seen now. The
+      // conversation is not entered again, so this is the only moment.
+      final String? open = _openConversationAddress;
+      if (open != null && !_isUiInteractive(previous)) {
+        await _sendReadReceiptIfNeeded(open);
+        if (!ref.mounted) {
+          return;
+        }
+      }
       await _syncRingingCallWindow();
       if (!ref.mounted) {
         return;
