@@ -23,6 +23,11 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **In-app sounds where they were missing**: sending in a group, a message arriving in the open chat, a like or reaction, a published post and a new entry in the notification list. On Android nothing plays in silent, vibrate or "Do not disturb" mode, and the diagnostics log now says so.
 - Every notice at the bottom of the screen can be swiped away to either side.
 
+### Chats and drafts
+- **The send button sits level with the letters** in chats and groups, for any font and text size (it was centred on the line, which looked too high, more so with tall phone fonts).
+- **A chat at the newest message stays there** when the keyboard opens, a message arrives or is sent, someone is typing or a picture loads; your own message always brings you down. Scrolled up, what you are reading no longer moves as messages arrive. A new message no longer rebuilds the whole list.
+- **Drafts survive a restart**: an unsent message in each chat and group, a comment under each post, and a new post's text, mentions and audience (closing the editor asks whether to keep the draft). Drafts are stored encrypted with the account and removed on send or wipe.
+
 ### Presence and network
 - **Presence shows up sooner**: a new round of pings goes out as soon as the node reaches the network, a new friend is pinged at once, pings run every 2 minutes while Zen is open, and a friend counts as offline after 5 minutes (10 when they were in the background).
 - **Public peers**: every built-in peer is on and shows what the device does with it (in use, connecting, not connecting, in reserve, paused by the transit guard). A phone keeps the whole list in reserve and replaces a peer that stays down for about 2 minutes.
