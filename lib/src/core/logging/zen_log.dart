@@ -700,9 +700,22 @@ void logZenError(
   StackTrace stackTrace, {
   String tag = 'ZEN',
 }) {
+  try {
+    _logError(message, error, stackTrace, tag);
+  } on Object catch (failure) {
+    _logFailed(message, error, failure);
+  }
+}
+
+void _logError(
+  String message,
+  Object error,
+  StackTrace stackTrace,
+  String tag,
+) {
   _console('[$tag] $message: $error');
   if (!kReleaseMode) {
-    debugPrintStack(label: '[$tag] $message', stackTrace: stackTrace);
+    _printStack('[$tag] $message', stackTrace);
   }
   final String frames = _topFrames(stackTrace);
   final String described = describeErrorForLog(error);
@@ -734,14 +747,45 @@ void logZenUncaught(
   StackTrace stackTrace, {
   String tag = 'ZEN',
 }) {
-  _console('[$tag] $message: $error');
-  if (!kReleaseMode) {
-    debugPrintStack(label: '[$tag] $message', stackTrace: stackTrace);
+  try {
+    _console('[$tag] $message: $error');
+    if (!kReleaseMode) {
+      _printStack('[$tag] $message', stackTrace);
+    }
+    ZenDiagnosticsLog.write(
+      'ERROR $message: ${describeErrorForLog(error)}\n'
+      '${_topFrames(stackTrace, count: _uncaughtFrames)}',
+    );
+  } on Object catch (failure) {
+    _logFailed(message, error, failure);
   }
-  ZenDiagnosticsLog.write(
-    'ERROR $message: ${describeErrorForLog(error)}\n'
-    '${_topFrames(stackTrace, count: _uncaughtFrames)}',
-  );
+}
+
+/// [stackTrace] on the console, under [label] (debug builds), in whatever
+/// form it comes: the VM's, a demangled one, or a chain from
+/// package:stack_trace (`===== asynchronous gap =====`), which Flutter's
+/// own [debugPrintStack] cannot parse and asserts on — losing the error
+/// being logged and throwing a new one in its place (R5-F3).
+void _printStack(String label, StackTrace stackTrace) {
+  debugPrint(label);
+  final List<String> lines = stackTrace.toString().trimRight().split('\n');
+  Iterable<String> shown = lines;
+  try {
+    shown = FlutterError.defaultStackFilter(lines);
+  } on Object {
+    // Not frames Flutter can read: shown as they are.
+  }
+  debugPrint(shown.join('\n'));
+}
+
+/// Logging must never throw: what failed and the error being logged go to
+/// the console as plain text.
+void _logFailed(String message, Object error, Object failure) {
+  try {
+    debugPrint('[ZEN] Logging failed ($failure) for: $message: $error');
+  } on Object {
+    // Nothing else is left to tell.
+  }
 }
 
 const int _uncaughtFrames = 60;
