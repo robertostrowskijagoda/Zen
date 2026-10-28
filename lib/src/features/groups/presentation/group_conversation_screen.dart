@@ -115,9 +115,11 @@ class _GroupConversationScreenState
       return t('Ty');
     }
     final SocialHubState hub = ref.read(socialHubControllerProvider);
-    return hub.friendByAddress(who)?.displayLabel ??
-        hub.groupById(widget.groupId)?.memberNames[who] ??
-        t('Uczestnik');
+    return hub.displayNameOf(
+      who,
+      selfNamed: hub.groupById(widget.groupId)?.memberNames[who],
+      fallback: t('Uczestnik'),
+    );
   }
 
   /// Scrolls to the message [id] a reply quotes and outlines it briefly.
@@ -610,11 +612,13 @@ class _GroupConversationScreenState
         (SocialHubState state) => state.groupById(widget.groupId),
       ),
     );
-    final Map<String, FriendProfile> friends = ref.watch(
+    // Built again when a friend or a friend's profile (their name) changes.
+    ref.watch(
       socialHubControllerProvider.select(
-        (SocialHubState state) => state.friends,
+        (SocialHubState state) => (state.friends, state.peerProfiles),
       ),
     );
+    final SocialHubState people = ref.read(socialHubControllerProvider);
     // Messages the person reported are hidden behind a line.
     final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final AsyncValue<List<ChatMessage>> messagesAsync = ref.watch(
@@ -880,16 +884,11 @@ class _GroupConversationScreenState
                         p.author,
                         ...memberAddresses,
                       ],
-                      nameOf: (GroupBoardPost p) =>
-                          friends[p.author]?.displayLabel ??
-                          ref
-                              .read(socialHubControllerProvider)
-                              .friendByAddress(p.author)
-                              ?.displayLabel ??
-                          memberNames[p.author] ??
-                          (p.authorName.isEmpty
-                              ? t('Uczestnik')
-                              : p.authorName),
+                      nameOf: (GroupBoardPost p) => people.displayNameOf(
+                        p.author,
+                        selfNamed: memberNames[p.author] ?? p.authorName,
+                        fallback: t('Uczestnik'),
+                      ),
                     )
                   : JumpToLatest(
                       controller: _scrollController,
@@ -1015,13 +1014,11 @@ class _GroupConversationScreenState
                               }
                               final String senderName = isSelf
                                   ? t('Ty')
-                                  : friends[msg.sender]?.displayLabel ??
-                                        ref
-                                            .read(socialHubControllerProvider)
-                                            .friendByAddress(msg.sender)
-                                            ?.displayLabel ??
-                                        group?.memberNames[msg.sender] ??
-                                        t('Uczestnik');
+                                  : people.displayNameOf(
+                                      msg.sender,
+                                      selfNamed: memberNames[msg.sender],
+                                      fallback: t('Uczestnik'),
+                                    );
 
                               final Color senderTone = zenTone(
                                 zen,
