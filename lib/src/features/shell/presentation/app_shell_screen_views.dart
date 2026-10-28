@@ -943,6 +943,8 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
               const _QuickLockPanel(),
               // Friends run a newer Zen: a quiet hint, gone otherwise.
               const FriendsNewerVersionBanner(),
+              // The account key here cannot be read: what to do.
+              const DamagedIdentityBanner(),
               // One topic per row, each topic in one place: a setting is
               // never in two rows (docs/guide/settings-and-peers.md has the
               // map).

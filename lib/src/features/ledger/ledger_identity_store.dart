@@ -1,12 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 
@@ -101,22 +103,52 @@ final class LedgerIdentity {
   /// set; after that only once [unlock]ed in this session).
   LedgerKeyPair? get accountKey => _accountKey;
 
-  /// Reads the saved identity, or creates and saves a new one.
-  /// Whether an identity was saved on [disk] already.
-  static Future<bool> exists(LedgerDisk disk) async =>
-      await _load(disk) != null;
+  /// Whether an identity was saved on [disk] already (one that can no
+  /// longer be read counts: it must not be replaced by a new account).
+  static Future<bool> exists(LedgerDisk disk) async {
+    try {
+      return await _load(disk) != null;
+    } on DamagedLedgerIdentityException {
+      return true;
+    }
+  }
 
-  /// The saved identity, or `null` when there is none yet. Never creates
-  /// one (only the ledger node does), e.g. for signing with the device key
-  /// outside the ledger (introductions).
-  static Future<LedgerIdentity?> read(LedgerDisk disk) => _load(disk);
+  /// The saved identity, or `null` when there is none yet or it cannot be
+  /// read. Never creates one (only the ledger node does), e.g. for signing
+  /// with the device key outside the ledger (introductions).
+  static Future<LedgerIdentity?> read(LedgerDisk disk) async {
+    try {
+      return await _load(disk);
+    } on DamagedLedgerIdentityException {
+      return null;
+    }
+  }
 
+  /// The saved identity, or `null` when there is none yet; throws
+  /// [DamagedLedgerIdentityException] when one is there but cannot be read.
+  static Future<LedgerIdentity?> load(LedgerDisk disk) => _load(disk);
+
+  /// Reads the saved identity, or creates and saves a new one when there is
+  /// none. One that cannot be read is never replaced
+  /// ([DamagedLedgerIdentityException]): a new one would be another account.
   static Future<LedgerIdentity> loadOrCreate(
     LedgerDisk disk, {
     String deviceName = 'Urządzenie',
     int Function()? now,
   }) async {
-    final LedgerIdentity? saved = await _load(disk);
+    final LedgerIdentity? saved;
+    try {
+      saved = await _load(disk);
+    } on DamagedLedgerIdentityException {
+      // The account key may still read (only the device part is damaged):
+      // this installation becomes a new device of the same account, as
+      // after linking it.
+      final Uint8List? seed = await _plainAccountSeed(disk);
+      if (seed == null) {
+        rethrow;
+      }
+      return adoptAccount(disk, seed, deviceName: deviceName, now: now);
+    }
     if (saved != null) {
       return saved;
     }
@@ -128,6 +160,24 @@ final class LedgerIdentity {
     );
   }
 
+  /// The account seed of a saved identity without a password whose other
+  /// parts do not read; null when that cannot be read either.
+  static Future<Uint8List?> _plainAccountSeed(LedgerDisk disk) async {
+    try {
+      final Uint8List? raw = await disk.read(storageKey);
+      if (raw == null) {
+        return null;
+      }
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is! Map || json['v'] != _plainVersion) {
+        return null;
+      }
+      return unb64(json['account'], length: 32);
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Makes this installation a new device of the account with [accountSeed]
   /// (after recovery, or when linking a device). Replaces whatever identity
   /// was there; the app must restart its ledger afterwards.
@@ -136,12 +186,16 @@ final class LedgerIdentity {
     Uint8List accountSeed, {
     String deviceName = 'Urządzenie',
     int Function()? now,
-  }) async => _create(
-    disk,
-    await LedgerKeyPair.fromSeed(accountSeed),
-    deviceName: deviceName,
-    now: now,
-  );
+  }) async {
+    final LedgerIdentity identity = await _create(
+      disk,
+      await LedgerKeyPair.fromSeed(accountSeed),
+      deviceName: deviceName,
+      now: now,
+    );
+    DamagedIdentityNotice.instance.clear();
+    return identity;
+  }
 
   static Future<LedgerIdentity> _create(
     LedgerDisk disk,
@@ -251,11 +305,34 @@ final class LedgerIdentity {
     );
   }
 
+  /// The saved identity; `null` only when none was ever saved. One that is
+  /// there but cannot be read (neither the file nor its backup) throws
+  /// [DamagedLedgerIdentityException] and is left as it is: the account key
+  /// is in it and nowhere else on this device, so nothing may save a new
+  /// one over it (a second account under the same name, the links of
+  /// friends and own devices broken). The person links this device again
+  /// from another of theirs, or recovers the account.
   static Future<LedgerIdentity?> _load(LedgerDisk disk) async {
-    final Uint8List? raw = await disk.read(storageKey);
+    final Uint8List? raw;
+    try {
+      raw = await disk.read(storageKey);
+    } on FormatException catch (error) {
+      if (!isDamagedStoredFile(error)) {
+        rethrow;
+      }
+      throw DamagedLedgerIdentityException(error.message);
+    }
     if (raw == null) {
       return null;
     }
+    final LedgerIdentity? identity = await _parse(disk, raw);
+    if (identity == null) {
+      throw const DamagedLedgerIdentityException('unreadable contents');
+    }
+    return identity;
+  }
+
+  static Future<LedgerIdentity?> _parse(LedgerDisk disk, Uint8List raw) async {
     final Object? json;
     try {
       json = jsonDecode(utf8.decode(raw));
@@ -329,5 +406,55 @@ final class LedgerIdentity {
       );
     }
     return null;
+  }
+}
+
+/// This device's account identity is on disk but cannot be read (both
+/// copies damaged). The ledger stays off (posts, profiles, own devices)
+/// until the device is linked again or the account recovered; the rest of
+/// the app works. Never answered with a new identity: that would be another
+/// account.
+final class DamagedLedgerIdentityException implements Exception {
+  const DamagedLedgerIdentityException(this.reason);
+
+  /// What was wrong (never key material).
+  final String reason;
+
+  @override
+  String toString() => 'DamagedLedgerIdentityException: $reason';
+}
+
+/// Tells the app that this device's account identity cannot be read
+/// ([DamagedLedgerIdentityException]): the settings say so and lead to
+/// linking the device again ("Urządzenia"). Cleared once an account is
+/// adopted.
+final class DamagedIdentityNotice extends ChangeNotifier {
+  DamagedIdentityNotice();
+
+  /// The one the ledger reports to.
+  static final DamagedIdentityNotice instance = DamagedIdentityNotice();
+
+  bool _damaged = false;
+
+  bool get damaged => _damaged;
+
+  void note() {
+    if (_damaged) {
+      return;
+    }
+    _damaged = true;
+    logZenWarning(
+      'The account identity on this device cannot be read; posts, profiles '
+      'and own devices stay off until the device is linked again.',
+    );
+    notifyListeners();
+  }
+
+  void clear() {
+    if (!_damaged) {
+      return;
+    }
+    _damaged = false;
+    notifyListeners();
   }
 }

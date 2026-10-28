@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
@@ -107,12 +108,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         setState(() {});
       }
     });
-    unawaited(
+    unawaitedLogged(
       _node?.start().then((_) {
         if (mounted) {
           setState(() {});
         }
       }),
+      context: 'The profile waits for a ledger that did not start',
     );
   }
 

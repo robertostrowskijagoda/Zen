@@ -197,7 +197,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         setState(() {});
       }
     });
-    unawaited(
+    // A ledger that cannot start (its identity damaged) is said in the
+    // settings; here the feed just stays empty.
+    unawaitedLogged(
       _node?.start().then((_) async {
         _feedRevision++;
         await _checkReshares();
@@ -205,6 +207,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           setState(() {});
         }
       }),
+      context: 'The feed waits for a ledger that did not start',
     );
   }
 
