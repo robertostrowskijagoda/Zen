@@ -1561,6 +1561,78 @@ void main() {
     expect(state.outbox, isEmpty);
   });
 
+  test('a friend request to someone away is tried every few seconds at '
+      'first and every few minutes hours later; a chat message keeps its '
+      'long backoff', () async {
+    final _SimMesh mesh = _SimMesh();
+    final _SimNode scanner = mesh.add(alice);
+    mesh.add(bob);
+    await scanner.engine.activate();
+    await mesh.goOffline(bob);
+    // Strangers: no mailbox can carry the request, only alice herself.
+    await scanner.engine.submit(bob, <String, dynamic>{
+      'type': 'friend_request',
+      'senderName': 'Alice',
+    });
+    await scanner.engine.submit(bob, _text('hej'));
+    await mesh.settle();
+
+    Future<Map<String, Duration>> waits() async => <String, Duration>{
+      for (final RelayOutboxEntry e in (await scanner.state()).outbox.values)
+        e.payload['type'] as String: Duration(
+          milliseconds: e.nextDirectAttemptAtMillis - mesh.now,
+        ),
+    };
+
+    Future<void> live(Duration span) async {
+      final int end = mesh.now + span.inMilliseconds;
+      while (mesh.now < end) {
+        await mesh.advance(
+          scanner.engine.wantsFrequentTicks
+              ? const Duration(seconds: 5)
+              : const Duration(seconds: 30),
+        );
+      }
+    }
+
+    expect(scanner.engine.wantsFrequentTicks, isTrue);
+    await live(const Duration(minutes: 1));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(seconds: 3)),
+    );
+    await live(const Duration(minutes: 10));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(seconds: 30)),
+    );
+    await live(const Duration(hours: 5));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(minutes: 2)),
+    );
+    expect(
+      (await waits())['message'],
+      greaterThan(const Duration(minutes: 30)),
+      reason: 'a friend has mailboxes; the long steps spare the battery',
+    );
+    await live(const Duration(days: 2));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(minutes: 15)),
+    );
+
+    // Back: the next try hands it over.
+    await mesh.goOnline(bob);
+    await live(const Duration(minutes: 15));
+    expect(
+      (await scanner.state()).outbox.values.map(
+        (RelayOutboxEntry e) => e.payload['type'],
+      ),
+      isNot(contains('friend_request')),
+    );
+  });
+
   group('while the sender is locked', () {
     test('the queue goes out from the outbox kit: sealed, into the '
         'mailboxes, and ends with the recipient\'s confirmation', () async {

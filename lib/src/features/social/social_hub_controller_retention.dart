@@ -161,7 +161,10 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     final String nextPreview = lastMessage == null
         ? ''
         : chatPreviewLine(
-            chatMessageText(lastMessage),
+            chatMessageText(
+              lastMessage,
+              peerName: friend.hasProfileName ? friend.displayLabel : null,
+            ),
             type: lastMessage.type,
             fileName: lastMessage.fileName,
             mimeType: lastMessage.mimeType,

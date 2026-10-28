@@ -925,6 +925,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                 )
                                               : null,
                                           nameOf: _nameOf,
+                                          peerName:
+                                              friend?.hasProfileName == true
+                                              ? friend!.displayLabel
+                                              : null,
                                           entranceDelay:
                                               animateEntrance &&
                                                   fromEnd <
@@ -1243,12 +1247,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String localAddress = ref
         .read(appShellControllerProvider)
         .localAddress;
+    // The chosen name only: `displayName` is "Ja" for someone who never
+    // chose one, and the friend would be shown as "Ja".
     final String? senderDisplayName =
         PeerShareCodec.buildLocalProfile(
           address: localAddress,
-          displayName: profile.displayName,
+          displayName: profile.publicName,
         )?.displayName ??
-        (profile.displayName.isNotEmpty ? profile.displayName : null);
+        (profile.publicName.trim().isNotEmpty
+            ? profile.publicName.trim()
+            : null);
 
     await _handleConversationAction(
       () => _socialHubController.acceptFriendRequest(

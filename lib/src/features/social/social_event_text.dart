@@ -46,7 +46,12 @@ final class SocialEventText {
         'Nie udało się odebrać załącznika od {name}: {error}',
         {'name': name, 'error': a['error'] ?? ''},
       ),
-      'chat.connected' => t('Połączenie z {name} jest gotowe.', {'name': name}),
+      // Saved before the friend's name was known: no placeholder in its
+      // place (see [chatMessageText] for the name put in later).
+      'chat.connected' =>
+        (a['name']?.trim() ?? '').isEmpty
+            ? t('Połączenie gotowe. Możesz pisać od razu.')
+            : t('Połączenie z {name} jest gotowe.', {'name': name}),
       'chat.inviteRejected' => t('{name} odrzucił(a) zaproszenie.', {
         'name': name,
       }),
@@ -180,6 +185,12 @@ final class SocialEventText {
   /// with it) for a code this build does not know.
   String render([String fallback = '']) => renderOrNull() ?? fallback;
 
+  /// This event about [name] instead of whoever it named when it was saved
+  /// (only an event that names someone).
+  SocialEventText withName(String name) => args.containsKey('name')
+      ? SocialEventText(code, <String, String>{...args, 'name': name})
+      : this;
+
   static String _name(Map<String, String> a) {
     final String name = a['name']?.trim() ?? '';
     return name.isEmpty ? t('Ktoś') : name;
@@ -269,7 +280,20 @@ SocialEventText? chatMessageEvent(ChatMessage message) =>
 
 /// What [message] says, for the screen: a system message with an event in
 /// the app's current language, everything else as it was saved.
-String chatMessageText(ChatMessage message) {
-  final SocialEventText? event = chatMessageEvent(message);
-  return event == null ? message.text : event.render(message.text);
+///
+/// In a chat with one friend every event names that friend: with
+/// [peerName] (their name, once it is known) it is said with the name
+/// they have now, not the one known when it was saved ("Połączenie z Ada
+/// jest gotowe" once Ada's profile came, though her answer came without
+/// it).
+String chatMessageText(ChatMessage message, {String? peerName}) {
+  SocialEventText? event = chatMessageEvent(message);
+  if (event == null) {
+    return message.text;
+  }
+  final String name = peerName?.trim() ?? '';
+  if (name.isNotEmpty) {
+    event = event.withName(name);
+  }
+  return event.render(message.text);
 }

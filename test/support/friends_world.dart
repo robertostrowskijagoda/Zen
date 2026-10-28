@@ -129,7 +129,8 @@ final class _PhoneLink implements SignalTransport {
     required String remoteAddress,
     required Map<String, dynamic> payload,
   }) async {
-    if (!phone.sim.online) {
+    if (!phone.sim.online ||
+        !phone.world._routeReady(phone, remoteAddress, payload)) {
       return;
     }
     await phone.sim.send(remoteAddress, payload);
@@ -801,6 +802,87 @@ final class FriendsWorld {
   final Set<String> _unlinked = <String>{};
   int _sentAtGuard = 0;
 
+  /// How long a device needs to find its way to an address it has not
+  /// talked to since it was last switched on (Yggdrasil's key and path
+  /// lookups, then the sessions' key exchange); `null`: the way is always
+  /// known. What is sent before the way is found is lost: the mesh keeps
+  /// only the last packet for an address it is still looking up, so a frame
+  /// of several packets does not arrive. A lookup only starts while the
+  /// other device is reachable.
+  Duration? routeLookup;
+
+  /// How long the sending node holds a frame while the way is looked up
+  /// (the bridge's session layer, which asks again for the other side's
+  /// keys meanwhile); `null`: the frame is lost.
+  Duration? routeHold;
+
+  /// `from>to` -> when the way is known.
+  final Map<String, int> _routeAt = <String, int>{};
+
+  /// Frames held until their way is known.
+  final List<
+    ({FriendsPhone from, String to, Map<String, dynamic> payload, int at})
+  >
+  _heldForRoute =
+      <
+        ({FriendsPhone from, String to, Map<String, dynamic> payload, int at})
+      >[];
+
+  /// How many frames were lost to lookups still running.
+  int lostToLookups = 0;
+
+  bool _routeReady(FriendsPhone from, String to, Map<String, dynamic> payload) {
+    final Duration? lookup = routeLookup;
+    if (lookup == null) {
+      return true;
+    }
+    final String target = PeerShareCodec.normalizeAddress(to);
+    final String key = '${from.address}>$target';
+    int? at = _routeAt[key];
+    if (at != null && net.now >= at) {
+      return true;
+    }
+    if (at == null && (_byAddress[target]?.online ?? false)) {
+      at = _routeAt[key] = net.now + lookup.inMilliseconds;
+    }
+    final Duration? hold = routeHold;
+    if (at != null && hold != null && at - net.now <= hold.inMilliseconds) {
+      _heldForRoute.add((
+        from: from,
+        to: target,
+        payload: jsonDecode(jsonEncode(payload)) as Map<String, dynamic>,
+        at: at,
+      ));
+      return false;
+    }
+    lostToLookups += 1;
+    return false;
+  }
+
+  /// Sends what was held for a way that is known now.
+  Future<void> _sendHeldForRoutes() async {
+    final List<
+      ({FriendsPhone from, String to, Map<String, dynamic> payload, int at})
+    >
+    due = _heldForRoute.where((e) => e.at <= net.now).toList(growable: false);
+    _heldForRoute.removeWhere((e) => e.at <= net.now);
+    for (final e in due) {
+      if (e.from.online) {
+        await e.from.sim.send(e.to, e.payload);
+      }
+    }
+  }
+
+  /// [p] was switched off or on: its node forgot every way it knew, and
+  /// everybody's way to it has to be found again.
+  void _forgetRoutesOf(FriendsPhone p) {
+    _routeAt.removeWhere(
+      (String key, int _) =>
+          key.startsWith('${p.address}>') || key.endsWith('>${p.address}'),
+    );
+    _heldForRoute.removeWhere((e) => e.from == p || e.to == p.address);
+  }
+
   /// Builds a world with [names] (one phone each, or with the device kinds
   /// in [devices]), everyone friends with everyone, mailbox announcements
   /// settled. Cleaned up when the test ends.
@@ -1056,6 +1138,7 @@ final class FriendsWorld {
     if (p.online == on) {
       return;
     }
+    _forgetRoutesOf(p);
     if (on) {
       net.setOnline(p.sim, true);
       _aliveAt[p.address] = net.now;
@@ -1204,6 +1287,7 @@ final class FriendsWorld {
               : const Duration(seconds: 30));
       final int next = min(end, net.now + every.inMilliseconds);
       await net.run(forAtMost: Duration(milliseconds: next - net.now));
+      await _sendHeldForRoutes();
       for (final FriendsPhone p in phones) {
         if (p.online && !p.locked) {
           await p.engine.tick();

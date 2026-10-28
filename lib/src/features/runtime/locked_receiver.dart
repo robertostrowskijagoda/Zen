@@ -998,13 +998,26 @@ final class LockedReceiver {
     final String? rid = rawRid is String && rawRid.isNotEmpty ? rawRid : null;
     if (!contact) {
       // From strangers only what was meant to arrive (it is reliable), and
-      // only a little of it.
-      if (rid == null || !_strangerMayLeave(from)) {
+      // only a little of it. A copy of what is kept already only gets its
+      // acknowledgement again, free: a friend request is tried every few
+      // seconds until it is heard back, and the repeats used to use up the
+      // budget and go unacknowledged, so the sender kept trying.
+      if (rid == null ||
+          (!_alreadyHere(from, rid) && !_strangerMayLeave(from))) {
         return;
       }
     }
     await _keep(frame, from, type, kind, rid: rid);
   }
+
+  /// How a reliable frame [rid] from [from] is known among the kept.
+  static String _keptId(String from, String rid) => 'r|$from|$rid';
+
+  /// Whether the reliable frame [rid] from [from] is kept already, or the
+  /// app took it before it locked.
+  bool _alreadyHere(String from, String rid) =>
+      _kept.contains(_keptId(from, rid)) ||
+      _taken.contains(LockedMailboxKit.takenTag(from, rid));
 
   bool _strangerMayLeave(String from) {
     final int sent = _strangerFrames[from] ?? 0;
@@ -1049,11 +1062,9 @@ final class LockedReceiver {
       return; // not JSON: nothing this app sends
     }
     final String id = rid != null
-        ? 'r|$from|$rid'
+        ? _keptId(from, rid)
         : 'h|$from|${frameContentHash(frame.payload)}';
-    if (_kept.contains(id) ||
-        (rid != null &&
-            _taken.contains(LockedMailboxKit.takenTag(from, rid)))) {
+    if (_kept.contains(id) || (rid != null && _alreadyHere(from, rid))) {
       // A repeat (the sender did not hear the first acknowledgement), or
       // what the app took before it locked.
       if (rid != null) {

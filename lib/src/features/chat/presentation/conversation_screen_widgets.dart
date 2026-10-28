@@ -330,10 +330,15 @@ class _MessageBubble extends StatelessWidget {
     this.onJumpToReply,
     this.onToggleReaction,
     this.nameOf,
+    this.peerName,
     this.highlighted = false,
   });
 
   final ChatMessage message;
+
+  /// The friend's name once it is known: the chat's notes about them say
+  /// it (see [chatMessageText]).
+  final String? peerName;
 
   /// The long-press menu's own entries (react, reply, edit, forward,
   /// delete for everyone).
@@ -378,7 +383,7 @@ class _MessageBubble extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               child: Text(
-                chatMessageText(message),
+                chatMessageText(message, peerName: peerName),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: zen.textSecondary,

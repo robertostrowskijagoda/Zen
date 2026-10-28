@@ -431,8 +431,7 @@ SocialHubState _applySignal(
               ? signal.callId!.trim()
               : 'call-$receivedAtMillis-${signal.sender}',
           peerAddress: signal.sender,
-          displayName:
-              friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+          displayName: _labelFor(signal, friends: friends),
           kind: _callKind(signal.content),
           status: CallSessionStatus.ringing,
           startedAtMillis: receivedAtMillis,
@@ -472,8 +471,7 @@ SocialHubState _applySignal(
                     ? signal.callId!.trim()
                     : 'call-$receivedAtMillis-${signal.sender}',
                 peerAddress: signal.sender,
-                displayName:
-                    friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+                displayName: _labelFor(signal, friends: friends),
                 kind: _callKind(signal.content),
                 status: CallSessionStatus.ringing,
                 startedAtMillis: receivedAtMillis,
@@ -666,11 +664,7 @@ InboxEntry _buildInboxEntry({
 }) {
   final String label = signal.type == ZenSignalType.groupMessage
       ? _groupSenderLabel(signal, friends)
-      : _resolvedPeerLabel(
-          address: signal.sender,
-          displayName: signal.displayName,
-          knownName: friends?[signal.sender]?.displayLabel,
-        );
+      : _labelFor(signal, friends: friends);
   final String groupName = _groupNameOf(signal, groups);
   return switch (signal.type) {
     ZenSignalType.friendRequest => InboxEntry.fromEvents(
@@ -1439,11 +1433,29 @@ String? _backgroundAlertDedupKeyForEntry(InboxEntry entry) {
 }
 
 String _labelFor(ZenSignal signal, {Map<String, FriendProfile>? friends}) {
-  return _resolvedPeerLabel(
-    address: signal.sender,
-    displayName: signal.displayName,
-    knownName: _friendIn(friends, signal.sender)?.displayLabel,
-  );
+  final FriendProfile? friend = _friendIn(friends, signal.sender);
+  if (friend == null) {
+    return _resolvedPeerLabel(
+      address: signal.sender,
+      displayName: signal.displayName,
+    );
+  }
+  return _realNameFor(signal, friends: friends) ?? friend.displayLabel;
+}
+
+/// The name of [signal]'s sender when it is known: the one a friend told
+/// before, else the one the signal carries (an answer to an invitation
+/// brings it); null when neither is a real name. The placeholder of a
+/// friend whose name is not known yet ("Kontakt Zen") never wins over the
+/// name in the signal: an accepted invitation used to say "Połączenie z
+/// Kontakt Zen jest gotowe" although the answer named the person.
+String? _realNameFor(ZenSignal signal, {Map<String, FriendProfile>? friends}) {
+  final FriendProfile? friend = _friendIn(friends, signal.sender);
+  if (friend != null && friend.hasProfileName) {
+    return friend.displayLabel;
+  }
+  final String carried = sanitizePeerName(signal.displayName);
+  return isRealPeerName(signal.sender, carried) ? carried : null;
 }
 
 /// The entry for [address] in [friends], whatever its status.

@@ -19,6 +19,23 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
   }
 
+  /// The name this person gives itself in an invitation or an answer:
+  /// [given] when the screen passed one, else the name chosen in the
+  /// profile; null when there is none (the other side shows its own label
+  /// then). Every way of inviting (a scanned code, an event, a dinner, the
+  /// neighbours) tells it, not only the screens that remembered to pass it.
+  String? _ownSenderName(String? given) {
+    final String chosen = given?.trim() ?? '';
+    if (chosen.isNotEmpty) {
+      return chosen;
+    }
+    final String own = ref
+        .read(userProfileControllerProvider)
+        .publicName
+        .trim();
+    return own.isEmpty ? null : own;
+  }
+
   /// Invites [peerAddress]. Their name is not chosen here: it comes from
   /// their profile with their answer ([knownName]: the name they use where
   /// they were met, shown until then). [nickname] is an optional note shown
@@ -42,12 +59,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
 
+    final String? senderName = _ownSenderName(senderDisplayName);
     await _sendFriendLifecycleSignal(
       peerAddress: normalizedAddress,
       payload: <String, dynamic>{
         'type': 'friend_request',
-        if (senderDisplayName != null && senderDisplayName.trim().isNotEmpty)
-          'senderName': senderDisplayName.trim(),
+        'senderName': ?senderName,
         if (message != null && message.trim().isNotEmpty)
           'message': message.trim(),
       },
@@ -177,12 +194,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
 
+    final String? senderName = _ownSenderName(senderDisplayName);
     await _sendFriendLifecycleSignal(
       peerAddress: peerAddress,
       payload: <String, dynamic>{
         'type': 'friend_accept',
-        if (senderDisplayName != null && senderDisplayName.trim().isNotEmpty)
-          'senderName': senderDisplayName.trim(),
+        'senderName': ?senderName,
       },
     );
 
@@ -234,7 +251,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _appendSystemMessage(
         peerAddress: peer,
         event: SocialEventText('chat.connected', <String, String>{
-          'name': updated.displayLabel,
+          // Not known yet: said without a name, the chat puts the name in
+          // once their profile tells it.
+          'name': updated.hasProfileName ? updated.displayLabel : '',
         }),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
@@ -1203,8 +1222,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         session: CallSession(
           id: callId,
           peerAddress: signal.sender,
-          displayName:
-              state.friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+          displayName: _labelFor(signal, friends: state.friends),
           kind: _callKind(signal.content),
           status: CallSessionStatus.ringing,
           startedAtMillis: timestamp,
@@ -1245,8 +1263,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       nextSession = CallSession(
         id: callId,
         peerAddress: signal.sender,
-        displayName:
-            state.friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+        displayName: _labelFor(signal, friends: state.friends),
         kind: _callKind(signal.content),
         status: CallSessionStatus.ringing,
         startedAtMillis: timestamp,
