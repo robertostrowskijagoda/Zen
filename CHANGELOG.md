@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.13.1 — 28.10.2026
+
 ### What's new
 - [en] Messages and notifications arrive again after Zen restarts or an account is restored.
 - [en] Restoring a full backup brings back everything, including your app password; friends see you right away.
