@@ -162,6 +162,103 @@ final class BiometricUnlockStatus {
   final String protection;
 }
 
+/// One password as a backup of the whole account carries it: the Argon2id
+/// cost and salt its key is derived with, and the check of that key
+/// ([securityVerifyDigest]) — never the password, the key or the master key
+/// it wraps. Enough to know the same password again on another device.
+@immutable
+final class AppPasswordCheck {
+  const AppPasswordCheck({
+    required this.cost,
+    required this.salt,
+    required this.check,
+  });
+
+  final PasswordCost cost;
+  final Uint8List salt;
+  final Uint8List check;
+
+  /// The key [password] derives when it is this password; `null` otherwise
+  /// (one Argon2id run either way).
+  Future<Uint8List?> keyFor(String password) async {
+    final Uint8List key = await derivePasswordKey(password, salt, cost: cost);
+    return securityConstantTimeEquals(securityVerifyDigest(key), check)
+        ? key
+        : null;
+  }
+
+  /// Whether [password] is this password.
+  Future<bool> matches(String password) async => await keyFor(password) != null;
+
+  /// The cost as the credentials store keeps it
+  /// ([appSecurityPasswordKdfStorageKey]).
+  String get kdfJson =>
+      jsonEncode(<String, Object>{'a': 'argon2id', ...cost.toJson()});
+
+  Map<String, Object> toJson() => <String, Object>{
+    'a': 'argon2id',
+    ...cost.toJson(),
+    's': securityHexFromBytes(salt),
+    'c': securityHexFromBytes(check),
+  };
+
+  static AppPasswordCheck? fromJson(Object? json) {
+    if (json is! Map || json['a'] != 'argon2id') {
+      return null;
+    }
+    final PasswordCost? cost = PasswordCost.fromJson(json);
+    final Object? s = json['s'];
+    final Object? c = json['c'];
+    if (cost == null || s is! String || c is! String) {
+      return null;
+    }
+    try {
+      final Uint8List salt = securityBytesFromHex(s);
+      final Uint8List check = securityBytesFromHex(c);
+      if (salt.length < 16 || salt.length > 64 || check.length != 32) {
+        return null;
+      }
+      return AppPasswordCheck(cost: cost, salt: salt, check: check);
+    } on FormatException {
+      return null;
+    }
+  }
+}
+
+/// The app's lock as a backup of the whole account carries it: the app
+/// password ([password]; `null`: the app was used without one) and the
+/// panic password. Biometric unlock and the key kept for "Nigdy" belong to
+/// the device they were made on and are never in it.
+@immutable
+final class AppLockCopy {
+  const AppLockCopy({this.password, this.panic});
+
+  final AppPasswordCheck? password;
+  final AppPasswordCheck? panic;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'password': ?password?.toJson(),
+    'panic': ?panic?.toJson(),
+  };
+
+  /// `null` for anything but a lock: a password that is there but cannot be
+  /// read must never come back as "no password".
+  static AppLockCopy? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final AppPasswordCheck? password = AppPasswordCheck.fromJson(
+      json['password'],
+    );
+    final AppPasswordCheck? panic = AppPasswordCheck.fromJson(json['panic']);
+    if ((json['password'] != null && password == null) ||
+        (json['panic'] != null && panic == null)) {
+      return null;
+    }
+    return AppLockCopy(password: password, panic: panic);
+  }
+}
+
 abstract class AppSecurityCredentialsStore {
   Future<String?> read(String key);
 
@@ -660,6 +757,22 @@ abstract class AppSecurityService extends ChangeNotifier {
   /// keeping nothing, for a wrong password or none set. The lock mode itself
   /// is the settings' (choosing another one drops the copy again).
   Future<bool> keepMasterKeyForNeverLock(String password);
+
+  /// The app password and the panic password as a backup of the whole
+  /// account carries them ([AppLockCopy]); `null` when they cannot be told
+  /// (the backup then carries no lock, and the restored app asks for a new
+  /// password).
+  Future<AppLockCopy?> lockCopy();
+
+  /// After a backup of the whole account was read: [password], when it is
+  /// the app password of [copy], becomes this app's password again, with
+  /// the cost and salt it had there. It wraps this device's own master key
+  /// (the data here is sealed with that one, not with the other device's),
+  /// and the copy's panic password comes with it. `false`, changing
+  /// nothing, for another password or a copy without one. Needs the app
+  /// unlocked. Biometric unlock and the key for "Nigdy" stay this device's
+  /// own.
+  Future<bool> takeLockCopy(AppLockCopy copy, String password);
 
   void lock();
 
@@ -1176,6 +1289,129 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     return _neverLockKeyKept;
   }
 
+  @override
+  Future<AppLockCopy?> lockCopy() async {
+    final _StoredCheck password = await _storedCheck(
+      appSecurityPasswordKdfStorageKey,
+      appSecuritySaltStorageKey,
+      appSecurityPasswordHashStorageKey,
+    );
+    final _StoredCheck panic = await _storedCheck(
+      appSecurityPanicKdfStorageKey,
+      appSecurityPanicSaltStorageKey,
+      appSecurityPanicPasswordHashStorageKey,
+    );
+    if (password.unreadable || panic.unreadable) {
+      return null;
+    }
+    // A panic password means something only on a lock screen.
+    return AppLockCopy(
+      password: password.check,
+      panic: password.check == null ? null : panic.check,
+    );
+  }
+
+  /// The password whose verifier is under [hashKey], as a copy carries it.
+  Future<_StoredCheck> _storedCheck(
+    String kdfKey,
+    String saltKey,
+    String hashKey,
+  ) async {
+    final String? hash = await _credentialsStore.read(hashKey);
+    if (hash == null) {
+      return const _StoredCheck(null);
+    }
+    final String? salt = await _credentialsStore.read(saltKey);
+    final String? kdf = await _credentialsStore.read(kdfKey);
+    AppPasswordCheck? check;
+    if (salt != null && kdf != null) {
+      try {
+        final Object? json = jsonDecode(kdf);
+        check = json is Map
+            ? AppPasswordCheck.fromJson(<Object?, Object?>{
+                ...json,
+                's': salt,
+                'c': hash,
+              })
+            : null;
+      } on FormatException {
+        check = null;
+      }
+    }
+    return check == null
+        ? const _StoredCheck(null, unreadable: true)
+        : _StoredCheck(check);
+  }
+
+  @override
+  Future<bool> takeLockCopy(AppLockCopy copy, String password) async {
+    final Uint8List? masterKey = _encryptionKey;
+    if (masterKey == null) {
+      throw StateError('Cannot take a password while the app is locked.');
+    }
+    final AppPasswordCheck? check = copy.password;
+    final Uint8List? derivedKey = check == null
+        ? null
+        : await check.keyFor(password);
+    if (check == null || derivedKey == null) {
+      return false;
+    }
+    final Uint8List wrappedMasterKey = await encryptSecurityBytes(
+      masterKey,
+      derivedKey,
+    );
+    // The same entries as setPassword writes, with the copy's cost, salt
+    // and verifier: the password opens this device's master key now.
+    await _credentialsStore.write(
+      appSecurityPasswordKdfStorageKey,
+      check.kdfJson,
+    );
+    await _credentialsStore.write(
+      appSecuritySaltStorageKey,
+      securityHexFromBytes(check.salt),
+    );
+    await _credentialsStore.write(
+      appSecurityPasswordHashStorageKey,
+      securityHexFromBytes(check.check),
+    );
+    await _credentialsStore.write(
+      appSecurityWrappedMasterKeyStorageKey,
+      securityHexFromBytes(wrappedMasterKey),
+    );
+    await _credentialsStore.write(
+      appSecurityMasterKeyFingerprintStorageKey,
+      securityHexFromBytes(securityMasterFingerprint(masterKey)),
+    );
+    final AppPasswordCheck? panic = copy.panic;
+    if (panic == null) {
+      await _credentialsStore.delete(appSecurityPanicPasswordHashStorageKey);
+      await _credentialsStore.delete(appSecurityPanicSaltStorageKey);
+      await _credentialsStore.delete(appSecurityPanicKdfStorageKey);
+    } else {
+      await _credentialsStore.write(
+        appSecurityPanicKdfStorageKey,
+        panic.kdfJson,
+      );
+      await _credentialsStore.write(
+        appSecurityPanicSaltStorageKey,
+        securityHexFromBytes(panic.salt),
+      );
+      await _credentialsStore.write(
+        appSecurityPanicPasswordHashStorageKey,
+        securityHexFromBytes(panic.check),
+      );
+    }
+    // As in setPassword: a biometric token only where this device's person
+    // turned it on, and the device master key's plain copy goes.
+    await _storeBiometricToken(masterKey);
+    await _credentialsStore.delete(appSecurityDeviceMasterKeyStorageKey);
+    _hasPassword = true;
+    _hasPanicPassword = panic != null;
+    _isLocked = false;
+    notifyListeners();
+    return true;
+  }
+
   /// Keeps [masterKey] for "Nigdy" (see
   /// [appSecurityNeverLockMasterKeyStorageKey]).
   Future<void> _storeNeverLockKey(Uint8List masterKey) async {
@@ -1466,6 +1702,15 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     _lockMode = settings.lockMode;
     _backgroundLockDelaySeconds = settings.backgroundLockDelaySeconds;
   }
+}
+
+/// A stored password as a copy carries it: [check], or none set — or one
+/// set that cannot be read ([unreadable]).
+final class _StoredCheck {
+  const _StoredCheck(this.check, {this.unreadable = false});
+
+  final AppPasswordCheck? check;
+  final bool unreadable;
 }
 
 final class LocalAppSecurityService extends _BaseAppSecurityService {
