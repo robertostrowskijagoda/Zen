@@ -33,6 +33,8 @@ void showCallRecordingOutcome(
         SnackBar(
           content: Text(unsavedCallRecordingText()),
           duration: const Duration(seconds: 10),
+          // With an action a snack bar stays until dismissed by default.
+          persist: false,
           action: SnackBarAction(
             label: t('Ponów'),
             onPressed: () => unawaited(_retry(messenger, keeper)),

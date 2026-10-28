@@ -349,6 +349,9 @@ class _NotificationsScreenState extends ConsumerState<_NotificationsScreen> {
           key: const Key('notifications-undo'),
           content: Text(message),
           duration: _undoFor,
+          // With an action a snack bar stays until dismissed by default; the
+          // removal is final once the time is up, so "Cofnij" must go too.
+          persist: false,
           action: SnackBarAction(
             key: const Key('notifications-undo-action'),
             label: t('Cofnij'),

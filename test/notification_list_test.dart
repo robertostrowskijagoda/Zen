@@ -273,6 +273,9 @@ void main() {
     expect(inboxIds(), <String>['one', 'two', 'three']);
     await tester.pump(const Duration(seconds: 6));
     expect(inboxIds(), <String>['one', 'three']);
+    // The snack bar has a "Cofnij" action, yet it goes away on its own.
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('notifications-undo')), findsNothing);
 
     await tester.tap(find.byKey(const Key('notice-dismiss-three')));
     await tester.pumpAndSettle();
