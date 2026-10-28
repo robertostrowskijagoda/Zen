@@ -169,7 +169,12 @@ final class FollowLedger {
   void _attach() {
     node.helloExtras = _helloExtras;
     node.onStrangerHello = _onStrangerHello;
-    _ready = _start();
+    final Future<void> ready = _start();
+    _ready = ready;
+    // Nobody has to wait for it: a ledger that cannot start (its identity
+    // damaged) is logged here, not left as an error nobody handles; who
+    // awaits [ready] still learns of it.
+    unawaitedLogged(ready, context: 'Starting the follows failed');
   }
 
   Future<void> _start() async {

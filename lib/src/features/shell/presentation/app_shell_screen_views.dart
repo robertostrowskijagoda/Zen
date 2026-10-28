@@ -855,6 +855,8 @@ class _SettingsScreen extends ConsumerWidget {
               const _QuickLockPanel(),
               // Friends run a newer Zen: a quiet hint, gone otherwise.
               const FriendsNewerVersionBanner(),
+              // The account key here cannot be read: what to do.
+              const DamagedIdentityBanner(),
               _SettingsGroup(
                 title: t('Prywatność i bezpieczeństwo'),
                 tiles: <Widget>[

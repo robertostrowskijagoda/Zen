@@ -696,9 +696,17 @@ final class LedgerNode {
       throw StateError(t('Brak tożsamości dziennika na tym urządzeniu.'));
     }
     final LedgerIdentity? existing = await LedgerIdentity.read(disk);
-    LedgerIdentity loaded =
-        existing ??
-        await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
+    LedgerIdentity loaded;
+    try {
+      loaded =
+          existing ??
+          await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
+    } on DamagedLedgerIdentityException {
+      // Kept as it is and never replaced by a new account: the ledger
+      // stays off, the rest of the app works, the settings say what to do.
+      DamagedIdentityNotice.instance.note();
+      rethrow;
+    }
     await store.directory.addCertificate(loaded.certificate);
     store.directory.isCoreAccount = (String acc) =>
         acc == loaded.certificate.account ||
@@ -1191,7 +1199,7 @@ final class LedgerNode {
   }
 
   Future<void> _loadMetPending() async {
-    final Uint8List? raw = await disk.read(_metPendingKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _metPendingKey);
     if (raw == null) {
       return;
     }
@@ -1361,7 +1369,7 @@ final class LedgerNode {
   }
 
   Future<void> _loadOwnApplied() async {
-    final Uint8List? raw = await disk.read(_ownAppliedKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _ownAppliedKey);
     if (raw == null) {
       return;
     }
@@ -1838,7 +1846,7 @@ final class LedgerNode {
   );
 
   Future<void> _loadDevices() async {
-    final Uint8List? raw = await disk.read(_devicesKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _devicesKey);
     if (raw == null) {
       return;
     }
@@ -2816,7 +2824,7 @@ final class LedgerNode {
   }
 
   Future<void> _loadKeys() async {
-    final Uint8List? raw = await disk.read(_keyringKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _keyringKey);
     if (raw != null) {
       try {
         final Object? json = jsonDecode(utf8.decode(raw));
@@ -2830,7 +2838,7 @@ final class LedgerNode {
     if (keyring.ensureOwn(_clock.wallMillis())) {
       await _saveKeyring();
     }
-    final Uint8List? levels = await disk.read(_levelsKey);
+    final Uint8List? levels = await readOrSetAsideOn(disk, _levelsKey);
     if (levels != null) {
       try {
         final Object? json = jsonDecode(utf8.decode(levels));
@@ -3029,7 +3037,7 @@ final class LedgerNode {
   /// A separate key just for the bridge, so an announcement never reveals
   /// whose computer it is.
   Future<LedgerKeyPair> _bridgeKey() async {
-    final Uint8List? raw = await disk.read(_bridgeKeyKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _bridgeKeyKey);
     if (raw != null && raw.length == 32) {
       return LedgerKeyPair.fromSeed(raw);
     }
@@ -3039,7 +3047,7 @@ final class LedgerNode {
   }
 
   Future<void> _loadBridges() async {
-    final Uint8List? raw = await disk.read(_bridgesKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _bridgesKey);
     if (raw == null) {
       return;
     }
@@ -3059,7 +3067,7 @@ final class LedgerNode {
   );
 
   Future<void> _loadPeers() async {
-    final Uint8List? raw = await disk.read(_peersKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _peersKey);
     if (raw == null) {
       return;
     }
@@ -3086,7 +3094,7 @@ final class LedgerNode {
   }
 
   Future<void> _loadFollowing() async {
-    final Uint8List? raw = await disk.read(_followingKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, _followingKey);
     if (raw == null) {
       return;
     }

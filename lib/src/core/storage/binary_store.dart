@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart'
+    show SecretBoxAuthenticationError;
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/core/storage/storage_health.dart';
@@ -269,6 +271,14 @@ final class BinaryCodec {
     return diff == 0;
   }
 }
+
+/// Whether [error], thrown while reading a stored file, says the file is
+/// damaged (cut short, overwritten, failing its check, past the size
+/// limit): such a file will never read, so it is set aside rather than
+/// tried at every start. A newer build's file is not damaged (it is held),
+/// and neither is a locked store or a failing disk.
+bool isDamagedStoredFile(Object error) =>
+    error is FormatException && error is! NewerFormatException;
 
 final class FileBinaryStore {
   FileBinaryStore(
@@ -605,8 +615,32 @@ final class FileBinaryStore {
     } on UnsupportedStoredPayloadException {
       // Plaintext or another seal: never trusted, read as missing.
       return null;
+    } on SecretBoxAuthenticationError {
+      // Cut short, a byte changed: damage like any other, reported the
+      // same way ([isDamagedStoredFile]).
+      throw const FormatException('Stored payload fails its check.');
     }
     return _codec.decode(encoded);
+  }
+
+  /// [key]'s payload, or null when there is none, when a newer build wrote
+  /// it (held, see [holdNewer]) or when neither the file nor its backup can
+  /// be read: the file is then set aside ([quarantine]) and the caller
+  /// starts it afresh, instead of failing on it at every start. What is not
+  /// damage (the store locked, the disk failing) still throws.
+  Future<Uint8List?> readOrSetAside(String key) async {
+    try {
+      return await read(key);
+    } on NewerFormatException {
+      return null;
+    } on FormatException catch (error) {
+      logZenWarning(
+        'Stored file "${ZenStorageHealth.categoryOf(_canonicalKey(key))}" '
+        'is damaged: ${error.message}',
+      );
+      await quarantine(key);
+      return null;
+    }
   }
 
   Future<Uint8List> _seal(String storageKey, Uint8List encoded) async {
