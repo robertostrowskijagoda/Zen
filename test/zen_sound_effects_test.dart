@@ -46,6 +46,7 @@ RuntimeSystemNotification _notification(
 void main() {
   late _FakeOutput output;
   late bool settingOn;
+  late bool notificationsOn;
   late bool quiet;
   late DateTime now;
 
@@ -53,6 +54,7 @@ void main() {
     return ZenSoundEffects(
       output: output,
       inAppSoundsOn: () => settingOn,
+      notificationSoundsOn: () => notificationsOn,
       deviceKeepsQuiet: () async => quiet,
       platform: platform,
       clock: () => now,
@@ -62,12 +64,14 @@ void main() {
   setUp(() {
     output = _FakeOutput();
     settingOn = true;
+    notificationsOn = true;
     quiet = false;
     now = DateTime(2026, 10, 21, 12);
   });
 
   test('"Dźwięki w aplikacji" is on by default', () {
     expect(const AppSettings().inAppSounds, isTrue);
+    expect(const AppSettings().notificationSounds, isTrue);
     expect(
       AppSettings.fromJson(<String, dynamic>{'inAppSounds': false}).inAppSounds,
       isFalse,
@@ -158,7 +162,7 @@ void main() {
   );
 
   test('an alarm always sounds; a ringtone ignores only the setting', () async {
-    settingOn = false;
+    notificationsOn = false;
     quiet = true;
     final ZenSoundEffects sounds = effects(TargetPlatform.windows);
     expect(await sounds.play(ZenSound.message), isFalse);
@@ -169,6 +173,40 @@ void main() {
     now = now.add(ZenSoundEffects.quietCheckValidFor);
     expect(await sounds.allows(ZenSound.ringtone), isTrue);
     expect(await sounds.allows(ZenSound.social), isFalse);
+  });
+
+  test('the two switches are independent', () async {
+    settingOn = false;
+    final ZenSoundEffects sounds = effects(TargetPlatform.windows);
+    // The effects are off, the notification sounds (Windows plays them
+    // itself) are not.
+    expect(await sounds.play(ZenSound.messageSent), isFalse);
+    expect(await sounds.play(ZenSound.like), isFalse);
+    expect(await sounds.play(ZenSound.message), isTrue);
+
+    settingOn = true;
+    notificationsOn = false;
+    now = now.add(ZenSoundEffects.repeatGap);
+    expect(await sounds.play(ZenSound.like), isTrue);
+    expect(await sounds.play(ZenSound.knock), isFalse);
+  });
+
+  test('the new effects play their own assets', () async {
+    final ZenSoundEffects sounds = effects(TargetPlatform.android);
+    for (final ZenSound sound in <ZenSound>[
+      ZenSound.messageReceived,
+      ZenSound.like,
+      ZenSound.posted,
+      ZenSound.pop,
+    ]) {
+      expect(await sounds.play(sound), isTrue, reason: sound.name);
+    }
+    expect(output.played, <String>[
+      'assets/sounds/zen_received.wav',
+      'assets/sounds/zen_like.wav',
+      'assets/sounds/zen_posted.wav',
+      'assets/sounds/zen_pop.wav',
+    ]);
   });
 
   test('a loop plays until stopped', () async {
