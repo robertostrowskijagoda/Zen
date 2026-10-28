@@ -120,7 +120,7 @@ key, so every release must be signed with this key.
 > 4. Swipe Zen away on one phone; messages still arrive within a minute.
 > 5. Restore an account from a backup on a phone (or a clean install):
 >    the setup appears once, friends see you online and see your name.
-> 6. Settings → Diagnostics: save the log; read it for `ERROR` lines,
+> 6. Settings → Advanced → Diagnostics: save the log; read it for `ERROR` lines,
 >    "already runs" or "Flutter framework error".
 >
 > Only when all of it works, edit the release, untick "pre-release" and tick

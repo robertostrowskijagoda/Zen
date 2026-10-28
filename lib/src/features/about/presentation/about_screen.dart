@@ -1033,9 +1033,9 @@ class _ContactPage extends StatelessWidget {
         _Paragraph(
           t(
             'Błąd, pomysł albo pytanie? Napisz na GitHubie w zakładce Issues. '
-            'Przy błędzie dołącz dziennik zdarzeń: Ustawienia → Diagnostyka '
-            '(bez treści wiadomości). Zen nie ma serwera, więc nikt nie '
-            'zobaczy problemu, dopóki go nie zgłosisz.',
+            'Przy błędzie dołącz dziennik zdarzeń: Ustawienia → Zaawansowane → '
+            'Diagnostyka (bez treści wiadomości). Zen nie ma własnego serwera, '
+            'więc nikt nie zobaczy problemu, dopóki go nie zgłosisz.',
           ),
         ),
         _LinkTile(

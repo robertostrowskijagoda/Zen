@@ -147,9 +147,9 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
 List<String> installNotesFor(InstallSystem system) => switch (system) {
   InstallSystem.android => <String>[
     t(
-      'Aktualizacje same: w darmowej aplikacji Obtainium dodaj '
-      'github.com/robertostrowskijagoda/Zen (przycisk na stronie '
-      'instalacji). Telefon obok możesz też poczęstować Zen stąd, przez '
+      'Aktualizacje: Zen sam powie o nowej wersji i ją zainstaluje. Jeśli '
+      'wolisz, dodaj też github.com/robertostrowskijagoda/Zen w darmowej '
+      'aplikacji Obtainium (przycisk na stronie instalacji). Telefon obok możesz też poczęstować Zen stąd, przez '
       'Wi-Fi albo Quick Share.',
     ),
   ],
