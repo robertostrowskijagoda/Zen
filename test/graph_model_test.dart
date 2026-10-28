@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
+import 'package:zen/src/features/meet/graph/graph_full_screen.dart';
 import 'package:zen/src/features/meet/graph/graph_painter.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -373,6 +375,97 @@ void main() {
       pyramid: marks,
     );
     expect(friends.edges.any((EdgeLook e) => e.dashed), isFalse);
+  });
+
+  test('presence: the three looks, nothing for weak acquaintances', () {
+    final List<GraphNode> nodes = <GraphNode>[
+      GraphNode(
+        address: _ania,
+        name: 'Ania',
+        ring: 1,
+        friend: _friend(_ania, 'Ania'),
+      ),
+      GraphNode(
+        address: _bartek,
+        name: 'Bartek',
+        ring: 2,
+        friend: _friend(_bartek, 'Bartek'),
+      ),
+      GraphNode(
+        address: _celina,
+        name: 'Celina',
+        ring: 2,
+        friend: _friend(_celina, 'Celina'),
+      ),
+      // A weak acquaintance whose presence the phone happens to know.
+      GraphNode(
+        address: _zenon,
+        name: 'Zenon',
+        ring: 3,
+        friend: _friend(_zenon, 'Zenon'),
+      ),
+      GraphNode(
+        address: _xawery,
+        name: 'Xawery',
+        ring: 4,
+        via: <String>[_ania],
+      ),
+    ];
+    final Map<String, PeerPresence> shown = <String, PeerPresence>{
+      _ania: PeerPresence.online,
+      _bartek: PeerPresence.background,
+      _celina: PeerPresence.offline,
+      _zenon: PeerPresence.online,
+      _xawery: PeerPresence.online,
+    };
+    final GraphLook look = graphLook(
+      scene: _scene(nodes),
+      mode: GraphMode.presence,
+      facts: GraphFacts(presence: (String a) => shown[a]!),
+      zen: zen,
+    );
+    final NodeLook online = look.nodes[0];
+    final NodeLook background = look.nodes[1];
+    final NodeLook offline = look.nodes[2];
+    // Filled green.
+    expect(online.fill, zen.success);
+    expect(online.ring, isNull);
+    expect(online.hollow, isFalse);
+    // A blue ring with a dot in it.
+    expect(background.ring, zen.tone(ZenTone.network));
+    expect(background.fill, zen.tone(ZenTone.network));
+    expect(background.hollow, isFalse);
+    // An empty grey ring.
+    expect(offline.hollow, isTrue);
+    expect(offline.fill, zen.textMuted);
+    expect(offline.ring, isNull);
+    // Weak acquaintances and people further away show nothing.
+    for (final NodeLook l in look.nodes.skip(3)) {
+      expect(l.hollow, isFalse);
+      expect(l.ring, isNull);
+      expect(l.fill, isNot(zen.success));
+      expect(l.fill.a, lessThan(0.5));
+    }
+    // Other modes do not colour by presence.
+    final GraphLook friends = graphLook(
+      scene: _scene(nodes),
+      mode: GraphMode.friends,
+      facts: GraphFacts(presence: (String a) => shown[a]!),
+      zen: zen,
+    );
+    expect(friends.nodes.any((NodeLook l) => l.hollow), isFalse);
+    expect(friends.nodes.first.fill, isNot(zen.success));
+    // And a phone that knows nothing shows nothing.
+    final GraphLook none = graphLook(
+      scene: _scene(nodes),
+      mode: GraphMode.presence,
+      facts: GraphFacts(),
+      zen: zen,
+    );
+    expect(none.nodes.any((NodeLook l) => l.hollow || l.ring != null), isFalse);
+    // The first look of the graph is the presence.
+    expect(GraphMode.values.first, GraphMode.presence);
+    expect(const GraphView().mode, GraphMode.presence);
   });
 
   test('layout: everyone gets a place, crowded rings spread, and the mode '

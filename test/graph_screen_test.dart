@@ -265,7 +265,13 @@ void main() {
     expect(find.text('Poproszono'), findsOneWidget);
 
     // Modes: the pyramid one only inside a pyramid.
-    for (final String m in <String>['friends', 'statuses', 'met', 'gates']) {
+    for (final String m in <String>[
+      'presence',
+      'friends',
+      'statuses',
+      'met',
+      'gates',
+    ]) {
       expect(find.byKey(Key('graph-mode-$m')), findsOneWidget);
     }
     expect(find.byKey(const Key('graph-mode-pyramid')), findsNothing);
@@ -602,6 +608,10 @@ void main() {
       await tapKey(Key('graph-hit-$address'));
     }
 
+    // The presence of friends is the first look at the graph.
+    expect(find.byKey(const Key('graph-legend-presence')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-friends')), findsNothing);
+    await tapKey(const Key('graph-mode-friends'));
     expect(find.byKey(const Key('graph-legend-friends')), findsOneWidget);
 
     // Statuses: the legend has the badge; only Ania's card has it.
@@ -769,6 +779,7 @@ void main() {
     ];
 
     // "Kogo warto poznać": Xawery, known by Ania and Celina; one tap asks.
+    await tapKey(const Key('graph-mode-friends'));
     expect(find.byKey(const Key('graph-who-to-meet')), findsOneWidget);
     expect(find.byKey(Key('graph-meet-$_xawery')), findsOneWidget);
     expect(find.byKey(Key('graph-meet-$_lucja')), findsNothing);
@@ -860,6 +871,91 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));
   });
+
+  for (final (String, Size) phone in <(String, Size)>[
+    ('320x568', const Size(320, 568)),
+    ('411x891', const Size(411, 891)),
+    ('desktop 1280x800', const Size(1280, 800)),
+  ]) {
+    testWidgets('graph: the modes and the buttons never overlap, presence is '
+        'the first mode (${phone.$1})', (WidgetTester tester) async {
+      tester.view.physicalSize = phone.$2;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final _Host host = _Host(<String, String>{
+        _ania: 'Ania',
+        _bartek: 'Bartek',
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            socialHubAutoHydrateProvider.overrideWithValue(false),
+            socialHubSeedProvider.overrideWithValue(
+              SocialHubState.empty().copyWith(
+                friends: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
+            ),
+            signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+            ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+            meetServiceProvider.overrideWithValue(
+              MeetService(host: host, store: MeetStore(MemoryLedgerDisk())),
+            ),
+            pyramidServiceProvider.overrideWithValue(
+              PyramidService(
+                host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+                disk: MemoryLedgerDisk(),
+              ),
+            ),
+          ],
+          child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // The first look: friends' presence.
+      expect(
+        tester
+            .widget<ChoiceChip>(find.byKey(const Key('graph-mode-presence')))
+            .selected,
+        isTrue,
+      );
+      expect(find.byKey(const Key('graph-legend-presence')), findsOneWidget);
+
+      final Rect modes = tester.getRect(find.byKey(const Key('graph-modes')));
+      final Rect actions = tester.getRect(
+        find.byKey(const Key('graph-actions')),
+      );
+      final Rect snapshot = tester.getRect(
+        find.byKey(const Key('graph-snapshot')),
+      );
+      final Rect filters = tester.getRect(
+        find.byKey(const Key('graph-filters')),
+      );
+      expect(modes.overlaps(actions), isFalse);
+      expect(snapshot.overlaps(filters), isFalse);
+      expect(modes.overlaps(snapshot), isFalse);
+      expect(modes.overlaps(filters), isFalse);
+      // Every mode chip that is built sits inside the row of the modes.
+      for (final GraphMode m in GraphMode.values) {
+        final Finder chip = find.byKey(Key('graph-mode-${m.name}'));
+        if (chip.evaluate().isEmpty) {
+          continue;
+        }
+        final Rect r = tester.getRect(chip);
+        expect(r.overlaps(snapshot), isFalse, reason: m.name);
+        expect(r.overlaps(filters), isFalse, reason: m.name);
+      }
+      // The buttons stay on the screen.
+      final Rect screen = Offset.zero & phone.$2;
+      expect(screen.contains(snapshot.topLeft), isTrue);
+      expect(screen.contains(filters.bottomRight), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('graph: full screen with a button, F11, Esc and a double click; '
       'the controls hide by themselves; the mode comes back; it turns', (

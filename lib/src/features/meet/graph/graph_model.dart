@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
@@ -22,7 +23,11 @@ const int kGraphMaxFar = 1500;
 /// What the graph shows. Each mode only colours what this phone already
 /// knows; none of them asks anyone for more.
 enum GraphMode {
-  /// Who knows whom, closeness (the default).
+  /// Which friends are online, in the background or offline (the
+  /// default); weak acquaintances show nothing.
+  presence,
+
+  /// Who knows whom, closeness.
   friends,
 
   /// Statuses, online, "Szukam: randki/znajomości".
@@ -50,6 +55,7 @@ enum GraphMode {
   neglect;
 
   String get label => switch (this) {
+    GraphMode.presence => t('Obecność'),
     GraphMode.friends => t('Znajomi'),
     GraphMode.statuses => t('Statusy'),
     GraphMode.met => t('Spotkani'),
@@ -690,6 +696,7 @@ final class GraphFacts {
   GraphFacts({
     IntentStatus? Function(String address)? statusOf,
     bool Function(String address)? online,
+    PeerPresence Function(String address)? presence,
     OpenToMeet? Function(String address)? openOf,
     bool Function(String address)? met,
     bool Function(String address)? nearby,
@@ -700,6 +707,7 @@ final class GraphFacts {
   }) : _inLabel = inLabel,
        _statusOf = statusOf,
        _online = online,
+       _presence = presence,
        _openOf = openOf,
        _met = met,
        _nearby = nearby,
@@ -708,6 +716,7 @@ final class GraphFacts {
 
   final IntentStatus? Function(String address)? _statusOf;
   final bool Function(String address)? _online;
+  final PeerPresence Function(String address)? _presence;
   final OpenToMeet? Function(String address)? _openOf;
   final bool Function(String address)? _met;
   final bool Function(String address)? _nearby;
@@ -722,6 +731,11 @@ final class GraphFacts {
 
   IntentStatus? statusOf(String a) => _statusOf?.call(a);
   bool online(String a) => _online?.call(a) ?? false;
+
+  /// What [a] shows of their presence ([PeerPresence.hidden]: nothing, as
+  /// for a weak acquaintance).
+  PeerPresence presenceOf(String a) =>
+      _presence?.call(a) ?? PeerPresence.hidden;
   OpenToMeet? openOf(String a) => _openOf?.call(a);
   bool met(String a) => _met?.call(a) ?? false;
   bool nearby(String a) => _nearby?.call(a) ?? false;

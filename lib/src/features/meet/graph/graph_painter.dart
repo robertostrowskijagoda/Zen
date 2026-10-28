@@ -19,6 +19,7 @@ final class NodeLook {
     this.tag,
     this.tagTone,
     this.label = false,
+    this.hollow = false,
   });
 
   /// The dot (a dimmed person has a see-through colour).
@@ -37,6 +38,9 @@ final class NodeLook {
 
   /// Always named, whatever the zoom (picked, found, on the route).
   final bool label;
+
+  /// Drawn as an empty ring in [fill] only (offline).
+  final bool hollow;
 }
 
 /// How one line is drawn in the current mode.
@@ -458,6 +462,10 @@ class GraphPainter extends CustomPainter {
           }
           continue;
         }
+      }
+      if (l.hollow) {
+        canvas.drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        continue;
       }
       if (l.radius <= 5 && l.ring == null && l.dot == null) {
         final (double, List<double>) b = dots.putIfAbsent(
