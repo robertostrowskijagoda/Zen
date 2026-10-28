@@ -245,8 +245,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    - `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz` — the folder
      `build/linux/<x64|arm64>/release/bundle` as `Zen/` with its
      `zen-app.marker` (started with
-     `Zen/zen`; includes `install-desktop-entry.sh`, which adds the menu entry
-     and `zen://` links for the current user);
+     `Zen/zen`; includes `install-desktop-entry.sh`, which adds the menu entry,
+     `zen://` links and Zen's file types for the current user);
    - `Zen-Linux-x64.deb`, `Zen-Linux-arm64.deb` — the same bundle packaged by
      `linux/packaging/build_deb.sh` (`/opt/zen`, `/usr/bin/zen`, `.desktop`
      file, AppStream; dependencies from `dpkg-shlibdeps`; AAC/H.264 playback

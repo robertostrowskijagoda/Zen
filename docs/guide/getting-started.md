@@ -238,6 +238,17 @@ On the same account the data is merged (nothing is deleted); a copy of a
 different account is refused on a device that already has an account with
 data. A copy made by a newer Zen asks you to update first.
 
+**Opening Zen's files directly.** Tapping a full account copy
+(`.zenbackup`), a key file (`.zenkey`) or an update file (`.zenupdate`) in
+Files, a mail or a chat opens it in Zen, on the right screen with the file
+already chosen — after you unlock Zen, and on the first start once the
+setup is done. On Android Zen is offered for other unnamed files too; it
+then only tells you the file is not one of its own. On Windows choose
+**Open with** → Zen (`zen.exe`) once; on Linux the `.deb`, the Flatpak and
+`install-desktop-entry.sh` register the file types. A copy saved in parts
+opens this way only on a computer (the other parts lie next to it); on a
+phone choose it with **I have a copy** → **Choose file**.
+
 **Key copy (paper or file).** Account and recovery → **Key copy**: a paper
 with a code (56 characters, also as a QR code) or a key file with a
 password. It brings the account back on a new phone even when nobody of

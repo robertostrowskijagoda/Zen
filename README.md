@@ -312,7 +312,7 @@ update itself: install the new file the same way when Zen tells you), or
 [Zen-Linux-x64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.tar.gz)
 ([arm64](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.tar.gz), for Raspberry Pi 4/5 and other 64-bit ARM
 computers): unpack it and run `Zen/zen`; `Zen/install-desktop-entry.sh` adds
-Zen to the menu and makes it open `zen://` links.
+Zen to the menu and makes it open `zen://` links and Zen's own files.
 **Which systems:** the `.tar.gz` and `.deb` run on Ubuntu 22.04, Debian 12,
 Linux Mint 21 or newer, and on other distributions with glibc 2.35 or newer
 (the builds are made on Ubuntu 22.04 and checked for that); on older
