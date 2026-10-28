@@ -286,6 +286,18 @@ Future<bool> _prepare(List<String> args) async {
     return false;
   }
 
+  // 1a. The release before this one left its data for the upgrade tests
+  // (test/start_upgrade_test.dart): a reminder, never a stop.
+  final Directory fixtures = Directory('test/fixtures/upgrade');
+  final String? fixture = missingUpgradeFixture(current, <String>[
+    if (fixtures.existsSync())
+      for (final FileSystemEntity e in fixtures.listSync())
+        if (e is Directory) e.uri.pathSegments.where((s) => s.isNotEmpty).last,
+  ]);
+  if (fixture != null) {
+    stdout.writeln('Reminder: $fixture');
+  }
+
   // 1b. The short note the app shows with the update notice; release.yml
   // makes whats-new.json of it, which the signature covers.
   final ({Map<String, List<String>> lines, List<String> problems}) note =

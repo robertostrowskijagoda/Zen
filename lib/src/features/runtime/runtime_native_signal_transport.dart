@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1645,8 +1646,10 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   // The user's public peers (public_peers.dart) before the node dials any.
   await applyStoredPublicPeers(bridge);
   // Whom the node is for: the bridge settles which owner of the identity
-  // runs it (node_identity.go).
-  final Map<String, dynamic> startResult = bridge.startNode(
+  // runs it (node_identity.go). Off this isolate's thread: taking the
+  // identity over stops the other owner's node (the Android service's)
+  // inside this call, and that must never freeze the screen.
+  final Map<String, dynamic> startResult = await startNodeOffThread(
     withNodeOwner(withNodePeerTarget(configJson, config.peerTarget), owner),
   );
   owner?.started(startResult);
@@ -1682,7 +1685,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
       ),
       onStop: () async {
         await pins.stop();
-        bridge.stopNode(handle);
+        await stopNodeOffThread(handle);
         ZenTechLog.nodeStopped(handle);
       },
     ),
@@ -1930,6 +1933,86 @@ Future<File> _runtimeConfigFile([
   await runtimeDirectory.create(recursive: true);
   return File(
     '${runtimeDirectory.path}${Platform.pathSeparator}yggdrasil.config.json',
+  );
+}
+
+/// How long a node start or stop may take in the bridge before its caller
+/// stops waiting (the bridge call goes on in its helper isolate).
+const Duration kNodeCallTimeout = Duration(seconds: 45);
+
+/// Runs [call] (a blocking call into the bridge) on a helper isolate and
+/// gives its answer, or a [TimeoutException] after [timeout]. A node
+/// start or stop runs inside the Go library for as long as it takes:
+/// stopping a node closes its links, and taking an identity over stops
+/// the other owner's node first. Called on the UI isolate that froze the
+/// screen (and every timer of the start with it) for that long; a call
+/// that never came back froze it for good.
+@visibleForTesting
+Future<T> runNodeCallOffThread<T>(
+  T Function() call, {
+  Duration timeout = kNodeCallTimeout,
+  String what = 'node call',
+}) {
+  final Future<T> running = Isolate.run<T>(call, debugName: 'zen-$what');
+  return running.timeout(
+    timeout,
+    onTimeout: () {
+      logZenWarning(
+        'The bridge has not answered a $what for ${timeout.inSeconds} s; '
+        'not waiting for it any longer.',
+      );
+      throw TimeoutException('The bridge did not answer a $what.', timeout);
+    },
+  );
+}
+
+/// Starts a node in the bridge off this isolate's thread
+/// ([runNodeCallOffThread]). A start that answers only after its caller
+/// gave up is stopped again: nobody would call on that node.
+Future<Map<String, dynamic>> startNodeOffThread(
+  String configJson, {
+  Duration timeout = kNodeCallTimeout,
+}) {
+  final Future<Map<String, dynamic>> started = _startNodeInHelper(configJson);
+  return started.timeout(
+    timeout,
+    onTimeout: () {
+      logZenWarning(
+        'The bridge has not started the node in ${timeout.inSeconds} s; '
+        'not waiting for it any longer.',
+      );
+      unawaited(
+        started.then((Map<String, dynamic> late) async {
+          final int? handle = (late['handle'] as num?)?.toInt();
+          if (handle != null && handle >= 0) {
+            await stopNodeOffThread(handle);
+          }
+        }, onError: (Object _) {}),
+      );
+      throw TimeoutException('The bridge did not start the node.', timeout);
+    },
+  );
+}
+
+/// The start itself, in a function of its own: the closure sent to the
+/// helper isolate must hold nothing but the config.
+Future<Map<String, dynamic>> _startNodeInHelper(String configJson) =>
+    Isolate.run(
+      () => YggdrasilBridgeFfi.load().startNode(configJson),
+      debugName: 'zen-node-start',
+    );
+
+/// Stops the node [handle] in the bridge off this isolate's thread.
+Future<void> stopNodeOffThread(
+  int handle, {
+  Duration timeout = kNodeCallTimeout,
+}) async {
+  await runNodeCallOffThread<void>(
+    () {
+      YggdrasilBridgeFfi.load().stopNode(handle);
+    },
+    timeout: timeout,
+    what: 'node stop',
   );
 }
 

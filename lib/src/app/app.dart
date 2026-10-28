@@ -6,6 +6,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/platform_route_guard.dart';
+import 'package:zen/src/app/start_trace.dart';
 import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -64,6 +65,11 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
     // An iPhone: answers background checks from the start, also while Zen
     // is locked.
     ref.read(iosBackgroundHostProvider);
+    // The first screen (the lock screen, a setup step or the app) is drawn:
+    // the start log closes this start.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => ZenStartTrace.reached(),
+    );
   }
 
   @override

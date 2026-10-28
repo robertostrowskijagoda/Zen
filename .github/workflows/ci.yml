@@ -179,6 +179,45 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  # The app starting on the data every released version left behind
+  # (test/fixtures/upgrade, one folder per release) and on every file a
+  # start reads damaged in turn, with the start trace and the slow-start
+  # screen: cheap, Linux, no bridge. The same files run in the Windows
+  # shards too; this job says on its own when a start would hang or need
+  # a data wipe after an update (docs/TESTING.md, "Upgrade fixtures").
+  upgrade-start:
+    name: Start on older data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Test
+        run: >-
+          dart run tool/test.dart --results test-results
+          test/start_upgrade_test.dart
+          test/start_trace_test.dart
+          test/start_watchdog_test.dart
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: ci-test-results-upgrade
+          path: test-results/
+          retention-days: 3
+          if-no-files-found: ignore
+
   # The check the branch rules require: green only when format, analyzer,
   # the release contract and every test job passed. It runs even when one
   # of them failed (a skipped required check would count as passed), and
@@ -186,7 +225,7 @@ jobs:
   # (tool/ci/ci_summary.py, which never fails the job itself).
   app:
     name: Analyze and test
-    needs: [checks, test, test-linux]
+    needs: [checks, test, test-linux, upgrade-start]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -214,10 +253,14 @@ jobs:
           ANALYZE: ${{ needs.checks.outputs.analyze }}
           TESTS: ${{ needs.test.result }}
           LINUX_TESTS: ${{ needs.test-linux.result }}
+          UPGRADE_TESTS: ${{ needs.upgrade-start.result }}
         run: |
           outcome=$TESTS
           if [ "$TESTS" = success ] && [ "$LINUX_TESTS" != success ]; then
             outcome=$LINUX_TESTS
+          fi
+          if [ "$outcome" = success ] && [ "$UPGRADE_TESTS" != success ]; then
+            outcome=$UPGRADE_TESTS
           fi
           # shellcheck disable=SC2046 # one argument per results file
           python3 tool/ci/ci_summary.py flutter --format "$FORMAT" \
@@ -229,11 +272,13 @@ jobs:
           CHECKS: ${{ needs.checks.result }}
           TESTS: ${{ needs.test.result }}
           LINUX_TESTS: ${{ needs.test-linux.result }}
+          UPGRADE_TESTS: ${{ needs.upgrade-start.result }}
         run: |
           echo "Format, analyzer and release contract: $CHECKS"
           echo "Tests (Windows, 4 jobs): $TESTS"
           echo "Tests on Linux: $LINUX_TESTS"
-          for result in "$CHECKS" "$TESTS" "$LINUX_TESTS"; do
+          echo "Start on older data: $UPGRADE_TESTS"
+          for result in "$CHECKS" "$TESTS" "$LINUX_TESTS" "$UPGRADE_TESTS"; do
             if [ "$result" != success ]; then
               exit 1
             fi

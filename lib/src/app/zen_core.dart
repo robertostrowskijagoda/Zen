@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:zen/src/app/feature_flags.dart';
+import 'package:zen/src/app/start_trace.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// One part of Zen that [ZenCore] starts and stops: its services, timers and
@@ -18,7 +19,10 @@ abstract class ZenModule {
   ZenFeature? get feature => null;
 
   /// Starts the module's services. Modules start one after another, in the
-  /// order of the registry, each once the previous one has started.
+  /// order of the registry, each once the previous one has started — or
+  /// once [ZenCore.modulePatience] has passed: one module that hangs
+  /// (a node that does not come up, a store that does not answer) never
+  /// holds the others back.
   FutureOr<void> start();
 
   /// Stops what [start] started. Modules stop in the reverse order.
@@ -48,6 +52,7 @@ final class ZenCore {
     required List<ZenModule> modules,
     required Future<FeatureFlags> Function() loadFlags,
     this.minute = const Duration(minutes: 1),
+    this.modulePatience = const Duration(seconds: 15),
   }) : modules = List<ZenModule>.unmodifiable(modules),
        _loadFlags = loadFlags {
     final Set<String> ids = <String>{};
@@ -64,13 +69,18 @@ final class ZenCore {
   /// How often [ZenModule.onMinute] runs (shorter in tests).
   final Duration minute;
 
+  /// How long the next module waits for one that is still starting; the
+  /// late one joins the running ones once its start is done.
+  final Duration modulePatience;
+
   final Future<FeatureFlags> Function() _loadFlags;
 
   /// Started modules, in the order they started.
   final List<ZenModule> _running = <ZenModule>[];
 
-  /// The module whose start is in progress; [stop] stops it at once.
-  ZenModule? _startingModule;
+  /// The modules whose start is in progress (more than one once a start
+  /// outlived [modulePatience]); [stop] stops them at once.
+  final List<ZenModule> _starting = <ZenModule>[];
 
   FeatureFlags? _flags;
   bool _started = false;
@@ -114,12 +124,11 @@ final class ZenCore {
     _generation++;
     _ticker?.cancel();
     _ticker = null;
-    final ZenModule? starting = _startingModule;
-    _startingModule = null;
     final List<ZenModule> running = <ZenModule>[
-      ?starting,
+      ..._starting.reversed,
       ..._running.reversed,
     ];
+    _starting.clear();
     _running.clear();
     for (final ZenModule module in running) {
       // Not awaited when synchronous: `await null` would still yield, and the
@@ -228,7 +237,8 @@ final class ZenCore {
       if (module.feature == null ||
           flags == null ||
           !_isEnabled(module, flags) ||
-          _running.contains(module)) {
+          _running.contains(module) ||
+          _starting.contains(module)) {
         continue;
       }
       await _startModule(module, generation);
@@ -252,21 +262,59 @@ final class ZenCore {
   }
 
   Future<void> _startModule(ZenModule module, int generation) async {
-    _startingModule = module;
-    bool failed = false;
-    try {
-      await module.start();
-    } catch (error, stackTrace) {
-      logZenError('Starting the ${module.id} module failed', error, stackTrace);
-      failed = true;
+    _starting.add(module);
+    final Stopwatch watch = Stopwatch()..start();
+    final Future<bool> started = () async {
+      try {
+        await module.start();
+        return true;
+      } catch (error, stackTrace) {
+        logZenError(
+          'Starting the ${module.id} module failed',
+          error,
+          stackTrace,
+        );
+        return false;
+      }
+    }();
+    final bool? ok = await started
+        .then<bool?>((bool value) => value)
+        .timeout(modulePatience, onTimeout: () => null);
+    if (ok == null) {
+      logZenWarning(
+        'The ${module.id} module is still starting after '
+        '${modulePatience.inSeconds} s; the next modules start meanwhile.',
+      );
+      ZenStartTrace.note('module ${module.id} still starting');
+      unawaited(
+        started.then((bool late) async {
+          ZenStartTrace.note(
+            'module ${module.id} started late after '
+            '${watch.elapsedMilliseconds} ms',
+          );
+          await _finishStart(module, generation, late);
+        }),
+      );
+      return;
     }
-    if (_startingModule != module) {
+    if (watch.elapsedMilliseconds >= 1000) {
+      ZenStartTrace.note(
+        'module ${module.id} took ${watch.elapsedMilliseconds} ms',
+      );
+    }
+    await _finishStart(module, generation, ok);
+  }
+
+  /// After [module]'s start ended ([ok]: without an error): it runs from
+  /// now on, or is stopped again when the core stopped meanwhile, its
+  /// feature went off or the start failed.
+  Future<void> _finishStart(ZenModule module, int generation, bool ok) async {
+    if (!_starting.remove(module)) {
       // [stop] came meanwhile and has stopped this module already.
       return;
     }
-    _startingModule = null;
     final FeatureFlags? flags = _flags;
-    if (failed ||
+    if (!ok ||
         generation != _generation ||
         (flags != null && !_isEnabled(module, flags))) {
       await _stopModule(module);

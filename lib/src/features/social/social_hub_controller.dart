@@ -239,6 +239,10 @@ const Duration _mentionAlertWindow = Duration(minutes: 10);
 /// person; past it they notify like any other message.
 const int kMaxMentionAlertsPerSender = 5;
 
+/// How long reading the stored snapshot (friends, groups, the inbox) may
+/// take at start before it counts as unreadable.
+const Duration kSnapshotReadTimeout = Duration(seconds: 45);
+
 /// Delays of the extra call-teardown attempts, relative to the first one.
 const List<Duration> _callTeardownRetryDelays = <Duration>[
   Duration(milliseconds: 400),

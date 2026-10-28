@@ -297,7 +297,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   Future<void> _hydrateFromStore({bool fromUnlock = false}) async {
     final SocialHubState? persisted;
     try {
-      persisted = await _snapshotStore.load();
+      // Bounded: everything the hub does waits behind this read (the work
+      // queue, the writers). A read that does not come back is taken as
+      // unreadable — saving stays paused, nothing is lost — and is tried
+      // again when the app comes back to the screen.
+      persisted = await _snapshotStore.load().timeout(kSnapshotReadTimeout);
     } on Object {
       if (_isSecurityBlockingUi && !_controllerDisposed) {
         // Read while the app was still locked (something above the lock

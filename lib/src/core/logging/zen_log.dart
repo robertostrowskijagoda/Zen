@@ -212,7 +212,13 @@ abstract final class ZenDiagnosticsLog {
   static Future<List<String>> entries() async {
     final File? target = _file;
     if (target == null) {
-      return const <String>[];
+      // Not attached yet (a start that waits before its data folder is
+      // known): what was written so far, so that "Zapisz dziennik" on the
+      // slow-start screen still says something.
+      return <String>[
+        for (final (DateTime time, String line) in _early)
+          _entry(time, line).trimRight(),
+      ];
     }
     final List<String> texts = <String>[];
     for (final List<File> files in (await _files(target.parent)).values) {

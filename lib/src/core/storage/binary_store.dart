@@ -631,6 +631,38 @@ final class FileBinaryStore {
     return protector.unseal(bytes);
   }
 
+  /// Sets the file of [key] and its backup aside (renamed with
+  /// `.damaged-<time>` after their names, never read again but kept for a
+  /// look by hand) when neither can be read: the next read finds nothing
+  /// and the next write starts afresh. For a store the app cannot start
+  /// without, where an unreadable file must not ask for a wipe of the
+  /// whole app. Returns how many files were set aside.
+  Future<int> quarantine(String key) async {
+    final _StorePlace place = await _placeOf(key);
+    final String stamp = DateTime.now().millisecondsSinceEpoch.toString();
+    int moved = 0;
+    for (final File file in <File>[
+      place.file,
+      File('${place.file.path}.bak'),
+    ]) {
+      try {
+        if (await file.exists()) {
+          await file.rename('${file.path}.damaged-$stamp');
+          moved += 1;
+        }
+      } on FileSystemException catch (error) {
+        logZenWarning('Setting a damaged file aside failed: $error');
+      }
+    }
+    if (moved > 0) {
+      logZenWarning(
+        'Plik "${ZenStorageHealth.categoryOf(place.canonicalKey)}" był '
+        'nieczytelny; odłożony na bok, Zen zaczyna go od nowa.',
+      );
+    }
+    return moved;
+  }
+
   Future<void> delete(String key) async {
     if (_heldNewer.contains(_canonicalKey(key))) {
       return;

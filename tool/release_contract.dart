@@ -1021,3 +1021,21 @@ List<String> pinnedKeyProblems({
     'kOfficialApkCertificatesSha256 is empty: pin the APK certificate '
         '(dart run tool/zen_release.dart fingerprint --keystore <jks> --write)',
 ];
+
+/// Where the upgrade fixture of [version] lives (docs/TESTING.md, "Upgrade
+/// fixtures"): an account written by that release's own code, which every
+/// later build must start on.
+String upgradeFixtureFolder(String version) => 'test/fixtures/upgrade/$version';
+
+/// What to say before releasing the version after [released] when
+/// [released] left no upgrade fixture behind ([present]: the folders in
+/// test/fixtures/upgrade); `null` when it did.
+String? missingUpgradeFixture(String released, Iterable<String> present) {
+  if (present.contains(released)) {
+    return null;
+  }
+  return 'No upgrade fixture of $released: the next build is not tested '
+      'on its data. Make it from the tag v$released before releasing and '
+      'commit ${upgradeFixtureFolder(released)} (docs/TESTING.md, '
+      '"Upgrade fixtures").';
+}

@@ -267,11 +267,11 @@ class CiWorkflowTest(unittest.TestCase):
         app = self.jobs["app"]
         # The name the branch rules require stays.
         self.assertIn("name: Analyze and test\n", app)
-        self.assertIn("needs: [checks, test, test-linux]", app)
+        self.assertIn("needs: [checks, test, test-linux, upgrade-start]", app)
         # Also when one failed: a skipped required check counts as passed.
         self.assertIn("if: ${{ always() }}", app)
         for result in ("needs.checks.result", "needs.test.result",
-                       "needs.test-linux.result"):
+                       "needs.test-linux.result", "needs.upgrade-start.result"):
             self.assertIn(result, app)
 
     def test_shards_are_numbered_from_one(self):

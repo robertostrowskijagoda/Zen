@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -17,15 +18,22 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 /// * the user's own GIF API key lives only in secure storage.
 ///
 /// Secure storage failing never stops the app: the file is used as before.
+/// Nor does secure storage that does not answer: at start each of its
+/// calls may take [secretsTimeout] (the Keystore can hang after an update
+/// or a restore), then the file is used.
 final class GuardedAppSettingsStore implements AppSettingsStore {
   GuardedAppSettingsStore({
     required this.inner,
     AppSecurityCredentialsStore secrets = const SecureStorageCredentialsStore(),
+    this.secretsTimeout = const Duration(seconds: 5),
   }) : _secrets = secrets;
 
   /// The settings file.
   final AppSettingsStore inner;
   final AppSecurityCredentialsStore _secrets;
+
+  /// How long [load] waits for one answer of secure storage.
+  final Duration secretsTimeout;
 
   static const int _version = 1;
 
@@ -81,12 +89,12 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
   Future<AppSettings?> load() async {
     final AppSettings? fromFile = await inner.load();
     try {
-      final String? guarded = await _secrets.read(
-        appSecurityGuardedSettingsStorageKey,
-      );
-      final String? gifKey = await _secrets.read(
-        appSecurityGifApiKeyStorageKey,
-      );
+      final String? guarded = await _secrets
+          .read(appSecurityGuardedSettingsStorageKey)
+          .timeout(secretsTimeout);
+      final String? gifKey = await _secrets
+          .read(appSecurityGifApiKeyStorageKey)
+          .timeout(secretsTimeout);
       if (fromFile == null) {
         // No file (deleted?): what was protected still holds.
         final AppSettings? kept = _apply(const AppSettings(), guarded);
@@ -99,10 +107,9 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
       final AppSettings? guardedSettings = _apply(fromFile, guarded);
       if (guardedSettings == null) {
         // First start with the guard: remember what the file says.
-        await _secrets.write(
-          appSecurityGuardedSettingsStorageKey,
-          _encode(fromFile),
-        );
+        await _secrets
+            .write(appSecurityGuardedSettingsStorageKey, _encode(fromFile))
+            .timeout(secretsTimeout);
       } else {
         if (_encode(guardedSettings) != _encode(fromFile)) {
           logZenWarning(

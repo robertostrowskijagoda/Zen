@@ -348,6 +348,59 @@ the first system language, then English, loading files) and the repository the
 same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 `assets/i18n` holds only languages Zen knows.
 
+## 5.1 Upgrade fixtures and the start (`test/start_upgrade_test.dart`)
+
+Every release leaves an account written by its own code in
+`test/fixtures/upgrade/<version>/`: friends, a pending request, a group,
+messages, a queued signal, notifications, presence, the profile, the relay
+state, posts in the ledger, drafts and the settings, sealed under a test
+password (`fixture.json` names it) with keys made for the fixture only;
+`secure_storage.json` stands in for the system's secure storage. Each
+folder is a few dozen kilobytes.
+
+`test/start_upgrade_test.dart` runs the app's real start sequence
+(`ZenBootstrapper` with the real file stores, the settings with their
+protected copy and the app lock; everything but the node) on a copy of each
+folder: it must reach the first screen within a bounded time, unlock with
+the fixture's password and find everything (the social hub is hydrated the
+way the app does it). Then every file of the newest fixture is damaged in
+turn — emptied, cut short, overwritten with garbage, given a format version
+from the future, together with its backup — and the app must still start,
+never hang and never need its data wiped (a settings file it cannot read is
+set aside as `*.damaged-<time>` and the next start is a normal one). The
+CI job *Start on older data* runs it with the start trace and slow-start
+tests.
+
+After a release, add its fixture from the release's tag, before the next
+one is prepared (`dart run tool/release.dart prepare` reminds you when the
+version released last has none):
+
+```sh
+git worktree add ../zen-fixture v1.14.1
+cd ../zen-fixture
+flutter pub get
+ZEN_FIXTURE_OUT=$PWD/fixture flutter test tool/upgrade_fixture/seed_test.dart
+cd -
+cp -r ../zen-fixture/fixture test/fixtures/upgrade/1.14.1
+git worktree remove ../zen-fixture
+flutter test test/start_upgrade_test.dart
+```
+
+The seed test writes with the code of the checkout it runs in; envelopes are
+stored uncompressed (the test machines have no zstd library), a form the app
+reads like any other. A release that stores something new adds it to
+`tool/upgrade_fixture/seed_test.dart` and the check of it to
+`test/start_upgrade_test.dart`. Fixtures are never edited after they are
+committed; for releases before 1.14.1 the seed test was copied into a
+checkout of the tag by hand.
+
+Every start writes its steps to `zen-diagnostics-start.log` (read back with
+the diagnostics log) before each one begins, and a `TECH  start step=<id>
+ms=<n> result=<ok|timeout|failed|skipped>` line when it ends; the next start
+logs where the previous one stopped (`The previous start stopped at step
+"…"`). `test/start_trace_test.dart` and `test/start_watchdog_test.dart`
+cover that and the slow-start screen.
+
 ## 6. GitHub Actions
 
 `.github/workflows/ci.yml` — on every push to `main`, pull request and by hand
@@ -358,7 +411,8 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 | Format and analyze | Windows | `dart format` (no changes), `flutter analyze`, the release contract (`tool/release.dart check`) and the Python tests of `tool/ci` |
 | Tests (1 of 4) … (4 of 4) | Windows | the app's tests (including translations), a quarter of the files each, at the same time (`dart run tool/test.dart --shard N/4`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
-| Analyze and test | Ubuntu | waits for the four jobs above and is green only when all of them are; the check the branch rules require. Writes the report described below |
+| Start on older data | Ubuntu | the app's start on every upgrade fixture and on damaged files, the start trace and the slow-start screen (`start_upgrade_test.dart`, `start_trace_test.dart`, `start_watchdog_test.dart`; section 5.1) |
+| Analyze and test | Ubuntu | waits for the jobs above and is green only when all of them are; the check the branch rules require. Writes the report described below |
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
 | Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
