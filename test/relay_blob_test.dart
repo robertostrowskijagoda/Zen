@@ -568,6 +568,43 @@ void main() {
     expect(await _heldChunkCount(mesh), 0);
   });
 
+  // A mailbox that is around but never confirms a chunk (a node of another
+  // engine answering for its phone) got a new window of half a megabyte at
+  // every sighting past the window's timeout.
+  test('a mailbox that never confirms gets windows on a growing wait, not at '
+      'every sighting', () async {
+    final _SimMesh mesh = await _mesh();
+    final Uint8List file = _bytes(600 * 1000, seed: 5);
+    await mesh.goOffline(bob);
+    final Map<String, int> puts = <String, int>{};
+    mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+      if (from == alice && p['type'] == 'rly_bput') {
+        puts[to] = (puts[to] ?? 0) + 1;
+      }
+      if (p['type'] == 'rly_bput_ack') {
+        return null; // the chunks arrive, the confirmations never do
+      }
+      return p;
+    };
+    expect(await _sendAttachment(mesh, file), isTrue);
+    await mesh.settle();
+    await mesh.advance(const Duration(seconds: 5));
+    expect(puts, isNotEmpty);
+    final String talker = puts.keys.first;
+    final int firstWindow = puts[talker]!;
+
+    // Ten minutes of the mailbox talking every six seconds.
+    for (int i = 0; i < 100; i++) {
+      await mesh.nodes[alice]!.receive(talker, <String, dynamic>{
+        'type': 'typing',
+      });
+      await mesh.advance(const Duration(seconds: 6));
+    }
+    // A window now, after 2, then 4 minutes more (it was one per sighting
+    // past the timeout, some twenty-five).
+    expect(puts[talker]! ~/ firstWindow, lessThanOrEqualTo(4));
+  });
+
   test('blob state survives a save', () {
     final RelayState state = RelayState(
       peers: <String, RelayPeerInfo>{
