@@ -4,7 +4,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/storage/format_version.dart';
@@ -136,8 +138,8 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       _cache.clear();
       return const <ChatMessage>[];
     } on Object {
-      // A damaged index: nothing to show, as before. Nothing is written
-      // over it either.
+      // A newer build's index: nothing to show, and nothing is written
+      // over it (a damaged one starts afresh in [_open]).
       return const <ChatMessage>[];
     }
   }
@@ -146,7 +148,7 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
   Future<void> append(String peerAddress, ChatMessage message) {
     final String key = _keyFor(peerAddress);
     return _serial(key, () async {
-      final _Thread thread = await _open(key);
+      final _Thread thread = await _open(key, before: message.sentAtMillis);
       final List<ChatMessage> all = thread.all;
       if (all.isNotEmpty && all.last.sentAtMillis > message.sentAtMillis) {
         // Older than what came since (held by relays while offline): it goes
@@ -199,9 +201,11 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
 
   /// The conversation under [key]: from memory while the index on disk has
   /// the generation it was read with, else read again. Throws when the
-  /// index cannot be read (or the store is locked): nothing may then be
-  /// written.
-  Future<_Thread> _open(String key) async {
+  /// store is locked or a newer build wrote the index: nothing may then be
+  /// written. A damaged index starts the conversation afresh
+  /// ([_restartDamaged]; its note dated before [before], the message about
+  /// to be added).
+  Future<_Thread> _open(String key, {int? before}) async {
     final _ThreadIndex? index;
     try {
       index = _ThreadIndex.decode(await disk.read(_indexKey(key)));
@@ -209,6 +213,8 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       // A newer build's conversation: kept as it is (never written).
       holdNewerOn(disk, _indexKey(key));
       rethrow;
+    } on FormatException catch (error) {
+      return _restartDamaged(key, error, before: before);
     }
     final _Thread? cached = _cache[key];
     if (index == null) {
@@ -233,6 +239,68 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
         drop: await _dropSegments(key, index.drop),
       ),
     );
+  }
+
+  /// The index of [key] cannot be read (neither it nor its backup: cut
+  /// short, a byte changed, past the size limit), so no piece of the
+  /// conversation can be found. Before, every message to and from that
+  /// friend failed on it for good. Now the index is set aside, and the
+  /// conversation goes on in pieces numbered past the old ones (those stay
+  /// on disk as they are and are never written over), starting with a note
+  /// that the older messages could not be read.
+  Future<_Thread> _restartDamaged(
+    String key,
+    FormatException error, {
+    int? before,
+  }) async {
+    logZenWarning(
+      'A conversation index is damaged (${error.message}); the '
+      'conversation goes on afresh.',
+    );
+    await setAsideOn(disk, _indexKey(key));
+    _cache.remove(key);
+    final int now = min(
+      DateTime.now().millisecondsSinceEpoch,
+      before == null ? 1 << 62 : before - 1,
+    );
+    final _Segment first = _Segment(await _freshSegmentId(key), <ChatMessage>[
+      ChatMessage(
+        id: 'system-history-unreadable-$now',
+        sender: 'system',
+        text: t(
+          'Starszych wiadomości tej rozmowy nie udało się odczytać (plik '
+          'był uszkodzony). Nowe zapisują się normalnie.',
+        ),
+        sentAtMillis: now,
+        direction: ChatMessageDirection.system,
+      ),
+    ]);
+    await _store(
+      key,
+      _Thread.empty(),
+      segments: <_Segment>[first],
+      written: <_Segment>[first],
+      nextId: first.id + 1,
+    );
+    return _cache[key]!;
+  }
+
+  /// A piece number far past those an index ever names (they count up
+  /// from 0) and not on disk: the pieces of an index that was set aside
+  /// stay as they are.
+  Future<int> _freshSegmentId(String key) async {
+    int id = 0;
+    for (int attempt = 0; attempt < 4; attempt++) {
+      id = (1 << 30) + _random.nextInt(1 << 29);
+      try {
+        if (await disk.read(_segmentKey(key, id)) == null) {
+          break;
+        }
+      } on Object {
+        // Something is there: another number.
+      }
+    }
+    return id;
   }
 
   /// A piece; one that is gone counts as empty, one that cannot be read is
