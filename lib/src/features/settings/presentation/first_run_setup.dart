@@ -10,6 +10,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
+import 'package:zen/src/features/meet/presentation/gate_widgets.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
@@ -68,7 +69,17 @@ abstract interface class GateDefaults {
   /// The gates now; `null` for terms of one's own.
   GateDefault? get current;
 
+  /// The terms when every tier has the same ones (a price among them),
+  /// else `null`.
+  GateTerms? get terms;
+
+  /// A member of the pyramid: only then can anyone pay a price.
+  bool get member;
+
   Future<void> set(GateDefault value);
+
+  /// The same [terms] for every tier (a price set in the setup).
+  Future<void> setTerms(GateTerms terms);
 
   /// Fires when the gates change.
   Listenable get changes;
@@ -83,9 +94,18 @@ final class IntroGateDefaults implements GateDefaults {
   GateDefault? get current => GateDefault.of(intro.gates);
 
   @override
-  Future<void> set(GateDefault value) async {
+  GateTerms? get terms => intro.gates.sameForAll;
+
+  @override
+  bool get member => intro.wallet?.myKey != null;
+
+  @override
+  Future<void> set(GateDefault value) => setTerms(value.terms);
+
+  @override
+  Future<void> setTerms(GateTerms terms) async {
     for (final GateTier tier in GateTier.values) {
-      await intro.setGateTier(tier, value.terms);
+      await intro.setGateTier(tier, terms);
     }
   }
 
@@ -449,18 +469,41 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
   );
 }
 
-/// "Otwarte za darmo" or "Za moją zgodą", saved at once.
+/// "Otwarte za darmo", "Za moją zgodą" or "Za cenę" (the gates' own terms
+/// editor, the same price for everyone), saved at once.
 class _GateDefaultChoice extends ConsumerWidget {
   const _GateDefaultChoice();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final GateDefaults gates = ref.watch(gateDefaultsProvider);
+    void save(Future<void> saving) => unawaited(
+      saving.catchError((Object error, StackTrace stack) {
+        logZenError('Bramy: zapis', error, stack);
+      }),
+    );
+    Future<void> editPrice() async {
+      final GateTerms? now = gates.terms;
+      final GateTerms? terms = await editGateTerms(
+        context,
+        initial: now ?? GateTerms.standard,
+        title: t('Cena bramy'),
+        member: gates.member,
+        askPrice: now == null || now.free,
+      );
+      if (terms != null) {
+        save(gates.setTerms(terms));
+      }
+    }
+
     return ListenableBuilder(
       listenable: gates.changes,
       builder: (BuildContext context, Widget? child) {
         final ZenColors zen = ZenColors.of(context);
         final GateDefault? current = gates.current;
+        final GateTerms? terms = gates.terms;
+        final GateTerms? paid = terms != null && !terms.free ? terms : null;
+        final bool priced = paid != null;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -475,24 +518,26 @@ class _GateDefaultChoice extends ConsumerWidget {
                     showCheckmark: false,
                     label: Text(value.label),
                     selected: current == value,
-                    onSelected: (_) => unawaited(
-                      gates.set(value).catchError((
-                        Object error,
-                        StackTrace stack,
-                      ) {
-                        logZenError('Bramy: zapis', error, stack);
-                      }),
-                    ),
+                    onSelected: (_) => save(gates.set(value)),
                   ),
+                ChoiceChip(
+                  key: const Key('first-run-gates-paid'),
+                  showCheckmark: false,
+                  label: Text(t('Za cenę')),
+                  selected: priced,
+                  onSelected: (_) => unawaited(editPrice()),
+                ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              current?.description ??
-                  t(
-                    'Masz własne ceny bram. Wybierz jedną z opcji, żeby je '
-                    'zastąpić, albo zostaw je bez zmian.',
-                  ),
+              paid != null
+                  ? t('Dla wszystkich: {terms}.', {'terms': paid.label})
+                  : current?.description ??
+                        t(
+                          'Masz własne ceny bram. Wybierz jedną z opcji, żeby '
+                          'je zastąpić, albo zostaw je bez zmian.',
+                        ),
               key: const Key('first-run-gates-description'),
               style: TextStyle(
                 color: zen.textSecondary,
@@ -500,9 +545,31 @@ class _GateDefaultChoice extends ConsumerWidget {
                 height: 1.35,
               ),
             ),
+            if (priced) ...<Widget>[
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton.icon(
+                  key: const Key('first-run-gates-price-edit'),
+                  onPressed: () => unawaited(editPrice()),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: Text(t('Zmień cenę')),
+                ),
+              ),
+              if (!gates.member)
+                ZenInfo(
+                  icon: Icons.info_outline_rounded,
+                  text: t(
+                    'Płatne bramy działają tylko między członkami piramidy '
+                    '(punkty z portfela). Poza nią — tylko darmowe.',
+                  ),
+                ),
+            ],
             const SizedBox(height: 6),
             Text(
-              t('Ceny i wyjątki ustawisz później na grafie, w trybie Bramy.'),
+              t(
+                'Osobne ceny dla przyjaciół, znajomych i dalszych osób oraz '
+                'wyjątki ustawisz później na grafie, w trybie Bramy.',
+              ),
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
           ],
