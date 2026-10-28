@@ -10,6 +10,28 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Messages and notifications arrive again after Zen restarts or an account is restored.
+- [en] Restoring a full backup brings back everything, including your app password; friends see you right away.
+- [en] GIFs from the search work again, and tapping a Zen backup file opens it in Zen.
+- [pl] Wiadomości i powiadomienia znów docierają po ponownym uruchomieniu Zen i po przywróceniu konta.
+- [pl] Przywrócenie pełnej kopii przywraca wszystko, także hasło aplikacji, a znajomi od razu Cię widzą.
+- [pl] GIF-y z wyszukiwarki znów działają, a dotknięcie pliku kopii otwiera go w Zen.
+
+### Fixes
+- After the app's engine was recreated (for example after restoring an account), the background service and the app could not start their connection for minutes ("a node with this identity already runs"), so messages and notifications didn't arrive. The newest owner now takes the connection over at once and the old one goes quiet.
+- A friend request accepted while Zen was in the background could turn the friend back into a pending request when Zen opened, showing them as "Kontakt Zen" and stopping presence.
+- After a restore, friends are greeted again within a minute and profiles (names, photos) are exchanged with the new device.
+- Restoring a whole backup restores every setting and the app password; the setup appears only when the backup comes from an older version. "I already have an account" is offered on the password step, without the app flashing up first.
+- GIFs from the search are sent as a copy small enough to travel inside the message; a device that keeps receiving without confirming no longer gets the same data again and again.
+- Returning to an open conversation sends the read receipt (two ticks).
+- Coming back to the app no longer crashes when a link reaches it.
+- "Start over" on the lock screen needs the full 10-second hold also with animations turned off.
+- The send buttons in chats and comments are centred and show their icon; snack bars with an action disappear after their time.
+- The diagnostics log is saved to Downloads on Android.
+- Tapping a Zen backup, key or update file opens it in Zen (Android, iPhone, Mac, Linux; "Open with" on Windows).
+- The setup's gates step can set a price.
+
 ## 1.13.0 — 27.10.2026
 
 ### What's new
