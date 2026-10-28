@@ -797,6 +797,12 @@ jobs:
             echo "::warning::No ZEN_RELEASE_SIGNING_KEY in the secrets of the environment 'release': SHA256SUMS.sig is not made, and builds that know a release key will not update themselves from this release."
             sums=false
           fi
+          # A fork may release without keys; this repository may not, or the
+          # installed builds would refuse the update and its note.
+          if [ "$GITHUB_REPOSITORY" = "robertostrowskijagoda/Zen" ] && { [ "$apk" = false ] || [ "$sums" = false ]; }; then
+            echo "::error::A release of this repository needs both keys in the environment 'release'."
+            exit 1
+          fi
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
           echo "sums=$sums" >> "$GITHUB_OUTPUT"
 

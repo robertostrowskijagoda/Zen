@@ -231,10 +231,11 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    **`release` environment** (Settings → Environments; not the repository
    secrets): `ANDROID_KEYSTORE_BASE64` (the `.jks` file in base64),
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-   — without them the APKs are left out (a warning) — and
-   `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
-   `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
-   warning). Only the `sign` job uses the environment, so a tag run asks
+   and `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
+   `SHA256SUMS` (section 8.6). In this repository the `sign` job fails when
+   any of them is missing, because the installed builds would refuse such a
+   release and its note; a fork without them gets a release without APKs
+   and without `SHA256SUMS.sig`, with a warning. Only the `sign` job uses the environment, so a tag run asks
    for one approval. The environment
    requires an approver (the maintainer) and has a rule for `v*` tags
    only; the keys go only to a run of a `v*` tag after approval (described
