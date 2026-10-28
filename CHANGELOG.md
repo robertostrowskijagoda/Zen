@@ -39,16 +39,18 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - The follower count includes every friend, and the followers list shows them.
 
 ### Settings and storage
-- **One "Data and storage" page**: how much room Zen takes, with a breakdown, the total limit (1 GB by default, from 10 MB to 10 GB) and an optional separate limit for friends' photos and videos, where the oldest go first and your own posts are never touched.
+- **One "Data and storage" page**: how much room Zen takes, with a breakdown, the storage limit (1 GB by default, from 10 MB to 10 GB) and an optional separate limit for friends' photos and videos.
+- **Zen keeps within its storage limit** by deleting only the oldest photos and videos of friends' posts; messages, chats, your own posts, backups and exports are never deleted on their own. When Zen goes over the limit, a warning on the page and one notice (at most once a day) offer to raise it.
 - "Run the setup again" is the first item in Settings.
 
 ### Fixes
+- The "new version" notification goes away once that version is installed, and a What's new note that could not be fetched is fetched again at the next check.
 - The offline mailboxes, the meeting hub and several sheets no longer hide their last items under the system bar.
 - Holding the alarm and delete buttons no longer selects text.
 
 ### Development
 - The tests run in parallel groups (`dart run tool/test.dart`), about twice as fast; CI splits them into four jobs and runs the tests that need Linux or the Go bridge on Linux.
-- A release needs one approval: the APKs are built in parallel without keys and everything is signed in one approved job.
+- A release needs one approval: the APKs are built in parallel without keys and everything is signed in one approved job. A release of this repository stops when a signing key is missing.
 
 ## 1.13.1 — 28.10.2026
 
