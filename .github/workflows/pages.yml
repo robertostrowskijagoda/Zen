@@ -7,6 +7,7 @@
 #   /apps.json     an AltStore / SideStore source: "Add Zen source" in
 #                  SideStore installs the release's Zen-unsigned.ipa and
 #                  keeps it up to date (tool/ci/release_source.py);
+#   /scarlet.json  the same app as a Scarlet repo ("Add Zen to Scarlet");
 #   /release.json  version, files and sizes, and the Android signing
 #                  certificate fingerprint, for the install page;
 #   /zen-icon.png  the app icon the source names.
@@ -103,7 +104,7 @@ jobs:
           done
           cat "$RUNNER_TEMP/fingerprint.txt"
 
-      - name: SideStore / AltStore source and release data
+      - name: SideStore / AltStore and Scarlet sources and release data
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-

@@ -56,13 +56,19 @@ void main() {
       expect(home, contains('zen-icon.png'));
     });
 
-    test('the iPhone source is made from the release, not kept here', () {
+    test('the iPhone sources are made from the release, not kept here', () {
       expect(File('$_site/apps.json').existsSync(), isFalse);
+      expect(File('$_site/scarlet.json').existsSync(), isFalse);
       final String workflow = File(
         '.github/workflows/pages.yml',
       ).readAsStringSync();
       expect(workflow, contains('apps.json'));
+      expect(workflow, contains('scarlet.json'));
       expect(workflow, contains('release_source.py'));
+      expect(
+        File('tool/ci/release_source.py').readAsStringSync(),
+        contains('"scarlet.json"'),
+      );
     });
   });
 
@@ -168,6 +174,29 @@ void main() {
       expect(iphone, contains('revoke'));
       // The about page thanks Yggdrasil and Scarlet.
       expect(_read('site.js'), contains('https://usescarlet.com/'));
+    });
+
+    test('iPhone: the Scarlet source is only another way, after the steps, '
+        'with the address to paste', () {
+      final String iphone = _read('install/iphone/index.html');
+      const String source =
+          'https://robertostrowskijagoda.github.io/Zen/scarlet.json';
+      expect(iphone, contains('href="scarlet://source=$source"'));
+      // The four steps stay as they are; the source comes under "Other
+      // ways", never as a step.
+      final int steps = iphone.indexOf('</ol>');
+      expect(iphone.indexOf('scarlet://'), greaterThan(steps));
+      expect(
+        iphone.indexOf('scarlet://'),
+        greaterThan(iphone.indexOf('data-i="otherWays"')),
+      );
+      expect('<li>'.allMatches(iphone.substring(0, steps)), hasLength(4));
+      // Every language says how to add it by hand, with the address.
+      final String texts = iphone.substring(iphone.indexOf('var TEXTS'));
+      expect('"scarletSource": '.allMatches(texts), hasLength(21));
+      expect('"addScarlet": '.allMatches(texts), hasLength(21));
+      expect('**Add Repo**'.allMatches(texts), hasLength(21));
+      expect('`$source`'.allMatches(texts), hasLength(21));
     });
 
     test('every system page has a download or the steps, and a way on', () {

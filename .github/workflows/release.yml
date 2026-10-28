@@ -762,8 +762,8 @@ jobs:
       # new" part of this version in CHANGELOG.md (tool/release.dart
       # prepare requires it). Made before SHA256SUMS, so SHA256SUMS.sig
       # signs it with every other file. The iPhone file must be there: the
-      # SideStore / AltStore source (apps.json on GitHub Pages, pages.yml)
-      # points to it.
+      # SideStore / AltStore and Scarlet sources (apps.json, scarlet.json on
+      # GitHub Pages, pages.yml) point to it.
       - name: Prepare
         env:
           TAG: ${{ github.ref_name }}

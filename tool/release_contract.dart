@@ -25,8 +25,8 @@ const List<String> kUpdateAssets = <String>[
   'Zen-Linux-x64.flatpak',
 ];
 
-/// The iPhone file: the SideStore / AltStore source (apps.json) and the
-/// install page point to it.
+/// The iPhone file: the SideStore / AltStore and Scarlet sources (apps.json,
+/// scarlet.json) and the install page point to it.
 const String kIpaAsset = 'Zen-unsigned.ipa';
 
 /// The sums every update is checked against (sha256SumsUri).

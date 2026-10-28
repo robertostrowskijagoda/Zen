@@ -7,14 +7,16 @@
   field an AltStore / SideStore source needs, pointing to the release's
   Zen-unsigned.ipa, with the app's bundle id and minimum iOS version, the
   permissions and version numbers of that very IPA (checked against the
-  release's SHA256SUMS), and the APK fingerprint the code pins at the tag.
+  release's SHA256SUMS), and the APK fingerprint the code pins at the tag;
+  and a scarlet.json, the same app as a Scarlet repo (`META`, `Apps`).
 - Every download link of tool/pages/install/index.html, the invitation
   page and the door page names a file the release workflow makes (the
   list in tool/release_contract.dart; Android: one APK per ABI), the
   add-source links use the documented `sidestore://source?url=` /
   `altstore://source?url=` form (AltStore's handler: host "source", query
   "url"; SideStore is a fork of it), Obtainium's is `obtainium://add/<repo>`,
-  and every link a text uses exists.
+  the iPhone page's Scarlet link is `scarlet://source=` with the address of
+  scarlet.json, and every link a text uses exists.
 - The app's constants (install page, source address) are the same.
 - The invitation and door pages start with the "Open in Zen" button, and
   the pages link the Discord server the app links.
@@ -128,6 +130,8 @@ class SourceTest(unittest.TestCase):
             source = json.load(f)
         with open(os.path.join(site, "release.json"), encoding="utf-8") as f:
             page = json.load(f)
+        with open(os.path.join(site, "scarlet.json"), encoding="utf-8") as f:
+            self.scarlet = json.load(f)
         return source, page, status
 
     def fake_release(self, names, ipa=None):
@@ -186,6 +190,43 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(page["version"], "9.9.9")
         for apk in ("Zen-arm64-v8a.apk", "Zen-armeabi-v7a.apk", "Zen-x86_64.apk"):
             self.assertIn(apk, page["assets"])
+
+    def test_scarlet_json_is_the_same_app_as_a_scarlet_repo(self):
+        source, _, _ = self.released()
+        repo = self.scarlet
+        self.assertEqual(set(repo), {"META", "Apps"})
+        self.assertEqual(repo["META"], {
+            "repoName": "Zen",
+            "repoIcon": release_source.PAGES + "zen-icon.png",
+        })
+        self.assertEqual(len(repo["Apps"]), 1)
+        app = repo["Apps"][0]
+        for key in ("name", "version", "down", "icon", "dev", "category",
+                    "description", "bundleID"):
+            self.assertIsInstance(app[key], str, key)
+            self.assertTrue(app[key], key)
+        listed = source["apps"][0]
+        self.assertEqual(app["name"], "Zen")
+        # X.Y.Z of the released IPA, and its file pinned to that very tag.
+        self.assertEqual(app["version"], "9.9.9")
+        self.assertEqual(
+            app["down"],
+            "https://github.com/robertostrowskijagoda/Zen/releases/download/"
+            "v9.9.9/Zen-unsigned.ipa")
+        self.assertEqual(app["down"], listed["versions"][0]["downloadURL"])
+        self.assertEqual(app["bundleID"], listed["bundleIdentifier"])
+        self.assertEqual(app["dev"], listed["developerName"])
+        self.assertEqual(app["icon"], listed["iconURL"])
+        self.assertEqual(app["description"], listed["localizedDescription"])
+        self.assertIn("9.9.9", app["changelog"])
+
+    def test_scarlet_json_without_an_app_is_still_a_repo(self):
+        names = [n for n in contract_assets() if n != "Zen-unsigned.ipa"]
+        self.run_source(self.fake_release(names))
+        self.assertEqual(self.scarlet["Apps"], [])
+        self.assertEqual(self.scarlet["META"]["repoName"], "Zen")
+        self.run_source(None)
+        self.assertEqual(self.scarlet["Apps"], [])
 
     def test_permissions_come_from_the_released_ipa_not_from_main(self):
         source, _, _ = self.released()
@@ -418,6 +459,15 @@ class SitePagesTest(unittest.TestCase):
         self.assertIn("/releases/latest/download/Zen-unsigned.ipa", iphone)
         self.assertIn("sidestore://source?url=" + urllib.parse.quote(
             release_source.PAGES + "apps.json", safe=""), iphone)
+        # Scarlet: its source, published next to apps.json, and the address
+        # to paste by hand in every language.
+        self.assertIn('href="scarlet://source=' + release_source.PAGES
+                      + 'scarlet.json"', iphone)
+        texts = language_tables(
+            re.search(r"var TEXTS = \{(.*?)\n  \};", iphone, re.S).group(1))
+        for lang, table in texts.items():
+            self.assertIn("`" + release_source.PAGES + "scarlet.json`",
+                          table["scarletSource"], lang)
         android = read("tool/pages/install/android/index.html")
         self.assertIn("/releases/latest/download/Zen-arm64-v8a.apk", android)
 
