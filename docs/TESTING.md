@@ -11,8 +11,11 @@ From fastest to most "real":
 
 In addition: Go bridge tests (`go test` in `native/yggdrasil_bridge`,
 `test_native.ps1`; among them the post-quantum session layer, local links, LAN
-discovery, Bluetooth and Wi-Fi Direct logic and the door node), translation checks (section 5) and GitHub Actions on every
-push (section 6).
+discovery, Bluetooth and Wi-Fi Direct logic and the door node), translation checks (section 5), GitHub Actions on every
+push (section 6), real Zen devices with real nodes on one computer
+(section 7), every stored file damaged at random (section 8), the app on
+an Android emulator (section 9) and one regression test per reported bug
+(section 10).
 
 ## Running the tests
 
@@ -413,6 +416,7 @@ cover that and the slow-start screen.
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
 | Start on older data | Ubuntu | the app's start on every upgrade fixture and on damaged files, the start trace and the slow-start screen (`start_upgrade_test.dart`, `start_trace_test.dart`, `start_watchdog_test.dart`; section 5.1) |
 | Analyze and test | Ubuntu | waits for the jobs above and is green only when all of them are; the check the branch rules require. Writes the report described below |
+| End-to-end on Linux | Ubuntu | the real-node tests of section 7 (`dart run tool/e2e.dart`), about 6-8 minutes; its own report; not required by the branch rules until it is green |
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
 | Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
@@ -443,6 +447,135 @@ keys), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
 job for Linux additionally checks the bridge and GStreamer linkage and runs
 `dpkg-deb --info` on the `.deb`.
 
+## 7. End-to-end on real nodes (`test/e2e`)
+
+Several real Zen devices in one `flutter test` process: each runs the app's
+own start-up (`ZenBootstrapper`: settings, security, the stores in its own
+data folder), its own Yggdrasil node from the Go bridge and all the app's
+modules (`ZenCore`); only the screens are missing. The nodes meet through
+one more node, the hub, listening on this computer's peering port (32913);
+the bridge's public peer list is the hub alone, so nothing reaches the
+internet, and the radios for friends nearby are off.
+`test/e2e/support/zen_mesh.dart` (`ZenMesh`, `ZenDevice`) does the
+plumbing; a scenario reads like what people do:
+
+```dart
+final ZenMesh mesh = await ZenMesh.open();
+final ZenDevice ala = await mesh.device('Ala');
+final ZenDevice ola = await mesh.device('Ola');
+await mesh.befriend(ala, ola, within: kInvitationWithin); // QR, accept, names
+await ala.send(ola, 'cześć');
+await ola.waitForText(ala, 'cześć', within: kMessageWithin);
+await ola.setOnScreen(false);          // the app in the background
+await ola.restart();                   // stop, start again on the same folder
+```
+
+| File | Journeys |
+|---|---|
+| `friends_e2e_test.dart` | invitation by QR code and acceptance with time limits, both names shown (never "Kontakt Zen"), messages both ways, a friend in the background shown "w tle", one notification per message naming the sender and the text, a removed friend who keeps writing stays removed, also after a restart |
+| `mailbox_e2e_test.dart` | a friend's device picks a mailbox; the friend is away, the sender writes and leaves, the friend comes back and gets the message from the mailbox; a post reaches a friend of a friend |
+| `restart_e2e_test.dart` | a restart keeps the identity, friends, names and chats, presence is confirmed again after the start, messages flow again |
+| `crash_e2e_test.dart` | a device whose folder is copied file by file during a burst of writes (a power cut) starts from that copy, keeps its friend and receives again |
+
+```
+dart run tool/e2e.dart                         # builds what it needs, runs every file
+dart run tool/e2e.dart test/e2e/restart_e2e_test.dart
+dart run tool/e2e.dart --no-build test/e2e/friends_e2e_test.dart
+dart run tool/e2e.dart --clean                 # removes the bridge it put into the Flutter SDK
+```
+
+`tool/e2e.dart` (Linux and Windows; needs Go and a C compiler) builds the
+bridge with the build tag `zene2e` and copies it next to the engine's
+`flutter_tester`, where the app looks for it under `flutter test`; builds
+zstd (the stores compress with it; its plugin library comes only from a
+platform build) from the pub cache's sources; then runs the files one at a
+time with `ZEN_E2E=1` (without it the tests skip, so a plain `flutter
+test` never starts nodes, and `tool/test.dart` leaves `test/e2e` out unless
+named). A Zen running on the same computer holds port 32913: close it
+first. About 1-3 minutes per file.
+
+A hang is reported, not waited out: the app calls the bridge on its main
+isolate, and a call that never returns freezes every timer, the test's own
+timeout included. A watchdog isolate ends the process after 45 s of
+silence; the `zene2e` bridge writes the stacks of all goroutines to
+`build/e2e/goroutines.txt` every 10 s (`stack_dump_e2e.go`, never in an
+app), and both the watchdog and `tool/e2e.dart` print them. Each device
+keeps a trace of the frames that reached it (`mesh.describe()`), printed
+when a wait fails; `mesh.report()` prints the time each step took.
+
+Time limits (`zen_mesh.dart`): `kInvitationWithin` and
+`kAfterRestartWithin` (20 s today: the first contact of two devices, and
+the first after a restart, take about 14 s, R5-F5), `kMessageWithin`
+(10 s). Lower them as the fixes land.
+
+Not covered here: Android's locked receiver (it runs only on Android; the
+simulator covers it, section 1.1), the account's second device (linking),
+calls, the radios, the screens.
+
+## 8. Damaged files (`test/persistence_fuzz_test.dart`)
+
+Every file the app keeps, damaged as a phone damages it, must never keep
+the app from starting. The files are not listed by hand: a device starts
+once with the app's start-up and modules (no node), is used (a name,
+settings, a friend, a group, a message) and closed; then each file it
+wrote, and sometimes its backup too, is emptied, cut short at a random
+point, filled with random bytes, has a byte flipped, gets a newer or older
+format number or is made huge, and the app starts again on that folder. It
+must start within 30 s, get through the same use without an error, and
+leave no error unhandled in the background. A store added later is covered
+without a change in the test. The files read outside the start (the node's
+config, the public peers, the update notice, the language) get the same
+damage through their own loaders.
+
+Seeded (`ZEN_FUZZ_SEED`, default fixed, so CI is reproducible);
+`ZEN_FUZZ_CASES=500` tries more cases locally. Part of the normal suite
+(about 40 s). What it found and is not fixed yet is listed in
+`_knownFindings` with its regression id (printed on every run, not
+failing); whoever fixes one removes its line. Anything else fails.
+
+Upgrades from released versions are covered by the stored samples of
+every format (`test/fixtures/formats`, `test/fixtures/upgrade`) and the
+emulator's install over the previous release (section 9).
+
+## 9. Android emulator (`.github/workflows/android-emulator.yml`)
+
+On pull requests to `main`, for a release tag and by hand (about 25-35
+minutes, so not on every push): an x86_64 Android 14 emulator on the
+Ubuntu runner (KVM), from the runner's own SDK.
+`tool/ci/android_smoke.sh`:
+
+- `fresh` — a fresh install of the commit runs
+  `integration_test/app_start_test.dart`: the real app must get past the
+  logo within 60 s and throw nothing in its first seconds;
+- `upgrade` — the previous release, built from its tag with the same debug
+  key (a release APK cannot be replaced by a debug build), installed and
+  started; then the commit installed over it: past the logo on the old
+  data, the same node identity (the SHA-256 of its config, handed to the
+  test), and no file of the old version lost;
+- `monkey` — 2000 random events inside Zen (seed 20261028), then no
+  crash and no "not responding" in monkey's output or the crash log.
+
+Locally, with an emulator or a phone in debug mode:
+`sh tool/ci/android_smoke.sh fresh`, `... monkey 2000 1`.
+
+## 10. Field report → regression test (`test/regressions`)
+
+Every bug the owner reports gets a test named after its report before it
+is fixed, so nothing is forgotten and nothing comes back:
+
+1. A file `test/regressions/r<round>_<nn>_<what>_test.dart` with one test
+   named `'R5-#14: <what must hold>'` (bugs the tests found themselves:
+   `'R5-F<n>: …'` in `r5_found_by_tests_test.dart`). While the fix is not
+   in, the test is skipped with the description and what is known
+   (`skip: 'R5-#14 open: …'`); the CI summary lists every skipped test
+   ("never run"), so open reports stay visible.
+2. Whoever fixes it writes the test that fails on the current code first
+   (in that file, or in the feature's own test file with the file here
+   pointing to it), then the fix; the skip goes.
+3. A bug found again later gets a new id, never a changed old test.
+
+`tool/ci/test_ci_checks.py` checks that every file there names its report.
+
 ## What this does not check
 
 - The simulator does not test Bluetooth, Wi-Fi Direct, Multipeer or real
@@ -453,13 +586,17 @@ job for Linux additionally checks the bridge and GStreamer linkage and runs
 - App tests run in CI on Windows, and on Linux only those the Windows jobs
   skip; on macOS and Windows on ARM CI only builds and (Linux, macOS) runs
   the app for 20 s. There is no APK build
-  on push (only the Go bridge for the three ABIs) and no emulator test; the
+  on push (only the Go bridge for the three ABIs); the emulator workflow
+  (section 9) runs on pull requests to `main` and tags only; the
   `appStoreOnly` flavor is covered only by the Dart-level `store_build_test.dart`, not
   by a Gradle build in CI.
+- The real-node tests (section 7) run every device as a computer in one
+  process: Android's locked receiver, the iPhone's suspension and real
+  phone networks are not in them.
 - The Linux GStreamer player (`zen_media_player.cc`) is not tested beyond
   linking and starting; playback is checked by hand.
 - The Go bridge has no random-input tests (`go test -fuzz`), and the app no
-  "corrupted data sends no frame" test.
+  "corrupted data sends no frame" test (damaged files: section 8).
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

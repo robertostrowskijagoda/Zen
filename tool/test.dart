@@ -7,8 +7,9 @@
 // Plain Dart, no packages:
 //
 //   dart run tool/test.dart
-//       Every *_test.dart under test/, in parallel groups (by default one
-//       per four cores, at least two).
+//       Every *_test.dart under test/ but the real-node tests of test/e2e
+//       (tool/e2e.dart runs those), in parallel groups (by default one per
+//       four cores, at least two).
 //   dart run tool/test.dart test/chat_test.dart test/wire
 //       Only these files and folders.
 //   dart run tool/test.dart --groups 6 --concurrency 3
@@ -44,6 +45,10 @@ const String _timesFile = 'build/test_times.json';
 /// name is guessed from its size ([_estimate]). Refresh it from
 /// [_timesFile] now and then (the files above 15 seconds).
 const String _knownTimesFile = 'tool/test_times.json';
+
+/// The folder of the real-node tests, left out unless named
+/// (docs/TESTING.md, "End-to-end on real nodes").
+const String kRealNodeTests = 'test/e2e';
 
 Future<void> main(List<String> args) async {
   final int dashes = args.indexOf('--');
@@ -210,15 +215,24 @@ int _positive(String value, String option) {
 
 /// The *_test.dart files of [paths] (files or folders), sorted, with
 /// forward slashes, so every computer splits them the same way.
+///
+/// The real-node tests (`test/e2e`, [kRealNodeTests]) run only when named:
+/// they need the Go bridge and the peering port, and `tool/e2e.dart` runs
+/// them one file at a time.
 List<String> _testFiles(List<String> paths) {
   final Set<String> files = <String>{};
   for (final String path in paths) {
     final String clean = path.replaceAll(r'\', '/');
+    final bool namesRealNodeTests =
+        clean == kRealNodeTests || clean.startsWith('$kRealNodeTests/');
     if (FileSystemEntity.isDirectorySync(clean)) {
       for (final FileSystemEntity e in Directory(
         clean,
       ).listSync(recursive: true, followLinks: false)) {
         final String p = e.path.replaceAll(r'\', '/');
+        if (!namesRealNodeTests && p.startsWith('$kRealNodeTests/')) {
+          continue;
+        }
         if (e is File && p.endsWith('_test.dart')) {
           files.add(p);
         }
