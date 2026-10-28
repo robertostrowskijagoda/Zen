@@ -321,24 +321,31 @@ presence kit the app writes, sealed with the background key, whenever Zen
 leaves the screen (`presence-kit.zenbg`: the friends who may see presence
 and when Zen was last open).
 
-The receiver shows a fourth state, *unknown*, while it cannot tell; the
-last state known is kept underneath and nothing is sent for it:
+Two more states are shown only by the receiver; the last state known is
+kept underneath and nothing is sent for them:
 
-- *No network*: this device has not reached the mesh for 30 s
-  (`kPresenceNoNetworkAfter`). Nothing expires into *offline* meanwhile.
-  Back on the mesh, the friends who had Zen open are pinged at once (they
-  hear this device and answer); the others are settled 20 s after the next
-  round (`kPresenceSettleAfterResume`).
-- *Not checked*: the state remembered from before a start (kept per friend
-  in the encrypted social snapshot: the state, when it was last confirmed,
-  the last opening), until the friend's next frame, or until 20 s after the
-  second round of pings that could arrive (about 2 min after the node
-  reached the mesh), when it shows what that state is worth by then. The
-  same after coming back to the screen for a state that would have expired
-  meanwhile.
-- *Too old*: a friend whose `ping` or `pong` names a `ver` older than
-  1.13.0 and no `state` (a newer Zen without `state` hides its presence from
-  this person, which shows nothing).
+- *No connection* ("brak połączenia"): this device has not reached the
+  mesh for 30 s (`kPresenceNoNetworkAfter`), so every friend shows it at
+  once; it is about this device, not about them. Nothing expires into
+  *offline* meanwhile. Back on the mesh, each friend shows the last state
+  as it stands now, or *unknown* when it was confirmed more than 30 min
+  ago (below); the friends who had Zen open are pinged at once (they hear
+  this device and answer).
+- *Unknown* ("status nieznany"), for two reasons:
+  - *Not checked lately*: the state remembered from before a start (kept
+    per friend in the encrypted social snapshot: the state, when it was
+    last confirmed, the last opening) is shown as it stands now when it
+    was confirmed at most 30 min ago (`kPresenceRememberedFor`; the
+    expiry above counts from that confirmation, so *online* from 8 min ago
+    shows *offline*); confirmed longer ago, it is *unknown* until the
+    friend's next frame, or until 20 s after the second round of pings
+    that could arrive (about 2 min after the node reached the mesh,
+    `kPresenceSettleAfterResume`), when it shows what that state is worth
+    by then. The same after coming back to the screen, or to the mesh, for
+    a state that would have expired meanwhile.
+  - *Too old*: a friend whose `ping` or `pong` names a `ver` older than
+    1.13.0 and no `state` (a newer Zen without `state` hides its presence
+    from this person, which shows nothing).
 
 ### 2.2 Friends and profile
 

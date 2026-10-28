@@ -55,8 +55,9 @@ Contact: see section 13.
   voice notes, photos, videos and files, your posts, likes and comments.
   For each friend who shows it, their last presence (open, in the
   background, offline), when it was last confirmed and when they last
-  opened Zen, so that after a start it can be shown as not checked yet
-  instead of offline; it is replaced by their next answer.
+  opened Zen, so that after a start it can be shown as it stands (when
+  confirmed within the last 30 minutes) or as not known yet instead of
+  offline; it is replaced by their next answer.
 - **Features data:** "Right now" statuses, events, alarms (including location
   and recorded sound, if you use them), neighbours (flats), dating profile and
   decisions, pyramid records and balances, and the ledger of signed entries.

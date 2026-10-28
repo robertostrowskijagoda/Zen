@@ -505,6 +505,29 @@ void main() {
     expect(offline.hollow, isTrue);
   });
 
+  test('presence: a fifth look while this device has no network, unlike '
+      'offline and "status nieznany"', () {
+    final List<GraphNode> nodes = <GraphNode>[
+      GraphNode(
+        address: _ania,
+        name: 'Ania',
+        ring: 1,
+        friend: _friend(_ania, 'Ania'),
+      ),
+    ];
+    final GraphLook look = graphLook(
+      scene: _scene(nodes),
+      mode: GraphMode.presence,
+      facts: GraphFacts(presence: (String a) => PeerPresence.noConnection),
+      zen: zen,
+    );
+    final NodeLook cut = look.nodes.single;
+    expect(cut.noConnection, isTrue);
+    expect(cut.unknown, isFalse);
+    expect(cut.hollow, isFalse);
+    expect(cut.fill, zen.textMuted);
+  });
+
   test('layout: everyone gets a place, crowded rings spread, and the mode '
       'bands move people', () {
     final List<GraphNode> nodes = <GraphNode>[

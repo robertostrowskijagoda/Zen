@@ -496,6 +496,8 @@ final class SocialHubState {
 int _presenceRank(PeerPresence presence) => switch (presence) {
   PeerPresence.online => 3,
   PeerPresence.background => 2,
-  PeerPresence.offline || PeerPresence.unknown => 1,
+  PeerPresence.offline ||
+  PeerPresence.unknown ||
+  PeerPresence.noConnection => 1,
   PeerPresence.hidden => 0,
 };

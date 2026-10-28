@@ -72,6 +72,7 @@ class PeerAvatar extends ConsumerWidget {
       online: shown == PeerPresence.online,
       away: shown == PeerPresence.background,
       unknown: shown == PeerPresence.unknown,
+      noConnection: shown == PeerPresence.noConnection,
       showStatus: showStatus && shown != PeerPresence.hidden,
       image: peerAvatarImage(path),
     );

@@ -42,27 +42,11 @@ final Provider<RuntimePresenceConfig> runtimePresenceConfigProvider =
 /// device's state to the friends who have Zen open ([kPresenceNoticeEvery]).
 const Duration kPresencePingInterval = Duration(minutes: 2);
 
-/// A friend "w tle" with no sign of life for this long counts as offline
-/// (and no longer reachable directly). A phone in the background never
-/// pings; it only answers this phone's pings, which go out only while Zen
-/// is on this screen, every [kPresencePingInterval], and a locked phone
-/// answers one contact at most every kLockedPongEvery (3.5 min): the first
-/// ping after a quiet while at once, then every other one, so an answer
-/// comes every 4 min. Twice that and a bit, so one lost answer is not
-/// "offline".
-const Duration kPresenceOfflineAfter = Duration(minutes: 10);
-
-/// A friend "online" with no new sign for this long counts as offline. A
-/// friend on the screen pings every [kPresencePingInterval] and answers
-/// this phone's pings at once, and tells "away" when Zen leaves their
-/// screen (an "away" lost: the next answer says "w tle"). Silence for two
-/// rounds and a bit means Zen was closed or the phone lost the network.
-const Duration kPresenceForegroundFor = Duration(minutes: 5);
-
 /// After a round of pings that could arrive, how long the answers may take
 /// before friends who did not answer count as offline. A friend whose
-/// presence is not checked since Zen started is settled so only after the
-/// second such round (about 2 min after the node reached the network).
+/// presence was not checked lately ("status nieznany", confirmed longer
+/// than [kPresenceRememberedFor] ago) is settled so only after the second
+/// such round (about 2 min after the node reached the network).
 const Duration kPresenceSettleAfterResume = Duration(seconds: 20);
 
 /// Each change of this device's state (on the screen, off it, closing) is
@@ -84,9 +68,9 @@ const Duration kPresenceNoticeDelay = Duration(seconds: 2);
 /// phone).
 const Duration kPresenceAwayEvery = Duration(minutes: 4);
 
-/// Without the network this long, friends' presence is in doubt
-/// ([PresenceDoubt.noNetwork]): nothing from them can come, so it does not
-/// expire into "offline" either.
+/// Without the network this long, every friend shows "brak połączenia"
+/// ([PresenceDoubt.noNetwork]): nothing from them can come, so what they
+/// showed does not expire into "offline" either.
 const Duration kPresenceNoNetworkAfter = Duration(seconds: 30);
 
 /// Whether the node reaches the mesh: running, with a peer up.
@@ -183,8 +167,10 @@ bool isSecurityBlockingUi(AppSecurityService security) {
 /// network back after a loss.
 ///
 /// Friends' presence is in doubt ([PresenceDoubt]) while this device has
-/// no network ([kPresenceNoNetworkAfter]), and after a start until they
-/// answer or the answers had time to come ([kPresenceSettleAfterResume]).
+/// no network ([kPresenceNoNetworkAfter]: "brak połączenia"), and, when
+/// it was confirmed longer than [kPresenceRememberedFor] ago, after a start
+/// until they answer or the answers had time to come
+/// ([kPresenceSettleAfterResume]: "status nieznany").
 final class RuntimeSignalModule extends ZenModule {
   RuntimeSignalModule(this._ref)
     : _inService = _ref.read(zenHostProvider) == ZenHost.backgroundService;
@@ -407,19 +393,20 @@ final class RuntimeSignalModule extends ZenModule {
         return;
       }
       if (cameBack) {
-        // What friends showed may have expired off the screen: in doubt
-        // until they answer, not "offline" before they could.
+        // What friends showed may have expired off the screen: what it is
+        // worth by now, or "status nieznany" when it is long ago, until
+        // they answer.
         final RuntimePresenceConfig config = _ref.read(
           runtimePresenceConfigProvider,
         );
         unawaitedLogged(
           _ref
               .read(socialHubControllerProvider.notifier)
-              .doubtStalePresence(
+              .recheckStalePresence(
                 offlineAfter: config.offlineAfter,
                 foregroundFor: config.foregroundFor,
               ),
-          context: 'Doubting stale presence failed',
+          context: 'Rechecking stale presence failed',
         );
       }
       // The node cannot read its sealed config while the app is locked, so
@@ -446,8 +433,8 @@ final class RuntimeSignalModule extends ZenModule {
   /// The node reached the mesh, or lost it. A round of pings that went out
   /// while it did not went nowhere (a cold start: Zen on the screen before
   /// the node has a peer), so "I am here" goes out again now rather than a
-  /// whole interval later. Lost for [kPresenceNoNetworkAfter], friends'
-  /// presence is in doubt; back, the friends who had Zen open are pinged
+  /// whole interval later. Lost for [kPresenceNoNetworkAfter], friends
+  /// show "brak połączenia"; back, the friends who had Zen open are pinged
   /// (they hear this device again and answer), and what friends should
   /// have been told meanwhile goes out.
   void _onReachableChanged() {
@@ -471,8 +458,15 @@ final class RuntimeSignalModule extends ZenModule {
       socialHubControllerProvider.notifier,
     );
     if (wasWithout) {
+      final RuntimePresenceConfig config = _ref.read(
+        runtimePresenceConfigProvider,
+      );
       unawaitedLogged(
-        hub.notePresenceNetwork(reachable: true),
+        hub.notePresenceNetwork(
+          reachable: true,
+          offlineAfter: config.offlineAfter,
+          foregroundFor: config.foregroundFor,
+        ),
         context: 'Presence back on the network failed',
       );
     }
@@ -741,7 +735,7 @@ final class RuntimeSignalModule extends ZenModule {
 
   /// Once the answers to a round had time to come, friends who did not
   /// answer show what their last state is worth by now; with
-  /// [settleUnchecked] also those not checked yet since the start.
+  /// [settleUnchecked] also those not checked lately ("status nieznany").
   void _armSettle({required bool settleUnchecked}) {
     _settleTimer?.cancel();
     _settleTimer = Timer(kPresenceSettleAfterResume, () {

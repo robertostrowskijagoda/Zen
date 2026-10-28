@@ -539,6 +539,7 @@ class _RelayFriendTile extends StatelessWidget {
         online: friend.shownPresence == PeerPresence.online,
         away: friend.shownPresence == PeerPresence.background,
         unknown: friend.shownPresence == PeerPresence.unknown,
+        noConnection: friend.shownPresence == PeerPresence.noConnection,
         showStatus: friend.presence != PeerPresence.hidden,
         size: 40,
       ),

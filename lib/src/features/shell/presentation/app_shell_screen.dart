@@ -316,9 +316,10 @@ final class ConversationPreview {
   final int unreadCount;
 
   /// What the friend's Zen is doing as shown ([PeerPresence.hidden]: they
-  /// do not show it; [PeerPresence.unknown]: not known now), and that in
+  /// do not show it; [PeerPresence.unknown]: not checked lately;
+  /// [PeerPresence.noConnection]: this device has no network), and that in
   /// words, as the list was built ("w tle · ostatnio otwierał(a) 5 min
-  /// temu", "status nieznany · ostatnio w sieci 12 min temu").
+  /// temu", "status nieznany · ostatnio w sieci 2 godz. temu").
   final PeerPresence presence;
   final String? presenceLine;
   final bool isTyping;

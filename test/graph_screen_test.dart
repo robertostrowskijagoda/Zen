@@ -612,6 +612,7 @@ void main() {
     // fourth look: not known now.
     expect(find.byKey(const Key('graph-legend-presence')), findsOneWidget);
     expect(find.byKey(const Key('graph-legend-unknown')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-no-connection')), findsOneWidget);
     expect(find.byKey(const Key('graph-legend-friends')), findsNothing);
     await tapKey(const Key('graph-mode-friends'));
     expect(find.byKey(const Key('graph-legend-friends')), findsOneWidget);

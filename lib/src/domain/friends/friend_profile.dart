@@ -61,19 +61,23 @@ final class FriendProfile {
   final PeerPresence presence;
   final int presenceAtMillis;
 
-  /// Why [presence] is not known now, `null` when it is: only in memory
-  /// (a friend read back from the store is [PresenceDoubt.unchecked] until
-  /// they answer, see [shownPresence]).
+  /// Why [presence] is not shown as it is, `null` when it is: only in
+  /// memory (a friend read back from the store whose presence was confirmed
+  /// longer than kPresenceRememberedFor ago is [PresenceDoubt.unchecked]
+  /// until they answer, see [shownPresence]).
   final PresenceDoubt? presenceDoubt;
 
   /// What the screens show: [PeerPresence.hidden] for a friend who does not
-  /// show it, [PeerPresence.unknown] while it is in doubt ([presenceDoubt])
-  /// or their Zen is too old to tell it; [presence] otherwise.
+  /// show it; [PeerPresence.noConnection] while this device has no network;
+  /// [PeerPresence.unknown] while it is not checked lately or their Zen is
+  /// too old to tell it; [presence] otherwise.
   PeerPresence get shownPresence => presence == PeerPresence.hidden
       ? PeerPresence.hidden
-      : presenceDoubt != null
-      ? PeerPresence.unknown
-      : presence;
+      : switch (presenceDoubt) {
+          PresenceDoubt.noNetwork => PeerPresence.noConnection,
+          PresenceDoubt.unchecked => PeerPresence.unknown,
+          null => presence,
+        };
 
   /// When the friend last had Zen open on the screen, as they told it;
   /// 0 when not known or they keep it to themselves.

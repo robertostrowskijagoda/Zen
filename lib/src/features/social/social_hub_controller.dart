@@ -801,8 +801,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   final Map<String, int> _openedAt = <String, int>{};
 
   /// [hub] as saved: each friend's presence with its latest confirmation
-  /// from memory, so what is shown after a restart ("ostatnio w sieci
-  /// 3 min temu") is not older than it was.
+  /// from memory (and, while online, the last opening that goes with it),
+  /// so what is shown after a restart ("w sieci" from 3 min ago, offline
+  /// from 8 min ago, "ostatnio w sieci 2 godz. temu") is not older than it
+  /// was.
   SocialHubState _withConfirmedPresence(SocialHubState hub) {
     Map<String, FriendProfile>? friends;
     for (final MapEntry<String, FriendProfile> entry in hub.friends.entries) {
@@ -810,8 +812,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       final String key = PeerShareCodec.normalizeAddress(friend.address);
       final int confirmed = _presenceConfirmedAt[key] ?? 0;
       final int seen = _presenceSeenAt[key] ?? 0;
+      final int opened = friend.presence == PeerPresence.online
+          ? _openedAt[key] ?? 0
+          : 0;
       if (confirmed <= friend.presenceAtMillis &&
-          seen <= friend.lastPresenceAtMillis) {
+          seen <= friend.lastPresenceAtMillis &&
+          opened <= friend.lastOpenedAtMillis) {
         continue;
       }
       (friends ??= Map<String, FriendProfile>.from(
@@ -819,6 +825,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       ))[entry.key] = friend.copyWith(
         presenceAtMillis: max(confirmed, friend.presenceAtMillis),
         lastPresenceAtMillis: max(seen, friend.lastPresenceAtMillis),
+        lastOpenedAtMillis: max(opened, friend.lastOpenedAtMillis),
       );
     }
     return friends == null ? hub : hub.copyWith(friends: friends);

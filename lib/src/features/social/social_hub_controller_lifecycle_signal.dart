@@ -241,13 +241,10 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         lifecycle: state.lifecycle,
         // What is in doubt here stays so: the other isolate heard nothing
         // of it.
-        friends: _withPresenceDoubts(
+        friends: _withRememberedPresence(
           _canonicalizeFriends(persisted.friends),
-          (FriendProfile friend) =>
-              known[friend.address]?.presenceDoubt ??
-              (known.containsKey(friend.address)
-                  ? null
-                  : PresenceDoubt.unchecked),
+          nowMillis: DateTime.now().millisecondsSinceEpoch,
+          keep: (FriendProfile friend) => known[friend.address],
         ),
         activeCall: mediaOwnsCall
             ? current
@@ -347,11 +344,12 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         // the background: the pending queue is not flushed and every incoming
         // signal raises a system notification on top of the open app.
         lifecycle: state.lifecycle,
-        // What each friend showed last is remembered, but not confirmed
+        // What each friend showed last is remembered: shown as it stands
+        // now when it was confirmed lately, "status nieznany" otherwise
         // until they answer (or the answers had time to come).
-        friends: _withPresenceDoubts(
+        friends: _withRememberedPresence(
           _canonicalizeFriends(persisted.friends),
-          (FriendProfile friend) => PresenceDoubt.unchecked,
+          nowMillis: DateTime.now().millisecondsSinceEpoch,
         ),
         groups: _canonicalizeGroups(persisted.groups),
         activeCall:

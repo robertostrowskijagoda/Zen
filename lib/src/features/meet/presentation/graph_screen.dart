@@ -227,14 +227,16 @@ GraphLook graphLook({
     Color? tagTone;
     bool hollow = false;
     bool unknown = false;
+    bool noConnection = false;
     switch (mode) {
       case GraphMode.friends:
       case GraphMode.gates:
         break;
       case GraphMode.presence:
-        // The four looks of the presence dots: filled green (online), a
+        // The five looks of the presence dots: filled green (online), a
         // blue ring with a dot ("w tle"), an empty grey ring (offline), a
-        // faint grey dot with a question mark (not known now). Weak
+        // faint grey dot with a question mark (not checked lately), a grey
+        // crossed-out cloud (this device has no network). Weak
         // acquaintances and friends who hide it show nothing.
         final PeerPresence presence = n.isFriend && n.ring <= 2
             ? facts.presenceOf(a)
@@ -252,6 +254,9 @@ GraphLook graphLook({
           case PeerPresence.unknown:
             fill = zen.textMuted;
             unknown = true;
+          case PeerPresence.noConnection:
+            fill = zen.textMuted;
+            noConnection = true;
           case PeerPresence.hidden:
             fill = dim(fill, n.isFriend ? 0.3 : 0.18);
         }
@@ -327,6 +332,7 @@ GraphLook graphLook({
         label: lit,
         hollow: hollow && !lit,
         unknown: unknown && !lit,
+        noConnection: noConnection && !lit,
       ),
     );
   }
@@ -2619,6 +2625,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           question: true,
         ),
         _LegendDot(
+          key: const Key('graph-legend-no-connection'),
+          color: zen.textMuted,
+          label: presenceStateLabel(PeerPresence.noConnection)!,
+          icon: Icons.cloud_off_rounded,
+        ),
+        _LegendDot(
           color: zen.accent.withValues(alpha: 0.3),
           label: t('słabi znajomi — bez statusu'),
           small: true,
@@ -2876,6 +2888,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                                   friend.shownPresence == PeerPresence.unknown)
                                 // Not known now, and why.
                                 unknownPresenceLine(friend, meet.now)
+                              else if (friend != null &&
+                                  friend.shownPresence ==
+                                      PeerPresence.noConnection)
+                                // This device has no network.
+                                friendPresenceLine(friend, meet.now)!
                               else if (friend != null &&
                                   friend.presence != PeerPresence.hidden &&
                                   friend.presence != PeerPresence.offline)
@@ -3375,6 +3392,7 @@ class _LegendDot extends StatelessWidget {
     this.ring = false,
     this.dotted = false,
     this.question = false,
+    this.icon,
   });
 
   final Color color;
@@ -3385,44 +3403,51 @@ class _LegendDot extends StatelessWidget {
   /// A ring with a dot in it ("w tle").
   final bool dotted;
 
-  /// A faint dot with a question mark (presence not known now).
+  /// A faint dot with a question mark (presence not checked lately).
   final bool question;
+
+  /// A glyph instead of a dot (a crossed-out cloud: no network).
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final double d = small ? 7 : 10;
+    final IconData? glyph = icon;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Container(
-          width: ring || question ? 12 : d,
-          height: ring || question ? 12 : d,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: ring
-                ? null
+        if (glyph != null)
+          Icon(glyph, size: 14, color: color)
+        else
+          Container(
+            width: ring || question ? 12 : d,
+            height: ring || question ? 12 : d,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ring
+                  ? null
+                  : question
+                  ? color.withValues(alpha: 0.3)
+                  : color,
+              border: ring || question
+                  ? Border.all(color: color, width: 1.5)
+                  : null,
+            ),
+            child: dotted
+                ? Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color,
+                      ),
+                      child: const SizedBox.square(dimension: 5),
+                    ),
+                  )
                 : question
-                ? color.withValues(alpha: 0.3)
-                : color,
-            border: ring || question
-                ? Border.all(color: color, width: 1.5)
+                ? Icon(Icons.question_mark_rounded, size: 8, color: color)
                 : null,
           ),
-          child: dotted
-              ? Center(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: color,
-                    ),
-                    child: const SizedBox.square(dimension: 5),
-                  ),
-                )
-              : question
-              ? Icon(Icons.question_mark_rounded, size: 8, color: color)
-              : null,
-        ),
         const SizedBox(width: 5),
         Flexible(
           child: Text(

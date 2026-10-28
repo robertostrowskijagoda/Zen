@@ -88,22 +88,28 @@ String presenceAgoLabel(int atMillis, int nowMillis) {
 }
 
 /// The short name of [presence]: "w sieci", "w tle", "poza siecią",
-/// "status nieznany"; `null` for a friend who does not show it.
+/// "status nieznany", "brak połączenia"; `null` for a friend who does not
+/// show it.
 String? presenceStateLabel(PeerPresence presence) => switch (presence) {
   PeerPresence.online => t('w sieci'),
   PeerPresence.background => t('w tle'),
   PeerPresence.offline => t('poza siecią'),
   PeerPresence.unknown => t('status nieznany'),
+  PeerPresence.noConnection => t('brak połączenia'),
   PeerPresence.hidden => null,
 };
 
 /// What a friend's chat header says about their presence at [nowMillis]:
 /// "w sieci"; "w tle · ostatnio otwierał(a) 5 min temu"; offline, when Zen
 /// was last open there (or, without that, since when they are quiet); not
-/// known now, and why ([unknownPresenceLine]); and `null` for a friend who
-/// does not show it.
+/// known now, and why ([unknownPresenceLine]); "Nie masz połączenia z
+/// siecią" while this device has no network (the same for every friend);
+/// and `null` for a friend who does not show it.
 String? friendPresenceLine(FriendProfile friend, int nowMillis) {
   final PeerPresence shown = friend.shownPresence;
+  if (shown == PeerPresence.noConnection) {
+    return t('Nie masz połączenia z siecią');
+  }
   if (shown == PeerPresence.unknown) {
     return unknownPresenceLine(friend, nowMillis);
   }
@@ -120,30 +126,26 @@ String? friendPresenceLine(FriendProfile friend, int nowMillis) {
       state;
 }
 
-/// Why a friend's presence is not known at [nowMillis], in words: this
-/// device has no network; not checked since Zen started, with the last one
-/// known ("status nieznany · ostatnio w sieci 12 min temu"); or their Zen
-/// is too old to tell it.
+/// Why a friend's presence is not known at [nowMillis], in words: not
+/// checked lately, with the last one known ("status nieznany · ostatnio w
+/// sieci 2 godz. temu"); or their Zen is too old to tell it.
 String unknownPresenceLine(FriendProfile friend, int nowMillis) {
-  final String state = t('status nieznany');
-  switch (friend.presenceDoubt) {
-    case PresenceDoubt.noNetwork:
-      return t('Brak połączenia z siecią — status nieznany');
-    case null:
-      return t('Starsza wersja Zen — status nieznany');
-    case PresenceDoubt.unchecked:
-      final int at = friend.presenceAtMillis;
-      final String? last = switch (friend.presence) {
-        PeerPresence.online when at > 0 => t('ostatnio w sieci {ago}', {
-          'ago': presenceAgoLabel(at, nowMillis),
-        }),
-        PeerPresence.background when at > 0 => t('ostatnio w tle {ago}', {
-          'ago': presenceAgoLabel(at, nowMillis),
-        }),
-        _ =>
-          lastOpenedLabel(friend.lastOpenedAtMillis, nowMillis) ??
-              quietFriendLabel(friend.lastPresenceAtMillis, nowMillis),
-      };
-      return last == null ? state : '$state · $last';
+  if (friend.presenceDoubt != PresenceDoubt.unchecked) {
+    // Not in doubt, and still not known: their Zen does not tell it.
+    return t('Starsza wersja Zen — status nieznany');
   }
+  final String state = t('status nieznany');
+  final int at = friend.presenceAtMillis;
+  final String? last = switch (friend.presence) {
+    PeerPresence.online when at > 0 => t('ostatnio w sieci {ago}', {
+      'ago': presenceAgoLabel(at, nowMillis),
+    }),
+    PeerPresence.background when at > 0 => t('ostatnio w tle {ago}', {
+      'ago': presenceAgoLabel(at, nowMillis),
+    }),
+    _ =>
+      lastOpenedLabel(friend.lastOpenedAtMillis, nowMillis) ??
+          quietFriendLabel(friend.lastPresenceAtMillis, nowMillis),
+  };
+  return last == null ? state : '$state · $last';
 }

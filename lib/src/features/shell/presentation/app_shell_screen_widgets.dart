@@ -612,6 +612,9 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                       !pending,
                   unknown:
                       conversation.presence == PeerPresence.unknown && !pending,
+                  noConnection:
+                      conversation.presence == PeerPresence.noConnection &&
+                      !pending,
                   // A friend who does not show presence gets no dot.
                   showStatus:
                       pending || conversation.presence != PeerPresence.hidden,
@@ -737,6 +740,8 @@ void _showConversationActionSheet(
       conversation.presence == PeerPresence.background && !pending;
   final bool unknown =
       conversation.presence == PeerPresence.unknown && !pending;
+  final bool noConnection =
+      conversation.presence == PeerPresence.noConnection && !pending;
   final String? presence = pending ? null : _presenceSemantics(conversation);
 
   showModalBottomSheet<void>(
@@ -762,6 +767,7 @@ void _showConversationActionSheet(
                     online: online,
                     away: away,
                     unknown: unknown,
+                    noConnection: noConnection,
                     showStatus:
                         pending || conversation.presence != PeerPresence.hidden,
                     image: peerAvatarImage(conversation.avatarPath),
@@ -803,6 +809,8 @@ void _showConversationActionSheet(
                                 ? Icons.adjust_rounded
                                 : unknown
                                 ? Icons.help_rounded
+                                : noConnection
+                                ? Icons.cloud_off_rounded
                                 : Icons.circle_outlined,
                           ),
                         ],
@@ -1453,8 +1461,8 @@ ConversationPreview _conversationFromFriend(
 }
 
 /// What a chat's presence dot says, in words: "w sieci", "w tle · ostatnio
-/// otwierał(a) 5 min temu", "Brak połączenia z siecią — status nieznany",
-/// …; `null` for a friend who does not show it.
+/// otwierał(a) 5 min temu", "Nie masz połączenia z siecią", …; `null` for
+/// a friend who does not show it.
 String? _presenceSemantics(ConversationPreview conversation) =>
     conversation.presenceLine;
 

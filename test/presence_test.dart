@@ -129,6 +129,22 @@ void main() {
       expect(at(PeerPresence.offline, 0), PeerPresence.offline);
     });
 
+    test('a state is remembered for 30 min after its last confirmation', () {
+      expect(kPresenceRememberedFor, const Duration(minutes: 30));
+      final int window = kPresenceRememberedFor.inMilliseconds;
+      bool remembered(int age) =>
+          presenceRemembered(confirmedAtMillis: _day, nowMillis: _day + age);
+      expect(remembered(0), isTrue);
+      expect(remembered(window), isTrue);
+      expect(remembered(window + 1), isFalse);
+      expect(remembered(-_minute), isFalse, reason: 'the clock went back');
+      expect(
+        presenceRemembered(confirmedAtMillis: 0, nowMillis: _day),
+        isFalse,
+        reason: 'never confirmed',
+      );
+    });
+
     test('a locked friend answering every other ping stays "w tle"', () {
       // A locked phone answers one contact at most every 4 min; pings go
       // every 2.5 min, so an answer comes every 5 min — even with one of
@@ -280,12 +296,64 @@ void main() {
       expect(friendPresenceLine(read, _day + _minute), isNull);
     });
 
-    test('a presence in doubt keeps the last state: without the network it '
-        'never expires, not checked it settles only when the answers had '
-        'time to come', () async {
+    test('without the network every friend shows "brak połączenia" and '
+        'nothing expires; back on it, a state confirmed lately shows what '
+        'it is worth by now', () async {
       final ProviderContainer container = hub(
         ada: ada.copyWith(
           presence: PeerPresence.online,
+          presenceAtMillis: _day,
+        ),
+      );
+      final SocialHubController controller = container.read(
+        socialHubControllerProvider.notifier,
+      );
+      FriendProfile read() =>
+          container.read(socialHubControllerProvider).friends[_ada]!;
+
+      await controller.notePresenceNetwork(reachable: false);
+      expect(read().presenceDoubt, PresenceDoubt.noNetwork);
+      expect(read().shownPresence, PeerPresence.noConnection);
+      expect(
+        friendPresenceLine(read(), _day + _minute),
+        'Nie masz połączenia z siecią',
+      );
+      await controller.decayPresence(
+        offlineAfter: kPresenceOfflineAfter,
+        foregroundFor: kPresenceForegroundFor,
+        settleUnchecked: true,
+        nowMillis: _day + _hour,
+      );
+      expect(
+        read().presence,
+        PeerPresence.online,
+        reason: 'nothing could come',
+      );
+      expect(read().shownPresence, PeerPresence.noConnection);
+
+      // Back 3 min after the last word: still online.
+      await controller.notePresenceNetwork(
+        reachable: true,
+        nowMillis: _day + 3 * _minute,
+      );
+      expect(read().presenceDoubt, isNull);
+      expect(read().shownPresence, PeerPresence.online);
+
+      // Lost again, back 8 min after the last word: "online" has expired.
+      await controller.notePresenceNetwork(reachable: false);
+      await controller.notePresenceNetwork(
+        reachable: true,
+        nowMillis: _day + 8 * _minute,
+      );
+      expect(read().presenceDoubt, isNull);
+      expect(read().shownPresence, PeerPresence.offline);
+    });
+
+    test('back on the network after long, "status nieznany" until the '
+        'answers had time to come', () async {
+      final ProviderContainer container = hub(
+        ada: ada.copyWith(
+          presence: PeerPresence.background,
           presenceAtMillis: _day,
         ),
       );
@@ -303,29 +371,25 @@ void main() {
           );
 
       await controller.notePresenceNetwork(reachable: false);
-      expect(read().presenceDoubt, PresenceDoubt.noNetwork);
+      final int back = _day + kPresenceRememberedFor.inMilliseconds + _minute;
+      await controller.notePresenceNetwork(reachable: true, nowMillis: back);
+      expect(read().presenceDoubt, PresenceDoubt.unchecked);
       expect(read().shownPresence, PeerPresence.unknown);
-      await decayAt(_day + _hour, settle: true);
       expect(
-        read().presence,
-        PeerPresence.online,
-        reason: 'nothing could come',
+        friendPresenceLine(read(), back),
+        'status nieznany · ostatnio w tle 31 min temu',
       );
-      expect(read().presenceDoubt, PresenceDoubt.noNetwork);
-
-      await controller.notePresenceNetwork(reachable: true);
-      expect(read().presenceDoubt, PresenceDoubt.unchecked);
-      await decayAt(_day + _hour);
-      expect(read().presenceDoubt, PresenceDoubt.unchecked);
-      expect(read().presence, PeerPresence.online);
-      await decayAt(_day + _hour, settle: true);
+      await decayAt(back);
+      expect(read().shownPresence, PeerPresence.unknown);
+      expect(read().presence, PeerPresence.background);
+      await decayAt(back, settle: true);
       expect(read().presenceDoubt, isNull);
-      expect(read().presence, PeerPresence.offline);
       expect(read().shownPresence, PeerPresence.offline);
     });
 
-    test('back on the screen, only a presence that would have expired is in '
-        'doubt; an answer ends the doubt', () async {
+    test('back on the screen, a presence that would have expired shows what '
+        'it is worth by now, or "status nieznany" when it is long ago; an '
+        'answer ends the doubt', () async {
       final ProviderContainer container = hub(
         ada: ada.copyWith(
           presence: PeerPresence.online,
@@ -337,7 +401,7 @@ void main() {
       );
       FriendProfile read() =>
           container.read(socialHubControllerProvider).friends[_ada]!;
-      Future<void> backAt(int now) => controller.doubtStalePresence(
+      Future<void> backAt(int now) => controller.recheckStalePresence(
         offlineAfter: kPresenceOfflineAfter,
         foregroundFor: kPresenceForegroundFor,
         nowMillis: now,
@@ -347,16 +411,32 @@ void main() {
       expect(read().presenceDoubt, isNull);
       expect(read().shownPresence, PeerPresence.online);
       await backAt(_day + kPresenceForegroundFor.inMilliseconds);
-      expect(read().presenceDoubt, PresenceDoubt.unchecked);
-      expect(read().presence, PeerPresence.online);
+      expect(read().presenceDoubt, isNull);
+      expect(read().shownPresence, PeerPresence.offline);
 
+      final int heard = _day + 6 * _minute;
       await controller.updatePeerPresence(
         peerAddress: _ada,
         report: const PresenceReport(presence: PeerPresence.background),
-        observedAtMillis: _day + 6 * _minute,
+        observedAtMillis: heard,
+      );
+      expect(read().shownPresence, PeerPresence.background);
+      final int later = heard + 40 * _minute;
+      await backAt(later);
+      expect(read().presenceDoubt, PresenceDoubt.unchecked);
+      expect(read().presence, PeerPresence.background);
+      expect(
+        friendPresenceLine(read(), later),
+        'status nieznany · ostatnio w tle 40 min temu',
+      );
+
+      await controller.updatePeerPresence(
+        peerAddress: _ada,
+        report: const PresenceReport(presence: PeerPresence.online),
+        observedAtMillis: later + _minute,
       );
       expect(read().presenceDoubt, isNull);
-      expect(read().shownPresence, PeerPresence.background);
+      expect(read().shownPresence, PeerPresence.online);
     });
 
     test('presence is kept with the friends', () async {
@@ -809,11 +889,10 @@ void main() {
       expect(friendIn(tester, _ada).shownPresence, PeerPresence.hidden);
     });
 
-    testWidgets('without the network for a while friends are in doubt, not '
-        'offline; back on it, the friends who have Zen open are pinged at '
-        'once, the others settled after the next round', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('without the network for a while every friend shows "brak '
+        'połączenia", neither offline nor "status nieznany"; back on it, '
+        'what they showed lately at once, and the friends who have Zen open '
+        'are pinged', (WidgetTester tester) async {
       final ValueNotifier<bool> reachable = ValueNotifier<bool>(true);
       addTearDown(reachable.dispose);
       final MemorySignalTransport transport = await pumpApp(
@@ -834,18 +913,21 @@ void main() {
       await tester.pump(kPresenceNoNetworkAfter);
       await tester.pump();
       for (final String friend in <String>[_ada, _bob]) {
-        expect(friendIn(tester, friend).shownPresence, PeerPresence.unknown);
-        expect(friendIn(tester, friend).presenceDoubt, PresenceDoubt.noNetwork);
+        expect(
+          friendIn(tester, friend).shownPresence,
+          PeerPresence.noConnection,
+        );
+        expect(
+          friendPresenceLine(
+            friendIn(tester, friend),
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+          'Nie masz połączenia z siecią',
+        );
       }
-      expect(
-        friendPresenceLine(
-          friendIn(tester, _ada),
-          DateTime.now().millisecondsSinceEpoch,
-        ),
-        'Brak połączenia z siecią — status nieznany',
-      );
       // What they showed last is kept underneath.
       expect(friendIn(tester, _ada).presence, PeerPresence.online);
+      expect(friendIn(tester, _bob).presence, PeerPresence.background);
 
       final int adaPings = sent(transport, 'ping', _ada);
       final int bobPings = sent(transport, 'ping', _bob);
@@ -854,25 +936,24 @@ void main() {
       await tester.pump();
       expect(sent(transport, 'ping', _ada), adaPings + 1);
       expect(sent(transport, 'ping', _bob), bobPings, reason: 'not woken');
-      expect(friendIn(tester, _bob).presenceDoubt, PresenceDoubt.unchecked);
-
-      // Ada answers: known again at once.
-      await transport.injectIncoming(
-        from: _ada,
-        payload: const <String, dynamic>{'type': 'pong', 'state': 'foreground'},
-      );
-      await tester.pumpAndSettle();
+      // Confirmed moments ago: shown as it was, not "status nieznany".
+      expect(friendIn(tester, _ada).presenceDoubt, isNull);
       expect(friendIn(tester, _ada).shownPresence, PeerPresence.online);
-      // Bob: once the next round's answers had time to come.
-      await tester.pump(kPresencePingInterval);
-      await tester.pump(kPresenceSettleAfterResume);
-      await tester.pump();
       expect(friendIn(tester, _bob).presenceDoubt, isNull);
       expect(friendIn(tester, _bob).shownPresence, PeerPresence.background);
+
+      // Ada answers: what she says now.
+      await transport.injectIncoming(
+        from: _ada,
+        payload: const <String, dynamic>{'type': 'pong', 'state': 'background'},
+      );
+      await tester.pumpAndSettle();
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
     });
 
-    testWidgets('what friends showed is remembered over a restart and shown '
-        'as not checked until they answer, or until the second round\'s '
+    testWidgets('what friends showed is remembered over a restart: confirmed '
+        'within 30 min it shows as it stands now until they answer; older, '
+        '"status nieznany" until they answer, or until the second round\'s '
         'answers had time to come', (WidgetTester tester) async {
       final int now = DateTime.now().millisecondsSinceEpoch;
       final MemorySocialSnapshotStore store = MemorySocialSnapshotStore(
@@ -880,12 +961,22 @@ void main() {
           friends: <String, FriendProfile>{
             _ada: adaAndBob[_ada]!.copyWith(
               presence: PeerPresence.online,
-              presenceAtMillis: now - 12 * _minute,
+              presenceAtMillis: now - 3 * _minute,
             ),
             _bob: adaAndBob[_bob]!.copyWith(
               presence: PeerPresence.background,
               presenceAtMillis: now - _hour,
             ),
+            _carol:
+                const FriendProfile(
+                  address: _carol,
+                  displayName: 'Carol',
+                  status: FriendRelationshipStatus.accepted,
+                ).copyWith(
+                  presence: PeerPresence.online,
+                  presenceAtMillis: now - 12 * _minute,
+                  lastOpenedAtMillis: now - 12 * _minute,
+                ),
           },
         ),
       );
@@ -893,27 +984,35 @@ void main() {
         tester,
         store: store,
       );
-      for (final String friend in <String>[_ada, _bob]) {
-        expect(friendIn(tester, friend).shownPresence, PeerPresence.unknown);
-        expect(friendIn(tester, friend).presenceDoubt, PresenceDoubt.unchecked);
-      }
+      // Ada, online 3 min ago: online.
+      expect(friendIn(tester, _ada).presenceDoubt, isNull);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.online);
+      // Carol, online 12 min ago: "online" has expired, so offline.
+      expect(friendIn(tester, _carol).presenceDoubt, isNull);
+      expect(friendIn(tester, _carol).shownPresence, PeerPresence.offline);
       expect(
-        friendPresenceLine(friendIn(tester, _ada), now),
-        'status nieznany · ostatnio w sieci 12 min temu',
+        friendPresenceLine(friendIn(tester, _carol), now),
+        'ostatnio otwierał(a) 12 min temu',
+      );
+      // Bob, an hour ago: not known.
+      expect(friendIn(tester, _bob).presenceDoubt, PresenceDoubt.unchecked);
+      expect(friendIn(tester, _bob).shownPresence, PeerPresence.unknown);
+      expect(
+        friendPresenceLine(friendIn(tester, _bob), now),
+        'status nieznany · ostatnio w tle 1 godz. temu',
       );
       // Not offline after the first round's settle either.
       await tester.pump(kPresenceSettleAfterResume);
       await tester.pump();
       expect(friendIn(tester, _bob).shownPresence, PeerPresence.unknown);
 
-      // Ada answers: what she says now.
+      // Ada's first word replaces what was remembered.
       await transport.injectIncoming(
         from: _ada,
-        payload: const <String, dynamic>{'type': 'pong', 'state': 'foreground'},
+        payload: const <String, dynamic>{'type': 'pong', 'state': 'background'},
       );
       await tester.pumpAndSettle();
-      expect(friendIn(tester, _ada).shownPresence, PeerPresence.online);
-      expect(friendIn(tester, _ada).presenceDoubt, isNull);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
 
       // Bob never answers: after the second round, what his last state is
       // worth by now (an hour old "w tle" is offline).
@@ -1116,7 +1215,7 @@ void main() {
       );
     });
 
-    test('the line of a presence not known now says why', () {
+    test('the line of a presence not shown as it is says why', () {
       const int now = 100 * _day;
       const FriendProfile base = FriendProfile(
         address: _ada,
@@ -1129,6 +1228,7 @@ void main() {
             presenceDoubt: PresenceDoubt.unchecked,
           );
       expect(presenceStateLabel(PeerPresence.unknown), 'status nieznany');
+      expect(presenceStateLabel(PeerPresence.noConnection), 'brak połączenia');
       expect(
         friendPresenceLine(
           unchecked(PeerPresence.online, at: now - 12 * _minute),
@@ -1163,7 +1263,17 @@ void main() {
           ).copyWith(presenceDoubt: PresenceDoubt.noNetwork),
           now,
         ),
-        'Brak połączenia z siecią — status nieznany',
+        'Nie masz połączenia z siecią',
+      );
+      expect(
+        base
+            .copyWith(
+              presence: PeerPresence.offline,
+              presenceDoubt: PresenceDoubt.noNetwork,
+            )
+            .shownPresence,
+        PeerPresence.noConnection,
+        reason: 'about this device, so the same for every friend',
       );
       expect(
         friendPresenceLine(base.copyWith(presence: PeerPresence.unknown), now),
@@ -1210,7 +1320,7 @@ void main() {
           .last,
     );
 
-    testWidgets('the chat header shows the three states', (
+    testWidgets('the chat header shows each state', (
       WidgetTester tester,
     ) async {
       final int now = DateTime.now().millisecondsSinceEpoch;
@@ -1286,6 +1396,22 @@ void main() {
       expect(headerDot(tester).unknown, isTrue);
       expect(headerDot(tester).away, isFalse);
 
+      // This device has no network: its own look, and the words say whose
+      // connection it is.
+      await pumpConversation(
+        tester,
+        base.copyWith(
+          presence: PeerPresence.online,
+          presenceAtMillis: now,
+          presenceDoubt: PresenceDoubt.noNetwork,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(subtitle(tester), 'Nie masz połączenia z siecią');
+      expect(headerDot(tester).noConnection, isTrue);
+      expect(headerDot(tester).on, isFalse);
+      expect(headerDot(tester).unknown, isFalse);
+
       await pumpConversation(
         tester,
         base.copyWith(
@@ -1355,9 +1481,10 @@ void main() {
       expect(avatarOf('Ada').showStatus, isTrue);
       // Bob does not show presence to this person: no dot at all.
       expect(avatarOf('Bob').showStatus, isFalse);
-      // Carol's is not known now (this device has no network): its own
-      // look, neither online nor offline.
-      expect(avatarOf('Carol').unknown, isTrue);
+      // Carol's cannot be known (this device has no network): its own
+      // look, neither online, offline nor "status nieznany".
+      expect(avatarOf('Carol').noConnection, isTrue);
+      expect(avatarOf('Carol').unknown, isFalse);
       expect(avatarOf('Carol').online, isFalse);
       expect(avatarOf('Carol').showStatus, isTrue);
       // The dot says it in words, too.
@@ -1368,22 +1495,29 @@ void main() {
         findsWidgets,
       );
       expect(
-        find.bySemanticsLabel(
-          RegExp(r'^Brak połączenia z siecią — status nieznany'),
-        ),
+        find.bySemanticsLabel(RegExp(r'^Nie masz połączenia z siecią')),
         findsWidgets,
       );
     });
 
-    testWidgets('the dot has four looks', (WidgetTester tester) async {
-      Future<void> pumpDot(bool on, bool away, {bool unknown = false}) =>
-          tester.pumpWidget(
-            MaterialApp(
-              home: Center(
-                child: ZenStatusDot(on: on, away: away, unknown: unknown),
-              ),
+    testWidgets('the dot has five looks', (WidgetTester tester) async {
+      Future<void> pumpDot(
+        bool on,
+        bool away, {
+        bool unknown = false,
+        bool noConnection = false,
+      }) => tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: ZenStatusDot(
+              on: on,
+              away: away,
+              unknown: unknown,
+              noConnection: noConnection,
             ),
-          );
+          ),
+        ),
+      );
       Iterable<BoxDecoration> boxes() => tester
           .widgetList<DecoratedBox>(
             find.descendant(
@@ -1435,6 +1569,17 @@ void main() {
         find.descendant(
           of: find.byType(ZenStatusDot),
           matching: find.byIcon(Icons.question_mark_rounded),
+        ),
+        findsOneWidget,
+      );
+
+      // No network here: a crossed-out cloud, neither a ring nor a dot.
+      await pumpDot(false, false, noConnection: true);
+      expect(boxes(), isEmpty);
+      expect(
+        find.descendant(
+          of: find.byType(ZenStatusDot),
+          matching: find.byIcon(Icons.cloud_off_rounded),
         ),
         findsOneWidget,
       );
