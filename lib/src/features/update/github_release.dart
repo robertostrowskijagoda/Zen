@@ -210,7 +210,7 @@ enum LinuxInstall {
 
 /// The release file that updates this platform ([releasePlatform] as
 /// [currentReleasePlatform] names it), or null where Zen downloads nothing
-/// (iOS: Scarlet installs [kIosIpaAssetName], see [UpdateTarget.ios]).
+/// (iOS: the person installs [kIosIpaAssetName], see [UpdateTarget.ios]).
 /// Android: the APK of the best
 /// of the device's [androidAbis] (`Build.SUPPORTED_ABIS`), else of the
 /// ABI the app runs as ([abi]); see [preferredAndroidAbi].
@@ -269,7 +269,8 @@ enum UpdateTarget {
 
   /// iPhone and iPad: a signing app (Scarlet, SideStore, AltStore)
   /// installed Zen, and an iOS app cannot install another one; Zen opens
-  /// Scarlet with the release's IPA instead ([scarletInstallLink]).
+  /// the release's IPA in Safari instead, for the signing app to install
+  /// ([GithubUpdateRoute.sideload]).
   ios,
 
   /// Anything else (the web): only the release page.
@@ -299,9 +300,11 @@ enum GithubUpdateRoute {
   /// Zen downloads this device's file, checks it and installs it.
   download,
 
-  /// iPhone and iPad: Scarlet is opened with the release's IPA (the iPhone
-  /// install page when Scarlet is not there). Nothing is downloaded.
-  scarlet,
+  /// iPhone and iPad: Safari downloads the release's IPA to Files (the
+  /// iPhone install page when the release has none), and the person
+  /// installs it with the signing app ("Sideload IPA" in Scarlet). Zen
+  /// downloads nothing.
+  sideload,
 
   /// Flatpak: the command and the release page. Nothing is downloaded.
   flatpak,
@@ -317,7 +320,7 @@ GithubUpdateRoute githubUpdateRoute({
   required GithubRelease release,
   required String? assetName,
 }) => switch (target) {
-  UpdateTarget.ios => GithubUpdateRoute.scarlet,
+  UpdateTarget.ios => GithubUpdateRoute.sideload,
   UpdateTarget.flatpak => GithubUpdateRoute.flatpak,
   UpdateTarget.other => GithubUpdateRoute.releasePage,
   _ =>
@@ -333,14 +336,20 @@ const String kIosIpaAssetName = 'Zen-unsigned.ipa';
 /// The steps for iPhone on the project's pages (Scarlet first).
 const String kIphoneInstallPageUrl = '${kZenPagesBase}install/iphone/';
 
-/// Scarlet's link that installs the IPA at the address after it.
-const String kScarletInstallPrefix = 'scarlet://install=';
+/// Zen's Scarlet source (made by the Pages workflow from the latest release,
+/// next to the SideStore / AltStore source apps.json).
+const String kScarletSourceUrl = '${kZenPagesBase}scarlet.json';
 
-/// The link that opens Scarlet with [release]'s IPA, pinned to that very
-/// version; null when the release has no IPA.
-String? scarletInstallLink(GithubRelease release) =>
+/// The link that adds [kScarletSourceUrl] to Scarlet. Scarlet does not
+/// document it, so the address and the steps by hand are always shown with
+/// it; AppDelegate.swift opens this link and no other of Scarlet's.
+const String kScarletSourceLink = 'scarlet://source=$kScarletSourceUrl';
+
+/// The address of [release]'s IPA, pinned to that very version (Safari
+/// saves it to Files); null when the release has no IPA.
+String? iosIpaUrl(GithubRelease release) =>
     release.assets.containsKey(kIosIpaAssetName)
-    ? '$kScarletInstallPrefix${release.assetUri(kIosIpaAssetName)}'
+    ? release.assetUri(kIosIpaAssetName).toString()
     : null;
 
 /// Whether the release's `SHA256SUMS` ([sumsText]) lists the file [name]

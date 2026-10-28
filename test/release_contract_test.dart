@@ -33,7 +33,8 @@ void main() {
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());
-      // iPhone: Zen downloads nothing, Scarlet installs the release's IPA.
+      // iPhone: Zen downloads nothing; Safari saves the release's IPA and
+      // Scarlet installs it.
       expect(
         githubAssetName(releasePlatform: 'ios', abi: Abi.iosArm64),
         isNull,
@@ -44,6 +45,36 @@ void main() {
       for (final String name in kContractAssets) {
         expect(kSafeAssetName.hasMatch(name), isTrue, reason: name);
       }
+    });
+
+    test('no link into Scarlet is guessed in the app', () {
+      // Scarlet documents no link that installs a file: the update goes
+      // through Safari and "Sideload IPA" instead. The only Scarlet link is
+      // the one that adds Zen's source, always shown with the steps by hand.
+      const String source =
+          'scarlet://source=https://robertostrowskijagoda.github.io/Zen/'
+          'scarlet.json';
+      final RegExp other = RegExp(r'scarlet://(?!source=)');
+      final List<String> found = <String>[
+        for (final String root in <String>['lib', 'ios/Runner'])
+          for (final FileSystemEntity f in Directory(
+            root,
+          ).listSync(recursive: true))
+            // latin1: images and sounds read without failing.
+            if (f is File &&
+                other.hasMatch(
+                  latin1.decode(f.readAsBytesSync()).toLowerCase(),
+                ))
+              f.path,
+      ];
+      expect(found, isEmpty);
+      // iOS opens exactly that link and the app asks for exactly it.
+      final String swift = File(
+        'ios/Runner/AppDelegate.swift',
+      ).readAsStringSync();
+      expect(swift, contains('"$source"'));
+      expect('scarlet://'.allMatches(swift.toLowerCase()), hasLength(1));
+      expect(kScarletSourceLink, source);
     });
 
     test('release.yml produces every one of them', () {

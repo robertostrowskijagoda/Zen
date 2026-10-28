@@ -111,11 +111,11 @@ Future<bool> openWebLink(String url) async {
   }
 }
 
-/// iPhone and iPad: opens Scarlet with [link] (`scarlet://…`, see
-/// scarletInstallLink). Returns `false` when Scarlet is not installed
-/// (iOS then opens nothing) or elsewhere.
-Future<bool> openScarletLink(String link) async {
-  if (kIsWeb || !Platform.isIOS || !link.startsWith('scarlet://')) {
+/// iPhone and iPad: opens Scarlet with [link], the link that adds Zen's
+/// source (kScarletSourceLink; iOS opens no other Scarlet link). Returns
+/// `false` where nothing opened it (Scarlet is not installed) or elsewhere.
+Future<bool> openScarletSourceLink(String link) async {
+  if (kIsWeb || !Platform.isIOS || !link.startsWith('scarlet://source=')) {
     return false;
   }
   try {

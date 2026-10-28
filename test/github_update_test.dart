@@ -15,6 +15,7 @@ import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
 import 'package:zen/src/features/update/presentation/github_update_banner.dart';
+import 'package:zen/src/features/update/presentation/scarlet_source_option.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
@@ -36,7 +37,6 @@ Map<String, Object?> _releaseJson(
 /// An iPhone's update check and what it opened, copied and downloaded.
 typedef _IosRun = ({
   GithubUpdateService service,
-  List<String> scarlet,
   List<String> pages,
   List<String> copied,
   List<Uri> downloads,
@@ -252,10 +252,10 @@ void main() {
         GithubUpdateRoute.download,
       );
       // iPhone and iPad never download, whatever file is named.
-      expect(route(UpdateTarget.ios, null), GithubUpdateRoute.scarlet);
+      expect(route(UpdateTarget.ios, null), GithubUpdateRoute.sideload);
       expect(
         route(UpdateTarget.ios, 'Zen-unsigned.ipa'),
-        GithubUpdateRoute.scarlet,
+        GithubUpdateRoute.sideload,
       );
       // A Flatpak never installs the bundle (nor a .deb) itself.
       expect(route(UpdateTarget.flatpak, null), GithubUpdateRoute.flatpak);
@@ -271,19 +271,30 @@ void main() {
       expect(route(UpdateTarget.other, null), GithubUpdateRoute.releasePage);
     });
 
-    test('Scarlet gets the IPA of exactly the announced version', () {
+    test('Safari gets the IPA of exactly the announced version', () {
       final GithubRelease release = GithubRelease.fromJson(
         _releaseJson('v1.12.0', assets: <String, int>{kIosIpaAssetName: 9}),
       )!;
       expect(kIosIpaAssetName, 'Zen-unsigned.ipa');
       expect(
-        scarletInstallLink(release),
-        'scarlet://install=https://github.com/robertostrowskijagoda/Zen/'
+        iosIpaUrl(release),
+        'https://github.com/robertostrowskijagoda/Zen/'
         'releases/download/v1.12.0/Zen-unsigned.ipa',
       );
       expect(
-        scarletInstallLink(GithubRelease.fromJson(_releaseJson('v1.12.0'))!),
+        iosIpaUrl(GithubRelease.fromJson(_releaseJson('v1.12.0'))!),
         isNull,
+      );
+      // The Scarlet source, published next to apps.json, and the one
+      // Scarlet link iOS opens.
+      expect(
+        kScarletSourceUrl,
+        'https://robertostrowskijagoda.github.io/Zen/scarlet.json',
+      );
+      expect(kScarletSourceLink, 'scarlet://source=$kScarletSourceUrl');
+      expect(
+        File('ios/Runner/AppDelegate.swift').readAsStringSync(),
+        contains('"$kScarletSourceLink"'),
       );
       expect(kIphoneInstallPageUrl, endsWith('/install/iphone/'));
       expect(kIphoneInstallPageUrl, startsWith('https://'));
@@ -328,9 +339,35 @@ void main() {
         saved(UpdateTarget.linuxTarball, 'Zen-Linux-x64.tar.gz'),
         contains('rozpakuj'),
       );
+      expect(iosUpdateHint, contains('Scarlet'));
+      expect(iosDownloadLabel('1.12.0'), 'Pobierz Zen 1.12.0');
+      final List<String> steps = iosUpdateSteps('1.12.0');
+      expect(steps, hasLength(4));
+      // The words of the iPhone install page and the install guide.
       expect(
-        iosUpdateHint('1.12.0'),
-        allOf(contains('Scarlet'), contains('1.12.0')),
+        steps[0],
+        allOf(
+          contains('„Pobierz Zen 1.12.0”'),
+          contains('Zen-unsigned.ipa'),
+          contains('Pliki'),
+        ),
+      );
+      expect(
+        steps[1],
+        allOf(
+          contains('Scarlet'),
+          contains('przytrzymaj strzałkę pobierania'),
+          contains('„Sideload IPA”'),
+        ),
+      );
+      expect(
+        steps[2],
+        allOf(contains('Zen-unsigned.ipa'), contains('„Install”')),
+      );
+      expect(steps[3], contains('Nie usuwaj'));
+      expect(
+        iosOtherSignersHint,
+        allOf(contains('SideStore'), contains('AltStore')),
       );
     });
 
@@ -919,11 +956,9 @@ void main() {
 
       _IosRun ios({
         Map<String, Object?>? json,
-        bool scarletInstalled = true,
-        bool browser = true,
+        bool Function(String url)? browser,
         String? assetName,
       }) {
-        final List<String> scarlet = <String>[];
         final List<String> pages = <String>[];
         final List<String> copied = <String>[];
         final List<Uri> downloads = <Uri>[];
@@ -942,83 +977,89 @@ void main() {
                 required int maxBytes,
                 void Function(int received)? onProgress,
               }) async => downloads.add(uri),
-          openScarlet: (String link) async {
-            scarlet.add(link);
-            return scarletInstalled;
-          },
           openPage: (String url) async {
             pages.add(url);
-            return browser;
+            return browser?.call(url) ?? true;
           },
           copy: (String text) async => copied.add(text),
           currentVersion: '1.11.0',
         );
         addTearDown(s.dispose);
-        return (
-          service: s,
-          scarlet: scarlet,
-          pages: pages,
-          copied: copied,
-          downloads: downloads,
-        );
+        return (service: s, pages: pages, copied: copied, downloads: downloads);
       }
 
       test('never download an IPA, even when a file is named', () async {
         final _IosRun r = ios(assetName: 'Zen-unsigned.ipa');
         await r.service.check();
         expect(r.service.showNewerBanner, isTrue);
-        expect(r.service.route, GithubUpdateRoute.scarlet);
+        expect(r.service.route, GithubUpdateRoute.sideload);
         expect(r.service.canInstall, isFalse);
         await r.service.update();
-        expect(r.downloads, isEmpty);
         expect(r.service.installState, GithubInstallState.idle);
+        await r.service.openIpaInSafari();
+        expect(r.downloads, isEmpty);
       });
 
-      test('open Scarlet with the IPA of the announced version', () async {
+      test('Safari opens the IPA of exactly the announced version', () async {
         final _IosRun r = ios();
         await r.service.check();
-        await r.service.openInScarlet();
-        expect(r.scarlet, <String>['scarlet://install=$ipa']);
-        expect(r.pages, isEmpty);
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa]);
         expect(r.downloads, isEmpty);
-        expect(r.service.installMessage, contains('Otwarto Scarlet'));
-        expect(r.service.installMessage, contains('1.12.0'));
+        expect(r.copied, isEmpty);
+        expect(r.service.installState, GithubInstallState.done);
+        // The message repeats the next step in Scarlet.
+        expect(
+          r.service.installMessage,
+          allOf(
+            contains('1.12.0'),
+            contains('Pliki'),
+            contains('Scarlet'),
+            contains('przytrzymaj strzałkę pobierania'),
+            contains('„Sideload IPA”'),
+          ),
+        );
       });
 
-      test('without Scarlet: the iPhone install page', () async {
-        final _IosRun r = ios(scarletInstalled: false);
+      test('a release without the IPA: the install page', () async {
+        final _IosRun r = ios(json: _releaseJson('v1.12.0'));
         await r.service.check();
-        await r.service.openInScarlet();
-        expect(r.scarlet, hasLength(1));
+        await r.service.openIpaInSafari();
         expect(r.pages, <String>[kIphoneInstallPageUrl]);
-        expect(r.service.installMessage, contains('Nie ma tu Scarlet'));
+        expect(r.service.installState, GithubInstallState.done);
+        expect(r.service.installMessage, contains('stronę instalacji'));
       });
 
-      test(
-        'a release without the IPA: the install page, not Scarlet',
-        () async {
-          final _IosRun r = ios(json: _releaseJson('v1.12.0'));
-          await r.service.check();
-          await r.service.openInScarlet();
-          expect(r.scarlet, isEmpty);
-          expect(r.pages, <String>[kIphoneInstallPageUrl]);
-        },
-      );
+      test('the IPA did not open in a browser: the install page', () async {
+        final _IosRun r = ios(browser: (String url) => url != ipa);
+        await r.service.check();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa, kIphoneInstallPageUrl]);
+        expect(r.copied, isEmpty);
+        expect(r.service.installMessage, contains('stronę instalacji'));
+      });
 
       test('nothing opens: the page address is copied and said', () async {
-        final _IosRun r = ios(scarletInstalled: false, browser: false);
+        final _IosRun r = ios(browser: (String url) => false);
         await r.service.check();
-        await r.service.openInScarlet();
+        await r.service.openIpaInSafari();
+        expect(r.pages, <String>[ipa, kIphoneInstallPageUrl]);
         expect(r.copied, <String>[kIphoneInstallPageUrl]);
         expect(r.service.installState, GithubInstallState.failed);
         expect(r.service.installMessage, contains(kIphoneInstallPageUrl));
       });
 
-      test('no newer release: Scarlet is not opened', () async {
+      test('the install page button opens the install page', () async {
+        final _IosRun r = ios();
+        await r.service.check();
+        await r.service.openInstallPage();
+        expect(r.pages, <String>[kIphoneInstallPageUrl]);
+      });
+
+      test('no newer release: nothing opens', () async {
         final _IosRun r = ios(json: _releaseJson('v1.11.0'));
         await r.service.check();
-        await r.service.openInScarlet();
-        expect(r.scarlet, isEmpty);
+        await r.service.openIpaInSafari();
         expect(r.pages, isEmpty);
       });
     });
@@ -1430,14 +1471,13 @@ void main() {
       _FakeInstaller installer,
       Map<String, Object?> json, {
       Widget home = const Scaffold(body: GithubUpdateBanner()),
-      Future<bool> Function(String link)? openScarlet,
+      Future<bool> Function(String url)? openPage,
     }) async {
       final GithubUpdateService s = GithubUpdateService(
         installer: installer,
         fetchJson: (Uri uri) async => json,
         fetchSums: (Uri uri) async => '',
-        openScarlet: openScarlet ?? (String link) async => true,
-        openPage: (String url) async => true,
+        openPage: openPage ?? (String url) async => true,
         currentVersion: '1.11.0',
       );
       await tester.pumpWidget(
@@ -1451,36 +1491,237 @@ void main() {
       return s;
     }
 
-    testWidgets('on iPhone: "Otwórz w Scarlet", never "Aktualizuj"', (
-      WidgetTester tester,
-    ) async {
+    _FakeInstaller iosInstaller() => _FakeInstaller(
+      Directory.systemTemp,
+      assetName: null,
+      target: UpdateTarget.ios,
+    );
+
+    testWidgets('on iPhone: "Pobierz Zen …" and numbered steps, never '
+        '"Aktualizuj"', (WidgetTester tester) async {
       final List<String> opened = <String>[];
       final GithubUpdateService s = await pumpWith(
         tester,
-        _FakeInstaller(
-          Directory.systemTemp,
-          assetName: null,
-          target: UpdateTarget.ios,
-        ),
+        iosInstaller(),
         _releaseJson('v1.12.0', assets: <String, int>{'Zen-unsigned.ipa': 9}),
-        openScarlet: (String link) async {
-          opened.add(link);
+        openPage: (String url) async {
+          opened.add(url);
           return true;
         },
       );
       expect(find.byKey(const Key('github-update-install')), findsNothing);
-      expect(find.byKey(const Key('github-update-scarlet')), findsOneWidget);
+      expect(find.byKey(const Key('github-update-ipa')), findsOneWidget);
+      expect(find.text('Pobierz Zen 1.12.0'), findsOneWidget);
       expect(
         find.byKey(const Key('github-update-install-page')),
         findsOneWidget,
       );
-      expect(find.text(iosUpdateHint('1.12.0')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('github-update-scarlet')));
+      expect(find.text(iosUpdateHint), findsOneWidget);
+      final List<String> steps = iosUpdateSteps('1.12.0');
+      for (int i = 0; i < steps.length; i++) {
+        expect(
+          tester
+              .widget<Text>(find.byKey(Key('github-update-ios-step-${i + 1}')))
+              .data,
+          steps[i],
+        );
+        expect(find.text('${i + 1}.'), findsOneWidget);
+      }
+      expect(find.text(iosOtherSignersHint), findsOneWidget);
+      await tester.tap(find.byKey(const Key('github-update-ipa')));
       await tester.pump();
-      expect(opened, hasLength(1));
-      expect(opened.single, startsWith('scarlet://install=https://'));
-      expect(find.byKey(const Key('github-update-message')), findsOneWidget);
+      expect(opened, <String>[
+        'https://github.com/robertostrowskijagoda/Zen/releases/download/'
+            'v1.12.0/Zen-unsigned.ipa',
+      ]);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('github-update-message')))
+            .data,
+        contains('„Sideload IPA”'),
+      );
       await finish(tester, s);
+    });
+
+    testWidgets('the iPhone steps are not shown on other systems', (
+      WidgetTester tester,
+    ) async {
+      for (final _FakeInstaller installer in <_FakeInstaller>[
+        _FakeInstaller(Directory.systemTemp),
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: 'Zen-Windows.zip',
+          target: UpdateTarget.windows,
+        ),
+        _FakeInstaller(
+          Directory.systemTemp,
+          assetName: null,
+          target: UpdateTarget.flatpak,
+        ),
+      ]) {
+        final GithubUpdateService s = await pumpWith(
+          tester,
+          installer,
+          _releaseJson(
+            'v1.12.0',
+            assets: <String, int>{
+              'Zen-arm64-v8a.apk': 5,
+              'Zen-Windows.zip': 5,
+              'Zen-Linux-x64.flatpak': 5,
+              'Zen-unsigned.ipa': 9,
+            },
+          ),
+          home: const Scaffold(
+            body: SingleChildScrollView(child: GithubUpdateCard()),
+          ),
+        );
+        final String system = installer.target.name;
+        expect(
+          find.byKey(const Key('github-update-ios-steps')),
+          findsNothing,
+          reason: system,
+        );
+        expect(
+          find.byKey(const Key('github-update-ipa')),
+          findsNothing,
+          reason: system,
+        );
+        expect(find.text(iosUpdateHint), findsNothing, reason: system);
+        expect(find.byType(ScarletSourceOption), findsNothing, reason: system);
+        await finish(tester, s);
+      }
+    });
+
+    // A small phone (320 x 568) at twice the text size: the banner above
+    // the app's content as in the shell, the card on the updates screen.
+    for (final (String where, Widget home) in <(String, Widget)>[
+      (
+        'banner',
+        const Scaffold(
+          body: Column(
+            children: <Widget>[
+              GithubUpdateBanner(),
+              Expanded(child: SizedBox.expand()),
+            ],
+          ),
+        ),
+      ),
+      (
+        'card',
+        const Scaffold(body: SingleChildScrollView(child: GithubUpdateCard())),
+      ),
+    ]) {
+      testWidgets('the iPhone steps fit 320 px at twice the text size '
+          '($where)', (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(320, 568);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final GithubUpdateService s = await pumpWith(
+          tester,
+          iosInstaller(),
+          _releaseJson('v1.12.0', assets: <String, int>{'Zen-unsigned.ipa': 9}),
+          home: home,
+        );
+        expect(
+          find.byKey(const Key('github-update-ios-steps')),
+          findsOneWidget,
+        );
+        for (int i = 1; i <= 4; i++) {
+          expect(find.byKey(Key('github-update-ios-step-$i')), findsOneWidget);
+        }
+        expect(find.byKey(const Key('github-update-ipa')), findsOneWidget);
+        if (where == 'card') {
+          expect(find.byKey(const Key('scarlet-source-add')), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+        await finish(tester, s);
+      });
+    }
+
+    group('the Scarlet source', () {
+      Future<(List<String>, List<String>)> pumpOption(
+        WidgetTester tester, {
+        required bool opens,
+      }) async {
+        final List<String> opened = <String>[];
+        final List<String> copied = <String>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ZenTheme.dark(),
+            home: Scaffold(
+              body: ScarletSourceOption(
+                openLink: (String link) async {
+                  opened.add(link);
+                  return opens;
+                },
+                copy: (String text) async => copied.add(text),
+              ),
+            ),
+          ),
+        );
+        return (opened, copied);
+      }
+
+      String message(WidgetTester tester) => tester
+          .widget<Text>(find.byKey(const Key('scarlet-source-message')))
+          .data!;
+
+      testWidgets('the button opens exactly the source link', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: true,
+        );
+        // The step by hand is said before anything is tapped.
+        expect(
+          tester
+              .widget<Text>(find.byKey(const Key('scarlet-source-manual')))
+              .data,
+          allOf(
+            contains('przytrzymaj strzałkę pobierania'),
+            contains('„Add Repo”'),
+          ),
+        );
+        await tester.tap(find.byKey(const Key('scarlet-source-add')));
+        await tester.pump();
+        expect(opened, <String>[
+          'scarlet://source=https://robertostrowskijagoda.github.io/Zen/'
+              'scarlet.json',
+        ]);
+        expect(copied, isEmpty);
+        expect(message(tester), contains('Otwarto Scarlet'));
+      });
+
+      testWidgets('Scarlet did not open: the address is copied', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: false,
+        );
+        await tester.tap(find.byKey(const Key('scarlet-source-add')));
+        await tester.pump();
+        expect(opened, hasLength(1));
+        expect(copied, <String>[kScarletSourceUrl]);
+        expect(message(tester), contains('„Add Repo”'));
+      });
+
+      testWidgets('"Kopiuj adres źródła" copies and shows the address', (
+        WidgetTester tester,
+      ) async {
+        final (List<String> opened, List<String> copied) = await pumpOption(
+          tester,
+          opens: true,
+        );
+        await tester.tap(find.byKey(const Key('scarlet-source-copy')));
+        await tester.pump();
+        expect(opened, isEmpty);
+        expect(copied, <String>[kScarletSourceUrl]);
+        expect(message(tester), contains(kScarletSourceUrl));
+      });
     });
 
     testWidgets('in a Flatpak: the command and the release page', (
@@ -1499,7 +1740,7 @@ void main() {
         ),
       );
       expect(find.byKey(const Key('github-update-install')), findsNothing);
-      expect(find.byKey(const Key('github-update-scarlet')), findsNothing);
+      expect(find.byKey(const Key('github-update-ipa')), findsNothing);
       expect(find.byKey(const Key('github-update-open-page')), findsOneWidget);
       expect(find.text(flatpakUpdateHint), findsOneWidget);
       await finish(tester, s);
@@ -1542,7 +1783,10 @@ void main() {
       final String how = tester
           .widget<Text>(find.byKey(const Key('github-update-how')))
           .data!;
-      expect(how, contains('Scarlet'));
+      expect(how, allOf(contains('Safari'), contains('Scarlet')));
+      // The Scarlet source as a quieter way, even with no new version.
+      expect(find.byType(ScarletSourceOption), findsOneWidget);
+      expect(find.byKey(const Key('scarlet-source-copy')), findsOneWidget);
       expect(how, isNot(contains('Pobrany plik')));
       await finish(tester, s);
     });

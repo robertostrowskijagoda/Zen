@@ -56,16 +56,36 @@ String get flatpakUpdateHint => t(
   'flatpak install --user ./Zen-Linux-x64.flatpak',
 );
 
-/// What "Otwórz w Scarlet" does on iPhone and iPad (Zen downloads nothing
-/// there: Scarlet downloads, signs and installs the IPA).
-String iosUpdateHint(String version) => t(
-  'Na iPhonie i iPadzie Zen nie zainstaluje się sam. „Otwórz w Scarlet” '
-  'otworzy Scarlet z plikiem Zen {version}: potwierdź tam instalację i nie '
-  'usuwaj wcześniej obecnego Zen. Bez Scarlet otworzy się strona '
-  'instalacji. Instalujesz przez SideStore lub AltStore? Zaktualizuj Zen '
-  'tam.',
-  {'version': version},
+/// The label of the iPhone and iPad update button, which opens the IPA of
+/// [version] in Safari.
+String iosDownloadLabel(String version) =>
+    t('Pobierz Zen {version}', {'version': version});
+
+/// Said on iPhone and iPad above [iosUpdateSteps] (Zen downloads nothing
+/// there: Safari saves the IPA, Scarlet installs it).
+String get iosUpdateHint => t(
+  'Na iPhonie i iPadzie Zen nie zainstaluje się sam. Zaktualizujesz go '
+  'przez Scarlet:',
 );
+
+/// The update of an iPhone or iPad to [version], step by step, in the words
+/// of the iPhone install page and the install guide.
+List<String> iosUpdateSteps(String version) => <String>[
+  t(
+    'Stuknij „Pobierz Zen {version}”: Safari zapisze plik Zen-unsigned.ipa '
+    'w aplikacji Pliki.',
+    {'version': version},
+  ),
+  t(
+    'Otwórz Scarlet, przytrzymaj strzałkę pobierania i wybierz „Sideload IPA”.',
+  ),
+  t('Wskaż Zen-unsigned.ipa i stuknij „Install”.'),
+  t('Nie usuwaj wcześniej obecnego Zen: nowa wersja zastąpi starą.'),
+];
+
+/// Said on iPhone and iPad below [iosUpdateSteps].
+String get iosOtherSignersHint =>
+    t('Instalujesz przez SideStore lub AltStore? Zaktualizuj Zen tam.');
 
 /// What "Aktualizuj" will do on [target] with the release file [file],
 /// said before it is tapped; null where Zen downloads nothing.
@@ -176,8 +196,8 @@ LinuxInstall currentLinuxInstall() {
 /// * Flatpak: nothing ([assetName] is null). The sandbox can neither write
 ///   to Downloads nor run `flatpak install`; the banner opens the release
 ///   page instead ([flatpakUpdateHint]).
-/// * iOS: nothing ([assetName] is null); the banner opens Scarlet
-///   ([GithubUpdateRoute.scarlet]).
+/// * iOS: nothing ([assetName] is null); the banner opens the release's
+///   IPA in Safari, for Scarlet to install ([GithubUpdateRoute.sideload]).
 final class SystemGithubInstaller implements GithubUpdateInstaller {
   SystemGithubInstaller({Future<void> Function()? quit})
     : _quit = quit ?? _quitForUpdate {

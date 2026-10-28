@@ -54,13 +54,30 @@ aligned for phones with 16 KB memory pages. Details:
     checked `.deb` is saved to Downloads; open it with the package
     installer or run the `sudo apt install …` line Zen shows.
   - **iPhone and iPad:** an iOS app can't install another, so Zen downloads
-    nothing. **Open in Scarlet** opens Scarlet with that version's
-    `Zen-unsigned.ipa` (`scarlet://install=` followed by the file's address
-    in the release); confirm there, without deleting the current Zen first.
-    When Scarlet isn't installed, the iPhone install page opens instead.
-    With SideStore or AltStore, update Zen there (the Zen source, below).
-    Scarlet downloads the file itself, so Zen's checksum and signature
-    check doesn't apply to it.
+    nothing itself. The card shows the steps, numbered, in the words of the
+    iPhone install page:
+    1. Tap **Download Zen 1.x.y**: Safari saves that version's
+       `Zen-unsigned.ipa` (pinned to the announced release) to the Files app.
+    2. Open Scarlet, press and hold the download arrow and choose
+       **Sideload IPA**.
+    3. Pick `Zen-unsigned.ipa` and tap **Install**.
+    4. Don't delete the current Zen first: the new version replaces it.
+
+    After the tap Zen repeats the next step in Scarlet. When the release has
+    no IPA, or no browser opens it, the iPhone install page opens instead
+    (its address is copied when that fails too); **Open install page** is
+    always there. With SideStore or AltStore, update Zen there (the Zen
+    source, below). Safari downloads the file, so Zen's checksum and
+    signature check doesn't apply to it.
+
+    A quieter way, under the steps on the updates screen (and in the
+    iPhone steps of "How to install Zen" on an iPhone): **Add Zen source
+    to Scarlet**, so new versions are installed in Scarlet itself, without
+    downloading the file in Safari. Scarlet doesn't document the link that
+    adds a source, so **Copy source address** and the step by hand are
+    always there: in Scarlet hold the download arrow, choose **Add Repo**
+    and paste `https://robertostrowskijagoda.github.io/Zen/scarlet.json`.
+    When Scarlet doesn't open, the address is copied.
 - **Flatpak** updates outside the app: the card shows the command
   (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
   page**; nothing is downloaded inside the sandbox.
@@ -86,11 +103,14 @@ aligned for phones with 16 KB memory pages. Details:
 - If github.com cannot be reached at all, Zen tells you, in case someone is
   blocking it.
 
-## The install page and the iPhone source
+## The install page and the iPhone sources
 
 GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 (steps for every system, the downloads, the Android signing certificate
-fingerprint; one recommended way and its own page for each system) and **`apps.json`**, a SideStore / AltStore source. Both are
+fingerprint; one recommended way and its own page for each system),
+**`apps.json`**, a SideStore / AltStore source, and **`scarlet.json`**, the
+same app as a Scarlet source (the iPhone page offers it under "Other ways",
+with the address to paste in Scarlet's **Add Repo**). All are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
 version, date, size and checksum, and the permissions read from that very
@@ -131,7 +151,8 @@ already.
   the store signs it, it also skips the check of its own signing
   certificate.
 - On iPhone and iPad Zen updates through the signer you installed it with
-  (Scarlet: **Open in Scarlet**; SideStore: the source above), not by itself.
+  (Scarlet: **Download Zen**, then **Sideload IPA**; SideStore: the source
+  above), not by itself.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it

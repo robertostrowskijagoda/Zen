@@ -53,7 +53,8 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenOpenedFilesBridge") {
       ZenOpenedFilesBridge.register(with: registrar)
     }
-    // Links: web pages in Safari, the update in Scarlet.
+    // Links: web pages (and the update's IPA) in Safari, Zen's source in
+    // Scarlet.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenSystemLinks") {
       ZenSystemLinks.register(with: registrar.messenger())
     }
@@ -61,12 +62,16 @@ import UserNotifications
 }
 
 /// `zen/system` on iOS: `openUrl` {url} → Bool, the same as on Android.
-/// Only https pages (Safari) and `scarlet://` links (the signing app Zen is
-/// updated with, system_actions.dart) are opened. False when nothing opened
-/// the link, which for Scarlet means it is not installed (`open` needs no
-/// LSApplicationQueriesSchemes entry, unlike `canOpenURL`).
+/// Only https links are opened (Safari: web pages, and the release's IPA,
+/// which Safari saves to Files), and of Scarlet's links exactly the one
+/// that adds Zen's source (kScarletSourceLink in github_release.dart).
+/// False when nothing opened the link, which for Scarlet means it is not
+/// installed (`open` needs no LSApplicationQueriesSchemes entry, unlike
+/// `canOpenURL`).
 enum ZenSystemLinks {
   private static var channel: FlutterMethodChannel?
+  private static let scarletSource =
+    "scarlet://source=https://robertostrowskijagoda.github.io/Zen/scarlet.json"
 
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "zen/system", binaryMessenger: messenger)
@@ -76,7 +81,7 @@ enum ZenSystemLinks {
         return
       }
       let link = (call.arguments as? [String: Any])?["url"] as? String
-      guard let link = link, let url = URL(string: link), ZenSystemLinks.allowed(url) else {
+      guard let link = link, let url = URL(string: link), ZenSystemLinks.allowed(link, url) else {
         result(false)
         return
       }
@@ -87,15 +92,11 @@ enum ZenSystemLinks {
     ZenSystemLinks.channel = channel
   }
 
-  private static func allowed(_ url: URL) -> Bool {
-    switch url.scheme?.lowercased() {
-    case "https":
-      return !(url.host ?? "").isEmpty
-    case "scarlet":
+  private static func allowed(_ link: String, _ url: URL) -> Bool {
+    if link == scarletSource {
       return true
-    default:
-      return false
     }
+    return url.scheme?.lowercased() == "https" && !(url.host ?? "").isEmpty
   }
 }
 

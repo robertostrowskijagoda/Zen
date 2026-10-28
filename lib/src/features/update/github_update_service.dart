@@ -86,8 +86,8 @@ bool githubUpdatesEnabledFor({
 /// knows [releaseKeys], against the maintainer's signature in
 /// [kSignedSumsAssetName], and hands it to [installer] (which on Android
 /// also checks the signing certificate). On iPhone and iPad it downloads
-/// nothing and opens Scarlet with the release's IPA instead
-/// ([openInScarlet]); in a Flatpak, and for a release without this
+/// nothing: Safari downloads the release's IPA for the signing app
+/// ([openIpaInSafari]); in a Flatpak, and for a release without this
 /// device's file, it points to the release page.
 ///
 /// Only one request to api.github.com per check, with no header but the
@@ -106,7 +106,6 @@ final class GithubUpdateService extends ChangeNotifier {
     Sha256SumsFetcher? fetchSums,
     GithubDownloader? download,
     this.beforeDownload,
-    Future<bool> Function(String link)? openScarlet,
     Future<bool> Function(String url)? openPage,
     Future<void> Function(String text)? copy,
     bool Function()? internetWorks,
@@ -123,7 +122,6 @@ final class GithubUpdateService extends ChangeNotifier {
   }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
-       _openScarlet = openScarlet ?? openScarletLink,
        _openPage = openPage ?? openWebLink,
        _copy = copy ?? copyWithExpiry,
        _internetWorks = internetWorks ?? (() => true),
@@ -167,9 +165,6 @@ final class GithubUpdateService extends ChangeNotifier {
   final GithubJsonFetcher _fetchJson;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
-
-  /// Opens a `scarlet://` link (false: Scarlet is not installed).
-  final Future<bool> Function(String link) _openScarlet;
 
   /// Opens an https page (false: it could not be opened).
   final Future<bool> Function(String url) _openPage;
@@ -737,42 +732,39 @@ final class GithubUpdateService extends ChangeNotifier {
     }
   }
 
-  /// iPhone and iPad ([GithubUpdateRoute.scarlet]): opens Scarlet with the
-  /// IPA of [newer] (pinned to that version; Scarlet downloads, signs and
-  /// installs it). Where Scarlet is not installed, or the release has no
-  /// IPA, the iPhone install page opens instead ([openInstallPage]).
-  /// Nothing is downloaded here.
-  Future<void> openInScarlet() async {
+  /// iPhone and iPad ([GithubUpdateRoute.sideload]): opens the IPA of
+  /// [newer] (pinned to that version) in Safari, which saves it to Files;
+  /// the person then installs it with Scarlet ("Sideload IPA"). Where the
+  /// release has no IPA, or no browser opens it, the iPhone install page
+  /// opens instead ([openInstallPage]). Zen itself downloads nothing.
+  Future<void> openIpaInSafari() async {
     final GithubRelease? release = newer;
-    if (release == null || route != GithubUpdateRoute.scarlet) {
+    if (release == null || route != GithubUpdateRoute.sideload) {
       return;
     }
-    final String? link = scarletInstallLink(release);
-    if (link != null && await _openScarlet(link)) {
+    final String? url = iosIpaUrl(release);
+    if (url != null && await _openPage(url)) {
       _finish(
         GithubInstallState.done,
-        t('Otwarto Scarlet. Potwierdź tam instalację Zen {version}.', {
-          'version': release.version,
-        }),
+        t(
+          'Safari pobiera Zen {version}: plik Zen-unsigned.ipa zapisze się '
+          'w aplikacji Pliki. Teraz otwórz Scarlet, przytrzymaj strzałkę '
+          'pobierania i wybierz „Sideload IPA”.',
+          {'version': release.version},
+        ),
       );
       return;
     }
-    await openInstallPage(noScarlet: link != null);
+    await openInstallPage();
   }
 
-  /// iPhone and iPad: opens the iPhone install page (Scarlet's steps);
-  /// [noScarlet]: Scarlet did not open. Where no browser opens it, its
-  /// address is copied.
-  Future<void> openInstallPage({bool noScarlet = false}) async {
+  /// iPhone and iPad: opens the iPhone install page (Scarlet's steps).
+  /// Where no browser opens it, its address is copied.
+  Future<void> openInstallPage() async {
     if (await _openPage(kIphoneInstallPageUrl)) {
       _finish(
         GithubInstallState.done,
-        noScarlet
-            ? t(
-                'Nie ma tu Scarlet, więc otwarto stronę instalacji Zen na '
-                'iPhone’a.',
-              )
-            : t('Otwarto stronę instalacji Zen na iPhone’a.'),
+        t('Otwarto stronę instalacji Zen na iPhone’a.'),
       );
       return;
     }

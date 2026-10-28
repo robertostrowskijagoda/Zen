@@ -185,8 +185,9 @@ key, so every release must be signed with this key.
 7. Publish the draft as a full release: not a pre-release, with "Set as
    the latest release" ticked (the app asks only for `releases/latest`,
    which never shows a draft or a pre-release). This starts `pages.yml`,
-   which refreshes the install page data and the SideStore / AltStore
-   source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
+   which refreshes the install page data, the SideStore / AltStore
+   source (`apps.json`) and the Scarlet source (`scarlet.json`) for the new
+   `Zen-unsigned.ipa`. A running app
    finds the release within an hour, and at once when it starts or comes
    back to the screen an hour or more after its last check; an Android
    phone that receives in the background finds it within about 4 to 5
@@ -464,11 +465,19 @@ for a `v*` tag, which attaches it to the release. The package is unsigned —
 Scarlet, SideStore or AltStore sign it on the phone (README, section
 "iPhone"; the install page links `releases/latest/download/Zen-unsigned.ipa`,
 which follows every release). The app's update notice on iPhone and iPad
-downloads nothing: **Open in Scarlet** opens
-`scarlet://install=<the release's Zen-unsigned.ipa>` (kIosIpaAssetName,
-pinned to the announced tag), else the iPhone install page, so every
-release must carry the IPA under exactly that name (`release.yml` refuses
-one without it). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
+downloads nothing itself: **Download Zen 1.x.y** opens the release's
+`Zen-unsigned.ipa` (kIosIpaAssetName, pinned to the announced tag) in
+Safari, which saves it to Files, and the notice lists the steps in Scarlet
+(hold the download arrow, **Sideload IPA**, pick the file, **Install**);
+without the IPA the iPhone install page opens instead, so every release
+must carry the IPA under exactly that name (`release.yml` refuses one
+without it). Scarlet documents no link that installs a file, so the app
+opens none. The updates card (and, on an iPhone, the guide's iPhone steps)
+also offers **Add Zen source to Scarlet**: `scarlet://source=` followed by
+the address of `scarlet.json`, the only Scarlet link `AppDelegate.swift`
+opens. That link is not documented by Scarlet either, so **Copy source
+address** and the step by hand (hold the download arrow, **Add Repo**) are
+always shown, and the address is copied when Scarlet does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
 `build_ios.sh`, then `flutter build ios --release --no-codesign`.
 
 ### 3.4. Build checks, pins and reproducibility
@@ -855,8 +864,11 @@ changes are planned.
   AltStore with a free Apple ID.
   `pages.yml` publishes the source `https://robertostrowskijagoda.github.io/Zen/apps.json`
   (`tool/ci/release_source.py`) for the latest published release's
-  `Zen-unsigned.ipa`, and the install page `/install/`; publishing a release
-  refreshes both (the release event starts a run on `main`, since the
+  `Zen-unsigned.ipa`, the same app as a Scarlet source
+  `https://robertostrowskijagoda.github.io/Zen/scarlet.json` (`META` with the
+  name and icon, one `Apps` entry: version, the IPA pinned to the tag in
+  `down`, bundle id, developer, description), and the install page
+  `/install/`; publishing a release refreshes them all (the release event starts a run on `main`, since the
   `github-pages` environment deploys only from it). The source is built from
   that release's own IPA: downloaded only from GitHub hosts, checked against
   the release's `SHA256SUMS` and size, and its permission texts, version and

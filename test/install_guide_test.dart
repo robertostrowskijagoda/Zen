@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
+import 'package:zen/src/features/update/presentation/scarlet_source_option.dart';
 
 Widget _app(InstallSystem initial) => MaterialApp(
   theme: ZenTheme.dark(),
@@ -35,6 +36,39 @@ void main() {
       installStepsFor(InstallSystem.linux).map((InstallStep s) => s.command),
       contains('sudo apt install ./Zen-Linux-x64.deb'),
     );
+  });
+
+  testWidgets('on an iPhone the iPhone steps offer the Scarlet source, '
+      'elsewhere not', (WidgetTester tester) async {
+    for (final (InstallSystem system, bool onIphone, bool shown)
+        in <(InstallSystem, bool, bool)>[
+          (InstallSystem.iphone, true, true),
+          (InstallSystem.iphone, false, false),
+          (InstallSystem.android, true, false),
+        ]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ZenTheme.dark(),
+          home: InstallGuideScreen(
+            key: ValueKey<String>('${system.name} $onIphone'),
+            initial: system,
+            onIphone: onIphone,
+          ),
+        ),
+      );
+      expect(
+        find.byType(ScarletSourceOption, skipOffstage: false),
+        shown ? findsOneWidget : findsNothing,
+        reason: '${system.name} $onIphone',
+      );
+      // The four steps stay the main way.
+      if (system == InstallSystem.iphone) {
+        expect(
+          find.textContaining('Sideload IPA', skipOffstage: false),
+          findsOneWidget,
+        );
+      }
+    }
   });
 
   testWidgets('the guide shows a QR code to the install page and switches '

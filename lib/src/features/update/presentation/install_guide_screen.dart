@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/features/update/presentation/scarlet_source_option.dart';
 
 /// The install page on GitHub Pages (`tool/pages/install`): the steps for
 /// every system and the downloads.
@@ -182,10 +183,14 @@ List<String> installNotesFor(InstallSystem system) => switch (system) {
 /// a QR code to the install page (where the downloads are) and a picker of
 /// systems.
 class InstallGuideScreen extends StatefulWidget {
-  const InstallGuideScreen({this.initial, super.key});
+  const InstallGuideScreen({this.initial, this.onIphone, super.key});
 
   /// The system shown first (this device's when `null`).
   final InstallSystem? initial;
+
+  /// Whether this device is an iPhone or iPad, where the iPhone steps offer
+  /// to add Zen's source to its Scarlet (`null`: as it runs).
+  final bool? onIphone;
 
   static Future<void> open(BuildContext context, {InstallSystem? initial}) =>
       Navigator.of(context).push(
@@ -366,6 +371,11 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                   children: <Widget>[
                     for (int i = 0; i < steps.length; i++)
                       _step(zen, i + 1, steps[i]),
+                    // On an iPhone the source can be added to its own
+                    // Scarlet: a quieter way than the steps.
+                    if (_system == InstallSystem.iphone &&
+                        (widget.onIphone ?? (!kIsWeb && Platform.isIOS)))
+                      const ScarletSourceOption(),
                   ],
                 ),
               ),

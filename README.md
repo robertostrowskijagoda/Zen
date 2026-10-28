@@ -246,6 +246,10 @@ source `https://robertostrowskijagoda.github.io/Zen/apps.json`; with a free Appl
 days and SideStore refreshes it, one tap on the install page) and Sideloadly
 (from a computer). The source always points to the latest release's
 [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa).
+Scarlet can take the same app as a source too: in Scarlet hold the download
+arrow, choose **Add Repo** and paste
+`https://robertostrowskijagoda.github.io/Zen/scarlet.json`; new versions are
+then installed in Scarlet itself.
 
 **What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
 the background for long. Messages and calls arrive while Zen is open, and

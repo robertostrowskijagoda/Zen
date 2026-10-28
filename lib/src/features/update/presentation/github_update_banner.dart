@@ -9,6 +9,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/presentation/scarlet_source_option.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
 /// Across the top of the app: "Jest nowa wersja … — warto zaktualizować"
@@ -51,12 +52,21 @@ class GithubUpdateBanner extends ConsumerWidget {
                     'version': newer.version,
                   }),
                   onClose: service.installing ? null : service.dismissNewer,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _WhatsNewLines(lines: service.whatsNewLines),
-                      _UpdateProgress(service: service, compact: true),
-                    ],
+                  // At most part of the screen (the iPhone steps with large
+                  // text are long): the rest scrolls, the app stays usable.
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _WhatsNewLines(lines: service.whatsNewLines),
+                          _UpdateProgress(service: service, compact: true),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               if (showUnreachable)
@@ -192,9 +202,9 @@ class _WhatsNewLines extends StatelessWidget {
 
 /// What this installation updates with ([GithubUpdateService.route]):
 /// "Aktualizuj" with the download's progress where Zen installs the file
-/// itself, "Otwórz w Scarlet" on iPhone and iPad, the release page in a
-/// Flatpak or when the release lacks this device's file; then the result
-/// (and "Szczegóły" in the banner).
+/// itself, "Pobierz Zen …" in Safari with the numbered steps for Scarlet on
+/// iPhone and iPad, the release page in a Flatpak or when the release lacks
+/// this device's file; then the result (and "Szczegóły" in the banner).
 class _UpdateProgress extends StatelessWidget {
   const _UpdateProgress({required this.service, this.compact = false});
 
@@ -218,7 +228,7 @@ class _UpdateProgress extends StatelessWidget {
               compact || file == null
                   ? null
                   : githubUpdatePlan(service.installer.target, file),
-            GithubUpdateRoute.scarlet => iosUpdateHint(newer.version),
+            GithubUpdateRoute.sideload => iosUpdateHint,
             GithubUpdateRoute.flatpak => flatpakUpdateHint,
             GithubUpdateRoute.releasePage => t(
               'Wydanie {version} nie ma pliku dla tego urządzenia. Pobierz '
@@ -283,6 +293,8 @@ class _UpdateProgress extends StatelessWidget {
                 ),
               ),
             ),
+          if (newer != null && route == GithubUpdateRoute.sideload)
+            _SideloadSteps(version: newer.version),
           const SizedBox(height: 4),
           Wrap(
             spacing: 8,
@@ -297,12 +309,13 @@ class _UpdateProgress extends StatelessWidget {
                   icon: const Icon(Icons.system_update_rounded, size: 18),
                   label: Text(t('Aktualizuj')),
                 ),
-              if (route == GithubUpdateRoute.scarlet) ...<Widget>[
+              if (newer != null &&
+                  route == GithubUpdateRoute.sideload) ...<Widget>[
                 FilledButton.icon(
-                  key: const Key('github-update-scarlet'),
-                  onPressed: () => unawaited(service.openInScarlet()),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: Text(t('Otwórz w Scarlet')),
+                  key: const Key('github-update-ipa'),
+                  onPressed: () => unawaited(service.openIpaInSafari()),
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: Text(iosDownloadLabel(newer.version)),
                 ),
                 TextButton(
                   key: const Key('github-update-install-page'),
@@ -325,6 +338,63 @@ class _UpdateProgress extends StatelessWidget {
                   child: Text(t('Szczegóły')),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// iPhone and iPad: the update to [version] as numbered steps (one line
+/// each, so they read well on a narrow phone with large text), then where
+/// SideStore and AltStore users update.
+class _SideloadSteps extends StatelessWidget {
+  const _SideloadSteps({required this.version});
+
+  final String version;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final TextStyle style = TextStyle(
+      color: zen.textSecondary,
+      fontSize: 13,
+      height: 1.35,
+    );
+    final List<String> steps = iosUpdateSteps(version);
+    return Padding(
+      key: const Key('github-update-ios-steps'),
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (int i = 0; i < steps.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${i + 1}.',
+                    style: style.copyWith(
+                      color: zen.accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      steps[i],
+                      key: Key('github-update-ios-step-${i + 1}'),
+                      style: style,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(iosOtherSignersHint, style: style),
           ),
         ],
       ),
@@ -486,6 +556,10 @@ class GithubUpdateCard extends ConsumerWidget {
                         style: TextStyle(color: zen.textSecondary),
                       ),
                     ),
+                  // iPhone and iPad: the source in Scarlet, a quieter way
+                  // than the steps above.
+                  if (service.installer.target == UpdateTarget.ios)
+                    const ScarletSourceOption(),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     key: const Key('github-check-now'),
@@ -521,9 +595,9 @@ class GithubUpdateCard extends ConsumerWidget {
                         UpdateTarget.ios => t(
                           'Zen sprawdza najnowsze wydanie na github.com przy '
                           'starcie i co godzinę i o nowej wersji powiadamia '
-                          'raz. Na iPhonie i iPadzie sam niczego nie pobiera: '
-                          'plik wydania pobiera i instaluje Scarlet (albo '
-                          'SideStore).',
+                          'raz. Na iPhonie i iPadzie sam niczego nie pobiera '
+                          'ani nie instaluje: plik wydania pobierasz w Safari '
+                          'i instalujesz przez Scarlet (albo SideStore).',
                         ),
                         UpdateTarget.flatpak => t(
                           'Zen sprawdza najnowsze wydanie na github.com przy '
