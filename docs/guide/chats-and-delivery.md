@@ -141,7 +141,7 @@ and none of your other friends' devices is good enough to take its place
 (say all of them are iPhones), or you chose your mailboxes by hand, Zen
 tells you: a card on the chats list and an entry in the notifications say
 *Mailbox {name} has not answered for {time} — choose another*. Tapping it
-opens **Settings → Offline mailboxes**, where each friend shows the kind of
+opens **Settings → Network → Offline mailboxes**, where each friend shows the kind of
 device and how much of the time it was available, and an iPhone without
 *receive in the background* is marked as a weak mailbox.
 
@@ -156,7 +156,7 @@ old phone, once silent for 3 days, stops being your mailbox and their new
 phone takes its place. Mailboxes you chose by hand name friends, not
 devices, so they follow a friend to their new phone, and they are the same
 on all your own devices (a new phone starts with your choice). Unlinking a
-lost phone (**Settings → Privacy and security → Devices**) stops everything
+lost phone (**Settings → Account and recovery → Devices**) stops everything
 going there at once.
 
 ### iPhone
@@ -174,7 +174,7 @@ iOS lets Zen run in the background only briefly. On an iPhone:
   or until you open Zen again;
 - a locked Zen receives too: messages wait encrypted until you unlock, and
   their notifications show at most the start of a message;
-- **Settings → Background work** (and a step of the first-run setup) lets
+- **Settings → Notifications and sounds → Background work** (and a step of the first-run setup) lets
   you choose how Zen is woken: **automatically by iOS** (a few times a day,
   almost no battery), a **Shortcuts automation every hour** (the action
   *Check Zen messages*; iOS may show a short banner each run) and a
@@ -290,6 +290,6 @@ then, and offers *Retry* when saving failed.
   when you open it, with its few pings while it stays open, with its
   answers to friends' pings, and "leaving" when it goes to the background.
   A weak acquaintance sees none of it; *Settings → Privacy and security →
-  Show when I last opened the app* hides the time from everyone.
+  Contact and visibility → Show when I last opened the app* hides the time from everyone.
 
 [Back to the guide](README.md)

@@ -855,37 +855,12 @@ class _SettingsScreen extends ConsumerWidget {
               const _QuickLockPanel(),
               // Friends run a newer Zen: a quiet hint, gone otherwise.
               const FriendsNewerVersionBanner(),
+              // One topic per row, each topic in one place: a setting is
+              // never in two rows (docs/guide/settings-and-peers.md has the
+              // map).
               _SettingsGroup(
-                title: t('Prywatność i bezpieczeństwo'),
+                title: t('Konto i odzyskiwanie'),
                 tiles: <Widget>[
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-security'),
-                    tone: ZenTone.privacy,
-                    icon: Icons.shield_outlined,
-                    title: t('Bezpieczeństwo'),
-                    subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
-                    pageTitle: t('Bezpieczeństwo'),
-                    pageChildren: const <Widget>[_SettingsSecuritySection()],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-notification-privacy'),
-                    icon: Icons.notifications_off_outlined,
-                    tone: ZenTone.privacy,
-                    title: t('Treść powiadomień'),
-                    subtitle: settings.notificationPrivacy.label,
-                    pageChildren: <Widget>[
-                      _SectionIntro(
-                        title: t('Co mówi powiadomienie'),
-                        caption: t(
-                          'Na ekranie blokady, w zasłonce i w historii '
-                          'powiadomień systemu. Rozmowa może mieć własny '
-                          'poziom (menu rozmowy → Treść powiadomień).',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const NotificationPrivacySettingChoice(),
-                    ],
-                  ),
                   if (ref.watch(ledgerNodeEnabledProvider))
                     _SettingsNavTile(
                       key: const Key('settings-nav-account'),
@@ -929,6 +904,34 @@ class _SettingsScreen extends ConsumerWidget {
                       onTap: () =>
                           unawaited(AccountDevicesScreen.open(context)),
                     ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Prywatność i bezpieczeństwo'),
+                tiles: <Widget>[
+                  // Passwords, the lock, the screen and the disguise.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-security'),
+                    tone: ZenTone.privacy,
+                    icon: Icons.shield_outlined,
+                    title: t('Bezpieczeństwo'),
+                    subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
+                    pageTitle: t('Bezpieczeństwo'),
+                    pageChildren: const <Widget>[_SettingsSecuritySection()],
+                  ),
+                  // Who sees what of you and who may reach you, on one page.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-contact'),
+                    icon: Icons.visibility_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Kontakt i widoczność'),
+                    subtitle: t(
+                      'Status dla znajomych, wiadomości spoza znajomych, '
+                      'zaproszenia do grup',
+                    ),
+                    pageTitle: t('Kontakt i widoczność'),
+                    pageChildren: const <Widget>[_ContactSettingsSection()],
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-blocked-button'),
                     icon: Icons.block_outlined,
@@ -941,47 +944,27 @@ class _SettingsScreen extends ConsumerWidget {
                           }),
                     onTap: () => _openBlockedFriendsScreen(context),
                   ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-group-invites'),
-                    icon: Icons.group_add_outlined,
-                    tone: ZenTone.people,
-                    title: t('Zaproszenia do grup'),
-                    subtitle: settings.groupInviteFrom.label,
-                    pageTitle: t('Zaproszenia do grup'),
-                    pageChildren: const <Widget>[GroupInviteFromTile()],
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-show-last-opened'),
-                    icon: Icons.history_toggle_off_rounded,
-                    tone: ZenTone.privacy,
-                    title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
-                    subtitle: t(
-                      'Znajomi widzą, czy masz Zen otwarty, w tle czy '
-                      'offline, a przy tym, kiedy ostatnio go otwierałeś. '
-                      'Słabi znajomi nie widzą żadnego z tych statusów.',
-                    ),
-                    value: settings.showLastOpened,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setShowLastOpened(value),
-                    ),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-stranger-messages'),
-                    icon: Icons.mark_chat_unread_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Wiadomości spoza znajomych'),
-                    subtitle: t('Kto może napisać pierwszy'),
-                    pageTitle: t('Wiadomości spoza znajomych'),
-                    pageChildren: const <Widget>[StrangerMessagesFromTile()],
-                  ),
                 ],
               ),
               _SettingsGroup(
                 title: t('Wiadomości i połączenia'),
                 tiles: <Widget>[
-                  const _RelayNavTile(),
+                  // Everything about notifications: what they say, the
+                  // sounds, each kind, the muted people, the background.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-notifications'),
+                    icon: Icons.notifications_outlined,
+                    tone: ZenTone.communication,
+                    title: t('Powiadomienia i dźwięki'),
+                    subtitle: t(
+                      '{privacy} · dźwięki, rodzaje powiadomień, praca w tle',
+                      {'privacy': settings.notificationPrivacy.label},
+                    ),
+                    pageTitle: t('Powiadomienia i dźwięki'),
+                    pageChildren: const <Widget>[
+                      _NotificationSettingsSection(),
+                    ],
+                  ),
                   if (ref.watch(ledgerNodeEnabledProvider))
                     _SettingsNavTile(
                       key: const Key('settings-nav-recordings'),
@@ -1005,115 +988,33 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('GIF-y'),
                     pageChildren: const <Widget>[_GifSettingsSection()],
                   ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-auto-media'),
-                    icon: Icons.download_for_offline_outlined,
-                    tone: ZenTone.media,
-                    title: t('Pobieraj zdjęcia i filmy'),
-                    subtitle: t(
-                      'Media z postów pobierają się same. Wyłącz, żeby '
-                      'oszczędzać transfer.',
-                    ),
-                    value: settings.autoDownloadMedia,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setAutoDownloadMedia(value),
-                    ),
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-media-wifi-only'),
-                    icon: Icons.wifi_rounded,
-                    tone: ZenTone.network,
-                    title: t('Media tylko przez Wi-Fi'),
-                    subtitle: t(
-                      'Zdjęcia i filmy nie pobierają się same przez dane '
-                      'komórkowe. Można je pobrać dotknięciem.',
-                    ),
-                    value: settings.mediaOnlyOnWifi,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setMediaOnlyOnWifi(value),
-                    ),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-notifications'),
-                    icon: Icons.notifications_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Powiadomienia i dźwięki'),
-                    subtitle: t(
-                      'Dźwięki oraz rodzaje powiadomień: wiadomości, '
-                      'połączenia, reakcje, posty',
-                    ),
-                    pageTitle: t('Powiadomienia i dźwięki'),
-                    pageChildren: const <Widget>[
-                      _NotificationSettingsSection(),
-                    ],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-muted-post-authors'),
-                    icon: Icons.notifications_off_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Wyciszone osoby'),
-                    subtitle: settings.mutedPostAuthors.isEmpty
-                        ? t('Nikogo nie wyciszono')
-                        : tn(
-                            settings.mutedPostAuthors.length,
-                            one: 'Bez powiadomień o postach: {n} osoba',
-                            few: 'Bez powiadomień o postach: {n} osoby',
-                            many: 'Bez powiadomień o postach: {n} osób',
-                          ),
-                    pageTitle: t('Wyciszone osoby'),
-                    pageChildren: const <Widget>[_MutedPostAuthorsSection()],
-                  ),
-                  if (Platform.isAndroid)
-                    _SettingsNavTile(
-                      key: const Key('settings-nav-delivery'),
-                      icon: Icons.notifications_active_outlined,
-                      tone: ZenTone.communication,
-                      title: t('Powiadomienia i praca w tle'),
-                      subtitle: t(
-                        'Uprawnienia, dostarczanie w tle, ekran połączeń',
-                      ),
-                      pageTitle: t('Powiadomienia i praca w tle'),
-                      pageChildren: const <Widget>[
-                        _BackgroundDeliverySection(),
-                        SizedBox(height: 12),
-                        _BatteryOptimizationSection(),
-                        SizedBox(height: 12),
-                        _FullScreenCallSection(),
-                      ],
-                    ),
-                  if (Platform.isIOS)
-                    _SettingsNavTile(
-                      key: const Key('settings-nav-ios-background'),
-                      icon: Icons.notifications_active_outlined,
-                      tone: ZenTone.communication,
-                      title: t('Praca w tle'),
-                      subtitle: t(
-                        'Sprawdzanie skrzynek w tle, odbieranie cały czas',
-                      ),
-                      pageTitle: t('Praca w tle'),
-                      pageChildren: const <Widget>[
-                        _Panel(child: IosBackgroundSection()),
-                      ],
-                    ),
                 ],
               ),
               _SettingsGroup(
-                title: t('Aplikacja'),
+                title: t('Sieć'),
                 tiles: <Widget>[
-                  // The same steps as on the first start.
+                  const _RelayNavTile(),
                   _SettingsNavTile(
-                    key: const Key('settings-nav-permissions'),
-                    icon: Icons.verified_user_outlined,
-                    tone: ZenTone.privacy,
-                    title: t('Uprawnienia i Bluetooth'),
-                    subtitle: Platform.isAndroid
-                        ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
-                        : t('Powiadomienia, mikrofon i kamera'),
-                    onTap: () => unawaited(PermissionsScreen.open(context)),
+                    key: const Key('settings-nav-network'),
+                    icon: Icons.hub_outlined,
+                    tone: ZenTone.network,
+                    title: t('Sieć i usługa'),
+                    subtitle: state.connectionLabel,
+                    pageTitle: t('Sieć i usługa'),
+                    pageChildren: const <Widget>[
+                      _LiveTechInfoSection(),
+                      _OfflineLinksPanel(),
+                      _BridgeHostSection(),
+                    ],
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-public-peers'),
+                    icon: Icons.public_rounded,
+                    tone: ZenTone.network,
+                    title: t('Publiczne węzły'),
+                    subtitle: t('Przez które węzły Zen łączy się z siecią'),
+                    pageTitle: t('Publiczne węzły'),
+                    pageChildren: const <Widget>[PublicPeersSection()],
                   ),
                   // How often Bluetooth looks around in the background.
                   if (Platform.isAndroid)
@@ -1126,16 +1027,11 @@ class _SettingsScreen extends ConsumerWidget {
                       pageTitle: t('Rozglądanie w tle'),
                       pageChildren: const <Widget>[NearbyLookSettingsSection()],
                     ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-health'),
-                    icon: Icons.health_and_safety_outlined,
-                    tone: ZenTone.network,
-                    title: t('Dlaczego nie działa?'),
-                    subtitle: t(
-                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
-                    ),
-                    onTap: () => unawaited(HealthScreen.open(context)),
-                  ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Aplikacja'),
+                tiles: <Widget>[
                   _SettingsNavTile(
                     key: const Key('settings-nav-appearance'),
                     icon: Icons.palette_outlined,
@@ -1161,6 +1057,7 @@ class _SettingsScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  // Room, limits, cleaning and what downloads by itself.
                   _SettingsNavTile(
                     key: const Key('settings-nav-data'),
                     icon: Icons.storage_outlined,
@@ -1180,6 +1077,17 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('Dane i pamięć'),
                     pageChildren: _storagePageChildren(),
                   ),
+                  // The same steps as on the first start.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-permissions'),
+                    icon: Icons.verified_user_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Uprawnienia i Bluetooth'),
+                    subtitle: Platform.isAndroid
+                        ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
+                        : t('Powiadomienia, mikrofon i kamera'),
+                    onTap: () => unawaited(PermissionsScreen.open(context)),
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-updates'),
                     icon: Icons.system_update_alt_rounded,
@@ -1196,26 +1104,14 @@ class _SettingsScreen extends ConsumerWidget {
                 title: t('Zaawansowane'),
                 tiles: <Widget>[
                   _SettingsNavTile(
-                    key: const Key('settings-nav-network'),
-                    icon: Icons.hub_outlined,
+                    key: const Key('settings-nav-health'),
+                    icon: Icons.health_and_safety_outlined,
                     tone: ZenTone.network,
-                    title: t('Sieć i usługa'),
-                    subtitle: state.connectionLabel,
-                    pageTitle: t('Sieć i usługa'),
-                    pageChildren: const <Widget>[
-                      _LiveTechInfoSection(),
-                      _OfflineLinksPanel(),
-                      _BridgeHostSection(),
-                    ],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-public-peers'),
-                    icon: Icons.public_rounded,
-                    tone: ZenTone.network,
-                    title: t('Publiczne węzły'),
-                    subtitle: t('Przez które węzły Zen łączy się z siecią'),
-                    pageTitle: t('Publiczne węzły'),
-                    pageChildren: const <Widget>[PublicPeersSection()],
+                    title: t('Dlaczego nie działa?'),
+                    subtitle: t(
+                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
+                    ),
+                    onTap: () => unawaited(HealthScreen.open(context)),
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-diagnostics'),
@@ -1467,11 +1363,12 @@ class _SettingsSwitchTile extends StatelessWidget {
 }
 
 /// Ustawienia → Dane i pamięć: how much room Zen takes, the defaults for
-/// the data and the limits.
+/// the data, what downloads by itself and the limits.
 List<Widget> _storagePageChildren() => <Widget>[
   const _Panel(child: StorageUsageSection()),
   const SizedBox(height: 12),
   const _DataSection(),
+  const _MediaDownloadSettings(),
   const SizedBox(height: 12),
   _SectionIntro(
     title: t('Limity przechowywania'),
@@ -1492,6 +1389,95 @@ Future<void> openStorageSettingsPage(BuildContext context) =>
         ),
       ),
     );
+
+/// Ustawienia → Dane i pamięć: whether photos and videos of posts download
+/// by themselves, and whether only over Wi-Fi.
+class _MediaDownloadSettings extends ConsumerWidget {
+  const _MediaDownloadSettings();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppSettings settings = ref.watch(appSettingsControllerProvider);
+    final AppSettingsController controller = ref.read(
+      appSettingsControllerProvider.notifier,
+    );
+    return _SettingsGroup(
+      title: '',
+      tiles: <Widget>[
+        _SettingsSwitchTile(
+          key: const Key('settings-auto-media'),
+          icon: Icons.download_for_offline_outlined,
+          tone: ZenTone.media,
+          title: t('Pobieraj zdjęcia i filmy'),
+          subtitle: t(
+            'Media z postów pobierają się same. Wyłącz, żeby '
+            'oszczędzać transfer.',
+          ),
+          value: settings.autoDownloadMedia,
+          onChanged: (bool value) =>
+              unawaited(controller.setAutoDownloadMedia(value)),
+        ),
+        _SettingsSwitchTile(
+          key: const Key('settings-media-wifi-only'),
+          icon: Icons.wifi_rounded,
+          tone: ZenTone.network,
+          title: t('Media tylko przez Wi-Fi'),
+          subtitle: t(
+            'Zdjęcia i filmy nie pobierają się same przez dane '
+            'komórkowe. Można je pobrać dotknięciem.',
+          ),
+          value: settings.mediaOnlyOnWifi,
+          onChanged: (bool value) =>
+              unawaited(controller.setMediaOnlyOnWifi(value)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Ustawienia → Kontakt i widoczność: what friends see of you, and who
+/// may write to you or invite you without being a friend.
+class _ContactSettingsSection extends ConsumerWidget {
+  const _ContactSettingsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool showLastOpened = ref.watch(
+      appSettingsControllerProvider.select((AppSettings s) => s.showLastOpened),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _SettingsGroup(
+          title: '',
+          tiles: <Widget>[
+            _SettingsSwitchTile(
+              key: const Key('settings-show-last-opened'),
+              icon: Icons.history_toggle_off_rounded,
+              tone: ZenTone.privacy,
+              title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
+              subtitle: t(
+                'Znajomi widzą, czy masz Zen otwarty, w tle czy '
+                'offline, a przy tym, kiedy ostatnio go otwierałeś. '
+                'Słabi znajomi nie widzą żadnego z tych statusów.',
+              ),
+              value: showLastOpened,
+              onChanged: (bool value) => unawaited(
+                ref
+                    .read(appSettingsControllerProvider.notifier)
+                    .setShowLastOpened(value),
+              ),
+            ),
+          ],
+        ),
+        const _SettingsGroup(
+          title: '',
+          tiles: <Widget>[StrangerMessagesFromTile(), GroupInviteFromTile()],
+        ),
+      ],
+    );
+  }
+}
 
 /// A settings sub-page: the panels of one topic, nothing else.
 class _SettingsPage extends StatelessWidget {

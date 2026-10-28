@@ -70,7 +70,7 @@ Native side: `ios/Runner/ZenBackgroundBridge.swift` and
 `lib/src/features/runtime/ios_background.dart` (the host that answers iOS,
 the unlocked app's part) and `lib/src/features/runtime/ios_locked_receiver.dart`
 (the locked receiver on an iPhone, the engine without a screen). Settings
-page: Settings → Praca w tle
+page: Settings → Powiadomienia i dźwięki → Praca w tle
 (`lib/src/features/runtime/presentation/ios_background_section.dart`); the
 same choices are a step of the first-run setup, and the iPhone's own
 settings are checked on the permissions screen.
@@ -244,7 +244,7 @@ Trade-offs, honestly:
 
 ### Choosing how Zen is woken
 
-Settings → Praca w tle and the first-run setup (iPhone only) show the three
+Settings → Powiadomienia i dźwięki → Praca w tle and the first-run setup (iPhone only) show the three
 ways as separate choices, each with how often it wakes Zen and what it
 costs:
 
@@ -323,7 +323,7 @@ check that the Swift compiles.
 2. **First-run setup.** On a fresh install (or Settings → Ponownie
    przeprowadź konfigurację), step 3 is "Jak iPhone ma budzić Zen?" with the
    three choices and the settings check.
-3. **Settings page.** Settings → Praca w tle. Option 1 should say background
+3. **Settings page.** Settings → Powiadomienia i dźwięki → Praca w tle. Option 1 should say background
    refresh is on and "iOS jeszcze nie obudził Zen w tle". Turn off Settings
    → General → Background App Refresh → Zen, come back: the line and the
    check below say it is off, with the button to Zen's Settings page. Turn

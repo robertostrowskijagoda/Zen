@@ -266,7 +266,8 @@ on a computer) and Sideloadly (from a computer).
 the background for long. Messages and calls arrive while Zen is open, and
 otherwise only when iOS wakes Zen for a short check now and then (no push
 notifications); until then they wait with the sender or in the mailboxes
-your friends' devices keep for you. Settings → Praca w tle can keep Zen
+your friends' devices keep for you. Settings → Notifications and sounds →
+Background work can keep Zen
 receiving all the time, at a clear battery cost; see
 [iPhone: receiving in the background](docs/IOS_BACKGROUND.md). It works best when one friend has Zen on a computer (in
 the tray) or on Android: that device keeps the mail for the whole group of
