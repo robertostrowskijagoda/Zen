@@ -120,7 +120,8 @@
               android:resource="@style/NormalTheme"
               />
             <!-- Links are handled by the app (app_links), not by Flutter's
-                 own routing: it would try to open "/…" as a page. -->
+                 own routing: it would try to open "/…" as a page
+                 (MainActivity.shouldHandleDeeplinking says no as well). -->
             <meta-data
               android:name="flutter_deeplinking_enabled"
               android:value="false"
@@ -173,6 +174,12 @@
             android:label="@string/launcher_label"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round">
+            <!-- Started from the launcher, MainActivity reads its settings
+                 from the alias it came through, not from its own entry:
+                 without this, Flutter's own link routing was on again. -->
+            <meta-data
+                android:name="flutter_deeplinking_enabled"
+                android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -186,11 +193,56 @@
             android:label="@string/disguise_label"
             android:icon="@mipmap/ic_disguise_notes"
             android:roundIcon="@mipmap/ic_disguise_notes">
+            <meta-data
+                android:name="flutter_deeplinking_enabled"
+                android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity-alias>
+        <!-- Zen's own files opened from another app (Files, a mail, a
+             chat): an account backup (.zenbackup), a key backup (.zenkey),
+             an update (.zenupdate). Most apps hand an unknown file over as
+             application/octet-stream with no name in the address, so Zen
+             is offered for any such file and the app tells by its content
+             whether it is one of its own; addresses that still carry the
+             name match by its ending as well. ZenOpenFileActivity passes
+             the file on to MainActivity in Zen's own task. -->
+        <activity
+            android:name=".ZenOpenFileActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="content"/>
+                <data android:mimeType="application/octet-stream"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="content"/>
+                <data android:host="*"/>
+                <data android:mimeType="*/*"/>
+                <!-- pathSuffix: Android 12+; the patterns cover older
+                     ones (their matcher needs one per extra dot). -->
+                <data android:pathSuffix=".zenbackup"/>
+                <data android:pathSuffix=".zenkey"/>
+                <data android:pathSuffix=".zenupdate"/>
+                <data android:pathPattern=".*\\.zenbackup"/>
+                <data android:pathPattern=".*\\..*\\.zenbackup"/>
+                <data android:pathPattern=".*\\..*\\..*\\.zenbackup"/>
+                <data android:pathPattern=".*\\.zenkey"/>
+                <data android:pathPattern=".*\\..*\\.zenkey"/>
+                <data android:pathPattern=".*\\..*\\..*\\.zenkey"/>
+                <data android:pathPattern=".*\\.zenupdate"/>
+                <data android:pathPattern=".*\\..*\\.zenupdate"/>
+                <data android:pathPattern=".*\\..*\\..*\\.zenupdate"/>
+            </intent-filter>
+        </activity>
         <!-- Only ever started by the app itself (explicit intents and the
              incoming-call notification's full-screen intent), so other apps
              cannot open it with a forged caller or route. -->

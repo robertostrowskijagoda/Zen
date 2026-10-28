@@ -4,6 +4,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/runtime/opened_files.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 final Provider<bool> runtimeDeepLinkBindingEnabledProvider = Provider<bool>((
@@ -98,7 +99,10 @@ final class _RuntimeDeepLinkBridgeState
   }
 
   Future<void> _handleLink(Uri uri) async {
-    if (!mounted) {
+    // A file (a backup tapped in Files) comes on the same stream; its
+    // screen opens through opened_files.dart, not as a route (an unknown
+    // route would open the chats).
+    if (!mounted || isZenOpenedFileLink(uri)) {
       return;
     }
     await ref

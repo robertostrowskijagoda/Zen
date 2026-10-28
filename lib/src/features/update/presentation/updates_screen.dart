@@ -21,13 +21,18 @@ import 'package:zen/src/features/update/update_service.dart';
 
 /// "Aktualizacje i Podaj dalej".
 class UpdatesScreen extends ConsumerStatefulWidget {
-  const UpdatesScreen({super.key});
+  const UpdatesScreen({this.file, super.key});
 
-  static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) => const UpdatesScreen(),
-    ),
-  );
+  /// An update file opened in Zen from outside (opened_files.dart): loaded
+  /// as soon as the screen opens, like "Wczytaj aktualizację z pliku".
+  final String? file;
+
+  static Future<void> open(BuildContext context, {String? file}) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => UpdatesScreen(file: file),
+        ),
+      );
 
   @override
   ConsumerState<UpdatesScreen> createState() => _UpdatesScreenState();
@@ -109,6 +114,25 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     }
   }
 
+  @override
+  void initState() {
+    super.initState();
+    final String? file = widget.file;
+    if (file != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        final UpdateService? service = ref.read(updateServiceProvider);
+        if (service == null) {
+          setState(() => _message = t('Aktualizacje nie są jeszcze gotowe.'));
+          return;
+        }
+        unawaited(_load(service, file));
+      });
+    }
+  }
+
   Future<void> _importFile(UpdateService service) async {
     final FilePickerResult? picked = await FilePicker.platform.pickFiles(
       allowMultiple: false,
@@ -118,6 +142,10 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     if (path == null) {
       return;
     }
+    await _load(service, path);
+  }
+
+  Future<void> _load(UpdateService service, String path) async {
     await _run(() async {
       final Uint8List data = await File(path).readAsBytes();
       return service.importBundle(data);

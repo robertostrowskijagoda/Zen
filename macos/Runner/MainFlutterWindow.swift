@@ -42,6 +42,9 @@ class MainFlutterWindow: NSWindow {
     mediaTransfer = ZenMediaTransferBridge.register(
       with: flutterViewController.engine.binaryMessenger)
     registerForDraggedTypes([.fileURL])
+    // Zen's own files opened from Finder (AppDelegate.swift).
+    ZenOpenedFilesBridge.register(
+      with: flutterViewController.registrar(forPlugin: "ZenOpenedFilesBridge"))
 
     super.awakeFromNib()
   }

@@ -54,6 +54,11 @@ import java.io.IOException
  * named [name], part n `<first>.n` (after any rename the system did).
  * `deleteDocument` {uri} deletes such a copy again (exported_files.dart,
  * the panic password): true when it went.
+ *
+ * Files opened in Zen from another app (opened_files.dart):
+ * `copyOpenedFile` {uri} copies the content address into the cache's
+ * `opened` folder, which keeps only the newest one, and answers
+ * {path, name} (null when it cannot be read).
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -171,6 +176,11 @@ object ZenSystemBridge {
                         "setDisguise" -> result.success(
                             setDisguise(activity, call.argument<Boolean>("enabled") ?: false),
                         )
+                        "copyOpenedFile" -> {
+                            val uri = call.argument<String>("uri") ?: ""
+                            val context = activity.applicationContext
+                            inBackground(result) { copyOpenedFile(context, uri) }
+                        }
                         else -> result.notImplemented()
                     }
                 } catch (error: Exception) {
@@ -288,6 +298,32 @@ object ZenSystemBridge {
             false
         }
         return mapOf("deleted" to deleted)
+    }
+
+    /**
+     * Copies the file another app opened in Zen ([uri], read access came
+     * with the intent) into `cache/opened`, under its own name made safe.
+     */
+    private fun copyOpenedFile(context: Context, uri: String): Map<String, Any>? {
+        val source = Uri.parse(uri)
+        if (source.scheme != "content") {
+            return null
+        }
+        val name = (displayName(context, source) ?: source.lastPathSegment ?: "")
+            .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]"), "_")
+            .trimStart('.')
+            .take(120)
+            .ifEmpty { "plik" }
+        val folder = File(context.cacheDir, "opened")
+        folder.deleteRecursively()
+        if (!folder.mkdirs()) {
+            throw IOException("Cannot make $folder")
+        }
+        val target = File(folder, name)
+        context.contentResolver.openInputStream(source)?.use { input ->
+            target.outputStream().use { input.copyTo(it) }
+        } ?: throw IOException("Cannot read $uri")
+        return mapOf("path" to target.path, "name" to name)
     }
 
     private fun treeDocument(tree: Uri): Uri =

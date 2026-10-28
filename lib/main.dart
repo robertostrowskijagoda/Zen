@@ -21,6 +21,7 @@ import 'package:zen/src/features/about/go_licenses.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/media/linux_video_player.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/opened_files.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 void main(List<String> args) {
@@ -43,10 +44,17 @@ void main(List<String> args) {
       // it would run permanently offline. Hand the launch over to the instance
       // that is already running instead.
       // A test profile (--zen-profile) runs beside the others on purpose.
-      if (ZenInstance.profile == null && !await ZenSingleInstance.acquire()) {
+      if (ZenInstance.profile == null &&
+          !await ZenSingleInstance.acquire(
+            // Windows: a file opened while Zen runs goes to the running one.
+            open: Platform.isWindows ? zenOpenedFileArgument(args) : null,
+          )) {
         logZenMessage('Another Zen instance is already running — exiting.');
         exit(0);
       }
+      // Files opened in Zen from outside (a backup tapped in Files):
+      // listening before anything else, so the one Zen starts with counts.
+      ZenOpenedFiles.instance.start(args);
       // Before the first text: the person's language (or the system's).
       await loadZenLanguage();
       runApp(const _ZenBootstrapApp());

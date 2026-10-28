@@ -457,13 +457,19 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
 /// "Mam kopię": the backup file of the account, or the key alone (a
 /// paper key or a key file).
 class AccountBackupRestoreScreen extends ConsumerStatefulWidget {
-  const AccountBackupRestoreScreen({super.key});
+  const AccountBackupRestoreScreen({this.path, super.key});
 
-  static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) => const AccountBackupRestoreScreen(),
-    ),
-  );
+  /// A backup file opened in Zen from outside (opened_files.dart): chosen
+  /// already, the password is what is left.
+  final String? path;
+
+  static Future<void> open(BuildContext context, {String? path}) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              AccountBackupRestoreScreen(path: path),
+        ),
+      );
 
   @override
   ConsumerState<AccountBackupRestoreScreen> createState() =>
@@ -480,6 +486,15 @@ class _AccountBackupRestoreScreenState
   bool _obscure = true;
 
   @override
+  void initState() {
+    super.initState();
+    final String? path = widget.path;
+    if (path != null) {
+      unawaited(_choose(path));
+    }
+  }
+
+  @override
   void dispose() {
     _password.dispose();
     super.dispose();
@@ -490,6 +505,10 @@ class _AccountBackupRestoreScreenState
     if (path == null) {
       return;
     }
+    await _choose(path);
+  }
+
+  Future<void> _choose(String path) async {
     final List<String> parts = await accountBackupParts(path);
     if (!mounted) {
       return;
