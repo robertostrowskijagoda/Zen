@@ -9,6 +9,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -407,8 +408,27 @@ final class PrivacyRedactingNotificationService
   }
 
   @override
-  Future<bool> show(RuntimeSystemNotification notification) {
-    return delegate.show(redact(notification));
+  Future<bool> show(RuntimeSystemNotification notification) async {
+    final bool shown = await delegate.show(redact(notification));
+    if (shown) {
+      // One line in the diagnostics log per notification posted: what
+      // kind, at what level, whether the sender was known (the poster's
+      // own words, see noticeLogs), never the text or a name.
+      final bool ringsOrAlarms =
+          notification.category == RuntimeSystemNotificationCategory.call ||
+          notification.category == RuntimeSystemNotificationCategory.alarm;
+      logNoticePosted(
+        'ui',
+        noticeLogs[notification] ??
+            (
+              kind: noticeLogKindOf(notification),
+              level: ringsOrAlarms ? null : _level(),
+              known: false,
+              version: null,
+            ),
+      );
+    }
+    return shown;
   }
 
   @override

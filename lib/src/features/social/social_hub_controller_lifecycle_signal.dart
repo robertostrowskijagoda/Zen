@@ -213,6 +213,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       }
       return;
     }
+    if (_unsavedState) {
+      // A save failed while the app was locked: the store holds an older
+      // copy than memory (a friend removed right before the lock would
+      // come back from it). Memory stays and goes to the store now.
+      await _persistState();
+      return;
+    }
     final SocialHubState before = state;
     final SocialHubState? persisted;
     try {
@@ -255,8 +262,36 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       ),
       _appSettings,
     );
+    // A removal known here stays, whatever the copy read says.
+    state = _withRemovalsOf(before, state);
     _dismissedOrRejectedGroupIds.addAll(state.rejectedGroupIds);
     _syncCallRingingTimeout();
+  }
+
+  /// [into] with the removals and friendships [known] holds (newer wins):
+  /// a friend removed in [known] since their friendship is not in it.
+  SocialHubState _withRemovalsOf(SocialHubState known, SocialHubState into) {
+    SocialHubState next = into;
+    known.friendsSince.forEach((String address, int at) {
+      next = withFriendshipSince(next, address, at);
+    });
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
+      next.friends,
+    );
+    known.removedFriends.forEach((String address, int at) {
+      if ((next.friendsSince[address] ?? 0) > at) {
+        return;
+      }
+      next = withFriendRemovedAt(next, address, at);
+      if (known.friendByAddress(address) == null &&
+          _friendFromMap(friends, address)?.status ==
+              FriendRelationshipStatus.accepted) {
+        _removeFriend(friends, address);
+      }
+    });
+    return friends.length == next.friends.length
+        ? next
+        : next.copyWith(friends: friends);
   }
 
   Future<void> hydrateFromStore() {
@@ -563,10 +598,25 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         // own side skips nothing.
         return;
       }
+      if (knownPeer == null && state.removedFriendAt(signal.sender) != null) {
+        // A removed friend "accepting" (an old acceptance sent again)
+        // invited nobody: they stay removed, and no invitation shows.
+        return;
+      }
       // Nobody here invited them. An accept must never turn a stranger into
       // a friend; it goes through everything below as the invitation it
       // amounts to, which the user still has to confirm.
       signal = _unsolicitedAcceptAsRequest(signal);
+    }
+    // A removed friend's new invitation shows as one (their copies kept
+    // for the app's return went with the removal).
+    if (knownPeer == null &&
+        signal.type == ZenSignalType.message &&
+        state.removedFriendAt(signal.sender) != null) {
+      // A removed friend's chat (they may not know yet, or write as to
+      // someone outside their friends): not let in, no notice. A new
+      // invitation from them is the way back.
+      return;
     }
     // Someone who is not a friend writing in an ordinary chat:
     // let in only within the limits, with their mini-profile.
@@ -907,6 +957,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                   groups: state.groups,
                   privacy: _noticePrivacyFor(signal),
                 ),
+                about: signal,
               );
         if (displayed && backgroundEntry.type != InboxEntryType.callInvite) {
           final Set<String> nextIds = backgroundAlerts
@@ -1031,6 +1082,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           groups: state.groups,
           privacy: _noticePrivacyFor(signal),
         ),
+        about: signal,
       );
     }
 

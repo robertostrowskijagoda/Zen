@@ -145,20 +145,36 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     });
   }
 
-  /// Another device of this account removed [address] as a friend (it
-  /// already told them): drop them here too, quietly.
-  Future<void> forgetFriendFromOtherDevice(String address) async {
+  /// Another device of this account removed [address] as a friend at
+  /// [atMillis] (it already told them): drop them here too, quietly, and
+  /// remember it — unless the friendship was made again since (newer
+  /// wins). [atMillis] 0: now.
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) async {
+    final int at = atMillis > 0
+        ? atMillis
+        : DateTime.now().millisecondsSinceEpoch;
     await _enqueueStateWork(() async {
-      final FriendProfile? have = state.friendByAddress(address);
-      if (have == null) {
+      final String key = PeerShareCodec.normalizeAddress(address);
+      if ((state.friendsSince[key] ?? 0) > at) {
+        // Made friends again after that removal.
         return;
       }
-      final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
-        state.friends,
-      );
-      _removeFriend(friends, have.address);
-      state = state.copyWith(friends: friends);
-      await _persistState();
+      final FriendProfile? have = state.friendByAddress(address);
+      final SocialHubState before = state;
+      if (have != null && have.status != FriendRelationshipStatus.blocked) {
+        final Map<String, FriendProfile> friends =
+            Map<String, FriendProfile>.of(state.friends);
+        _removeFriend(friends, have.address);
+        state = state.copyWith(friends: friends);
+        await _dropQueuedSignalsFrom(key);
+      }
+      state = withFriendRemovedAt(state, key, at);
+      if (!identical(state, before)) {
+        await _persistState();
+      }
     });
   }
 
@@ -208,6 +224,16 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     Uint8List? bytes,
     String? storedPath,
   }) async {
+    if (!key.startsWith('group:') &&
+        state.friendByAddress(key) == null &&
+        state.removedFriendAt(key) != null) {
+      // The conversation with a removed friend was cleared here; another
+      // device's older copy of it does not come back.
+      if (storedPath != null && isMediaVaultPath(storedPath)) {
+        await _mediaVault.delete(storedPath);
+      }
+      return;
+    }
     StoredAttachment? stored;
     if (storedPath != null && isMediaVaultPath(storedPath)) {
       stored = StoredAttachment(
@@ -283,8 +309,17 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
   ///
   /// The backup is the newest one any device saved, so names and blocks in
   /// it win too. [removedAt] holds when friends (address) and groups
-  /// (`group:id`) were removed on some device; they are not brought back
+  /// (`group:id`) were removed on some device; a group is not brought back
   /// unless the backup is newer ([backupAt]) — added again since.
+  ///
+  /// Friends go by each one's own times, never by the backup's: a device
+  /// that still lists a removed friend (it saved before it heard of the
+  /// removal, or saves for some other change) does not bring them back. A
+  /// friend removed anywhere ([removedAt], the backup's own removals `x`,
+  /// [SocialHubState.removedFriends]) comes back only with a friendship
+  /// made after that removal (the backup's `s`, see
+  /// [SocialHubState.friendsSince]); a removal newer than a friendship
+  /// this device knows the time of removes that friend here.
   Future<int> importContactsBackup(
     Map<String, dynamic> backup, {
     Map<String, int> removedAt = const <String, int>{},
@@ -298,14 +333,58 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return 0;
     }
     bool removedSince(String key) => (removedAt[key] ?? -1) >= backupAt;
+    // Removals of friends this backup and the ledger know of.
+    final Map<String, int> removals = <String, int>{};
+    void noteRemoval(Object? address, Object? at) {
+      if (address is! String || at is! int || at <= 0) {
+        return;
+      }
+      if (address.startsWith('group:') || !isRoutablePeerAddress(address)) {
+        return;
+      }
+      final String key = PeerShareCodec.normalizeAddress(address);
+      if ((removals[key] ?? -1) < at) {
+        removals[key] = at;
+      }
+    }
+
+    removedAt.forEach(noteRemoval);
+    final Object? x = backup['x'];
+    if (x is Map) {
+      for (final MapEntry<dynamic, dynamic> e in x.entries.take(
+        kMaxRemovedFriends,
+      )) {
+        noteRemoval(e.key, e.value);
+      }
+    }
     int added = 0;
     await _enqueueStateWork(() async {
+      final SocialHubState before = state;
+      SocialHubState next = state;
       final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
         state.friends,
       );
       final Map<String, GroupProfile> groups = Map<String, GroupProfile>.of(
         state.groups,
       );
+      // Removals first: newer wins against the friendships known here.
+      removals.forEach((String address, int at) {
+        final FriendProfile? have = _friendFromMap(friends, address);
+        final int since = next.friendsSince[address] ?? 0;
+        if (since > at) {
+          return;
+        }
+        if (have != null && have.status != FriendRelationshipStatus.blocked) {
+          if (since == 0) {
+            // A friendship from before its time was kept: only the
+            // removal's own entry takes it away (applied once, see
+            // DeviceChatSync), never an old one read again here.
+            return;
+          }
+          _removeFriend(friends, address);
+        }
+        next = withFriendRemovedAt(next, address, at);
+      });
       final Object? fs = backup['friends'];
       if (fs is List) {
         for (final Object? item in fs.take(5000)) {
@@ -325,7 +404,14 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           final String k = rawNickname is String
               ? sanitizeFriendNickname(rawNickname)
               : '';
-          final FriendProfile? have = state.friendByAddress(address);
+          final Object? rawSince = item['s'];
+          final int since = rawSince is int && rawSince > 0 ? rawSince : 0;
+          final FriendProfile? have = _friendFromMap(friends, address);
+          if (have != null &&
+              have.status == FriendRelationshipStatus.accepted &&
+              since > (next.friendsSince[address] ?? 0)) {
+            next = withFriendshipSince(next, address, since);
+          }
           if (have != null) {
             // A newer name, a nickname given or (un)blocked on another
             // device.
@@ -348,8 +434,14 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
             }
             continue;
           }
-          if (removedSince(address)) {
+          final int? removed = next.removedFriendAt(address);
+          if (removed != null && since <= removed) {
+            // Removed after (or without a known) friendship in this copy:
+            // a device that still lists them does not bring them back.
             continue;
+          }
+          if (since > 0) {
+            next = withFriendshipSince(next, address, since);
           }
           friends[address] = FriendProfile(
             address: address,
@@ -400,10 +492,22 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           added++;
         }
       }
-      if (added == 0) {
+      if (added == 0 &&
+          identical(next, before) &&
+          friends.length == before.friends.length) {
         return;
       }
-      state = state.copyWith(friends: friends, groups: groups);
+      for (final String address in removals.keys) {
+        if (_friendFromMap(friends, address) == null &&
+            before.friendByAddress(address) != null) {
+          await _dropQueuedSignalsFrom(address);
+        }
+      }
+      state = next.copyWith(
+        friends: friends,
+        groups: groups,
+        pendingSignalCount: state.pendingSignalCount,
+      );
       await _persistState();
     });
     return added;
@@ -412,41 +516,53 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
 
 // ---- (top level) ----
 
-/// Friends and groups of [state], as the account's devices share them.
-Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
-    <String, dynamic>{
-      'v': 1,
-      'friends':
-          <Map<String, dynamic>>[
-            for (final FriendProfile f in state.friends.values)
-              if (f.status == FriendRelationshipStatus.accepted ||
-                  f.status == FriendRelationshipStatus.blocked)
-                <String, dynamic>{
-                  'a': PeerShareCodec.normalizeAddress(f.address),
-                  if (f.hasProfileName) 'n': f.displayName,
-                  if (f.hasNickname) 'k': f.nickname,
-                  if (f.status == FriendRelationshipStatus.blocked) 'b': 1,
-                },
-          ]..sort(
-            (Map<String, dynamic> a, Map<String, dynamic> b) =>
-                (a['a'] as String).compareTo(b['a'] as String),
-          ),
-      'groups':
-          <Map<String, dynamic>>[
-            for (final GroupProfile g in state.groups.values)
-              if (!g.isInvitePending)
-                <String, dynamic>{
-                  'id': g.id,
-                  'name': g.name,
-                  if (g.description.isNotEmpty) 'd': g.description,
-                  'avatar': g.avatarPreset,
-                  'by': g.createdById,
-                  'at': g.createdAtMillis,
-                  'm': g.memberAddresses,
-                  if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
-                },
-          ]..sort(
-            (Map<String, dynamic> a, Map<String, dynamic> b) =>
-                (a['id'] as String).compareTo(b['id'] as String),
-          ),
-    };
+/// Friends and groups of [state], as the account's devices share them:
+/// with when each friendship was made (`s`, when known) and the friends
+/// removed since theirs (`x`: address → when), so the devices agree on
+/// who is a friend friend by friend, the newer of the two winning.
+/// (Zen 1.14.0 and older read `friends` and `groups` only.)
+Map<String, dynamic> contactsBackupOf(
+  SocialHubState state,
+) => <String, dynamic>{
+  'v': 1,
+  'friends':
+      <Map<String, dynamic>>[
+        for (final FriendProfile f in state.friends.values)
+          if (f.status == FriendRelationshipStatus.accepted ||
+              f.status == FriendRelationshipStatus.blocked)
+            <String, dynamic>{
+              'a': PeerShareCodec.normalizeAddress(f.address),
+              if (f.hasProfileName) 'n': f.displayName,
+              if (f.hasNickname) 'k': f.nickname,
+              if (f.status == FriendRelationshipStatus.blocked) 'b': 1,
+              's': ?state
+                  .friendsSince[PeerShareCodec.normalizeAddress(f.address)],
+            },
+      ]..sort(
+        (Map<String, dynamic> a, Map<String, dynamic> b) =>
+            (a['a'] as String).compareTo(b['a'] as String),
+      ),
+  'groups':
+      <Map<String, dynamic>>[
+        for (final GroupProfile g in state.groups.values)
+          if (!g.isInvitePending)
+            <String, dynamic>{
+              'id': g.id,
+              'name': g.name,
+              if (g.description.isNotEmpty) 'd': g.description,
+              'avatar': g.avatarPreset,
+              'by': g.createdById,
+              'at': g.createdAtMillis,
+              'm': g.memberAddresses,
+              if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
+            },
+      ]..sort(
+        (Map<String, dynamic> a, Map<String, dynamic> b) =>
+            (a['id'] as String).compareTo(b['id'] as String),
+      ),
+  if (state.removedFriends.isNotEmpty)
+    'x': <String, int>{
+      for (final String address in state.removedFriends.keys.toList()..sort())
+        if (state.removedFriendAt(address) case final int at) address: at,
+    },
+};

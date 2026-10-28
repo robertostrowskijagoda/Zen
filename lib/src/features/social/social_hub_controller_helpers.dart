@@ -39,7 +39,10 @@ SocialHubState _applySignal(
               lastActivityLabel: t('Teraz'),
             );
         _putFriend(friends, _withAppRetentionDefaults(mutual, appSettings));
-        return current.copyWith(friends: friends);
+        return withFriendshipMadeNow(
+          current.copyWith(friends: friends),
+          signal.sender,
+        );
       }
       if (requester != null &&
           requester.status == FriendRelationshipStatus.accepted) {
@@ -91,6 +94,12 @@ SocialHubState _applySignal(
         // top of it changes nothing.
         return current;
       }
+      if (acceptedBase == null &&
+          current.removedFriendAt(signal.sender) != null) {
+        // A removed friend's acceptance (an old one sent again, or kept
+        // for the app's return) answers nothing: they stay removed.
+        return current;
+      }
       if (acceptedBase == null ||
           !FriendLifecycleReducer.isSolicitedRemoteAccept(acceptedBase)) {
         // Nobody here invited them: an accept cannot make a stranger a
@@ -119,7 +128,14 @@ SocialHubState _applySignal(
         appSettings,
       );
       _putFriend(friends, resolved);
-      return current.copyWith(friends: friends);
+      // Only an invitation answered makes a friendship (a repeated accept
+      // of one already made says nothing new).
+      return acceptedBase.status == FriendRelationshipStatus.pendingOutgoing
+          ? withFriendshipMadeNow(
+              current.copyWith(friends: friends),
+              signal.sender,
+            )
+          : current.copyWith(friends: friends);
     case ZenSignalType.friendReject:
       final FriendProfile? rejected = _friendFromMap(friends, signal.sender);
       if (rejected?.status == FriendRelationshipStatus.pendingOutgoing) {
@@ -139,8 +155,20 @@ SocialHubState _applySignal(
         inbox: _prependSocialLifecycleInbox(current.inbox, inboxEntry),
       );
     case ZenSignalType.friendRemove:
+      final bool wasFriend =
+          _friendFromMap(friends, signal.sender)?.status ==
+          FriendRelationshipStatus.accepted;
       _removeFriend(friends, signal.sender);
-      return current.copyWith(
+      // They ended it: another device of this account, or a backup, that
+      // still lists them does not bring them back either.
+      final SocialHubState ended = wasFriend
+          ? withFriendRemovedAt(
+              current,
+              signal.sender,
+              DateTime.now().millisecondsSinceEpoch,
+            )
+          : current;
+      return ended.copyWith(
         friends: friends,
         activeCall:
             _currentCallMatches(
@@ -1133,7 +1161,7 @@ NoticeText? _chatNoticeText({
       sender: _resolvedPeerLabel(
         address: signal.sender,
         displayName: signal.displayName,
-        knownName: friends?[signal.sender]?.displayLabel,
+        knownName: _namedFriendLabel(friends?[signal.sender], signal),
       ),
       preview: _signalPreviewText(signal),
     );
@@ -1169,7 +1197,7 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   final String senderLabel = _resolvedPeerLabel(
     address: signal.sender,
     displayName: signal.displayName,
-    knownName: friends?[signal.sender]?.displayLabel,
+    knownName: _namedFriendLabel(friends?[signal.sender], signal),
   );
   final String title;
   final String body;
@@ -1513,6 +1541,19 @@ String _groupSenderLabel(
 /// group this device does not have).
 String _groupNameOf(ZenSignal signal, Map<String, GroupProfile>? groups) =>
     groups?[signal.groupId ?? '']?.name ?? signal.groupName ?? '';
+
+/// [friend]'s name when they told one; `null` for the "Kontakt Zen"
+/// placeholder, so the name their message carries is used instead (a
+/// friend whose profile never came, e.g. from an older Zen, was announced
+/// as "Kontakt Zen" although the message named them).
+String? _namedFriendLabel(FriendProfile? friend, ZenSignal signal) {
+  if (friend == null || friend.hasProfileName) {
+    return friend?.displayLabel;
+  }
+  return (signal.displayName?.trim().isNotEmpty ?? false)
+      ? null
+      : friend.displayLabel;
+}
 
 String _resolvedPeerLabel({
   required String address,

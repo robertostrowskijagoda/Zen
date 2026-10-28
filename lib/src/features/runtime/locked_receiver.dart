@@ -24,6 +24,7 @@ import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -115,16 +116,18 @@ const Set<String> _invitationTypes = <String>{
   'group_invite',
 };
 
+/// What is told about while locked besides messages, alarms and calls:
+/// invitations only. Events, questions and meeting intents are kept
+/// without a notice: most of their frames are updates (a guest list, an
+/// answer counted, an intent renewed) the app announces nothing for, and
+/// here each of them rang a bare "Nowe powiadomienie" — over and over while
+/// a friend's event filled up. The app tells of a new invitation or a
+/// cancellation once it opens them after unlock. Mail from a mailbox has
+/// its own notice ([LockedReceiver._announceMail]).
 const Set<String> _socialTypes = <String>{
   'friend_request',
   'friend_accept',
   'group_invite',
-  'event',
-  'ask',
-  'intent',
-  // Mail from a mailbox: sealed for the relay key, so what it is cannot be
-  // told here.
-  'rly_mail',
 };
 
 /// What a stranger may leave while the app is locked, per run of the
@@ -1204,8 +1207,52 @@ final class LockedReceiver {
       }
     }
     if (fresh.isNotEmpty) {
-      await _announce('rly_mail', frame.payload, kind);
+      await _announceMail(<String>{
+        for (final Map<String, dynamic> item in fresh)
+          PeerShareCodec.normalizeAddress(item['s'] as String),
+      });
     }
+  }
+
+  /// Mail a mailbox handed over, from [senders]: sealed for the relay key,
+  /// so what it is cannot be told here, only from whom (the envelope says
+  /// it). Nothing when none of them is a contact (a removed friend, a
+  /// stranger: the app would not let it in either); the sender's name when
+  /// it is one friend the notice kit names at a level that shows who
+  /// wrote.
+  Future<void> _announceMail(Set<String> senders) async {
+    final List<String> contacts = <String>[
+      for (final String s in senders)
+        if (_capability.kindOf(s) != BackgroundContactKind.stranger) s,
+    ];
+    if (contacts.isEmpty) {
+      return;
+    }
+    final String? name = contacts.length == 1
+        ? _noticeKit.senderName(contacts.single)
+        : null;
+    await _postThrottled(
+      RuntimeSystemNotification(
+        id: '$kLockedSocialSlot-${_now()}',
+        title: name ?? PrivacyRedactingNotificationService.genericTitle,
+        body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        routeKey: buildInboxRouteKey(),
+        slotKey: kLockedSocialSlot,
+        contentRedacted: true,
+      ),
+      log: (
+        kind: 'mail',
+        level: name == null
+            ? NotificationPrivacy.generic
+            : NotificationPrivacy.senderOnly,
+        known: name != null,
+        version: contacts.length == 1
+            ? _noticeKit.versionOf(contacts.single)
+            : null,
+      ),
+    );
   }
 
   Future<void> _announce(
@@ -1235,11 +1282,24 @@ final class LockedReceiver {
       return;
     }
     if (_messageTypes.contains(type)) {
+      final bool inGroup = type == 'group_message';
+      if (kind == BackgroundContactKind.stranger ||
+          (!inGroup && kind != BackgroundContactKind.friend)) {
+        // Someone this person did not name: a removed friend, a group
+        // member outside the group's chat, a stranger. The app lets in
+        // none of it as a chat (a stranger's message is told about after
+        // unlock, as one from outside friends); a notice "Nowa wiadomość"
+        // with nobody behind it is all it could say here.
+        return;
+      }
       final NoticeText text = _noticeKit.messageNotice(
         from: from,
         payload: payload,
         genericBody: t('Odblokuj Zen, żeby przeczytać.'),
       );
+      final String key = inGroup
+          ? groupConversationKey('${payload['groupId']}')
+          : PeerShareCodec.normalizeAddress(from);
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedMessageSlot-${_now()}',
@@ -1252,10 +1312,22 @@ final class LockedReceiver {
           slotKey: kLockedMessageSlot,
           contentRedacted: true,
         ),
+        log: (
+          kind: inGroup ? 'group-message' : 'message',
+          level: _noticeKit.levelOf(key),
+          known: _noticeKit.senderName(from) != null,
+          version: _noticeKit.versionOf(from),
+        ),
       );
       return;
     }
     if (_socialTypes.contains(type)) {
+      if (type == 'friend_accept' &&
+          _noticeKit.removed.contains(PeerShareCodec.normalizeAddress(from))) {
+        // A removed friend's old acceptance sent again: it answers nothing
+        // (the app drops it too).
+        return;
+      }
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedSocialSlot-${_now()}',
@@ -1267,6 +1339,12 @@ final class LockedReceiver {
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedSocialSlot,
           contentRedacted: true,
+        ),
+        log: (
+          kind: _invitationTypes.contains(type) ? 'invitation' : 'social',
+          level: NotificationPrivacy.generic,
+          known: kind != BackgroundContactKind.stranger,
+          version: _noticeKit.versionOf(from),
         ),
       );
     }
@@ -1370,7 +1448,10 @@ final class LockedReceiver {
 
   /// One entry per kind at most every [noticeThrottle], posted anew (so
   /// the shade does not stack the same line).
-  Future<void> _postThrottled(RuntimeSystemNotification notice) async {
+  Future<void> _postThrottled(
+    RuntimeSystemNotification notice, {
+    NoticeLog? log,
+  }) async {
     if (_noticeKit.settingsApplied(notice) == null) {
       // Switched off: it neither shows nor takes the slot's turn.
       return;
@@ -1383,17 +1464,28 @@ final class LockedReceiver {
     }
     _lastNoticeAt[slot] = now;
     await _notices.dismissSlot(slot);
-    await _post(notice);
+    await _post(notice, log: log);
   }
 
-  Future<void> _post(RuntimeSystemNotification notice) async {
+  Future<void> _post(RuntimeSystemNotification notice, {NoticeLog? log}) async {
     // The notification switches of the settings (from the notice kit).
     final RuntimeSystemNotification? shown = _noticeKit.settingsApplied(notice);
     if (shown == null) {
       return;
     }
     try {
-      await _notices.show(shown);
+      if (await _notices.show(shown)) {
+        logNoticePosted(
+          'svc',
+          log ??
+              (
+                kind: noticeLogKindOf(shown),
+                level: null,
+                known: false,
+                version: null,
+              ),
+        );
+      }
     } on Object catch (error, stackTrace) {
       logZenError('A locked notice failed', error, stackTrace);
     }

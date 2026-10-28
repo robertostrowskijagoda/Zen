@@ -2585,10 +2585,10 @@ class _GroupCardState extends ConsumerState<_GroupCard> {
           },
           onHover: (bool hovering) => setState(() => _isHovered = hovering),
           onLongPress: () {
-            _showGroupActionSheet(context, ref, group);
+            _showGroupActionSheet(context, group);
           },
           onSecondaryTap: () {
-            _showGroupActionSheet(context, ref, group);
+            _showGroupActionSheet(context, group);
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -2679,12 +2679,16 @@ Color _groupTone(ZenColors zen, GroupProfile group) {
   return zenTone(zen, hash % 8);
 }
 
-void _showGroupActionSheet(
-  BuildContext context,
-  WidgetRef ref,
-  GroupProfile group,
-) {
+void _showGroupActionSheet(BuildContext context, GroupProfile group) {
   final ZenColors zen = ZenColors.of(context);
+  // What follows the sheet runs from the navigator and the provider scope:
+  // the card that opened it may be gone by then (see
+  // _showConversationActionSheet).
+  final NavigatorState navigator = Navigator.of(context);
+  final ProviderContainer container = ProviderScope.containerOf(
+    context,
+    listen: false,
+  );
 
   showModalBottomSheet<void>(
     context: context,
@@ -2749,7 +2753,7 @@ void _showGroupActionSheet(
                 tone: zen.accent,
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  Navigator.of(context).push(
+                  navigator.push(
                     MaterialPageRoute<void>(
                       builder: (BuildContext context) =>
                           GroupConversationScreen(
@@ -2768,7 +2772,7 @@ void _showGroupActionSheet(
                 onTap: () async {
                   Navigator.of(sheetContext).pop();
                   final bool? confirmed = await showDialog<bool>(
-                    context: context,
+                    context: navigator.context,
                     builder: (BuildContext dialogContext) {
                       return AlertDialog(
                         scrollable: true,
@@ -2807,7 +2811,7 @@ void _showGroupActionSheet(
                     },
                   );
                   if (confirmed == true) {
-                    await ref
+                    await container
                         .read(socialHubControllerProvider.notifier)
                         .leaveGroup(groupId: group.id);
                   }

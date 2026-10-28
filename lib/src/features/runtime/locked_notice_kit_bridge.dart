@@ -22,7 +22,13 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 String lockedNoticeKitSignature(SocialHubState state) {
   final List<String> parts = <String>[
     for (final FriendProfile friend in state.friends.values)
-      'f:${friend.status.name}:${friend.address}:${friend.displayLabel}',
+      'f:${friend.status.name}:${friend.address}:${state.nameFor(friend)}',
+    for (final MapEntry<String, String> e in state.peerAppVersions.entries)
+      'v:${e.key}:${e.value}',
+    for (final MapEntry<String, int> e in state.removedFriends.entries)
+      'x:${e.key}:${e.value}',
+    for (final MapEntry<String, int> e in state.friendsSince.entries)
+      's:${e.key}:${e.value}',
     for (final GroupProfile group in state.groups.values)
       'g:${group.id}:${group.isInvitePending}:${group.name}:'
           '${group.memberAddresses.join(',')}',

@@ -152,6 +152,8 @@ final class SocialHubState {
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.snapshotUnreadable = false,
     this.peerAppVersions = const <String, String>{},
+    this.removedFriends = const <String, int>{},
+    this.friendsSince = const <String, int>{},
   });
 
   factory SocialHubState.empty({
@@ -307,6 +309,33 @@ final class SocialHubState {
   /// newer Zen" hint, never for anything that guards security.
   final Map<String, String> peerAppVersions;
 
+  /// Friends who were removed (here, on another device of the account, or
+  /// who removed this person): normalized address → when. Nothing that
+  /// comes later brings them back on its own — a backup or another device
+  /// that still lists them, a copy of an old acceptance, their messages;
+  /// only a new invitation does, and it shows as one. Shared with the
+  /// account's other devices (the newer of a removal and a friendship
+  /// wins, see [friendsSince]).
+  final Map<String, int> removedFriends;
+
+  /// When a friendship was made on this account (an invitation answered,
+  /// here or on another device), by normalized address; absent for the
+  /// friendships made before this was kept. A removal older than this
+  /// does not undo it.
+  final Map<String, int> friendsSince;
+
+  /// When [address] was removed as a friend, `null` when it was not (or
+  /// the friendship was made again since).
+  int? removedFriendAt(String address) {
+    final int? at = removedFriends[PeerShareCodec.normalizeAddress(address)];
+    if (at == null) {
+      return null;
+    }
+    final int since =
+        friendsSince[PeerShareCodec.normalizeAddress(address)] ?? 0;
+    return since > at ? null : at;
+  }
+
   /// Seconds messages in conversation [key] live (0 = they stay).
   int disappearSecondsFor(String key) {
     final int? direct = disappearingTimers[key];
@@ -438,6 +467,8 @@ final class SocialHubState {
     Map<String, NotificationPrivacy>? notificationPrivacy,
     bool? snapshotUnreadable,
     Map<String, String>? peerAppVersions,
+    Map<String, int>? removedFriends,
+    Map<String, int>? friendsSince,
   }) {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
@@ -466,6 +497,8 @@ final class SocialHubState {
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
       peerAppVersions: peerAppVersions ?? this.peerAppVersions,
+      removedFriends: removedFriends ?? this.removedFriends,
+      friendsSince: friendsSince ?? this.friendsSince,
     );
   }
 
@@ -501,3 +534,73 @@ int _presenceRank(PeerPresence presence) => switch (presence) {
   PeerPresence.noConnection => 1,
   PeerPresence.hidden => 0,
 };
+
+/// The most removed friends remembered ([SocialHubState.removedFriends]);
+/// past it the oldest removals are forgotten.
+const int kMaxRemovedFriends = 2000;
+
+/// [state] with [address] removed as a friend at [atMillis] (a later
+/// removal already known stays). The friend list itself is not touched.
+SocialHubState withFriendRemovedAt(
+  SocialHubState state,
+  String address,
+  int atMillis,
+) {
+  final String key = PeerShareCodec.normalizeAddress(address);
+  if (key.isEmpty || (state.removedFriends[key] ?? -1) >= atMillis) {
+    return state;
+  }
+  final Map<String, int> removed = <String, int>{
+    ...state.removedFriends,
+    key: atMillis,
+  };
+  if (removed.length > kMaxRemovedFriends) {
+    final List<MapEntry<String, int>> byAge = removed.entries.toList()
+      ..sort(
+        (MapEntry<String, int> a, MapEntry<String, int> b) =>
+            a.value.compareTo(b.value),
+      );
+    for (final MapEntry<String, int> e in byAge.take(
+      removed.length - kMaxRemovedFriends,
+    )) {
+      removed.remove(e.key);
+    }
+  }
+  return state.copyWith(removedFriends: removed);
+}
+
+/// [state] with the friendship with [address] made here just now (an
+/// invitation answered): it comes after any removal known here, even one
+/// in the same millisecond.
+SocialHubState withFriendshipMadeNow(SocialHubState state, String address) {
+  final int removedAt =
+      state.removedFriends[PeerShareCodec.normalizeAddress(address)] ?? 0;
+  final int now = DateTime.now().millisecondsSinceEpoch;
+  return withFriendshipSince(
+    state,
+    address,
+    now > removedAt ? now : removedAt + 1,
+  );
+}
+
+/// [state] with the friendship with [address] made at [atMillis] (an
+/// invitation answered): a removal from before no longer counts.
+SocialHubState withFriendshipSince(
+  SocialHubState state,
+  String address,
+  int atMillis,
+) {
+  final String key = PeerShareCodec.normalizeAddress(address);
+  if (key.isEmpty) {
+    return state;
+  }
+  final int? removedAt = state.removedFriends[key];
+  return state.copyWith(
+    friendsSince: (state.friendsSince[key] ?? -1) >= atMillis
+        ? null
+        : <String, int>{...state.friendsSince, key: atMillis},
+    removedFriends: removedAt != null && removedAt < atMillis
+        ? (Map<String, int>.of(state.removedFriends)..remove(key))
+        : null,
+  );
+}

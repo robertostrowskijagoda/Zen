@@ -147,8 +147,10 @@ final class _HubChatTarget implements ChatSyncTarget {
   );
 
   @override
-  Future<void> forgetFriendFromOtherDevice(String address) =>
-      _hub.forgetFriendFromOtherDevice(address);
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) => _hub.forgetFriendFromOtherDevice(address, atMillis: atMillis);
 
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) =>
@@ -391,7 +393,15 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   }
 
   unawaitedLogged(
-    node.start().then((_) => takeContacts()),
+    node.start().then((_) async {
+      await takeContacts();
+      // What this device knows goes out once at the start when the newest
+      // copy says otherwise (a removal whose copy was cut short by the
+      // lock): the copy is otherwise written only on a change.
+      await node.publishContacts(
+        ref.read(socialHubControllerProvider.notifier).contactsBackup(),
+      );
+    }),
     context: 'Reading the friends backup failed',
   );
   final StreamSubscription<void> contactsSub = node.contactsChanged.listen(

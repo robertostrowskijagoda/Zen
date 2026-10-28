@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -26,6 +28,53 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// The title and the body of one notification.
 typedef NoticeText = ({String title, String body});
+
+/// What the diagnostics log says of a posted notification ([logNoticePosted]):
+/// its [kind] (a short fixed word), the privacy [level] applied (`null`:
+/// none, a call or an alarm), whether the sender was [known] (named by
+/// this person), and the Zen [version] the sender last named, when known.
+typedef NoticeLog = ({
+  String kind,
+  NotificationPrivacy? level,
+  bool known,
+  String? version,
+});
+
+/// What a poster tells the app's notification service about the
+/// notification it posts, for the diagnostics log
+/// (PrivacyRedactingNotificationService writes the line).
+final Expando<NoticeLog> noticeLogs = Expando<NoticeLog>('noticeLog');
+
+/// One TECH line for a notification just posted by [process] (`ui`, `svc`):
+/// its kind, the level applied, whether the sender was known and their
+/// Zen version when known — never the text or a name.
+void logNoticePosted(String process, NoticeLog log) {
+  final String? version = log.version;
+  ZenTechLog.event('notice', <String, Object?>{
+    'p': process,
+    'kind': log.kind,
+    'level': switch (log.level) {
+      NotificationPrivacy.senderAndContent => 'sender-content',
+      NotificationPrivacy.senderOnly => 'sender-only',
+      NotificationPrivacy.generic => 'generic',
+      null => null,
+    },
+    'known': log.known,
+    // A log word starts with a letter and has no dots: 1.13.1 is v1-13-1.
+    'ver': version == null ? null : 'v${version.replaceAll('.', '-')}',
+  });
+}
+
+/// The [NoticeLog.kind] of [notification] when its poster says no more.
+String noticeLogKindOf(RuntimeSystemNotification notification) =>
+    switch (notification.category) {
+      RuntimeSystemNotificationCategory.message => 'message',
+      RuntimeSystemNotificationCategory.social => 'social',
+      RuntimeSystemNotificationCategory.call => 'call',
+      RuntimeSystemNotificationCategory.transfer => 'transfer',
+      RuntimeSystemNotificationCategory.alarm => 'alarm',
+      RuntimeSystemNotificationCategory.update => 'update',
+    };
 
 /// What a chat message's notification says at [level]: [sender] wrote it,
 /// in the group chat [group] when that is not `null` ('' for a group
@@ -202,7 +251,31 @@ final class LockedNoticeKit {
     this.members = const <String, Set<String>>{},
     this.muted = const <NoticeKind>{},
     this.sounds = true,
+    this.versions = const <String, String>{},
+    this.removed = const <String>{},
   });
+
+  /// Friends this person removed (normalized addresses): an acceptance
+  /// from them answers nothing and is not told about.
+  final Set<String> removed;
+
+  /// The Zen version friends last named, by normalized address: only for
+  /// the diagnostics log's line about a notice ([logNoticePosted]).
+  final Map<String, String> versions;
+
+  /// The name of [address] for a notice about their own chat, `null` when
+  /// the kit has none or their level shows nobody.
+  String? senderName(String address) {
+    final String key = PeerShareCodec.normalizeAddress(address);
+    final String? name = names[key];
+    return name == null || levelOf(key) == NotificationPrivacy.generic
+        ? null
+        : name;
+  }
+
+  /// The Zen version [address] last named, `null` when not known.
+  String? versionOf(String address) =>
+      versions[PeerShareCodec.normalizeAddress(address)];
 
   final NotificationPrivacy privacy;
   final Map<String, NotificationPrivacy> overrides;
@@ -310,6 +383,8 @@ final class LockedNoticeKit {
     if (muted.isNotEmpty)
       'q': <String>[for (final NoticeKind k in muted) k.name],
     if (!sounds) 's': false,
+    if (versions.isNotEmpty) 'ver': versions,
+    if (removed.isNotEmpty) 'x': removed.toList(growable: false),
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -374,6 +449,21 @@ final class LockedNoticeKit {
             if (NoticeKind.byName(name) case final NoticeKind kind) kind,
       },
       sounds: json['s'] != false,
+      versions: <String, String>{
+        if (json['ver'] case final Map<dynamic, dynamic> ver)
+          for (final MapEntry<dynamic, dynamic> e in ver.entries.take(
+            maxEntries,
+          ))
+            if (fits(e.key) &&
+                e.value is String &&
+                isValidAppVersion(e.value as String))
+              e.key as String: e.value as String,
+      },
+      removed: <String>{
+        if (json['x'] case final List<dynamic> x)
+          for (final Object? address in x.take(maxEntries))
+            if (fits(address)) address as String,
+      },
     );
   }
 }
@@ -422,7 +512,7 @@ LockedNoticeKit lockedNoticeKitOf(
         overrides[device] = own;
       }
       if (level != NotificationPrivacy.generic) {
-        names[device] = friend.displayLabel;
+        names[device] = state.nameFor(friend);
       }
     }
   }
@@ -453,7 +543,7 @@ LockedNoticeKit lockedNoticeKitOf(
       final FriendProfile? friend = state.friendByAddress(member);
       if (friend != null &&
           friend.status == FriendRelationshipStatus.accepted) {
-        names[normal(member)] = friend.displayLabel;
+        names[normal(member)] = state.nameFor(friend);
       }
     }
     members[key] = listed;
@@ -468,6 +558,16 @@ LockedNoticeKit lockedNoticeKitOf(
         : names,
     members: members,
     muted: muted,
+    removed: <String>{
+      for (final String address in state.removedFriends.keys)
+        if (state.removedFriendAt(address) != null) normal(address),
+    },
+    versions: <String, String>{
+      for (final MapEntry<String, String> e in state.peerAppVersions.entries)
+        if (state.friendByAddress(e.key)?.status ==
+            FriendRelationshipStatus.accepted)
+          normal(e.key): e.value,
+    },
     sounds: sounds,
   );
 }

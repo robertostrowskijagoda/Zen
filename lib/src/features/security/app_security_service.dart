@@ -28,6 +28,10 @@ final Provider<bool> appPasswordRequiredProvider = Provider<bool>(
 /// Shortest app password accepted.
 const int kMinAppPasswordLength = 8;
 
+/// How long after the lock what is being saved still seals
+/// ([AppSecurityService.currentSealingKey]).
+const Duration kLockWriteGrace = Duration(seconds: 3);
+
 /// Why biometric unlock is weaker than the password (shown wherever it can
 /// be turned on).
 String get kBiometricRiskText => t(
@@ -780,6 +784,14 @@ abstract class AppSecurityService extends ChangeNotifier {
 
   Future<Uint8List?> currentEncryptionKey();
 
+  /// The key what is written now is sealed with: [currentEncryptionKey],
+  /// and for [kLockWriteGrace] after [lock] the key of the session just
+  /// locked, so a save of what the person did right before the lock (a
+  /// friend removed, then the phone locked) still lands instead of failing
+  /// and leaving the older copy to come back at the next start. It opens
+  /// nothing: reading still needs [currentEncryptionKey].
+  Future<Uint8List?> currentSealingKey();
+
   /// The secure storage this service keeps its credentials in (the lock
   /// screen keeps its failed-attempt counter there too).
   AppSecurityCredentialsStore get credentialsStore;
@@ -912,6 +924,33 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   int _backgroundLockDelaySeconds =
       AppSettings.defaultBackgroundLockDelaySeconds;
   Uint8List? _encryptionKey;
+
+  /// The key of the session just locked, for sealing only, until
+  /// [kLockWriteGrace] passed ([currentSealingKey]).
+  Uint8List? _lockGraceKey;
+  DateTime _lockGraceUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _lockGraceTimer;
+
+  void _keepForWritesAfterLock(Uint8List? key) {
+    _lockGraceTimer?.cancel();
+    _lockGraceKey = key;
+    _lockGraceUntil = DateTime.now().add(kLockWriteGrace);
+    // Dropped when the grace is over even if nothing asks for it again;
+    // on the root zone, so a screen's test clock does not hold it.
+    _lockGraceTimer = key == null
+        ? null
+        : Zone.root.createTimer(kLockWriteGrace, () {
+            _lockGraceKey = null;
+            _lockGraceTimer = null;
+          });
+  }
+
+  Uint8List? get _sealingGraceKey {
+    if (_lockGraceKey != null && DateTime.now().isAfter(_lockGraceUntil)) {
+      _lockGraceKey = null;
+    }
+    return _lockGraceKey;
+  }
 
   @override
   bool get isReady => _isReady;
@@ -1535,6 +1574,9 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       return;
     }
     _isLocked = true;
+    // Saves already under way (or started by the lock itself) still seal
+    // for a moment; nothing opens with it.
+    _keepForWritesAfterLock(_encryptionKey);
     _encryptionKey = null;
     if (_neverLockKeyKept) {
       // Locked by hand under "Nigdy": the lock holds across a restart too
@@ -1586,6 +1628,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   @override
   Future<void> reset() async {
     _encryptionKey = null;
+    _keepForWritesAfterLock(null);
     _neverLockKeyKept = false;
     for (final String key in _keyMaterial) {
       await _deleteCredential(key);
@@ -1618,6 +1661,14 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       return null;
     }
     return _encryptionKey;
+  }
+
+  @override
+  Future<Uint8List?> currentSealingKey() async {
+    if (!_isReady) {
+      return null;
+    }
+    return _encryptionKey ?? _sealingGraceKey;
   }
 
   Future<Uint8List?> _readDeviceMasterKey() async {

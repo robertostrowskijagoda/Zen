@@ -243,10 +243,14 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // The invitation is answered: its copy kept for the app's return
       // must not be replayed over the answer.
       await _dropQueuedFriendRequests(peer);
-      state = state.copyWith(
-        friends: friends,
-        inbox: nextInbox,
-        backgroundAlerts: nextAlerts,
+      // A friendship made now: an earlier removal no longer counts.
+      state = withFriendshipMadeNow(
+        state.copyWith(
+          friends: friends,
+          inbox: nextInbox,
+          backgroundAlerts: nextAlerts,
+        ),
+        peer,
       );
       await _appendSystemMessage(
         peerAddress: peer,
@@ -376,35 +380,51 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _cancelQueuedTraffic(canonical, keep: 'friend_remove');
     // The account's other devices remove them too.
     ref.read(accountDirectoryHolderProvider).friendRemoved?.call(canonical);
+    final int removedAt = DateTime.now().millisecondsSinceEpoch;
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _removeFriend(friends, canonical);
-    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
-      state.inbox,
-      canonical,
-    );
-    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
-      state.backgroundAlerts,
-      canonical,
-    );
-    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
-    await _dismissForegroundNotifications(canonical);
+    // In turn with the signals: one in flight must not put back the
+    // friend list it read before the removal.
+    await _enqueueStateWork(() async {
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      _removeFriend(friends, canonical);
+      final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+        state.inbox,
+        canonical,
+      );
+      final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+        state.backgroundAlerts,
+        canonical,
+      );
+      await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+      await _dismissForegroundNotifications(canonical);
+      // What they sent that waits for the app's return (an old acceptance
+      // among it) is not replayed over the removal.
+      await _dropQueuedSignalsFrom(canonical);
 
-    await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
-    _bumpTimelineRevision();
+      await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
+      _bumpTimelineRevision();
 
-    state = state.copyWith(
-      friends: friends,
-      inbox: nextInbox,
-      backgroundAlerts: nextAlerts,
-      activeCall:
-          _currentCallMatches(call: state.activeCall, peerAddress: canonical)
-          ? null
-          : state.activeCall,
-    );
-    await _persistState();
+      // Remembered, so that nothing brings them back on its own: another
+      // device or a backup that still lists them, a late frame of theirs.
+      state = withFriendRemovedAt(
+        state.copyWith(
+          friends: friends,
+          inbox: nextInbox,
+          backgroundAlerts: nextAlerts,
+          activeCall:
+              _currentCallMatches(
+                call: state.activeCall,
+                peerAddress: canonical,
+              )
+              ? null
+              : state.activeCall,
+        ),
+        canonical,
+        removedAt,
+      );
+      await _persistState();
+    });
   }
 
   /// Sets what this user calls [peerAddress] (shown under their own name);

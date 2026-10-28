@@ -318,6 +318,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Logged once per run: saving is paused over an unreadable snapshot.
   bool _loggedPausedSave = false;
 
+  /// The last save failed (the app locked under it): memory holds what the
+  /// store does not.
+  bool _unsavedState = false;
+
   /// Releases the writers. Called once the read came back — or failed, because
   /// an unreadable snapshot must not block saving for the rest of the session.
   void _markHydrationSettled() {
@@ -558,9 +562,42 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// Posts a system notification. Ringing-call window flags and the native
   /// popup are owned by [_syncRingingCallWindow], not by the shade entry.
+  /// Posts [notification]; [about]: the signal it tells of, for the line
+  /// the diagnostics log gets (kind, level, sender known, their version).
   Future<bool> _presentSystemNotification(
-    RuntimeSystemNotification notification,
-  ) async {
+    RuntimeSystemNotification notification, {
+    ZenSignal? about,
+  }) async {
+    if (about != null) {
+      final FriendProfile? friend = state.friendByAddress(about.sender);
+      final bool chat =
+          about.type == ZenSignalType.message ||
+          about.type == ZenSignalType.groupMessage;
+      noticeLogs[notification] = (
+        kind: switch (about.type) {
+          ZenSignalType.message => 'message',
+          ZenSignalType.groupMessage => 'group-message',
+          ZenSignalType.friendRequest ||
+          ZenSignalType.friendAccept ||
+          ZenSignalType.groupInvite => 'invitation',
+          _ => noticeLogKindOf(notification),
+        },
+        level: chat
+            ? _noticePrivacyFor(about)
+            : (notification.category ==
+                          RuntimeSystemNotificationCategory.call ||
+                      notification.category ==
+                          RuntimeSystemNotificationCategory.alarm
+                  ? null
+                  : _appSettings.notificationPrivacy),
+        known:
+            friend != null &&
+            friend.status == FriendRelationshipStatus.accepted &&
+            (friend.hasProfileName ||
+                state.nameFor(friend) != friend.displayLabel),
+        version: friend == null ? null : state.peerAppVersions[friend.address],
+      );
+    }
     return _systemNotifications.show(notification);
   }
 
@@ -883,8 +920,16 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         }
         return;
       }
-      await _snapshotStore.save(_withConfirmedPresence(state));
+      final SocialHubState saving = state;
+      await _snapshotStore.save(_withConfirmedPresence(saving));
+      if (identical(state, saving)) {
+        _unsavedState = false;
+      }
     } catch (error, stackTrace) {
+      // What is in memory is newer than the store now (a save after the
+      // lock): it must not be replaced by the older copy at the return to
+      // the screen, and goes to the store at the next chance.
+      _unsavedState = true;
       logZenError('Saving social hub state snapshot failed', error, stackTrace);
     } finally {
       _activePersist = null;
@@ -1027,6 +1072,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   });
 
   /// Stops retrying (and relaying) anything still queued for [peer].
+  /// Drops everything from [peer] kept in the queue for the app's return
+  /// (a removed friend's old acceptance would be replayed over the
+  /// removal).
+  Future<void> _dropQueuedSignalsFrom(String peer) async {
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> rest = queue
+        .where(
+          (QueuedSignal q) =>
+              !PeerShareCodec.addressesEqual(q.signal.sender, peer),
+        )
+        .toList(growable: false);
+    if (rest.length != queue.length) {
+      await _queueStore.save(rest);
+      state = state.copyWith(pendingSignalCount: rest.length);
+    }
+  }
+
   Future<void> _cancelQueuedTraffic(String peer, {String? keep}) async {
     try {
       await ref

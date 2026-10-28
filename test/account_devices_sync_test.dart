@@ -109,8 +109,10 @@ final class _Target implements ChatSyncTarget {
   }
 
   @override
-  Future<void> forgetFriendFromOtherDevice(String address) async =>
-      forgottenFriends.add(address);
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) async => forgottenFriends.add(address);
 
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) async =>

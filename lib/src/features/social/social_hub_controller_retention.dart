@@ -228,16 +228,29 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
       state.friends,
     );
+    final FriendProfile? known = _friendFromMap(friends, peerAddress);
+    if (known == null && isRoutablePeerAddress(peerAddress)) {
+      // Writing to someone on the mesh never makes them a friend (it used
+      // to, with the status "accepted": a removed friend sent a file came
+      // back so). Only the local stand-ins of the preview are made here.
+      return;
+    }
     final FriendProfile base =
-        friends[peerAddress] ?? FriendProfile(address: peerAddress);
-    friends[peerAddress] = base.copyWith(
-      displayName: displayName ?? base.displayName,
-      status: FriendRelationshipStatus.accepted,
-      isOnline: true,
-      lastPresenceAtMillis: timestamp,
-      lastMessagePreview: preview,
-      lastActivityLabel: t('Teraz'),
-      unreadCount: 0,
+        known ??
+        FriendProfile(
+          address: peerAddress,
+          status: FriendRelationshipStatus.accepted,
+        );
+    _putFriend(
+      friends,
+      base.copyWith(
+        displayName: displayName ?? base.displayName,
+        isOnline: true,
+        lastPresenceAtMillis: timestamp,
+        lastMessagePreview: preview,
+        lastActivityLabel: t('Teraz'),
+        unreadCount: 0,
+      ),
     );
     state = state.copyWith(friends: friends);
   }

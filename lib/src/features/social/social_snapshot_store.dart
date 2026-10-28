@@ -48,6 +48,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'inboxText',
     'peerVersions',
     'groups',
+    'removedFriends',
+    'friendsSince',
     'presence',
   ];
 
@@ -236,6 +238,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
     final Map<String, String> peerAppVersions = <String, String>{};
+    final Map<String, int> removedFriends = <String, int>{};
+    final Map<String, int> friendsSince = <String, int>{};
     final int extensionCount = reader.readUint32();
     for (int i = 0; i < extensionCount; i++) {
       final String id = reader.readString();
@@ -388,6 +392,22 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         inbox = _withInboxEvents(inbox, inboxText);
         backgroundAlerts = _withInboxEvents(backgroundAlerts, inboxText);
       }
+      for (final (String key, Map<String, int> into)
+          in <(String, Map<String, int>)>[
+            ('removedFriends', removedFriends),
+            ('friendsSince', friendsSince),
+          ]) {
+        final Object? times = decoded[key];
+        if (times is Map) {
+          for (final MapEntry<dynamic, dynamic> e in times.entries.take(
+            kMaxRemovedFriends,
+          )) {
+            if (e.key is String && e.value is int) {
+              into[e.key as String] = e.value as int;
+            }
+          }
+        }
+      }
       final Object? inviteIds = decoded['rejectedInviteIds'];
       if (inviteIds is List) {
         rejectedInviteIds.addAll(inviteIds.whereType<String>());
@@ -443,6 +463,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       disappearedMessages: disappearedMessages,
       notificationPrivacy: notificationPrivacy,
       peerAppVersions: peerAppVersions,
+      removedFriends: removedFriends,
+      friendsSince: friendsSince,
     );
   }
 
@@ -652,6 +674,9 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
                 'receivedInviteIds': group.receivedInviteIds,
               },
         },
+        if (state.removedFriends.isNotEmpty)
+          'removedFriends': state.removedFriends,
+        if (state.friendsSince.isNotEmpty) 'friendsSince': state.friendsSince,
       }),
     );
 
@@ -736,6 +761,8 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
         state.notificationPrivacy,
       ),
       peerAppVersions: Map<String, String>.from(state.peerAppVersions),
+      removedFriends: Map<String, int>.from(state.removedFriends),
+      friendsSince: Map<String, int>.from(state.friendsSince),
     );
   }
 }

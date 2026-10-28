@@ -239,7 +239,10 @@ final class _SourceTarget implements ChatSyncTarget {
   }) async {}
 
   @override
-  Future<void> forgetFriendFromOtherDevice(String address) async {}
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) async {}
 
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) async {}
@@ -273,8 +276,10 @@ final class _HubTarget implements ChatSyncTarget {
   );
 
   @override
-  Future<void> forgetFriendFromOtherDevice(String address) =>
-      hub.forgetFriendFromOtherDevice(address);
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) => hub.forgetFriendFromOtherDevice(address, atMillis: atMillis);
 
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) =>

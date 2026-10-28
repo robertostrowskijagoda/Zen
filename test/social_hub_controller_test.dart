@@ -2067,7 +2067,7 @@ void main() {
         overrides: [
           signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
           socialSnapshotStoreProvider.overrideWithValue(
-            MemorySocialSnapshotStore(),
+            MemorySocialSnapshotStore(_friendSnapshot(_meshPeer)),
           ),
           messageTimelineStoreProvider.overrideWithValue(timelineStore),
           attachmentTransferStoreProvider.overrideWithValue(transferStore),
@@ -2160,7 +2160,7 @@ void main() {
         overrides: [
           signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
           socialSnapshotStoreProvider.overrideWithValue(
-            MemorySocialSnapshotStore(),
+            MemorySocialSnapshotStore(_friendSnapshot(_meshPeer)),
           ),
           messageTimelineStoreProvider.overrideWithValue(timelineStore),
           attachmentTransferStoreProvider.overrideWithValue(transferStore),
@@ -5479,3 +5479,18 @@ Future<void> _expectSealed(
   }
   expect(holdsPlain, isFalse, reason: 'the file is stored encrypted');
 }
+
+/// The friend on the mesh the attachment tests send to.
+const String _meshPeer = '200:1111:2222:3333:4444:5555:6666:7777';
+
+/// A stored state where [address] is an accepted friend (sending to someone
+/// on the mesh never makes them one).
+SocialHubState _friendSnapshot(String address) =>
+    SocialHubState.empty().copyWith(
+      friends: <String, FriendProfile>{
+        address: FriendProfile(
+          address: address,
+          status: FriendRelationshipStatus.accepted,
+        ),
+      },
+    );

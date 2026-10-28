@@ -30,6 +30,7 @@ import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/relay/reliable_signal_transport.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -37,6 +38,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -294,6 +296,10 @@ final class FriendsPhone implements RelayPeerSource {
 
   _LockedSide? _locked;
   int _generation = 1;
+
+  /// The notification privacy level the locked service gets in its notice
+  /// kit ("Nadawca i treść" unless a test sets another).
+  NotificationPrivacy noticePrivacy = NotificationPrivacy.senderAndContent;
 
   String get address => sim.address;
 
@@ -694,6 +700,18 @@ final class FriendsPhone implements RelayPeerSource {
       ),
       notices: notices,
       mailbox: mailbox,
+      // The notice kit the app writes (through JSON, as its file does it).
+      noticeKit: LockedNoticeKit.fromJson(
+        jsonDecode(
+          jsonEncode(
+            lockedNoticeKitOf(
+              state,
+              privacy: noticePrivacy,
+              directory: accounts,
+            ).toJson(),
+          ),
+        ),
+      ),
       taken: kit.taken,
       now: () => world.net.now,
       mailboxPollInterval: Duration.zero,

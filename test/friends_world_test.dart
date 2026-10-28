@@ -19,6 +19,7 @@ import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 
 import 'support/friends_world.dart';
 
@@ -561,6 +562,8 @@ void main() {
     test('keeps what arrives in its sealed inbox, notifies once without '
         'saying what, and the chat has it after the unlock', () async {
       final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+      // "Tylko informacja": the notice says only that something came.
+      w['B'].noticePrivacy = NotificationPrivacy.generic;
       await w.lock(w['B']);
       await w.send(w['A'], w['B'], 'tajna treść');
       await w.advance(const Duration(seconds: 20));
