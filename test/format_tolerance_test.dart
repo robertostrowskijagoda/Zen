@@ -337,6 +337,53 @@ void main() {
     ]);
   });
 
+  test('a list kept before 1.14.0 turns the untouched reserve peers on and '
+      'keeps what the user switched', () {
+    // Before 1.14.0 only the first picks were on in the built-in list.
+    const PublicPeer pick = PublicPeer(uri: 'tls://pick.example:1');
+    const PublicPeer spare = PublicPeer(
+      uri: 'tls://spare.example:1',
+      enabled: false,
+    );
+    const PublicPeer offByUser = PublicPeer(uri: 'tls://off.example:1');
+    const PublicPeer onByUser = PublicPeer(
+      uri: 'tls://on.example:1',
+      enabled: false,
+    );
+    final PublicPeerList kept = PublicPeerList.fromJson(
+      jsonDecode(
+        jsonEncode(
+          const PublicPeerList(
+            custom: true,
+            peers: <PublicPeer>[
+              pick,
+              spare,
+              PublicPeer(uri: 'tls://off.example:1', enabled: false),
+              PublicPeer(uri: 'tls://on.example:1'),
+            ],
+            base: <PublicPeer>[pick, spare, offByUser, onByUser],
+          ).toJson(),
+        ),
+      ),
+    )!;
+    // 1.14.0: every built-in peer is on.
+    final PublicPeerList now = kept.mergedWith(const <PublicPeer>[
+      PublicPeer(uri: 'tls://pick.example:1'),
+      PublicPeer(uri: 'tls://spare.example:1'),
+      PublicPeer(uri: 'tls://off.example:1'),
+      PublicPeer(uri: 'tls://on.example:1'),
+    ]);
+    expect(
+      <String, bool>{for (final PublicPeer p in now.peers) p.uri: p.enabled},
+      <String, bool>{
+        'tls://pick.example:1': true,
+        'tls://spare.example:1': true,
+        'tls://off.example:1': false,
+        'tls://on.example:1': true,
+      },
+    );
+  });
+
   test('a pyramid on rules this build does not know stops where they '
       'start', () async {
     final LedgerKeyPair power = await LedgerKeyPair.generate();

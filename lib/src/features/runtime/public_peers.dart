@@ -258,12 +258,19 @@ final class PublicPeerList {
     final Map<String, PublicPeer> before = <String, PublicPeer>{
       for (final PublicPeer p in base) p.uri: p,
     };
-    final Set<String> now = <String>{for (final PublicPeer p in builtIn) p.uri};
+    final Map<String, PublicPeer> now = <String, PublicPeer>{
+      for (final PublicPeer p in builtIn) p.uri: p,
+    };
+    // A built-in peer the user left as it was follows this build's default
+    // (before 1.14.0 only the first picks were on); one the user switched
+    // stays as they set it.
+    bool untouched(PublicPeer p) =>
+        before[p.uri] != null && before[p.uri]!.enabled == p.enabled;
     final List<PublicPeer> merged = <PublicPeer>[
       for (final PublicPeer p in peers)
-        if (now.contains(p.uri) ||
-            before[p.uri] == null ||
-            before[p.uri]!.enabled != p.enabled)
+        if (now.containsKey(p.uri))
+          untouched(p) ? now[p.uri]! : p
+        else if (!untouched(p))
           p,
     ];
     final Set<String> have = <String>{for (final PublicPeer p in merged) p.uri};
