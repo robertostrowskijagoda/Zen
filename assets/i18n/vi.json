@@ -716,6 +716,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Khi điện thoại vẫn đang nhìn quanh: ở màn hình này và mỗi 5 phút khi chạy nền. Không tìm kiếm thêm.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Khi không có Wi-Fi gần đó, điện thoại của bạn bè tự lập mạng riêng với nhau. Hoạt động khi Zen đang mở hoặc chạy nền; tốn pin hơn một chút.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Khi không có mạng gần đó, thiết bị của bạn bè (trong khoảng mười mấy mét) kết nối qua Bluetooth. Đường truyền chậm: đủ cho tin nhắn và ảnh, cuộc gọi có thể không dùng được. Tốn pin hơn một chút.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Khi bạn đóng Zen hoặc hệ thống đóng nó, Zen sẽ mở không cần mật khẩu trong khoảng thời gian tương tự. Đây là rủi ro: ai lấy điện thoại đã mở khóa của bạn trong lúc đó sẽ mở được Zen mà không cần mật khẩu. Chỉ bật khi điện thoại có khóa màn hình. Sau khi khởi động lại điện thoại, sau khi tắt khóa màn hình của điện thoại và sau “Khóa ngay”, luôn cần mật khẩu.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "other": "Khi đa số những người trong nhà còn lại đồng ý (cần {n} phiếu), căn hộ sẽ có khóa mới và mã cửa mới, còn điện thoại này sẽ mất quyền truy cập. Hàng xóm sẽ được thông báo. Nhãn dán cũ sẽ phải thay."
   },
@@ -1705,6 +1706,7 @@
   "Nic z trzeciego stopnia": "Không có gì từ bậc ba",
   "Nie": "Không",
   "Nie akceptuję": "Tôi không đồng ý",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Không khóa ngay sau khi đóng ứng dụng",
   "Nie będzie": "Không đến",
   "Nie da się sprawdzić podpisu": "Không kiểm tra được chữ ký",
   "Nie da się teraz do nich dotrzeć.": "Hiện không thể liên lạc với họ.",

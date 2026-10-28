@@ -716,6 +716,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "휴대폰이 어차피 주변을 살필 때만: 이 화면에서, 그리고 백그라운드에서 5분마다. 추가 검색은 없어요.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "근처에 Wi-Fi가 없으면 친구들의 휴대폰끼리 자체 네트워크를 만들어요. Zen이 열려 있거나 백그라운드에서 실행 중일 때 작동하고, 배터리를 조금 더 써요.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "근처에 네트워크가 없으면 친구의 기기(십여 미터 이내)가 Bluetooth로 연결돼요. 느린 연결이라 메시지와 사진은 충분하지만 통화는 안 될 수 있어요. 배터리를 조금 더 써요.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Zen을 닫거나 시스템이 닫으면, 같은 시간 동안 비밀번호 없이 열려요. 위험이 있어요: 그동안 잠금이 풀린 휴대폰을 집은 사람은 비밀번호 없이 Zen을 열 수 있어요. 휴대폰에 화면 잠금이 있을 때만 켜세요. 휴대폰을 다시 시작한 뒤, 화면 잠금을 끈 뒤, “지금 잠금” 뒤에는 비밀번호가 항상 필요해요.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "other": "나머지 세대원 과반이 동의하면(필요한 표 {n}표) 집에 새 키와 새 문 코드가 생기고, 이 휴대폰은 접근할 수 없게 돼요. 이웃에게 알려지고, 이전 스티커는 교체해야 해요."
   },
@@ -1705,6 +1706,7 @@
   "Nic z trzeciego stopnia": "3촌에게서 온 것 없음",
   "Nie": "싫어요",
   "Nie akceptuję": "동의 안 함",
+  "Nie blokuj od razu po zamknięciu aplikacji": "앱을 닫아도 바로 잠그지 않기",
   "Nie będzie": "불참",
   "Nie da się sprawdzić podpisu": "서명을 확인할 수 없어요",
   "Nie da się teraz do nich dotrzeć.": "지금은 이분들에게 닿을 수 없어요.",

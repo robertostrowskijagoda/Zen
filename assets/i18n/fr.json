@@ -723,6 +723,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Quand le téléphone regarde déjà autour de lui : sur cet écran et toutes les 5 minutes en arrière-plan. Sans recherche supplémentaire.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Quand il n’y a pas de Wi-Fi à proximité, les téléphones de vos amis créent entre eux leur propre réseau. Fonctionne quand Zen est ouvert ou tourne en arrière-plan ; consomme un peu plus de batterie.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Quand il n’y a pas de réseau à proximité, les appareils de vos amis (jusqu’à une quinzaine de mètres) se connectent en Bluetooth. C’est une liaison lente : suffisante pour les messages et les photos, les appels peuvent ne pas fonctionner. Consomme un peu plus de batterie.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Quand vous fermez Zen ou que le système le ferme, il s’ouvre sans mot de passe pendant ce même délai. C’est un risque : celui qui prend votre téléphone déverrouillé pendant ce temps ouvre Zen sans mot de passe. Activez cette option seulement si le téléphone a un verrouillage d’écran. Après un redémarrage du téléphone, après la désactivation de son verrouillage d’écran et après « Verrouiller maintenant », le mot de passe est toujours nécessaire.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "Quand la majorité des autres membres du foyer sont d’accord (votre voix suffit), le logement recevra une nouvelle clé et un nouveau code de porte, et ce téléphone n’y aura plus accès. Les voisins seront prévenus. Il faudra remplacer l’ancien autocollant.",
     "other": "Quand la majorité des autres membres du foyer sont d’accord ({n} voix sont nécessaires), le logement recevra une nouvelle clé et un nouveau code de porte, et ce téléphone n’y aura plus accès. Les voisins seront prévenus. Il faudra remplacer l’ancien autocollant."
@@ -1732,6 +1733,7 @@
   "Nic z trzeciego stopnia": "Rien du troisième degré",
   "Nie": "Non",
   "Nie akceptuję": "Je refuse",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Ne pas verrouiller tout de suite après la fermeture de l’application",
   "Nie będzie": "Ne viendra pas",
   "Nie da się sprawdzić podpisu": "Impossible de vérifier la signature",
   "Nie da się teraz do nich dotrzeć.": "Impossible de les joindre pour le moment.",

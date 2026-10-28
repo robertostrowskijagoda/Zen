@@ -723,6 +723,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Telefon zaten etrafına bakınırken: bu ekranda ve arka planda her 5 dakikada bir. Ek arama yapılmaz.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Yakında Wi-Fi yokken arkadaşlarının telefonları aralarında kendi ağlarını kurar. Zen açıkken veya arka planda çalışırken işler; biraz daha fazla pil harcar.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Yakında ağ yokken arkadaşlarının cihazları (birkaç on metreye kadar) Bluetooth ile bağlanır. Bu yavaş bir bağlantıdır: mesajlara ve fotoğraflara yeter, görüşmeler çalışmayabilir. Biraz daha fazla pil harcar.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Zen’i kapattığında ya da sistem kapattığında, aynı süre boyunca parolasız açılır. Bu bir risktir: o sırada kilidi açık telefonunu alan kişi Zen’i parolasız açar. Yalnızca telefonda ekran kilidi varsa aç. Telefon yeniden başlatıldıktan, telefonun ekran kilidi kapatıldıktan ve “Şimdi kilitle” seçildikten sonra parola her zaman gerekir.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "Diğer ev üyelerinin çoğunluğu kabul ettiğinde (senin oyun yeter) daireye yeni bir anahtar ve yeni bir kapı kodu verilir, bu telefonun da erişimi kalmaz. Komşulara haber gider. Eski çıkartmayı değiştirmek gerekecek.",
     "other": "Diğer ev üyelerinin çoğunluğu kabul ettiğinde ({n} oy gerekir) daireye yeni bir anahtar ve yeni bir kapı kodu verilir, bu telefonun da erişimi kalmaz. Komşulara haber gider. Eski çıkartmayı değiştirmek gerekecek."
@@ -1732,6 +1733,7 @@
   "Nic z trzeciego stopnia": "Üçüncü dereceden hiçbir şey yok",
   "Nie": "Hayır",
   "Nie akceptuję": "Kabul etmiyorum",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Uygulama kapandıktan sonra hemen kilitleme",
   "Nie będzie": "Gelmeyecek",
   "Nie da się sprawdzić podpisu": "İmza doğrulanamıyor",
   "Nie da się teraz do nich dotrzeć.": "Şu an onlara ulaşılamıyor.",

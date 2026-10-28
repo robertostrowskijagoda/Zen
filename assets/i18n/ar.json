@@ -751,6 +751,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "عندما يكون الهاتف يتفقد المحيط أصلًا: في هذه الشاشة وكل 5 دقائق في الخلفية. دون بحث إضافي.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "عندما لا توجد شبكة Wi-Fi قريبة، تكوّن هواتف أصدقائك شبكتها الخاصة. يعمل عندما يكون Zen مفتوحًا أو يعمل في الخلفية؛ ويستهلك بطارية أكثر قليلًا.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "عندما لا توجد شبكة قريبة، تتصل أجهزة أصدقائك (حتى بضعة عشر مترًا) عبر Bluetooth. اتصال بطيء: يكفي للرسائل والصور، وقد لا تعمل المكالمات. يستهلك بطارية أكثر قليلًا.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "عند إغلاقك Zen أو إغلاق النظام له، سيُفتح دون كلمة مرور طوال المدة نفسها. هذه مخاطرة: من يأخذ هاتفك المفتوح خلال هذه المدة يفتح Zen دون كلمة مرور. فعّله فقط إذا كان للهاتف قفل شاشة. بعد إعادة تشغيل الهاتف، وبعد إيقاف قفل شاشته، وبعد «اقفل الآن» تكون كلمة المرور مطلوبة دائمًا.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "zero": "عندما يوافق معظم سكان الشقة الآخرين (يلزم {n} من الأصوات)، ستحصل الشقة على مفتاح جديد ورمز جديد للباب، وسيفقد هذا الهاتف الوصول. سيُبلَّغ الجيران. وسيلزم استبدال الملصق القديم.",
     "one": "عندما يوافق معظم سكان الشقة الآخرين (يكفي صوتك)، ستحصل الشقة على مفتاح جديد ورمز جديد للباب، وسيفقد هذا الهاتف الوصول. سيُبلَّغ الجيران. وسيلزم استبدال الملصق القديم.",
@@ -1840,6 +1841,7 @@
   "Nic z trzeciego stopnia": "لا شيء من الدرجة الثالثة",
   "Nie": "لا",
   "Nie akceptuję": "لا أوافق",
+  "Nie blokuj od razu po zamknięciu aplikacji": "لا تقفل فور إغلاق التطبيق",
   "Nie będzie": "لن يحضر",
   "Nie da się sprawdzić podpisu": "لا يمكن التحقق من التوقيع",
   "Nie da się teraz do nich dotrzeć.": "لا يمكن الوصول إليهم الآن.",

@@ -723,6 +723,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Cuando el teléfono ya está buscando alrededor: en esta pantalla y cada 5 minutos en segundo plano. Sin búsqueda adicional.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Cuando no hay Wi-Fi cerca, los teléfonos de tus amigos crean entre ellos su propia red. Funciona con Zen abierto o en segundo plano; gasta algo más de batería.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Cuando no hay red cerca, los dispositivos de tus amigos (hasta unos 15 metros) se conectan por Bluetooth. Es un enlace lento: basta para mensajes y fotos, las llamadas pueden no funcionar. Gasta algo más de batería.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Cuando cierres Zen o lo cierre el sistema, se abrirá sin contraseña durante ese mismo tiempo. Es un riesgo: quien coja tu teléfono desbloqueado en ese tiempo abrirá Zen sin contraseña. Actívalo solo si el teléfono tiene bloqueo de pantalla. Tras reiniciar el teléfono, tras desactivar su bloqueo de pantalla y tras «Bloquear ahora», la contraseña siempre es necesaria.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "Cuando acepte la mayoría de los demás residentes (basta con tu voto), el apartamento recibirá una clave nueva y un código nuevo para la puerta, y este teléfono se quedará sin acceso. Se avisará a los vecinos. Habrá que cambiar la etiqueta vieja.",
     "other": "Cuando acepte la mayoría de los demás residentes (hacen falta {n} votos), el apartamento recibirá una clave nueva y un código nuevo para la puerta, y este teléfono se quedará sin acceso. Se avisará a los vecinos. Habrá que cambiar la etiqueta vieja."
@@ -1732,6 +1733,7 @@
   "Nic z trzeciego stopnia": "Nada del tercer grado",
   "Nie": "No",
   "Nie akceptuję": "No acepto",
+  "Nie blokuj od razu po zamknięciu aplikacji": "No bloquear al instante al cerrar la app",
   "Nie będzie": "No irá",
   "Nie da się sprawdzić podpisu": "No se puede verificar la firma",
   "Nie da się teraz do nich dotrzeć.": "Ahora mismo no se puede contactar con ellos.",

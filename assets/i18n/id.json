@@ -716,6 +716,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Saat ponsel memang sedang melihat sekitar: di layar ini dan tiap 5 menit di latar belakang. Tanpa pencarian tambahan.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Saat tidak ada Wi-Fi di dekat, ponsel teman membentuk jaringan sendiri di antara mereka. Berfungsi saat Zen terbuka atau berjalan di latar belakang; memakai sedikit lebih banyak baterai.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Saat tidak ada jaringan di dekat, perangkat teman (hingga puluhan meter) terhubung lewat Bluetooth. Ini koneksi yang lambat: cukup untuk pesan dan foto, panggilan mungkin tidak berfungsi. Memakai sedikit lebih banyak baterai.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Saat kamu menutup Zen atau sistem menutupnya, Zen akan terbuka tanpa kata sandi selama waktu yang sama. Ini berisiko: siapa pun yang mengambil ponselmu yang tidak terkunci selama waktu itu akan membuka Zen tanpa kata sandi. Aktifkan hanya jika ponsel memiliki kunci layar. Setelah ponsel dimulai ulang, setelah kunci layarnya dimatikan, dan setelah «Kunci sekarang», kata sandi selalu diperlukan.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "other": "Jika sebagian besar penghuni lain setuju (dibutuhkan {n} suara), rumah akan mendapat kunci baru dan kode pintu baru, dan ponsel ini tidak lagi punya akses. Tetangga akan diberi tahu. Stiker lama harus diganti."
   },
@@ -1705,6 +1706,7 @@
   "Nic z trzeciego stopnia": "Tidak ada dari tingkat ketiga",
   "Nie": "Tidak",
   "Nie akceptuję": "Saya tidak setuju",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Jangan langsung kunci setelah aplikasi ditutup",
   "Nie będzie": "Tidak hadir",
   "Nie da się sprawdzić podpisu": "Tanda tangan tidak bisa diperiksa",
   "Nie da się teraz do nich dotrzeć.": "Saat ini mereka tidak bisa dijangkau.",

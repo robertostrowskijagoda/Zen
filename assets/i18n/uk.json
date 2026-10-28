@@ -737,6 +737,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Коли телефон і так роззирається довкола: на цьому екрані та кожні 5 хвилин у фоні. Без додаткового пошуку.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Коли поблизу немає Wi-Fi, телефони друзів створюють між собою власну мережу. Працює, коли Zen відкритий або працює у фоні; витрачає трохи більше заряду.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Коли поблизу немає мережі, пристрої друзів (до кільканадцяти метрів) з’єднуються через Bluetooth. Це повільний канал: вистачить на повідомлення та фото, розмови можуть не працювати. Витрачає трохи більше заряду.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Коли ти закриєш Zen або його закриє система, протягом такого самого часу він відкриватиметься без пароля. Це ризик: хто в цей час візьме твій розблокований телефон, відкриє Zen без пароля. Вмикай, лише якщо телефон має блокування екрана. Після перезавантаження телефона, після вимкнення його блокування екрана та після «Заблокувати зараз» пароль потрібен завжди.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "Коли погодиться більшість решти мешканців (потрібен {n} голос), квартира отримає новий ключ і новий код для дверей, а цей телефон залишиться без доступу. Сусіди отримають повідомлення. Стару наклейку доведеться замінити.",
     "few": "Коли погодиться більшість решти мешканців (потрібні {n} голоси), квартира отримає новий ключ і новий код для дверей, а цей телефон залишиться без доступу. Сусіди отримають повідомлення. Стару наклейку доведеться замінити.",
@@ -1786,6 +1787,7 @@
   "Nic z trzeciego stopnia": "Нічого від третього ступеня",
   "Nie": "Ні",
   "Nie akceptuję": "Не приймаю",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Не блокувати одразу після закриття застосунку",
   "Nie będzie": "Не буде",
   "Nie da się sprawdzić podpisu": "Неможливо перевірити підпис",
   "Nie da się teraz do nich dotrzeć.": "Зараз із ними не зв’язатися.",

@@ -723,6 +723,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "Als je telefoon toch al rondkijkt: op dit scherm en elke 5 minuten op de achtergrond. Zonder extra zoeken.",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "Als er geen Wi-Fi in de buurt is, maken de telefoons van vrienden onderling een eigen netwerk. Werkt als Zen open is of op de achtergrond draait; gebruikt wat meer batterij.",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "Als er geen netwerk is, verbinden de apparaten van vrienden (tot enkele tientallen meters) via Bluetooth. Een langzame verbinding: genoeg voor berichten en foto’s, gesprekken werken misschien niet. Gebruikt wat meer batterij.",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "Als je Zen sluit of het systeem sluit het af, opent het even lang zonder wachtwoord. Dat is een risico: wie in die tijd je ontgrendelde telefoon pakt, opent Zen zonder wachtwoord. Zet dit alleen aan als de telefoon een schermvergrendeling heeft. Na een herstart van de telefoon, na het uitzetten van de schermvergrendeling en na „Nu vergrendelen” is het wachtwoord altijd nodig.",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "Zodra de meerderheid van de overige huisgenoten akkoord gaat (jouw stem is genoeg), krijgt de woning een nieuwe sleutel en een nieuwe deurcode en heeft deze telefoon geen toegang meer. De buren worden op de hoogte gebracht. De oude sticker moet vervangen worden.",
     "other": "Zodra de meerderheid van de overige huisgenoten akkoord gaat (er zijn {n} stemmen nodig), krijgt de woning een nieuwe sleutel en een nieuwe deurcode en heeft deze telefoon geen toegang meer. De buren worden op de hoogte gebracht. De oude sticker moet vervangen worden."
@@ -1732,6 +1733,7 @@
   "Nic z trzeciego stopnia": "Niets van de derde graad",
   "Nie": "Nee",
   "Nie akceptuję": "Ik ga niet akkoord",
+  "Nie blokuj od razu po zamknięciu aplikacji": "Niet meteen vergrendelen na het sluiten van de app",
   "Nie będzie": "Komt niet",
   "Nie da się sprawdzić podpisu": "Handtekening kan niet worden gecontroleerd",
   "Nie da się teraz do nich dotrzeć.": "Ze zijn nu niet te bereiken.",

@@ -723,6 +723,7 @@
   "Gdy telefon i tak rozgląda się w pobliżu: na tym ekranie i co 5 minut w tle. Bez dodatkowego szukania.": "जब फ़ोन वैसे भी आसपास देख रहा हो: इस स्क्रीन पर और बैकग्राउंड में हर 5 मिनट में। अलग से कोई खोज नहीं।",
   "Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych tworzą między sobą własną sieć. Działa, gdy Zen jest otwarty albo działa w tle; zużywa trochę więcej baterii.": "आसपास Wi-Fi न होने पर दोस्तों के फ़ोन आपस में अपना नेटवर्क बना लेते हैं। Zen खुला होने या बैकग्राउंड में चलने पर काम करता है; बैटरी थोड़ी ज़्यादा लगती है।",
   "Gdy w pobliżu nie ma sieci, urządzenia znajomych (do kilkunastu metrów) łączą się przez Bluetooth. To wolne łącze: wystarczy na wiadomości i zdjęcia, rozmowy mogą nie działać. Zużywa trochę więcej baterii.": "आसपास नेटवर्क न होने पर दोस्तों के डिवाइस (कुछ दस मीटर तक) Bluetooth से जुड़ते हैं। यह धीमा कनेक्शन है: संदेश और फ़ोटो के लिए काफ़ी, कॉल शायद न चलें। बैटरी थोड़ी ज़्यादा लगती है।",
+  "Gdy zamkniesz Zen albo zamknie go system, przez ten sam czas otworzy się bez hasła. To ryzyko: kto w tym czasie weźmie Twój odblokowany telefon, otworzy Zen bez hasła. Włącz tylko, jeśli telefon ma blokadę ekranu. Po restarcie telefonu, po wyłączeniu jego blokady ekranu i po „Zablokuj teraz” hasło jest potrzebne zawsze.": "जब आप Zen बंद करें या सिस्टम उसे बंद करे, तो उतने ही समय तक वह बिना पासवर्ड के खुलेगा। यह जोखिम है: उस दौरान जो आपका अनलॉक फ़ोन उठाएगा, वह Zen को बिना पासवर्ड के खोल लेगा। इसे तभी चालू करें जब फ़ोन में स्क्रीन लॉक हो। फ़ोन रीस्टार्ट होने के बाद, उसका स्क्रीन लॉक बंद करने के बाद और “अभी लॉक करें” के बाद पासवर्ड हमेशा चाहिए।",
   "Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę trzeba będzie wymienić.": {
     "one": "जब बाकी घर के सदस्यों में से ज़्यादातर सहमत हो जाएँगे (आपका वोट काफ़ी है), तो फ़्लैट को नई कुंजी और दरवाज़े का नया कोड मिलेगा, और इस फ़ोन की पहुँच खत्म हो जाएगी। पड़ोसियों को बता दिया जाएगा। पुराना स्टिकर बदलना होगा।",
     "other": "जब बाकी घर के सदस्यों में से ज़्यादातर सहमत हो जाएँगे ({n} वोट चाहिए), तो फ़्लैट को नई कुंजी और दरवाज़े का नया कोड मिलेगा, और इस फ़ोन की पहुँच खत्म हो जाएगी। पड़ोसियों को बता दिया जाएगा। पुराना स्टिकर बदलना होगा।"
@@ -1732,6 +1733,7 @@
   "Nic z trzeciego stopnia": "तीसरे स्तर से कुछ नहीं",
   "Nie": "नहीं",
   "Nie akceptuję": "मैं स्वीकार नहीं करता/करती",
+  "Nie blokuj od razu po zamknięciu aplikacji": "ऐप बंद करने के तुरंत बाद लॉक न करें",
   "Nie będzie": "नहीं आ रहे",
   "Nie da się sprawdzić podpisu": "हस्ताक्षर जाँचा नहीं जा सकता",
   "Nie da się teraz do nich dotrzeć.": "अभी उन तक पहुँचना संभव नहीं।",
