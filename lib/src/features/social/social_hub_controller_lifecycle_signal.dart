@@ -213,6 +213,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       }
       return;
     }
+    final SocialHubState before = state;
     final SocialHubState? persisted;
     try {
       persisted = await _snapshotStore.load();
@@ -221,6 +222,12 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       return;
     }
     if (persisted == null || _controllerDisposed || !ref.mounted) {
+      return;
+    }
+    if (!identical(state, before)) {
+      // Changed while it was read, by something outside this queue (the
+      // person's own action): what is in memory is newer than what was
+      // read, and stays.
       return;
     }
     final CallSession? current = state.activeCall;
@@ -405,16 +412,21 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           return;
         }
       }
+      final FriendRelationshipStatus? before =
+          signal.type == ZenSignalType.friendRequest
+          ? state
+                .friendByAddress(PeerShareCodec.normalizeAddress(signal.sender))
+                ?.status
+          : null;
       final bool askedThemToo =
-          signal.type == ZenSignalType.friendRequest &&
-          state
-                  .friendByAddress(
-                    PeerShareCodec.normalizeAddress(signal.sender),
-                  )
-                  ?.status ==
-              FriendRelationshipStatus.pendingOutgoing;
-      await _handleIncomingSignal(signal, receivedAtMillis: receivedAtMillis);
-      if (askedThemToo &&
+          before == FriendRelationshipStatus.pendingOutgoing;
+      // A friend asking again lost our answer: it only goes again (they
+      // were let in once already) — no notice, no request, no queue copy.
+      final bool friendsAlready = before == FriendRelationshipStatus.accepted;
+      if (!friendsAlready) {
+        await _handleIncomingSignal(signal, receivedAtMillis: receivedAtMillis);
+      }
+      if ((askedThemToo || friendsAlready) &&
           state
                   .friendByAddress(
                     PeerShareCodec.normalizeAddress(signal.sender),

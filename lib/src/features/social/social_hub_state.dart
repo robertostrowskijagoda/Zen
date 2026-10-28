@@ -9,6 +9,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 
@@ -353,6 +354,31 @@ final class SocialHubState {
   String nameFor(FriendProfile friend) {
     final String own = peerProfileOf(friend.address)?.name.trim() ?? '';
     return own.isNotEmpty ? own : friend.displayLabel;
+  }
+
+  /// The name [address] goes by on screen (a group's messages, posts and
+  /// members): a friend's own name ([nameFor]); for anyone else, or a
+  /// friend whose name has not come yet, the name they gave themselves
+  /// where they were met ([selfNamed]: the group's member names); else
+  /// [fallback] ("Kontakt Zen" for a friend). Notifications are stricter:
+  /// they name only friends (notification_privacy.dart).
+  String displayNameOf(
+    String address, {
+    String? selfNamed,
+    required String fallback,
+  }) {
+    final FriendProfile? friend = friendByAddress(address);
+    if (friend != null) {
+      final String own = nameFor(friend);
+      if (friend.hasProfileName || own != friend.displayLabel) {
+        return own;
+      }
+    }
+    final String self = sanitizePeerName(selfNamed);
+    if (self.isNotEmpty) {
+      return self;
+    }
+    return friend?.displayLabel ?? fallback;
   }
 
   List<FriendProfile> get acceptedFriends {

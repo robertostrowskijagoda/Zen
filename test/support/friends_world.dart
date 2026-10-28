@@ -6,8 +6,11 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
@@ -17,6 +20,10 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
+import 'package:zen/src/features/ledger/bridge_book.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
@@ -237,15 +244,27 @@ final class FriendsPhone implements RelayPeerSource {
     this.device,
     this.directory, {
     SocialHubState? seed,
-  }) : _seed = seed;
+    Uint8List? accountSeed,
+  }) : _seed = seed,
+       _accountSeed = accountSeed;
 
   /// The social state the phone starts with (another device of an account
   /// starts with the account's friends).
   final SocialHubState? _seed;
 
-  /// Which account each address belongs to, as this phone's ledger would
-  /// tell (see [FriendsWorld.addDevice]).
-  late final AccountDeviceDirectory accounts = _WorldAccounts(this);
+  /// The account key this phone's ledger takes (a device the account was
+  /// restored on); null: an account of its own.
+  final Uint8List? _accountSeed;
+
+  /// Which account each address belongs to: in a world with ledgers what
+  /// this phone's own ledger learnt from proven hellos, else the world's
+  /// truth (see [FriendsWorld.addDevice]).
+  AccountDeviceDirectory get accounts => _ledgerAccounts ?? _worldAccounts;
+  late final AccountDeviceDirectory _worldAccounts = _WorldAccounts(this);
+  AccountDeviceDirectory? _ledgerAccounts;
+
+  /// The phone's ledger, in a world made with `ledger: true`.
+  LedgerNode? ledger;
 
   final FriendsWorld world;
   final String name;
@@ -313,22 +332,36 @@ final class FriendsPhone implements RelayPeerSource {
   List<RelayFriend> acceptedFriends() => <RelayFriend>[
     for (final FriendProfile f in state.acceptedFriends)
       if (accounts.unlinkedAccountOf(f.address) == null ||
-          world._devicesOf(f.address).length > 1)
+          _devicesOf(f.address).length > 1)
         RelayFriend(
           linked: accounts.unlinkedAccountOf(f.address) == null,
           address: f.address,
           lastSeenAtMillis: <int>[
-            for (final String a in world._devicesOf(f.address))
-              world._lastSeenOf(a),
+            for (final String a in _devicesOf(f.address)) world._lastSeenOf(a),
           ].fold<int>(0, max),
           devices: <String>[
-            for (final String a in world._devicesOf(f.address))
+            for (final String a in _devicesOf(f.address))
               if (a != PeerShareCodec.normalizeAddress(f.address) &&
                   accounts.unlinkedAccountOf(a) == null)
                 a,
           ],
         ),
   ];
+
+  /// Every device of the account [address] belongs to, as this phone
+  /// knows them (its ledger, or the world's truth).
+  List<String> _devicesOf(String address) {
+    if (_ledgerAccounts == null) {
+      return world._devicesOf(address);
+    }
+    final String normal = PeerShareCodec.normalizeAddress(address);
+    final String? account = accounts.accountOf(normal);
+    return <String>{
+      normal,
+      if (account != null)
+        ...accounts.addressesOf(account).map(PeerShareCodec.normalizeAddress),
+    }.toList();
+  }
 
   @override
   List<RelayFriend> groupContacts() {
@@ -457,6 +490,85 @@ final class FriendsPhone implements RelayPeerSource {
     // The social state exists from here on.
     await hub.whenHydrated;
     await engine.activate();
+    if (world.ledgers) {
+      await _startLedger();
+    }
+  }
+
+  /// The ledger as the app runs it: hellos with the device certificate
+  /// over the phone's own transport, on the world's clock; who belongs to
+  /// which account is what it learns (the routing asks it).
+  Future<void> _startLedger() async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final Uint8List? seed = _accountSeed;
+    if (seed != null) {
+      await LedgerIdentity.adoptAccount(disk, seed, deviceName: name);
+    }
+    final LedgerNode node = LedgerNode(
+      transport: appTransport,
+      disk: disk,
+      friendAddresses: () => <String>[
+        for (final FriendProfile f in state.acceptedFriends) f.address,
+      ],
+      deviceName: name,
+      clock: HlcClock(wallClock: () => world.net.now),
+      bridges: BridgeBook(probe: (String _) async => null),
+      reachProbe: (String _) async => null,
+      // The world ticks it (greetUnknown) instead of the app's timers.
+      syncInterval: Duration.zero,
+      localAddress: () => address,
+    );
+    // As the app wires it (ledgerNodeProvider): a friend met on a new
+    // device gets the profile.
+    node.onPeerLearnt = (String peer, String account) {
+      String? friend =
+          state.friendByAddress(peer)?.status ==
+              FriendRelationshipStatus.accepted
+          ? peer
+          : null;
+      for (final FriendProfile f in state.acceptedFriends) {
+        if (friend == null && node.accountOf(f.address) == account) {
+          friend = f.address;
+        }
+      }
+      if (friend != null) {
+        unawaited(hub.shareOwnProfileWith(friend));
+      }
+    };
+    ledger = node;
+    await node.start();
+    _ledgerAccounts = LedgerAccountDirectory(
+      node,
+      () => <String>[
+        for (final FriendProfile f in state.acceptedFriends) f.address,
+      ],
+    );
+  }
+
+  /// Presence as the app takes it: a ping or a pong from a friend (any of
+  /// their devices speaks as the friend) says what their Zen is doing; a
+  /// ping is answered. Anyone else gets no answer and counts for nothing.
+  Future<void> _onPresence(String speaker, SignalTransportFrame frame) async {
+    if (state.friendByAddress(speaker)?.status !=
+        FriendRelationshipStatus.accepted) {
+      return;
+    }
+    await hub.updatePeerPresence(
+      peerAddress: speaker,
+      report: PresenceReport.fromPayload(frame.payload),
+      observedAtMillis: frame.receivedAtMillis,
+    );
+    if (frame.payload['type'] == 'ping') {
+      await container
+          .read(signalTransportProvider)
+          .send(
+            remoteAddress: speaker,
+            payload: <String, dynamic>{
+              'type': 'pong',
+              ...presenceFields(own: PeerPresence.online),
+            },
+          );
+    }
   }
 
   /// One frame from the network: while locked, the background service takes
@@ -481,6 +593,11 @@ final class FriendsPhone implements RelayPeerSource {
       _appFrames.add(next);
       final String? from = _speakerOf(next.from);
       if (from == null) {
+        continue;
+      }
+      final Object? type = next.payload['type'];
+      if (type == 'ping' || type == 'pong') {
+        await _onPresence(from, next);
         continue;
       }
       final ZenSignal? signal = zenSignalFromTransportPayload(
@@ -624,6 +741,7 @@ final class FriendsPhone implements RelayPeerSource {
       await side.receiver.stop();
       _locked = null;
     }
+    await ledger?.stop();
     await _appFrames.close();
     await transport.dispose();
     container.dispose();
@@ -653,16 +771,24 @@ final class FriendsPhone implements RelayPeerSource {
 /// await w.assertDelivered(w['B'], 'hello', from: w['A']);
 /// ```
 ///
-/// Not simulated: Yggdrasil itself (sessions, routing), presence pings, and
-/// the platform (wake locks, radios). A message travels as the app sends it:
-/// controller, reliable transport, relay engine, then datagrams that the
-/// network delays, drops or holds back.
+/// Not simulated: Yggdrasil itself (sessions, routing), the timers of
+/// presence pings (a test pings with [ping]), and the platform (wake locks,
+/// radios). A message travels as the app sends it: controller, reliable
+/// transport, relay engine, then datagrams that the network delays, drops or
+/// holds back.
+///
+/// With `ledgers: true` every phone also runs its ledger, and who belongs to
+/// which account is what each phone's ledger learnt from proven hellos (as
+/// in the app), not the world's truth.
 final class FriendsWorld {
-  FriendsWorld({int seed = 1, double dropRate = 0})
+  FriendsWorld({int seed = 1, double dropRate = 0, this.ledgers = false})
     : net = SimNetwork(seed: seed, dropRate: dropRate, holdForOffline: false);
 
   /// The network; its virtual clock is [now].
   final SimNetwork net;
+
+  /// Every phone runs its ledger (see the class comment).
+  final bool ledgers;
   final Map<String, FriendsPhone> _byName = <String, FriendsPhone>{};
   final Map<String, FriendsPhone> _byAddress = <String, FriendsPhone>{};
   final Map<String, int> _aliveAt = <String, int>{};
@@ -684,8 +810,13 @@ final class FriendsWorld {
     bool allFriends = true,
     int seed = 1,
     double dropRate = 0,
+    bool ledgers = false,
   }) async {
-    final FriendsWorld w = FriendsWorld(seed: seed, dropRate: dropRate);
+    final FriendsWorld w = FriendsWorld(
+      seed: seed,
+      dropRate: dropRate,
+      ledgers: ledgers,
+    );
     addTearDown(w.dispose);
     for (final String name in names) {
       await w.add(name, device: devices[name] ?? SimDevice.android);
@@ -714,6 +845,7 @@ final class FriendsWorld {
     required SimDevice device,
     required String account,
     SocialHubState? seed,
+    Uint8List? accountSeed,
   }) async {
     final SimPhone sim = net.phone(name);
     final Directory dir = Directory.systemTemp.createTempSync('zen-world-');
@@ -724,6 +856,7 @@ final class FriendsWorld {
       device,
       dir,
       seed: seed,
+      accountSeed: accountSeed,
     );
     _byName[name] = p;
     _byAddress[sim.address] = p;
@@ -742,27 +875,89 @@ final class FriendsWorld {
     String name, {
     SimDevice device = SimDevice.android,
   }) async {
-    final SocialHubState seed =
-        SocialHubState.empty(
-          lifecycle: const LifecycleSnapshot(
-            visibility: AppVisibilityState.background,
-            generation: 1,
-            capturedAtMillis: 0,
-          ),
-        ).copyWith(
-          friends: <String, FriendProfile>{
-            for (final FriendProfile f in owner.state.acceptedFriends)
-              f.address: f,
-          },
-        );
     final FriendsPhone p = await _add(
       name,
       device: device,
       account: _accountOf[owner.address]!,
-      seed: seed,
+      seed: _friendsOf(owner),
     );
     await settleMailboxes();
     return p;
+  }
+
+  /// The social state a new device of [owner]'s account starts with: the
+  /// account's friends.
+  SocialHubState _friendsOf(FriendsPhone owner) =>
+      SocialHubState.empty(
+        lifecycle: const LifecycleSnapshot(
+          visibility: AppVisibilityState.background,
+          generation: 1,
+          capturedAtMillis: 0,
+        ),
+      ).copyWith(
+        friends: <String, FriendProfile>{
+          for (final FriendProfile f in owner.state.acceptedFriends)
+            f.address: f,
+        },
+      );
+
+  /// [owner]'s phone is lost and the account is restored on a new one,
+  /// [name] (a world with ledgers): the account's key and friends, but a
+  /// new device with its own address that the friends know nothing of
+  /// until it proves itself to them. The lost phone stays off. Nothing
+  /// settles afterwards: the test decides what happens next (the new phone
+  /// starts switched off when [online] is false, as when the node is down
+  /// right after the restore).
+  Future<FriendsPhone> restoreOnNewDevice(
+    FriendsPhone owner,
+    String name, {
+    bool online = true,
+    SimDevice device = SimDevice.android,
+  }) async {
+    final Uint8List? key = owner.ledger?.identity.accountKey?.seed;
+    if (key == null) {
+      throw StateError('Restoring needs a world with ledgers.');
+    }
+    final SocialHubState friends = _friendsOf(owner);
+    await setOnline(owner, false);
+    final SimPhone sim = net.phone(name);
+    if (!online) {
+      net.setOnline(sim, false);
+    }
+    final Directory dir = Directory.systemTemp.createTempSync('zen-world-');
+    final FriendsPhone p = FriendsPhone._(
+      this,
+      name,
+      sim,
+      device,
+      dir,
+      seed: friends,
+      accountSeed: Uint8List.fromList(key),
+    );
+    _byName[name] = p;
+    _byAddress[sim.address] = p;
+    _accountOf[sim.address] = _accountOf[owner.address]!;
+    await p._start();
+    if (!online) {
+      p.engine.deactivate();
+    }
+    return p;
+  }
+
+  /// [from] pings [to] as the app does while Zen is on the screen (its
+  /// presence rides along). The answer (a pong, from a friend who knows
+  /// it) lands with the next settle.
+  Future<void> ping(FriendsPhone from, FriendsPhone to) async {
+    await from.container
+        .read(signalTransportProvider)
+        .send(
+          remoteAddress: to.address,
+          payload: <String, dynamic>{
+            'type': 'ping',
+            ...presenceFields(own: PeerPresence.online),
+          },
+        );
+    await settle();
   }
 
   /// [p]'s owner unlinks it (a lost phone): friends neither send to it nor
@@ -802,6 +997,11 @@ final class FriendsWorld {
         fail('${x.name} and ${y.name} did not become friends');
       }
     }
+    // The ledgers greet the new friend (the app tells them on every change
+    // of the friend list).
+    await a.ledger?.onFriendsChanged();
+    await b.ledger?.onFriendsChanged();
+    await settle();
   }
 
   /// Everybody friends with everybody, then the mailbox announcements settle
@@ -1009,7 +1209,39 @@ final class FriendsWorld {
           await p.engine.tick();
         }
       }
+      if (ledgers) {
+        await _tickLedgers();
+      }
       await settle();
+    }
+  }
+
+  /// When the ledgers' periodic round last ran, and how many ran.
+  int _ledgerRoundAt = 0;
+  int _ledgerRound = 0;
+
+  /// What the ledgers' timers do in the app: every round (10 minutes) a
+  /// greeting of those heard from lately, of everyone every
+  /// [kLedgerGreetAllEvery] rounds; in between, friends whose hello never
+  /// came are greeted again ([LedgerNode.greetUnknown]).
+  Future<void> _tickLedgers() async {
+    final bool round =
+        net.now - _ledgerRoundAt >= const Duration(minutes: 10).inMilliseconds;
+    if (round) {
+      _ledgerRoundAt = net.now;
+      _ledgerRound += 1;
+    }
+    for (final FriendsPhone p in phones) {
+      final LedgerNode? node = p.ledger;
+      if (node == null || !p.online || p.locked) {
+        continue;
+      }
+      if (round) {
+        await node.greetFriends(
+          onlyHeard: _ledgerRound % kLedgerGreetAllEvery != 0,
+        );
+      }
+      await node.greetUnknown();
     }
   }
 

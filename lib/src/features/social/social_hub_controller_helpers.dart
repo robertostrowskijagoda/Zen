@@ -41,6 +41,15 @@ SocialHubState _applySignal(
         _putFriend(friends, _withAppRetentionDefaults(mutual, appSettings));
         return current.copyWith(friends: friends);
       }
+      if (requester != null &&
+          requester.status == FriendRelationshipStatus.accepted) {
+        // Friends already: a request again changes nothing. It is the copy
+        // of an invitation kept for the queue and replayed after the person
+        // accepted it (which made the friend a pending request again), or
+        // theirs sent again after our answer got lost (receiveSignal
+        // answers that one).
+        return current;
+      }
       List<InboxEntry> requestInbox = current.inbox;
       if (requester == null) {
         // A new invitation: strangers can send any number of them, so the
