@@ -18,18 +18,29 @@ Uint8List _seed(int start) =>
     Uint8List.fromList(List<int>.generate(32, (int i) => (start + i) & 0xff));
 
 void main() {
-  test('friends on the same Wi-Fi are on by default, Wi-Fi Direct off', () {
+  test('friends on the same Wi-Fi, Wi-Fi Direct and Bluetooth are on by '
+      'default', () {
     const AppSettings defaults = AppSettings();
     expect(defaults.lanDiscovery, isNull);
     expect(defaults.lanDiscoveryOn, isTrue);
-    expect(defaults.wifiDirect, isFalse);
+    expect(defaults.wifiDirect, isTrue);
+    expect(defaults.bluetoothLinks, isTrue);
+    expect(defaults.multipeerLinks, isFalse);
     expect(defaults.toJson().containsKey('lanDiscovery'), isFalse);
+    expect(AppSettings.fromJson(const <String, dynamic>{}).wifiDirect, isTrue);
 
     final AppSettings chosen = AppSettings.fromJson(
-      defaults.copyWith(lanDiscovery: false, wifiDirect: true).toJson(),
+      defaults
+          .copyWith(
+            lanDiscovery: false,
+            wifiDirect: false,
+            bluetoothLinks: false,
+          )
+          .toJson(),
     );
     expect(chosen.lanDiscoveryOn, isFalse);
-    expect(chosen.wifiDirect, isTrue);
+    expect(chosen.wifiDirect, isFalse);
+    expect(chosen.bluetoothLinks, isFalse);
   });
 
   test('an Ed25519 key converts to the X25519 key of the same seed', () async {

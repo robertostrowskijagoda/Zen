@@ -339,13 +339,15 @@ void main() {
     final _Transport wifiDirect = _Transport(LocalLinkTransport.wifiDirect);
     final LocalLinksController controller = LocalLinksController(
       target: target,
-      loadPeers: () async => const <LocalLinkPeer>[],
+      loadPeers: () async => const <LocalLinkPeer>[
+        LocalLinkPeer(address: '200::1', secretHex: 'aa', own: false),
+      ],
       transports: <LocalLink>[wifiDirect],
       setMulticastLock: (bool held) async {},
     );
     await controller.start(active: true, foreground: true);
     await Future<void>.delayed(Duration.zero);
-    expect(wifiDirect.running, isFalse, reason: 'off by default');
+    expect(wifiDirect.running, isFalse, reason: 'not handed the setting yet');
 
     controller.setSettings(
       lan: true,
@@ -368,18 +370,62 @@ void main() {
     expect(wifiDirect.running, isFalse);
   });
 
+  test('native transports stay quiet with no device to link with', () async {
+    final _Target target = _Target();
+    final _Transport bluetooth = _Transport(LocalLinkTransport.bluetooth);
+    List<LocalLinkPeer> devices = const <LocalLinkPeer>[];
+    final LocalLinksController controller = LocalLinksController(
+      target: target,
+      loadPeers: () async => devices,
+      transports: <LocalLink>[bluetooth],
+      setMulticastLock: (bool held) async {},
+    );
+    controller.setSettings(
+      lan: true,
+      transports: const <LocalLinkTransport>{LocalLinkTransport.bluetooth},
+    );
+    await controller.start(active: true, foreground: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(bluetooth.running, isFalse, reason: 'no friend to link with');
+
+    // The first friend's device: the radio starts.
+    devices = const <LocalLinkPeer>[
+      LocalLinkPeer(address: '200::1', secretHex: 'aa', own: false),
+    ];
+    await controller.refreshPeers();
+    await Future<void>.delayed(Duration.zero);
+    expect(bluetooth.running, isTrue);
+
+    // Gone again: it stops.
+    devices = const <LocalLinkPeer>[];
+    await controller.refreshPeers();
+    await Future<void>.delayed(Duration.zero);
+    expect(bluetooth.running, isFalse);
+    await controller.stop();
+  });
+
   test('Wi-Fi Direct needs the LAN setting', () {
     expect(
-      enabledLocalTransports(const AppSettings(wifiDirect: true)),
+      enabledLocalTransports(const AppSettings(bluetoothLinks: false)),
       <LocalLinkTransport>{LocalLinkTransport.wifiDirect},
     );
     expect(
       enabledLocalTransports(
-        const AppSettings(wifiDirect: true, lanDiscovery: false),
+        const AppSettings(bluetoothLinks: false, lanDiscovery: false),
       ),
       isEmpty,
     );
-    expect(enabledLocalTransports(const AppSettings()), isEmpty);
+    // Wi-Fi Direct and Bluetooth are on by default.
+    expect(enabledLocalTransports(const AppSettings()), <LocalLinkTransport>{
+      LocalLinkTransport.wifiDirect,
+      LocalLinkTransport.bluetooth,
+    });
+    expect(
+      enabledLocalTransports(
+        const AppSettings(wifiDirect: false, bluetoothLinks: false),
+      ),
+      isEmpty,
+    );
   });
 
   test('the status line says how many devices are linked and how', () {

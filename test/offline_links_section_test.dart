@@ -115,7 +115,7 @@ void main() {
     final SwitchListTile direct = tester.widget<SwitchListTile>(
       find.byKey(const Key('settings-wifi-direct-switch')),
     );
-    expect(direct.value, isFalse, reason: 'off by default');
+    expect(direct.value, isTrue, reason: 'on by default');
     final Text status = tester.widget<Text>(
       find.byKey(const Key('offline-links-status')),
     );
@@ -123,7 +123,7 @@ void main() {
     expect(status.data, contains('Wi-Fi: 1'));
   });
 
-  testWidgets('turning Wi-Fi Direct on asks for the permission', (
+  testWidgets('turning Wi-Fi Direct back on asks for the permission', (
     WidgetTester tester,
   ) async {
     final _FakeLink wifiDirect = _FakeLink();
@@ -131,6 +131,12 @@ void main() {
       tester,
       wifiDirect: wifiDirect,
     );
+
+    await tester.tap(find.byKey(const Key('settings-wifi-direct-switch')));
+    await tester.pump();
+    await tester.pump();
+    expect(wifiDirect.permissionRequests, 0);
+    expect((await store.load())?.wifiDirect, isFalse);
 
     await tester.tap(find.byKey(const Key('settings-wifi-direct-switch')));
     await tester.pump();
@@ -196,6 +202,11 @@ void main() {
         findsOneWidget,
       );
 
+      expect((await store.load())?.wifiDirect ?? true, isTrue);
+      await tester.tap(find.byKey(const Key('settings-wifi-direct-switch')));
+      await tester.pump();
+      await tester.pump();
+      expect((await store.load())?.wifiDirect, isFalse);
       await tester.tap(find.byKey(const Key('settings-wifi-direct-switch')));
       await tester.pump();
       await tester.pump();
@@ -205,9 +216,8 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
-  testWidgets('Bluetooth is off by default and asks for the permission', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('Bluetooth is on by default and asks for the permission when '
+      'turned back on', (WidgetTester tester) async {
     final _FakeLink bluetooth = _FakeLink(LocalLinkTransport.bluetooth);
     final MemoryAppSettingsStore store = await pumpSection(
       tester,
@@ -223,17 +233,23 @@ void main() {
     final Finder toggle = find.byKey(
       const Key('settings-bluetooth-links-switch'),
     );
-    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
 
     await tester.ensureVisible(toggle);
     await tester.pump();
     await tester.tap(toggle);
     await tester.pump();
     await tester.pump();
+    expect(bluetooth.permissionRequests, 0);
+    expect((await store.load())?.bluetoothLinks, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pump();
+    await tester.pump();
 
     expect(bluetooth.permissionRequests, 1);
     expect((await store.load())?.bluetoothLinks, isTrue);
-    expect((await store.load())?.wifiDirect, isFalse);
+    expect((await store.load())?.wifiDirect, isTrue);
   });
 
   testWidgets('Apple devices also offer Multipeer', (

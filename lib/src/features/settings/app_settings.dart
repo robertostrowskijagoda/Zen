@@ -468,8 +468,8 @@ final class AppSettings {
     this.legalAcceptedAtMillis = 0,
     this.groupInviteFrom = GroupInviteFrom.friends,
     this.lanDiscovery,
-    this.wifiDirect = false,
-    this.bluetoothLinks = false,
+    this.wifiDirect = true,
+    this.bluetoothLinks = true,
     this.multipeerLinks = false,
     this.keepReceivingInBackground = false,
     this.showLastOpened = true,
@@ -635,13 +635,17 @@ final class AppSettings {
   bool get lanDiscoveryOn => lanDiscovery ?? true;
 
   /// "Wi-Fi Direct (Android)": with no Wi-Fi network around, nearby
-  /// friends' phones form a Wi-Fi Direct group and link over it. Off by
-  /// default: it needs a permission and costs battery.
+  /// friends' phones form a Wi-Fi Direct group and link over it. On by
+  /// default: its permission is asked on the first start, and it runs only
+  /// while it can help — Zen used (or its background service running), no
+  /// Wi-Fi network, and friends' devices to link with.
   final bool wifiDirect;
 
   /// "Bluetooth": nearby friends' devices link over Bluetooth when there is
-  /// no network. Off by default: it needs a permission, costs battery and
-  /// is slow (text and photos; calls may not work).
+  /// no network (slow: text and photos; calls may not work). On by default:
+  /// its permission is asked on the first start, and it runs only while Zen
+  /// is used (or its background service runs) and there are friends'
+  /// devices to link with, advertising and scanning in short windows.
   final bool bluetoothLinks;
 
   /// "Apple Wi-Fi/Bluetooth" (iPhone, iPad, Mac): Apple's Multipeer

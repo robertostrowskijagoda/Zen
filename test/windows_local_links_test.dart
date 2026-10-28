@@ -240,7 +240,7 @@ void main() {
     );
     expect(
       enabledLocalTransports(
-        const AppSettings(wifiDirect: true, lanDiscovery: false),
+        const AppSettings(bluetoothLinks: false, lanDiscovery: false),
       ),
       isEmpty,
       reason: 'Wi-Fi Direct only makes a network for the LAN discovery',
