@@ -36,6 +36,21 @@ typedef CommentMentionSend =
 /// Where a picture for a comment comes from.
 enum CommentPictureSource { camera, gallery, file, gif, paste }
 
+/// The side of the buttons next to the field: a finger-sized target. The
+/// theme's compact density would shrink them to a flat 36 x 26 box.
+const double _kSideButton = 44;
+
+/// Centres a [_kSideButton] on the field's first line (48 tall).
+const double _kSideButtonTop = 2;
+
+final ButtonStyle _sideButtonStyle = IconButton.styleFrom(
+  minimumSize: const Size.square(_kSideButton),
+  fixedSize: const Size.square(_kSideButton),
+  padding: EdgeInsets.zero,
+  visualDensity: VisualDensity.standard,
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+);
+
 bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
 /// The field under comments (posts, films): text and up to
@@ -385,10 +400,11 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: _kSideButtonTop),
                 child: IconButton(
                   key: const Key('comment-attach'),
                   tooltip: t('Dodaj obrazek'),
+                  style: _sideButtonStyle,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                   onPressed: _room > 0 && !_sending
                       ? () => unawaited(_attach())
@@ -421,10 +437,26 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
               ),
               const SizedBox(width: 8),
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: _kSideButtonTop),
                 child: IconButton.filled(
                   key: widget.sendKey,
                   tooltip: t('Wyślij'),
+                  // The theme tints every icon button with the accent, which
+                  // would paint the icon in the button's own colour.
+                  style: _sideButtonStyle.copyWith(
+                    backgroundColor: WidgetStateProperty.resolveWith(
+                      (Set<WidgetState> states) =>
+                          states.contains(WidgetState.disabled)
+                          ? zen.surfaceMuted
+                          : zen.accent,
+                    ),
+                    foregroundColor: WidgetStateProperty.resolveWith(
+                      (Set<WidgetState> states) =>
+                          states.contains(WidgetState.disabled)
+                          ? zen.textMuted
+                          : zen.onAccent,
+                    ),
+                  ),
                   icon: const Icon(Icons.send_rounded),
                   onPressed: _sending || _preparing > 0
                       ? null
