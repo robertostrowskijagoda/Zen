@@ -1213,12 +1213,12 @@ downloaded without a known size. Builds up to 1.14.0 asked the API only:
 GitHub allows 60 unauthenticated requests an hour per IP address, which a
 mobile operator's shared address often has used up (403 or 429), and such
 a phone then found nothing for hours. The app looks
-(`github_update_service.dart`) whenever the last answer is an hour old or
-older (`kGithubCheckEvery`): 20 s after start, when the app comes back to
-the screen and every hour while it stays open. On Android the background
+(`github_update_service.dart`) whenever the last answer is 15 minutes old
+or older (`kGithubCheckEvery`): 20 s after start, when the app comes back to
+the screen and every quarter of an hour while it stays open. On Android the background
 service (`background_update_check.dart`, started in every mode of the
 service, also while the app is locked) looks while Zen is closed once the
-last answer is 2 h old (`kBackgroundGithubCheckEvery`): it rides the
+last answer is 30 minutes old (`kBackgroundGithubCheckEvery`): it rides the
 service's shared wake as work that does not wake the phone in Doze, looks
 every 30 minutes whether a check is due (one small file,
 `update_check.json`, which the app and the service share, so whoever asked

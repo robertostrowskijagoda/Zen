@@ -19,6 +19,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 ### Fixes
 - **Profile reset after a restart**: the own profile was read once at start, and when that happened before the app was unlocked (the store refuses then), the default profile stayed for the whole session and a change made then could be saved over the real one. It is read again once the store opens, and no change is saved on top of the default profile.
 - **Ticks**: a read message always shows as read, and read receipts are recorded in the same queue as delivery changes, so neither writes over the other.
+- **New versions are seen sooner**: the app looks every 15 minutes while it runs and the Android background service every 30 minutes while it is closed (was every hour and every 2 hours), on wakes that come anyway; the project's pages answer first and have no request limit.
 - **Pebble previews** are drawn smoothed instead of as 16 × 16 squares.
 - **Pebble keepers**: right after publishing, the pebble says that it lives only on your phone until a friend keeps it (unreachable while the phone is off), that Zen asks friends by itself, and where to see who agreed (Kamyczki → the pebble → "Opiekunowie").
 - **Calls**: the diagnostics log now names where a native crash happened (the first libraries and functions of its stack, Android 12+), to find the crash a friend's phone had when answering calls. Sounds that stayed off were the phone's quiet modes (silent, vibrate, "Do not disturb" or Samsung's bedtime mode), as designed.

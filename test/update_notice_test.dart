@@ -372,12 +372,16 @@ void main() {
 
     test('a check is due after the interval, or with a clock set back', () {
       expect(updateCheckDue(null, nowMillis: 0), isTrue);
-      expect(updateCheckDue(0, nowMillis: _hour - 1), isFalse);
-      expect(updateCheckDue(0, nowMillis: _hour), isTrue);
+      // Often (a new version is seen soon), on the wakes that come anyway.
+      expect(kGithubCheckEvery, const Duration(minutes: 15));
+      expect(kBackgroundGithubCheckEvery, const Duration(minutes: 30));
+      const int quarter = _hour ~/ 4;
+      expect(updateCheckDue(0, nowMillis: quarter - 1), isFalse);
+      expect(updateCheckDue(0, nowMillis: quarter), isTrue);
       expect(
         updateCheckDue(
           0,
-          nowMillis: 2 * _hour - 1,
+          nowMillis: 2 * quarter - 1,
           every: kBackgroundGithubCheckEvery,
         ),
         isFalse,
@@ -400,6 +404,8 @@ void main() {
         notifications: notices,
         now: now,
         currentVersion: '1.11.0',
+        // The hour these steps were written for; the default is below.
+        checkEvery: const Duration(hours: 1),
       );
       addTearDown(s.dispose);
       return s;
@@ -643,6 +649,7 @@ void main() {
         store: store,
         now: () => now,
         currentVersion: '1.11.0',
+        every: const Duration(hours: 2),
         firstAfter: const Duration(days: 1),
         fetchJson: (Uri uri) async {
           asked++;

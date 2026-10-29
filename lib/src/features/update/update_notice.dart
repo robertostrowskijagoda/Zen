@@ -17,14 +17,15 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 /// stays open. Whoever asked last (the app, the Android background
 /// service) counts. A check asks the project's pages first, which have no
 /// rate limit; GitHub's API (60 requests an hour per IP address, shared
-/// behind a mobile operator's address) only when they do not answer.
-const Duration kGithubCheckEvery = Duration(hours: 1);
+/// behind a mobile operator's address) only when they do not answer. A
+/// new version is seen within a quarter of an hour of the pages showing it.
+const Duration kGithubCheckEvery = Duration(minutes: 15);
 
 /// How old the last answer may get before the Android background service
 /// asks while the app is closed. The service's look rides wakes that come
 /// anyway (the mailbox polls), so it adds no alarm of its own, and asks the
 /// project's pages first, which have no rate limit (latest_release.dart).
-const Duration kBackgroundGithubCheckEvery = Duration(hours: 2);
+const Duration kBackgroundGithubCheckEvery = Duration(minutes: 30);
 
 /// The longest error text [UpdateNoticeState.error] keeps.
 const int kUpdateNoticeErrorChars = 160;
