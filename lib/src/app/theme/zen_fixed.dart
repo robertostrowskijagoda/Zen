@@ -28,14 +28,9 @@ abstract final class ZenFixed {
   /// Behind a photo or a video shown whole (letterboxing).
   static const Color photoBackdrop = Color(0xFF000000);
 
-  /// A printed door sticker: black ink on white paper, exactly as it
-  /// will come out of a printer.
+  /// White paper under a code shown to a housemate's camera. (Printed
+  /// stickers take their colours from qr_sticker/sticker_design.dart.)
   static const Color paper = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF151515);
-  static const Color inkSoft = Color(0xFF555555);
-  static const Color inkFaint = Color(0xFF8A8A8A);
-  static const Color paperTint = Color(0xFFF1F1F1);
-  static const Color paperEdge = Color(0x22000000);
 }
 
 /// The emergency red of the alarm: the theme's danger colour, made deep
