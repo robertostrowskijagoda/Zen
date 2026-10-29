@@ -125,6 +125,11 @@ jobs:
           python3 tool/ci/test_check_libwebrtc.py
           python3 tool/ci/test_check_webrtc_sdk.py
 
+      # The website's screenshots must all be there and small
+      # (tool/screenshots.dart; not compared pixel by pixel).
+      - name: Screenshots of the website
+        run: dart run tool/screenshots.dart --check
+
       - name: The tests that read the documentation
         if: ${{ needs.plan.outputs.code != 'true' }}
         run: >-

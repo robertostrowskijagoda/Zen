@@ -558,4 +558,38 @@ main.prose { max-width: 780px; }
 .support-box { text-align: center; }
 .support-box .btn { margin: 6px 0; }
 
+/* Screenshots of the app (shots/<lang>/, made by tool/screenshots.dart): a
+   row that scrolls sideways on its own, never the page, snapping to each
+   picture; buttons and arrow keys too (site.js). Each picture keeps its
+   size before it loads (width and height on the img). */
+.gallery { position: relative; }
+.gallery-track {
+  display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding-inline: 16px;
+  padding: 6px 16px 16px; margin: 0 -16px; scrollbar-width: thin;
+}
+.gallery-track:focus-visible { outline-offset: -3px; }
+.shot { flex: none; width: min(64vw, 232px); margin: 0; scroll-snap-align: center; text-align: center; }
+.shot.wide { width: min(86vw, 520px); }
+.shot img, .film img {
+  display: block; width: 100%; height: auto; border-radius: 26px; background: var(--card);
+  border: 7px solid #18161f; box-shadow: var(--shadow);
+}
+.shot.wide img { border-radius: 12px; border-width: 5px; }
+@media (prefers-color-scheme: dark) { .shot img, .film img { border-color: #33304a; } }
+.shot figcaption, .film figcaption { margin-top: 10px; font-size: 14.5px; font-weight: 600; }
+.gallery-nav { display: flex; justify-content: center; gap: 12px; margin-top: 4px; }
+.gallery-nav button {
+  display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text);
+  cursor: pointer; box-shadow: var(--shadow);
+}
+.gallery-nav button:hover { background: var(--soft); border-color: var(--link); }
+.gallery-nav button:disabled { opacity: .4; cursor: default; box-shadow: none; }
+.gallery-prev .ico { transform: scaleX(-1); }
+html[dir="rtl"] .gallery-prev .ico { transform: none; }
+html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
+.films { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px; }
+.film { flex: none; width: min(72vw, 250px); margin: 0; text-align: center; }
+
 /* Right-to-left pages. */
