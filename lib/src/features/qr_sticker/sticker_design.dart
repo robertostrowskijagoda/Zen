@@ -375,7 +375,7 @@ List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
     StickerKind.zenAbout => <StickerTexts>[
       StickerTexts(
         top: 'Zen',
-        caption: t('Bez serwerów · bez reklam · bez algorytmu'),
+        caption: t('Bez reklam · bez algorytmu · bez śledzenia'),
         bottom: t('Prywatna sieć społecznościowa — zeskanuj'),
       ),
       StickerTexts(

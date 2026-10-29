@@ -195,7 +195,7 @@ void main() {
       expect(find.byKey(Key(key)), findsOneWidget, reason: key);
     }
     // The preview says what is on it.
-    expect(previewLabel(tester), contains('Prywatny komunikator bez serwerów'));
+    expect(previewLabel(tester), contains('Prywatna sieć społecznościowa'));
     semantics.dispose();
   });
 
