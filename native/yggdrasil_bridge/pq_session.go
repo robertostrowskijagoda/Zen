@@ -175,6 +175,13 @@ func isPQWire(wire string) bool {
 	return len(wire) > len(pqMagic) && wire[:len(pqMagic)] == pqMagic
 }
 
+// isPQDataWire reports whether a signal text is a sealed signal frame
+// ('D'): a copy of one is dropped unopened (its counter was seen), so the
+// mesh writer may send it again (mesh_io.go, echoes).
+func isPQDataWire(wire []byte) bool {
+	return isPQWire(string(wire[:min(len(wire), len(pqMagic)+1)])) && wire[len(pqMagic)] == pqKindData
+}
+
 type pqSessionID [pqSessionIDSize]byte
 
 type pqChallengeID [pqChallengeIDSize]byte
@@ -296,7 +303,11 @@ type pqEndpoint struct {
 	foreignKEM   pqBucket
 	// Sends a signal text (already sealed, or a control message) to a peer.
 	write func(destination net.IP, wire []byte) error
-	now   func() time.Time
+	// Tells the mesh writer a peer holds no session of this node's (it
+	// restarted): the way to it settles (meshIO.settle). May be nil; set
+	// before the endpoint is used.
+	settle func(ip net.IP)
+	now    func() time.Time
 	// Runs f after d (time.AfterFunc; tests run it by hand).
 	after func(d time.Duration, f func())
 }
@@ -1074,7 +1085,8 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		debugf("[ZEN-GO] pq: key record from %s is not the pinned one\n", source)
 		return
 	}
-	if flags&pqFlagFresh != 0 && peer.send != nil {
+	restarted := flags&pqFlagFresh != 0 && peer.send != nil
+	if restarted {
 		// The peer holds no session of this node's (it restarted, or the
 		// other process of the device took its address over): this node's
 		// goes, and what went lately under it goes again under the next
@@ -1102,6 +1114,11 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		request = e.requestFrameLocked(peer)
 	}
 	e.mu.Unlock()
+	if restarted && e.settle != nil {
+		// What goes to the peer the next seconds may still die below (its
+		// core and this node's set up their session anew; mesh_io.go).
+		e.settle(source)
+	}
 	if reply != nil {
 		_ = e.write(source, reply)
 	}
@@ -1187,6 +1204,10 @@ func (e *pqEndpoint) receiveUnknown(source net.IP, body []byte) {
 		request = e.requestFrameLocked(peer)
 	}
 	e.mu.Unlock()
+	if e.settle != nil {
+		// As after a key request saying so (receiveKeys).
+		e.settle(source)
+	}
 	if reply != nil {
 		_ = e.write(source, reply)
 	}

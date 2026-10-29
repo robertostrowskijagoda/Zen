@@ -426,6 +426,60 @@ func TestFriendReachesASilentlyRestartedDevice(t *testing.T) {
 // findable again (ironwood's router rounds).
 const afterRestartBound = 5 * time.Second
 
+// R5-F5: a friend's message to a device that restarted a moment before is
+// not lost, although the two talked again already: ironwood can drop it
+// then without anyone noticing (the two cores' sessions out of step, the
+// device's place in the tree changing), and the mesh writer sends it again
+// (mesh_io.go, echoes). The steps of the real-device crash test: a burst of
+// messages, the device restarts and greets, the friend answers and writes
+// again a second later.
+func TestAMessageSoonAfterARestartIsNotLost(t *testing.T) {
+	mesh, a, b := talkingPair(t)
+	drain := func(node *bridgeNode) func() {
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				node.signalInbox.wait(20 * time.Millisecond)
+			}
+		}()
+		return func() {
+			close(stop)
+			<-done
+		}
+	}
+	stopA := drain(a)
+	defer stopA()
+	stopB := drain(b)
+	for i := range 40 {
+		_ = sendSignal(a, meshIP(b).String(), fmt.Sprintf(`{"type":"message","text":"%d"}`, i))
+		_ = sendSignal(b, meshIP(a).String(), fmt.Sprintf(`{"type":"message_ack","n":%d}`, i))
+		time.Sleep(60 * time.Millisecond)
+	}
+	stopB()
+	b = restartTestNode(t, mesh, b)
+	time.Sleep(time.Second)
+	for _, kind := range []string{"hello", "ping", "poll"} {
+		_ = sendSignal(b, meshIP(a).String(), fmt.Sprintf(`{"type":"%s"}`, kind))
+	}
+	time.Sleep(10 * time.Millisecond)
+	for _, kind := range []string{"pong", "heads", "here"} {
+		_ = sendSignal(a, meshIP(b).String(), fmt.Sprintf(`{"type":"%s"}`, kind))
+	}
+	time.Sleep(time.Second)
+	took := deliverWithin(t, a, b, `{"type":"message","text":"po awarii"}`, 15*time.Second)
+	t.Logf("the friend's message a moment after the restart: %v", took)
+	if took > afterRestartBound {
+		t.Fatalf("the friend's message a moment after the restart took %v (at most %v)", took, afterRestartBound)
+	}
+}
+
 // R5-F4: four devices sending to each other at once (short signals, ones
 // of several fragments, call media), the app asking about them all the
 // while, and one of them restarting every few seconds: no node stops

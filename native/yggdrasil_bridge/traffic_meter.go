@@ -99,6 +99,16 @@ func (node *bridgeNode) writeMesh(packet []byte, relay bool) error {
 	return node.mesh.send(packet, relay)
 }
 
+// writeMeshSealed is writeMesh for a fragment of a sealed signal frame,
+// which the writer sends again while the way to its node settles
+// (mesh_io.go, echoes).
+func (node *bridgeNode) writeMeshSealed(packet []byte) error {
+	if node.mesh == nil {
+		return errMeshStopped
+	}
+	return node.mesh.sendSealed(packet)
+}
+
 // trafficLink is what a peering (or a session) had carried when it was last
 // looked at.
 type trafficLink struct {
