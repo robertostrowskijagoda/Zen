@@ -4,6 +4,12 @@
 // while the bug is there and passes once it is fixed replaces the skipped
 // one below, under the same name prefix; skip only while the fix is not in.
 //
+// Fixed in the start (every step bounded and logged, the node's calls off
+// the UI thread, secure storage that does not answer no longer waited for:
+// guarded_settings_store.dart, f5b9d873) and in the Go bridge (R5-F4);
+// guarded by the tests below, test/start_upgrade_test.dart (every release's
+// data), test/start_watchdog_test.dart and test/guarded_settings_store_test.dart.
+//
 // Found meanwhile by test/persistence_fuzz_test.dart: a damaged ledger file
 // (an archive part, the keys, the identity) threw out of LedgerNode._start
 // (the store reports a seal that no longer opens as
@@ -15,7 +21,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/start_trace.dart';
+import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
@@ -23,18 +33,95 @@ import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/guarded_settings_store.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 import '../support/damaged_files.dart';
+import '../support/start_harness.dart';
+
+/// Secure storage that never answers (the Keystore after an update).
+final class _SilentSecrets implements AppSecurityCredentialsStore {
+  @override
+  Future<String?> read(String key) => Completer<String?>().future;
+
+  @override
+  Future<void> write(String key, String value) => Completer<void>().future;
+
+  @override
+  Future<void> delete(String key) => Completer<void>().future;
+}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  tearDown(() {
+    ZenInstance.debugSetBaseDirectory(null);
+    ZenStartTrace.debugReset();
+  });
+
   test(
     'R5-#8: the app starts after an update on the data the old version left',
-    () {},
-    skip:
-        'R5-#8 open: after the update to 1.14 the app stayed on the logo until its data was wiped. '
-        'Upgrade fixtures: test/fixtures/upgrade (in progress). The damaged ledger files the '
-        'fuzz test found are covered below.',
+    () async {
+      final List<Directory> fixtures =
+          Directory(
+              'test/fixtures/upgrade',
+            ).listSync().whereType<Directory>().toList()
+            ..sort((Directory a, Directory b) => a.path.compareTo(b.path));
+      expect(fixtures, isNotEmpty);
+      for (final Directory fixture in fixtures) {
+        final Map<String, dynamic> manifest =
+            jsonDecode(File('${fixture.path}/fixture.json').readAsStringSync())
+                as Map<String, dynamic>;
+        final Directory folder = copyFixture(
+          Directory('${fixture.path}/account'),
+          'zen-r5-08-upgrade-',
+        );
+        addTearDown(() => deleteQuietly(folder));
+        ZenStartTrace.debugReset();
+        final HarnessStart start = await startZenOn(
+          folder,
+          secrets: MapSecrets(readSecrets(fixture)),
+        );
+        expect(start.result.appSecurityService.isLocked, isTrue);
+        expect(
+          await start.result.appSecurityService.unlock(
+            manifest['password'] as String,
+          ),
+          isTrue,
+          reason: fixture.path,
+        );
+        final (ProviderContainer container, SocialHubState hub) =
+            await hydrateHub(start.result);
+        container.dispose();
+        expect(hub.snapshotUnreadable, isFalse, reason: fixture.path);
+        expect(hub.friends, isNotEmpty, reason: fixture.path);
+      }
+    },
   );
+
+  test('R5-#8: secure storage that does not answer after the update never '
+      'holds the start on the logo', () {
+    // The settings are the first step of the start; the Keystore can stop
+    // answering after an update or a restore, and the start waited on it.
+    fakeAsync((FakeAsync async) {
+      final GuardedAppSettingsStore settings = GuardedAppSettingsStore(
+        inner: MemoryAppSettingsStore(
+          const AppSettings(
+            lockMode: AppLockMode.background,
+            autoCleanupDays: 4,
+          ),
+        ),
+        secrets: _SilentSecrets(),
+      );
+      AppSettings? loaded;
+      settings.load().then((AppSettings? value) => loaded = value);
+      async.elapse(const Duration(seconds: 30));
+      expect(loaded?.autoCleanupDays, 4);
+      expect(loaded?.lockMode, AppLockMode.background);
+    });
+  });
 
   late Directory root;
   late FileBinaryStore store;
