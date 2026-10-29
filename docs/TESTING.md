@@ -45,15 +45,19 @@ then) and guesses the rest from their size. `--groups N` (parallel runs) and `--
 busy. It fetches the packages only when they were never fetched: after
 changing `pubspec.yaml`, run `flutter pub get` yourself.
 
-CI splits the files into four jobs of about the same length
-(`--shard 1/4` … `4/4`, section 6, by `tool/test_times.json` and the file
+CI splits the files into six jobs of about the same length
+(`--shard 1/6` … `6/6`, section 6, by `tool/test_times.json` and the file
 sizes only, so every job computes the same split);
-`dart run tool/test.dart --list --shard 2/4` shows the files of one of them.
+`dart run tool/test.dart --list --shard 2/6` shows the files of one of them.
+Refresh `tool/test_times.json` when the jobs drift apart (one shard several
+minutes longer than another): after a full local run, keep the entries of
+`build/test_times.json` above 15 seconds, rounded down to the second.
 
 The longest files are the simulated phone worlds (`post_reach_test.dart`,
 `neighbors_test.dart`, `dating_test.dart`, `conversation_recovery_sync_test.dart`),
-the whole app (`widget_test.dart`, `shell_*_test.dart`) and the text fit
-checks of every screen in every language, which are split into
+the whole app (`widget_test.dart`, `shell_*_test.dart`), the damaged-file
+sweep (`persistence_fuzz_test.dart`) and the text fit checks of every
+screen in every language, which are split into
 `test/ui_text_fit_1_test.dart` … `_4_test.dart` so that the four parts run
 side by side. Split a new long file the same way rather than letting it
 grow past a minute or two.
@@ -411,21 +415,70 @@ cover that and the slow-start screen.
 
 | Job | Where | What it does |
 |---|---|---|
-| Format and analyze | Windows | `dart format` (no changes), `flutter analyze`, the release contract (`tool/release.dart check`) and the Python tests of `tool/ci` |
-| Tests (1 of 4) … (4 of 4) | Windows | the app's tests (including translations), a quarter of the files each, at the same time (`dart run tool/test.dart --shard N/4`, see "Running the tests") |
+| What to run | Ubuntu | decides whether a pull request changes code or only documentation, and whether the Linux build runs in the prebuilt image (`tool/ci/ci_plan.py`, below) |
+| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`) and the Python tests of `tool/ci`; when only documentation changed, also the app's tests that read it (`legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`) |
+| Format and analyze | Windows | `dart format` (no changes) and `flutter analyze` |
+| Tests (1 of 6) … (6 of 6) | Windows | the app's tests (including translations), a sixth of the files each, at the same time (`dart run tool/test.dart --shard N/6`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
 | Start on older data | Ubuntu | the app's start on every upgrade fixture and on damaged files, the start trace and the slow-start screen (`start_upgrade_test.dart`, `start_trace_test.dart`, `start_watchdog_test.dart`; section 5.1) |
 | Analyze and test | Ubuntu | waits for the jobs above and is green only when all of them are; the check the branch rules require. Writes the report described below |
 | End-to-end on Linux | Ubuntu | the real-node tests of section 7 (`dart run tool/e2e.dart`), about 6-8 minutes; its own report; not required by the branch rules until it is green |
 | Go bridge | Windows | `go vet` and `go test` of the bridge |
 | Go bridge for Android (3 ABIs) | Ubuntu | `build_android.sh` for arm64-v8a, armeabi-v7a and x86_64 (NDK from the runner); checks the `YggStartNode` export in each `.so` |
-| Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
+| Linux build | Ubuntu 22.04 (the image below, or the runner) | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), the native test of the video codec filter (`linux/runner/test/zen_media_codecs_test.cc`), start under Xvfb — the app must still run after 20 s |
 | Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build |
 | macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start |
 
-All jobs start at once (only the `.deb` installs wait for the Linux build).
-The Flutter SDK with its pub packages and Go's modules and build cache are
-cached between CI runs; the release workflow uses no caches at all.
+All jobs start right after *What to run* (only the `.deb` installs wait for
+the Linux build). A new commit of a pull request cancels the run of the
+commit before; on `main` every commit gets a complete run.
+
+**Only documentation changed.** When every file a pull request changes is
+documentation or the website (`docs/` except `TERMS.md` and `PRIVACY.md`,
+which the app carries; `tool/pages/`; the Markdown files at the top except
+`THIRD_PARTY_NOTICES.md`; the issue and pull request templates), only
+*What to run*, *Docs and site* and *Analyze and test* run, in about two
+minutes instead of about fifteen; *Analyze and test* is green when *Docs and
+site* passed and the other jobs were skipped. Pushes to `main` always run
+everything. `tool/ci/test_ci_checks.py` keeps *Docs and site* running every
+app test that reads one of those files.
+
+**Caches.** The Flutter SDK with its pub packages (Windows, Windows on ARM,
+macOS, Linux) and Go's modules and build cache are cached; the emulator
+workflow also caches Gradle's downloads. Pull requests read the caches the
+runs of `main` wrote (GitHub keeps the caches a pull request writes to that
+pull request), so a change of `pubspec.lock` is slow once, on its first
+run. The repository has 10 GB for caches and each Flutter SDK takes about
+2 GB, so a new cache must save real minutes. The release workflow uses no
+caches at all ([RELEASES.md](RELEASES.md), section 3).
+
+**The Linux build image.** The Linux build runs in
+`ghcr.io/robertostrowskijagoda/zen-ci`, an Ubuntu 22.04 image with the build
+tools, Flutter, Go and a head start of pub packages and Go modules
+(`.github/images/linux-build/Dockerfile`). `.github/workflows/ci-image.yml`
+builds and publishes it when the Dockerfile changes on `main` and once a
+month, then opens a pull request that writes its digest into
+`.github/images/linux-build/image.txt`; the CI run of that pull request
+builds Linux in the new image. *What to run* uses the image only by that
+digest, only while the Dockerfile is the one it was built from, and only
+when the package is public; otherwise the job installs its tools on the
+runner as before, so CI never depends on the image. It saves the job's
+minute of `apt-get` and setup, and keeps the glibc 2.35 baseline once
+GitHub retires the `ubuntu-22.04` runners (April 2027). The same image
+builds Zen for Linux on any computer with Docker:
+`docker run --rm -v "$PWD:/src" -w /src ghcr.io/robertostrowskijagoda/zen-ci:latest flutter build linux --release`.
+Windows and macOS jobs cannot run in containers on GitHub's runners; their
+time goes into the native builds (MSBuild, Xcode), which no cache shortens.
+
+Once, after the first run of *CI image*: on GitHub open your profile →
+**Packages** → **zen-ci** → **Package settings**, set **Change visibility →
+Public**, and check that **Manage Actions access** lists this repository
+with the **Write** role. Then merge the pull request *Use the new Linux
+build image*. Updating Flutter or Go means updating
+`FLUTTER_VERSION`/`FLUTTER_SHA256` or `GO_VERSION`/`GO_SHA256` in the
+Dockerfile too (`tool/ci/test_ci_checks.py` fails until they match; the
+SHA-256 values are in Flutter's `releases_linux.json` and
+`https://go.dev/dl/?mode=json&include=all`).
 
 The *Analyze and test* and *Go bridge* jobs write a short report to the run's
 summary page (Actions → the run → Summary): format, analyzer issues, test
@@ -539,9 +592,12 @@ emulator's install over the previous release (section 9).
 
 ## 9. Android emulator (`.github/workflows/android-emulator.yml`)
 
-On pull requests to `main`, for a release tag and by hand (about 25-35
-minutes, so not on every push): an x86_64 Android 14 emulator on the
-Ubuntu runner (KVM), from the runner's own SDK.
+On pull requests to `main`, for a release tag, once a week on `main` and by
+hand (about 25-35 minutes, so not on every push): an x86_64 Android 14
+emulator on the Ubuntu runner (KVM), from the runner's own SDK. Gradle's
+downloads, Flutter and Go are cached; the weekly run on `main` writes the
+caches pull requests read, and the system image downloads while the apps
+build.
 `tool/ci/android_smoke.sh`:
 
 - `fresh` — a fresh install of the commit runs

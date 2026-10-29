@@ -299,7 +299,10 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    APKs, without signing and without a release. No job of `release.yml`
    uses a cache (no Flutter, pub, Gradle or Go cache): a cache another run
    wrote could change what gets signed; the run is fast because the builds
-   run side by side. **Windows ARM64 is
+   run side by side. Nor does it run in CI's prebuilt Linux build image
+   (`.github/images/linux-build`, [TESTING.md](TESTING.md#6-github-actions)):
+   a release is built only from what its own jobs download and check, with
+   no input another workflow wrote. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
