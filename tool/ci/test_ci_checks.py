@@ -635,7 +635,9 @@ class RegressionsTest(unittest.TestCase):
         for name in names:
             with open(os.path.join(folder, name), encoding="utf-8") as f:
                 text = f.read()
-            ids = re.findall(r"""test\(\s*'(R\d+-(?:#\d+|F\d+)):""", text)
+            # A widget test counts too (testWidgets).
+            ids = re.findall(
+                r"""\btest(?:Widgets)?\(\s*'(R\d+-(?:#\d+|F\d+)):""", text)
             self.assertTrue(ids, name)
             if name.startswith("r5_") and name[3:5].isdigit():
                 # Every test of the file names that file's report (one or more).
