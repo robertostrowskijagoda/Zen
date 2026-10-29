@@ -19,7 +19,6 @@ import (
 	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
 func TestDoorFrameFilter(t *testing.T) {
@@ -167,11 +166,8 @@ func newTestMesh(t *testing.T) *testMesh {
 	if err != nil {
 		t.Fatalf("core: %v", err)
 	}
-	iprwc := ipv6rwc.NewReadWriteCloser(yggCore)
-	iprwc.SetMTU(iprwc.MaxMTU())
 	node := &bridgeNode{
 		core:           yggCore,
-		iprwc:          iprwc,
 		config:         cfg,
 		logger:         logger,
 		signalPartials: make(map[string]*signalReassembly),
@@ -179,11 +175,13 @@ func newTestMesh(t *testing.T) *testMesh {
 		// path, as another flat's door would: doors speak no session layer.
 		pqPlain: true,
 	}
+	node.startMesh()
 	allowed := doorHostPeerAllowed
 	doorHostPeerAllowed = func(string) bool { return true }
 	t.Cleanup(func() {
 		node.stopDoor()
 		_, _ = node.setMailboxDoors(nil)
+		node.mesh.stop()
 		yggCore.Stop()
 		hub.Stop()
 		doorHostPeerAllowed = allowed

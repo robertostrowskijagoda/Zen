@@ -19,7 +19,6 @@ import (
 	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 	"github.com/yggdrasil-network/yggdrasil-go/src/multicast"
 )
 
@@ -195,17 +194,9 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		}
 	}
 
-	iprwc := ipv6rwc.NewReadWriteCloser(yggCore)
-	mtu := cfg.IfMTU
-	if iprwc.MaxMTU() < mtu {
-		mtu = iprwc.MaxMTU()
-	}
-	iprwc.SetMTU(mtu)
-
 	node := &bridgeNode{
 		publicPeers:    publicPeersOf(cfg.Peers),
 		core:           yggCore,
-		iprwc:          iprwc,
 		config:         cfg,
 		multicast:      multicastModule,
 		logger:         logger,
@@ -219,6 +210,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		identity:       identity,
 	}
 	started = true
+	node.startMesh()
 	if phonePeers != nil {
 		go node.watchPhonePeers()
 	}
@@ -258,6 +250,14 @@ func nodeInfoPrivacyOptions() []core.SetupOption {
 		core.NodeInfoPrivacy(true),
 		core.NodeInfo(map[string]interface{}{}),
 	}
+}
+
+// startMesh starts the node's packet writer and takes the core's path
+// notifications (mesh_io.go); the packet loop reads through it once
+// signalling starts.
+func (node *bridgeNode) startMesh() {
+	node.mesh = newMeshIO(node.core, node.traffic.sent)
+	node.mesh.start()
 }
 
 func (node *bridgeNode) startPeerNudge() {

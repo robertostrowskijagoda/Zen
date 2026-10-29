@@ -24,11 +24,11 @@ import (
 // phone's limit on it (transit_guard.go).
 //
 // Anyone on the mesh can send this node packets it drops (junk that does
-// not open, packets ipv6rwc refuses), and ironwood answers some of them
-// (a session init back): bytes in and out that are not the node's own as
-// the packet loop counts them, yet no transit either. So the node's own
+// not open, packets the mesh reader refuses), and ironwood answers some of
+// them (a session init back): bytes in and out that are not the node's own
+// as the packet loop counts them, yet no transit either. So the node's own
 // traffic is also taken from its end-to-end sessions (everything that
-// opened, whatever ipv6rwc made of it), and transit is at most what came in
+// opened, whatever the reader made of it), and transit is at most what came in
 // on one peering while another one sent as much: junk and the answers to it
 // travel over the same peering.
 const (
@@ -90,13 +90,13 @@ func (own *ownTraffic) totals() (rx, tx, packetsRx, packetsTx uint64) {
 	return rx, tx, own.packetsRx.Load(), own.packetsTx.Load()
 }
 
-// writeMesh writes one of the node's own packets to the mesh and counts it.
+// writeMesh hands one of the node's own packets to its mesh writer, which
+// counts it once written (mesh_io.go). It never waits for the mesh.
 func (node *bridgeNode) writeMesh(packet []byte, relay bool) error {
-	if _, err := node.iprwc.Write(packet); err != nil {
-		return err
+	if node.mesh == nil {
+		return errMeshStopped
 	}
-	node.traffic.sent(len(packet), relay)
-	return nil
+	return node.mesh.send(packet, relay)
 }
 
 // trafficLink is what a peering (or a session) had carried when it was last

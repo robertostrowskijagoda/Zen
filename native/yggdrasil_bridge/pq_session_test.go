@@ -14,7 +14,6 @@ import (
 	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
 // pqTestNet carries frames between session endpoints in memory, in order,
@@ -286,6 +285,71 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 	_ = aIP
 }
 
+// R5-F5: a frame sent to a friend whose device has just restarted never
+// reaches the device's new session layer: the new core knows no session of
+// this node's core, drops the packet and sets up a new session, so nobody
+// answers that the session layer's session is unknown. The device's first
+// word after its start is a key request (it lost this node's record and
+// challenge); this node then knows its own session with the device is gone
+// too, and what it sent lately goes again under a new one.
+func TestPQFramesLostToARestartGoAgainWhenThePeerAsksForKeys(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	restarted, _ := network.add(2)
+	mustSend(t, a, bIP, "lost on the way")
+	network.queue = nil
+	// The device's app greets its friends once it started.
+	mustSend(t, restarted, aIP, "hello after the start")
+	network.pump()
+	if got := network.take(aIP); len(got) != 1 || got[0] != "hello after the start" {
+		t.Fatalf("A got %q", got)
+	}
+	if got := network.take(bIP); len(got) != 1 || got[0] != "lost on the way" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+	mustSend(t, a, bIP, "next")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "next" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+}
+
+// A key request from a peer whose challenge is old (it asks for a new one
+// before it may start sessions with it no more) sends nothing again.
+func TestPQKeyRequestForAFreshChallengeResendsNothing(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+
+	network.clock = network.clock.Add(pqChallengeRefresh + time.Minute)
+	mustSend(t, a, bIP, "recent")
+	network.pump()
+	// B's challenge from A is due for a refresh: it asks along with its frame.
+	mustSend(t, b, aIP, "with a refresh")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "recent" {
+		t.Fatalf("B got %q", got)
+	}
+	if got := network.take(aIP); len(got) != 1 || got[0] != "with a refresh" {
+		t.Fatalf("A got %q", got)
+	}
+}
+
 func TestPQFramesResentAfterARestartAreOnlyTheLatest(t *testing.T) {
 	network := newPQTestNet(t)
 	a, _ := network.add(1)
@@ -542,15 +606,14 @@ func TestPQSignalsBetweenTwoMeshNodes(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(yggCore.Stop)
-		iprwc := ipv6rwc.NewReadWriteCloser(yggCore)
-		iprwc.SetMTU(iprwc.MaxMTU())
 		node := &bridgeNode{
 			core:           yggCore,
-			iprwc:          iprwc,
 			config:         cfg,
 			logger:         logger,
 			signalPartials: make(map[string]*signalReassembly),
 		}
+		node.startMesh()
+		t.Cleanup(node.mesh.stop)
 		startPacketLoop(node)
 		return node
 	}

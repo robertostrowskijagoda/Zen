@@ -157,6 +157,9 @@ func (node *bridgeNode) shutdown(handle int32) error {
 			return err
 		}
 	}
+	if node.mesh != nil {
+		node.mesh.stop()
+	}
 	node.core.Stop()
 	nodes.Delete(handle)
 	// The key is free for the next node only now that this one is down.
