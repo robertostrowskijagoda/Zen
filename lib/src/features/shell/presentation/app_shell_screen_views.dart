@@ -409,34 +409,40 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      TextField(
-                        key: const Key('chats-search-field'),
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          hintText: t('Szukaj rozmów i wiadomości'),
-                          // Wraps rather than ending in "…" (French,
-                          // Italian on a narrow phone).
-                          hintMaxLines: 2,
-                          prefixIcon: const Icon(
-                            Icons.search_rounded,
-                            size: 20,
-                          ),
-                          suffixIcon: _searchController.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: t('Wyczyść'),
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
+                      // Its own node for screen readers: else the field's
+                      // bounds are those of the whole block with the
+                      // filters, and a tap at their middle misses it.
+                      Semantics(
+                        container: true,
+                        child: TextField(
+                          key: const Key('chats-search-field'),
+                          controller: _searchController,
+                          onChanged: (_) => setState(() {}),
+                          textInputAction: TextInputAction.search,
+                          decoration: InputDecoration(
+                            hintText: t('Szukaj rozmów i wiadomości'),
+                            // Wraps rather than ending in "…" (French,
+                            // Italian on a narrow phone).
+                            hintMaxLines: 2,
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 20,
+                            ),
+                            suffixIcon: _searchController.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: t('Wyczyść'),
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                    ),
+                                    color: zen.textMuted,
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
                                   ),
-                                  color: zen.textMuted,
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() {});
-                                  },
-                                ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -842,26 +848,30 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
     final SearchQuery query = SearchQuery.parse(_search.text);
     final Widget field = Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        key: const Key('settings-search-field'),
-        controller: _search,
-        onChanged: (_) => setState(() {}),
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: t('Szukaj ustawienia'),
-          hintMaxLines: 2,
-          prefixIcon: const Icon(Icons.search_rounded, size: 20),
-          suffixIcon: _search.text.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: t('Wyczyść'),
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  color: zen.textMuted,
-                  onPressed: () {
-                    _search.clear();
-                    setState(() {});
-                  },
-                ),
+      // Its own node for screen readers (bounds of the field itself).
+      child: Semantics(
+        container: true,
+        child: TextField(
+          key: const Key('settings-search-field'),
+          controller: _search,
+          onChanged: (_) => setState(() {}),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: t('Szukaj ustawienia'),
+            hintMaxLines: 2,
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: t('Wyczyść'),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    color: zen.textMuted,
+                    onPressed: () {
+                      _search.clear();
+                      setState(() {});
+                    },
+                  ),
+          ),
         ),
       ),
     );

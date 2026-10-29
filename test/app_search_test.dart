@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
@@ -141,6 +142,54 @@ void main() {
       findsOneWidget,
     );
   });
+
+  for (final double scale in <double>[1, 2]) {
+    testWidgets('a screen reader finds each search field where it is drawn '
+        '(320 px, text ×${scale.round()})', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final SemanticsHandle semantics = tester.ensureSemantics();
+      await tester.pumpWidget(_app());
+      await tester.pumpAndSettle();
+
+      /// The field's node: its own, as large as the field, and a tap at its
+      /// middle lands on the field.
+      void ownNode(Key key) {
+        final Finder field = find.byKey(key);
+        final SemanticsNode node = tester.getSemantics(field);
+        expect(node, isSemantics(isTextField: true));
+        Rect bounds = node.rect;
+        for (SemanticsNode? n = node; n != null; n = n.parent) {
+          if (n.transform != null) {
+            bounds = MatrixUtils.transformRect(n.transform!, bounds);
+          }
+        }
+        final Rect drawn = tester.getRect(field);
+        expect(
+          drawn.inflate(1).contains(bounds.topLeft) &&
+              drawn.inflate(1).contains(bounds.bottomRight),
+          isTrue,
+          reason: '$key: read out at $bounds, drawn at $drawn',
+        );
+        final HitTestResult hit = tester.hitTestOnBinding(bounds.center);
+        final RenderObject box = tester.renderObject(field);
+        expect(
+          hit.path.any((HitTestEntry e) => identical(e.target, box)),
+          isTrue,
+          reason: '$key: a tap at the middle of its bounds misses it',
+        );
+      }
+
+      ownNode(const Key('chats-search-field'));
+      await tester.tap(find.byKey(const Key('chats-status-chip')));
+      await tester.pumpAndSettle();
+      ownNode(const Key('settings-search-field'));
+      semantics.dispose();
+    });
+  }
 
   testWidgets('the settings find a setting by its name', (
     WidgetTester tester,
