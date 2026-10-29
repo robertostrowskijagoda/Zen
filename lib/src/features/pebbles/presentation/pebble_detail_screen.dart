@@ -16,6 +16,7 @@ import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/pebbles/pebble_parts.dart';
 import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_code_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -132,8 +133,9 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final PebbleService? service = ref.watch(pebbleServiceProvider);
-    final PebbleCard card = widget.card;
-    final PebbleEntry? entry = service?.store.entry(card.id);
+    final PebbleEntry? entry = service?.store.entry(widget.card.id);
+    // The store's card: the full one once it came with the design.
+    final PebbleCard card = entry?.card ?? widget.card;
     final int? foundAt = entry?.foundAtMillis ?? widget.foundAtMillis;
     final String findNote = entry?.findNote ?? widget.findNote;
     if (!_noteFilled && entry != null && entry.collected) {
@@ -148,6 +150,15 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       key: const Key('pebble-detail-screen'),
       appBar: ZenSectionBar(
         title: card.name.isEmpty ? t('Kamyczek') : card.name,
+        actions: <Widget>[
+          if (entry != null && (entry.created || entry.collected))
+            IconButton(
+              key: const Key('pebble-show-code'),
+              tooltip: t('Pokaż kod'),
+              icon: const Icon(Icons.qr_code_2_rounded),
+              onPressed: () => unawaited(PebbleCodeScreen.open(context, card)),
+            ),
+        ],
       ),
       body: SafeArea(
         top: false,
@@ -183,15 +194,23 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
               ),
             const SizedBox(height: 6),
             Text(
-              t('{author} · {date}', <String, Object?>{
-                'author': card.authorName.isEmpty
-                    ? t('Autor nieznany')
-                    : card.authorName,
-                'date': ZenFormat.date(card.created),
-              }),
+              pebbleByline(card),
               textAlign: TextAlign.center,
               style: TextStyle(color: zen.textMuted, fontSize: 13),
             ),
+            if (entry != null && (entry.created || entry.collected))
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Center(
+                  child: OutlinedButton.icon(
+                    key: const Key('pebble-show-code-button'),
+                    onPressed: () =>
+                        unawaited(PebbleCodeScreen.open(context, card)),
+                    icon: const Icon(Icons.qr_code_2_rounded),
+                    label: Text(t('Pokaż kod')),
+                  ),
+                ),
+              ),
             if (widget.justPublished && entry != null && entry.created)
               Padding(
                 padding: const EdgeInsets.only(top: 16),
@@ -441,4 +460,20 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       label: Text(t('Przestań przechowywać')),
     ),
   ];
+}
+
+/// "{author} · {date}" under a pebble; only the author while the date is
+/// not known yet (a pebble collected from its QR card, before its full
+/// card came).
+String pebbleByline(PebbleCard card) {
+  final String author = card.authorName.isEmpty
+      ? t('Autor nieznany')
+      : card.authorName;
+  final DateTime? created = card.created;
+  return created == null
+      ? author
+      : t('{author} · {date}', <String, Object?>{
+          'author': author,
+          'date': ZenFormat.date(created),
+        });
 }

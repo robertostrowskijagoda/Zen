@@ -733,11 +733,25 @@ final class PebbleHosting {
     final PebbleCard? card = PebbleCard.fromText(c);
     final PebbleEntry? e = card == null ? null : store.entry(card.id);
     // Only for a pebble this device wants: nobody fills its store.
-    if (card == null || e == null || e.hasDesign || e.card != card) {
+    if (card == null || e == null || e.hasDesign || !card.isFull) {
+      return;
+    }
+    // A pebble collected from its QR card: the full card that came with
+    // the design takes its place, when it is the same pebble by the same
+    // author, holds the author's signature and matches the design.
+    final bool upgrade = e.card != card;
+    if (upgrade &&
+        (e.card.isFull || !e.card.isSamePebble(card) || !await card.verify())) {
       return;
     }
     final Uint8List? design = unb64(d);
-    if (design == null || !await store.putDesign(card.id, design)) {
+    if (design == null || !card.matchesDesign(design)) {
+      return;
+    }
+    if (upgrade && !await store.replaceCard(card)) {
+      return;
+    }
+    if (!await store.putDesign(card.id, design)) {
       return;
     }
     _fetches.remove(card.id);

@@ -81,12 +81,14 @@ Map<String, dynamic> pebbleProfileBody({
 }) {
   List<Map<String, dynamic>> items(List<PebbleEntry> list, bool found) =>
       <Map<String, dynamic>>[
+        // Only full cards: friends check the author's signature.
         for (final PebbleEntry e in list)
-          <String, dynamic>{
-            'c': e.card.text,
-            if (found && e.foundAtMillis != null) 'f': e.foundAtMillis,
-            if (found && e.findNote.isNotEmpty) 'n': e.findNote,
-          },
+          if (e.card.isFull)
+            <String, dynamic>{
+              'c': e.card.text,
+              if (found && e.foundAtMillis != null) 'f': e.foundAtMillis,
+              if (found && e.findNote.isNotEmpty) 'n': e.findNote,
+            },
       ];
   final List<Map<String, dynamic>> made = items(created, false);
   final List<Map<String, dynamic>> found = items(collected, true);
@@ -318,14 +320,15 @@ final class PebbleService {
     }
   }
 
-  /// Collects the pebble of [card] (after its signature is checked): saved
-  /// at once, the full design looked for in the background, the author told
-  /// it was found.
+  /// Collects the pebble of [card]: saved at once, the full design looked
+  /// for in the background, the author told it was found. A full card's
+  /// signature is checked here; a QR card carries none, and the full card
+  /// that comes with the design is checked then ([PebbleHosting]).
   Future<PebbleCollectResult> collect(
     PebbleCard card, {
     String findNote = '',
   }) async {
-    if (!await card.verify()) {
+    if (card.isFull && !await card.verify()) {
       return PebbleCollectResult.invalid;
     }
     await store.load();

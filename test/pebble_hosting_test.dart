@@ -535,6 +535,72 @@ void main() {
     },
   );
 
+  test('a pebble collected from its QR card gets the full signed card '
+      'with the design', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'F']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A']);
+    // The sticker carries only the QR card: no note, date or signature.
+    await net.collect(w['F'], card.qrCard);
+    await net.until(
+      () => net.hasDesign(w['F'], card),
+      reason: 'the design reaching F',
+    );
+    final PebbleEntry e = net.store(w['F']).entry(card.id)!;
+    expect(e.card, card);
+    expect(e.card.isFull, isTrue);
+    expect(e.card.note, 'przy ławce');
+    expect(e.collected, isTrue);
+    expect(e.findNote, 'w parku');
+  });
+
+  test('a QR card is not replaced by a full card someone else signed, nor '
+      'by another pebble\'s', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'F', 'M']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A']);
+    final Uint8List design = (await net.store(w['A']).design(card.id))!;
+    await w.setOnline(w['A'], false);
+    await net.store(w['F']).addCollected(card.qrCard);
+    // M copies the author's key and id into a card it signs itself.
+    final PebbleCard mine = await PebbleCard.sign(
+      key: net.keys[w['M']]!,
+      design: design,
+      createdSeconds: card.createdSeconds,
+      look: card.look,
+      name: 'Podróbka',
+      note: '',
+      authorName: 'A',
+    );
+    final Uint8List forged = Uint8List.fromList(mine.bytes)
+      ..setRange(1, 17, card.id.bytes)
+      ..setRange(17, 49, card.author);
+    // And a real card of another pebble by A.
+    await w.setOnline(w['A'], true);
+    final PebbleCard other = await net.publish(w['A'], size: 2000);
+    final Uint8List otherDesign = (await net.store(w['A']).design(other.id))!;
+    await w.setOnline(w['A'], false);
+    for (final (Uint8List c, Uint8List d) in <(Uint8List, Uint8List)>[
+      (forged, design),
+      (other.bytes, otherDesign),
+      // The QR card itself never stands for the full one.
+      (card.qrCard.bytes, design),
+    ]) {
+      await w['M'].appTransport.send(
+        remoteAddress: w['F'].address,
+        payload: <String, dynamic>{
+          'type': PebbleFrames.design,
+          'c': b64(c),
+          'd': b64(d),
+        },
+      );
+      await net.settle();
+    }
+    expect(net.hasDesign(w['F'], card), isFalse);
+    expect(net.store(w['F']).entry(card.id)!.card, card.qrCard);
+    expect(net.store(w['F']).entry(other.id), isNull);
+  });
+
   test('"znaleziono" reaches the author once per finder', () async {
     final FriendsWorld w = await FriendsWorld.create(<String>['A', 'F', 'G']);
     final _Net net = await _Net.of(w, keeperTarget: 0);

@@ -50,14 +50,15 @@ Map<StickerKind, String> _payloads() {
   };
 }
 
-/// A pebble's link as its sticker carries it: the pebble page with a signed
-/// card (the test card with a thumbnail, tool/ci/pebble_cards.py).
+/// A pebble's link as its sticker carries it: the pebble page with the
+/// digits of a QR card (the ladybird of tool/ci/pebble_cards.py).
 String _pebbleLink() {
   final Map<String, dynamic> cards =
       jsonDecode(File('tool/ci/pebble_card_vectors.json').readAsStringSync())
           as Map<String, dynamic>;
-  final Map<String, dynamic> ladybird =
-      (cards['vectors'] as List<dynamic>).first as Map<String, dynamic>;
+  final Map<String, dynamic> ladybird = (cards['vectors'] as List<dynamic>)
+      .cast<Map<String, dynamic>>()
+      .firstWhere((Map<String, dynamic> v) => v['name'] == 'qr-ladybird');
   return '${cards['link']}${ladybird['card']}';
 }
 
@@ -701,9 +702,9 @@ void main() {
       design,
       kind: StickerKind.pebble,
     );
-    // The artwork 50 mm across: a module of a quarter of a millimetre or
-    // more.
-    expect(scene.module / StickerScene.side * 50, greaterThanOrEqualTo(0.25));
+    // The artwork 50 mm across: a module of 0.4 mm or more (the QR card;
+    // the whole signed card of the first builds made about 0.26 mm).
+    expect(scene.module / StickerScene.side * 50, greaterThanOrEqualTo(0.4));
   });
 
   test('a pebble\'s ready texts: the owner\'s, with its name and author when '

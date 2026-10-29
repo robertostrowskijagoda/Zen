@@ -7,8 +7,22 @@ fixed test key, and what the page must read from each.
                                             this script writes, or when the
                                             signer misses RFC 8032's examples
 
-A card (format v1, all integers big-endian, base64url without padding in the
-link https://robertostrowskijagoda.github.io/Zen/k/#<card>):
+The QR card (format v2, all integers big-endian), what a sticker's link
+carries: https://robertostrowskijagoda.github.io/Zen/k/#<digits>, the card
+as one big-endian number in decimal, padded with zeros to the digits of
+256^n - 1 for its n bytes (a QR code writes digits at 3.3 bits each):
+
+  u8 version = 2 | 16 bytes pebble id | 32 bytes author key (Ed25519)
+  u8 shape preset | u32 shape seed | u8 material preset
+  3 bytes main colour | 3 bytes second colour
+  u8 length + UTF-8 name (at most 24 bytes)
+  u8 length + UTF-8 author (at most 16 bytes)
+
+It is not signed: the app checks the author's signature on the full card
+that comes with the design.
+
+The full card (format v1), signed, what the first test builds put in the
+link as base64url without padding (https://…/Zen/k/#<card>, still read):
 
   u8 version = 1 | 16 bytes pebble id | 32 bytes author key (Ed25519)
   u32 created (Unix seconds) | u8 shape preset | u32 shape seed
@@ -20,7 +34,7 @@ link https://robertostrowskijagoda.github.io/Zen/k/#<card>):
   64 bytes Ed25519 signature over everything before it
 
 test/pages_site_test.dart runs the page's decoder (tool/pages/k/pebble.js)
-on every card with node and compares what it reads. Ed25519 is written out
+on every card of both formats with node and compares what it reads. Ed25519 is written out
 here (RFC 8032, section 6) because the standard library has none; it only
 signs test cards. Standard library only.
 """
@@ -231,6 +245,55 @@ def card_body(c, key):
     return bytes(body)
 
 
+def qr_card(c, key):
+    """The QR card (format v2) of [c] by [key]."""
+    name, author = c["name"].encode("utf-8"), c["author"].encode("utf-8")
+    if len(name) > 24 or len(author) > 16:
+        raise ValueError(f"too long for a QR card: {c['name']!r}")
+    body = bytearray([2])
+    body += c["id"]
+    body += key
+    body += struct.pack(">BIB", c["shape"], c["seed"], c["material"])
+    body += bytes(c["main"]) + bytes(c["second"])
+    body += bytes([len(name)]) + name + bytes([len(author)]) + author
+    return bytes(body)
+
+
+def digits(data):
+    """[data] as one big-endian number in decimal, padded with zeros to the
+    digits of the largest number of that many bytes."""
+    width = len(str(256 ** len(data) - 1))
+    return str(int.from_bytes(data, "big")).zfill(width)
+
+
+def expected_qr(c, key):
+    def colour(rgb):
+        return "#%02x%02x%02x" % tuple(rgb)
+
+    return {
+        "version": 2,
+        "id": c["id"].hex(),
+        "authorKey": key.hex(),
+        "shape": c["shape"],
+        "seed": c["seed"],
+        "material": c["material"],
+        "main": colour(c["main"]),
+        "second": colour(c["second"]),
+        "name": c["name"],
+        "author": c["author"],
+        "signature": "unsigned",
+    }
+
+
+def qr_cards():
+    """The QR cards: the base cards with names short enough, and the
+    longest names a QR card takes (24 and 16 bytes)."""
+    cards = base_cards()
+    out = {name: cards[name] for name in ("ladybird", "planet", "right-to-left")}
+    out["longest"] = dict(cards["longest"], name="Ż" * 12, author="Ą" * 8)
+    return out
+
+
 def signed_card(c, secret=TEST_SECRET, key=None):
     body = card_body(c, key if key is not None else public_key(secret))
     return body + sign(secret, body)
@@ -337,6 +400,28 @@ def vectors():
     bad_name[name_at + 1] = 0xFF
     broken["name-not-utf8"] = b64url(bytes(bad_name) + sign(TEST_SECRET, bytes(bad_name)))
     for name, text in broken.items():
+        out.append({"name": name, "card": text, "expect": None})
+
+    # QR cards (format v2), as stickers carry them now.
+    for name, c in qr_cards().items():
+        out.append({"name": "qr-" + name, "card": digits(qr_card(c, key)),
+                    "expect": expected_qr(c, key)})
+    qr = qr_card(cards["planet"], key)
+    long_name = qr_card(dict(cards["planet"], name="n" * 24), key)
+    at = 1 + 16 + 32 + 12
+    broken_qr = {
+        # A digit too few: no number of bytes has that many.
+        "qr-wrong-length": digits(qr)[1:],
+        # More than the bytes it stands for can hold.
+        "qr-too-large": "9" * len(digits(qr)),
+        "qr-version-3": digits(b"\3" + qr[1:]),
+        "qr-trailing-byte": digits(qr + b"\0"),
+        "qr-truncated": digits(qr[:-1]),
+        # A name of 25 bytes (the length byte says so).
+        "qr-name-too-long": digits(long_name[:at] + b"\x19" + b"n" * 25 + long_name[at + 25:]),
+        "qr-not-digits": digits(qr)[:-1] + "x",
+    }
+    for name, text in broken_qr.items():
         out.append({"name": name, "card": text, "expect": None})
     return {
         "link": LINK,

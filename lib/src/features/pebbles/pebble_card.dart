@@ -10,20 +10,35 @@ import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
 export 'package:zen/src/features/pebbles/design/pebble_card_look.dart'
     show PebbleCardLook, PebbleLookSource;
 
-/// The version byte of the card format below.
+/// The version byte of the full card: the pebble as its author signed it
+/// (format v1 below). It travels with the design and in profiles; the
+/// first test builds also put it in the QR code, and those codes are still
+/// read.
 const int kPebbleCardVersion = 1;
 
-/// The longest card made here: the QR code stays readable on a sticker of
-/// about 5 × 5 cm. When the texts and the thumbnail do not fit, the
-/// thumbnail is left out first, then the texts are shortened. Cards from
-/// elsewhere are taken up to what the format allows
-/// ([kPebbleCardFormatMaxBytes]).
-const int kPebbleCardMaxBytes = 400;
+/// The version byte of the QR card (format v2, [PebbleCard.qrCard]): only
+/// what the web page and the first contact need, so the printed code has
+/// large modules. The note, the date, the painted preview and the
+/// signature come with the full card, fetched with the design.
+const int kPebbleQrCardVersion = 2;
+
+/// The longest full card made here (every text at its limit, with the
+/// thumbnail): the texts are cut to their limits, nothing else is left
+/// out.
+const int kPebbleCardMaxBytes = kPebbleCardFormatMaxBytes;
 
 /// The longest well-formed card of format v1 (every text at its limit in
 /// letters of several bytes, with a thumbnail).
 const int kPebbleCardFormatMaxBytes =
     1 + 16 + 32 + 4 + 12 + 3 + 160 + 255 + 128 + 1 + 176 + 64;
+
+/// The longest name and author's name in a QR card, in UTF-8 bytes.
+const int kPebbleQrNameMaxBytes = 24;
+const int kPebbleQrAuthorMaxBytes = 16;
+
+/// The longest well-formed QR card (format v2).
+const int kPebbleQrCardMaxBytes =
+    1 + 16 + 32 + 12 + 1 + kPebbleQrNameMaxBytes + 1 + kPebbleQrAuthorMaxBytes;
 
 /// The longest name, note and author's name, in characters.
 const int kPebbleNameMaxChars = 40;
@@ -126,9 +141,11 @@ final class PebbleId {
   String toString() => text;
 }
 
-/// The public preview of a pebble, signed by its author: what the QR code
-/// and the link carry, and what finders save at once. Binary format v1 (all
-/// integers big-endian), docs/PROTOCOL.md "Pebbles":
+/// A pebble's card, in one of two forms (all integers big-endian),
+/// docs/PROTOCOL.md "Pebbles":
+///
+/// The full card (format v1), signed by the author: what travels with the
+/// design, in profiles and to keepers.
 ///
 /// * u8 version = 1, 16 bytes [PebbleId], 32 bytes author account id
 ///   (Ed25519 public key), u32 created (Unix seconds);
@@ -139,6 +156,16 @@ final class PebbleId {
 /// * u8 thumbnail length (0 or [kPebbleThumbnailBytes]) + thumbnail;
 /// * 64 bytes Ed25519 signature over everything before it, by the author's
 ///   account key.
+///
+/// The QR card (format v2, [qrCard]): what the printed code and the link
+/// carry, not signed. A finder saves it at once and asks for the design;
+/// the full card that comes with it must have the same id and author, hold
+/// the author's signature and match the design, and then takes its place.
+///
+/// * u8 version = 2, 16 bytes [PebbleId], 32 bytes author account id;
+/// * the same 12 bytes of shape, seed, material and colours;
+/// * u8 length + UTF-8 name (at most [kPebbleQrNameMaxBytes]), u8 length +
+///   UTF-8 author's display name (at most [kPebbleQrAuthorMaxBytes]).
 @immutable
 final class PebbleCard implements PebbleLookSource {
   const PebbleCard._({
@@ -158,41 +185,64 @@ final class PebbleCard implements PebbleLookSource {
 
   /// The author's account key (Ed25519 public key, 32 bytes).
   final Uint8List author;
+
+  /// When the author made it; 0 on a QR card (not known before the full
+  /// card comes).
   final int createdSeconds;
   @override
   final PebbleCardLook look;
   final String name;
+
+  /// Empty on a QR card.
   final String note;
   final String authorName;
 
-  /// [kPebbleThumbnailBytes] bytes, or `null` when the card has none.
+  /// [kPebbleThumbnailBytes] bytes, or `null` when the card has none (a QR
+  /// card never has one).
   @override
   final Uint8List? thumbnail;
+
+  /// Empty on a QR card.
   final Uint8List signature;
 
   /// The card as it travels (what [decode] read or [sign] made).
   final Uint8List bytes;
 
+  /// The format of this card: [kPebbleCardVersion] or
+  /// [kPebbleQrCardVersion].
+  int get version => bytes.first;
+
+  /// Whether this is the full card, signed by the author (otherwise the
+  /// QR card, until the full one comes with the design).
+  bool get isFull => version == kPebbleCardVersion;
+
   /// The author's account as the ledger names accounts (base64url of the
   /// key).
   String get authorAccount => b64(author);
 
-  DateTime get created =>
-      DateTime.fromMillisecondsSinceEpoch(createdSeconds * 1000);
+  /// When the author made it; `null` on a QR card.
+  DateTime? get created => isFull
+      ? DateTime.fromMillisecondsSinceEpoch(createdSeconds * 1000)
+      : null;
 
   /// The bytes the signature covers.
   Uint8List get signedBytes =>
-      Uint8List.sublistView(bytes, 0, bytes.length - _signatureBytes);
+      Uint8List.sublistView(bytes, 0, bytes.length - signature.length);
 
-  /// Whether the author's key signed this card.
-  Future<bool> verify() => verifyClassicalSignature(
-    publicKey: authorAccount,
-    message: signedBytes,
-    signature: b64(signature),
-  );
+  /// Whether the author's key signed this card (never for a QR card: it
+  /// carries no signature).
+  Future<bool> verify() async =>
+      isFull &&
+      await verifyClassicalSignature(
+        publicKey: authorAccount,
+        message: signedBytes,
+        signature: b64(signature),
+      );
 
-  /// Whether [design] is the design this card was made for.
+  /// Whether [design] is the design this card was made for (a QR card
+  /// cannot tell: it has no date).
   bool matchesDesign(List<int> design) =>
+      isFull &&
       design.length <= kPebbleDesignMaxBytes &&
       PebbleId.of(
             author: author,
@@ -201,10 +251,37 @@ final class PebbleCard implements PebbleLookSource {
           ) ==
           id;
 
+  /// Whether [full] is a card of this same pebble by the same author (its
+  /// signature is checked by the caller).
+  bool isSamePebble(PebbleCard full) =>
+      full.id == id && listEquals(full.author, author);
+
+  /// The QR card of this pebble (format v2): the name and the author's
+  /// name cut to [kPebbleQrNameMaxBytes] and [kPebbleQrAuthorMaxBytes]
+  /// (with "…" when cut).
+  PebbleCard get qrCard {
+    if (!isFull) {
+      return this;
+    }
+    final BytesBuilder b = BytesBuilder(copy: false)
+      ..addByte(kPebbleQrCardVersion)
+      ..add(id.bytes)
+      ..add(author)
+      ..add(look.toBytes());
+    for (final (String s, int max) in <(String, int)>[
+      (name, kPebbleQrNameMaxBytes),
+      (authorName, kPebbleQrAuthorMaxBytes),
+    ]) {
+      final List<int> raw = utf8.encode(clipPebbleTextBytes(s, max));
+      b
+        ..addByte(raw.length)
+        ..add(raw);
+    }
+    return decode(b.takeBytes())!;
+  }
+
   /// Makes and signs the card of [design] with the account [key]. The texts
-  /// are cut to their limits; when the card would not fit
-  /// [kPebbleCardMaxBytes], the thumbnail is left out, then the note, the
-  /// name and the author's name are shortened.
+  /// are cut to their limits.
   static Future<PebbleCard> sign({
     required LedgerKeyPair key,
     required Uint8List design,
@@ -274,9 +351,26 @@ final class PebbleCard implements PebbleLookSource {
     )!;
   }
 
-  /// The card in [bytes], or `null` for anything malformed (the signature
-  /// is not checked here: [verify]).
+  /// The card in [bytes] (either format), or `null` for anything
+  /// malformed (the signature is not checked here: [verify]).
   static PebbleCard? decode(Uint8List bytes) {
+    if (bytes.isEmpty) {
+      return null;
+    }
+    try {
+      return switch (bytes.first) {
+        kPebbleCardVersion => _decodeFull(bytes),
+        kPebbleQrCardVersion => _decodeQr(bytes),
+        _ => null,
+      };
+    } on RangeError {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  static PebbleCard? _decodeFull(Uint8List bytes) {
     if (bytes.length > kPebbleCardFormatMaxBytes ||
         bytes.length <
             pebbleCardSize(
@@ -287,51 +381,73 @@ final class PebbleCard implements PebbleLookSource {
             )) {
       return null;
     }
-    final _Reader r = _Reader(bytes);
-    try {
-      if (r.u8() != kPebbleCardVersion) {
-        return null;
-      }
-      final PebbleId id = PebbleId(r.take(_idBytes));
-      final Uint8List author = r.take(_keyBytes);
-      final int created = r.u32();
-      final PebbleCardLook look = PebbleCardLook.fromBytes(
-        r.take(PebbleCardLook.byteLength),
-      );
-      final String? name = r.text(kPebbleNameMaxChars);
-      final String? note = r.text(kPebbleNoteMaxChars);
-      final String? authorName = r.text(kPebbleAuthorNameMaxChars);
-      if (name == null || note == null || authorName == null) {
-        return null;
-      }
-      final int thumbLength = r.u8();
-      if (thumbLength != 0 && thumbLength != kPebbleThumbnailBytes) {
-        return null;
-      }
-      final Uint8List? thumbnail = thumbLength == 0
-          ? null
-          : r.take(thumbLength);
-      final Uint8List signature = r.take(_signatureBytes);
-      if (!r.done) {
-        return null;
-      }
-      return PebbleCard._(
-        id: id,
-        author: author,
-        createdSeconds: created,
-        look: look,
-        name: name,
-        note: note,
-        authorName: authorName,
-        thumbnail: thumbnail,
-        signature: signature,
-        bytes: Uint8List.fromList(bytes),
-      );
-    } on RangeError {
-      return null;
-    } on FormatException {
+    final _Reader r = _Reader(bytes)..u8();
+    final PebbleId id = PebbleId(r.take(_idBytes));
+    final Uint8List author = r.take(_keyBytes);
+    final int created = r.u32();
+    final PebbleCardLook look = PebbleCardLook.fromBytes(
+      r.take(PebbleCardLook.byteLength),
+    );
+    final String? name = r.text(kPebbleNameMaxChars);
+    final String? note = r.text(kPebbleNoteMaxChars);
+    final String? authorName = r.text(kPebbleAuthorNameMaxChars);
+    if (name == null || note == null || authorName == null) {
       return null;
     }
+    final int thumbLength = r.u8();
+    if (thumbLength != 0 && thumbLength != kPebbleThumbnailBytes) {
+      return null;
+    }
+    final Uint8List? thumbnail = thumbLength == 0 ? null : r.take(thumbLength);
+    final Uint8List signature = r.take(_signatureBytes);
+    if (!r.done) {
+      return null;
+    }
+    return PebbleCard._(
+      id: id,
+      author: author,
+      createdSeconds: created,
+      look: look,
+      name: name,
+      note: note,
+      authorName: authorName,
+      thumbnail: thumbnail,
+      signature: signature,
+      bytes: Uint8List.fromList(bytes),
+    );
+  }
+
+  static PebbleCard? _decodeQr(Uint8List bytes) {
+    if (bytes.length > kPebbleQrCardMaxBytes ||
+        bytes.length <
+            kPebbleQrCardMaxBytes -
+                kPebbleQrNameMaxBytes -
+                kPebbleQrAuthorMaxBytes) {
+      return null;
+    }
+    final _Reader r = _Reader(bytes)..u8();
+    final PebbleId id = PebbleId(r.take(_idBytes));
+    final Uint8List author = r.take(_keyBytes);
+    final PebbleCardLook look = PebbleCardLook.fromBytes(
+      r.take(PebbleCardLook.byteLength),
+    );
+    final String? name = r.textBytes(kPebbleQrNameMaxBytes);
+    final String? authorName = r.textBytes(kPebbleQrAuthorMaxBytes);
+    if (name == null || authorName == null || !r.done) {
+      return null;
+    }
+    return PebbleCard._(
+      id: id,
+      author: author,
+      createdSeconds: 0,
+      look: look,
+      name: name,
+      note: '',
+      authorName: authorName,
+      thumbnail: null,
+      signature: Uint8List(0),
+      bytes: Uint8List.fromList(bytes),
+    );
   }
 
   /// The card in base64url [text] (padding optional), or `null`.
@@ -345,10 +461,29 @@ final class PebbleCard implements PebbleLookSource {
     return raw == null ? null : decode(raw);
   }
 
-  static final RegExp _base64Url = RegExp(r'^[A-Za-z0-9_-]+$');
+  /// The card in a link's [text]: the digits of a QR card ([linkText]) or
+  /// the base64url of any card ([text], the first test builds' links);
+  /// `null` for anything else.
+  static PebbleCard? fromLinkText(String text) {
+    final String t = text.trim();
+    if (_digits.hasMatch(t)) {
+      final Uint8List? raw = pebbleBytesFromDigits(t);
+      return raw == null ? null : decode(raw);
+    }
+    return fromText(t);
+  }
 
-  /// base64url without padding, as links carry it.
+  static final RegExp _base64Url = RegExp(r'^[A-Za-z0-9_-]+$');
+  static final RegExp _digits = RegExp(r'^[0-9]+$');
+
+  /// base64url without padding (how cards are stored and sent).
   String get text => base64Url.encode(bytes).replaceAll('=', '');
+
+  /// What a link carries after `#`: the QR card in decimal digits
+  /// ([pebbleDigits]), which a QR code writes in its numeric mode at 3.3
+  /// bits a digit (base64url takes 8 bits per 6). A full card's link
+  /// carries its QR card.
+  String get linkText => pebbleDigits(qrCard.bytes);
 
   @override
   bool operator ==(Object other) =>
@@ -356,6 +491,65 @@ final class PebbleCard implements PebbleLookSource {
 
   @override
   int get hashCode => Object.hashAll(bytes);
+}
+
+/// [bytes] as one big-endian number in decimal, padded with zeros to the
+/// digits of the largest number of that many bytes (so the length tells
+/// how many bytes there are: [pebbleBytesFromDigits]).
+String pebbleDigits(List<int> bytes) {
+  BigInt v = BigInt.zero;
+  for (final int b in bytes) {
+    v = (v << 8) | BigInt.from(b);
+  }
+  return v.toString().padLeft(_digitsFor(bytes.length), '0');
+}
+
+/// The bytes [digits] stand for ([pebbleDigits]), or `null` when no
+/// number of bytes is written with that many digits.
+Uint8List? pebbleBytesFromDigits(String digits) {
+  int n = 0;
+  while (n <= 255 && _digitsFor(n) < digits.length) {
+    n++;
+  }
+  if (n > 255 || _digitsFor(n) != digits.length) {
+    return null;
+  }
+  BigInt v = BigInt.parse(digits);
+  if (v.bitLength > n * 8) {
+    return null;
+  }
+  final Uint8List out = Uint8List(n);
+  for (int i = n - 1; i >= 0; i--) {
+    out[i] = (v & BigInt.from(0xFF)).toInt();
+    v >>= 8;
+  }
+  return out;
+}
+
+/// The decimal digits of 256^[n] − 1.
+int _digitsFor(int n) =>
+    n == 0 ? 0 : ((BigInt.one << (8 * n)) - BigInt.one).toString().length;
+
+/// [s] cut to at most [maxBytes] bytes of UTF-8 on a whole letter, ending
+/// in "…" when anything was cut.
+String clipPebbleTextBytes(String s, int maxBytes) {
+  final String t = s.trim();
+  if (utf8.encode(t).length <= maxBytes) {
+    return t;
+  }
+  final List<int> runes = t.runes.toList();
+  final int room = maxBytes - utf8.encode('…').length;
+  int used = 0;
+  int take = 0;
+  while (take < runes.length) {
+    final int len = utf8.encode(String.fromCharCode(runes[take])).length;
+    if (used + len > room) {
+      break;
+    }
+    used += len;
+    take++;
+  }
+  return '${String.fromCharCodes(runes.take(take)).trimRight()}…';
 }
 
 /// The texts and thumbnail of a card as they fit ([PebbleCard.sign]).
@@ -366,49 +560,33 @@ typedef PebbleCardText = ({
   Uint8List? thumbnail,
 });
 
-/// [name], [note] and [authorName] cut to their limits, with the
-/// thumbnail while everything fits [kPebbleCardMaxBytes]; without it the
-/// note, then the name, then the author's name are shortened until it does
-/// (only very long texts in scripts of several bytes per letter get there).
+/// [name], [note] and [authorName] cut to their limits (and to 255 bytes
+/// each: a length is one byte), with the thumbnail when it is well formed.
 PebbleCardText fitPebbleCardText({
   required String name,
   required String note,
   required String authorName,
   Uint8List? thumbnail,
 }) {
-  String n = _clipChars(name.trim(), kPebbleNameMaxChars);
-  String o = _clipChars(note.trim(), kPebbleNoteMaxChars);
-  String a = _clipChars(authorName.trim(), kPebbleAuthorNameMaxChars);
-  Uint8List? thumb =
-      thumbnail != null && thumbnail.length == kPebbleThumbnailBytes
-      ? thumbnail
-      : null;
-  int size() => pebbleCardSize(
-    nameBytes: utf8.encode(n).length,
-    noteBytes: utf8.encode(o).length,
-    authorBytes: utf8.encode(a).length,
-    thumbnail: thumb != null,
-  );
-  if (size() > kPebbleCardMaxBytes) {
-    thumb = null;
-  }
-  // A length is one byte: no text is longer than 255 bytes either.
-  while (utf8.encode(o).length > 255) {
-    o = _dropLast(o);
-  }
-  while (size() > kPebbleCardMaxBytes) {
-    if (o.isNotEmpty) {
-      o = _dropLast(o);
-    } else if (n.runes.length > 1) {
-      n = _dropLast(n);
-    } else {
-      a = _dropLast(a);
+  String fit(String s, int max) {
+    String out = _clipChars(s.trim(), max);
+    while (utf8.encode(out).length > 255) {
+      out = _dropLast(out);
     }
+    return out;
   }
-  return (name: n, note: o, authorName: a, thumbnail: thumb);
+
+  return (
+    name: fit(name, kPebbleNameMaxChars),
+    note: fit(note, kPebbleNoteMaxChars),
+    authorName: fit(authorName, kPebbleAuthorNameMaxChars),
+    thumbnail: thumbnail != null && thumbnail.length == kPebbleThumbnailBytes
+        ? thumbnail
+        : null,
+  );
 }
 
-/// How long a card with texts of these UTF-8 lengths is.
+/// How long a full card with texts of these UTF-8 lengths is.
 int pebbleCardSize({
   required int nameBytes,
   required int noteBytes,
@@ -431,27 +609,6 @@ int pebbleCardSize({
     1 +
     (thumbnail ? kPebbleThumbnailBytes : 0) +
     _signatureBytes;
-
-/// Whether the card's thumbnail fits next to these texts (the editor tells
-/// when a long note pushes the painted preview out of the QR code).
-bool pebbleThumbnailFits({
-  required String name,
-  required String note,
-  required String authorName,
-}) =>
-    pebbleCardSize(
-      nameBytes: utf8
-          .encode(_clipChars(name.trim(), kPebbleNameMaxChars))
-          .length,
-      noteBytes: utf8
-          .encode(_clipChars(note.trim(), kPebbleNoteMaxChars))
-          .length,
-      authorBytes: utf8
-          .encode(_clipChars(authorName.trim(), kPebbleAuthorNameMaxChars))
-          .length,
-      thumbnail: true,
-    ) <=
-    kPebbleCardMaxBytes;
 
 /// The thumbnail's palette (16 colours 0xRRGGBB, index 0 transparent) and
 /// its 256 pixels (row by row, palette indexes); `null` for a malformed one.
@@ -727,5 +884,12 @@ final class _Reader {
   String? text(int maxChars) {
     final String s = utf8.decode(take(u8()));
     return s.runes.length > maxChars ? null : s;
+  }
+
+  /// A length-prefixed UTF-8 text of at most [maxBytes] bytes; `null` when
+  /// it is longer.
+  String? textBytes(int maxBytes) {
+    final int n = u8();
+    return n > maxBytes ? null : utf8.decode(take(n));
   }
 }

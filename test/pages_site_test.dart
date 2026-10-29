@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart' show QrErrorCorrectLevel;
+import 'package:zen/src/features/qr_sticker/zen_qr_code.dart';
 
 import '../tool/screenshots/shots.dart';
 
@@ -455,6 +457,19 @@ function outside(key, signature, message) {
     const c = reader.decode(v.card);
     decoded.push(c);
     if (!c) { out.cards.push({ name: v.name, card: null }); continue; }
+    if (c.version === 2) {
+      // A sticker's QR card: no signature, no note, date or thumbnail.
+      out.cards.push({
+        name: v.name,
+        card: {
+          version: c.version, id: reader.hex(c.id), authorKey: reader.hex(c.authorKey),
+          shape: c.shape, seed: c.seed, material: c.material, main: colour(c.main), second: colour(c.second),
+          name: c.name, author: c.author,
+        },
+        page: await reader.verify(c),
+      });
+      continue;
+    }
     out.cards.push({
       name: v.name,
       card: {
@@ -472,7 +487,7 @@ function outside(key, signature, message) {
   // A browser without Ed25519 in Web Crypto: the page's own verifier.
   crypto.subtle.importKey = () => Promise.reject(new Error('NotSupportedError'));
   for (let i = 0; i < decoded.length; i++) {
-    if (decoded[i]) { out.cards[i].withoutNative = await reader.verify(decoded[i]); }
+    if (decoded[i] && decoded[i].version === 1) { out.cards[i].withoutNative = await reader.verify(decoded[i]); }
   }
   process.stdout.write(JSON.stringify(out));
 })().catch((e) => { console.error(e); process.exit(1); });
@@ -1554,6 +1569,7 @@ void main() {
       expect(results, hasLength(wanted.length));
       int valid = 0;
       int invalid = 0;
+      int unsigned = 0;
       int broken = 0;
       for (int i = 0; i < wanted.length; i++) {
         final Map<String, dynamic> want = wanted[i] as Map<String, dynamic>;
@@ -1573,6 +1589,12 @@ void main() {
           <String, dynamic>{...expected}..remove('signature'),
           reason: name,
         );
+        if (signature == 'unsigned') {
+          // A QR card: the page says the app checks the signature.
+          expect(got['page'], 'unsigned', reason: name);
+          unsigned++;
+          continue;
+        }
         final bool ok = signature == 'valid';
         expect(got['outside'], ok, reason: "$name: node's Ed25519");
         expect(got['native'], ok, reason: '$name: Web Crypto');
@@ -1585,8 +1607,8 @@ void main() {
           invalid++;
         }
       }
-      expect((valid, invalid), (4, 2));
-      expect(broken, greaterThanOrEqualTo(8));
+      expect((valid, invalid, unsigned), (4, 2, 4));
+      expect(broken, greaterThanOrEqualTo(15));
     });
 
     test('the test cards are what tool/ci/pebble_cards.py writes, and its '
@@ -1606,27 +1628,31 @@ void main() {
       expect(run.exitCode, 0, reason: '${run.stdout}${run.stderr}');
     });
 
-    test('the link fits a sticker: the usual test cards stay within the '
-        "format's 400 bytes", () {
+    test('the link fits a sticker: every QR card, the longest too, makes a '
+        'QR code of version 8 or less at M', () {
       final Map<String, dynamic> cards =
           jsonDecode(
                 File('tool/ci/pebble_card_vectors.json').readAsStringSync(),
               )
               as Map<String, dynamic>;
       expect(cards['link'], '${_base}k/#');
+      int checked = 0;
       for (final dynamic v in cards['vectors'] as List<dynamic>) {
         final Map<String, dynamic> vector = v as Map<String, dynamic>;
-        // "longest" has every text at its longest, in two-byte letters.
-        if (vector['expect'] == null || vector['name'] == 'longest') {
+        final Map<String, dynamic>? want =
+            vector['expect'] as Map<String, dynamic>?;
+        if (want == null || want['version'] != 2) {
           continue;
         }
-        final String card = vector['card'] as String;
+        final String link = '${cards['link']}${vector['card']}';
         expect(
-          card.length * 3 ~/ 4,
-          lessThanOrEqualTo(400),
+          zenQrVersion(link, QrErrorCorrectLevel.M),
+          lessThanOrEqualTo(8),
           reason: vector['name'] as String,
         );
+        checked++;
       }
+      expect(checked, 4);
     });
   });
 

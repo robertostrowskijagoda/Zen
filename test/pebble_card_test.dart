@@ -150,45 +150,99 @@ void main() {
       expect(PebbleCard.fromText('${card.text}!'), isNull);
     });
 
-    test('maximal fields stay within 400 bytes', () async {
-      final PebbleCard ascii = await _card(
-        kasia,
-        name: 'N' * 60,
-        note: 'o' * 150,
-        author: 'A' * 50,
-        thumbnail: _thumbnail(),
-      );
-      expect(ascii.bytes.length, lessThanOrEqualTo(kPebbleCardMaxBytes));
-      expect(ascii.name.length, kPebbleNameMaxChars);
-      expect(ascii.note.length, kPebbleNoteMaxChars);
-      expect(ascii.authorName.length, kPebbleAuthorNameMaxChars);
-      // The texts take precedence over the painted preview.
-      expect(ascii.thumbnail, isNull);
-      expect(await ascii.verify(), isTrue);
+    test(
+      'maximal fields are cut to their limits, the thumbnail stays',
+      () async {
+        final PebbleCard ascii = await _card(
+          kasia,
+          name: 'N' * 60,
+          note: 'o' * 150,
+          author: 'A' * 50,
+          thumbnail: _thumbnail(),
+        );
+        expect(ascii.bytes.length, lessThanOrEqualTo(kPebbleCardMaxBytes));
+        expect(ascii.name.length, kPebbleNameMaxChars);
+        expect(ascii.note.length, kPebbleNoteMaxChars);
+        expect(ascii.authorName.length, kPebbleAuthorNameMaxChars);
+        // The full card never goes into a QR code: the preview stays.
+        expect(ascii.thumbnail, _thumbnail());
+        expect(await ascii.verify(), isTrue);
 
-      final PebbleCard wide = await _card(
-        kasia,
-        name: '🐞' * 40,
-        note: '🌊' * 100,
-        author: '😀' * 32,
-        thumbnail: _thumbnail(),
-      );
-      expect(wide.bytes.length, lessThanOrEqualTo(kPebbleCardMaxBytes));
-      expect(wide.name.runes.length, lessThanOrEqualTo(kPebbleNameMaxChars));
-      expect(await wide.verify(), isTrue);
-      expect(PebbleCard.decode(wide.bytes), wide);
+        final PebbleCard wide = await _card(
+          kasia,
+          name: '🐞' * 40,
+          note: '🌊' * 100,
+          author: '😀' * 32,
+          thumbnail: _thumbnail(),
+        );
+        expect(wide.bytes.length, lessThanOrEqualTo(kPebbleCardMaxBytes));
+        expect(wide.name.runes.length, lessThanOrEqualTo(kPebbleNameMaxChars));
+        expect(await wide.verify(), isTrue);
+        expect(PebbleCard.decode(wide.bytes), wide);
+      },
+    );
 
-      final PebbleCard short = await _card(kasia, thumbnail: _thumbnail());
-      expect(short.thumbnail, isNotNull, reason: 'short texts keep it');
-      expect(short.bytes.length, lessThanOrEqualTo(kPebbleCardMaxBytes));
-      expect(
-        pebbleThumbnailFits(name: 'Biedronka', note: 'krótko', authorName: 'K'),
-        isTrue,
-      );
-      expect(
-        pebbleThumbnailFits(name: 'N' * 40, note: 'o' * 100, authorName: 'A'),
-        isFalse,
-      );
+    test(
+      'the QR card keeps only what the page and the first contact need',
+      () async {
+        final PebbleCard full = await _card(kasia, thumbnail: _thumbnail());
+        final PebbleCard qr = full.qrCard;
+        expect(qr.version, kPebbleQrCardVersion);
+        expect(qr.isFull, isFalse);
+        expect(qr.id, full.id);
+        expect(qr.author, full.author);
+        expect(qr.look, full.look);
+        expect(qr.name, 'Biedronka');
+        expect(qr.authorName, 'Kasia');
+        // The note, the date, the preview and the signature come with the
+        // design.
+        expect(qr.note, isEmpty);
+        expect(qr.created, isNull);
+        expect(qr.thumbnail, isNull);
+        expect(qr.signature, isEmpty);
+        expect(qr.bytes.length, 1 + 16 + 32 + 12 + 1 + 9 + 1 + 5);
+        expect(PebbleCard.decode(qr.bytes), qr);
+        expect(qr.qrCard, qr);
+        // Not signed: never taken as the author's, never matched to a design.
+        expect(await qr.verify(), isFalse);
+        expect(qr.matchesDesign(_design()), isFalse);
+        expect(qr.isSamePebble(full), isTrue);
+        expect(qr.isSamePebble(await _card(other)), isFalse);
+
+        // Long names are cut on a whole letter, with "…".
+        final PebbleCard wide = await _card(
+          kasia,
+          name: 'Żółć gęślą jaźń ąę Ź',
+          author: 'Małgorzata Łęcka',
+        );
+        final PebbleCard cut = wide.qrCard;
+        expect(utf8.encode(cut.name).length, lessThanOrEqualTo(24));
+        expect(utf8.encode(cut.authorName).length, lessThanOrEqualTo(16));
+        expect(cut.name, endsWith('…'));
+        expect(cut.authorName, endsWith('…'));
+        expect(
+          'Żółć gęślą jaźń ąę Ź',
+          startsWith(cut.name.replaceAll('…', '')),
+        );
+        expect(cut.bytes.length, lessThanOrEqualTo(kPebbleQrCardMaxBytes));
+        expect(clipPebbleTextBytes('Ala', 24), 'Ala');
+      },
+    );
+
+    test('the QR card goes into the link as digits, both ways', () async {
+      final PebbleCard full = await _card(kasia);
+      final String digits = full.linkText;
+      expect(RegExp(r'^[0-9]+$').hasMatch(digits), isTrue);
+      expect(pebbleBytesFromDigits(digits), full.qrCard.bytes);
+      expect(PebbleCard.fromLinkText(digits), full.qrCard);
+      // The length says how many bytes: one digit less is no card.
+      expect(pebbleBytesFromDigits(digits.substring(1)), isNull);
+      expect(pebbleBytesFromDigits('9' * digits.length), isNull);
+      expect(pebbleDigits(<int>[0, 0, 1]), '00000001');
+      expect(pebbleBytesFromDigits('00000001'), <int>[0, 0, 1]);
+      // The base64url of any card is read too (the first test builds).
+      expect(PebbleCard.fromLinkText(full.text), full);
+      expect(PebbleCard.fromLinkText(full.qrCard.text), full.qrCard);
     });
 
     test('the thumbnail decodes into a palette and 256 pixels', () {
@@ -221,19 +275,27 @@ void main() {
       final String web = pebbleWebLink(card);
       expect(
         web,
-        startsWith('https://robertostrowskijagoda.github.io/Zen/k/#'),
+        'https://robertostrowskijagoda.github.io/Zen/k/#${card.linkText}',
       );
-      expect(web, isNot(contains('=')));
-      expect(pebbleCardFromLink(web), card);
+      // The link carries the QR card.
+      expect(pebbleCardFromLink(web), card.qrCard);
       final String app = pebbleAppLink(card);
-      expect(app, startsWith('zen://pebble#'));
-      expect(pebbleCardFromLink(app), card);
-      expect(pebbleCardFromLink('  $web  '), card);
+      expect(app, 'zen://pebble#${card.linkText}');
+      expect(pebbleCardFromLink(app), card.qrCard);
+      expect(pebbleCardFromLink('  $web  '), card.qrCard);
       expect(
         pebbleCardFromLink(web.replaceFirst('/k/#', '/k#')),
-        card,
+        card.qrCard,
         reason: 'without the trailing slash',
       );
+      // The first test builds' links: the whole signed card in base64url.
+      expect(
+        pebbleCardFromLink(
+          'https://robertostrowskijagoda.github.io/Zen/k/#${card.text}',
+        ),
+        card,
+      );
+      expect(pebbleCardFromLink('zen://pebble#${card.text}'), card);
     });
 
     test('other links are not pebbles', () async {
@@ -341,7 +403,9 @@ void main() {
     for (final Object? v in file['vectors'] as List<Object?>) {
       final Map<String, dynamic> vector = v! as Map<String, dynamic>;
       test(vector['name'], () async {
-        final PebbleCard? card = PebbleCard.fromText(vector['card'] as String);
+        final PebbleCard? card = PebbleCard.fromLinkText(
+          vector['card'] as String,
+        );
         final Map<String, dynamic>? want =
             vector['expect'] as Map<String, dynamic>?;
         if (want == null) {
@@ -352,6 +416,20 @@ void main() {
         expect(card!.bytes.first, want['version']);
         expect(hexOf(card.id.bytes), want['id']);
         expect(hexOf(card.author), want['authorKey']);
+        expect(card.look.shape, want['shape']);
+        expect(card.name, want['name']);
+        expect(card.authorName, want['author']);
+        expect(pebbleCardFromLink('${file['link']}${vector['card']}'), card);
+        if (want['version'] == kPebbleQrCardVersion) {
+          // Dart writes the same digits as the script.
+          expect(card.linkText, vector['card']);
+          expect(card.isFull, isFalse);
+          expect(card.note, isEmpty);
+          expect(card.thumbnail, isNull);
+          expect(want['signature'], 'unsigned');
+          expect(await card.verify(), isFalse);
+          return;
+        }
         expect(card.createdSeconds, want['created']);
         expect(card.look.shape, want['shape']);
         expect(card.look.seed, want['seed']);
