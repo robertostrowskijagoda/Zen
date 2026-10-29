@@ -19,6 +19,19 @@ updates:
         patterns:
           - '*'
 
+  # The base image of CI's Linux build image (.github/images/linux-build),
+  # pinned by digest. Only the digest of ubuntu:22.04 moves (the baseline
+  # stays); after the merge ci-image.yml builds the new image.
+  - package-ecosystem: docker
+    directory: /.github/images/linux-build
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+
   # The Go bridge. After a change of go.mod refresh LICENSES-GO.txt
   # (dart run tool/go_licenses.dart); go_licenses_test.dart fails until then.
   - package-ecosystem: gomod
