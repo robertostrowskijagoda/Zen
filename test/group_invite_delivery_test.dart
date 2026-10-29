@@ -175,6 +175,30 @@ void main() {
       expect(h.state.groups[group.id]!.pendingInviteAddresses, <String>[cyd]);
     });
 
+    test(
+      'a group of one is made with nobody chosen; members come later',
+      () async {
+        final _Harness h = _Harness();
+
+        final GroupProfile group = await h.controller.createGroup(
+          name: 'Na później',
+          description: '',
+          memberAddresses: const <String>[],
+        );
+
+        expect(h.state.groups[group.id], isNotNull);
+        expect(group.pendingInviteAddresses, isEmpty);
+        expect(h.transport.sentSignals, isEmpty);
+
+        await h.controller.addMemberToGroup(
+          groupId: group.id,
+          memberAddress: bob,
+        );
+        expect(h.state.groups[group.id]!.memberAddresses, contains(bob));
+        expect(h.sentTo(bob, 'group_invite'), hasLength(1));
+      },
+    );
+
     test('an invitee that shows up later gets the invite again', () async {
       final _Harness h = _Harness();
       final GroupProfile group = await h.controller.createGroup(

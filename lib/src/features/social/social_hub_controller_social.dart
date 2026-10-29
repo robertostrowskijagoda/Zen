@@ -1867,6 +1867,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
   }
 
+  /// A new group of this person and [memberAddresses]; with nobody chosen
+  /// it is a group of one, and members are invited later
+  /// ([addMemberToGroup]).
   Future<GroupProfile> createGroup({
     required String name,
     required String description,
@@ -1884,9 +1887,6 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         .toList(growable: false);
     if (name.trim().isEmpty) {
       throw FormatException(t('Nadaj grupie nazwę.'));
-    }
-    if (invitees.isEmpty) {
-      throw FormatException(t('Wybierz co najmniej jedną osobę.'));
     }
     final String groupId = 'group-$now-${invitees.length}';
     final GroupProfile group = GroupProfile(
