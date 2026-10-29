@@ -16,6 +16,38 @@ import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
   group('FileSocialSnapshotStore', () {
+    test('keeps the friendship records and their clock', () async {
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'zen-social-store-records-',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        ),
+      );
+      const String fred = '200::f';
+      const String ola = '200::7';
+      final FriendshipBook book = FriendshipBook.empty
+          .invite(fred, (FriendProfile base) => base)
+          .admit(
+            fred,
+            FriendshipEvidence.theyAcceptedMine,
+            const FriendshipTick(100, 'phone'),
+          )
+          .remove(ola, const FriendshipTick(200, 'phone'));
+      await store.save(SocialHubState.empty().copyWith(book: book));
+      final SocialHubState loaded = (await store.load())!;
+      expect(loaded.book.records, book.records);
+      expect(loaded.book.clock, book.clock);
+      expect(
+        loaded.friendByAddress(fred)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(loaded.removedFriendAt(ola), 200);
+    });
+
     test('round-trips friends and inbox state', () async {
       final Directory tempDir = await Directory.systemTemp.createTemp(
         'zen-social-store-test-',
