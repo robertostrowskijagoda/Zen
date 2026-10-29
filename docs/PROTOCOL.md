@@ -738,6 +738,126 @@ larger estimate of the current and the previous month. Limits: two
 colluding friends, or a friend of a phone with a single other friend, can
 still inflate it; it is a rough guide only.
 
+### 2.16 Pebbles (`pbl_*`) [P]
+
+`lib/src/features/pebbles/` (`pebble_card.dart`, `pebble_hosting.dart`,
+`pebble_store.dart`, `pebble_service.dart`). A pebble is a painted stone a
+person makes and leaves as a QR sticker; whoever scans it collects it
+(collecting takes nothing away). A pebble is immutable: changing it makes a
+new one.
+
+**Identity.** `PebbleId` = the first 16 bytes of SHA-256 over
+`"zen-pebble/1" || author key (32) || created (u32, big-endian, Unix
+seconds) || design bytes`, written in base32 (RFC 4648, lower case, no
+padding, 26 characters). The design itself is opaque here (made by the
+editor, at most 64 KB); a copy from anyone is checked by recomputing the id
+from the card's author and time.
+
+**Card, binary format v1** (the public preview; all integers big-endian):
+
+| Field | Size |
+|---|---|
+| version = 1 | u8 |
+| PebbleId | 16 |
+| author account id (Ed25519 public key) | 32 |
+| created (Unix seconds) | u32 |
+| shape preset, shape seed, material preset | u8, u32, u8 |
+| main colour, second colour (RGB) | 3, 3 |
+| name (at most 40 characters) | u8 length + UTF-8 |
+| note (at most 100 characters) | u8 length + UTF-8 |
+| author's display name (at most 32 characters) | u8 length + UTF-8 |
+| thumbnail: 0, or 176 = 16 colours x 3 bytes, then 16 x 16 pixels of 4 bits, rows from the top, the left pixel in the high nibble (index 0 transparent) | u8 length + bytes |
+| Ed25519 signature over everything before it, by the author's account key | 64 |
+
+A card Zen makes is at most 400 bytes, so the QR code stays readable on a
+sticker of about 5 x 5 cm: when the texts and the thumbnail do not fit, the
+thumbnail is left out, then the note, the name and the author's name are
+shortened (the form shows the bytes used). A card from elsewhere is taken
+while it is well formed (at most 852 bytes); another version, trailing
+bytes, a text over its limit or not UTF-8, a thumbnail of another length or
+base64 with padding is not. The signature is classical Ed25519 (like an
+event ticket, §4.1): it must fit the QR code and is checked on the spot by
+anyone holding the card. Shared test vectors: `tool/ci/pebble_card_vectors.json`.
+
+**Links.** `https://robertostrowskijagoda.github.io/Zen/k/#<base64url(card)>`
+(no padding; the fragment never reaches the server) and
+`zen://pebble#<same>`, which opens the collecting screen in the app; the
+in-app QR scanner takes both. `zen://pebbles` opens the person's pebbles
+(a keeping request's notification).
+
+**Signed records** (Ed25519, by the same keys as the card):
+
+- *Keeper list* `{id, v, r?, k, s}`: the author's list of the devices that
+  keep the pebble (at most 16 addresses), version `v` (milliseconds, newest
+  wins), `r: true` when the author retired the pebble (the list is then
+  empty). Signed bytes: `"zen-pebble-keepers/1\n" id "\n" v "\n" (1|0) "\n"`
+  followed by the addresses joined by `,`.
+- *Found note* `{id, f, at, s}`: the finder's account `f` found the pebble
+  at `at` (seconds). Signed bytes: `"zen-pebble-found/1\n" id "\n" f "\n" at`.
+
+**Frames** (direct, not reliable; an older Zen ignores them, §2.13):
+
+| type | Direction | Fields |
+|---|---|---|
+| `pbl_get` | finder -> author, keepers, friends | `id`, `a` author account, `h` hops (1 from a finder to its friend, else 0), `o` the asker (set only by a friend passing it on) |
+| `pbl_design` | any holder -> asker | `c` card, `d` design (base64url), `k` newest keeper list known (optional) |
+| `pbl_keep_ask` | author -> friend | `c` card, `n` design size in bytes |
+| `pbl_keep_yes`, `pbl_keep_no` | friend -> author | `id` |
+| `pbl_keep_quit` | keeper -> author | `id` |
+| `pbl_keepers` | author -> keepers | `k` a new keeper list (or the retired one) |
+| `pbl_found` | finder -> author | `n` a found note |
+
+**Keepers.** A role separate from mailboxes. When a pebble is published,
+the author's device draws 6 friends (devices that answer best first,
+computers and phones mixed about half and half) and sends each
+`pbl_keep_ask`; the person answers a notification ("{author} asks you to
+keep their pebble ... It takes n KB."). A friend who agrees answers
+`pbl_keep_yes`; the author sends the design and a new signed keeper list to
+every keeper. A friend who says no, never answers within 2 days (asked again
+every 30 minutes meanwhile), resigns (`pbl_keep_quit`) or is blocked by the
+author is replaced by the next draw; the author can also draw again by
+hand. The role belongs to the pebble: a keeper keeps serving after the
+author removes them as a friend or stops using them as a mailbox. A retired
+list makes keepers drop their copy (collectors keep theirs). Only the device
+that made the pebble draws and signs; the account's other devices show it
+and fetch its design like any copy.
+
+**Serving.** A device hands a design to whoever asks (and is not blocked)
+when it is the author, a keeper of a pebble not retired, or a collector who
+did not turn off "serve collected pebbles" (on by default).
+
+**Finding a design.** A collected pebble is saved from its card at once and
+shown with the card's look; the design is asked for three devices at a
+time, 20 seconds apart, in this order: the author's devices (when this
+device knows the account: a friend's), the author's device that asked it to
+keep the pebble, the keepers of the newest list known, then its friends
+with `h: 1`. A friend who cannot serve passes the question on once (`h: 0`,
+`o`: the asker) to the author's devices it knows, the keepers it knows and
+up to 8 of its own friends, who answer the asker directly. After a full
+round the next one waits 1, 5, 15 minutes, then 1, 3 and 6 hours, driven by
+the app's wake beat (every 15 minutes). A design is taken only for a pebble
+this device wants and only when it matches the card; a keeper list only
+when the card's author signed it.
+
+**Limits.** At most 30 pebble frames per sender per minute, 60 designs
+served per minute, 10 questions passed on per friend per minute (the same
+question from the same friend once in 2 minutes); a design is at most
+64 KB; `o` is honoured only from a friend; nothing is sent to or taken from
+someone blocked. At most 500 pebbles collected, 200 kept for others and 20
+keeping requests waiting.
+
+**"Znaleziono".** After collecting, a finder whose account key is at hand
+sends a found note to the author's devices when it knows them (best effort,
+once); the author counts distinct finder accounts.
+
+**Profile.** The kind `pebbles` in the account's `profile` space, sealed for
+all friends (`Audience.all`): `{v: 1, c: [{c: card}], k: [{c: card, f:
+found at (ms), n: finder's note}], x: {id: removed at}}`, newest first, at
+most 40 KB before sealing (the oldest collected ones are left out first).
+Friends see it; followers and friends of friends who hold the entry cannot
+open it. A made pebble in it counts only when the account signed it. The
+account's other devices take in what it lists, and its removals.
+
 ## 3. Layers above the frames
 
 ### 3.1 Reliable delivery (`relay_engine.dart`, `reliable_signal_transport.dart`) [V]
