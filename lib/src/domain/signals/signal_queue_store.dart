@@ -24,9 +24,12 @@ final class FileSignalQueueStore implements SignalQueueStore {
   final FileBinaryStore store;
   final String storageKey;
 
+  /// The queue; empty when there is none, or when neither its file nor
+  /// its backups read (set aside: it only holds signals in transit, and a
+  /// damaged one must not fail every send that loads it).
   @override
   Future<List<QueuedSignal>> load() async {
-    final Uint8List? bytes = await store.read(storageKey);
+    final Uint8List? bytes = await store.readOrSetAside(storageKey);
     if (bytes == null || bytes.isEmpty) {
       return const <QueuedSignal>[];
     }

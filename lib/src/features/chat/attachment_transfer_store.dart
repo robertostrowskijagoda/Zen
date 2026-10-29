@@ -418,7 +418,8 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
       if (entity is! File || !entity.path.endsWith('.zenbin')) {
         continue;
       }
-      final Uint8List? bytes = await store.read(_keyOfFile(entity));
+      // One damaged transfer is set aside; the others still resume.
+      final Uint8List? bytes = await store.readOrSetAside(_keyOfFile(entity));
       if (bytes == null || bytes.isEmpty) {
         continue;
       }
@@ -439,7 +440,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     String peerAddress,
     String messageId,
   ) async {
-    final Uint8List? bytes = await store.read(
+    final Uint8List? bytes = await store.readOrSetAside(
       await _key(_incomingFolder, peerAddress, messageId),
     );
     if (bytes == null || bytes.isEmpty) {
@@ -453,7 +454,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     String peerAddress,
     String messageId,
   ) async {
-    final Uint8List? bytes = await store.read(
+    final Uint8List? bytes = await store.readOrSetAside(
       await _key(_outgoingFolder, peerAddress, messageId),
     );
     if (bytes == null || bytes.isEmpty) {
