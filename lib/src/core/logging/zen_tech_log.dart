@@ -156,7 +156,8 @@ abstract final class ZenTechLog {
 /// second), short lower-case words (`mailbox-poll`), lists of such words and
 /// maps of words to numbers (`mailbox-poll:120,watchdog:6000`). Anything
 /// else (text, addresses, keys, paths) becomes `?`, and so does a key that
-/// is not a plain word.
+/// is not a plain word. [TechCodeNames] carry names of code (a native
+/// crash's libraries and functions).
 String formatTechLine(String event, Map<String, Object?> fields) {
   final StringBuffer line = StringBuffer('TECH  ${_word(event)}');
   for (final MapEntry<String, Object?> field in fields.entries) {
@@ -165,6 +166,17 @@ String formatTechLine(String event, Map<String, Object?> fields) {
   }
   return line.toString();
 }
+
+/// Names of code for a [formatTechLine] value: libraries and functions
+/// (`libwebrtc.so<webrtc::Foo::Bar`), never text of the person's. Anything
+/// else in them makes the value `?`.
+final class TechCodeNames {
+  const TechCodeNames(this.names);
+
+  final String names;
+}
+
+final RegExp _codeNamesPattern = RegExp(r'^[A-Za-z0-9_.:<~+$-]{1,600}$');
 
 final RegExp _keyPattern = RegExp(r'^[a-z][A-Za-z0-9]{0,23}$');
 final RegExp _wordPattern = RegExp(r'^[a-z][a-z0-9-]{0,31}$');
@@ -175,6 +187,9 @@ String _word(Object? value) =>
 String _value(Object? value) {
   if (value == null) {
     return '-';
+  }
+  if (value is TechCodeNames) {
+    return _codeNamesPattern.hasMatch(value.names) ? value.names : '?';
   }
   if (value is bool) {
     return '$value';
@@ -271,7 +286,8 @@ String nodeSampleLine(Map<String, dynamic> info) {
 /// Lines for Android's records of how earlier runs ended ([exits]: the
 /// `exitReasons` answer of `zen/power`), those after [since] (epoch
 /// milliseconds), oldest first. Reasons and importance by name; memory in
-/// KiB; no description (free text from the system).
+/// KiB; for a native crash where it happened (code names only); no
+/// description (free text from the system).
 List<String> exitLines(List<Object?> exits, {int since = 0}) {
   final List<Map<Object?, Object?>> fresh = <Map<Object?, Object?>>[
     for (final Object? exit in exits)
@@ -286,6 +302,9 @@ List<String> exitLines(List<Object?> exits, {int since = 0}) {
         'status': _int(exit['status']),
         'pssKb': _int(exit['pssKb']),
         'rssKb': _int(exit['rssKb']),
+        // A native crash: the first libraries and functions of its stack.
+        if (exit['where'] case final String where when where.isNotEmpty)
+          'where': TechCodeNames(where.replaceAll(RegExp(r'\s'), '')),
       }),
   ];
 }
