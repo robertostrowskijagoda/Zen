@@ -988,6 +988,10 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   int _recoveryAttempt = 0;
   bool _autoRecoveryEnabled = false;
   Future<void>? _starting;
+
+  /// The owner's own logic stopped the node ([stop]) and nothing started it
+  /// since: a send waits for no start of its own then ([_startForSend]).
+  bool _stoppedOnPurpose = false;
   RuntimeTransportSnapshot _snapshot;
   int _lifecycleToken = 0;
 
@@ -1066,6 +1070,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     if (_heldByService || _yielded || _retired || _disposed) {
       return Future<void>.value();
     }
+    _stoppedOnPurpose = false;
     if (_previewMode) {
       if (_snapshot.serviceRunning) {
         return Future<void>.value();
@@ -1142,12 +1147,29 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       );
       return;
     }
+    _stoppedOnPurpose = true;
     _yielded = false;
     _lookingAgain = false;
     _yieldRetry?.cancel();
     _yieldRetry = null;
     owner.claim = true;
     await _stopNode();
+  }
+
+  /// What a send or a relay waits for: the start under way, or one of its
+  /// own while the node is not up yet or was lost. Never a start after the
+  /// owner stopped the node on purpose: a frame of work still under way
+  /// (a queued message's first try, a presence notice, a reply) would start
+  /// the node behind the owner's back — a node that closing the app, an
+  /// account switch, a wipe or the iPhone's locked session had just
+  /// stopped, running on beside the next owner of the identity until
+  /// something stopped it again, while friends' sessions went from one
+  /// node to the other.
+  Future<void> _startForSend() {
+    if (_stoppedOnPurpose) {
+      return _starting ?? Future<void>.value();
+    }
+    return start();
   }
 
   /// Stops the node without a word about who may start it next.
@@ -1240,7 +1262,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     // The session can be missing while the runtime is (re)starting — e.g.
     // right after a background/foreground handoff on Android. Wait for the
     // start instead of silently dropping the payload.
-    await start();
+    await _startForSend();
     final RuntimeNodeSession? session = _session;
     if (session == null) {
       if (_previewMode) {
@@ -1279,7 +1301,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     if (_previewMode) {
       return 0;
     }
-    await start();
+    await _startForSend();
     final RuntimeNodeSession? session = _session;
     if (session == null) {
       return 0;
