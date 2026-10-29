@@ -253,6 +253,65 @@ func TestTheServiceBeatsAnAppOffScreen(t *testing.T) {
 	takenOver(t, -6402, service)
 }
 
+// The app closed with "back" (or swiped away): Android ends its engine, and
+// the Dart code that would have said "off screen" never runs. Its word that
+// it is on screen lapses without a new one, so the service is kept off the
+// identity for nodeOnScreenFor at most, not until the node counts as unused.
+func TestTheWordOfAnAppGoneWithoutLeavingTheScreenLapses(t *testing.T) {
+	cfg := config.GenerateConfig()
+	const appHandle = -6451
+	app := runningNode(t, cfg, appHandle, nodeOwner{Role: nodeOwnerApp, Claim: true, OnScreen: true})
+	service := nodeOwner{Role: nodeOwnerService, Claim: true}
+	if _, err := claimNodeIdentity(nodeIdentityKey(cfg), service); !errors.Is(err, errNodeAppOnScreen) {
+		t.Fatalf("the app's fresh word keeps the service off, got %v", err)
+	}
+	// The app's engine is gone: no word since; the node was called on a
+	// moment ago (a signal wait still running out).
+	ageOnScreenWord(app, nodeOnScreenFor)
+	app.touch()
+	runningNode(t, cfg, -6452, service)
+	takenOver(t, appHandle, app)
+}
+
+// While on screen the app keeps saying so: its word holds again after any
+// pause, and "off screen" ends it at once.
+func TestTheAppsWordThatItIsOnScreenHoldsWhileItSaysIt(t *testing.T) {
+	cfg := config.GenerateConfig()
+	app := runningNode(t, cfg, -6461, nodeOwner{Role: nodeOwnerApp, Claim: true, OnScreen: true})
+	service := nodeOwner{Role: nodeOwnerService, Claim: true}
+	ageOnScreenWord(app, nodeOnScreenFor)
+	app.identity.setOnScreen(true)
+	if _, err := claimNodeIdentity(nodeIdentityKey(cfg), service); !errors.Is(err, errNodeAppOnScreen) {
+		t.Fatalf("said again, the word holds, got %v", err)
+	}
+	app.identity.setOnScreen(false)
+	runningNode(t, cfg, -6462, service)
+	takenOver(t, -6461, app)
+}
+
+// Android ended the app's engine and the service says which one: the
+// service takes that engine's node at once, on screen or not, and never the
+// node of another engine on screen (the app opened again).
+func TestTheServiceTakesTheNodeOfTheEngineAndroidEndedAtOnce(t *testing.T) {
+	cfg := config.GenerateConfig()
+	const appHandle = -6471
+	app := runningNode(t, cfg, appHandle, nodeOwner{Role: nodeOwnerApp, Claim: true, OnScreen: true})
+	gone := app.identity.engine()
+	if _, err := claimNodeIdentity(nodeIdentityKey(cfg), nodeOwner{Role: nodeOwnerService, Claim: true, GoneApp: gone + 1000}); !errors.Is(err, errNodeAppOnScreen) {
+		t.Fatalf("another engine's end frees nothing, got %v", err)
+	}
+	runningNode(t, cfg, -6472, nodeOwner{Role: nodeOwnerService, Claim: true, GoneApp: gone})
+	takenOver(t, appHandle, app)
+}
+
+// ageOnScreenWord makes the app's last word that it is on screen by long
+// ago.
+func ageOnScreenWord(node *bridgeNode, by time.Duration) {
+	nodeIdentities.Lock()
+	defer nodeIdentities.Unlock()
+	node.identity.onScreenUntil -= by
+}
+
 // A higher-priority owner that is active keeps its node: the service never
 // takes the key from the app on screen.
 func TestTheServiceNeverTakesTheNodeOfTheAppOnScreen(t *testing.T) {
@@ -315,6 +374,9 @@ func TestWhoOutranksWhom(t *testing.T) {
 		{"app restart over the service", app(3, false, false), service(9, true), false, errNodeSuperseded},
 		{"service claim over the app off screen", service(9, true), app(3, true, false), true, nil},
 		{"service claim over the app on screen", service(9, true), app(3, true, true), false, errNodeAppOnScreen},
+		{"service claim over the gone app on screen", nodeOwner{Role: nodeOwnerService, Engine: 9, Claim: true, GoneApp: 3}, app(3, true, true), true, nil},
+		{"service claim over a newer app on screen", nodeOwner{Role: nodeOwnerService, Engine: 9, Claim: true, GoneApp: 3}, app(5, true, true), false, errNodeAppOnScreen},
+		{"service restart over the gone app", nodeOwner{Role: nodeOwnerService, Engine: 9, GoneApp: 3}, app(3, true, true), false, errNodeSuperseded},
 		{"service restart over the app off screen", service(9, false), app(3, true, false), false, errNodeSuperseded},
 		{"newer service", service(0, true), service(4, true), true, nil},
 		{"older service", service(4, true), service(6, false), false, errNodeSuperseded},

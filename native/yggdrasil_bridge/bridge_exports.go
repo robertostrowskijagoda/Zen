@@ -106,7 +106,8 @@ func YggStartNode(configJSON *C.char) *C.char {
 
 // YggSetNodeOnScreen tells whether the app that runs the node is on screen
 // (onScreen 1) or not: the background service never takes the identity of a
-// node over while its app is on screen (node_identity.go).
+// node over while its app is on screen (node_identity.go). "On screen"
+// lapses unless the app says it again within nodeOnScreenFor.
 //
 //export YggSetNodeOnScreen
 func YggSetNodeOnScreen(handle C.int, onScreen C.int) *C.char {
