@@ -5,6 +5,10 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
+
+export 'package:zen/src/features/pebbles/design/pebble_card_look.dart'
+    show PebbleCardLook, PebbleLookSource;
 
 /// The version byte of the card format below.
 const int kPebbleCardVersion = 1;
@@ -122,39 +126,6 @@ final class PebbleId {
   String toString() => text;
 }
 
-/// What a card says about a stone's look, enough to draw a recognisable
-/// stone without the full design: the shape preset and its seed, the
-/// material, two main colours (0xRRGGBB).
-@immutable
-final class PebbleCardLook {
-  const PebbleCardLook({
-    required this.shapePreset,
-    required this.shapeSeed,
-    required this.material,
-    required this.mainColor,
-    required this.secondColor,
-  });
-
-  final int shapePreset;
-  final int shapeSeed;
-  final int material;
-  final int mainColor;
-  final int secondColor;
-
-  @override
-  bool operator ==(Object other) =>
-      other is PebbleCardLook &&
-      other.shapePreset == shapePreset &&
-      other.shapeSeed == shapeSeed &&
-      other.material == material &&
-      other.mainColor == mainColor &&
-      other.secondColor == secondColor;
-
-  @override
-  int get hashCode =>
-      Object.hash(shapePreset, shapeSeed, material, mainColor, secondColor);
-}
-
 /// The public preview of a pebble, signed by its author: what the QR code
 /// and the link carry, and what finders save at once. Binary format v1 (all
 /// integers big-endian), docs/PROTOCOL.md "Pebbles":
@@ -169,7 +140,7 @@ final class PebbleCardLook {
 /// * 64 bytes Ed25519 signature over everything before it, by the author's
 ///   account key.
 @immutable
-final class PebbleCard {
+final class PebbleCard implements PebbleLookSource {
   const PebbleCard._({
     required this.id,
     required this.author,
@@ -188,12 +159,14 @@ final class PebbleCard {
   /// The author's account key (Ed25519 public key, 32 bytes).
   final Uint8List author;
   final int createdSeconds;
+  @override
   final PebbleCardLook look;
   final String name;
   final String note;
   final String authorName;
 
   /// [kPebbleThumbnailBytes] bytes, or `null` when the card has none.
+  @override
   final Uint8List? thumbnail;
   final Uint8List signature;
 
@@ -322,12 +295,8 @@ final class PebbleCard {
       final PebbleId id = PebbleId(r.take(_idBytes));
       final Uint8List author = r.take(_keyBytes);
       final int created = r.u32();
-      final PebbleCardLook look = PebbleCardLook(
-        shapePreset: r.u8(),
-        shapeSeed: r.u32(),
-        material: r.u8(),
-        mainColor: r.rgb(),
-        secondColor: r.rgb(),
+      final PebbleCardLook look = PebbleCardLook.fromBytes(
+        r.take(PebbleCardLook.byteLength),
       );
       final String? name = r.text(kPebbleNameMaxChars);
       final String? note = r.text(kPebbleNoteMaxChars);
@@ -522,11 +491,7 @@ Uint8List _encodeBody({
     ..add(id.bytes)
     ..add(author)
     ..add(_u32(createdSeconds))
-    ..addByte(look.shapePreset & 0xFF)
-    ..add(_u32(look.shapeSeed))
-    ..addByte(look.material & 0xFF)
-    ..add(_rgb(look.mainColor))
-    ..add(_rgb(look.secondColor));
+    ..add(look.toBytes());
   for (final String s in <String>[name, note, authorName]) {
     final List<int> raw = utf8.encode(s);
     b
@@ -547,8 +512,6 @@ List<int> _u32(int v) {
   final int x = v & 0xFFFFFFFF;
   return <int>[(x >> 24) & 0xFF, (x >> 16) & 0xFF, (x >> 8) & 0xFF, x & 0xFF];
 }
-
-List<int> _rgb(int c) => <int>[(c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF];
 
 String _clipChars(String s, int max) {
   final List<int> runes = s.runes.toList();
@@ -747,8 +710,6 @@ final class _Reader {
   }
 
   int u32() => (u8() << 24) | (u8() << 16) | (u8() << 8) | u8();
-
-  int rgb() => (u8() << 16) | (u8() << 8) | u8();
 
   Uint8List take(int n) {
     if (_at + n > _bytes.length) {

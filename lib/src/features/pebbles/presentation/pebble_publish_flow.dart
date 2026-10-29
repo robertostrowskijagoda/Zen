@@ -35,8 +35,7 @@ Future<void> startPebbleCreation(BuildContext context, WidgetRef ref) async {
     );
     return;
   }
-  final (Uint8List, PebbleCardLook, Uint8List)? made =
-      await PebbleEditorScreen.open(context);
+  final PebbleEditorResult? made = await PebbleEditorScreen.open(context);
   if (made == null || !context.mounted) {
     return;
   }
