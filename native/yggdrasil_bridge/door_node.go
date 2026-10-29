@@ -529,13 +529,28 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 	}
 	door.mesh = newMeshIO(doorCore, nil)
 	door.mesh.start()
-	// The host calls the door (the door dials nobody).
-	if err := host.core.AddPeer(peerURI, ""); err != nil {
-		door.mesh.stop()
-		doorCore.Stop()
-		return nil, err
+	// The host calls the door (the door dials nobody). This runs on the
+	// app's thread: a host core that does not answer within nodeActionWait
+	// gets the peering by itself, and the door shows as not linked till then.
+	added := make(chan error, 1)
+	go func() {
+		err := host.core.AddPeer(peerURI, "")
+		if err == nil {
+			host.core.RetryPeersNow()
+		}
+		added <- err
+	}()
+	timer := time.NewTimer(nodeActionWait)
+	defer timer.Stop()
+	select {
+	case err := <-added:
+		if err != nil {
+			door.mesh.stop()
+			doorCore.Stop()
+			return nil, err
+		}
+	case <-timer.C:
 	}
-	host.core.RetryPeersNow()
 	go door.run(main)
 	return door, nil
 }
