@@ -21,7 +21,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// What a sticker's QR code carries: the text of the code, its kind (for
 /// the ready texts and the remembered design) and the name the ready texts
-/// put in (the person's, the flat's).
+/// put in (the person's, the flat's, the pebble's, with a pebble's author).
 @immutable
 final class StickerSubject {
   const StickerSubject({
@@ -29,6 +29,7 @@ final class StickerSubject {
     required this.data,
     required this.label,
     this.name = '',
+    this.author = '',
   });
 
   final StickerKind kind;
@@ -37,6 +38,32 @@ final class StickerSubject {
   /// What the choice between several subjects shows.
   final String label;
   final String name;
+  final String author;
+
+  /// The design this subject starts with.
+  StickerDesign get initialDesign =>
+      StickerDesign.initial(kind, name: name, author: author);
+
+  /// [kept], the remembered design of this kind, for this subject: a kind
+  /// whose stickers are each about another thing keeps the look but takes
+  /// this subject's own ready texts.
+  StickerDesign remembered(StickerDesign kept) =>
+      kind.keepsTexts ? kept : kept.copyWith(texts: initialDesign.texts);
+
+  /// A pebble's sticker: [link] is the pebble page with the pebble's card
+  /// (what its QR code opens), [name] and [author] go into the ready texts.
+  /// The code sits on a stone labelled "kamyczek Zen".
+  static StickerSubject pebble({
+    required String link,
+    required String name,
+    required String author,
+  }) => StickerSubject(
+    kind: StickerKind.pebble,
+    data: link,
+    label: t('Kamyczek'),
+    name: name.trim(),
+    author: author.trim(),
+  );
 
   /// The person's own invitation ("Mój kod"), with their name (not the
   /// "Zen 1A2B" a profile without one shows).
@@ -81,6 +108,17 @@ Future<void> openZenPromoSticker(BuildContext context, WidgetRef ref) {
   ]);
 }
 
+/// The sticker designer for a pebble: [link] is the pebble page with its
+/// card, [name] and [author] the pebble's (for the ready texts).
+Future<void> openPebbleSticker(
+  BuildContext context, {
+  required String link,
+  required String name,
+  required String author,
+}) => StickerDesignerScreen.open(context, <StickerSubject>[
+  StickerSubject.pebble(link: link, name: name, author: author),
+]);
+
 /// The sticker designer every printable QR code opens: texts (ready ones
 /// or the person's own), the small "Zen" signature, the code's style and
 /// colours, a pattern in the margins, the page and the file. The artwork
@@ -123,8 +161,7 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
   StickerSubject get _subject => widget.subjects[_chosen];
 
   StickerDesign get _design =>
-      _designs[_subject.kind] ??
-      StickerDesign.initial(_subject.kind, name: _subject.name);
+      _designs[_subject.kind] ?? _subject.initialDesign;
 
   @override
   void initState() {
@@ -140,7 +177,7 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
         return;
       }
       if (kept != null && !_designs.containsKey(s.kind)) {
-        setState(() => _designs[s.kind] = kept);
+        setState(() => _designs[s.kind] = s.remembered(kept));
         if (s.kind == _subject.kind) {
           _showTexts();
         }
@@ -218,13 +255,18 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
 
   StickerScene _scene() {
     final StickerDesign d = _drawn;
-    return StickerScene.build(_matrix(_subject.data, d.logo), d);
+    return StickerScene.build(
+      _matrix(_subject.data, d.logo),
+      d,
+      kind: _subject.kind,
+    );
   }
 
   Future<void> _presets() async {
     final List<StickerTexts> presets = stickerPresets(
       _subject.kind,
       name: _subject.name,
+      author: _subject.author,
     );
     final StickerTexts? picked = await showModalBottomSheet<StickerTexts>(
       context: context,
@@ -506,13 +548,15 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
               decoration: InputDecoration(labelText: t('Napis na dole')),
               onChanged: (_) => _textsChanged(),
             ),
-            SwitchListTile(
-              key: const Key('sticker-signature'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              title: Text(t('Podpis „Zen” w rogu')),
-              value: design.signature,
-              onChanged: (bool v) => _change(design.copyWith(signature: v)),
-            ),
+            // A pebble's label already says "Zen".
+            if (!_subject.kind.pebbleMark)
+              SwitchListTile(
+                key: const Key('sticker-signature'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                title: Text(t('Podpis „Zen” w rogu')),
+                value: design.signature,
+                onChanged: (bool v) => _change(design.copyWith(signature: v)),
+              ),
             ZenSection(t('Wygląd')),
             label(t('STYL KODU')),
             chips<QrStyle>(
@@ -723,13 +767,16 @@ class _StoredStickerPreviewState extends ConsumerState<StoredStickerPreview> {
   @override
   Widget build(BuildContext context) {
     final StickerSubject s = widget.subject;
-    StickerDesign design = _kept ?? StickerDesign.initial(s.kind, name: s.name);
+    final StickerDesign? kept = _kept;
+    StickerDesign design = kept == null ? s.initialDesign : s.remembered(kept);
     QrMatrix matrix = StickerScene.matrixFor(s.data, design);
     if (design.logo && matrix.logoHole == null) {
       design = design.copyWith(logo: false);
       matrix = StickerScene.matrixFor(s.data, design);
     }
-    return StickerPreview(scene: StickerScene.build(matrix, design));
+    return StickerPreview(
+      scene: StickerScene.build(matrix, design, kind: s.kind),
+    );
   }
 }
 

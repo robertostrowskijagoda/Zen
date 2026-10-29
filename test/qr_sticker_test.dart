@@ -46,7 +46,19 @@ Map<StickerKind, String> _payloads() {
     StickerKind.installPage: kInstallPageUrl,
     StickerKind.donation: kDonationUrl,
     StickerKind.zenAbout: zenPageUrl('about/'),
+    StickerKind.pebble: _pebbleLink(),
   };
+}
+
+/// A pebble's link as its sticker carries it: the pebble page with a signed
+/// card (the test card with a thumbnail, tool/ci/pebble_cards.py).
+String _pebbleLink() {
+  final Map<String, dynamic> cards =
+      jsonDecode(File('tool/ci/pebble_card_vectors.json').readAsStringSync())
+          as Map<String, dynamic>;
+  final Map<String, dynamic> ladybird =
+      (cards['vectors'] as List<dynamic>).first as Map<String, dynamic>;
+  return '${cards['link']}${ladybird['card']}';
 }
 
 const StickerTexts _texts = StickerTexts(
@@ -185,15 +197,25 @@ void main() {
               'jeszcze dziś, zapraszamy serdecznie',
         ),
       ]) {
-        for (final String data in payloads.values) {
+        for (final MapEntry<StickerKind, String> e in payloads.entries) {
           final StickerDesign design = StickerDesign(
             texts: texts,
             pattern: pattern,
           );
           final StickerScene scene = StickerScene.build(
-            StickerScene.matrixFor(data, design),
+            StickerScene.matrixFor(e.value, design),
             design,
+            kind: e.key,
           );
+          // A pebble's stone lies under the white plate.
+          final int plate = scene.shapes.indexWhere(
+            (StickerShape s) => s.role == ShapeRole.plate,
+          );
+          for (final (int i, StickerShape s) in scene.shapes.indexed) {
+            if (s.role == ShapeRole.frame) {
+              expect(i, lessThan(plate), reason: e.key.name);
+            }
+          }
           const Rect art = Rect.fromLTWH(
             0,
             0,
@@ -211,7 +233,8 @@ void main() {
               if (s.role != ShapeRole.background &&
                   s.role != ShapeRole.plate &&
                   s.role != ShapeRole.qr &&
-                  s.role != ShapeRole.logo)
+                  s.role != ShapeRole.logo &&
+                  s.role != ShapeRole.frame)
                 s,
           ];
           for (final StickerShape s in others) {
@@ -223,9 +246,21 @@ void main() {
             expect(art.contains(s.bounds.topLeft), isTrue);
             expect(art.contains(s.bounds.bottomRight), isTrue);
           }
+          for (final StickerShape s in scene.withRole(ShapeRole.frame)) {
+            expect(
+              art.deflate(StickerScene.margin).contains(s.bounds.topLeft),
+              isTrue,
+            );
+            expect(
+              art.deflate(StickerScene.margin).contains(s.bounds.bottomRight),
+              isTrue,
+            );
+          }
           final List<StickerShape> words = <StickerShape>[
             ...scene.withRole(ShapeRole.text),
             ...scene.withRole(ShapeRole.signature),
+            ...scene.withRole(ShapeRole.mark),
+            ...scene.withRole(ShapeRole.frame),
           ];
           for (final StickerShape d in scene.withRole(ShapeRole.decoration)) {
             for (final StickerShape w in words) {
@@ -331,7 +366,7 @@ void main() {
                 StickerTheme.values[style.index % StickerTheme.values.length],
           );
           final QrMatrix m = StickerScene.matrixFor(e.value, design);
-          final StickerScene scene = StickerScene.build(m, design);
+          final StickerScene scene = StickerScene.build(m, design, kind: e.key);
           final String what = '${e.key.name} ${style.name} logo: $logo';
           expect(scene.hole != null, logo && m.logoHole != null, reason: what);
           final (Uint8List rgba, int side) = await _rgba(scene, 1200);
@@ -575,6 +610,133 @@ void main() {
     );
   });
 
+  test('a pebble\'s sticker puts the code on a stone labelled "kamyczek '
+      'Zen", around the quiet zone and clear of every text', () {
+    final String link = _pebbleLink();
+    for (final StickerTexts texts in <StickerTexts>[
+      const StickerTexts(),
+      stickerPresets(StickerKind.pebble).first,
+      _texts,
+      const StickerTexts(
+        top: 'Bardzo długi napis na górze naklejki, który musi się zmieścić',
+        bottom:
+            'Kasia zostawiła tu kamyczek, zeskanuj go i zbierz, nikomu go '
+            'nie zabierasz',
+      ),
+    ]) {
+      for (final StickerTheme theme in StickerTheme.values) {
+        final StickerDesign design = StickerDesign(
+          texts: texts,
+          theme: theme,
+          pattern: StickerPattern.values[theme.index % 7],
+        );
+        final StickerScene scene = StickerScene.build(
+          StickerScene.matrixFor(link, design),
+          design,
+          kind: StickerKind.pebble,
+        );
+        final PebbleStone stone = scene.stone!;
+        final Rect quiet = scene.quietRect;
+        final String what = '${theme.name} "${texts.top}"';
+        // The whole quiet zone lies on the stone, inside its rim.
+        for (final Offset corner in <Offset>[
+          quiet.topLeft,
+          quiet.topRight,
+          quiet.bottomLeft,
+          quiet.bottomRight,
+        ]) {
+          expect(stone.contains(corner, inside: true), isTrue, reason: what);
+        }
+        // The label and its little stone: under the code, on the stone.
+        final List<StickerShape> mark = scene.withRole(ShapeRole.mark).toList();
+        expect(mark, hasLength(4), reason: what);
+        for (final StickerShape s in mark) {
+          expect(s.bounds.top, greaterThanOrEqualTo(quiet.bottom));
+          for (final Offset corner in <Offset>[
+            s.bounds.topLeft,
+            s.bounds.topRight,
+            s.bounds.bottomLeft,
+            s.bounds.bottomRight,
+          ]) {
+            expect(stone.contains(corner, inside: true), isTrue, reason: what);
+          }
+        }
+        final StickerText label = mark.whereType<StickerText>().single;
+        expect(label.text, 'kamyczek Zen');
+        expect(label.lines.single.text, 'kamyczek Zen', reason: 'not cut');
+        expect(label.size, greaterThanOrEqualTo(24), reason: what);
+        // The label says "Zen": no signature in the corner.
+        expect(design.signature, isTrue);
+        expect(scene.withRole(ShapeRole.signature), isEmpty);
+        for (final StickerShape t in scene.withRole(ShapeRole.text)) {
+          expect(t.bounds.overlaps(stone.bounds), isFalse, reason: what);
+        }
+        // The label reads on the stone.
+        expect(
+          QrMatrix.contrast(theme.ink, theme.accentSoft),
+          greaterThanOrEqualTo(4.5),
+          reason: theme.name,
+        );
+      }
+    }
+    // Only a pebble's sticker has it.
+    const StickerDesign plain = StickerDesign(texts: _texts);
+    final StickerScene door = StickerScene.build(
+      StickerScene.matrixFor(link, plain),
+      plain,
+      kind: StickerKind.door,
+    );
+    expect(door.stone, isNull);
+    expect(door.withRole(ShapeRole.frame), isEmpty);
+    expect(door.withRole(ShapeRole.mark), isEmpty);
+    expect(door.withRole(ShapeRole.signature), hasLength(2));
+  });
+
+  test('a pebble\'s code keeps modules a camera reads on a 5 cm sticker', () {
+    final StickerDesign design = StickerDesign(
+      texts: stickerPresets(StickerKind.pebble).first,
+    );
+    final StickerScene scene = StickerScene.build(
+      StickerScene.matrixFor(_pebbleLink(), design),
+      design,
+      kind: StickerKind.pebble,
+    );
+    // The artwork 50 mm across: a module of a quarter of a millimetre or
+    // more.
+    expect(scene.module / StickerScene.side * 50, greaterThanOrEqualTo(0.25));
+  });
+
+  test('a pebble\'s ready texts: the owner\'s, with its name and author when '
+      'there are', () {
+    expect(stickerPresets(StickerKind.pebble), const <StickerTexts>[
+      StickerTexts(
+        top: 'Znalazłeś kamyczek!',
+        bottom: 'Zeskanuj, żeby go zebrać',
+      ),
+    ]);
+    expect(
+      stickerPresets(
+        StickerKind.pebble,
+        name: ' Biedronka ',
+        author: 'Kasia',
+      ).map((StickerTexts p) => p.bottom),
+      <String>[
+        'Zeskanuj, żeby go zebrać',
+        'Kamyczek Biedronka — zeskanuj i zbierz',
+        'Kasia zostawił(a) tu kamyczek',
+      ],
+    );
+    expect(StickerKind.pebble.fileStem, 'zen-kamyczek');
+    expect(StickerKind.pebble.keepsTexts, isFalse);
+    expect(
+      <StickerKind>[
+        for (final StickerKind k in StickerKind.values)
+          if (k.pebbleMark) k,
+      ],
+      <StickerKind>[StickerKind.pebble],
+    );
+  });
+
   // CI decodes these pictures again with another decoder (zbar), which
   // also reads them on the phones' cameras' terms: every style of every
   // kind, as printed (tool/ci/decode_qr_stickers.py).
@@ -600,6 +762,7 @@ void main() {
           final StickerScene scene = StickerScene.build(
             StickerScene.matrixFor(e.value, design),
             design,
+            kind: e.key,
           );
           final String name =
               '${e.key.name}-${style.name}${logo ? '-logo' : ''}.png';

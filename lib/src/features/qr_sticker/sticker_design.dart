@@ -17,7 +17,10 @@ enum StickerKind {
   donation,
 
   /// The page about Zen (the promotional sticker in "O aplikacji").
-  zenAbout;
+  zenAbout,
+
+  /// A pebble (Kamyczki): the pebble page with the pebble's card.
+  pebble;
 
   /// The file name the exports start with.
   String get fileStem => switch (this) {
@@ -26,7 +29,17 @@ enum StickerKind {
     StickerKind.installPage => 'zen-instalacja',
     StickerKind.donation => 'zen-wsparcie',
     StickerKind.zenAbout => 'zen-naklejka',
+    StickerKind.pebble => 'zen-kamyczek',
   };
+
+  /// Every sticker of this kind opens the same thing, so the remembered
+  /// design keeps its texts too. Each pebble is another one: its sticker
+  /// keeps the remembered look but starts from its own ready texts.
+  bool get keepsTexts => this != StickerKind.pebble;
+
+  /// The code sits on a painted stone with the label "kamyczek Zen" (in
+  /// place of the small signature), so a finder knows it is a pebble.
+  bool get pebbleMark => this == StickerKind.pebble;
 }
 
 /// How the QR code's modules are drawn. The finder eyes, the timing lines
@@ -189,9 +202,15 @@ final class StickerDesign {
     this.format = StickerFormat.pdf,
   });
 
-  /// The design a kind starts with: its first ready texts for [name].
-  factory StickerDesign.initial(StickerKind kind, {String name = ''}) =>
-      StickerDesign(texts: stickerPresets(kind, name: name).first);
+  /// The design a kind starts with: its first ready texts for [name] (and
+  /// a pebble's [author]).
+  factory StickerDesign.initial(
+    StickerKind kind, {
+    String name = '',
+    String author = '',
+  }) => StickerDesign(
+    texts: stickerPresets(kind, name: name, author: author).first,
+  );
 
   /// Longest text above or below the code.
   static const int maxText = 80;
@@ -328,11 +347,17 @@ final class StickerDesign {
   );
 }
 
-/// The ready texts of [kind] for the person's or the flat's [name]; a text
-/// that needs a name is left out while there is none.
-List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
+/// The ready texts of [kind] for the person's, the flat's or the pebble's
+/// [name] (and the pebble's [author]); a text that needs a name is left out
+/// while there is none.
+List<StickerTexts> stickerPresets(
+  StickerKind kind, {
+  String name = '',
+  String author = '',
+}) {
   final String who = name.trim();
   final bool named = who.isNotEmpty;
+  final String by = author.trim();
   return switch (kind) {
     StickerKind.friendInvite => <StickerTexts>[
       if (named) StickerTexts(top: who, bottom: t('Dodaj mnie w Zen')),
@@ -383,6 +408,24 @@ List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
         bottom: t('Sieć ludzi, którzy się znają — zeskanuj'),
       ),
       StickerTexts(bottom: t('Zeskanuj, żeby poznać Zen')),
+    ],
+    StickerKind.pebble => <StickerTexts>[
+      StickerTexts(
+        top: t('Znalazłeś kamyczek!'),
+        bottom: t('Zeskanuj, żeby go zebrać'),
+      ),
+      if (named)
+        StickerTexts(
+          bottom: t('Kamyczek {name} — zeskanuj i zbierz', <String, Object?>{
+            'name': who,
+          }),
+        ),
+      if (by.isNotEmpty)
+        StickerTexts(
+          bottom: t('{author} zostawił(a) tu kamyczek', <String, Object?>{
+            'author': by,
+          }),
+        ),
     ],
   };
 }
