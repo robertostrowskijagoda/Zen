@@ -209,6 +209,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(bridgeEnabled: value));
   }
 
+  /// "Udostępniaj zebrane kamyczki".
+  Future<void> setServePebbles(bool value) async {
+    await _save(state.copyWith(servePebbles: value));
+  }
+
   /// "Znajomi w tej samej sieci Wi-Fi"; the local links
   /// controller applies it to the running node.
   Future<void> setLanDiscovery(bool value) async {

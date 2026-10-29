@@ -33,6 +33,7 @@ import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/local_delete.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_profile_section.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/followers_sheet.dart';
@@ -777,7 +778,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
 
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         key: const Key('profile-screen'),
         appBar: ZenSectionBar(
@@ -823,6 +824,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               text: t('Filmy'),
                             ),
                             Tab(text: t('Podziękowania')),
+                            Tab(
+                              key: const Key('profile-tab-pebbles'),
+                              text: t('Kamyczki'),
+                            ),
                             Tab(
                               key: const Key('profile-tab-info'),
                               text: t('Informacje'),
@@ -949,6 +954,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               ),
                             for (final ThanksCard c in thanks)
                               _ThanksTile(card: c),
+                          ],
+                        ),
+                        // Made and collected pebbles, for friends only.
+                        ListView(
+                          key: const Key('profile-pebbles'),
+                          padding: readableInsets(context, bottom: 32),
+                          children: <Widget>[
+                            PebbleProfileSection(account: account, own: _isOwn),
                           ],
                         ),
                         ListView(

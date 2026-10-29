@@ -93,6 +93,7 @@ final Map<String, List<String>> _pages = <String, List<String>>{
     'settings-network-card',
     'settings-tech-info-tile',
     'settings-lan-discovery-switch',
+    'settings-serve-pebbles-switch',
   ],
   'settings-nav-public-peers': <String>['public-peers'],
   'settings-nav-appearance': <String>[

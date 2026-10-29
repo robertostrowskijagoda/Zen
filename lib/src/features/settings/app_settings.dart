@@ -462,6 +462,7 @@ final class AppSettings {
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
+    this.servePebbles = true,
     this.setupRevision = 0,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
@@ -602,6 +603,11 @@ final class AppSettings {
   /// and not advertised; it can be switched off at the bottom of the
   /// settings (Sieć i usługa).
   final bool bridgeEnabled;
+
+  /// The pebbles this person collected are handed to others who look for
+  /// them (Ustawienia → Sieć i usługa). On by default: popular pebbles
+  /// become easier to get, not harder.
+  final bool servePebbles;
 
   /// The [kSetupRevision] of the setup (the lock, notifications, gates,
   /// animations) this person last went through or skipped; 0: never. The
@@ -754,6 +760,7 @@ final class AppSettings {
     bool? allowNoAppPassword,
     bool? disguiseIcon,
     bool? bridgeEnabled,
+    bool? servePebbles,
     int? setupRevision,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
@@ -800,6 +807,7 @@ final class AppSettings {
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
+      servePebbles: servePebbles ?? this.servePebbles,
       setupRevision: setupRevision ?? this.setupRevision,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
@@ -894,6 +902,7 @@ final class AppSettings {
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
+    'servePebbles': servePebbles,
     'setupRevision': setupRevision,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
@@ -969,6 +978,7 @@ final class AppSettings {
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
+      servePebbles: pick<bool>('servePebbles'),
       setupRevision: pick<int>('setupRevision'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),

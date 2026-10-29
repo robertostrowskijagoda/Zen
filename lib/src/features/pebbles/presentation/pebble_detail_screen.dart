@@ -1,0 +1,437 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/feed/presentation/feed_screen.dart'
+    show readableInsets;
+import 'package:zen/src/features/pebbles/pebble_card.dart';
+import 'package:zen/src/features/pebbles/pebble_link.dart';
+import 'package:zen/src/features/pebbles/pebble_parts.dart';
+import 'package:zen/src/features/pebbles/pebble_service.dart';
+import 'package:zen/src/features/pebbles/pebble_store.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
+
+/// One pebble full screen: the stone to turn, its name, note, author and
+/// date; for a collected one when and where it was found (the finder's own
+/// note); for one of this account's the keepers, the finders, the sticker,
+/// the link; for one kept for its author, giving the role up.
+class PebbleDetailScreen extends ConsumerStatefulWidget {
+  const PebbleDetailScreen({
+    required this.card,
+    this.foundAtMillis,
+    this.findNote = '',
+    this.justPublished = false,
+    super.key,
+  });
+
+  final PebbleCard card;
+
+  /// When and where it was found, for a friend's collected pebble (one in
+  /// this device's store says it itself).
+  final int? foundAtMillis;
+  final String findNote;
+
+  /// Opened right after publishing: the sticker is offered first.
+  final bool justPublished;
+
+  static Future<void> open(
+    BuildContext context,
+    PebbleCard card, {
+    int? foundAtMillis,
+    String findNote = '',
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) => PebbleDetailScreen(
+        card: card,
+        foundAtMillis: foundAtMillis,
+        findNote: findNote,
+      ),
+    ),
+  );
+
+  @override
+  ConsumerState<PebbleDetailScreen> createState() => _PebbleDetailScreenState();
+}
+
+class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
+  PebbleStore? _store;
+  Uint8List? _design;
+  bool _designAsked = false;
+  late final TextEditingController _note = TextEditingController();
+  bool _noteFilled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _store = ref.read(pebbleServiceProvider)?.store;
+    _store?.addListener(_changed);
+    unawaited(_loadDesign());
+  }
+
+  @override
+  void dispose() {
+    _store?.removeListener(_changed);
+    _note.dispose();
+    super.dispose();
+  }
+
+  void _changed() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    if (_design == null) {
+      unawaited(_loadDesign());
+    }
+  }
+
+  Future<void> _loadDesign() async {
+    final PebbleStore? store = _store;
+    if (store == null || _designAsked) {
+      return;
+    }
+    if (!(store.entry(widget.card.id)?.hasDesign ?? false)) {
+      return;
+    }
+    _designAsked = true;
+    final Uint8List? design = await store.design(widget.card.id);
+    if (mounted) {
+      setState(() => _design = design);
+    }
+  }
+
+  Future<bool> _confirm(String title, String text, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: Text(title),
+          content: Text(text),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(action),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final PebbleService? service = ref.watch(pebbleServiceProvider);
+    final PebbleCard card = widget.card;
+    final PebbleEntry? entry = service?.store.entry(card.id);
+    final int? foundAt = entry?.foundAtMillis ?? widget.foundAtMillis;
+    final String findNote = entry?.findNote ?? widget.findNote;
+    if (!_noteFilled && entry != null && entry.collected) {
+      _noteFilled = true;
+      _note.text = entry.findNote;
+    }
+    final double size = (MediaQuery.sizeOf(context).width - 64).clamp(
+      160.0,
+      340.0,
+    );
+    return Scaffold(
+      key: const Key('pebble-detail-screen'),
+      appBar: ZenSectionBar(
+        title: card.name.isEmpty ? t('Kamyczek') : card.name,
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: readableInsets(context, bottom: 32),
+          children: <Widget>[
+            Center(
+              child: PebbleView(
+                key: const Key('pebble-detail-view'),
+                design: _design,
+                card: card,
+                size: size,
+                interactive: true,
+              ),
+            ),
+            if (entry != null && !entry.hasDesign)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Center(
+                  child: ZenPill(
+                    key: const Key('pebble-detail-waiting'),
+                    text: t('Pełny wygląd jeszcze w drodze'),
+                    icon: Icons.downloading_rounded,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 16),
+            if (card.note.isNotEmpty)
+              Text(
+                card.note,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.textPrimary, fontSize: 16),
+              ),
+            const SizedBox(height: 6),
+            Text(
+              t('{author} · {date}', <String, Object?>{
+                'author': card.authorName.isEmpty
+                    ? t('Autor nieznany')
+                    : card.authorName,
+                'date': ZenFormat.date(card.created),
+              }),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: zen.textMuted, fontSize: 13),
+            ),
+            if (widget.justPublished && entry != null && entry.created)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: ZenInfo(
+                  key: const Key('pebble-published-info'),
+                  icon: Icons.celebration_outlined,
+                  text: t(
+                    'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i zostaw '
+                    'ją w ciekawym miejscu. Znajomi, których poprosiłeś(-aś), '
+                    'przechowają go, gdy Twój telefon będzie poza siecią.',
+                  ),
+                ),
+              ),
+            if (foundAt != null &&
+                (entry == null || entry.collected)) ...<Widget>[
+              ZenSection(t('Znaleziony')),
+              Text(
+                ZenFormat.date(DateTime.fromMillisecondsSinceEpoch(foundAt)),
+                style: TextStyle(color: zen.textPrimary, fontSize: 15),
+              ),
+              if (entry == null && findNote.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    findNote,
+                    style: TextStyle(color: zen.textSecondary, fontSize: 14),
+                  ),
+                ),
+            ],
+            if (entry != null && entry.collected) ...<Widget>[
+              const SizedBox(height: 8),
+              TextField(
+                key: const Key('pebble-find-note'),
+                controller: _note,
+                maxLength: kPebbleFindNoteMaxChars,
+                minLines: 1,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: t('Gdzie go znalazłeś(-aś)?'),
+                  helperText: t('Widzą to Twoi znajomi.'),
+                  prefixIcon: const Icon(Icons.place_outlined),
+                  suffixIcon: IconButton(
+                    key: const Key('pebble-find-note-save'),
+                    tooltip: t('Zapisz'),
+                    icon: const Icon(Icons.check_rounded),
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      unawaited(
+                        service!.store.setFindNote(card.id, _note.text),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+            if (entry != null && entry.created && service != null)
+              ..._ownPart(service, entry, zen),
+            if (entry != null &&
+                entry.kept &&
+                !entry.created &&
+                service != null)
+              ..._keptPart(service, entry),
+            if (entry != null &&
+                entry.collected &&
+                service != null) ...<Widget>[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                key: const Key('pebble-remove'),
+                onPressed: () async {
+                  if (!await _confirm(
+                    t('Usunąć z kolekcji?'),
+                    t(
+                      'Kamyczek zniknie z Twojego profilu. Możesz go zebrać '
+                      'ponownie, skanując jego kod.',
+                    ),
+                    t('Usuń'),
+                  )) {
+                    return;
+                  }
+                  await service.store.drop(card.id, PebbleRole.collected);
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+                },
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: Text(t('Usuń z kolekcji')),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _ownPart(
+    PebbleService service,
+    PebbleEntry entry,
+    ZenColors zen,
+  ) {
+    final PebbleCard card = entry.card;
+    final List<PebbleKeeperStatus> keepers = service.store.keepersOf(card.id);
+    final SocialHubState social = ref.watch(socialHubControllerProvider);
+    String nameOf(String address) {
+      final f = social.friendByAddress(address);
+      return f == null ? address : social.nameFor(f);
+    }
+
+    final int accepted = service.store.acceptedKeepers(card.id);
+    return <Widget>[
+      const SizedBox(height: 16),
+      FilledButton.icon(
+        key: const Key('pebble-print-sticker'),
+        onPressed: () => unawaited(openPebbleSticker(context, card)),
+        icon: const Icon(Icons.qr_code_2_rounded),
+        label: Text(t('Wydrukuj naklejkę')),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        key: const Key('pebble-copy-link'),
+        onPressed: () async {
+          await copyPublicText(pebbleWebLink(card));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(t('Skopiowano link do kamyczka.'))),
+            );
+          }
+        },
+        icon: const Icon(Icons.link_rounded),
+        label: Text(t('Kopiuj link')),
+      ),
+      ZenSection(
+        t('Opiekunowie'),
+        action: entry.madeHere && !entry.retired ? t('Losuj ponownie') : null,
+        onAction: () => unawaited(service.hosting.redraw(card.id)),
+      ),
+      Text(
+        entry.retired
+            ? t('Kamyczek wycofany: opiekunowie już go nie udostępniają.')
+            : tn(
+                accepted,
+                one: '{n} znajomy przechowuje ten kamyczek.',
+                few: '{n} znajomych przechowuje ten kamyczek.',
+                many: '{n} znajomych przechowuje ten kamyczek.',
+              ),
+        key: const Key('pebble-keepers-count'),
+        style: TextStyle(color: zen.textSecondary, fontSize: 14),
+      ),
+      for (final PebbleKeeperStatus k in keepers)
+        ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(switch (k.state) {
+            PebbleKeeperState.accepted => Icons.verified_outlined,
+            PebbleKeeperState.asked => Icons.hourglass_top_rounded,
+            _ => Icons.remove_circle_outline_rounded,
+          }),
+          title: Text(nameOf(k.address)),
+          subtitle: Text(switch (k.state) {
+            PebbleKeeperState.accepted => t('przechowuje'),
+            PebbleKeeperState.asked => t('czeka na odpowiedź'),
+            PebbleKeeperState.declined => t('odmówił(a)'),
+            PebbleKeeperState.resigned => t('zrezygnował(a)'),
+            PebbleKeeperState.silent => t('nie odpowiedział(a)'),
+          }),
+        ),
+      ZenSection(t('Znalazcy')),
+      Text(
+        tn(
+          service.store.finderCount(card.id),
+          one: '{n} osoba dała znać, że go znalazła.',
+          few: '{n} osoby dały znać, że go znalazły.',
+          many: '{n} osób dało znać, że go znalazło.',
+        ),
+        key: const Key('pebble-finders-count'),
+        style: TextStyle(color: zen.textSecondary, fontSize: 14),
+      ),
+      if (entry.madeHere && !entry.retired) ...<Widget>[
+        const SizedBox(height: 16),
+        TextButton.icon(
+          key: const Key('pebble-retire'),
+          onPressed: () async {
+            if (!await _confirm(
+              t('Wycofać kamyczek?'),
+              t(
+                'Opiekunowie przestaną go udostępniać. Kto już go zebrał, '
+                'zachowa swoją kopię.',
+              ),
+              t('Wycofaj'),
+            )) {
+              return;
+            }
+            final bool done = await service.hosting.retire(card.id);
+            if (!done && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    t(
+                      'Klucz konta jest zablokowany. Odblokuj go i spróbuj '
+                      'ponownie.',
+                    ),
+                  ),
+                ),
+              );
+            }
+          },
+          icon: const Icon(Icons.undo_rounded),
+          label: Text(t('Wycofaj kamyczek')),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _keptPart(PebbleService service, PebbleEntry entry) => <Widget>[
+    const SizedBox(height: 16),
+    ZenInfo(
+      icon: Icons.inventory_2_outlined,
+      text: t(
+        'Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego '
+        'wygląd, gdy autor jest poza siecią.',
+      ),
+    ),
+    const SizedBox(height: 8),
+    TextButton.icon(
+      key: const Key('pebble-resign'),
+      onPressed: () async {
+        if (!await _confirm(
+          t('Przestać przechowywać?'),
+          t('Autor poprosi kogoś innego.'),
+          t('Przestań'),
+        )) {
+          return;
+        }
+        await service.hosting.resign(entry.id);
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      icon: const Icon(Icons.logout_rounded),
+      label: Text(t('Przestań przechowywać')),
+    ),
+  ];
+}

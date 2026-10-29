@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
+import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum RuntimeRouteTarget {
@@ -34,6 +35,13 @@ enum RuntimeRouteTarget {
 
   /// "Dane i pamięć" (`zen://storage`): Zen took more than its limit.
   storage,
+
+  /// A pebble's link (`zen://pebble#<card>`, the page's `/k/#<card>`):
+  /// collecting it; [rawInput] holds the link.
+  pebble,
+
+  /// "Kamyczki" (`zen://pebbles`): a friend asks to keep a pebble.
+  pebbles,
 }
 
 @immutable
@@ -146,6 +154,23 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.storage);
   }
 
+  /// A pebble's link, to collect it ([rawInput]: the link).
+  factory RuntimeRouteIntent.pebble({
+    required String id,
+    required String rawInput,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.pebble,
+      rawInput: rawInput,
+    );
+  }
+
+  /// "Kamyczki" (a request to keep a pebble).
+  factory RuntimeRouteIntent.pebbles({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.pebbles);
+  }
+
   /// The Tablica, filtered by [filter] (a name of the feed's filters), at
   /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
@@ -233,6 +258,8 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.updates => t('Aktualizuj'),
     RuntimeRouteTarget.mailboxes => t('Wybierz skrzynkę'),
     RuntimeRouteTarget.storage => t('Otwórz Dane i pamięć'),
+    RuntimeRouteTarget.pebble => t('Zbierz kamyczek'),
+    RuntimeRouteTarget.pebbles => t('Otwórz Kamyczki'),
   };
 }
 
@@ -246,6 +273,9 @@ String buildMailboxesRouteKey() => 'zen://mailboxes';
 
 /// "Dane i pamięć" (Zen took more than its limit).
 String buildStorageRouteKey() => 'zen://storage';
+
+/// "Kamyczki" (a friend asks to keep a pebble).
+String buildPebblesRouteKey() => 'zen://pebbles';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
@@ -355,6 +385,10 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
     if (isZenPage(uri, path: 'm') && uri.fragment.isNotEmpty) {
       return _flatDoorIntent(id, uri.fragment);
     }
+    // A pebble's page (`…/k/#<card>`) opened in Zen: collect it.
+    if (isPebbleLink(trimmed)) {
+      return RuntimeRouteIntent.pebble(id: id, rawInput: trimmed);
+    }
     return PeerShareCodec.inviteCodeFromLink(trimmed) == null
         ? null
         : RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
@@ -376,6 +410,15 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'storage') {
     return RuntimeRouteIntent.storage(id: id);
+  }
+  if (uri.host == 'pebbles') {
+    return RuntimeRouteIntent.pebbles(id: id);
+  }
+  // `zen://pebble#<card>`: the pebble page's "Zbierz w Zen".
+  if (uri.host == 'pebble') {
+    return isPebbleLink(trimmed)
+        ? RuntimeRouteIntent.pebble(id: id, rawInput: trimmed)
+        : null;
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(

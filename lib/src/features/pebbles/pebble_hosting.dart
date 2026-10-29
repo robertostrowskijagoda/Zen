@@ -230,7 +230,9 @@ final class PebbleHosting {
   Future<void> _tick() async {
     await store.load();
     for (final PebbleEntry e in store.created) {
-      await _keepUp(e);
+      if (e.madeHere) {
+        await _keepUp(e);
+      }
     }
     for (final PebbleEntry e in store.lackingDesign.take(20)) {
       await _fetchStep(e);
@@ -269,7 +271,7 @@ final class PebbleHosting {
   Future<bool> retire(PebbleId id) => _run(() async {
     final PebbleEntry? e = store.entry(id);
     final LedgerKeyPair? key = accountKey();
-    if (e == null || !e.created || key == null) {
+    if (e == null || !e.madeHere || key == null) {
       return false;
     }
     final PebbleKeeperList list = await PebbleKeeperList.sign(
@@ -336,7 +338,7 @@ final class PebbleHosting {
   /// nobody asked before for this pebble.
   Future<void> _draw(PebbleId id) async {
     final PebbleEntry? e = store.entry(id);
-    if (e == null || !e.created || e.retired) {
+    if (e == null || !e.madeHere || e.retired) {
       return;
     }
     final List<PebbleKeeperStatus> known = store.keepersOf(id);
