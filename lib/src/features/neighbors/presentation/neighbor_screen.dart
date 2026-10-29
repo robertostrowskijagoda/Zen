@@ -288,6 +288,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
       context,
       ref,
       title: t('Nowy kod z ich drzwi'),
+      accepts: isFlatDoorText,
     );
     if (text == null || !mounted) {
       return;

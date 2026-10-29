@@ -18,9 +18,9 @@ import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
-import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/presentation/friends_version_banner.dart';
 
@@ -588,7 +588,13 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
   }
 
   Future<void> _scan() async {
-    final String? text = await ref.read(peerQrScannerProvider).scan(context);
+    // Another device's code is its invitation link; other Zen codes open
+    // their own screen.
+    final String? text = await scanZenCode(
+      context,
+      ref,
+      accepts: (String text) => _codeOf(text) != null,
+    );
     if (text != null && text.trim().isNotEmpty) {
       final String? code = _codeOf(text);
       _code.text = code ?? text.trim();

@@ -14,13 +14,14 @@ import 'package:zen/src/features/pebbles/pebble_parts.dart';
 import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_detail_screen.dart';
-import 'package:zen/src/features/social/peer_qr_scanner.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 
 /// Scans a pebble's QR code with the app's scanner and opens what it
-/// carries; anything else is said to be no pebble.
+/// carries; another Zen code opens its own screen ([scanZenCode]),
+/// anything else is said to be no pebble.
 Future<void> scanPebble(BuildContext context, WidgetRef ref) async {
-  final String? text = await ref.read(peerQrScannerProvider).scan(context);
-  if (text == null || text.trim().isEmpty || !context.mounted) {
+  final String? text = await scanZenCode(context, ref, accepts: isPebbleLink);
+  if (text == null || !context.mounted) {
     return;
   }
   final PebbleCard? card = pebbleCardFromLink(text);

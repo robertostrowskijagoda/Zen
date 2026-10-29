@@ -28,7 +28,7 @@ import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
-import 'package:zen/src/features/social/peer_qr_scanner.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -1122,7 +1122,12 @@ class EventScreen extends ConsumerWidget {
   }
 
   Future<void> _scan(BuildContext context, WidgetRef ref, MeetEvent e) async {
-    final String? qr = await ref.read(peerQrScannerProvider).scan(context);
+    // A ticket is no link: a Zen link shown by mistake opens its own screen.
+    final String? qr = await scanZenCode(
+      context,
+      ref,
+      accepts: (String text) => zenLinkIntent(text) == null,
+    );
     if (qr == null || !context.mounted) {
       return;
     }
