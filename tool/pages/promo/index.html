@@ -108,7 +108,6 @@
       <video controls playsinline preload="none" poster="zen-promo-poster-en.jpg" width="1080" height="1920" data-ial="filmLabel" aria-label="Zen promo film">
         <source data-film="webm" src="zen-promo-en.webm" type="video/webm">
         <source data-film="mp4" src="zen-promo-en.mp4" type="video/mp4">
-        <track data-film="vtt" kind="captions" src="zen-promo-en.vtt" srclang="en" label="Captions" default>
       </video>
       <figcaption class="dl">
         <a class="chip" data-film="mp4" href="zen-promo-en.mp4" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>MP4 9:16</a>
@@ -197,13 +196,13 @@
   var film = document.getElementById("promoFilm");
   var soon = document.getElementById("filmSoon");
   function show(ok) { (ok ? film : soon).classList.remove("hidden"); }
-  // The Polish film for Polish, the English one for every other language.
+  // The Polish film for Polish, the English one for every other language
+  // (music only, its words are in the picture: no captions track).
   var video = film.querySelector("video");
   var files = {
     mp4: function (l) { return "zen-promo-" + l + ".mp4"; },
     mp4wide: function (l) { return "zen-promo-" + l + "-16x9.mp4"; },
-    webm: function (l) { return "zen-promo-" + l + ".webm"; },
-    vtt: function (l) { return "zen-promo-" + l + ".vtt"; }
+    webm: function (l) { return "zen-promo-" + l + ".webm"; }
   };
   var shown = null;
   function filmLang() {
@@ -216,13 +215,19 @@
     Array.prototype.forEach.call(film.querySelectorAll("[data-film]"), function (el) {
       var f = files[el.getAttribute("data-film")](l);
       el.setAttribute(el.tagName === "A" ? "href" : "src", f);
-      if (el.tagName === "TRACK") { el.setAttribute("srclang", l); }
     });
     video.setAttribute("poster", "zen-promo-poster-" + l + ".jpg");
     video.load();
   }
-  useFilm();
-  new MutationObserver(useFilm).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  // Likewise one poster: the Polish one on the Polish page only.
+  var posters = document.querySelectorAll("figure.poster");
+  function usePoster() {
+    var l = filmLang();
+    Array.prototype.forEach.call(posters, function (p) { p.hidden = p.lang !== l; });
+  }
+  function useLanguage() { useFilm(); usePoster(); }
+  useLanguage();
+  new MutationObserver(useLanguage).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
   Promise.all([
     "zen-promo-pl.mp4", "zen-promo-en.mp4", "zen-promo-pl-16x9.mp4", "zen-promo-en-16x9.mp4",
     "zen-promo-pl.webm", "zen-promo-en.webm", "zen-promo-poster-pl.jpg", "zen-promo-poster-en.jpg"
