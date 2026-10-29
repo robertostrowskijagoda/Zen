@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:intl/intl.dart' show Bidi;
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/qr_sticker/qr_matrix.dart';
 import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 
@@ -56,8 +57,19 @@ final class CircleOp extends PathOp {
   final double radius;
 }
 
-/// What a shape is on the sticker.
-enum ShapeRole { background, plate, qr, logo, text, signature, decoration }
+/// What a shape is on the sticker: [frame] is the pebble's stone under the
+/// code's white plate, [mark] its label and little stone beside it.
+enum ShapeRole {
+  background,
+  plate,
+  qr,
+  logo,
+  text,
+  signature,
+  decoration,
+  frame,
+  mark,
+}
 
 sealed class StickerShape {
   const StickerShape(this.role, this.bounds);
@@ -159,6 +171,7 @@ final class StickerScene {
     required this.qrRect,
     required this.module,
     required this.hole,
+    required this.stone,
   });
 
   /// The artwork's side, in the scene's units.
@@ -191,6 +204,9 @@ final class StickerScene {
   /// The modules left empty for the logo, or null.
   final QrHole? hole;
 
+  /// The pebble's stone around the code (a pebble's sticker), or null.
+  final PebbleStone? stone;
+
   Iterable<StickerShape> withRole(ShapeRole role) =>
       shapes.where((StickerShape s) => s.role == role);
 
@@ -205,10 +221,17 @@ final class StickerScene {
   static QrMatrix matrixFor(String data, StickerDesign design) =>
       QrMatrix.encode(data, robust: design.logo);
 
-  /// Lays out [design] around [matrix] (see [matrixFor]).
-  static StickerScene build(QrMatrix matrix, StickerDesign design) {
+  /// Lays out [design] around [matrix] (see [matrixFor]); a [kind] with
+  /// [StickerKind.pebbleMark] puts the code on a stone labelled "kamyczek
+  /// Zen", which takes the place of the small signature.
+  static StickerScene build(
+    QrMatrix matrix,
+    StickerDesign design, {
+    StickerKind? kind,
+  }) {
     final StickerTheme theme = design.theme;
     final StickerTexts texts = design.texts;
+    final bool pebble = kind?.pebbleMark ?? false;
     final List<StickerShape> shapes = <StickerShape>[
       StickerPath(
         ShapeRole.background,
@@ -224,8 +247,9 @@ final class StickerScene {
     final bool anyText =
         top.isNotEmpty || caption.isNotEmpty || bottom.isNotEmpty;
 
-    // The code in the middle, with its quiet zone.
-    final double outer = anyText ? 540 : 680;
+    // The code in the middle, with its quiet zone (a little smaller on a
+    // pebble's stone, which needs room around it).
+    final double outer = pebble ? (anyText ? 500 : 600) : (anyText ? 540 : 680);
     final int span = matrix.size + 2 * QrMatrix.quietZone;
     final double module = outer / span;
     final Rect quiet = Rect.fromCenter(
@@ -235,6 +259,9 @@ final class StickerScene {
     );
     final Rect qr = quiet.deflate(QrMatrix.quietZone * module);
     final QrHole? hole = design.logo ? matrix.logoHole : null;
+    final PebbleStone? stone = pebble ? PebbleStone.around(quiet) : null;
+    // What the texts keep clear of: the stone, or the code.
+    final Rect middle = stone?.bounds ?? quiet;
 
     // The texts around it.
     final List<StickerShape> words = <StickerShape>[];
@@ -243,7 +270,7 @@ final class StickerScene {
       words.add(
         _fit(
           top,
-          Rect.fromLTRB(margin, margin, side - margin, quiet.top - gap),
+          Rect.fromLTRB(margin, margin, side - margin, middle.top - gap),
           family: kStickerDisplayFont,
           maxSize: 78,
           minSize: 22,
@@ -253,8 +280,9 @@ final class StickerScene {
         ),
       );
     }
-    final double signatureHeight = design.signature ? 34 : 0;
-    double below = quiet.bottom + gap;
+    final bool signed = design.signature && !pebble;
+    final double signatureHeight = signed ? 34 : 0;
+    double below = middle.bottom + gap;
     if (caption.isNotEmpty) {
       final StickerText line = _fit(
         caption,
@@ -290,17 +318,20 @@ final class StickerScene {
       );
     }
 
-    final List<StickerShape> signature = design.signature
+    final List<StickerShape> signature = signed
         ? _signature(ink, signatureHeight)
         : const <StickerShape>[];
 
     // The patterns, only where nothing else is.
     final List<Rect> taken = <Rect>[
-      quiet.inflate(gap / 2),
+      middle.inflate(gap / 2),
       for (final StickerShape w in words) w.bounds.inflate(12),
       for (final StickerShape s in signature) s.bounds.inflate(10),
     ];
     shapes.addAll(_decorations(design.pattern, theme, taken));
+    if (stone != null) {
+      shapes.addAll(stone.shapes(theme));
+    }
 
     // The white plate: the quiet zone and the code.
     shapes.add(
@@ -315,6 +346,9 @@ final class StickerScene {
     shapes
       ..addAll(words)
       ..addAll(signature);
+    if (stone != null) {
+      shapes.addAll(_pebbleLabel(stone, quiet, theme));
+    }
     return StickerScene._(
       matrix: matrix,
       design: design,
@@ -323,7 +357,96 @@ final class StickerScene {
       qrRect: qr,
       module: module,
       hole: hole,
+      stone: stone,
     );
+  }
+
+  /// "kamyczek Zen" with a little painted stone before it, on the stone
+  /// under the code: between the quiet zone and the stone's rim.
+  static List<StickerShape> _pebbleLabel(
+    PebbleStone stone,
+    Rect quiet,
+    StickerTheme theme,
+  ) {
+    final double top = quiet.bottom + gap / 2;
+    final double bottom = math.min(
+      top + quiet.height * 0.12,
+      stone.edgeBelow(quiet.center.dx) - 8,
+    );
+    final (double left, double right) = stone.spanAt(bottom);
+    final Rect band = Rect.fromLTRB(left + 14, top, right - 14, bottom);
+    final double iconWidth = band.height * 0.95;
+    final double space = band.height * 0.22;
+    final String label = t('kamyczek Zen');
+    StickerText fit(Rect box) => _fit(
+      label,
+      box,
+      family: kStickerDisplayFont,
+      maxSize: band.height * 0.68,
+      minSize: 8,
+      weight: 700,
+      maxLines: 1,
+      color: theme.ink,
+      role: ShapeRole.mark,
+    );
+    // Measured in the room the icon leaves, then set beside it, the two
+    // centred together.
+    final StickerText measured = fit(
+      Rect.fromLTRB(band.left + iconWidth + space, top, band.right, bottom),
+    );
+    final double whole = iconWidth + space + measured.bounds.width;
+    final double start = band.center.dx - whole / 2;
+    final StickerText text = fit(
+      Rect.fromLTRB(start + iconWidth + space, top, start + whole + 1, bottom),
+    );
+    final Rect icon = Rect.fromCenter(
+      center: Offset(start + iconWidth / 2, text.bounds.center.dy),
+      width: iconWidth,
+      height: text.size * 0.82,
+    );
+    final double rx = icon.width / 2;
+    final double ry = icon.height / 2;
+    final Offset c = icon.center;
+    // The little stone, a painted wave across it and a dot.
+    final List<PathOp> wave = <PathOp>[
+      MoveOp(c.dx - rx * 0.72, c.dy + ry * 0.18),
+      CubicOp(
+        c.dx - rx * 0.3,
+        c.dy - ry * 0.32,
+        c.dx + rx * 0.2,
+        c.dy + ry * 0.12,
+        c.dx + rx * 0.74,
+        c.dy - ry * 0.22,
+      ),
+      LineOp(c.dx + rx * 0.7, c.dy + ry * 0.06),
+      CubicOp(
+        c.dx + rx * 0.2,
+        c.dy + ry * 0.4,
+        c.dx - rx * 0.3,
+        c.dy - ry * 0.02,
+        c.dx - rx * 0.66,
+        c.dy + ry * 0.46,
+      ),
+      const CloseOp(),
+    ];
+    final Rect waveBounds = Rect.fromLTRB(
+      c.dx - rx * 0.72,
+      c.dy - ry * 0.32,
+      c.dx + rx * 0.74,
+      c.dy + ry * 0.46,
+    );
+    final Offset dot = Offset(c.dx - rx * 0.28, c.dy - ry * 0.46);
+    return <StickerShape>[
+      StickerPath(ShapeRole.mark, icon, theme.accent, ellipseOps(icon)),
+      StickerPath(ShapeRole.mark, waveBounds, StickerTheme.plate, wave),
+      StickerPath(
+        ShapeRole.mark,
+        Rect.fromCircle(center: dot, radius: ry * 0.16),
+        theme.ink,
+        <PathOp>[CircleOp(dot, ry * 0.16)],
+      ),
+      text,
+    ];
   }
 
   /// The modules: the data in the chosen style, the code's own patterns
@@ -839,5 +962,144 @@ final class StickerScene {
             ], i == 1),
         ];
     }
+  }
+}
+
+/// An ellipse filling [r], as four curves.
+List<PathOp> ellipseOps(Rect r) {
+  const double k = 0.5523;
+  final double cx = r.center.dx;
+  final double cy = r.center.dy;
+  final double rx = r.width / 2;
+  final double ry = r.height / 2;
+  return <PathOp>[
+    MoveOp(cx + rx, cy),
+    CubicOp(cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry),
+    CubicOp(cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy),
+    CubicOp(cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry),
+    CubicOp(cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy),
+    const CloseOp(),
+  ];
+}
+
+/// The stone of a pebble's sticker: a rounded, slightly uneven
+/// superellipse around the code's quiet zone, a little lower than the code
+/// so that its label fits under it. It lies under the white plate, so the
+/// quiet zone stays white; only its rim and the band around the plate show.
+final class PebbleStone {
+  PebbleStone.around(Rect quiet)
+    : center = Offset(quiet.center.dx, quiet.center.dy + quiet.height * 0.03),
+      rx = quiet.width * 0.63,
+      ry = quiet.height * 0.65 {
+    outline = _points(0);
+    inner = _points(rim);
+    bounds = _around(outline);
+    innerBounds = _around(inner);
+  }
+
+  static Rect _around(List<Offset> points) {
+    double l = double.infinity, t = double.infinity;
+    double r = -double.infinity, b = -double.infinity;
+    for (final Offset p in points) {
+      l = math.min(l, p.dx);
+      t = math.min(t, p.dy);
+      r = math.max(r, p.dx);
+      b = math.max(b, p.dy);
+    }
+    return Rect.fromLTRB(l, t, r, b);
+  }
+
+  /// How square the stone is (2 would be an ellipse).
+  static const double exponent = 4.6;
+
+  /// The darker rim, in the scene's units.
+  static const double rim = 9;
+
+  static const int _steps = 180;
+
+  final Offset center;
+  final double rx;
+  final double ry;
+
+  /// The edge, and the edge inside the rim, as points around.
+  late final List<Offset> outline;
+  late final List<Offset> inner;
+  late final Rect bounds;
+  late final Rect innerBounds;
+
+  List<Offset> _points(double inset) => <Offset>[
+    for (int i = 0; i < _steps; i++) _point(i * 2 * math.pi / _steps, inset),
+  ];
+
+  Offset _point(double a, double inset) {
+    double power(double v) =>
+        (v < 0 ? -1 : 1) * math.pow(v.abs(), 2 / exponent).toDouble();
+    // A gentle unevenness, the same on every sticker: a stone, not a
+    // rounded square.
+    final double wobble =
+        1 + 0.022 * math.sin(2 * a + 0.6) + 0.014 * math.cos(3 * a + 1.1);
+    final double x = rx * power(math.cos(a)) * wobble;
+    final double y = ry * power(math.sin(a)) * wobble;
+    final double length = math.sqrt(x * x + y * y);
+    final double k = length > inset ? (length - inset) / length : 0;
+    return Offset(center.dx + x * k, center.dy + y * k);
+  }
+
+  /// [p] lies inside the edge (inside the rim with [inside]).
+  bool contains(Offset p, {bool inside = false}) {
+    final List<Offset> poly = inside ? inner : outline;
+    bool odd = false;
+    for (int i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      final Offset a = poly[i];
+      final Offset b = poly[j];
+      if ((a.dy > p.dy) != (b.dy > p.dy) &&
+          p.dx < (b.dx - a.dx) * (p.dy - a.dy) / (b.dy - a.dy) + a.dx) {
+        odd = !odd;
+      }
+    }
+    return odd;
+  }
+
+  /// Where the inner edge crosses the height [y]: its left and right.
+  (double, double) spanAt(double y) {
+    double left = double.infinity;
+    double right = -double.infinity;
+    for (int i = 0, j = inner.length - 1; i < inner.length; j = i++) {
+      final Offset a = inner[i];
+      final Offset b = inner[j];
+      if ((a.dy > y) != (b.dy > y)) {
+        final double x = a.dx + (b.dx - a.dx) * (y - a.dy) / (b.dy - a.dy);
+        left = math.min(left, x);
+        right = math.max(right, x);
+      }
+    }
+    return (left, right);
+  }
+
+  /// The lowest point of the inner edge straight below [x].
+  double edgeBelow(double x) {
+    double lowest = center.dy;
+    for (int i = 0, j = inner.length - 1; i < inner.length; j = i++) {
+      final Offset a = inner[i];
+      final Offset b = inner[j];
+      if ((a.dx > x) != (b.dx > x)) {
+        final double y = a.dy + (b.dy - a.dy) * (x - a.dx) / (b.dx - a.dx);
+        lowest = math.max(lowest, y);
+      }
+    }
+    return lowest;
+  }
+
+  /// The rim and the stone in [theme]'s colours, painted before the plate.
+  List<StickerShape> shapes(StickerTheme theme) {
+    List<PathOp> path(List<Offset> points) => <PathOp>[
+      MoveOp(points.first.dx, points.first.dy),
+      for (final Offset p in points.skip(1)) LineOp(p.dx, p.dy),
+      const CloseOp(),
+    ];
+    return <StickerShape>[
+      StickerPath(ShapeRole.frame, bounds, theme.accent, path(outline)),
+      StickerPath(ShapeRole.frame, innerBounds, theme.accentSoft, path(inner)),
+    ];
   }
 }
