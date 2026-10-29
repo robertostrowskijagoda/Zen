@@ -1003,6 +1003,18 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		debugf("[ZEN-GO] pq: key record from %s is not the pinned one\n", source)
 		return
 	}
+	if flags&pqFlagWant != 0 && e.peerLostStateLocked(peer, now) {
+		// The session the peer no longer knows goes, and what went lately
+		// under it goes again under the next one, as after 'N': frames sent
+		// while the peer restarted reached nobody (its new core dropped
+		// them while it set up a session with this node's core), so nobody
+		// could say the session was unknown. The challenge in hand went
+		// with the peer's old state too.
+		id := peer.send.id
+		peer.send = nil
+		e.resendLocked(peer, id, now)
+		peer.challenge = nil
+	}
 	if hasChallenge {
 		e.takeChallengeLocked(peer, body[1+pqRecordSize:], now)
 	}
@@ -1022,6 +1034,18 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		_ = e.write(source, e.keysFrame(true, nil, nil))
 	}
 	e.writeJobs(source, jobs)
+}
+
+// peerLostStateLocked tells whether peer, which asks for this node's record
+// and a challenge, lost what it had of this node (it restarted, or the other
+// process of the device took its address over): it acknowledged this node's
+// session and was given a challenge too lately to ask for a new one
+// (pqChallengeRefresh).
+func (e *pqEndpoint) peerLostStateLocked(peer *pqPeer, now time.Time) bool {
+	if peer.send == nil || !peer.send.acked || len(peer.issued) == 0 {
+		return false
+	}
+	return now.Sub(peer.issued[len(peer.issued)-1].at) < pqChallengeRefresh/2
 }
 
 // replyKeysLocked is this node's record with a fresh challenge for peer,

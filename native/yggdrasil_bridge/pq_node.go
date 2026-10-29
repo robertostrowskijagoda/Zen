@@ -95,14 +95,16 @@ func (node *bridgeNode) openRelayFrame(source net.IP, payload []byte) ([]byte, b
 	return endpoint.receiveMedia(source, payload)
 }
 
-// writeSignalWire splits a signal text into fragments and sends them from
-// the node's own address to destination.
+// writeSignalWire splits a signal text into fragments and hands them to the
+// node's mesh writer, from the node's own address to destination. It never
+// waits for the mesh: the packet loop calls it for the session layer's
+// answers (mesh_io.go).
 func (node *bridgeNode) writeSignalWire(destination net.IP, wire []byte) error {
 	localAddress := net.ParseIP(node.core.Address().String())
 	if localAddress == nil {
 		return errors.New("could not resolve local yggdrasil address")
 	}
-	chunks := splitSignalPayloadRaw(string(wire))
+	chunks := splitSignalWire(string(wire), signalSendChunkSize)
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
 	for index, chunk := range chunks {
 		envelopeBytes, err := json.Marshal(signalEnvelope{

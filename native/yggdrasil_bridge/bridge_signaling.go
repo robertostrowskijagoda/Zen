@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// startPacketLoop starts the loop that reads the node's packets from the
+// mesh. It never writes, nor waits for anything that may wait for the mesh
+// (mesh_io.go): answers and everything else it sends go to the node's mesh
+// writer, and what it hands the app goes to an inbox that never blocks.
 func startPacketLoop(node *bridgeNode) {
 	if !node.packetStarted.CompareAndSwap(false, true) {
 		return
@@ -30,7 +34,12 @@ func startPacketLoop(node *bridgeNode) {
 		consecutiveErrors := 0
 		var limiter signalRateLimiter
 		for {
-			count, err := node.iprwc.Read(buffer)
+			// Core.ReadFrom hands Yggdrasil's own queries (nodeinfo) to
+			// the core's actors without waiting for them.
+			count, from, err := node.core.ReadFrom(buffer)
+			if err == nil && !node.mesh.accept(buffer[:count], from) {
+				continue
+			}
 			if err != nil {
 				fmt.Printf("[ZEN-GO] packet loop read error: %v\n", err)
 				consecutiveErrors++
@@ -57,9 +66,10 @@ func startPacketLoop(node *bridgeNode) {
 				continue
 			}
 			if !isYggNodeAddress(source) {
-				// ipv6rwc also delivers packets from any address in the
-				// sender's own /64 (300::/8). Zen never sends from those, and
-				// accepting them would give one node 2^64 identities.
+				// Never from an address in the sender's own /64 (300::/8):
+				// Zen never sends from those, and accepting them would give
+				// one node 2^64 identities (the mesh reader refuses them
+				// already).
 				continue
 			}
 
@@ -146,20 +156,22 @@ func shouldCompressSignalPayload(payload string) bool {
 		!strings.Contains(payload, "\"_zenPayload\"")
 }
 
-// splitSignalPayloadRaw splits an already-encoded wire string into chunks.
+// splitSignalPayloadRaw splits an already-encoded wire string into chunks
+// as senders up to 1.14 did (signalChunkSize).
 func splitSignalPayloadRaw(encoded string) []string {
-	if encoded == "" {
+	return splitSignalWire(encoded, signalChunkSize)
+}
+
+// splitSignalWire base64-encodes a wire string for transport and cuts the
+// text into chunks of at most size characters.
+func splitSignalWire(wire string, size int) []string {
+	if wire == "" {
 		return []string{""}
 	}
-	// Base64-encode the wire string for chunk transport.
-	b64 := base64.StdEncoding.EncodeToString([]byte(encoded))
-	chunks := make([]string, 0, len(b64)/signalChunkSize+1)
-	for start := 0; start < len(b64); start += signalChunkSize {
-		end := start + signalChunkSize
-		if end > len(b64) {
-			end = len(b64)
-		}
-		chunks = append(chunks, b64[start:end])
+	b64 := base64.StdEncoding.EncodeToString([]byte(wire))
+	chunks := make([]string, 0, len(b64)/size+1)
+	for start := 0; start < len(b64); start += size {
+		chunks = append(chunks, b64[start:min(start+size, len(b64))])
 	}
 	return chunks
 }

@@ -17,12 +17,10 @@ import (
 	"sync"
 	"time"
 
-	iwt "github.com/Arceliar/ironwood/types"
 	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
 // The flat's door (neighbours). The sticker on the door carries the
@@ -149,9 +147,10 @@ type doorNode struct {
 	// Only its fragment buffers (signal_reassembly.go) are used, so knocks
 	// split into fragments do not mix with the main node's.
 	assembler *bridgeNode
-	// Sends from the door. Only its write side is used: reading through it
-	// would answer the core's protocol packets.
-	rwc *ipv6rwc.ReadWriteCloser
+	// The door's packets on the mesh: run reads (below Core.ReadFrom, which
+	// would answer the core's protocol packets) and never writes; a writer
+	// of its own sends (mesh_io.go).
+	mesh *meshIO
 	// The session layer of the door (nil: plain, tests of the main node's
 	// plain mode only).
 	pq *pqEndpoint
@@ -511,8 +510,6 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		done:      make(chan struct{}),
 		mailbox:   mailbox,
 	}
-	door.rwc = ipv6rwc.NewReadWriteCloser(doorCore)
-	door.rwc.SetMTU(door.rwc.MaxMTU())
 	if !main.pqPlain {
 		door.pq, err = newPQEndpoint(private, net.IP(append([]byte(nil), door.ip[:]...)), door.writeWire)
 		if err != nil {
@@ -520,8 +517,11 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 			return nil, err
 		}
 	}
+	door.mesh = newMeshIO(doorCore, nil)
+	door.mesh.start()
 	// The host calls the door (the door dials nobody).
 	if err := host.core.AddPeer(peerURI, ""); err != nil {
+		door.mesh.stop()
 		doorCore.Stop()
 		return nil, err
 	}
@@ -584,22 +584,15 @@ func (door *doorNode) run(main *bridgeNode) {
 // trafficPacket is the IPv6 packet in what the door's session layer read
 // from the key from, or false for anything else. The door reads below
 // Core.ReadFrom, which would answer the core's protocol packets (getSelf,
-// getPeers, getTree, nodeinfo) itself; here they are dropped. As in
-// ipv6rwc, the packet must be addressed to the door and come from the
-// sender key's own address.
+// getPeers, getTree, nodeinfo) itself; here they are dropped. The packet
+// must be addressed to the door and come from the sender key's own address
+// (meshIO.accept, which notes the key for the answers).
 func (door *doorNode) trafficPacket(session []byte, from net.Addr) ([]byte, bool) {
 	if len(session) < 1+40 || session[0] != doorSessionTraffic {
 		return nil, false
 	}
-	key, ok := from.(iwt.Addr)
-	if !ok || len(key) != ed25519.PublicKeySize {
-		return nil, false
-	}
 	packet := session[1:]
-	if packet[0]>>4 != 6 || !bytes.Equal(packet[24:40], door.ip[:]) {
-		return nil, false
-	}
-	if !bytes.Equal(packet[8:24], address.AddrForKey(ed25519.PublicKey(key))[:]) {
+	if !door.mesh.accept(packet, from) {
 		return nil, false
 	}
 	return packet, true
@@ -657,25 +650,14 @@ func (door *doorNode) send(remoteAddress, payload string) error {
 	return nil
 }
 
-// doorChunkSize is the base64 text one packet of a door carries: a whole
-// session-layer key record or opening frame fits one. While ironwood (and
-// ipv6rwc's address lookup) opens a session to a new peer it keeps only the
-// last packet written, so a frame split in small fragments always lost all
-// but its last on first contact and the session layer had to ask again.
-const doorChunkSize = 8 * 1024
-
 // writeWire splits a signal text into fragments and sends them from the
 // door's address to destination (the session layer's frames too).
 func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
-	size := doorChunkSize
-	if limit := int(door.rwc.MTU()) - 1024; limit < size {
+	size := signalSendChunkSize
+	if limit := door.mesh.MTU() - 1024; limit < size {
 		size = max(limit, signalChunkSize)
 	}
-	encoded := base64.StdEncoding.EncodeToString(wire)
-	chunks := make([]string, 0, len(encoded)/size+1)
-	for start := 0; start < len(encoded) || len(chunks) == 0; start += size {
-		chunks = append(chunks, encoded[start:min(start+size, len(encoded))])
-	}
+	chunks := splitSignalWire(string(wire), size)
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
 	source := net.IP(append([]byte(nil), door.ip[:]...))
 	for index, chunk := range chunks {
@@ -693,7 +675,7 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 			door.stats.fail("write error", err)
 			return err
 		}
-		if _, err := door.rwc.Write(packet); err != nil {
+		if err := door.mesh.send(packet, false); err != nil {
 			door.stats.fail("write error", err)
 			return err
 		}
@@ -706,6 +688,7 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 func (door *doorNode) stop() {
 	door.stopOnce.Do(func() {
 		close(door.quit)
+		door.mesh.stop()
 		_ = door.host.core.RemovePeer(door.peerURI, "")
 		door.listener.Cancel()
 		// Stopping the core ends run's reads.
