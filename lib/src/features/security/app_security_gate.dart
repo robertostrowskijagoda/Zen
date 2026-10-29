@@ -288,6 +288,17 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
             !(security.encryptionEnabled &&
                 security.hasPassword &&
                 security.isLocked)) {
+          // The documents are still being read and were accepted before:
+          // wait for their version rather than flash "they changed".
+          if (legalVersionNow(ref.watch(legalTextsProvider)) == null &&
+              ref
+                  .watch(appSettingsControllerProvider)
+                  .legalAcceptedVersion
+                  .isNotEmpty) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
           // Before anything is made (the app password, the account): the
           // terms, the privacy policy and the licence notice; asked again
           // when their version changes (after unlocking, if locked).
