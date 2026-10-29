@@ -17,7 +17,15 @@
   builds Linux on the baseline's Ubuntu; only its sign job has the keys
   (one approval per tag) and it uses no caches.
 - CI: the required "Analyze and test" waits for every test job, the shards
-  cover all files, and every test that can skip itself also runs on Linux.
+  cover all files, and every test that can skip itself also runs on Linux;
+  a pull request that changes only documentation skips every job but
+  "Docs and site", which runs every test that reads documentation; only
+  pull requests cancel their older runs.
+- ci_plan.py: which paths are documentation, and the Linux build image is
+  used only by digest and only while its Dockerfile is unchanged; the
+  Dockerfile pins its downloads at the versions CI uses, installs what the
+  job installs without it, and only ci-image.yml may write packages.
+- The emulator workflow caches Gradle, the release workflow nothing.
 - ci_summary.py adds up the reports of several test runs.
 
 Standard library only.
@@ -39,6 +47,7 @@ sys.path.insert(0, os.path.join(ROOT, "tool", "ci"))
 
 import check_page_alignment  # noqa: E402
 import check_windows_bundle  # noqa: E402
+import ci_plan  # noqa: E402
 
 
 def elf(is64=True, aligns=(0x4000, 0x4000)):
@@ -267,12 +276,74 @@ class CiWorkflowTest(unittest.TestCase):
         app = self.jobs["app"]
         # The name the branch rules require stays.
         self.assertIn("name: Analyze and test\n", app)
-        self.assertIn("needs: [checks, test, test-linux, upgrade-start]", app)
+        self.assertIn("needs: [plan, docs, checks, test, test-linux, upgrade-start]", app)
         # Also when one failed: a skipped required check counts as passed.
         self.assertIn("if: ${{ always() }}", app)
-        for result in ("needs.checks.result", "needs.test.result",
-                       "needs.test-linux.result", "needs.upgrade-start.result"):
+        for result in ("needs.plan.result", "needs.docs.result", "needs.checks.result",
+                       "needs.test.result", "needs.test-linux.result",
+                       "needs.upgrade-start.result"):
             self.assertIn(result, app)
+        # Skipped jobs pass only when "What to run" said documentation only.
+        self.assertIn('if [ "$CODE" = false ]; then', app)
+        self.assertIn("expected=skipped", app)
+
+    def test_documentation_only_skips_the_code_jobs(self):
+        # Every job but these waits for "What to run" and is skipped when a
+        # pull request changes only documentation (the .deb installs need
+        # the Linux build, which is).
+        always = {"plan", "docs", "app", "deb-install"}
+        for name, body in self.jobs.items():
+            if name in always:
+                continue
+            self.assertIn("    needs: plan\n", body, name)
+            self.assertIn("    if: ${{ needs.plan.outputs.code == 'true' }}\n", body, name)
+        self.assertIn("needs: linux\n", self.jobs["deb-install"])
+        self.assertIn("needs: plan\n", self.jobs["docs"])
+        self.assertNotIn("\n    if:", self.jobs["docs"])
+        plan = self.jobs["plan"]
+        self.assertIn("fetch-depth: 2", plan)
+        self.assertIn("git diff --name-only HEAD^1 HEAD", plan)
+        self.assertIn("ci_plan.py changes", plan)
+        self.assertIn("ci_plan.py image .github/images/linux-build", plan)
+
+    def test_the_docs_job_checks_what_documentation_can_break(self):
+        docs = self.jobs["docs"]
+        for step in ("python3 tool/ci/check_links.py", "python3 tool/ci/test_check_links.py",
+                     "dart run tool/release.dart check", "python3 tool/ci/test_release_source.py",
+                     "python3 tool/ci/test_ci_checks.py"):
+            self.assertIn(step, docs)
+        # Every app test that reads a file of the documentation, the website,
+        # the README or the changelog (the shards are skipped then).
+        for folder, _, files in os.walk(os.path.join(ROOT, "test")):
+            for name in files:
+                if not name.endswith("_test.dart"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as f:
+                    text = f.read()
+                if re.search(r"""['"](docs/|tool/pages|README\.md|CHANGELOG\.md)""", text):
+                    relative = os.path.relpath(path, ROOT).replace(os.sep, "/")
+                    self.assertIn(relative + "\n", docs)
+
+    def test_only_pull_requests_cancel_older_runs(self):
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+                      self.ci)
+        self.assertIn("group: ci-${{ github.event_name == 'pull_request' && github.ref "
+                      "|| github.sha }}", self.ci)
+
+    def test_the_linux_build_runs_in_the_image_or_on_the_runner(self):
+        linux = self.jobs["linux"]
+        self.assertIn("runs-on: ubuntu-22.04\n", linux)
+        self.assertIn("container: ${{ needs.plan.outputs.image }}\n", linux)
+        # What the image carries is set up only without it.
+        for step in ("Build tools and libraries (without the image)",
+                     "Go (without the image)", "Flutter (without the image)"):
+            at = linux.index("name: " + step)
+            self.assertIn("if: ${{ !needs.plan.outputs.image }}", linux[at:at + 200], step)
+
+    def test_the_release_workflow_never_runs_in_the_image(self):
+        with open(os.path.join(ROOT, ".github/workflows/release.yml"), encoding="utf-8") as f:
+            self.assertNotIn("container: ${{", f.read())
 
     def test_shards_are_numbered_from_one(self):
         test = self.jobs["test"]
@@ -376,6 +447,168 @@ class AndroidEmulatorTest(unittest.TestCase):
             releases = f.read()
         self.assertIn("**Android emulator**", releases)
         self.assertIn("**End-to-end on Linux**", releases)
+
+
+class CiPlanTest(unittest.TestCase):
+    def test_documentation_only(self):
+        docs = ci_plan.is_docs_only
+        self.assertTrue(docs(["docs/TESTING.md", "docs/guide/pyramid.md", "README.md",
+                              "CHANGELOG.md", "CONTRIBUTING.md", "tool/pages/index.html",
+                              "docs/images/chat-dark.png", ".github/ISSUE_TEMPLATE/bug.yml",
+                              ".github/pull_request_template.md", ""]))
+        # The app carries these: code.
+        for path in ("docs/TERMS.md", "docs/PRIVACY.md", "THIRD_PARTY_NOTICES.md", "NOTICE",
+                     "lib/main.dart", ".github/workflows/ci.yml", "tool/test.dart",
+                     "tool/ci/check_links.py", "test/docs/x_test.dart", "lib/README.md",
+                     ".github/images/linux-build/image.txt", "pubspec.lock"):
+            self.assertFalse(docs(["README.md", path]), path)
+        # Nothing known: everything runs.
+        self.assertFalse(docs([]))
+        self.assertFalse(docs(["", "  "]))
+
+    def test_changes_command(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder)
+        listed = os.path.join(folder, "changed.txt")
+        script = os.path.join(ROOT, "tool", "ci", "ci_plan.py")
+        for names, code in (("docs/TESTING.md\nREADME.md\n", "false"),
+                            ("docs/TESTING.md\nlib/main.dart\n", "true"), ("", "true")):
+            with open(listed, "w", encoding="utf-8") as f:
+                f.write(names)
+            out = subprocess.run([sys.executable, script, "changes", listed],
+                                 capture_output=True, text=True, check=True).stdout
+            self.assertEqual(out, "code=%s\n" % code)
+        out = subprocess.run([sys.executable, script, "changes", os.path.join(folder, "none")],
+                             capture_output=True, text=True, check=True).stdout
+        self.assertEqual(out, "code=true\n")
+
+    def image_folder(self, dockerfile="FROM x\n", image="", built_from=""):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder)
+        with open(os.path.join(folder, "Dockerfile"), "w", encoding="utf-8") as f:
+            f.write(dockerfile)
+        with open(os.path.join(folder, "image.txt"), "w", encoding="utf-8") as f:
+            f.write("# comment\nimage=%s\ndockerfile-sha256=%s\n" % (image, built_from))
+        return folder
+
+    REFERENCE = "ghcr.io/robertostrowskijagoda/zen-ci@sha256:" + "ab" * 32
+
+    def test_the_image_only_while_its_dockerfile_is_unchanged(self):
+        empty = self.image_folder()
+        self.assertEqual(ci_plan.usable_image(empty)[0], "")
+        folder = self.image_folder()
+        sha = ci_plan.dockerfile_sha256(os.path.join(folder, "Dockerfile"))
+        folder = self.image_folder(image=self.REFERENCE, built_from=sha)
+        self.assertEqual(ci_plan.usable_image(folder), (self.REFERENCE,
+                                                        "built from this Dockerfile"))
+        changed = self.image_folder(dockerfile="FROM y\n", image=self.REFERENCE, built_from=sha)
+        reference, reason = ci_plan.usable_image(changed)
+        self.assertEqual(reference, "")
+        self.assertIn("Dockerfile changed", reason)
+        # By digest only, never by tag.
+        tagged = self.image_folder(image="ghcr.io/robertostrowskijagoda/zen-ci:latest",
+                                   built_from=sha)
+        self.assertEqual(ci_plan.usable_image(tagged)[0], "")
+
+    def test_line_ends_do_not_change_the_dockerfile_hash(self):
+        lf = self.image_folder(dockerfile="FROM x\nRUN y\n")
+        crlf = self.image_folder()
+        with open(os.path.join(crlf, "Dockerfile"), "wb") as f:
+            f.write(b"FROM x\r\nRUN y\r\n")
+        self.assertEqual(ci_plan.dockerfile_sha256(os.path.join(lf, "Dockerfile")),
+                         ci_plan.dockerfile_sha256(os.path.join(crlf, "Dockerfile")))
+
+    def test_record_writes_the_new_image(self):
+        folder = self.image_folder()
+        self.assertTrue(ci_plan.record_image(folder, self.REFERENCE))
+        self.assertFalse(ci_plan.record_image(folder, self.REFERENCE))
+        with open(os.path.join(folder, "image.txt"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertTrue(text.startswith("# comment\n"))
+        self.assertEqual(ci_plan.usable_image(folder)[0], self.REFERENCE)
+        with self.assertRaises(ValueError):
+            ci_plan.record_image(folder, "ghcr.io/robertostrowskijagoda/zen-ci:latest")
+
+
+class LinuxBuildImageTest(unittest.TestCase):
+    FOLDER = os.path.join(ROOT, ".github", "images", "linux-build")
+
+    def setUp(self):
+        with open(os.path.join(self.FOLDER, "Dockerfile"), encoding="utf-8") as f:
+            self.dockerfile = f.read()
+
+    def arg(self, name):
+        return re.search(r"^ARG %s=(\S+)$" % name, self.dockerfile, re.M).group(1)
+
+    def test_versions_are_the_ones_ci_uses(self):
+        folder = os.path.join(ROOT, ".github", "workflows")
+        for name in os.listdir(folder):
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                for version in re.findall(r"FLUTTER_VERSION: '([^']+)'", f.read()):
+                    self.assertEqual(version, self.arg("FLUTTER_VERSION"),
+                                     "%s: update FLUTTER_VERSION and FLUTTER_SHA256 in "
+                                     ".github/images/linux-build/Dockerfile" % name)
+        with open(os.path.join(ROOT, "native", "yggdrasil_bridge", "go.mod"),
+                  encoding="utf-8") as f:
+            toolchain = re.search(r"^toolchain go(\S+)$", f.read(), re.M).group(1)
+        self.assertEqual(toolchain, self.arg("GO_VERSION"),
+                         "update GO_VERSION and GO_SHA256 in .github/images/linux-build/Dockerfile")
+
+    def test_every_download_is_pinned(self):
+        self.assertRegex(self.dockerfile, r"(?m)^FROM ubuntu:22\.04@sha256:[0-9a-f]{64}$")
+        self.assertRegex(self.arg("FLUTTER_SHA256"), r"^[0-9a-f]{64}$")
+        self.assertRegex(self.arg("GO_SHA256"), r"^[0-9a-f]{64}$")
+        self.assertEqual(self.dockerfile.count("| sha256sum -c -"), 2)
+        self.assertIn("GOTOOLCHAIN=local", self.dockerfile)
+        with open(os.path.join(ROOT, ".github", "dependabot.yml"), encoding="utf-8") as f:
+            self.assertIn("directory: /.github/images/linux-build", f.read())
+
+    def test_it_has_what_the_job_installs_without_it(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            linux = WorkflowTest.jobs(f.read())["linux"]
+        step = linux[linux.index("--no-install-recommends") + len("--no-install-recommends"):]
+        step = step[:step.index("\n\n")]
+        wanted = set(step.split()) - {"\\"}
+        self.assertIn("g++", wanted)
+        self.assertIn("dpkg-dev", wanted)
+        image = self.dockerfile[self.dockerfile.index("apt-get install"):]
+        image = set(image[:image.index("rm -rf /var/lib/apt/lists")].split())
+        self.assertTrue(wanted)
+        self.assertEqual(sorted(wanted - image), [])
+
+    def test_image_file(self):
+        values = ci_plan.read_image_file(os.path.join(self.FOLDER, "image.txt"))
+        self.assertEqual(set(values), {"image", "dockerfile-sha256"})
+        if values["image"]:
+            self.assertRegex(values["image"],
+                             r"^ghcr\.io/robertostrowskijagoda/zen-ci@sha256:[0-9a-f]{64}$")
+
+    def test_only_the_image_workflow_writes_packages(self):
+        folder = os.path.join(ROOT, ".github", "workflows")
+        for name in sorted(os.listdir(folder)):
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                text = f.read()
+            if name == "ci-image.yml":
+                self.assertIn("packages: write", text)
+                self.assertIn("if: github.ref == 'refs/heads/main'", text)
+                self.assertIn("ci_plan.py record .github/images/linux-build", text)
+                self.assertIn("git add .github/images/linux-build/image.txt\n", text)
+                self.assertIn("permissions: {}", text)
+            else:
+                self.assertNotIn("packages: write", text, name)
+
+
+class EmulatorCachesTest(unittest.TestCase):
+    def test_gradle_is_cached_and_main_writes_the_caches(self):
+        with open(os.path.join(ROOT, ".github/workflows/android-emulator.yml"),
+                  encoding="utf-8") as f:
+            workflow = f.read()
+        self.assertIn("cache: gradle", workflow)
+        self.assertIn("schedule:", workflow)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+        # The system image downloads while the apps build.
+        self.assertIn(') > "$RUNNER_TEMP/avd.log" 2>&1 &', workflow)
+        self.assertIn("avd.status", workflow[workflow.index("name: Start the emulator"):])
 
 
 class PinnedActionsTest(unittest.TestCase):
