@@ -1338,6 +1338,13 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required ChatMessageDeliveryState deliveryState,
   });
 
+  /// Runs [change] of a conversation's delivery or read state after the
+  /// ones queued before it (`social_hub_controller_retention.dart`).
+  Future<void> _editDeliveryOf(
+    String peerAddress,
+    Future<void> Function() change,
+  );
+
   Future<void> _sendReadReceiptIfNeeded(
     String peerAddress, {
     int? readAtMillis,
