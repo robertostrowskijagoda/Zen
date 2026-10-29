@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -61,6 +62,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
@@ -847,9 +849,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// from 8 min ago, "ostatnio w sieci 2 godz. temu") is not older than it
   /// was.
   SocialHubState _withConfirmedPresence(SocialHubState hub) {
-    Map<String, FriendProfile>? friends;
-    for (final MapEntry<String, FriendProfile> entry in hub.friends.entries) {
-      final FriendProfile friend = entry.value;
+    final FriendshipBook book = hub.book.editAll((FriendProfile friend) {
       final String key = PeerShareCodec.normalizeAddress(friend.address);
       final int confirmed = _presenceConfirmedAt[key] ?? 0;
       final int seen = _presenceSeenAt[key] ?? 0;
@@ -859,18 +859,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       if (confirmed <= friend.presenceAtMillis &&
           seen <= friend.lastPresenceAtMillis &&
           opened <= friend.lastOpenedAtMillis) {
-        continue;
+        return friend;
       }
-      (friends ??= Map<String, FriendProfile>.from(
-        hub.friends,
-      ))[entry.key] = friend.copyWith(
+      return friend.copyWith(
         presenceAtMillis: max(confirmed, friend.presenceAtMillis),
         lastPresenceAtMillis: max(seen, friend.lastPresenceAtMillis),
         lastOpenedAtMillis: max(opened, friend.lastOpenedAtMillis),
       );
-    }
-    return friends == null ? hub : hub.copyWith(friends: friends);
+    });
+    return identical(book, hub.book) ? hub : hub.copyWith(book: book);
   }
+
+  /// This moment on this device, for what the friendship book records.
+  FriendshipTick get _friendshipTick => FriendshipTick.now(
+    PeerShareCodec.normalizeAddress(
+      ref.read(runtimeNodeSnapshotProvider).localAddress,
+    ),
+  );
 
   Timer? _persistSoonTimer;
 

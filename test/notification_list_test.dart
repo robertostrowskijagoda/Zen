@@ -10,6 +10,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -58,7 +59,9 @@ Future<ProviderContainer> _pumpApp(
           appSecurityServiceProvider.overrideWithValue(security),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty().copyWith(
-            friends: <String, FriendProfile>{friend.address: friend},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{friend.address: friend},
+            ),
             inbox: inbox,
             backgroundAlerts: alerts,
           ),

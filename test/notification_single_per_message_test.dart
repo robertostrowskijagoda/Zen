@@ -16,6 +16,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -103,13 +104,15 @@ final class _Storage {
 
 SocialHubState _seed(LifecycleSnapshot lifecycle) =>
     SocialHubState.empty(lifecycle: lifecycle).copyWith(
-      friends: const <String, FriendProfile>{
-        _ada: FriendProfile(
-          address: _ada,
-          displayName: 'Ada',
-          status: FriendRelationshipStatus.accepted,
-        ),
-      },
+      book: FriendshipBook.restore(
+        profiles: const <String, FriendProfile>{
+          _ada: FriendProfile(
+            address: _ada,
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.accepted,
+          ),
+        },
+      ),
       groups: const <String, GroupProfile>{_groupId: _group},
     );
 

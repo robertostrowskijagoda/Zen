@@ -9,6 +9,7 @@ import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -39,25 +40,27 @@ Widget _app({int parkFriends = 0}) => ProviderScope(
     ),
     socialHubSeedProvider.overrideWithValue(
       SocialHubState.empty().copyWith(
-        friends: <String, FriendProfile>{
-          for (int i = 0; i < parkFriends; i++)
-            'park$i.ygg': FriendProfile(
-              address: 'park$i.ygg',
-              displayName: 'Parkowy $i',
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            for (int i = 0; i < parkFriends; i++)
+              'park$i.ygg': FriendProfile(
+                address: 'park$i.ygg',
+                displayName: 'Parkowy $i',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            _zofia: const FriendProfile(
+              address: _zofia,
+              displayName: 'Zofia Żółkiewska',
               status: FriendRelationshipStatus.accepted,
             ),
-          _zofia: const FriendProfile(
-            address: _zofia,
-            displayName: 'Zofia Żółkiewska',
-            status: FriendRelationshipStatus.accepted,
-          ),
-          _jan: const FriendProfile(
-            address: _jan,
-            displayName: 'Jan',
-            nickname: 'Sąsiad',
-            status: FriendRelationshipStatus.accepted,
-          ),
-        },
+            _jan: const FriendProfile(
+              address: _jan,
+              displayName: 'Jan',
+              nickname: 'Sąsiad',
+              status: FriendRelationshipStatus.accepted,
+            ),
+          },
+        ),
       ),
     ),
   ],

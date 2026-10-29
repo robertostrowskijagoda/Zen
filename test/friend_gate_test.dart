@@ -7,6 +7,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -43,13 +44,15 @@ void main() {
     FriendRelationshipStatus status,
   ) {
     return SocialHubState.empty().copyWith(
-      friends: <String, FriendProfile>{
-        address: FriendProfile(
-          address: address,
-          displayName: 'Ada',
-          status: status,
-        ),
-      },
+      book: FriendshipBook.restore(
+        profiles: <String, FriendProfile>{
+          address: FriendProfile(
+            address: address,
+            displayName: 'Ada',
+            status: status,
+          ),
+        },
+      ),
     );
   }
 
@@ -228,13 +231,15 @@ void main() {
       final MemorySignalTransport transport = MemorySignalTransport();
       final ProviderContainer container = buildContainer(
         seed: SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{
-            canonical: const FriendProfile(
-              address: canonical,
-              displayName: 'Ada',
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              canonical: const FriendProfile(
+                address: canonical,
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
         ),
         transport: transport,
       );
@@ -280,13 +285,15 @@ void main() {
       final MemorySignalTransport transport = MemorySignalTransport();
       final ProviderContainer container = buildContainer(
         seed: SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{
-            canonical: const FriendProfile(
-              address: canonical,
-              displayName: 'Ada',
-              status: FriendRelationshipStatus.pendingOutgoing,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              canonical: const FriendProfile(
+                address: canonical,
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.pendingOutgoing,
+              ),
+            },
+          ),
         ),
         transport: transport,
       );

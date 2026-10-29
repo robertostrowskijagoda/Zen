@@ -19,6 +19,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -87,11 +88,13 @@ final class _Harness {
         socialHubSeedProvider.overrideWithValue(
           seed ??
               SocialHubState.empty(lifecycle: _focused).copyWith(
-                friends: <String, FriendProfile>{
-                  ada: _friend(ada, 'Ada'),
-                  bob: _friend(bob, 'Bob'),
-                  cyd: _friend(cyd, 'Cyd'),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    ada: _friend(ada, 'Ada'),
+                    bob: _friend(bob, 'Bob'),
+                    cyd: _friend(cyd, 'Cyd'),
+                  },
+                ),
               ),
         ),
       ],
@@ -305,7 +308,9 @@ void main() {
       () async {
         final _Harness h = _Harness(
           seed: SocialHubState.empty(lifecycle: _background).copyWith(
-            friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
           ),
         );
         for (int i = 0; i < 4; i++) {
@@ -353,7 +358,9 @@ void main() {
     test('someone leaving is a timeline note, not a notification', () async {
       final _Harness h = _Harness(
         seed: SocialHubState.empty(lifecycle: _background).copyWith(
-          friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
           groups: <String, GroupProfile>{
             'g4': GroupProfile(
               id: 'g4',
@@ -380,9 +387,11 @@ void main() {
 
     test('messages for a group we are not in are ignored', () async {
       final _Harness h = _Harness(
-        seed: SocialHubState.empty(
-          lifecycle: _background,
-        ).copyWith(friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')}),
+        seed: SocialHubState.empty(lifecycle: _background).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
+        ),
       );
       await h.deliver(ada, <String, dynamic>{
         'type': 'group_message',
@@ -399,7 +408,9 @@ void main() {
     test('a repeated group message is stored and announced once', () async {
       final _Harness h = _Harness(
         seed: SocialHubState.empty(lifecycle: _background).copyWith(
-          friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
           groups: <String, GroupProfile>{
             'g5': GroupProfile(
               id: 'g5',
@@ -427,9 +438,11 @@ void main() {
 
     test('a repeated direct message counts as unread once', () async {
       final _Harness h = _Harness(
-        seed: SocialHubState.empty(
-          lifecycle: _background,
-        ).copyWith(friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')}),
+        seed: SocialHubState.empty(lifecycle: _background).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
+        ),
       );
       final Map<String, dynamic> message = <String, dynamic>{
         'type': 'message',
@@ -447,9 +460,11 @@ void main() {
 
     test('a visible but unfocused window still notifies', () async {
       final _Harness h = _Harness(
-        seed: SocialHubState.empty(
-          lifecycle: _visibleUnfocused,
-        ).copyWith(friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')}),
+        seed: SocialHubState.empty(lifecycle: _visibleUnfocused).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
+        ),
       );
       await h.deliver(ada, <String, dynamic>{
         'type': 'message',
@@ -466,7 +481,9 @@ void main() {
         final _Harness h = _Harness(
           hideContent: true,
           seed: SocialHubState.empty(lifecycle: _visibleUnfocused).copyWith(
-            friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
           ),
         );
         await h.deliver(ada, <String, dynamic>{
@@ -493,9 +510,11 @@ void main() {
 
     test('a burst from one chat folds into one quiet, stacked entry', () async {
       final _Harness h = _Harness(
-        seed: SocialHubState.empty(
-          lifecycle: _background,
-        ).copyWith(friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')}),
+        seed: SocialHubState.empty(lifecycle: _background).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
+        ),
       );
       for (int i = 1; i <= 3; i++) {
         await h.deliver(ada, <String, dynamic>{
@@ -521,9 +540,11 @@ void main() {
       LifecycleSnapshot lifecycle = _background,
     }) async {
       final _Harness h = _Harness(
-        seed: SocialHubState.empty(
-          lifecycle: lifecycle,
-        ).copyWith(friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')}),
+        seed: SocialHubState.empty(lifecycle: lifecycle).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
+        ),
       );
       await h.deliver(ada, _invite('gp', <String>[ada, bob]));
       h.transport.sentSignals.clear();
@@ -585,10 +606,12 @@ void main() {
       final _Harness h = _Harness(
         snapshotStore: store,
         seed: SocialHubState.empty(lifecycle: _background).copyWith(
-          friends: <String, FriendProfile>{
-            ada: _friend(ada, 'Ada'),
-            bob: _friend(bob, 'Bob'),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              ada: _friend(ada, 'Ada'),
+              bob: _friend(bob, 'Bob'),
+            },
+          ),
         ),
       );
       // A message can overtake the invitation on the network.
@@ -791,7 +814,9 @@ void main() {
         'notifies', () async {
       final _Harness h = _Harness(
         seed: SocialHubState.empty(lifecycle: _focused).copyWith(
-          friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+          ),
           groups: <String, GroupProfile>{'gr': joined()},
         ),
       );
@@ -816,7 +841,9 @@ void main() {
       () async {
         final _Harness h = _Harness(
           seed: SocialHubState.empty(lifecycle: _focused).copyWith(
-            friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
             groups: <String, GroupProfile>{'gr': joined()},
           ),
         );
@@ -830,10 +857,12 @@ void main() {
       () async {
         final _Harness h = _Harness(
           seed: SocialHubState.empty(lifecycle: _focused).copyWith(
-            friends: <String, FriendProfile>{
-              ada: _friend(ada, 'Ada'),
-              cyd: _friend(cyd, 'Cyd'),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                ada: _friend(ada, 'Ada'),
+                cyd: _friend(cyd, 'Cyd'),
+              },
+            ),
             groups: <String, GroupProfile>{'gr': joined()},
           ),
         );
@@ -852,7 +881,9 @@ void main() {
       () async {
         final _Harness h = _Harness(
           seed: SocialHubState.empty(lifecycle: _focused).copyWith(
-            friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
             groups: <String, GroupProfile>{'gr': joined()},
           ),
         );
@@ -869,10 +900,12 @@ void main() {
   test('a call ringing out leaves other chats\' notifications alone', () async {
     final _Harness h = _Harness(
       seed: SocialHubState.empty(lifecycle: _background).copyWith(
-        friends: <String, FriendProfile>{
-          ada: _friend(ada, 'Ada'),
-          bob: _friend(bob, 'Bob'),
-        },
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            ada: _friend(ada, 'Ada'),
+            bob: _friend(bob, 'Bob'),
+          },
+        ),
       ),
       extraOverrides: [
         callRingingWaitTimeoutProvider.overrideWithValue(

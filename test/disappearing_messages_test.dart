@@ -18,6 +18,7 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -59,18 +60,20 @@ final class _Harness {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: <String, FriendProfile>{
-              ada: FriendProfile(
-                address: ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-              bob: FriendProfile(
-                address: bob,
-                displayName: 'Bob',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                ada: FriendProfile(
+                  address: ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                bob: FriendProfile(
+                  address: bob,
+                  displayName: 'Bob',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
             groups: <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',

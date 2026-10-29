@@ -20,6 +20,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/shell/composer_drafts.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -56,18 +57,20 @@ Future<void> _rest(WidgetTester tester) async {
 }
 
 SocialHubState _social() => SocialHubState.empty().copyWith(
-  friends: const <String, FriendProfile>{
-    _ada: FriendProfile(
-      address: _ada,
-      displayName: 'Ada',
-      status: FriendRelationshipStatus.accepted,
-    ),
-    _bob: FriendProfile(
-      address: _bob,
-      displayName: 'Bob',
-      status: FriendRelationshipStatus.accepted,
-    ),
-  },
+  book: FriendshipBook.restore(
+    profiles: const <String, FriendProfile>{
+      _ada: FriendProfile(
+        address: _ada,
+        displayName: 'Ada',
+        status: FriendRelationshipStatus.accepted,
+      ),
+      _bob: FriendProfile(
+        address: _bob,
+        displayName: 'Bob',
+        status: FriendRelationshipStatus.accepted,
+      ),
+    },
+  ),
   groups: const <String, GroupProfile>{
     _groupId: GroupProfile(
       id: _groupId,

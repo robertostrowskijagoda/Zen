@@ -15,6 +15,7 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -439,13 +440,15 @@ final class _Peer {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: <String, FriendProfile>{
-              peerAddress: FriendProfile(
-                address: peerAddress,
-                displayName: peerName,
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                peerAddress: FriendProfile(
+                  address: peerAddress,
+                  displayName: peerName,
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
           ),
         ),
       ],

@@ -20,6 +20,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -75,25 +76,27 @@ List<ChatMessage> _thread(String sender, {int count = 60}) => <ChatMessage>[
 
 SocialHubState _social({RuntimeRouteIntent? launch, int friends = 1}) {
   return SocialHubState.empty().copyWith(
-    friends: <String, FriendProfile>{
-      _ada: const FriendProfile(
-        address: _ada,
-        displayName: 'Ada',
-        status: FriendRelationshipStatus.accepted,
-      ),
-      _bob: const FriendProfile(
-        address: _bob,
-        displayName: 'Bob',
-        status: FriendRelationshipStatus.accepted,
-      ),
-      // Enough people for the chat list to scroll.
-      for (int i = 0; i < friends; i++)
-        'f$i.ygg': FriendProfile(
-          address: 'f$i.ygg',
-          displayName: 'Znajomy $i',
+    book: FriendshipBook.restore(
+      profiles: <String, FriendProfile>{
+        _ada: const FriendProfile(
+          address: _ada,
+          displayName: 'Ada',
           status: FriendRelationshipStatus.accepted,
         ),
-    },
+        _bob: const FriendProfile(
+          address: _bob,
+          displayName: 'Bob',
+          status: FriendRelationshipStatus.accepted,
+        ),
+        // Enough people for the chat list to scroll.
+        for (int i = 0; i < friends; i++)
+          'f$i.ygg': FriendProfile(
+            address: 'f$i.ygg',
+            displayName: 'Znajomy $i',
+            status: FriendRelationshipStatus.accepted,
+          ),
+      },
+    ),
     groups: const <String, GroupProfile>{
       _groupId: GroupProfile(
         id: _groupId,

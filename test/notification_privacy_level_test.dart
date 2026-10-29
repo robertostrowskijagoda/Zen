@@ -16,6 +16,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -65,18 +66,20 @@ SocialHubState _seed(
   LifecycleSnapshot lifecycle, {
   Map<String, NotificationPrivacy> own = const <String, NotificationPrivacy>{},
 }) => SocialHubState.empty(lifecycle: lifecycle).copyWith(
-  friends: const <String, FriendProfile>{
-    _ada: FriendProfile(
-      address: _ada,
-      displayName: 'Ada',
-      status: FriendRelationshipStatus.accepted,
-    ),
-    _bob: FriendProfile(
-      address: _bob,
-      displayName: 'Bob',
-      status: FriendRelationshipStatus.accepted,
-    ),
-  },
+  book: FriendshipBook.restore(
+    profiles: const <String, FriendProfile>{
+      _ada: FriendProfile(
+        address: _ada,
+        displayName: 'Ada',
+        status: FriendRelationshipStatus.accepted,
+      ),
+      _bob: FriendProfile(
+        address: _bob,
+        displayName: 'Bob',
+        status: FriendRelationshipStatus.accepted,
+      ),
+    },
+  ),
   groups: const <String, GroupProfile>{
     _groupId: GroupProfile(
       id: _groupId,
@@ -255,14 +258,16 @@ void main() {
     SocialHubState mixed(LifecycleSnapshot lifecycle) {
       final SocialHubState seeded = _seed(lifecycle);
       return seeded.copyWith(
-        friends: <String, FriendProfile>{
-          ...seeded.friends,
-          _pat: const FriendProfile(
-            address: _pat,
-            displayName: 'Ada',
-            status: FriendRelationshipStatus.pendingIncoming,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            ...seeded.friends,
+            _pat: const FriendProfile(
+              address: _pat,
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.pendingIncoming,
+            ),
+          },
+        ),
         groups: <String, GroupProfile>{
           _groupId: seeded.groups[_groupId]!.copyWith(
             memberAddresses: <String>[_ada, _bob, _eve, _pat],
@@ -542,15 +547,17 @@ void main() {
       final SocialHubState seeded = _seed(_background);
       final LockedNoticeKit kit = lockedNoticeKitOf(
         seeded.copyWith(
-          friends: <String, FriendProfile>{
-            ...seeded.friends,
-            // Their friend request still waits: the name is their own.
-            _pat: const FriendProfile(
-              address: _pat,
-              displayName: 'Ada',
-              status: FriendRelationshipStatus.pendingIncoming,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              ...seeded.friends,
+              // Their friend request still waits: the name is their own.
+              _pat: const FriendProfile(
+                address: _pat,
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.pendingIncoming,
+              ),
+            },
+          ),
           groups: <String, GroupProfile>{
             _groupId: seeded.groups[_groupId]!.copyWith(
               memberAddresses: <String>[_ada, _bob, _eve, _pat],

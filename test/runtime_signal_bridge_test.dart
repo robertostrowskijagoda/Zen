@@ -14,6 +14,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -619,12 +620,14 @@ const String _invitee = '200:1111:2222:3333:4444:5555:6666:9999';
 
 SocialHubState _seedState() {
   return SocialHubState.empty().copyWith(
-    friends: <String, FriendProfile>{
-      _adaAddress: const FriendProfile(
-        address: _adaAddress,
-        displayName: 'Ada',
-        status: FriendRelationshipStatus.accepted,
-      ),
-    },
+    book: FriendshipBook.restore(
+      profiles: <String, FriendProfile>{
+        _adaAddress: const FriendProfile(
+          address: _adaAddress,
+          displayName: 'Ada',
+          status: FriendRelationshipStatus.accepted,
+        ),
+      },
+    ),
   );
 }

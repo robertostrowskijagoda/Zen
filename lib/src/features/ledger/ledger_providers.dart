@@ -382,13 +382,20 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   Future<void> takeContacts() async {
     final Map<String, dynamic>? backup = node.latestContacts();
     if (backup != null) {
-      await ref
-          .read(socialHubControllerProvider.notifier)
-          .importContactsBackup(
-            backup,
-            removedAt: node.contactRemovals(),
-            backupAt: node.latestContactsMillis,
-          );
+      final SocialHubController hub = ref.read(
+        socialHubControllerProvider.notifier,
+      );
+      await hub.importContactsBackup(
+        backup,
+        removedAt: node.contactRemovals(),
+        backupAt: node.latestContactsMillis,
+      );
+      if (hub.contactsBackupBehind(backup)) {
+        // This device knows of a removal (or a friendship) the newest copy
+        // lacks: its own copy goes out, so the devices end up agreeing
+        // whichever saved last.
+        await node.publishContacts(hub.contactsBackup());
+      }
     }
   }
 

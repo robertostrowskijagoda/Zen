@@ -39,6 +39,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -995,10 +996,12 @@ final class FriendsWorld {
           capturedAtMillis: 0,
         ),
       ).copyWith(
-        friends: <String, FriendProfile>{
-          for (final FriendProfile f in owner.state.acceptedFriends)
-            f.address: f,
-        },
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            for (final FriendProfile f in owner.state.acceptedFriends)
+              f.address: f,
+          },
+        ),
       );
 
   /// [owner]'s phone is lost and the account is restored on a new one,

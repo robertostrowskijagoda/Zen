@@ -559,8 +559,7 @@ LockedNoticeKit lockedNoticeKitOf(
     members: members,
     muted: muted,
     removed: <String>{
-      for (final String address in state.removedFriends.keys)
-        if (state.removedFriendAt(address) != null) normal(address),
+      for (final String address in state.book.removedAddresses) normal(address),
     },
     versions: <String, String>{
       for (final MapEntry<String, String> e in state.peerAppVersions.entries)

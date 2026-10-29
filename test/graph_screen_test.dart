@@ -24,6 +24,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -201,11 +202,13 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-                _celina: _friend(_celina, 'Celina'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                  _celina: _friend(_celina, 'Celina'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(transport),
@@ -387,10 +390,12 @@ void main() {
     final String loner = addr('f7');
     final String far = addr('99');
     final SocialHubState social = SocialHubState.empty().copyWith(
-      friends: <String, FriendProfile>{
-        for (final String x in <String>[a, b, c, d, e, f, loner])
-          x: _friend(x, 'N$x'),
-      },
+      book: FriendshipBook.restore(
+        profiles: <String, FriendProfile>{
+          for (final String x in <String>[a, b, c, d, e, f, loner])
+            x: _friend(x, 'N$x'),
+        },
+      ),
     );
     final MeetBook book = MeetBook()
       ..friendLists[a] = <String, String>{b: 'B', c: 'C', d: 'D'}
@@ -431,10 +436,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -562,10 +569,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -707,11 +716,13 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-                _celina: _friend(_celina, 'Celina'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                  _celina: _friend(_celina, 'Celina'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(transport),
@@ -897,10 +908,12 @@ void main() {
             socialHubAutoHydrateProvider.overrideWithValue(false),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  _ania: _friend(_ania, 'Ania'),
-                  _bartek: _friend(_bartek, 'Bartek'),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    _ania: _friend(_ania, 'Ania'),
+                    _bartek: _friend(_bartek, 'Bartek'),
+                  },
+                ),
               ),
             ),
             signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -984,10 +997,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -1079,7 +1094,11 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{_ania: _friend(_ania, 'Ania')},
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -1137,10 +1156,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),

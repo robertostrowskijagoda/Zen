@@ -15,6 +15,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -85,14 +86,16 @@ _world(
   }
   await mesh.settle();
   final SocialHubState social = SocialHubState.empty().copyWith(
-    friends: <String, FriendProfile>{
-      for (final MapEntry<String, String> f in friends.entries)
-        mesh.address(f.key): FriendProfile(
-          address: mesh.address(f.key),
-          displayName: f.value,
-          status: FriendRelationshipStatus.accepted,
-        ),
-    },
+    book: FriendshipBook.restore(
+      profiles: <String, FriendProfile>{
+        for (final MapEntry<String, String> f in friends.entries)
+          mesh.address(f.key): FriendProfile(
+            address: mesh.address(f.key),
+            displayName: f.value,
+            status: FriendRelationshipStatus.accepted,
+          ),
+      },
+    ),
   );
   return (mesh: mesh, node: nodes[reader]!, reach: reach, social: social);
 }

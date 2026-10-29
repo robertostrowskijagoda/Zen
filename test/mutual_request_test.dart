@@ -5,6 +5,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -36,13 +37,15 @@ void main() {
     final MemorySignalTransport transport = MemorySignalTransport();
     final ProviderContainer c = _hub(
       SocialHubState.empty().copyWith(
-        friends: const <String, FriendProfile>{
-          _ada: FriendProfile(
-            address: _ada,
-            displayName: 'Ada',
-            status: FriendRelationshipStatus.pendingOutgoing,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            _ada: FriendProfile(
+              address: _ada,
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.pendingOutgoing,
+            ),
+          },
+        ),
       ),
       transport,
     );
