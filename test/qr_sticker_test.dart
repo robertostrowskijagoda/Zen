@@ -21,23 +21,29 @@ import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
 
 import 'support/text_fit.dart' show loadAppFonts;
 
+/// A door code as the app makes it, with [doors] doors in its sealed-knock
+/// list.
+FlatDoorCode _door(int doors) => FlatDoorCode(
+  key: base64Url.encode(List<int>.generate(32, (int i) => i * 7)),
+  door: base64Url
+      .encode(List<int>.generate(12, (int i) => i * 3))
+      .replaceAll('=', ''),
+  inbox: PeerShareCodec.normalizeAddress('200:5d1a:9c2e::7f3b'),
+  name: 'Kowalscy, m. 12',
+  mail: FlatMailDoor(
+    slots: <String>[
+      for (int i = 1; i <= doors; i++)
+        PeerShareCodec.normalizeAddress('202:${i}a1:4b2c::${i}d'),
+    ],
+    seal: base64Url.encode(List<int>.generate(32, (int i) => 255 - i)),
+  ),
+);
+
 /// What each kind of sticker carries, as long as the app makes it (the door
-/// code with all six mailbox doors: the longest).
+/// code with every door a sticker lists: the longest).
 Map<StickerKind, String> _payloads() {
   final String ada = PeerShareCodec.normalizeAddress('201:5d1a:9c2e::7f3b');
-  final FlatDoorCode door = FlatDoorCode(
-    key: base64Url.encode(List<int>.generate(32, (int i) => i * 7)),
-    door: base64Url.encode(List<int>.generate(16, (int i) => i * 3)),
-    inbox: ada,
-    name: 'Kowalscy, m. 12',
-    mail: FlatMailDoor(
-      slots: <String>[
-        for (int i = 1; i <= 6; i++)
-          PeerShareCodec.normalizeAddress('202:${i}a1:4b2c::${i}d'),
-      ],
-      seal: base64Url.encode(List<int>.generate(32, (int i) => 255 - i)),
-    ),
-  );
+  final FlatDoorCode door = _door(kStickerSealDoors);
   return <StickerKind, String>{
     StickerKind.friendInvite: PeerShareCodec.buildLocalProfile(
       address: ada,
@@ -705,6 +711,22 @@ void main() {
     // The artwork 50 mm across: a module of 0.4 mm or more (the QR card;
     // the whole signed card of the first builds made about 0.26 mm).
     expect(scene.module / StickerScene.side * 50, greaterThanOrEqualTo(0.4));
+  });
+
+  test("a door's code keeps modules a camera reads on a 5 cm sticker", () {
+    // Six mailbox doors, as a phone has: link format 2 in digits (the JSON
+    // of 1.14's stickers made about 0.29 mm).
+    final FlatDoorCode door = _door(kDoorSlots);
+    expect(door.toLink(), endsWith('#${door.linkCode}'));
+    final StickerDesign design = StickerDesign(
+      texts: stickerPresets(StickerKind.door).first,
+    );
+    final StickerScene scene = StickerScene.build(
+      StickerScene.matrixFor(door.toLink(), design),
+      design,
+      kind: StickerKind.door,
+    );
+    expect(scene.module / StickerScene.side * 50, greaterThanOrEqualTo(0.38));
   });
 
   test('a pebble\'s ready texts: the owner\'s, with its name and author when '

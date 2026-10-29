@@ -74,6 +74,7 @@
 <meta name="twitter:image:alt" content="The Zen app icon above the name Zen and the line: A private social network for people who know each other — no servers of its own, no ads">
 <link rel="stylesheet" href="../site.css">
 <script src="../site.js"></script>
+<script src="door.js"></script>
 <style>
   /* "Open in Zen": the first thing in the page, as big as a thumb wants. */
   a.btn.open {
@@ -164,23 +165,12 @@
   var noApp = /(^|[?&])noapp=1(&|$)/.test(location.search);
   var page = location.origin + location.pathname;
 
-  // The hash is the base64url door code; only its shape and the flat name
-  // are read here. Addresses (if an old sticker has them) are never shown.
+  // The hash is the door code (door.js reads both formats); only the flat
+  // name is shown here, never the addresses in it.
   var code = (location.hash || "").replace(/^#/, "").replace(/^zen-flat:/, "");
-  var name = "";
-  if (/^[A-Za-z0-9_-]{16,2000}$/.test(code)) {
-    try {
-      var b64 = code.replace(/-/g, "+").replace(/_/g, "/");
-      while (b64.length % 4) { b64 += "="; }
-      var bytes = atob(b64);
-      var json = JSON.parse(decodeURIComponent(bytes.split("").map(function (c) {
-        return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join("")));
-      if (json && typeof json.k === "string" && typeof json.d === "string") {
-        name = typeof json.n === "string" ? json.n.slice(0, 150) : "";
-      } else { code = ""; }
-    } catch (e) { code = ""; }
-  } else { code = ""; }
+  var door = ZenDoor.decode(code);
+  var name = door ? door.name : "";
+  if (!door) { code = ""; }
 
   function onLang() {
     $("lead").textContent = Zen.t(code ? "lead" : "leadBad");
