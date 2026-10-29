@@ -278,10 +278,11 @@ Future<void> _buildBridge(File target) async {
 }
 
 /// zstd as the zstandard plugin's own library name, from the package's
-/// sources in the pub cache.
+/// sources in the pub cache: the names zstandard_linux and
+/// zstandard_windows open (`DynamicLibrary.open`).
 Future<void> _buildZstd() async {
   final String name = Platform.isLinux
-      ? 'libzstandard_linux.so'
+      ? 'libzstandard_linux_plugin.so'
       : 'zstandard_windows.dll';
   final File built = File('$_lib/$name');
   if (built.existsSync()) {
