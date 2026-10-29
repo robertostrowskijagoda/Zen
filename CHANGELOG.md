@@ -16,6 +16,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Search on the Tablica** (posts, their authors and the comments you can see) and **in the settings** (a setting by its name or the line under it).
 - Case and Polish letters do not matter ("zolw" finds "żółw"), and every word typed has to be there. Search runs only on this device over what is already decrypted for the screen: nothing typed is sent anywhere or written down, and what was read for it is dropped when the field is cleared or the screen closed. Long histories are prepared in the background and searched in pieces, so the app stays smooth with tens of thousands of messages.
 
+### Website
+- **Screenshots and short films of the app** on the home, about and features pages: a gallery that scrolls sideways (swipe, arrow buttons or arrow keys), in Polish or English, light or dark as the visitor's device is set, with alt texts in all 21 languages; the films show a still picture to visitors who asked for less motion. They are made from the app itself with a made-up demo account by `dart run tool/screenshots.dart`, and CI checks that none is missing.
+- The lock screen's "I don't remember the password" and "Other account" use the app's font, not the phone's.
+
 ## 1.14.0 — 28.10.2026
 
 ### What's new

@@ -54,7 +54,11 @@ in-app way of handing Zen to a friend).
    address, the hreflang alternates of its 21 languages (`?lang=xx`,
    English without it), Open Graph and Twitter card tags (the picture
    `og-image.png` and the icons of `manifest.webmanifest` are drawn by
-   `tool/ci/site_images.py`; run it again after the icon changes) and, on
+   `tool/ci/site_images.py`; run it again after the icon changes; the
+   app's screenshots and short films in `tool/pages/shots/` are made by
+   `dart run tool/screenshots.dart`, see docs/TESTING.md, section 4.2,
+   and are worth making again before a release that changes these
+   screens) and, on
    the home, about and install pages, structured data (SoftwareApplication,
    no ratings). At every deployment `tool/ci/site_files.py` writes
    `sitemap.xml` (only the pages without `noindex`, so neither the

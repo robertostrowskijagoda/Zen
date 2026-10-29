@@ -328,6 +328,45 @@ and `docs/images/<screen>-dark.png` for `shell`, `graph`, `chat`, `feed`,
 date (an untranslated text shows in Polish) and commit the pictures. The
 diagrams next to them (`docs/images/*.svg`) are drawn by hand.
 
+### 4.2 Screenshots and films of the website (`tool/screenshots.dart`)
+
+```
+dart run tool/screenshots.dart                    # everything, then --check
+dart run tool/screenshots.dart --lang pl          # one language
+dart run tool/screenshots.dart --only dark,phone  # light, dark, phone, desktop, lock
+dart run tool/screenshots.dart --check            # what CI runs
+```
+
+Renders the real app on the host (no device) with a demo account made up in
+`tool/screenshots/demo_account.dart`: invented names, faces and photos drawn
+from code, a conversation with a photo, a voice message and reactions, a
+group, posts, friends of friends with the dates the friends graph grew by,
+people passed nearby. Nobody in it is a real person; never put real names,
+photos or messages there. `tool/screenshots/site_screens_test.dart` does the
+rendering, once per language (Polish and English; the other 19 languages of
+the site show the English pictures), in the light and dark theme: the
+screens of `tool/screenshots/shots.dart` at phone size (360 × 780 dp at 3×,
+1080 × 2340 pixels) and one computer window (1440 × 900 pixels), and the
+frames of two short films (sending a message, the graph's timeline). The
+full-size PNG frames go to `build/shots/` with a list of layout problems
+per run (`problems-*.txt`); `tool/screenshots/encode.py` (Python with
+Pillow) turns them into WebP in `tool/pages/shots/<lang>/`: each picture at
+the best quality under 150 KB, each film a looping animated WebP at half
+size under 2 MB with a still poster (its last frame) that pages show to
+visitors who asked for less motion. Commit `tool/pages/shots/` afterwards.
+
+The app's own fonts are loaded; a colour emoji font of the computer (Segoe
+UI Emoji on Windows, Noto Color Emoji on Linux) stands in for the second
+fallback font so that reactions show their emoji, as the phone's own font
+does on a device. The same frames always give the same files, but the
+pictures are not byte-identical from day to day: dates that come from the
+clock (the graph's timeline, "today", the time of the message sent in the
+film) follow the day of the run. That is why CI does not compare pixels:
+`--check` (in the "Format and analyze" job) and `test/pages_site_test.dart`
+fail when a picture the pages use is missing, too large, of the wrong size
+or not used, or an alt text is missing in a language. Run it again after a
+visible change to these screens and after the translations are up to date.
+
 ## 5. Translations
 
 Texts in code are in Polish in `t('…')` and `tn(n, one: …, few: …, many: …)`
