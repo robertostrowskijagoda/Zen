@@ -816,8 +816,27 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
     super.dispose();
   }
 
+  /// What this device shows of the settings pages, for their search.
+  SettingsSearchDevice _searchDevice() {
+    final AppSettings settings = ref.read(appSettingsControllerProvider);
+    return SettingsSearchDevice(
+      android: Platform.isAndroid,
+      ios: Platform.isIOS,
+      inAppSounds: !Platform.isIOS,
+      platform: defaultTargetPlatform,
+      disguise: !kIsWeb && Platform.isAndroid && !isStoreBuild,
+      hasPassword: ref.read(appSecurityServiceProvider).hasPassword,
+      gifSearch: settings.gifSearch,
+      classicPalette: settings.palette == AppPalette.classic,
+      wifiDirect: ref.read(wifiDirectAvailableProvider),
+      bluetoothLinks: ref.read(bluetoothLinksAvailableProvider),
+      multipeerLinks: ref.read(multipeerLinksAvailableProvider),
+    );
+  }
+
   /// [sections] as they are, or, while something is typed in the search
-  /// field, only the rows that match it (in their groups).
+  /// field, only the rows that match it (in their groups) and, below, the
+  /// settings on the pages they open ("Wygląd › Motyw").
   List<Widget> _searched(List<Widget> sections) {
     final ZenColors zen = ZenColors.of(context);
     final SearchQuery query = SearchQuery.parse(_search.text);
@@ -853,6 +872,28 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
       for (final _SettingsGroup group in sections.whereType<_SettingsGroup>())
         if (group.matching(query) case final _SettingsGroup shown) shown,
     ];
+    // The settings on the pages the rows open, by the row that opens each.
+    final Map<String, _SettingsNavTile> rows = <String, _SettingsNavTile>{
+      for (final _SettingsGroup group in sections.whereType<_SettingsGroup>())
+        for (final _SettingsNavTile row
+            in group.tiles.whereType<_SettingsNavTile>())
+          if (row.key case final ValueKey<String> key) key.value: row,
+    };
+    final List<Widget> deep = <Widget>[
+      for (final SettingsSearchEntry e in searchSettings(
+        query,
+        settingsSearchIndex(_searchDevice()),
+      ))
+        if (rows[e.row] case final _SettingsNavTile row)
+          _SettingsSearchResult(
+            key: Key('settings-search-result-${e.key}'),
+            entry: e,
+            onTap: () => row.open(context, highlight: e.key),
+          ),
+    ];
+    if (deep.isNotEmpty) {
+      found.add(_SettingsGroup(title: t('Na stronach ustawień'), tiles: deep));
+    }
     return <Widget>[
       field,
       if (found.isEmpty)
@@ -1310,14 +1351,52 @@ class _SettingsGroup extends StatelessWidget {
 /// under it and the title of the page it opens.
 String _settingsRowText(Widget tile) => switch (tile) {
   _SettingsNavTile(:final String title, :final String subtitle) =>
-    '$title $subtitle ${tile.pageTitle ?? ''}',
+    '$title $subtitle ${tile.pageTitle ?? ''} '
+        '${_settingsRowKeywords(tile.key)}',
   _SettingsSwitchTile(:final String title, :final String subtitle) =>
     '$title $subtitle',
   _RelayNavTile() =>
     '${t('Skrzynki offline')} '
-        '${t('Znajomi, którzy przechowają Twoje wiadomości')}',
+        '${t('Znajomi, którzy przechowają Twoje wiadomości')} '
+        '${_settingsRowKeywords(const Key('settings-relay-button'))}',
   _ => '',
 };
+
+/// The other words a row of the settings list is found by.
+String _settingsRowKeywords(Key? key) => key is ValueKey<String>
+    ? (kSettingsRowKeywords[key.value] ?? const <String>[]).join(' ')
+    : '';
+
+/// A setting on a settings page that the search found: "Page › Setting",
+/// what is written under it; opens the page at it.
+class _SettingsSearchResult extends StatelessWidget {
+  const _SettingsSearchResult({
+    super.key,
+    required this.entry,
+    required this.onTap,
+  });
+
+  final SettingsSearchEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: _SettingsRowBody(
+        icon: Icons.subdirectory_arrow_right_rounded,
+        tone: zen.tone(ZenTone.system),
+        title: '${entry.page} › ${entry.title}',
+        subtitle: entry.subtitle,
+        trailing: Padding(
+          padding: const EdgeInsetsDirectional.only(end: 2),
+          child: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
+        ),
+      ),
+    );
+  }
+}
 
 /// The shared layout of a settings row: badge, title, subtitle, and
 /// whatever sits on the right (a chevron or a switch).
@@ -1414,20 +1493,32 @@ class _SettingsNavTile extends StatelessWidget {
   /// What the row is about: its colour in every theme.
   final ZenTone tone;
 
+  /// Opens what the row opens; its own page scrolled to the setting whose
+  /// widget has the key [highlight] (the settings search).
+  void open(BuildContext context, {String? highlight}) {
+    final VoidCallback? own = onTap;
+    if (own != null) {
+      own();
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => _SettingsPage(
+            title: pageTitle ?? title,
+            highlight: highlight,
+            children: pageChildren ?? const <Widget>[],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return InkWell(
-      onTap:
-          onTap ??
-          () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) => _SettingsPage(
-                title: pageTitle ?? title,
-                children: pageChildren ?? const <Widget>[],
-              ),
-            ),
-          ),
+      onTap: () => open(context),
       child: _SettingsRowBody(
         icon: icon,
         tone: zen.tone(danger ? ZenTone.safety : tone),
@@ -1599,24 +1690,141 @@ class _ContactSettingsSection extends ConsumerWidget {
   }
 }
 
-/// A settings sub-page: the panels of one topic, nothing else.
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage({required this.title, required this.children});
+/// A settings sub-page: the panels of one topic, nothing else. Opened from
+/// the settings search, it scrolls to the setting found ([highlight], the
+/// key of its widget) and marks it for a moment.
+class _SettingsPage extends StatefulWidget {
+  const _SettingsPage({
+    required this.title,
+    required this.children,
+    this.highlight,
+  });
 
   final String title;
   final List<Widget> children;
+  final String? highlight;
+
+  @override
+  State<_SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<_SettingsPage> {
+  final GlobalKey _content = GlobalKey();
+
+  /// Where the found setting is in the page's content, while it is marked.
+  Rect? _mark;
+  bool _markShown = false;
+  Timer? _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.highlight != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _goToFound());
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade?.cancel();
+    super.dispose();
+  }
+
+  /// The element of the found setting, when the page shows it (one only
+  /// shown in some states may be missing: the page opens all the same).
+  Element? _found() {
+    final Key key = Key(widget.highlight!);
+    Element? hit;
+    void visit(Element e) {
+      if (hit != null) {
+        return;
+      }
+      if (e.widget.key == key) {
+        hit = e;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    _content.currentContext?.visitChildElements(visit);
+    return hit;
+  }
+
+  Future<void> _goToFound() async {
+    final Element? found = _found();
+    if (!mounted || found == null) {
+      return;
+    }
+    await Scrollable.ensureVisible(
+      found,
+      alignment: 0.15,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    if (!mounted) {
+      return;
+    }
+    final RenderObject? box = found.renderObject;
+    final RenderObject? content = _content.currentContext?.findRenderObject();
+    if (box is! RenderBox || content is! RenderBox || !box.attached) {
+      return;
+    }
+    final Offset at = box.localToGlobal(Offset.zero, ancestor: content);
+    setState(() {
+      _mark = at & box.size;
+      _markShown = true;
+    });
+    _fade = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) {
+        setState(() => _markShown = false);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Rect? mark = _mark;
     return Scaffold(
-      appBar: AppBar(title: PageTitle(title)),
+      appBar: AppBar(title: PageTitle(widget.title)),
       body: SelectionArea(
         child: SafeArea(
           top: false,
-          child: ListView(
+          // Every panel built at once (pages are short): the found setting
+          // is there to scroll to even when it starts off screen.
+          child: SingleChildScrollView(
             key: const Key('settings-page-body'),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: children,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Column(
+                  key: _content,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: widget.children,
+                ),
+                if (mark != null)
+                  Positioned.fromRect(
+                    rect: mark.inflate(4),
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        key: const Key('settings-page-highlight'),
+                        opacity: _markShown ? 1 : 0,
+                        duration: const Duration(milliseconds: 400),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: zen.accent.withValues(alpha: 0.10),
+                            borderRadius: context.zenRadius(14),
+                            border: Border.all(color: zen.accent, width: 2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

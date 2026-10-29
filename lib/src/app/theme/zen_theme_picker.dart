@@ -233,7 +233,11 @@ class ZenThemePreview extends StatelessWidget {
                   data: theme,
                   child: DefaultTextStyle(
                     style: theme.textTheme.bodyMedium ?? const TextStyle(),
-                    child: const _MiniApp(),
+                    // A picture laid out at a fixed size and scaled as a
+                    // whole: the system's large text would only burst it.
+                    child: MediaQuery.withNoTextScaling(
+                      child: const _MiniApp(),
+                    ),
                   ),
                 ),
               ),
