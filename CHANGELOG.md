@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.1 — 29.10.2026
+
 ### What's new
 - [en] A friend's message lights up your locked screen, links in chats and posts open with a tap, and screenshots work everywhere.
 - [en] Pebbles are flat stones now and have their own place in the menu; the first message of a chat gets its second tick.
