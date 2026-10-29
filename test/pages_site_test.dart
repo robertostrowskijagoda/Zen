@@ -1748,6 +1748,13 @@ void main() {
         scrolling.add(m[1]!.trim().split('\n').last.trim());
       }
       expect(scrolling, <String>['pre', '.files-wrap', '.gallery-track']);
+      // Beside the table of contents the text keeps its column: a grid item
+      // with auto margins would grow to the row of screenshots instead.
+      final int layout = css.indexOf('.layout main {');
+      expect(
+        css.substring(layout, css.indexOf('}', layout)),
+        contains('margin: 0;'),
+      );
       for (final RegExpMatch m in RegExp(
         r'(?<![-\w])width:\s*(\d+)px',
       ).allMatches(css)) {

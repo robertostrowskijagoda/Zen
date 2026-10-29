@@ -552,7 +552,9 @@ main.prose { max-width: 780px; }
   margin: 22px 0 10px; font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
 }
 .layout { max-width: 1040px; margin: 0 auto; padding: 4px 16px 24px; }
-.layout main { padding: 0; max-width: none; min-width: 0; }
+/* No auto margins: a grid item with them shrinks to its content, and a row
+   of screenshots would then widen the page instead of scrolling. */
+.layout main { padding: 0; margin: 0; max-width: none; min-width: 0; }
 .tpl { position: relative; }
 .tpl .btn { margin-top: 4px; }
 .support-box { text-align: center; }
