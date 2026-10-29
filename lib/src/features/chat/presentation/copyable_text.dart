@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/chat/presentation/linked_text.dart';
 import 'package:zen/src/features/search/presentation/search_highlight.dart';
 import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/social/mentions.dart';
@@ -66,8 +67,9 @@ Future<void> showChatContextMenu(
 /// chat bubbles and comments. With [onReport] the menu also has "Zgłoś"
 /// — for what others wrote; [actions] come first (react, reply, …). The
 /// tokens of [mentions] in [text] show as tappable names ([MentionText]);
-/// a copy has "@name" in their place. Under a [SearchHighlight] the words
-/// searched for are marked.
+/// a copy has "@name" in their place. Web links show as links and open in
+/// the browser ([LinkedText]). Under a [SearchHighlight] the words searched
+/// for are marked.
 class CopyableText extends StatelessWidget {
   const CopyableText(
     this.text, {
@@ -119,7 +121,7 @@ class CopyableText extends StatelessWidget {
           unawaited(_menu(context, d.globalPosition)),
       child: mentions.isEmpty
           ? (searched == null
-                ? Text(text, style: style)
+                ? LinkedText(text, style: style)
                 : Text.rich(
                     TextSpan(
                       style: style,

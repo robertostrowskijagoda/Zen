@@ -79,12 +79,16 @@ Future<bool> openMap(double lat, double lon, {String label = ''}) async {
   }
 }
 
-/// Opens an https page in the browser. Anything else (another scheme, a
-/// link without a host) is refused. Returns `false` where it could not be
-/// opened, so the caller can copy the link instead.
-Future<bool> openWebLink(String url) async {
+/// Opens an https page in the browser ([allowHttp]: an http one too, for
+/// links people wrote). Anything else (another scheme, a link without a
+/// host) is refused. Returns `false` where it could not be opened, so the
+/// caller can copy the link instead.
+Future<bool> openWebLink(String url, {bool allowHttp = false}) async {
   final Uri? uri = Uri.tryParse(url.trim());
-  if (kIsWeb || uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+  final bool web =
+      uri != null &&
+      (uri.scheme == 'https' || (allowHttp && uri.scheme == 'http'));
+  if (kIsWeb || !web || uri.host.isEmpty) {
     return false;
   }
   final String link = uri.toString();
