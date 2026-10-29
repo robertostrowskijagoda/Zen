@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -331,6 +332,18 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
     }
   }
 
+  /// [mm] in centimetres as people say it: "5 cm", "18,6 cm".
+  static String _cm(double mm) {
+    final double cm = mm / 10;
+    final bool whole = (cm - cm.round()).abs() < 0.05;
+    return t('{size} cm', <String, Object?>{
+      'size': ZenFormat.number(
+        whole ? cm.round() : cm,
+        decimals: whole ? 0 : 1,
+      ),
+    });
+  }
+
   String _fileName(StickerFormat format) =>
       '${_subject.kind.fileStem}.${format.extension}';
 
@@ -408,6 +421,14 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
     final StickerScene scene = _scene();
     final StickerOutlet outlet = ref.watch(stickerOutletProvider);
     final bool logoFits = _logoFits(_subject.data);
+    final StickerSheet sheet = StickerSheet.of(design);
+    // How many copies the page would hold at this size.
+    final int tileCount = StickerSheet(
+      design.page,
+      landscape: design.landscape,
+      sizeMm: design.sizeMm,
+      tile: true,
+    ).tiles.length;
     final List<String> texts = <String>[
       design.texts.top,
       design.texts.caption,
@@ -479,35 +500,46 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              t(
-                'Kwadrat stoi na środku strony: po wydruku przytnij go po '
-                'brzegach (albo po liniach cięcia).',
-              ),
+              sheet.tiles.length > 1
+                  ? t(
+                      'Naklejki stoją na stronie w rzędach, z odstępami: po '
+                      'wydruku przytnij każdą po brzegach (albo po liniach '
+                      'cięcia).',
+                    )
+                  : t(
+                      'Kwadrat stoi na środku strony: po wydruku przytnij go '
+                      'po brzegach (albo po liniach cięcia).',
+                    ),
               textAlign: TextAlign.center,
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
             if (widget.subjects.length > 1) ...<Widget>[
               ZenSection(t('Co otwiera kod')),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  for (final (int i, StickerSubject s)
-                      in widget.subjects.indexed)
-                    ChoiceChip(
-                      key: Key('sticker-subject-${s.kind.name}'),
-                      label: Text(s.label),
-                      selected: i == _chosen,
-                      onSelected: (_) {
-                        if (i == _chosen) {
-                          return;
-                        }
-                        setState(() => _chosen = i);
-                        _showTexts();
-                      },
+              // Rows, not chips: a chip keeps its label to one line, and
+              // these are long in large text.
+              for (final (int i, StickerSubject s) in widget.subjects.indexed)
+                Semantics(
+                  inMutuallyExclusiveGroup: true,
+                  checked: i == _chosen,
+                  child: ListTile(
+                    key: Key('sticker-subject-${s.kind.name}'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    selected: i == _chosen,
+                    leading: Icon(
+                      i == _chosen
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_unchecked_rounded,
                     ),
-                ],
-              ),
+                    title: Text(s.label),
+                    onTap: () {
+                      if (i == _chosen) {
+                        return;
+                      }
+                      setState(() => _chosen = i);
+                      _showTexts();
+                    },
+                  ),
+                ),
             ],
             ZenSection(t('Teksty')),
             Align(
@@ -535,7 +567,11 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
               controller: _caption,
               maxLength: StickerDesign.maxCaption,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: t('Mały napis pod kodem')),
+              decoration: InputDecoration(
+                // Two lines when large text needs them (the field is empty
+                // on most stickers, so the label sits in it at full size).
+                label: Text(t('Mały napis pod kodem'), maxLines: 2),
+              ),
               onChanged: (_) => _textsChanged(),
             ),
             TextField(
@@ -634,6 +670,65 @@ class _StickerDesignerScreenState extends ConsumerState<StickerDesignerScreen> {
                 (bool v) => _change(design.copyWith(landscape: v)),
               ),
             ],
+            if (design.page.sizable) ...<Widget>[
+              label(t('ROZMIAR NAKLEJKI')),
+              chips<int>(
+                'size',
+                <int>[
+                  StickerDesign.largest,
+                  ...StickerSheet.sizesMm(design.page),
+                ],
+                sheet.largest ? StickerDesign.largest : design.sizeMm,
+                // A chip keeps to one line: the largest's size is in the
+                // hint under the chips.
+                (int mm) => mm == StickerDesign.largest
+                    ? t('Największy')
+                    : _cm(mm.toDouble()),
+                (int mm) => _change(design.copyWith(sizeMm: mm)),
+              ),
+              const SizedBox(height: 10),
+              _ModuleHint(
+                side: _cm(sheet.sideMm),
+                moduleMm: printedModuleMm(scene, sheet),
+                grid: scene.matrix.size,
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: StickerSheetPreview(
+                  key: const Key('sticker-sheet-preview'),
+                  scene: scene,
+                  sheet: sheet,
+                  cropMarks: design.cropMarks,
+                  label: t(
+                    'Podgląd strony {page}: {count} × naklejka {size}',
+                    <String, Object?>{
+                      'page': design.page.label,
+                      'count': sheet.tiles.length,
+                      'size': _cm(sheet.sideMm),
+                    },
+                  ),
+                ),
+              ),
+            ],
+            if (tileCount > 1)
+              SwitchListTile(
+                key: const Key('sticker-tile'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                title: Text(t('Kilka na stronie')),
+                subtitle: Text(
+                  tn(
+                    tileCount,
+                    one:
+                        '{n} naklejka na jednej stronie, z odstępami do cięcia',
+                    few:
+                        '{n} naklejki na jednej stronie, z odstępami do cięcia',
+                    many:
+                        '{n} naklejek na jednej stronie, z odstępami do cięcia',
+                  ),
+                ),
+                value: design.tile,
+                onChanged: (bool v) => _change(design.copyWith(tile: v)),
+              ),
             if (design.page.hasMargins)
               SwitchListTile(
                 key: const Key('sticker-crop-marks'),
@@ -732,6 +827,159 @@ class _StickerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_StickerPainter old) => !identical(old.scene, scene);
+}
+
+/// The whole page of [sheet] drawn [height] high, every copy of [scene] on
+/// it at scale, so the chosen size shows against the paper.
+class StickerSheetPreview extends StatelessWidget {
+  const StickerSheetPreview({
+    required this.scene,
+    required this.sheet,
+    required this.label,
+    this.cropMarks = true,
+    this.height = 180,
+    super.key,
+  });
+
+  final StickerScene scene;
+  final StickerSheet sheet;
+
+  /// What a screen reader says about it.
+  final String label;
+  final bool cropMarks;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Semantics(
+      image: true,
+      label: label,
+      child: SizedBox(
+        width: height * sheet.widthMm / sheet.heightMm,
+        height: height,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(border: Border.all(color: zen.outline)),
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _SheetPainter(scene, sheet, cropMarks),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetPainter extends CustomPainter {
+  const _SheetPainter(this.scene, this.sheet, this.cropMarks);
+
+  final StickerScene scene;
+  final StickerSheet sheet;
+  final bool cropMarks;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas
+      ..save()
+      ..clipRect(Offset.zero & size);
+    paintStickerPage(
+      canvas,
+      scene,
+      sheet,
+      perMm: size.width / sheet.widthMm,
+      cropMarks: cropMarks,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SheetPainter old) =>
+      !identical(old.scene, scene) ||
+      !identical(old.sheet, sheet) ||
+      old.cropMarks != cropMarks;
+}
+
+/// The sticker's printed side, the printed size of one module of its code
+/// (a "dot") and the code's grid, with a warning when cameras may not read dots that small.
+class _ModuleHint extends StatelessWidget {
+  const _ModuleHint({
+    required this.side,
+    required this.moduleMm,
+    required this.grid,
+  });
+
+  /// The printed side of the sticker, for people ("5 cm").
+  final String side;
+  final double moduleMm;
+  final int grid;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ModuleSize size = ModuleSize.of(moduleMm);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          t(
+            'Bok naklejki: {side}. Jedna kropka kodu: {mm} mm, kod {n} × {n}.',
+            <String, Object?>{
+              'side': side,
+              'mm': ZenFormat.number(moduleMm, decimals: 2),
+              'n': grid,
+            },
+          ),
+          key: const Key('sticker-module-size'),
+          style: TextStyle(color: zen.textSecondary, fontSize: 13),
+        ),
+        if (size != ModuleSize.fine)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Semantics(
+              liveRegion: size == ModuleSize.tiny,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    size == ModuleSize.tiny
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    size: 20,
+                    color: size == ModuleSize.tiny
+                        ? zen.warning
+                        : zen.textSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      size == ModuleSize.tiny
+                          ? t(
+                              'Kropki kodu będą bardzo małe — wybierz większy '
+                              'rozmiar, żeby każdy aparat go odczytał.',
+                            )
+                          : t(
+                              'Kropki są dość małe — większość aparatów je '
+                              'odczyta, ale większy rozmiar skanuje się '
+                              'pewniej.',
+                            ),
+                      key: Key(
+                        size == ModuleSize.tiny
+                            ? 'sticker-module-warning'
+                            : 'sticker-module-note',
+                      ),
+                      style: TextStyle(color: zen.textPrimary, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// The remembered design of [subject]'s kind, drawn small (the door screen
