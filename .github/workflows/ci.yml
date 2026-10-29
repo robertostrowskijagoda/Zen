@@ -134,6 +134,7 @@ jobs:
         if: ${{ needs.plan.outputs.code != 'true' }}
         run: >-
           dart run tool/test.dart --results test-results
+          test/flat_door_link_test.dart
           test/legal_consent_test.dart
           test/pages_site_test.dart
           test/release_contract_test.dart

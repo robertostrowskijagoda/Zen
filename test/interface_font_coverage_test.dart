@@ -121,9 +121,6 @@ void main() {
 
   test('no title font is left over from before Baloo 2', () {
     expect(registeredFonts().keys, isNot(contains('Fredoka')));
-    expect(
-      File('assets/fonts/Fredoka-Variable.ttf').existsSync(),
-      isFalse,
-    );
+    expect(File('assets/fonts/Fredoka-Variable.ttf').existsSync(), isFalse);
   });
 }
