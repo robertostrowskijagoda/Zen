@@ -84,7 +84,14 @@ abstract final class ZenStartTrace {
   static File? get file => _file;
 
   /// A start begins (the app's own, or another account's being opened).
+  /// While one is already on its way to the first screen this only goes
+  /// on with it: `main` begins the app's start and the bootstrap's own
+  /// call must not restart the clock, or "reached the first screen after
+  /// N ms" would leave out the steps `main` took.
   static void begin() {
+    if (_sinceBegin.isRunning && !done.value) {
+      return;
+    }
     done.value = false;
     _sinceBegin
       ..reset()

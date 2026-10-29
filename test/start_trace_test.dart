@@ -110,6 +110,43 @@ void main() {
     expect(await running, 'done');
   });
 
+  test('the first screen is timed from the first begin of the process, not '
+      'from the bootstrap begin that follows it', () async {
+    // main begins, takes its own steps…
+    ZenStartTrace.begin();
+    ZenStartTrace.attach(folder);
+    await ZenStartTrace.run<void>(
+      _lock,
+      () => Future<void>.delayed(const Duration(milliseconds: 120)),
+      timeout: const Duration(seconds: 30),
+    );
+    // …then the bootstrap begins again.
+    ZenStartTrace.begin();
+    ZenStartTrace.reached();
+    final String log = startLog().readAsStringSync();
+    expect(
+      RegExp(ZenStartTrace.beginMarker).allMatches(log),
+      hasLength(1),
+      reason: 'one start, begun once',
+    );
+    final int ms = int.parse(
+      RegExp(
+        '${ZenStartTrace.reachedMarker} after (\\d+) ms',
+      ).firstMatch(log)![1]!,
+    );
+    expect(ms, greaterThanOrEqualTo(120));
+    // A start after the first screen (another account opened) is timed
+    // on its own.
+    ZenStartTrace.begin();
+    expect(ZenStartTrace.done.value, isFalse);
+    expect(
+      RegExp(
+        ZenStartTrace.beginMarker,
+      ).allMatches(startLog().readAsStringSync()),
+      hasLength(2),
+    );
+  });
+
   test('the next start says where the previous one stopped', () async {
     ZenStartTrace.begin();
     ZenStartTrace.attach(folder);
