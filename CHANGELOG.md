@@ -10,6 +10,21 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] A friend's message lights up your locked screen, links in chats and posts open with a tap, and screenshots work everywhere.
+- [en] Pebbles are flat stones now and have their own place in the menu; the first message of a chat gets its second tick.
+- [pl] Wiadomość od znajomego rozświetla zablokowany ekran, linki w czatach i postach otwierają się po dotknięciu, a zrzuty ekranu działają wszędzie.
+- [pl] Kamyczki to teraz płaskie kamienie i mają własne miejsce w menu; pierwsza wiadomość w czacie dostaje drugą fajkę.
+
+### Fixes and changes
+- **Notifications on a dark screen**: a friend's message or invitation that alerts lights the screen for a few seconds, as other messengers do, so it shows on the lock screen (with only what its privacy level allows there); not under "Do not disturb" and not for quiet notifications.
+- **Links** in messages, comments and posts are underlined and open in the browser with a tap (copied where they cannot be opened).
+- **Screenshots and screen recording are allowed everywhere**: the "Blokuj zrzuty i nagrywanie ekranu" setting is gone, and the protection older versions left on the window is lifted at start.
+- **Delivery ticks**: a friend's receipt is no longer overwritten by the send's own later "sent", which left the first message of a chat with one tick.
+- **Pebbles** are all flat stones, as people paint them, in the app and on the pebble page, and have their own place on the rail next to the Tablica and the films.
+- **Update notice**: phones on 1.14 could miss it (a silent channel and GitHub's request limit on mobile data); both were fixed in 1.15.0, so from 1.15.0 on the notice comes through the website and shows in the status bar.
+- CI: the emulator's start test runs as an installed app (flutter's test runner cannot open Zen's launcher alias), the emulator's start and the monkey run are bounded in time, the Linux Go bridge builds without a version-control stamp (CI's container), the promo film has no captions track and the promo page shows the poster of its language.
+
 ## 1.15.0 — 29.10.2026
 
 ### What's new
