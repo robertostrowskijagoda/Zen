@@ -149,9 +149,24 @@ cannot read it.
 - Your own node answers no "who are you" questions (operating system,
   version) and has no admin socket.
 
-**Your own bridge.** Zen on a computer helps others connect when the router
-allows it. You can also run a permanent Yggdrasil node yourself; see the
-[README](../../README.md#your-own-bridge-for-advanced-users).
+### Your own bridge (for advanced users)
+
+Zen on a computer helps others connect by itself when the router allows it. You can
+also set up a permanent bridge without Zen — an ordinary Yggdrasil node that runs
+around the clock and helps everyone (it can't see the content of messages):
+
+1. A computer that is always on and has a public IP address: a VPS server or a home
+   computer / Raspberry Pi with a port forwarded in the router.
+2. Install Yggdrasil following the
+   [instructions on the project's site](https://yggdrasil-network.github.io/installation.html)
+   (Linux, Windows, macOS, routers). The config file is created by `yggdrasil -genconf`.
+3. In the [configuration](https://yggdrasil-network.github.io/configuration.html)
+   put e.g. `tls://0.0.0.0:443` in `Listen`, and a few public nodes in `Peers`.
+   Restart the service and open that port in the firewall.
+4. Add your node to the
+   [list of public nodes](https://github.com/yggdrasil-network/public-peers)
+   (pull request). Zen takes its nodes from that list, so later versions of Zen will
+   connect through your bridge too.
 
 ## How many people use Zen
 

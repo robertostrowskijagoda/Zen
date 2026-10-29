@@ -9,10 +9,12 @@ UI strings quoted below are the app's English labels ("Pass it on" is the
 in-app way of handing Zen to a friend).
 
 - **Repository:** https://github.com/robertostrowskijagoda/Zen
-- **Website:** the human-facing page is the repository `README.md`. The only
-  file on GitHub Pages is the invitation page (`tool/pages/index.html`,
-  workflow `pages.yml`); it opens Zen with the code from a QR code or shows
-  the download links.
+- **Website:** https://robertostrowskijagoda.github.io/Zen/ (`tool/pages`,
+  deployed by `pages.yml`): the invitation page (it opens Zen
+  with the code from a QR code or shows the download links), the install
+  pages, the guide, features, support and about pages, and the SideStore
+  source. On GitHub the human-facing page is the repository `README.md`,
+  with the details in `docs/INSTALL.md`.
 - **Android package:** `com.roj.zen`.
 - **License:** `LICENSE` — GPL-3.0-only (the unmodified GNU text), with
   additional terms under GPL section 7 in `NOTICE`: copies keep the author
@@ -306,8 +308,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
-   `flutter build apk|windows|linux|macos --release` (requirements: README,
-   "Building from source").
+   `flutter build apk|windows|linux|macos --release` (requirements:
+   [BUILDING.md](BUILDING.md)).
 4. **Files under exactly these names** (what `release.yml` produces):
    - `Zen-arm64-v8a.apk`, `Zen-armeabi-v7a.apk`, `Zen-x86_64.apk` — one APK
      per ABI (`flutter build apk --release --split-per-abi --target-platform
@@ -380,7 +382,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    (no self-update, no APK handing, no icon camouflage). Never
    attach them to a GitHub release or hand them to people to sideload.
 
-   The README links to `…/releases/latest/download/Zen-arm64-v8a.apk`,
+   The README, INSTALL.md and the install pages link to
+   `…/releases/latest/download/Zen-arm64-v8a.apk`,
    `…/releases/latest/download/Zen-Windows.zip`
    and `…/releases/latest/download/Zen-unsigned.ipa`, so fixed names always
    give the newest version in one click (likewise the other two APKs,
@@ -511,7 +514,7 @@ bridge → `flutter build ios --release --no-codesign` → `Zen-unsigned.ipa`
 Run workflow; the file is in the run's artifacts) or as part of `release.yml`
 for a `v*` tag, which attaches it to the release. The package is unsigned —
 SideStore (or AltStore) signs it on the phone with the person's own Apple
-Account (README, section "iPhone"; the install page adds the source
+Account ([INSTALL.md](INSTALL.md#iphone); the install page adds the source
 `apps.json` and links `releases/latest/download/Zen-unsigned.ipa`, which
 follows every release). The app's update notice on iPhone and iPad
 downloads nothing itself: after "turn on LocalDevVPN", **Update in
@@ -545,7 +548,7 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   job (Ubuntu 24.04). **GitHub retires the `ubuntu-22.04` images in April
   2027** (with brownouts before): by then move the Linux jobs into an
   `ubuntu:22.04` / `debian:12` container, or raise the baseline together
-  with the README.
+  with the README and INSTALL.md.
 - **libwebrtc.** `flutter_webrtc` downloads the prebuilt libwebrtc for
   Windows and Linux (`libwebrtc.m150.7871.03`) without a checksum of its
   own. `tool/ci/check_libwebrtc.py <platform> <bundle>` hashes the library
@@ -715,8 +718,8 @@ State as of 15.10.2026 (sources: section 6.6):
   or sum, and a **signed manifest** with the donation link, author and
   repository (section 8.2) and a canary (section 8.3).
 - **Windows:** no Authenticode signature today, so SmartScreen shows "Windows
-  protected your PC" (the README says what to click), and **Smart App
-  Control** on Windows 11 blocks Zen with no "Run anyway" (the README and
+  protected your PC" ([INSTALL.md](INSTALL.md#windows) says what to click), and **Smart App
+  Control** on Windows 11 blocks Zen with no "Run anyway" (INSTALL.md and
   the install page explain turning it off, with its cost). Antivirus
   programs may flag new unsigned files (section 3, step 5).
   Zen-Windows-arm64.zip is the same. The lasting fix is code signing:

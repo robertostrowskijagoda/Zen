@@ -1,5 +1,5 @@
 # iPhone build without signing: Zen-unsigned.ipa for SideStore / AltStore
-# (README, section "iPhone"). Runs by hand (Actions -> iOS -> Run workflow),
+# (docs/INSTALL.md, section "iPhone"). Runs by hand (Actions -> iOS -> Run workflow),
 # and for version tags as part of the Release workflow, which attaches the
 # file to the draft release with the other release files. See
 # docs/RELEASES.md. Actions are pinned to commit SHAs (Dependabot updates
