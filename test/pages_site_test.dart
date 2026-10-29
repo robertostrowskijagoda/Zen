@@ -813,7 +813,14 @@ void main() {
       for (final FileSystemEntity f in Directory(
         _site,
       ).listSync(recursive: true)) {
-        if (f is! File || f.path.endsWith('.png') || f.path.endsWith('.webp')) {
+        if (f is! File ||
+            <String>[
+              '.png',
+              '.webp',
+              '.jpg',
+              '.mp4',
+              '.webm',
+            ].any(f.path.endsWith)) {
           continue;
         }
         final String text = f.readAsStringSync().toLowerCase();
