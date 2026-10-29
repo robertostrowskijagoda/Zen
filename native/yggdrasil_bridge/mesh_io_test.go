@@ -377,6 +377,42 @@ func TestMeshRetriesAWayThatDoesNotOpen(t *testing.T) {
 	waitMeshIO(t, "the opening packet never went again", func() bool { return len(c.written()) == 2 })
 }
 
+// R5-F5: a new path to a node this node writes to, found by the core by
+// itself (the old one broke: the node restarted elsewhere in the tree), has
+// the signal packets written lately go again; call media goes once.
+func TestMeshSendsAgainWhatWentAlongAPathThatBroke(t *testing.T) {
+	c := newFakeMeshCore(t)
+	m := newTestMeshIO(t, c)
+	key, to := meshPeer(t)
+	m.learn(*address.AddrForKey(key), key, false)
+	c.open(key)
+	for _, payload := range []string{"one", "two"} {
+		if err := m.send(meshPacketTo(t, m, to, payload), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.send(meshPacketTo(t, m, to, "media"), true); err != nil {
+		t.Fatal(err)
+	}
+	waitMeshIO(t, "the packets never went", func() bool { return len(c.written()) == 3 })
+	c.found(key)
+	waitMeshIO(t, "nothing went again on the new path", func() bool { return len(c.written()) > 3 })
+	time.Sleep(50 * time.Millisecond)
+	var again []string
+	for _, write := range c.written()[3:] {
+		again = append(again, payloadOf(t, write.data))
+	}
+	if len(again) != 2 || again[0] != "one" || again[1] != "two" {
+		t.Fatalf("went again: %q", again)
+	}
+	// Once: a further path finds nothing left to send again.
+	c.found(key)
+	time.Sleep(50 * time.Millisecond)
+	if n := len(c.written()); n != 5 {
+		t.Fatalf("%d writes, want 5", n)
+	}
+}
+
 // R5-F5: a node the core found a path to although this node never wrote to
 // it (a friend that still holds a session with this node's previous
 // process) is hailed once nothing of it came through within meshHailAfter,
