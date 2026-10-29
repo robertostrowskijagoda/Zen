@@ -375,7 +375,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       OutlinedButton.icon(
         key: const Key('pebble-copy-link'),
         onPressed: () async {
-          await copyPublicText(pebbleWebLink(card));
+          await copyPublicText(pebbleShareLink(card));
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(t('Skopiowano link do kamyczka.'))),

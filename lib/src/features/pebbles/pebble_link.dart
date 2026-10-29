@@ -11,6 +11,13 @@ const String kPebblePagePath = 'k';
 String pebbleWebLink(PebbleCard card) =>
     '${zenPageUrl('$kPebblePagePath/')}#${card.linkText}';
 
+/// The link to share a pebble in a message (Kopiuj link): the whole signed
+/// card in base64url ([PebbleCard.text]), with its 16 x 16 preview, so the
+/// page shows the painted top and checks the author's signature. Longer
+/// than the QR code's [pebbleWebLink], which has no room for the preview.
+String pebbleShareLink(PebbleCard card) =>
+    '${zenPageUrl('$kPebblePagePath/')}#${card.text}';
+
 /// The link that opens the pebble straight in Zen:
 /// `zen://pebble#<digits of the QR card>` (the page's "Zbierz w Zen").
 String pebbleAppLink(PebbleCard card) => 'zen://pebble#${card.linkText}';
