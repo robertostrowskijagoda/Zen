@@ -26,6 +26,7 @@ import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -233,23 +234,25 @@ void main() {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: const <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-              _troll: FriendProfile(
-                address: _troll,
-                displayName: 'T',
-                status: FriendRelationshipStatus.blocked,
-              ),
-              _stranger: FriendProfile(
-                address: _stranger,
-                displayName: 'S',
-                status: FriendRelationshipStatus.pendingIncoming,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                _troll: FriendProfile(
+                  address: _troll,
+                  displayName: 'T',
+                  status: FriendRelationshipStatus.blocked,
+                ),
+                _stranger: FriendProfile(
+                  address: _stranger,
+                  displayName: 'S',
+                  status: FriendRelationshipStatus.pendingIncoming,
+                ),
+              },
+            ),
             groups: const <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',
@@ -288,13 +291,15 @@ void main() {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: const <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
             groups: const <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',

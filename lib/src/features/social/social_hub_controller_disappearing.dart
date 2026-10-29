@@ -359,11 +359,12 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     if (friend.lastMessagePreview == preview) {
       return;
     }
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
-      state.friends,
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(lastMessagePreview: preview),
+      ),
     );
-    friends[friend.address] = friend.copyWith(lastMessagePreview: preview);
-    state = state.copyWith(friends: friends);
   }
 
   Future<void> _scheduleDisappearSweep() async {

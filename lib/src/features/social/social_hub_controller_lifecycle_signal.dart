@@ -242,16 +242,17 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         current != null &&
         (_callMedia.activeCallId == current.id ||
             _groupMedia.activeCallId == current.id);
-    final Map<String, FriendProfile> known = state.friends;
+    final FriendshipBook known = state.book;
     state = _withTrimmedInbox(
       persisted.copyWith(
         lifecycle: state.lifecycle,
         // What is in doubt here stays so: the other isolate heard nothing
-        // of it.
-        friends: _withRememberedPresence(
-          _canonicalizeFriends(persisted.friends),
+        // of it. What is settled here and later than the copy read (a
+        // removal right before the lock) stays too: the book merges both.
+        book: _withRememberedPresence(
+          persisted.book.mergeAll(known, _friendshipTick),
           nowMillis: DateTime.now().millisecondsSinceEpoch,
-          keep: (FriendProfile friend) => known[friend.address],
+          keep: (FriendProfile friend) => known.profileOf(friend.address),
         ),
         activeCall: mediaOwnsCall
             ? current
@@ -262,36 +263,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       ),
       _appSettings,
     );
-    // A removal known here stays, whatever the copy read says.
-    state = _withRemovalsOf(before, state);
     _dismissedOrRejectedGroupIds.addAll(state.rejectedGroupIds);
     _syncCallRingingTimeout();
-  }
-
-  /// [into] with the removals and friendships [known] holds (newer wins):
-  /// a friend removed in [known] since their friendship is not in it.
-  SocialHubState _withRemovalsOf(SocialHubState known, SocialHubState into) {
-    SocialHubState next = into;
-    known.friendsSince.forEach((String address, int at) {
-      next = withFriendshipSince(next, address, at);
-    });
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
-      next.friends,
-    );
-    known.removedFriends.forEach((String address, int at) {
-      if ((next.friendsSince[address] ?? 0) > at) {
-        return;
-      }
-      next = withFriendRemovedAt(next, address, at);
-      if (known.friendByAddress(address) == null &&
-          _friendFromMap(friends, address)?.status ==
-              FriendRelationshipStatus.accepted) {
-        _removeFriend(friends, address);
-      }
-    });
-    return friends.length == next.friends.length
-        ? next
-        : next.copyWith(friends: friends);
   }
 
   Future<void> hydrateFromStore() {
@@ -386,8 +359,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         // What each friend showed last is remembered: shown as it stands
         // now when it was confirmed lately, "status nieznany" otherwise
         // until they answer (or the answers had time to come).
-        friends: _withRememberedPresence(
-          _canonicalizeFriends(persisted.friends),
+        book: _withRememberedPresence(
+          persisted.book,
           nowMillis: DateTime.now().millisecondsSinceEpoch,
         ),
         groups: _canonicalizeGroups(persisted.groups),
@@ -590,29 +563,26 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     final int timestamp =
         receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final FriendProfile? knownPeer = state.friendByAddress(signal.sender);
-    if (signal.type == ZenSignalType.friendAccept &&
-        knownPeer?.status != FriendRelationshipStatus.blocked &&
-        !FriendLifecycleReducer.isSolicitedRemoteAccept(knownPeer)) {
-      if (knownPeer?.status == FriendRelationshipStatus.pendingIncoming) {
-        // Their request already waits for the user; "accepting" on their
-        // own side skips nothing.
-        return;
+    if (signal.type == ZenSignalType.friendAccept) {
+      // What it means is the book's to say (see meaningOfAccept).
+      switch (state.book.meaningOfAccept(signal.sender)) {
+        case AcceptMeaning.admits || AcceptMeaning.repeated:
+          break;
+        case AcceptMeaning.nothing:
+          // Blocked, removed, or their own request already waits for the
+          // user: nothing to answer and nothing to show.
+          if (knownPeer?.status != FriendRelationshipStatus.blocked) {
+            return;
+          }
+        case AcceptMeaning.invitation:
+          // Nobody here invited them. An accept must never turn a stranger
+          // into a friend; it goes through everything below as the
+          // invitation it amounts to, which the user still has to confirm.
+          signal = _unsolicitedAcceptAsRequest(signal);
       }
-      if (knownPeer == null && state.removedFriendAt(signal.sender) != null) {
-        // A removed friend "accepting" (an old acceptance sent again)
-        // invited nobody: they stay removed, and no invitation shows.
-        return;
-      }
-      // Nobody here invited them. An accept must never turn a stranger into
-      // a friend; it goes through everything below as the invitation it
-      // amounts to, which the user still has to confirm.
-      signal = _unsolicitedAcceptAsRequest(signal);
     }
-    // A removed friend's new invitation shows as one (their copies kept
-    // for the app's return went with the removal).
-    if (knownPeer == null &&
-        signal.type == ZenSignalType.message &&
-        state.removedFriendAt(signal.sender) != null) {
+    if (signal.type == ZenSignalType.message &&
+        state.book.standingOf(signal.sender) == FriendshipStanding.removed) {
       // A removed friend's chat (they may not know yet, or write as to
       // someone outside their friends): not let in, no notice. A new
       // invitation from them is the way back.
@@ -986,6 +956,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal,
             timestamp,
             appSettings: _appSettings,
+            tick: _friendshipTick,
             openConversationAddress: _openConversationAddress,
             openGroupId: _openGroupId,
             dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
@@ -1010,6 +981,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       signal,
       timestamp,
       appSettings: _appSettings,
+      tick: _friendshipTick,
       openConversationAddress: _openConversationAddress,
       openGroupId: _openGroupId,
       dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
@@ -1276,6 +1248,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         queued.signal,
         queued.receivedAtMillis,
         appSettings: _appSettings,
+        tick: _friendshipTick,
         openConversationAddress: _openConversationAddress,
         openGroupId: _openGroupId,
         dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,

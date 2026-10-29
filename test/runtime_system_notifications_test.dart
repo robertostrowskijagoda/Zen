@@ -9,6 +9,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -40,13 +41,15 @@ void main() {
                 capturedAtMillis: 0,
               ),
             ).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.pendingOutgoing,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.pendingOutgoing,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -366,13 +369,15 @@ void main() {
                 capturedAtMillis: 0,
               ),
             ).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.pendingOutgoing,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.pendingOutgoing,
+                  ),
+                },
+              ),
             ),
           ),
         ],

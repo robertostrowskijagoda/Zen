@@ -10,6 +10,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 
@@ -135,7 +136,7 @@ const LifecycleSnapshot _defaultLifecycle = LifecycleSnapshot(
 final class SocialHubState {
   const SocialHubState({
     required this.lifecycle,
-    required this.friends,
+    this.book = FriendshipBook.empty,
     this.groups = const <String, GroupProfile>{},
     required this.inbox,
     required this.pendingSignalCount,
@@ -152,8 +153,6 @@ final class SocialHubState {
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.snapshotUnreadable = false,
     this.peerAppVersions = const <String, String>{},
-    this.removedFriends = const <String, int>{},
-    this.friendsSince = const <String, int>{},
   });
 
   factory SocialHubState.empty({
@@ -161,7 +160,6 @@ final class SocialHubState {
   }) {
     return SocialHubState(
       lifecycle: lifecycle,
-      friends: const <String, FriendProfile>{},
       groups: const <String, GroupProfile>{},
       inbox: const <InboxEntry>[],
       pendingSignalCount: 0,
@@ -171,39 +169,42 @@ final class SocialHubState {
   }
 
   factory SocialHubState.preview() {
-    return const SocialHubState(
+    return SocialHubState(
       lifecycle: _defaultLifecycle,
-      friends: <String, FriendProfile>{
-        'ada.ygg': FriendProfile(
-          address: 'ada.ygg',
-          displayName: 'Ada',
-          status: FriendRelationshipStatus.accepted,
-          isOnline: true,
-          presence: PeerPresence.online,
-          lastMessagePreview:
-              'Jestem online, mogę wejść na rozmowę za 5 minut.',
-          lastActivityLabel: 'Teraz',
-          unreadCount: 2,
-        ),
-        'maks.ygg': FriendProfile(
-          address: 'maks.ygg',
-          displayName: 'Maks',
-          status: FriendRelationshipStatus.accepted,
-          isOnline: true,
-          presence: PeerPresence.background,
-          lastMessagePreview:
-              'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
-          lastActivityLabel: '08:41',
-        ),
-        'nina.ygg': FriendProfile(
-          address: 'nina.ygg',
-          displayName: 'Nina',
-          status: FriendRelationshipStatus.accepted,
-          lastMessagePreview: 'Transfer skończył się bez zrywania połączenia.',
-          lastActivityLabel: 'Wczoraj',
-        ),
-      },
-      groups: <String, GroupProfile>{
+      book: FriendshipBook.restore(
+        profiles: const <String, FriendProfile>{
+          'ada.ygg': FriendProfile(
+            address: 'ada.ygg',
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.accepted,
+            isOnline: true,
+            presence: PeerPresence.online,
+            lastMessagePreview:
+                'Jestem online, mogę wejść na rozmowę za 5 minut.',
+            lastActivityLabel: 'Teraz',
+            unreadCount: 2,
+          ),
+          'maks.ygg': FriendProfile(
+            address: 'maks.ygg',
+            displayName: 'Maks',
+            status: FriendRelationshipStatus.accepted,
+            isOnline: true,
+            presence: PeerPresence.background,
+            lastMessagePreview:
+                'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
+            lastActivityLabel: '08:41',
+          ),
+          'nina.ygg': FriendProfile(
+            address: 'nina.ygg',
+            displayName: 'Nina',
+            status: FriendRelationshipStatus.accepted,
+            lastMessagePreview:
+                'Transfer skończył się bez zrywania połączenia.',
+            lastActivityLabel: 'Wczoraj',
+          ),
+        },
+      ),
+      groups: const <String, GroupProfile>{
         'preview-group-1': GroupProfile(
           id: 'preview-group-1',
           name: 'Projekt Zen',
@@ -215,7 +216,7 @@ final class SocialHubState {
           lastActivityLabel: 'Teraz',
         ),
       },
-      inbox: <InboxEntry>[
+      inbox: const <InboxEntry>[
         InboxEntry(
           id: 'preview-accept',
           type: InboxEntryType.friendAccepted,
@@ -243,13 +244,19 @@ final class SocialHubState {
         ),
       ],
       pendingSignalCount: 0,
-      backgroundAlerts: <InboxEntry>[],
+      backgroundAlerts: const <InboxEntry>[],
       pendingLaunchIntent: null,
     );
   }
 
   final LifecycleSnapshot lifecycle;
-  final Map<String, FriendProfile> friends;
+
+  /// Who is a friend, who is invited, who is blocked or was removed: the
+  /// only way to change it (see [FriendshipBook]).
+  final FriendshipBook book;
+
+  /// Every entry of [book] by normalized address (read only).
+  Map<String, FriendProfile> get friends => book.profiles;
   final Map<String, GroupProfile> groups;
   final List<InboxEntry> inbox;
   final int pendingSignalCount;
@@ -309,32 +316,9 @@ final class SocialHubState {
   /// newer Zen" hint, never for anything that guards security.
   final Map<String, String> peerAppVersions;
 
-  /// Friends who were removed (here, on another device of the account, or
-  /// who removed this person): normalized address → when. Nothing that
-  /// comes later brings them back on its own — a backup or another device
-  /// that still lists them, a copy of an old acceptance, their messages;
-  /// only a new invitation does, and it shows as one. Shared with the
-  /// account's other devices (the newer of a removal and a friendship
-  /// wins, see [friendsSince]).
-  final Map<String, int> removedFriends;
-
-  /// When a friendship was made on this account (an invitation answered,
-  /// here or on another device), by normalized address; absent for the
-  /// friendships made before this was kept. A removal older than this
-  /// does not undo it.
-  final Map<String, int> friendsSince;
-
   /// When [address] was removed as a friend, `null` when it was not (or
   /// the friendship was made again since).
-  int? removedFriendAt(String address) {
-    final int? at = removedFriends[PeerShareCodec.normalizeAddress(address)];
-    if (at == null) {
-      return null;
-    }
-    final int since =
-        friendsSince[PeerShareCodec.normalizeAddress(address)] ?? 0;
-    return since > at ? null : at;
-  }
+  int? removedFriendAt(String address) => book.removedAt(address);
 
   /// Seconds messages in conversation [key] live (0 = they stay).
   int disappearSecondsFor(String key) {
@@ -434,23 +418,11 @@ final class SocialHubState {
 
   GroupProfile? groupById(String id) => groups[id];
 
-  FriendProfile? friendByAddress(String address) {
-    final String canonical = PeerShareCodec.normalizeAddress(address);
-    final FriendProfile? direct = friends[canonical] ?? friends[address];
-    if (direct != null) {
-      return direct;
-    }
-    for (final FriendProfile friend in friends.values) {
-      if (PeerShareCodec.addressesEqual(friend.address, canonical)) {
-        return friend;
-      }
-    }
-    return null;
-  }
+  FriendProfile? friendByAddress(String address) => book.profileOf(address);
 
   SocialHubState copyWith({
     LifecycleSnapshot? lifecycle,
-    Map<String, FriendProfile>? friends,
+    FriendshipBook? book,
     Map<String, GroupProfile>? groups,
     List<InboxEntry>? inbox,
     int? pendingSignalCount,
@@ -467,12 +439,10 @@ final class SocialHubState {
     Map<String, NotificationPrivacy>? notificationPrivacy,
     bool? snapshotUnreadable,
     Map<String, String>? peerAppVersions,
-    Map<String, int>? removedFriends,
-    Map<String, int>? friendsSince,
   }) {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
-      friends: friends ?? this.friends,
+      book: book ?? this.book,
       groups: groups ?? this.groups,
       inbox: inbox ?? this.inbox,
       pendingSignalCount: pendingSignalCount ?? this.pendingSignalCount,
@@ -497,8 +467,6 @@ final class SocialHubState {
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
       peerAppVersions: peerAppVersions ?? this.peerAppVersions,
-      removedFriends: removedFriends ?? this.removedFriends,
-      friendsSince: friendsSince ?? this.friendsSince,
     );
   }
 
@@ -534,73 +502,3 @@ int _presenceRank(PeerPresence presence) => switch (presence) {
   PeerPresence.noConnection => 1,
   PeerPresence.hidden => 0,
 };
-
-/// The most removed friends remembered ([SocialHubState.removedFriends]);
-/// past it the oldest removals are forgotten.
-const int kMaxRemovedFriends = 2000;
-
-/// [state] with [address] removed as a friend at [atMillis] (a later
-/// removal already known stays). The friend list itself is not touched.
-SocialHubState withFriendRemovedAt(
-  SocialHubState state,
-  String address,
-  int atMillis,
-) {
-  final String key = PeerShareCodec.normalizeAddress(address);
-  if (key.isEmpty || (state.removedFriends[key] ?? -1) >= atMillis) {
-    return state;
-  }
-  final Map<String, int> removed = <String, int>{
-    ...state.removedFriends,
-    key: atMillis,
-  };
-  if (removed.length > kMaxRemovedFriends) {
-    final List<MapEntry<String, int>> byAge = removed.entries.toList()
-      ..sort(
-        (MapEntry<String, int> a, MapEntry<String, int> b) =>
-            a.value.compareTo(b.value),
-      );
-    for (final MapEntry<String, int> e in byAge.take(
-      removed.length - kMaxRemovedFriends,
-    )) {
-      removed.remove(e.key);
-    }
-  }
-  return state.copyWith(removedFriends: removed);
-}
-
-/// [state] with the friendship with [address] made here just now (an
-/// invitation answered): it comes after any removal known here, even one
-/// in the same millisecond.
-SocialHubState withFriendshipMadeNow(SocialHubState state, String address) {
-  final int removedAt =
-      state.removedFriends[PeerShareCodec.normalizeAddress(address)] ?? 0;
-  final int now = DateTime.now().millisecondsSinceEpoch;
-  return withFriendshipSince(
-    state,
-    address,
-    now > removedAt ? now : removedAt + 1,
-  );
-}
-
-/// [state] with the friendship with [address] made at [atMillis] (an
-/// invitation answered): a removal from before no longer counts.
-SocialHubState withFriendshipSince(
-  SocialHubState state,
-  String address,
-  int atMillis,
-) {
-  final String key = PeerShareCodec.normalizeAddress(address);
-  if (key.isEmpty) {
-    return state;
-  }
-  final int? removedAt = state.removedFriends[key];
-  return state.copyWith(
-    friendsSince: (state.friendsSince[key] ?? -1) >= atMillis
-        ? null
-        : <String, int>{...state.friendsSince, key: atMillis},
-    removedFriends: removedAt != null && removedAt < atMillis
-        ? (Map<String, int>.of(state.removedFriends)..remove(key))
-        : null,
-  );
-}

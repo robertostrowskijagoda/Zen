@@ -18,6 +18,7 @@ import 'package:zen/src/features/meet/graph/graph_snapshot.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/graph/trust_map.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -33,10 +34,12 @@ FriendProfile _friend(String address, String name) => FriendProfile(
 
 SocialHubState _social(Map<String, String> people) =>
     SocialHubState.empty().copyWith(
-      friends: <String, FriendProfile>{
-        for (final MapEntry<String, String> e in people.entries)
-          e.key: _friend(e.key, e.value),
-      },
+      book: FriendshipBook.restore(
+        profiles: <String, FriendProfile>{
+          for (final MapEntry<String, String> e in people.entries)
+            e.key: _friend(e.key, e.value),
+        },
+      ),
     );
 
 GraphNode _node(String a, String name, int ring, [List<String>? via]) =>

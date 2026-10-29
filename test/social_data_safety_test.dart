@@ -9,6 +9,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -89,7 +90,9 @@ void main() {
         final _BrokenStore store = _BrokenStore(
           MemorySocialSnapshotStore(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+              ),
             ),
           ),
         );
@@ -165,7 +168,9 @@ void main() {
       final _BrokenStore store = _BrokenStore(
         MemorySocialSnapshotStore(
           SocialHubState.empty().copyWith(
-            friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
           ),
         ),
       )..broken = false;
@@ -186,10 +191,12 @@ void main() {
   group('member list of a joined group', () {
     ProviderContainer groupContainer() => buildContainer(
       seed: SocialHubState.empty().copyWith(
-        friends: <String, FriendProfile>{
-          ada: _friend(ada, 'Ada'),
-          bob: _friend(bob, 'Bob'),
-        },
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            ada: _friend(ada, 'Ada'),
+            bob: _friend(bob, 'Bob'),
+          },
+        ),
         groups: <String, GroupProfile>{
           'g': GroupProfile(
             id: 'g',

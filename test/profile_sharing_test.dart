@@ -18,6 +18,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -61,23 +62,25 @@ final class _Harness {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: <String, FriendProfile>{
-              ada: FriendProfile(
-                address: ada,
-                status: FriendRelationshipStatus.accepted,
-              ),
-              bob: FriendProfile(
-                address: bob,
-                displayName: 'Bob',
-                nickname: 'Bobek',
-                status: FriendRelationshipStatus.accepted,
-              ),
-              eve: FriendProfile(
-                address: eve,
-                displayName: 'Ewa',
-                status: FriendRelationshipStatus.blocked,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                ada: FriendProfile(
+                  address: ada,
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                bob: FriendProfile(
+                  address: bob,
+                  displayName: 'Bob',
+                  nickname: 'Bobek',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                eve: FriendProfile(
+                  address: eve,
+                  displayName: 'Ewa',
+                  status: FriendRelationshipStatus.blocked,
+                ),
+              },
+            ),
           ),
         ),
       ],
@@ -163,16 +166,18 @@ void main() {
             capturedAtMillis: 0,
           ),
         ).copyWith(
-          friends: <String, FriendProfile>{
-            named: FriendProfile(
-              address: named,
-              status: FriendRelationshipStatus.accepted,
-            ),
-            nameless: FriendProfile(
-              address: nameless,
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              named: FriendProfile(
+                address: named,
+                status: FriendRelationshipStatus.accepted,
+              ),
+              nameless: FriendProfile(
+                address: nameless,
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
           peerProfiles: <String, PeerPublicProfile>{
             named: PeerPublicProfile(address: named, version: 1, name: 'Ada'),
           },

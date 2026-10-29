@@ -7,6 +7,7 @@ import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -266,7 +267,9 @@ void main() {
               generation: 1,
               capturedAtMillis: 1,
             ),
-            friends: const <String, FriendProfile>{},
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{},
+            ),
             inbox: <InboxEntry>[
               accepted(),
               const InboxEntry(

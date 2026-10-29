@@ -178,18 +178,16 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
         friend.unreadCount == nextUnreadCount) {
       return;
     }
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      friend.copyWith(
-        lastMessagePreview: nextPreview,
-        lastActivityLabel: nextLabel,
-        unreadCount: nextUnreadCount,
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: nextPreview,
+          lastActivityLabel: nextLabel,
+          unreadCount: nextUnreadCount,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
   }
 
   @override
@@ -225,33 +223,20 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     String? displayName,
   }) {
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    final FriendProfile? known = _friendFromMap(friends, peerAddress);
-    if (known == null && isRoutablePeerAddress(peerAddress)) {
-      // Writing to someone on the mesh never makes them a friend (it used
-      // to, with the status "accepted": a removed friend sent a file came
-      // back so). Only the local stand-ins of the preview are made here.
-      return;
-    }
-    final FriendProfile base =
-        known ??
-        FriendProfile(
-          address: peerAddress,
-          status: FriendRelationshipStatus.accepted,
-        );
-    _putFriend(
-      friends,
-      base.copyWith(
-        displayName: displayName ?? base.displayName,
-        isOnline: true,
-        lastPresenceAtMillis: timestamp,
-        lastMessagePreview: preview,
-        lastActivityLabel: t('Teraz'),
-        unreadCount: 0,
+    // Only the line of someone already in the book: writing to someone
+    // never makes them a friend (the book has no way to).
+    state = state.copyWith(
+      book: state.book.edit(
+        peerAddress,
+        (FriendProfile base) => base.copyWith(
+          displayName: displayName ?? base.displayName,
+          isOnline: true,
+          lastPresenceAtMillis: timestamp,
+          lastMessagePreview: preview,
+          lastActivityLabel: t('Teraz'),
+          unreadCount: 0,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
   }
 }

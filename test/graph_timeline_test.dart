@@ -26,6 +26,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -169,11 +170,13 @@ Future<ProviderContainer> _pumpGraph(
         socialHubAutoHydrateProvider.overrideWithValue(false),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty().copyWith(
-            friends: <String, FriendProfile>{
-              _ania: _friend(_ania, 'Ania'),
-              _bartek: _friend(_bartek, 'Bartek'),
-              _celina: _friend(_celina, 'Celina'),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+                _celina: _friend(_celina, 'Celina'),
+              },
+            ),
             groups: <String, GroupProfile>{
               'g': _group('g', _now - 200 * _day, <String>[_bartek, _celina]),
             },

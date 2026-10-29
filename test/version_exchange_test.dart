@@ -13,6 +13,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -28,18 +29,20 @@ final String _next = '${_own[0]}.${_own[1] + 1}.0';
 final String _after = '${_own[0]}.${_own[1] + 2}.0';
 
 SocialHubState _seed() => SocialHubState.empty().copyWith(
-  friends: <String, FriendProfile>{
-    _ada: const FriendProfile(
-      address: _ada,
-      displayName: 'Ada',
-      status: FriendRelationshipStatus.accepted,
-    ),
-    _bob: const FriendProfile(
-      address: _bob,
-      displayName: 'Bob',
-      status: FriendRelationshipStatus.pendingOutgoing,
-    ),
-  },
+  book: FriendshipBook.restore(
+    profiles: <String, FriendProfile>{
+      _ada: const FriendProfile(
+        address: _ada,
+        displayName: 'Ada',
+        status: FriendRelationshipStatus.accepted,
+      ),
+      _bob: const FriendProfile(
+        address: _bob,
+        displayName: 'Bob',
+        status: FriendRelationshipStatus.pendingOutgoing,
+      ),
+    },
+  ),
 );
 
 ProviderContainer _container() => ProviderContainer(

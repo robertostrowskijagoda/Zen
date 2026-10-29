@@ -21,6 +21,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -414,13 +415,15 @@ void _lockTests() {
             capturedAtMillis: 0,
           ),
         ).copyWith(
-          friends: <String, FriendProfile>{
-            fred: FriendProfile(
-              address: fred,
-              displayName: 'Fred',
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              fred: FriendProfile(
+                address: fred,
+                displayName: 'Fred',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
         ),
       );
       final MemorySignalTransport out = MemorySignalTransport();

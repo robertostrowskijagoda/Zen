@@ -28,6 +28,7 @@ import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -330,7 +331,9 @@ void main() {
           ),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{_ada: ada},
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{_ada: ada},
+              ),
             ),
           ),
         ],
@@ -609,17 +612,19 @@ void main() {
       );
       await store.save(
         SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{
-            _ada: ada.copyWith(
-              presence: PeerPresence.background,
-              presenceAtMillis: 123,
-              lastOpenedAtMillis: 45,
-            ),
-            _bob: const FriendProfile(
-              address: _bob,
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              _ada: ada.copyWith(
+                presence: PeerPresence.background,
+                presenceAtMillis: 123,
+                lastOpenedAtMillis: 45,
+              ),
+              _bob: const FriendProfile(
+                address: _bob,
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
         ),
       );
       final SocialHubState back = (await store.load())!;
@@ -666,7 +671,9 @@ void main() {
             if (store != null)
               socialSnapshotStoreProvider.overrideWithValue(store),
             socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty().copyWith(friends: friends),
+              SocialHubState.empty().copyWith(
+                book: FriendshipBook.restore(profiles: friends),
+              ),
             ),
           ],
           child: const ZenRewriteApp(),
@@ -1118,26 +1125,28 @@ void main() {
       final int now = DateTime.now().millisecondsSinceEpoch;
       final MemorySocialSnapshotStore store = MemorySocialSnapshotStore(
         SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{
-            _ada: adaAndBob[_ada]!.copyWith(
-              presence: PeerPresence.online,
-              presenceAtMillis: now - 3 * _minute,
-            ),
-            _bob: adaAndBob[_bob]!.copyWith(
-              presence: PeerPresence.background,
-              presenceAtMillis: now - _hour,
-            ),
-            _carol:
-                const FriendProfile(
-                  address: _carol,
-                  displayName: 'Carol',
-                  status: FriendRelationshipStatus.accepted,
-                ).copyWith(
-                  presence: PeerPresence.online,
-                  presenceAtMillis: now - 12 * _minute,
-                  lastOpenedAtMillis: now - 12 * _minute,
-                ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              _ada: adaAndBob[_ada]!.copyWith(
+                presence: PeerPresence.online,
+                presenceAtMillis: now - 3 * _minute,
+              ),
+              _bob: adaAndBob[_bob]!.copyWith(
+                presence: PeerPresence.background,
+                presenceAtMillis: now - _hour,
+              ),
+              _carol:
+                  const FriendProfile(
+                    address: _carol,
+                    displayName: 'Carol',
+                    status: FriendRelationshipStatus.accepted,
+                  ).copyWith(
+                    presence: PeerPresence.online,
+                    presenceAtMillis: now - 12 * _minute,
+                    lastOpenedAtMillis: now - 12 * _minute,
+                  ),
+            },
+          ),
         ),
       );
       final MemorySignalTransport transport = await pumpApp(
@@ -1249,17 +1258,19 @@ void main() {
         tester,
         store: MemorySocialSnapshotStore(
           SocialHubState.empty().copyWith(
-            friends: <String, FriendProfile>{
-              _ada:
-                  const FriendProfile(
-                    address: _ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ).copyWith(
-                    presence: PeerPresence.background,
-                    presenceAtMillis: start - _hour,
-                  ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                _ada:
+                    const FriendProfile(
+                      address: _ada,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ).copyWith(
+                      presence: PeerPresence.background,
+                      presenceAtMillis: start - _hour,
+                    ),
+              },
+            ),
           ),
         ),
       );
@@ -1383,17 +1394,19 @@ void main() {
         tester,
         store: MemorySocialSnapshotStore(
           SocialHubState.empty().copyWith(
-            friends: <String, FriendProfile>{
-              _ada:
-                  const FriendProfile(
-                    address: _ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ).copyWith(
-                    presence: PeerPresence.background,
-                    presenceAtMillis: now - _hour,
-                  ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                _ada:
+                    const FriendProfile(
+                      address: _ada,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ).copyWith(
+                      presence: PeerPresence.background,
+                      presenceAtMillis: now - _hour,
+                    ),
+              },
+            ),
           ),
         ),
       );
@@ -1471,20 +1484,22 @@ void main() {
   group('the locked service', () {
     test('its kit names friends who may see presence, not weak ones', () {
       final SocialHubState state = SocialHubState.empty().copyWith(
-        friends: const <String, FriendProfile>{
-          _ada: FriendProfile(
-            address: _ada,
-            status: FriendRelationshipStatus.accepted,
-          ),
-          _bob: FriendProfile(
-            address: _bob,
-            status: FriendRelationshipStatus.accepted,
-          ),
-          'carol.ygg': FriendProfile(
-            address: 'carol.ygg',
-            status: FriendRelationshipStatus.pendingIncoming,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            _ada: FriendProfile(
+              address: _ada,
+              status: FriendRelationshipStatus.accepted,
+            ),
+            _bob: FriendProfile(
+              address: _bob,
+              status: FriendRelationshipStatus.accepted,
+            ),
+            'carol.ygg': FriendProfile(
+              address: 'carol.ygg',
+              status: FriendRelationshipStatus.pendingIncoming,
+            ),
+          },
+        ),
       );
       final DateTime left = DateTime.fromMillisecondsSinceEpoch(_day);
       final LockedPresenceKit kit = lockedPresenceKitOf(
@@ -1725,7 +1740,9 @@ void main() {
             ),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{_ada: ada},
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{_ada: ada},
+                ),
               ),
             ),
           ],
@@ -1868,31 +1885,33 @@ void main() {
             signalTransportProvider.overrideWithValue(MemorySignalTransport()),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  _ada: FriendProfile(
-                    address: _ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                    presence: PeerPresence.background,
-                    presenceAtMillis: now,
-                    lastOpenedAtMillis: now - 5 * _minute,
-                  ),
-                  _bob: FriendProfile(
-                    address: _bob,
-                    displayName: 'Bob',
-                    status: FriendRelationshipStatus.accepted,
-                    presence: PeerPresence.hidden,
-                    presenceAtMillis: now,
-                  ),
-                  _carol: FriendProfile(
-                    address: _carol,
-                    displayName: 'Carol',
-                    status: FriendRelationshipStatus.accepted,
-                    presence: PeerPresence.online,
-                    presenceAtMillis: now,
-                    presenceDoubt: PresenceDoubt.noNetwork,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    _ada: FriendProfile(
+                      address: _ada,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                      presence: PeerPresence.background,
+                      presenceAtMillis: now,
+                      lastOpenedAtMillis: now - 5 * _minute,
+                    ),
+                    _bob: FriendProfile(
+                      address: _bob,
+                      displayName: 'Bob',
+                      status: FriendRelationshipStatus.accepted,
+                      presence: PeerPresence.hidden,
+                      presenceAtMillis: now,
+                    ),
+                    _carol: FriendProfile(
+                      address: _carol,
+                      displayName: 'Carol',
+                      status: FriendRelationshipStatus.accepted,
+                      presence: PeerPresence.online,
+                      presenceAtMillis: now,
+                      presenceDoubt: PresenceDoubt.noNetwork,
+                    ),
+                  },
+                ),
               ),
             ),
           ],

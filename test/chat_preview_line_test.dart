@@ -12,18 +12,21 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 SocialHubState _seedWithAda() => SocialHubState.empty().copyWith(
-  friends: const <String, FriendProfile>{
-    'ada.ygg': FriendProfile(
-      address: 'ada.ygg',
-      displayName: 'Ada',
-      status: FriendRelationshipStatus.accepted,
-    ),
-  },
+  book: FriendshipBook.restore(
+    profiles: const <String, FriendProfile>{
+      'ada.ygg': FriendProfile(
+        address: 'ada.ygg',
+        displayName: 'Ada',
+        status: FriendRelationshipStatus.accepted,
+      ),
+    },
+  ),
 );
 
 const LifecycleSnapshot _background = LifecycleSnapshot(
@@ -150,13 +153,15 @@ ProviderContainer _bootFor(
         runtimeNotificationCenterProvider.overrideWithValue(center),
       socialHubSeedProvider.overrideWithValue(
         SocialHubState.empty(lifecycle: lifecycle).copyWith(
-          friends: const <String, FriendProfile>{
-            'ada.ygg': FriendProfile(
-              address: 'ada.ygg',
-              displayName: 'Ada',
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: const <String, FriendProfile>{
+              'ada.ygg': FriendProfile(
+                address: 'ada.ygg',
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
           groups: const <String, GroupProfile>{'grp-1': _ekipa},
         ),
       ),

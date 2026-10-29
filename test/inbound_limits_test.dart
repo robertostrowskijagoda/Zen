@@ -27,6 +27,7 @@ import 'package:zen/src/features/runtime/test_harness_server.dart';
 import 'package:zen/src/features/runtime/zstd_frame_guard.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -68,13 +69,15 @@ final class _Hub {
         socialHubSeedProvider.overrideWithValue(
           seed ??
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  _ada: FriendProfile(
-                    address: _ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    _ada: FriendProfile(
+                      address: _ada,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
               ),
         ),
       ],
@@ -697,13 +700,15 @@ void main() {
         );
         final _Hub hub = _Hub(
           seed: SocialHubState.empty().copyWith(
-            friends: const <String, FriendProfile>{
-              peer: FriendProfile(
-                address: peer,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                peer: FriendProfile(
+                  address: peer,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
             activeCall: ringing,
           ),
         );

@@ -25,10 +25,7 @@ String lockedNoticeKitSignature(SocialHubState state) {
       'f:${friend.status.name}:${friend.address}:${state.nameFor(friend)}',
     for (final MapEntry<String, String> e in state.peerAppVersions.entries)
       'v:${e.key}:${e.value}',
-    for (final MapEntry<String, int> e in state.removedFriends.entries)
-      'x:${e.key}:${e.value}',
-    for (final MapEntry<String, int> e in state.friendsSince.entries)
-      's:${e.key}:${e.value}',
+    for (final String address in state.book.removedAddresses) 'x:$address',
     for (final GroupProfile group in state.groups.values)
       'g:${group.id}:${group.isInvitePending}:${group.name}:'
           '${group.memberAddresses.join(',')}',

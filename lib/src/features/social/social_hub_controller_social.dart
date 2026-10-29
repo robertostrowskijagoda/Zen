@@ -70,27 +70,27 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       },
     );
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
+    state = state.copyWith(
+      book: state.book.invite(
+        normalizedAddress,
+        (FriendProfile base) => _withAppRetentionDefaults(
+          _friendReducer
+              .applyOutgoingRequest(
+                address: normalizedAddress,
+                knownName: knownName,
+                nickname: nickname,
+                requestMessage: message?.trim(),
+                current: base,
+              )
+              .copyWith(
+                lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
+                lastActivityLabel: t('Teraz'),
+              ),
+          _appSettings,
+        ),
+        nicknameChanged: sanitizeFriendNickname(nickname).isNotEmpty,
+      ),
     );
-    final FriendProfile updated = _friendReducer
-        .applyOutgoingRequest(
-          address: normalizedAddress,
-          knownName: knownName,
-          nickname: nickname,
-          requestMessage: message?.trim(),
-          current: current,
-        )
-        .copyWith(
-          lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
-          lastActivityLabel: t('Teraz'),
-        );
-    _putFriend(
-      friends,
-      _withAppRetentionDefaults(updated, _appSettings),
-      nicknameChanged: sanitizeFriendNickname(nickname).isNotEmpty,
-    );
-    state = state.copyWith(friends: friends);
     await _persistState();
   }
 
@@ -113,17 +113,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       throw FormatException(t('Nie znaleziono tej rozmowy.'));
     }
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      current.copyWith(
-        inboxLimitMb: inboxLimitMb,
-        autoCleanupDays: autoCleanupDays,
+    state = state.copyWith(
+      book: state.book.edit(
+        canonical,
+        (FriendProfile f) => f.copyWith(
+          inboxLimitMb: inboxLimitMb,
+          autoCleanupDays: autoCleanupDays,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
     await _applyConversationRetention(
       peerAddress: canonical,
       nowMillis: DateTime.now().millisecondsSinceEpoch,
@@ -214,17 +212,25 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           waiting.status != FriendRelationshipStatus.pendingIncoming) {
         return;
       }
-      final Map<String, FriendProfile> friends =
-          Map<String, FriendProfile>.from(state.friends);
-      final FriendProfile updated = _friendReducer
-          .applyAccepted(current: waiting)
-          .copyWith(
-            isOnline: true,
-            lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
-            lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-            lastActivityLabel: t('Teraz'),
-          );
-      _putFriend(friends, _withAppRetentionDefaults(updated, _appSettings));
+      final FriendshipBook book = state.book.admit(
+        peer,
+        FriendshipEvidence.iAcceptedTheirs,
+        _friendshipTick,
+        shape: (FriendProfile base) => _withAppRetentionDefaults(
+          _friendReducer
+              .applyAccepted(current: base)
+              .copyWith(
+                isOnline: true,
+                lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
+                lastMessagePreview: t(
+                  'Połączenie gotowe. Możesz pisać od razu.',
+                ),
+                lastActivityLabel: t('Teraz'),
+              ),
+          _appSettings,
+        ),
+      );
+      final FriendProfile updated = book.profileOf(peer)!;
       final List<InboxEntry> nextInbox = _removeEntriesForPeer(
         state.inbox,
         peer,
@@ -243,14 +249,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // The invitation is answered: its copy kept for the app's return
       // must not be replayed over the answer.
       await _dropQueuedFriendRequests(peer);
-      // A friendship made now: an earlier removal no longer counts.
-      state = withFriendshipMadeNow(
-        state.copyWith(
-          friends: friends,
-          inbox: nextInbox,
-          backgroundAlerts: nextAlerts,
-        ),
-        peer,
+      state = state.copyWith(
+        book: book,
+        inbox: nextInbox,
+        backgroundAlerts: nextAlerts,
       );
       await _appendSystemMessage(
         peerAddress: peer,
@@ -309,9 +311,6 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           FriendRelationshipStatus.pendingIncoming) {
         return;
       }
-      final Map<String, FriendProfile> friends =
-          Map<String, FriendProfile>.from(state.friends);
-      _removeFriend(friends, canonical);
       final List<InboxEntry> nextInbox = _removeEntriesForPeer(
         state.inbox,
         canonical,
@@ -329,7 +328,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       );
       await _dropQueuedFriendRequests(canonical);
       state = state.copyWith(
-        friends: friends,
+        book: state.book.withdraw(canonical),
         inbox: nextInbox,
         backgroundAlerts: nextAlerts,
       );
@@ -351,13 +350,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     await _cancelQueuedTraffic(canonical, keep: 'friend_cancel');
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _removeFriend(friends, canonical);
     await _dismissForegroundNotifications(canonical);
     state = state.copyWith(
-      friends: friends,
+      book: state.book.withdraw(canonical),
       activeCall:
           _currentCallMatches(call: state.activeCall, peerAddress: canonical)
           ? null
@@ -380,14 +375,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _cancelQueuedTraffic(canonical, keep: 'friend_remove');
     // The account's other devices remove them too.
     ref.read(accountDirectoryHolderProvider).friendRemoved?.call(canonical);
-    final int removedAt = DateTime.now().millisecondsSinceEpoch;
 
     // In turn with the signals: one in flight must not put back the
     // friend list it read before the removal.
     await _enqueueStateWork(() async {
-      final Map<String, FriendProfile> friends =
-          Map<String, FriendProfile>.from(state.friends);
-      _removeFriend(friends, canonical);
       final List<InboxEntry> nextInbox = _removeEntriesForPeer(
         state.inbox,
         canonical,
@@ -398,30 +389,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       );
       await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
       await _dismissForegroundNotifications(canonical);
-      // What they sent that waits for the app's return (an old acceptance
-      // among it) is not replayed over the removal.
+      // What they sent that waits for the app's return is of no use now.
       await _dropQueuedSignalsFrom(canonical);
 
       await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
       _bumpTimelineRevision();
 
-      // Remembered, so that nothing brings them back on its own: another
-      // device or a backup that still lists them, a late frame of theirs.
-      state = withFriendRemovedAt(
-        state.copyWith(
-          friends: friends,
-          inbox: nextInbox,
-          backgroundAlerts: nextAlerts,
-          activeCall:
-              _currentCallMatches(
-                call: state.activeCall,
-                peerAddress: canonical,
-              )
-              ? null
-              : state.activeCall,
-        ),
-        canonical,
-        removedAt,
+      // The book remembers it: nothing brings them back on its own.
+      state = state.copyWith(
+        book: state.book.remove(canonical, _friendshipTick, dropPending: true),
+        inbox: nextInbox,
+        backgroundAlerts: nextAlerts,
+        activeCall:
+            _currentCallMatches(call: state.activeCall, peerAddress: canonical)
+            ? null
+            : state.activeCall,
       );
       await _persistState();
     });
@@ -438,16 +420,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (current == null) {
       throw FormatException(t('Znajomy nie został znaleziony.'));
     }
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      current.copyWith(nickname: sanitizeFriendNickname(nickname)),
-      nicknameChanged: true,
-    );
     // The account's other devices take it from the contacts backup.
-    state = state.copyWith(friends: friends);
+    state = state.copyWith(
+      book: state.book.edit(
+        canonical,
+        (FriendProfile f) =>
+            f.copyWith(nickname: sanitizeFriendNickname(nickname)),
+        nicknameChanged: true,
+      ),
+    );
     await _persistState();
   }
 
@@ -456,16 +437,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (canonical.isEmpty) {
       return;
     }
-    final FriendProfile current =
-        state.friendByAddress(canonical) ?? FriendProfile(address: canonical);
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      _friendReducer
+    final FriendshipBook book = state.book.block(
+      canonical,
+      _friendshipTick,
+      shape: (FriendProfile base) => _friendReducer
           .applyBlocked(
-            current: current,
+            current: base,
             note: note?.trim().isNotEmpty == true ? note!.trim() : null,
           )
           .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
@@ -495,7 +472,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
 
     state = state.copyWith(
-      friends: friends,
+      book: book,
       inbox: nextInbox,
       backgroundAlerts: nextAlerts,
       pendingSignalCount: nextQueue.length,
@@ -514,16 +491,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
+    state = state.copyWith(
+      book: state.book.unblock(
+        canonical,
+        _friendshipTick,
+        shape: (FriendProfile base) => _friendReducer
+            .applyRemoved(current: base)
+            .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+      ),
     );
-    _putFriend(
-      friends,
-      _friendReducer
-          .applyRemoved(current: current)
-          .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
-    );
-    state = state.copyWith(friends: friends);
     await _persistState();
   }
 
@@ -1475,18 +1451,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
 
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      current.copyWith(
-        lastMessagePreview: '',
-        lastActivityLabel: '',
-        unreadCount: 0,
+    state = state.copyWith(
+      book: state.book.edit(
+        canonical,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: '',
+          lastActivityLabel: '',
+          unreadCount: 0,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
     await _persistState();
   }
 
@@ -1498,10 +1472,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
 
     if (friend.unreadCount > 0) {
-      final Map<String, FriendProfile> friends =
-          Map<String, FriendProfile>.from(state.friends);
-      _putFriend(friends, friend.copyWith(unreadCount: 0));
-      state = state.copyWith(friends: friends);
+      state = state.copyWith(
+        book: state.book.edit(
+          canonical,
+          (FriendProfile f) => f.copyWith(unreadCount: 0),
+        ),
+      );
       await _persistState();
     }
     await _sendReadReceiptIfNeeded(canonical);
@@ -1576,22 +1552,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (!visible && !stale) {
       return;
     }
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      friend.copyWith(
-        isOnline: reachable,
-        lastPresenceAtMillis: reachable ? timestamp : null,
-        presence: report.presence,
-        presenceAtMillis: timestamp,
-        // Heard from them just now: no longer in doubt.
-        presenceDoubt: null,
-        lastOpenedAtMillis: openedAt,
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(
+          isOnline: reachable,
+          lastPresenceAtMillis: reachable ? timestamp : null,
+          presence: report.presence,
+          presenceAtMillis: timestamp,
+          // Heard from them just now: no longer in doubt.
+          presenceDoubt: null,
+          lastOpenedAtMillis: openedAt,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
     _persistSoon();
   }
 
@@ -1714,22 +1688,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   /// change of the state. Doubt lives only in memory; a state that settles
   /// is saved with the next save.
   void _reviewPresence(FriendProfile Function(FriendProfile friend) review) {
-    Map<String, FriendProfile>? friends;
-    for (final MapEntry<String, FriendProfile> entry in state.friends.entries) {
-      final FriendProfile friend = entry.value;
-      if (friend.status != FriendRelationshipStatus.accepted ||
-          friend.presence == PeerPresence.hidden) {
-        continue;
-      }
-      final FriendProfile next = review(friend);
-      if (identical(next, friend)) {
-        continue;
-      }
-      (friends ??= Map<String, FriendProfile>.from(state.friends))[entry.key] =
-          next;
-    }
-    if (friends != null) {
-      state = state.copyWith(friends: friends);
+    final FriendshipBook book = state.book.editAll(
+      (FriendProfile friend) =>
+          friend.status != FriendRelationshipStatus.accepted ||
+              friend.presence == PeerPresence.hidden
+          ? friend
+          : review(friend),
+    );
+    if (!identical(book, state.book)) {
+      state = state.copyWith(book: book);
       _persistSoon();
     }
   }
@@ -1745,13 +1712,13 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         return;
       }
       _openedAt.remove(PeerShareCodec.normalizeAddress(friend.address));
-      final Map<String, FriendProfile> friends =
-          Map<String, FriendProfile>.from(state.friends);
-      _putFriend(
-        friends,
-        friend.copyWith(presence: PeerPresence.hidden, lastOpenedAtMillis: 0),
+      state = state.copyWith(
+        book: state.book.edit(
+          friend.address,
+          (FriendProfile f) =>
+              f.copyWith(presence: PeerPresence.hidden, lastOpenedAtMillis: 0),
+        ),
       );
-      state = state.copyWith(friends: friends);
       _persistSoon();
     });
   }
@@ -1816,12 +1783,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     final int timestamp = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
-    bool changed = false;
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    for (final MapEntry<String, FriendProfile> entry in friends.entries) {
-      final FriendProfile friend = entry.value;
+    final FriendshipBook book = state.book.editAll((FriendProfile friend) {
       final String key = PeerShareCodec.normalizeAddress(friend.address);
       final int seen = max(
         friend.lastPresenceAtMillis,
@@ -1847,9 +1809,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               backgroundFor: offlineAfter,
             );
       if (!unreachable && !settles && presence == friend.presence) {
-        continue;
+        return friend;
       }
-      friends[entry.key] = friend.copyWith(
+      return friend.copyWith(
         isOnline: unreachable ? false : null,
         lastPresenceAtMillis: seen,
         presence: presence,
@@ -1860,12 +1822,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             ? max(friend.lastOpenedAtMillis, _openedAt[key] ?? 0)
             : null,
       );
-      changed = true;
-    }
-    if (!changed) {
+    });
+    if (identical(book, state.book)) {
       return;
     }
-    state = state.copyWith(friends: friends);
+    state = state.copyWith(book: book);
     // Going offline is rare and shows, so it is saved now.
     await _persistState();
   }

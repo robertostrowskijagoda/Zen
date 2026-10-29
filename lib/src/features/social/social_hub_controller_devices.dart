@@ -146,33 +146,23 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
   }
 
   /// Another device of this account removed [address] as a friend at
-  /// [atMillis] (it already told them): drop them here too, quietly, and
-  /// remember it — unless the friendship was made again since (newer
-  /// wins). [atMillis] 0: now.
+  /// [atMillis] (it already told them; 0: now): the book takes the removal
+  /// unless what it knows of them is later (a friendship made again since).
   Future<void> forgetFriendFromOtherDevice(
     String address, {
     int atMillis = 0,
   }) async {
-    final int at = atMillis > 0
-        ? atMillis
-        : DateTime.now().millisecondsSinceEpoch;
     await _enqueueStateWork(() async {
-      final String key = PeerShareCodec.normalizeAddress(address);
-      if ((state.friendsSince[key] ?? 0) > at) {
-        // Made friends again after that removal.
-        return;
-      }
-      final FriendProfile? have = state.friendByAddress(address);
-      final SocialHubState before = state;
-      if (have != null && have.status != FriendRelationshipStatus.blocked) {
-        final Map<String, FriendProfile> friends =
-            Map<String, FriendProfile>.of(state.friends);
-        _removeFriend(friends, have.address);
-        state = state.copyWith(friends: friends);
-        await _dropQueuedSignalsFrom(key);
-      }
-      state = withFriendRemovedAt(state, key, at);
-      if (!identical(state, before)) {
+      final FriendshipTick tick = _friendshipTick;
+      final FriendshipBook book = state.book.remove(
+        address,
+        tick,
+        // Its own removal entry (Zen 1.14.0 writes only that one): no device
+        // named, so any record of the same moment wins over it.
+        at: atMillis > 0 ? FriendshipStamp(Hlc(atMillis, 0), '') : null,
+      );
+      if (!identical(book, state.book)) {
+        state = state.copyWith(book: book);
         await _persistState();
       }
     });
@@ -225,8 +215,7 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     String? storedPath,
   }) async {
     if (!key.startsWith('group:') &&
-        state.friendByAddress(key) == null &&
-        state.removedFriendAt(key) != null) {
+        state.book.standingOf(key) == FriendshipStanding.removed) {
       // The conversation with a removed friend was cleared here; another
       // device's older copy of it does not come back.
       if (storedPath != null && isMediaVaultPath(storedPath)) {
@@ -303,23 +292,17 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
   /// ledger: only own devices can read it).
   Map<String, dynamic> contactsBackup() => contactsBackupOf(state);
 
-  /// Adds what [backup] has and this device does not (a new or recovered
-  /// device gets its friends and groups back). Returns how many friends
-  /// and groups were added.
+  /// Takes in [backup], the newest copy any device of the account saved
+  /// (or a copy of the account): a new or recovered device gets its friends
+  /// and groups back. Returns how many friends and groups were added or
+  /// changed.
   ///
-  /// The backup is the newest one any device saved, so names and blocks in
-  /// it win too. [removedAt] holds when friends (address) and groups
-  /// (`group:id`) were removed on some device; a group is not brought back
-  /// unless the backup is newer ([backupAt]) — added again since.
-  ///
-  /// Friends go by each one's own times, never by the backup's: a device
-  /// that still lists a removed friend (it saved before it heard of the
-  /// removal, or saves for some other change) does not bring them back. A
-  /// friend removed anywhere ([removedAt], the backup's own removals `x`,
-  /// [SocialHubState.removedFriends]) comes back only with a friendship
-  /// made after that removal (the backup's `s`, see
-  /// [SocialHubState.friendsSince]); a removal newer than a friendship
-  /// this device knows the time of removes that friend here.
+  /// Who is a friend goes by the copy's records, merged into the book by
+  /// its one rule (the later record per friend wins, see [FriendshipBook]):
+  /// a device that still lists a removed friend brings nobody back. Names
+  /// and nicknames of friends in it win (it is the newest copy). A group is
+  /// not brought back when [removedAt] says it was left on some device
+  /// since the copy was saved ([backupAt]).
   Future<int> importContactsBackup(
     Map<String, dynamic> backup, {
     Map<String, int> removedAt = const <String, int>{},
@@ -333,127 +316,84 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return 0;
     }
     bool removedSince(String key) => (removedAt[key] ?? -1) >= backupAt;
-    // Removals of friends this backup and the ledger know of.
-    final Map<String, int> removals = <String, int>{};
-    void noteRemoval(Object? address, Object? at) {
-      if (address is! String || at is! int || at <= 0) {
-        return;
-      }
-      if (address.startsWith('group:') || !isRoutablePeerAddress(address)) {
-        return;
-      }
-      final String key = PeerShareCodec.normalizeAddress(address);
-      if ((removals[key] ?? -1) < at) {
-        removals[key] = at;
-      }
-    }
-
-    removedAt.forEach(noteRemoval);
-    final Object? x = backup['x'];
-    if (x is Map) {
-      for (final MapEntry<dynamic, dynamic> e in x.entries.take(
-        kMaxRemovedFriends,
-      )) {
-        noteRemoval(e.key, e.value);
+    final Map<String, FriendshipRecord> records = contactsBackupRecords(
+      backup,
+      backupAt: backupAt,
+    );
+    // What the copy shows of each friend: name, nickname.
+    final Map<String, (String?, String)> shown = <String, (String?, String)>{};
+    final Object? fs = backup['friends'];
+    if (fs is List) {
+      for (final Object? item in fs.take(5000)) {
+        if (item is! Map) {
+          continue;
+        }
+        final Object? a = item['a'];
+        if (a is! String || !isRoutablePeerAddress(a)) {
+          continue;
+        }
+        final Object? rawName = item['n'];
+        final Object? rawNickname = item['k'];
+        shown[PeerShareCodec.normalizeAddress(a)] = (
+          rawName is String ? sanitizePeerName(rawName) : null,
+          rawNickname is String ? sanitizeFriendNickname(rawNickname) : '',
+        );
       }
     }
     int added = 0;
     await _enqueueStateWork(() async {
-      final SocialHubState before = state;
-      SocialHubState next = state;
-      final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
-        state.friends,
-      );
-      final Map<String, GroupProfile> groups = Map<String, GroupProfile>.of(
-        state.groups,
-      );
-      // Removals first: newer wins against the friendships known here.
-      removals.forEach((String address, int at) {
-        final FriendProfile? have = _friendFromMap(friends, address);
-        final int since = next.friendsSince[address] ?? 0;
-        if (since > at) {
+      final FriendshipTick tick = _friendshipTick;
+      final FriendshipBook before = state.book;
+      FriendshipBook book = before;
+      records.forEach((String address, FriendshipRecord record) {
+        final (String?, String)? seen = shown[address];
+        book = book.merge(
+          address,
+          record,
+          tick,
+          shape: seen == null
+              ? null
+              : (FriendProfile base) => base.copyWith(
+                  displayName: seen.$1 != null && seen.$1!.isNotEmpty
+                      ? seen.$1
+                      : null,
+                  nickname: seen.$2,
+                ),
+        );
+      });
+      shown.forEach((String address, (String?, String) seen) {
+        final FriendProfile? have = book.profileOf(address);
+        if (have == null ||
+            (have.status != FriendRelationshipStatus.accepted &&
+                have.status != FriendRelationshipStatus.blocked)) {
           return;
         }
-        if (have != null && have.status != FriendRelationshipStatus.blocked) {
-          if (since == 0) {
-            // A friendship from before its time was kept: only the
-            // removal's own entry takes it away (applied once, see
-            // DeviceChatSync), never an old one read again here.
-            return;
-          }
-          _removeFriend(friends, address);
-        }
-        next = withFriendRemovedAt(next, address, at);
-      });
-      final Object? fs = backup['friends'];
-      if (fs is List) {
-        for (final Object? item in fs.take(5000)) {
-          if (item is! Map) {
-            continue;
-          }
-          final Object? a = item['a'];
-          if (a is! String || !isRoutablePeerAddress(a)) {
-            continue;
-          }
-          final String address = PeerShareCodec.normalizeAddress(a);
-          final Object? rawName = item['n'];
-          final String? n = rawName is String
-              ? sanitizePeerName(rawName)
-              : null;
-          final Object? rawNickname = item['k'];
-          final String k = rawNickname is String
-              ? sanitizeFriendNickname(rawNickname)
-              : '';
-          final Object? rawSince = item['s'];
-          final int since = rawSince is int && rawSince > 0 ? rawSince : 0;
-          final FriendProfile? have = _friendFromMap(friends, address);
-          if (have != null &&
-              have.status == FriendRelationshipStatus.accepted &&
-              since > (next.friendsSince[address] ?? 0)) {
-            next = withFriendshipSince(next, address, since);
-          }
-          if (have != null) {
-            // A newer name, a nickname given or (un)blocked on another
-            // device.
-            final FriendRelationshipStatus status = item['b'] == 1
-                ? FriendRelationshipStatus.blocked
-                : FriendRelationshipStatus.accepted;
-            final bool settled =
-                have.status == FriendRelationshipStatus.accepted ||
-                have.status == FriendRelationshipStatus.blocked;
-            if (settled &&
-                ((n != null && n.isNotEmpty && n != have.displayName) ||
-                    k != have.nickname ||
-                    status != have.status)) {
-              friends[have.address] = have.copyWith(
-                displayName: n != null && n.isNotEmpty ? n : have.displayName,
-                nickname: k,
-                status: status,
-              );
-              added++;
-            }
-            continue;
-          }
-          final int? removed = next.removedFriendAt(address);
-          if (removed != null && since <= removed) {
-            // Removed after (or without a known) friendship in this copy:
-            // a device that still lists them does not bring them back.
-            continue;
-          }
-          if (since > 0) {
-            next = withFriendshipSince(next, address, since);
-          }
-          friends[address] = FriendProfile(
-            address: address,
-            displayName: n ?? '',
-            nickname: k,
-            status: item['b'] == 1
-                ? FriendRelationshipStatus.blocked
-                : FriendRelationshipStatus.accepted,
+        final String? n = seen.$1;
+        final String k = seen.$2;
+        if ((n != null && n.isNotEmpty && n != have.displayName) ||
+            k != have.nickname) {
+          // A newer name, or a nickname given on another device.
+          book = book.edit(
+            address,
+            (FriendProfile f) => f.copyWith(
+              displayName: n != null && n.isNotEmpty ? n : f.displayName,
+              nickname: k,
+            ),
+            nicknameChanged: true,
           );
+          if (before.profileOf(address) != null) {
+            added++;
+          }
+        }
+      });
+      for (final String address in book.profiles.keys) {
+        if (before.profileOf(address) == null) {
           added++;
         }
       }
+      final Map<String, GroupProfile> groups = Map<String, GroupProfile>.of(
+        state.groups,
+      );
       final Object? gs = backup['groups'];
       if (gs is List) {
         for (final Object? item in gs.take(1000)) {
@@ -492,77 +432,142 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           added++;
         }
       }
-      if (added == 0 &&
-          identical(next, before) &&
-          friends.length == before.friends.length) {
+      if (identical(book, before) && groups.length == state.groups.length) {
         return;
       }
-      for (final String address in removals.keys) {
-        if (_friendFromMap(friends, address) == null &&
-            before.friendByAddress(address) != null) {
-          await _dropQueuedSignalsFrom(address);
-        }
-      }
-      state = next.copyWith(
-        friends: friends,
-        groups: groups,
-        pendingSignalCount: state.pendingSignalCount,
-      );
+      state = state.copyWith(book: book, groups: groups);
       await _persistState();
     });
     return added;
+  }
+
+  /// Whether this device knows something about who is a friend that
+  /// [backup] (the newest copy) lacks or has older: then its own copy goes
+  /// out, so the account's devices end up agreeing.
+  bool contactsBackupBehind(Map<String, dynamic> backup) {
+    final Map<String, FriendshipRecord> theirs = friendshipRecordsFromJson(
+      backup['r'],
+    );
+    for (final MapEntry<String, FriendshipRecord> e
+        in state.book.records.entries) {
+      final FriendshipRecord? copy = theirs[e.key];
+      if (copy == null || e.value.beats(copy)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 
 // ---- (top level) ----
 
-/// Friends and groups of [state], as the account's devices share them:
-/// with when each friendship was made (`s`, when known) and the friends
-/// removed since theirs (`x`: address → when), so the devices agree on
-/// who is a friend friend by friend, the newer of the two winning.
-/// (Zen 1.14.0 and older read `friends` and `groups` only.)
-Map<String, dynamic> contactsBackupOf(
-  SocialHubState state,
-) => <String, dynamic>{
-  'v': 1,
-  'friends':
-      <Map<String, dynamic>>[
-        for (final FriendProfile f in state.friends.values)
-          if (f.status == FriendRelationshipStatus.accepted ||
-              f.status == FriendRelationshipStatus.blocked)
-            <String, dynamic>{
-              'a': PeerShareCodec.normalizeAddress(f.address),
-              if (f.hasProfileName) 'n': f.displayName,
-              if (f.hasNickname) 'k': f.nickname,
-              if (f.status == FriendRelationshipStatus.blocked) 'b': 1,
-              's': ?state
-                  .friendsSince[PeerShareCodec.normalizeAddress(f.address)],
-            },
-      ]..sort(
-        (Map<String, dynamic> a, Map<String, dynamic> b) =>
-            (a['a'] as String).compareTo(b['a'] as String),
-      ),
-  'groups':
-      <Map<String, dynamic>>[
-        for (final GroupProfile g in state.groups.values)
-          if (!g.isInvitePending)
-            <String, dynamic>{
-              'id': g.id,
-              'name': g.name,
-              if (g.description.isNotEmpty) 'd': g.description,
-              'avatar': g.avatarPreset,
-              'by': g.createdById,
-              'at': g.createdAtMillis,
-              'm': g.memberAddresses,
-              if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
-            },
-      ]..sort(
-        (Map<String, dynamic> a, Map<String, dynamic> b) =>
-            (a['id'] as String).compareTo(b['id'] as String),
-      ),
-  if (state.removedFriends.isNotEmpty)
-    'x': <String, int>{
-      for (final String address in state.removedFriends.keys.toList()..sort())
-        if (state.removedFriendAt(address) case final int at) address: at,
-    },
-};
+/// Friends and groups of [state], as the account's devices share them,
+/// with the book's records (`r`, see [FriendshipBook.records]): who is a
+/// friend, blocked or removed, and since when — the devices merge them
+/// record by record. (Zen 1.14.0 reads `friends` and `groups` only.)
+Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
+    <String, dynamic>{
+      'v': 1,
+      'friends':
+          <Map<String, dynamic>>[
+            for (final FriendProfile f in state.friends.values)
+              if (f.status == FriendRelationshipStatus.accepted ||
+                  f.status == FriendRelationshipStatus.blocked)
+                <String, dynamic>{
+                  'a': PeerShareCodec.normalizeAddress(f.address),
+                  if (f.hasProfileName) 'n': f.displayName,
+                  if (f.hasNickname) 'k': f.nickname,
+                  if (f.status == FriendRelationshipStatus.blocked) 'b': 1,
+                },
+          ]..sort(
+            (Map<String, dynamic> a, Map<String, dynamic> b) =>
+                (a['a'] as String).compareTo(b['a'] as String),
+          ),
+      'groups':
+          <Map<String, dynamic>>[
+            for (final GroupProfile g in state.groups.values)
+              if (!g.isInvitePending)
+                <String, dynamic>{
+                  'id': g.id,
+                  'name': g.name,
+                  if (g.description.isNotEmpty) 'd': g.description,
+                  'avatar': g.avatarPreset,
+                  'by': g.createdById,
+                  'at': g.createdAtMillis,
+                  'm': g.memberAddresses,
+                  if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
+                },
+          ]..sort(
+            (Map<String, dynamic> a, Map<String, dynamic> b) =>
+                (a['id'] as String).compareTo(b['id'] as String),
+          ),
+      if (state.book.records.isNotEmpty)
+        'r': friendshipRecordsToJson(state.book.records),
+    };
+
+/// The records [backup] holds ([contactsBackupOf]). A copy of Zen 1.14.0
+/// has none: a friend it lists counts as one of unknown time (older than
+/// any record, so it adds only someone nothing is known of), a block it
+/// lists as made when the copy was saved ([backupAt]). What test builds of
+/// 1.15 wrote (`s`: friendship times, `x`: removals) is taken as records.
+Map<String, FriendshipRecord> contactsBackupRecords(
+  Map<String, dynamic> backup, {
+  int backupAt = 0,
+}) {
+  final Map<String, FriendshipRecord> records = friendshipRecordsFromJson(
+    backup['r'],
+  )..removeWhere((String address, _) => !isRoutablePeerAddress(address));
+  final Object? fs = backup['friends'];
+  if (fs is List) {
+    for (final Object? item in fs.take(5000)) {
+      if (item is! Map) {
+        continue;
+      }
+      final Object? a = item['a'];
+      if (a is! String || !isRoutablePeerAddress(a)) {
+        continue;
+      }
+      final String address = PeerShareCodec.normalizeAddress(a);
+      if (records.containsKey(address)) {
+        continue;
+      }
+      final Object? since = item['s'];
+      records[address] = item['b'] == 1
+          ? FriendshipRecord(
+              FriendshipMark.blocked,
+              FriendshipStamp(Hlc(backupAt > 0 ? backupAt : 0, 0), ''),
+            )
+          : FriendshipRecord(
+              FriendshipMark.friend,
+              since is int && since > 0
+                  ? FriendshipStamp(Hlc(since, 0), '')
+                  : FriendshipStamp.zero,
+            );
+    }
+  }
+  final Object? x = backup['x'];
+  if (x is Map) {
+    for (final MapEntry<dynamic, dynamic> e in x.entries.take(
+      kMaxRemovedFriends,
+    )) {
+      final Object? address = e.key;
+      final Object? at = e.value;
+      if (address is! String ||
+          at is! int ||
+          at <= 0 ||
+          !isRoutablePeerAddress(address)) {
+        continue;
+      }
+      final String key = PeerShareCodec.normalizeAddress(address);
+      final FriendshipRecord removal = FriendshipRecord(
+        FriendshipMark.removed,
+        FriendshipStamp(Hlc(at, 0), ''),
+      );
+      final FriendshipRecord? have = records[key];
+      if (have == null || removal.beats(have)) {
+        records[key] = removal;
+      }
+    }
+  }
+  return records;
+}

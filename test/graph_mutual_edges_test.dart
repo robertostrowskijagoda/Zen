@@ -15,6 +15,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -265,10 +266,12 @@ void main() {
         _ania: <String>[_bartek, _xawery],
       });
       final SocialHubState social = SocialHubState.empty().copyWith(
-        friends: <String, FriendProfile>{
-          _ania: _friend(_ania, 'Ania'),
-          _bartek: _friend(_bartek, 'Bartek'),
-        },
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            _ania: _friend(_ania, 'Ania'),
+            _bartek: _friend(_bartek, 'Bartek'),
+          },
+        ),
       );
       final List<GraphNode> nodes = buildGraph(
         social: social,
@@ -317,10 +320,12 @@ void main() {
             socialHubAutoHydrateProvider.overrideWithValue(false),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  for (final MapEntry<String, String> e in friends.entries)
-                    e.key: _friend(e.key, e.value),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    for (final MapEntry<String, String> e in friends.entries)
+                      e.key: _friend(e.key, e.value),
+                  },
+                ),
               ),
             ),
             signalTransportProvider.overrideWithValue(MemorySignalTransport()),
