@@ -22,8 +22,10 @@ import (
 // past a short wait they go on by themselves and the caller hears so. A
 // node's stop waits for its core only so long.
 const (
-	// An answer this young is given again without asking the core.
-	nodeViewFresh = time.Second
+	// An answer this young is given again without asking the core (callers
+	// in a burst share one question; the app still sees a peering that just
+	// came up at once).
+	nodeViewFresh = 100 * time.Millisecond
 	// How long a caller waits for a fresh answer before it takes the last
 	// one (a healthy core answers within a millisecond). A question under
 	// way for longer is not waited for again.
