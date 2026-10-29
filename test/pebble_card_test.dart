@@ -9,11 +9,11 @@ import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_link.dart';
 
 const PebbleCardLook _look = PebbleCardLook(
-  shapePreset: 7,
-  shapeSeed: 0xDEADBEEF,
+  shape: 7,
+  seed: 0xDEADBEEF,
   material: 3,
-  mainColor: 0x3366CC,
-  secondColor: 0xFFCC00,
+  mainColour: 0x3366CC,
+  secondColour: 0xFFCC00,
 );
 
 Uint8List _design([int n = 2048]) =>
@@ -353,11 +353,11 @@ void main() {
         expect(hexOf(card.id.bytes), want['id']);
         expect(hexOf(card.author), want['authorKey']);
         expect(card.createdSeconds, want['created']);
-        expect(card.look.shapePreset, want['shape']);
-        expect(card.look.shapeSeed, want['seed']);
+        expect(card.look.shape, want['shape']);
+        expect(card.look.seed, want['seed']);
         expect(card.look.material, want['material']);
-        expect(card.look.mainColor, colour(want['main'] as String));
-        expect(card.look.secondColor, colour(want['second'] as String));
+        expect(card.look.mainColour, colour(want['main'] as String));
+        expect(card.look.secondColour, colour(want['second'] as String));
         expect(card.name, want['name']);
         expect(card.note, want['note']);
         expect(card.authorName, want['author']);

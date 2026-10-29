@@ -20,11 +20,11 @@ import 'support/friends_world.dart';
 // pebbles taking their frames in its stride.
 
 const PebbleCardLook _look = PebbleCardLook(
-  shapePreset: 2,
-  shapeSeed: 42,
+  shape: 2,
+  seed: 42,
   material: 1,
-  mainColor: 0xAA3322,
-  secondColor: 0x112233,
+  mainColour: 0xAA3322,
+  secondColour: 0x112233,
 );
 
 /// What a phone of the world knows of the people around it: friends from

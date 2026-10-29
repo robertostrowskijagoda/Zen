@@ -67,11 +67,11 @@ Future<void> _settle() async {
 }
 
 const PebbleCardLook _look = PebbleCardLook(
-  shapePreset: 1,
-  shapeSeed: 9,
+  shape: 1,
+  seed: 9,
   material: 2,
-  mainColor: 0x808080,
-  secondColor: 0x202020,
+  mainColour: 0x808080,
+  secondColour: 0x202020,
 );
 
 Future<PebbleCard> _card(LedgerKeyPair key, String name, int design) =>
