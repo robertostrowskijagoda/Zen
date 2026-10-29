@@ -634,7 +634,8 @@ class RegressionsTest(unittest.TestCase):
             ids = re.findall(r"""test\(\s*'(R\d+-(?:#\d+|F\d+)):""", text)
             self.assertTrue(ids, name)
             if name.startswith("r5_") and name[3:5].isdigit():
-                self.assertEqual(ids, ["R5-#%d" % int(name[3:5])], name)
+                # Every test of the file names that file's report (one or more).
+                self.assertEqual(set(ids), {"R5-#%d" % int(name[3:5])}, name)
 
 
 class SummaryTest(unittest.TestCase):
