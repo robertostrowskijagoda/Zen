@@ -772,6 +772,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
       context,
       ref,
       title: t('Kod zaproszenia do piramidy'),
+      accepts: (String text) => PyramidService.parseInvite(text) != null,
     );
     if (code == null || !mounted) {
       return;

@@ -4647,19 +4647,12 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
     if (normalized == null || normalized.isEmpty || !mounted) {
       return;
     }
-    // A pebble's code scanned here: its card, not an invitation.
-    final PebbleCard? pebble = pebbleCardFromLink(normalized);
-    if (pebble != null) {
-      final NavigatorState navigator = Navigator.of(context);
-      navigator.pop();
-      unawaited(
-        navigator.push(
-          MaterialPageRoute<void>(
-            builder: (BuildContext context) =>
-                PebbleCollectScreen(card: pebble),
-          ),
-        ),
-      );
+    // Another Zen code scanned here (a pebble, a door sticker, one of Zen's
+    // pages): its own screen in the app, not an invitation.
+    final RuntimeRouteIntent? other = zenLinkIntent(normalized);
+    if (other != null && other.target != RuntimeRouteTarget.addFriend) {
+      Navigator.of(context).pop();
+      openZenLink(ref, normalized);
       return;
     }
     _applyTargetInput(normalized);

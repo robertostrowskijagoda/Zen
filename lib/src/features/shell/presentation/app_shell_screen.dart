@@ -67,9 +67,6 @@ import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
 import 'package:zen/src/features/meet/presentation/nearby_screen.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
-import 'package:zen/src/features/pebbles/pebble_card.dart';
-import 'package:zen/src/features/pebbles/pebble_link.dart';
-import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_profile_section.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
@@ -89,6 +86,7 @@ import 'package:zen/src/features/runtime/presentation/ios_background_section.dar
 import 'package:zen/src/features/runtime/presentation/offline_links_section.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/search/presentation/message_search_results.dart';
 import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/security/app_security_service.dart';

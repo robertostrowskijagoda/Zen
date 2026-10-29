@@ -11,6 +11,7 @@ import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
@@ -148,8 +149,12 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
   }
 
   Future<void> _scan() async {
-    final PeerQrScanner scanner = ref.read(peerQrScannerProvider);
-    final String? scanned = await scanner.scan(context);
+    // A paper backup is no link: a Zen link opens its own screen.
+    final String? scanned = await scanZenCode(
+      context,
+      ref,
+      accepts: (String text) => zenLinkIntent(text) == null,
+    );
     if (scanned == null || !mounted) {
       return;
     }

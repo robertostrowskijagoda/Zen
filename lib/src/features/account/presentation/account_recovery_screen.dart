@@ -29,6 +29,7 @@ import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
@@ -507,6 +508,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               if (scanned == null) {
                                 return;
                               }
+                              // Another Zen code (a pebble, a door, one of
+                              // Zen's pages): its own screen.
+                              if (!_isDeviceCode(scanned) &&
+                                  zenLinkIntent(scanned) != null) {
+                                if (dialog.mounted) {
+                                  Navigator.of(dialog).pop(false);
+                                }
+                                openZenLink(ref, scanned);
+                                return;
+                              }
                               target.text = scanned;
                               setDialog(() => error = check(scanned));
                             },
@@ -949,7 +960,13 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   }
 
   Future<void> _scanHelper() async {
-    final String? scanned = await ref.read(peerQrScannerProvider).scan(context);
+    // A helper's code is their invitation link; other Zen codes open their
+    // own screen.
+    final String? scanned = await scanZenCode(
+      context,
+      ref,
+      accepts: _isDeviceCode,
+    );
     if (scanned == null || !mounted) {
       return;
     }
@@ -1686,5 +1703,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
               ),
       ),
     );
+  }
+}
+
+/// Whether [text] is a device's code (its invitation code, link or QR, or a
+/// plain address).
+bool _isDeviceCode(String text) {
+  try {
+    parseRecoveryDevice(text);
+    return true;
+  } on FormatException {
+    return false;
   }
 }
