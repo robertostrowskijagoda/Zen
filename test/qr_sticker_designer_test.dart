@@ -75,6 +75,12 @@ StickerSubject _door() => const StickerSubject(
   name: 'Dom Kowalskich',
 );
 
+StickerSubject _pebble() => StickerSubject.pebble(
+  link: '${zenPageUrl('k/')}#AQtWtfhZ6kf4qYWb1mhj_pXOjzVowyj8sFECCexfVGU7yY7c',
+  name: ' Sowa ',
+  author: 'Ola',
+);
+
 void main() {
   setUpAll(loadAppFonts);
 
@@ -157,6 +163,78 @@ void main() {
     )!;
     expect(nameless.displayName, startsWith('Zen '));
     expect(StickerSubject.invite(nameless).name, '');
+  });
+
+  test('each pebble starts from its own ready texts, keeping the remembered '
+      'look; other kinds keep their texts too', () {
+    final StickerSubject sowa = _pebble();
+    const StickerDesign kept = StickerDesign(
+      texts: StickerTexts(bottom: 'Kamyczek Biedronka — zeskanuj i zbierz'),
+      style: QrStyle.dots,
+      theme: StickerTheme.forest,
+    );
+    expect(
+      sowa.remembered(kept),
+      kept.copyWith(
+        texts: const StickerTexts(
+          top: 'Znalazłeś kamyczek!',
+          bottom: 'Zeskanuj, żeby go zebrać',
+        ),
+      ),
+    );
+    expect(_door().remembered(kept), kept);
+    expect(sowa.kind, StickerKind.pebble);
+    expect((sowa.name, sowa.author), ('Sowa', 'Ola'));
+  });
+
+  testWidgets('a pebble\'s sticker: the stone and its label instead of the '
+      'signature, its own texts, saved as zen-kamyczek', (
+    WidgetTester tester,
+  ) async {
+    // The last pebble's texts are not this one's.
+    await tester.runAsync(
+      () => StickerStore(disk).save(
+        StickerKind.pebble,
+        const StickerDesign(
+          texts: StickerTexts(bottom: 'Kamyczek Biedronka — zeskanuj i zbierz'),
+          style: QrStyle.rounded,
+        ),
+      ),
+    );
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    await pumpDesigner(tester, <StickerSubject>[_pebble()]);
+    expect(tester.takeException(), isNull);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('sticker-bottom')))
+          .controller!
+          .text,
+      'Zeskanuj, żeby go zebrać',
+    );
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const Key('sticker-style-rounded')))
+          .selected,
+      isTrue,
+    );
+    expect(find.byKey(const Key('sticker-signature')), findsNothing);
+    expect(previewLabel(tester), contains('Znalazłeś kamyczek!'));
+    await tapVisible(tester, find.byKey(const Key('sticker-presets-open')));
+    await tester.pumpAndSettle();
+    expect(find.text('Kamyczek Sowa — zeskanuj i zbierz'), findsOneWidget);
+    await tester.tap(find.text('Ola zostawił(a) tu kamyczek'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('sticker-bottom')))
+          .controller!
+          .text,
+      'Ola zostawił(a) tu kamyczek',
+    );
+    await tapVisible(tester, find.byKey(const Key('sticker-save')));
+    await settleUntil(tester, () => outlet.saved.isNotEmpty);
+    expect(outlet.saved.single.$1, 'zen-kamyczek.pdf');
+    semantics.dispose();
   });
 
   testWidgets('fits the narrowest phone with text twice as large', (
