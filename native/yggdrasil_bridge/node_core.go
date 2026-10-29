@@ -342,9 +342,12 @@ func currentSelectedPeer(node *bridgeNode, peers []peerJSON) (string, string, in
 	return selectedPeer, selectedPeerLatency, availableCount, candidateCount
 }
 
+// normalizeNodeState is what the app learns of a node. The app asks on its
+// UI thread: what comes from the core is the node's view, which never waits
+// for the core longer than nodeViewWait (node_view.go).
 func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
-	self := node.core.GetSelf()
-	peers := buildPeerJSON(node.core.GetPeers())
+	view := node.view()
+	peers := buildPeerJSON(view.peers)
 	subnet := node.core.Subnet()
 	cfg := node.configSnapshot()
 	// Never leak the node identity key across the FFI boundary; Dart only
@@ -360,12 +363,17 @@ func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 	if candidatePeerCount == 0 {
 		candidatePeerCount = len(runtimePeerCandidatePool(cfg))
 	}
+	traffic := view.traffic
+	if traffic == nil {
+		// The core never answered yet.
+		traffic = map[string]any{}
+	}
 	return map[string]any{
 		"handle":              handle,
-		"publicKey":           hex.EncodeToString(self.Key),
+		"publicKey":           hex.EncodeToString(node.core.PublicKey()),
 		"address":             node.core.Address().String(),
 		"subnet":              subnet.String(),
-		"routingEntries":      self.RoutingEntries,
+		"routingEntries":      view.self.RoutingEntries,
 		"mtu":                 node.core.MTU(),
 		"listen":              append([]string(nil), cfg.Listen...),
 		"peers":               peers,
@@ -380,7 +388,7 @@ func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 		"selectedPeerLatency": selectedPeerLatency,
 		"publicPeersCustom":   customPublicPeers(),
 		"pqKey":               node.ownSignalKey(),
-		"traffic":             node.trafficState(),
+		"traffic":             traffic,
 		"goMemory":            goMemoryStats(),
 	}
 }
