@@ -231,9 +231,20 @@ Duration standbyWatchdogEvery({required bool appOnScreen}) => appOnScreen
 /// Key of the heartbeat's "the app is on screen" flag.
 const String _kHeartbeatOnScreenKey = 'onScreen';
 
+/// Key of the heartbeat's app engine: the number the bridge gave the app's
+/// node owner (0 before its node first ran).
+const String _kHeartbeatEngineKey = 'engine';
+
 /// How long the parked service waits for an answer to its probe before it
 /// takes the node over.
 const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
+
+/// How long the service waits to look again when the bridge refused its
+/// takeover for an app whose engine Android ended (the app's last word that
+/// it is on screen still held): a moment past the five seconds that word
+/// lasts (nodeOnScreenFor in node_identity.go), instead of the next missed
+/// heartbeat.
+const Duration kAndroidAppGoneLookAgain = Duration(seconds: 6);
 
 /// What the service tells the app without being asked.
 enum AndroidBackgroundServiceEvent {
@@ -523,10 +534,11 @@ abstract interface class AndroidBackgroundServiceController {
 
   Future<bool> isRunning();
 
-  /// Signals the parked task isolate that the app still runs its node, and
+  /// Signals the parked task isolate that the app still runs its node,
   /// whether it is [onScreen] (the service's watchdog then wakes the phone
-  /// far less often).
-  void sendHeartbeat({required bool onScreen});
+  /// far less often), and the [engine] number of the app's node owner (the
+  /// service names it to the bridge once Android ended the app's engine).
+  void sendHeartbeat({required bool onScreen, required int engine});
 
   /// What the service says on its own ([AndroidBackgroundServiceEvent]).
   Stream<AndroidBackgroundServiceEvent> get events;
@@ -556,7 +568,7 @@ final class NoopAndroidBackgroundServiceController
   Future<bool> isRunning() async => false;
 
   @override
-  void sendHeartbeat({required bool onScreen}) {}
+  void sendHeartbeat({required bool onScreen, required int engine}) {}
 
   @override
   Stream<AndroidBackgroundServiceEvent> get events =>
@@ -595,7 +607,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
   /// Tells the parked service the app is still here. Silence is the signal
   /// that the UI isolate is gone and the service has to own the node again.
   @override
-  void sendHeartbeat({required bool onScreen}) {
+  void sendHeartbeat({required bool onScreen, required int engine}) {
     if (!Platform.isAndroid || !_initialized) {
       return;
     }
@@ -603,6 +615,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
       FlutterForegroundTask.sendDataToTask(<String, Object?>{
         'type': _kRuntimeHeartbeatType,
         _kHeartbeatOnScreenKey: onScreen,
+        _kHeartbeatEngineKey: engine,
       });
     } catch (error, stackTrace) {
       logZenError(
@@ -1131,14 +1144,23 @@ final class _AndroidBackgroundRuntimeBridgeState
 
   /// The heartbeat, with whether the app is on screen: the parked service
   /// wakes the phone for its watchdog only while it is not.
+  ///
+  /// Off screen as soon as the last lifecycle event says so: the lifecycle
+  /// snapshot follows a turn later, and on "back" Android ends the engine
+  /// right after the event, so this heartbeat is the last one.
   void _sendHeartbeat() {
+    final AppLifecycleState? life = WidgetsBinding.instance.lifecycleState;
+    final bool leftScreen =
+        life == AppLifecycleState.hidden ||
+        life == AppLifecycleState.paused ||
+        life == AppLifecycleState.detached;
     ref
         .read(androidBackgroundServiceControllerProvider)
         .sendHeartbeat(
-          onScreen: !ref
-              .read(socialHubControllerProvider)
-              .lifecycle
-              .isBackgroundLike,
+          onScreen:
+              !leftScreen &&
+              !ref.read(socialHubControllerProvider).lifecycle.isBackgroundLike,
+          engine: ref.read(runtimeNodeRuntimeProvider).owner.engine,
         );
   }
 
@@ -1206,8 +1228,9 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!_initialized) {
       return;
     }
-    // `RuntimeLifecycleBridge` is an ancestor, so it has already published the
-    // new lifecycle snapshot by the time this runs.
+    // `RuntimeLifecycleBridge` is an ancestor and has asked for the new
+    // lifecycle snapshot, which lands a turn later (behind the social hub's
+    // queued work); the heartbeat reads the event itself.
     if (_heartbeatTimer != null) {
       // On or off screen: the parked service hears it now, before the
       // phone may fall asleep, and sets its watchdog for it.
@@ -2104,9 +2127,13 @@ final class LockedReceiverSession {
   /// those of the additional accounts that have it on. `null` when the
   /// default account should receive but the app never published a
   /// capability (not unlocked since it was installed or wiped).
+  ///
+  /// [goneApp]: the app engine Android ended, whose node the bridge then
+  /// gives this session at once (node_identity.go); 0 for none.
   static Future<LockedReceiverSession?> open(
     AndroidBackgroundBootstrapPayload payload, {
     required RuntimeSystemNotificationService notices,
+    int goneApp = 0,
   }) async {
     ZenBackgroundAccountList accounts = const ZenBackgroundAccountList();
     try {
@@ -2115,7 +2142,7 @@ final class LockedReceiverSession {
       logZenError('Reading the background accounts failed', error, stackTrace);
     }
     final LockedReceiverSession? session = accounts.defaultOn
-        ? await _openDefault(payload, notices: notices)
+        ? await _openDefault(payload, notices: notices, goneApp: goneApp)
         : LockedReceiverSession._without();
     if (session == null || accounts.additional.isEmpty) {
       return session;
@@ -2130,6 +2157,7 @@ final class LockedReceiverSession {
         ),
         notices: notices,
         waitTimeout: payload.settings.signalWaitTimeout,
+        goneApp: goneApp,
       ),
     );
     return session;
@@ -2169,6 +2197,7 @@ final class LockedReceiverSession {
   static Future<LockedReceiverSession?> _openDefault(
     AndroidBackgroundBootstrapPayload payload, {
     required RuntimeSystemNotificationService notices,
+    int goneApp = 0,
   }) async {
     final Directory support = await ZenInstance.supportDirectory();
     const AppSecurityCredentialsStore credentials =
@@ -2244,6 +2273,7 @@ final class LockedReceiverSession {
       // Never takes the identity from the app on screen (node_identity.go).
       role: RuntimeNodeRole.service,
     );
+    runtime.owner.goneApp = goneApp;
     // Shown nearby on the shared Wi-Fi too (safe before the node is up).
     final String? localLinks = lockedLocalLinksJson(
       nearbyKit,
@@ -2450,6 +2480,22 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// The app's last heartbeat said it is on screen.
   bool _appOnScreen = false;
 
+  /// The app engine the last heartbeat named (0 before its node ran).
+  int _appEngine = 0;
+
+  /// The app engine Android ended ("appGone"): the service names it to the
+  /// bridge, which gives it that engine's node at once, whatever the engine
+  /// last said about the screen (node_identity.go).
+  int _goneAppEngine = 0;
+
+  /// The app's engine went and no heartbeat came since.
+  bool _appGoneSilent = false;
+
+  /// The one more look after the bridge refused a takeover for a gone app
+  /// ([kAndroidAppGoneLookAgain]).
+  Timer? _appGoneLookAgain;
+  bool _appGoneLookedAgain = false;
+
   /// Since the probe sent on a silence; `null` while none waits for an
   /// answer.
   Stopwatch? _probe;
@@ -2539,7 +2585,28 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// The app's engine is gone: no heartbeat will come, take the node now.
   void _onAppGone() {
     logZenMessage('The app\'s engine is gone.');
+    _goneAppEngine = _appEngine;
+    _appGoneSilent = true;
+    _appGoneLookedAgain = false;
     _checkStandbyWatchdog(appGone: true);
+  }
+
+  /// The bridge refused the takeover for a gone app: it still held the
+  /// app's last word that it is on screen (the engine went before saying it
+  /// left, and the heartbeat never named it). That word lapses within
+  /// seconds: one more look then, not at the next missed heartbeat.
+  void _lookAgainForGoneApp() {
+    if (!_tookOver || !_appGoneSilent || _appGoneLookedAgain || _destroyed) {
+      return;
+    }
+    _appGoneLookedAgain = true;
+    _appGoneLookAgain?.cancel();
+    _appGoneLookAgain = Timer(kAndroidAppGoneLookAgain, () {
+      _appGoneLookAgain = null;
+      if (_appGoneSilent && !_destroyed) {
+        _checkStandbyWatchdog(appGone: true);
+      }
+    });
   }
 
   @override
@@ -2547,6 +2614,13 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (data is Map<Object?, Object?> &&
         data['type'] == _kRuntimeHeartbeatType) {
       _noteAppAlive();
+      final int engine = (data[_kHeartbeatEngineKey] as num?)?.toInt() ?? 0;
+      if (engine > 0) {
+        _appEngine = engine;
+      }
+      _appGoneSilent = false;
+      _appGoneLookAgain?.cancel();
+      _appGoneLookAgain = null;
       final bool onScreen = data[_kHeartbeatOnScreenKey] == true;
       if (onScreen != _appOnScreen) {
         _appOnScreen = onScreen;
@@ -2696,6 +2770,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     _updateCheck?.stop();
     _updateCheck = null;
     _endProbe();
+    _appGoneLookAgain?.cancel();
+    _appGoneLookAgain = null;
     _syncWatchdog(AndroidBackgroundRuntimeMode.active);
     await _appGone?.cancel();
     _appGone = null;
@@ -2867,7 +2943,11 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       try {
         final RuntimeSystemNotificationService notices =
             await _readyNotices() ?? MemoryRuntimeSystemNotificationService();
-        session = await LockedReceiverSession.open(payload, notices: notices);
+        session = await LockedReceiverSession.open(
+          payload,
+          notices: notices,
+          goneApp: _goneAppEngine,
+        );
         if (session == null) {
           // The app never told what it may receive with (not unlocked since
           // it was installed or wiped): stand by rather than run a node
@@ -2888,6 +2968,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
             // "active", the service would sit in receive-only with no node
             // at all. Parked, its watchdog keeps looking.
             logZenWarning('The app runs the node: the service stays parked.');
+            _lookAgainForGoneApp();
             mode = AndroidBackgroundRuntimeMode.standby;
             if (identical(_desired, payload)) {
               _desired = payload.withMode(AndroidBackgroundRuntimeMode.standby);

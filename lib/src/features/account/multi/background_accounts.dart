@@ -339,6 +339,7 @@ final class BackgroundAccountNode {
     Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
+    int goneApp = 0,
   }) async {
     final Directory support = Directory(
       '${accounts.path}${Platform.pathSeparator}${account.folder}',
@@ -351,17 +352,20 @@ final class BackgroundAccountNode {
       credentials: secrets.forAccount(account.secret),
       notices: notices,
       waitTimeout: waitTimeout,
+      goneApp: goneApp,
     );
   }
 
   /// The node of the account whose data is in [support] and whose entries
   /// [credentials] reads (a computer's default account while its window is
-  /// locked, too).
+  /// locked, too). [goneApp]: the app engine Android ended (0 for none),
+  /// whose node the bridge gives this one at once (node_identity.go).
   static Future<BackgroundAccountNode?> openAt({
     required Directory support,
     required AppSecurityCredentialsStore credentials,
     required RuntimeSystemNotificationService notices,
     Duration waitTimeout = const Duration(seconds: 30),
+    int goneApp = 0,
   }) async {
     Future<Directory> folder() async => support;
     final FileBackgroundVault vault = FileBackgroundVault(
@@ -407,6 +411,8 @@ final class BackgroundAccountNode {
       // again once the identity is free (node_identity.go).
       role: RuntimeNodeRole.service,
     );
+    // The app engine Android ended may have run this account.
+    runtime.owner.goneApp = goneApp;
     if (doorKit != null && !doorKit.isEmpty) {
       runtime
         ..setDoorKey(doorKit.doorKey)
@@ -445,6 +451,7 @@ final class BackgroundAccountNode {
     Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
+    int goneApp = 0,
   }) async {
     final List<BackgroundAccountNode> nodes = <BackgroundAccountNode>[];
     int slot = 0;
@@ -460,6 +467,7 @@ final class BackgroundAccountNode {
           notices: GenericAccountNotices(notices, slot: slot),
           waitTimeout: waitTimeout,
           secrets: secrets,
+          goneApp: goneApp,
         );
         if (node != null) {
           nodes.add(node);
