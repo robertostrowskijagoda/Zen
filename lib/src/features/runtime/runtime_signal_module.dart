@@ -203,6 +203,12 @@ final class RuntimeSignalModule extends ZenModule {
   /// Zen was on the screen at the last change.
   bool _wasInteractive = false;
 
+  /// The core was told Zen left the screen (or got locked). It hears that
+  /// within the lifecycle event itself, before the social hub's lifecycle
+  /// snapshot follows (runtime_signal_bridge.dart), and what friends are
+  /// told must already say so.
+  bool _toldOffScreen = false;
+
   /// The last round of pings (wall time: a sleeping phone's timers stand
   /// still) and a timer that runs out a ping interval after it; while both
   /// say it was lately, coming back on the screen pings no one at once.
@@ -397,6 +403,7 @@ final class RuntimeSignalModule extends ZenModule {
     if (_inService) {
       return;
     }
+    _toldOffScreen = !interactive;
     // The node's numbers are read often only while someone may look.
     _ref.read(runtimeNodeRuntimeProvider).setOnScreen(interactive);
     if (!interactive) {
@@ -1266,7 +1273,8 @@ final class RuntimeSignalModule extends ZenModule {
 
   bool _isUiInteractive() {
     final AppSecurityService security = _ref.read(appSecurityServiceProvider);
-    return _ref.read(socialHubControllerProvider).lifecycle.isInteractive &&
+    return !_toldOffScreen &&
+        _ref.read(socialHubControllerProvider).lifecycle.isInteractive &&
         !isSecurityBlockingUi(security);
   }
 }
