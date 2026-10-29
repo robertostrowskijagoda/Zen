@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -154,6 +155,21 @@ void main() {
       )
       .label;
 
+  /// The chips' labels cut short: a chip keeps its label to one line and
+  /// clips the rest (which [truncatedTexts] does not see).
+  List<String> clippedChipLabels(WidgetTester tester) => <String>[
+    for (final Element e
+        in find
+            .descendant(
+              of: find.byType(ChoiceChip),
+              matching: find.byType(Text),
+            )
+            .evaluate())
+      if (e.renderObject case final RenderParagraph p
+          when p.getMaxIntrinsicWidth(double.infinity) > p.size.width + 0.5)
+        p.text.toPlainText(),
+  ];
+
   test('an invitation sticker carries the person\'s name, never the '
       '"Zen 1A2B" of a profile without one', () {
     expect(StickerSubject.invite(_ada).name, 'Ada');
@@ -264,6 +280,10 @@ void main() {
       'sticker-pattern-butterflies',
       'sticker-page-a4',
       'sticker-landscape-true',
+      'sticker-size-0',
+      'sticker-size-150',
+      'sticker-module-size',
+      'sticker-sheet-preview',
       'sticker-crop-marks',
       'sticker-format-svg',
       'sticker-save',
@@ -272,8 +292,130 @@ void main() {
     ]) {
       expect(find.byKey(Key(key)), findsOneWidget, reason: key);
     }
+    expect(clippedChipLabels(tester), isEmpty);
     // The preview says what is on it.
     expect(previewLabel(tester), contains('Prywatna sieć społecznościowa'));
+    semantics.dispose();
+  });
+
+  testWidgets('the size: chosen in cm on the narrowest phone with text twice '
+      'as large, the dot size and its warning, several on a page, all '
+      'remembered for the kind', (WidgetTester tester) async {
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    await pumpDesigner(
+      tester,
+      <StickerSubject>[_door()],
+      size: const Size(kNarrowestPhoneWidth, 9000),
+      textScale: 2,
+    );
+    Finder key(String k) => find.byKey(Key(k));
+    String textOf(String k) => tester.widget<Text>(key(k)).data!;
+    bool selected(String k) => tester.widget<ChoiceChip>(key(k)).selected;
+    String sheetLabel() => tester
+        .getSemantics(
+          find
+              .descendant(
+                of: key('sticker-sheet-preview'),
+                matching: find.byType(Semantics),
+              )
+              .first,
+        )
+        .label;
+
+    // A4: the largest as today, with its size, and each size it holds.
+    expect(textOf('sticker-module-size'), isNotEmpty);
+    expect(selected('sticker-size-0'), isTrue);
+    expect(
+      find.descendant(
+        of: key('sticker-size-0'),
+        matching: find.text('Największy'),
+      ),
+      findsOneWidget,
+    );
+    expect(textOf('sticker-module-size'), startsWith('Bok naklejki: 18,6 cm.'));
+    for (final int mm in <int>[40, 50, 60, 80, 100, 120, 150]) {
+      expect(key('sticker-size-$mm'), findsOneWidget, reason: '$mm');
+    }
+    expect(key('sticker-size-200'), findsNothing);
+    final int grid = QrMatrix.encode(_door().data).size;
+    expect(textOf('sticker-module-size'), contains('kod $grid × $grid'));
+    expect(key('sticker-module-warning'), findsNothing);
+    expect(key('sticker-tile'), findsNothing);
+    expect(sheetLabel(), 'Podgląd strony A4: 1 × naklejka 18,6 cm');
+
+    // 4 cm: the dots get too small to read surely.
+    await tapVisible(tester, key('sticker-size-40'));
+    expect(selected('sticker-size-40'), isTrue);
+    expect(
+      textOf('sticker-module-size'),
+      matches(RegExp(r'^Bok naklejki: 4 cm\. Jedna kropka kodu: 0,[0-4]\d mm')),
+    );
+    expect(key('sticker-module-warning'), findsOneWidget);
+    expect(
+      textOf('sticker-module-warning'),
+      'Kropki kodu będą bardzo małe — wybierz większy rozmiar, żeby każdy '
+      'aparat go odczytał.',
+    );
+    expect(sheetLabel(), 'Podgląd strony A4: 1 × naklejka 4 cm');
+
+    // Several on the page.
+    expect(
+      find.descendant(
+        of: key('sticker-tile'),
+        matching: find.text(
+          '24 naklejki na jednej stronie, z odstępami do cięcia',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tapVisible(tester, key('sticker-tile'));
+    expect(sheetLabel(), 'Podgląd strony A4: 24 × naklejka 4 cm');
+
+    // 8 cm: a gentle note; the largest: nothing to say.
+    await tapVisible(tester, key('sticker-size-80'));
+    expect(key('sticker-module-warning'), findsNothing);
+    expect(key('sticker-module-note'), findsOneWidget);
+    expect(sheetLabel(), 'Podgląd strony A4: 6 × naklejka 8 cm');
+    await tapVisible(tester, key('sticker-size-60'));
+    await tapVisible(tester, key('sticker-size-0'));
+    expect(key('sticker-module-warning'), findsNothing);
+    expect(key('sticker-module-note'), findsNothing);
+    expect(key('sticker-tile'), findsNothing);
+    await tapVisible(tester, key('sticker-size-60'));
+
+    // The 10 × 10 cm sticker: the whole of it, or smaller in its middle.
+    await tapVisible(tester, key('sticker-page-sticker'));
+    expect(key('sticker-size-100'), findsNothing);
+    expect(key('sticker-size-80'), findsOneWidget);
+    expect(selected('sticker-size-60'), isTrue);
+    expect(key('sticker-tile'), findsNothing);
+    // A wallpaper fills its screen.
+    await tapVisible(tester, key('sticker-page-wallpaper'));
+    expect(key('sticker-size-0'), findsNothing);
+    expect(key('sticker-module-size'), findsNothing);
+    await tapVisible(tester, key('sticker-page-a4'));
+    expect(selected('sticker-size-60'), isTrue);
+
+    expect(tester.takeException(), isNull);
+    expect(truncatedTexts(tester), isEmpty);
+    expect(clippedChipLabels(tester), isEmpty);
+
+    // Remembered for doors, not for the other kinds.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    final StickerDesign? kept = await tester.runAsync<StickerDesign?>(
+      () => StickerStore(disk).load(StickerKind.door),
+    );
+    expect((kept!.sizeMm, kept.tile), (60, true));
+    expect(
+      await tester.runAsync(
+        () => StickerStore(disk).load(StickerKind.zenAbout),
+      ),
+      isNull,
+    );
+    await pumpDesigner(tester, <StickerSubject>[_door()]);
+    expect(selected('sticker-size-60'), isTrue);
+    expect(tester.widget<SwitchListTile>(key('sticker-tile')).value, isTrue);
     semantics.dispose();
   });
 
