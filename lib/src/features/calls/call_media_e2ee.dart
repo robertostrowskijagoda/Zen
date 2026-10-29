@@ -710,11 +710,12 @@ final class MediaE2eeChannel {
       // or receiver up by its id and hands a missing one to native code as
       // null, which crashes the whole app (SIGSEGV in
       // FrameCryptorFactory.nativeCreateFrameCryptorForRtpSender) — a
-      // transceiver without a track, or a stopped one, has no sender
-      // there. Such a sender is sealed later, once it carries a track.
+      // stopped transceiver has none there. A sender without a track yet
+      // (the camera before its first frame) is there and is sealed now, so
+      // its frames are encrypted from the first one, as the other side
+      // expects.
       senders = <String>{
-        for (final RTCRtpSender s in await connection.getSenders())
-          if (s.track != null) s.senderId,
+        for (final RTCRtpSender s in await connection.getSenders()) s.senderId,
       };
       receivers = <String>{
         for (final RTCRtpReceiver r in await connection.getReceivers())

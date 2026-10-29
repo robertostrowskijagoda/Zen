@@ -2896,6 +2896,9 @@ Map<String, dynamic> _buildAudioConstraints({String? deviceId}) {
   };
 }
 
+/// The camera for a call: 640 x 360 at 24 frames (up to 960 x 540 at 30).
+/// The picture crosses the mesh through a relay and every frame is
+/// encrypted on its way; 720p at 30 frames came through late and jerky.
 Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
   final bool isMobile = Platform.isAndroid || Platform.isIOS;
   if (isMobile) {
@@ -2904,9 +2907,9 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
         'deviceId': deviceId
       else
         'facingMode': 'user',
-      'width': <String, dynamic>{'ideal': 1280, 'max': 1280},
-      'height': <String, dynamic>{'ideal': 720, 'max': 720},
-      'frameRate': <String, dynamic>{'ideal': 30, 'max': 30},
+      'width': <String, dynamic>{'ideal': 640, 'max': 960},
+      'height': <String, dynamic>{'ideal': 360, 'max': 540},
+      'frameRate': <String, dynamic>{'ideal': 24, 'max': 30},
     };
   }
   return <String, dynamic>{
@@ -2915,9 +2918,9 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
       'optional': <Map<String, dynamic>>[
         <String, dynamic>{'sourceId': deviceId},
       ],
-    'width': 1280,
-    'height': 720,
-    'frameRate': 30,
+    'width': 960,
+    'height': 540,
+    'frameRate': 24,
   };
 }
 
