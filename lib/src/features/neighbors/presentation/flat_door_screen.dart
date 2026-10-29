@@ -1,33 +1,23 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
-import 'package:zen/src/features/security/exported_files.dart';
+import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 
-// A QR code scans only dark on light, and the sticker is printed on white
-// paper: these stay the same in every theme (see ZenFixed).
+// A QR code scans only dark on light: the housemate's code stays on white
+// paper in every theme (see ZenFixed).
 const Color _paper = ZenFixed.paper;
-const Color _ink = ZenFixed.ink;
-const Color _inkSoft = ZenFixed.inkSoft;
-const Color _inkFaint = ZenFixed.inkFaint;
-const Color _paperTint = ZenFixed.paperTint;
-const Color _paperEdge = ZenFixed.paperEdge;
 
 /// The door sticker: QR, the flat's name and a line of invitation.
 class FlatDoorScreen extends ConsumerStatefulWidget {
@@ -44,11 +34,10 @@ class FlatDoorScreen extends ConsumerStatefulWidget {
 }
 
 class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
-  final GlobalKey _sticker = GlobalKey();
-  final TextEditingController _line = TextEditingController(
-    text: t('Zeskanuj — zapraszamy na kawę!'),
-  );
   late final TextEditingController _note;
+
+  /// Changes when the designer closes: the preview shows its new design.
+  int _designs = 0;
 
   @override
   void initState() {
@@ -60,7 +49,6 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
 
   @override
   void dispose() {
-    _line.dispose();
     _note.dispose();
     super.dispose();
   }
@@ -151,57 +139,11 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
     ];
   }
 
-  /// Saves the sticker as a PNG the size of A6 at 300 dpi.
-  Future<void> _save() async {
-    try {
-      final RenderObject? object = _sticker.currentContext?.findRenderObject();
-      if (object is! RenderRepaintBoundary) {
-        return;
-      }
-      final double ratio = 1240 / object.size.width;
-      final ui.Image image = await object.toImage(pixelRatio: ratio);
-      final ByteData? data = await image.toByteData(
-        format: ui.ImageByteFormat.png,
-      );
-      image.dispose();
-      if (data == null) {
-        return;
-      }
-      final Uint8List bytes = data.buffer.asUint8List();
-      const String name = 'naklejka-na-drzwi.png';
-      String? target;
-      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-        target = await FilePicker.platform.saveFile(
-          dialogTitle: t('Zapisz naklejkę'),
-          fileName: name,
-        );
-      } else {
-        final Directory? dir = Platform.isAndroid
-            ? await getExternalStorageDirectory()
-            : await getApplicationDocumentsDirectory();
-        if (dir != null) {
-          final Directory zen = Directory('${dir.path}/Zen');
-          await zen.create(recursive: true);
-          target = '${zen.path}/$name';
-        }
-      }
-      if (target == null) {
-        return;
-      }
-      await File(target).writeAsBytes(bytes, flush: true);
-      // Outside Zen's folders: the panic password deletes it too.
-      await rememberExportedFile(target);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              t('Zapisano: {path} — wydrukuj w formacie A6.', {'path': target}),
-            ),
-          ),
-        );
-      }
-    } on Object catch (error, stack) {
-      logZenError('Naklejka na drzwi', error, stack);
+  /// The sticker designer for the door's code.
+  Future<void> _design(StickerSubject door) async {
+    await StickerDesignerScreen.open(context, <StickerSubject>[door]);
+    if (mounted) {
+      setState(() => _designs++);
     }
   }
 
@@ -278,6 +220,12 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
               }
               // A link, so a plain camera reaches the /m page; Zen reads both.
               final String qr = code.toLink();
+              final StickerSubject door = StickerSubject(
+                kind: StickerKind.door,
+                data: qr,
+                label: t('Kod na drzwi'),
+                name: code.name,
+              );
               final ZenColors zen = ZenColors.of(context);
               final Color tone = neighborsTone(zen);
               return ListView(
@@ -300,54 +248,38 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                       ),
                     ),
                     child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            boxShadow: ZenLook.of(
-                              context,
-                            ).lift(zen, radius: 18),
-                          ),
-                          child: RepaintBoundary(
-                            key: _sticker,
-                            child: _Sticker(
-                              name: code.name,
-                              line: _line.text,
-                              qr: qr,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 300),
+                        child: AspectRatio(
+                          aspectRatio: 1,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              boxShadow: ZenLook.of(
+                                context,
+                              ).lift(zen, radius: 18),
+                            ),
+                            child: Semantics(
+                              image: true,
+                              label: t('Podgląd naklejki z kodem QR'),
+                              child: StoredStickerPreview(
+                                key: ValueKey<String>('$qr $_designs'),
+                                subject: door,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Center(
-                    child: Text(
-                      t('Podgląd naklejki (A6)'),
-                      style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                    ),
-                  ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: _line,
-                    maxLength: 60,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: t('Hasło na naklejce'),
-                      hintText: t('Zeskanuj — zapraszamy na kawę!'),
-                      prefixIcon: const Icon(Icons.edit_rounded),
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                  const SizedBox(height: 8),
                   FilledButton.icon(
                     key: const Key('flat-door-save'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),
-                    onPressed: () => unawaited(_save()),
+                    onPressed: () => unawaited(_design(door)),
                     icon: const Icon(Icons.print_rounded),
-                    label: Text(t('Zapisz naklejkę')),
+                    label: Text(t('Zaprojektuj i wydrukuj naklejkę')),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
@@ -399,101 +331,6 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
               );
             },
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Sticker extends StatelessWidget {
-  const _Sticker({required this.name, required this.line, required this.qr});
-
-  final String name;
-  final String line;
-  final String qr;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    // A printed sticker: it ignores the phone's text size.
-    return MediaQuery.withNoTextScaling(
-      child: Container(
-        width: 300,
-        // A6 is 105 × 148 mm.
-        height: 300 * 148 / 105,
-        padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
-        decoration: BoxDecoration(
-          color: _paper,
-          border: Border.all(color: _paperEdge),
-        ),
-        child: Column(
-          children: <Widget>[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: const ShapeDecoration(
-                color: _paperTint,
-                shape: StadiumBorder(),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  const Icon(
-                    Icons.door_front_door_rounded,
-                    size: 13,
-                    color: _inkSoft,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    t('SĄSIEDZI'),
-                    style: const TextStyle(
-                      color: _inkSoft,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              name,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: zen.display(
-                color: _ink,
-                size: 26,
-                weight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: QrImageView(
-                data: qr,
-                backgroundColor: _paper,
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              line,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _ink,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                height: 1.25,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              t('Zen · sąsiedzi'),
-              style: const TextStyle(color: _inkFaint, fontSize: 12),
-            ),
-          ],
         ),
       ),
     );

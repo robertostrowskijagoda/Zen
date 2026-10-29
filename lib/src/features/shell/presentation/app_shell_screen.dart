@@ -74,6 +74,7 @@ import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
 import 'package:zen/src/features/relay/iphone_delivery_notice.dart';
 import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
 import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
