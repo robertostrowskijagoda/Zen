@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 
 /// The storage key the pins are sealed for.
@@ -92,11 +93,7 @@ final class NodeKeyPinKeeper {
       final Uint8List bytes = protector == null
           ? plain
           : await protector.sealFor(kNodeKeyPinsStorageKey, plain);
-      final File file = await _file();
-      await file.parent.create(recursive: true);
-      final File tmp = File('${file.path}.tmp');
-      await tmp.writeAsBytes(bytes, flush: true);
-      await tmp.rename(file.path);
+      await writeFileAtomically(await _file(), bytes);
       _saved = canonical;
     } on Object catch (error) {
       logZenWarning('Node key pins were not saved: $error');

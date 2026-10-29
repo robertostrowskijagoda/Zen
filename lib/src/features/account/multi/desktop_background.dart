@@ -9,6 +9,7 @@ import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
@@ -98,9 +99,7 @@ Future<void> resealNodeConfig({
       : await from.unsealFor(kNodeConfigStorageKey, stored);
   final Uint8List sealed = await to.sealFor(kNodeConfigStorageKey, plain);
   for (final File target in <File>[file, File('${file.path}.bak')]) {
-    final File tmp = File('${target.path}.tmp');
-    await tmp.writeAsBytes(sealed, flush: true);
-    await tmp.rename(target.path);
+    await writeFileAtomically(target, sealed);
   }
 }
 

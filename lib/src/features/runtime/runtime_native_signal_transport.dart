@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/logging/zen_tech_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
@@ -1921,12 +1922,8 @@ Future<String?> _readNodeConfig(
 
 /// Writes [bytes] so that [file] is always either the old or the new
 /// content, never half of it (a crash or a dead battery mid-write).
-Future<void> _writeAtomically(File file, Uint8List bytes) async {
-  await file.parent.create(recursive: true);
-  final File tmp = File('${file.path}.tmp');
-  await tmp.writeAsBytes(bytes, flush: true);
-  await tmp.rename(file.path);
-}
+Future<void> _writeAtomically(File file, Uint8List bytes) =>
+    writeFileAtomically(file, bytes);
 
 Future<File> _runtimeConfigFile([
   Future<Directory> Function()? supportDirectoryOf,
