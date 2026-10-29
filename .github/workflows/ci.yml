@@ -378,6 +378,56 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # Every printable QR sticker (each kind, code style and logo choice, as
+  # printed: test/qr_sticker_test.dart writes them as PNG) read by another
+  # decoder than the app's own: zbar, from Ubuntu's packages
+  # (tool/ci/decode_qr_stickers.py). The test shards already read each one
+  # with ZXing, the decoder of the app's scanner; a second, unrelated one
+  # catches a style only one of them tolerates. A few minutes; not required
+  # by the branch rules.
+  qr-stickers:
+    name: QR stickers decode
+    needs: plan
+    if: ${{ needs.plan.outputs.code == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: zbar
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zbar-tools
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Sticker pictures
+        env:
+          ZEN_QR_STICKER_OUT: build/qr-stickers
+        run: >-
+          flutter test test/qr_sticker_test.dart
+          --plain-name 'writes the pictures for the CI decoder when asked'
+
+      - name: Read them with zbar
+        run: python3 tool/ci/decode_qr_stickers.py build/qr-stickers
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: ci-qr-stickers
+          path: build/qr-stickers/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # The check the branch rules require: green only when format, analyzer,
   # the release contract, the links and every test job passed, or, when a
   # pull request changes only documentation ("What to run"), when "Docs and
