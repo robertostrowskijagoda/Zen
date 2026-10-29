@@ -452,6 +452,360 @@ void main() {
     }
   });
 
+  test('sizes: each page offers the sizes it holds within its margins, and '
+      'a size it cannot hold prints as the largest', () {
+    expect(StickerSheet.sizesMm(StickerPage.a4), <int>[
+      40,
+      50,
+      60,
+      80,
+      100,
+      120,
+      150,
+    ]);
+    expect(StickerSheet.sizesMm(StickerPage.letter), <int>[
+      40,
+      50,
+      60,
+      80,
+      100,
+      120,
+      150,
+    ]);
+    expect(StickerSheet.sizesMm(StickerPage.a5), <int>[
+      40,
+      50,
+      60,
+      80,
+      100,
+      120,
+    ]);
+    // The fixed formats: the whole of them as today, or smaller, centred.
+    expect(StickerSheet.sizesMm(StickerPage.square), <int>[
+      40,
+      50,
+      60,
+      80,
+      100,
+      120,
+      150,
+    ]);
+    expect(StickerSheet.sizesMm(StickerPage.sticker), <int>[40, 50, 60, 80]);
+    // A wallpaper is not printed: it keeps filling the screen.
+    expect(StickerSheet.sizesMm(StickerPage.wallpaper), isEmpty);
+    expect(
+      StickerSheet(StickerPage.wallpaper, sizeMm: 40).sidePx,
+      StickerSheet(StickerPage.wallpaper).sidePx,
+    );
+
+    expect(StickerSheet.largestSideMm(StickerPage.a4), 186);
+    expect(StickerSheet.largestSideMm(StickerPage.a5), 124);
+    expect(StickerSheet.largestSideMm(StickerPage.square), 200);
+    expect(StickerSheet.largestSideMm(StickerPage.sticker), 100);
+    for (final StickerPage page in StickerPage.values) {
+      for (final int mm in StickerSheet.sizesMm(page)) {
+        for (final bool landscape in <bool>[false, true]) {
+          final StickerSheet s = StickerSheet(
+            page,
+            landscape: landscape,
+            sizeMm: mm,
+          );
+          expect(s.largest, isFalse);
+          expect(s.sideMm, mm.toDouble());
+          if (page.hasMargins) {
+            // The printer's edge stays clear.
+            expect(s.leftMm, greaterThanOrEqualTo(12), reason: '$page $mm');
+            expect(s.topMm, greaterThanOrEqualTo(12), reason: '$page $mm');
+          }
+          // Centred.
+          final int right = s.widthPx - s.leftPx - s.sidePx;
+          final int bottom = s.heightPx - s.topPx - s.sidePx;
+          expect((s.leftPx - right).abs(), lessThanOrEqualTo(1));
+          expect((s.topPx - bottom).abs(), lessThanOrEqualTo(1));
+        }
+      }
+    }
+    // The largest is today's look.
+    final StickerSheet a4 = StickerSheet(StickerPage.a4);
+    expect((a4.largest, a4.sideMm, a4.sidePx), (true, 186, 2197));
+    final StickerSheet tooLarge = StickerSheet(StickerPage.a5, sizeMm: 150);
+    expect((tooLarge.largest, tooLarge.sideMm), (true, 124));
+    expect(StickerSheet(StickerPage.sticker, sizeMm: 100).largest, isTrue);
+    // Only the offered sizes are kept.
+    expect(StickerDesign.fromJson(<String, Object>{'sizeMm': 77}).sizeMm, 0);
+    expect(StickerDesign.fromJson(<String, Object>{'sizeMm': 50}).sizeMm, 50);
+    expect(const StickerDesign().sizeMm, StickerDesign.largest);
+    expect(const StickerDesign().tile, isFalse);
+  });
+
+  test('every size exports at exactly its side at 300 dpi: the pixels of '
+      'the picture and the points it is placed at', () async {
+    const StickerDesign design = StickerDesign(texts: _texts);
+    final StickerScene scene = StickerScene.build(
+      StickerScene.matrixFor(kDonationUrl, design),
+      design,
+    );
+    // mm → (pixels at 300 dpi, PDF points).
+    const Map<int, (int, String)> sizes = <int, (int, String)>{
+      40: (472, '113.39'),
+      50: (591, '141.73'),
+      60: (709, '170.08'),
+      80: (945, '226.77'),
+      100: (1181, '283.46'),
+      120: (1417, '340.16'),
+      150: (1772, '425.2'),
+      200: (2362, '566.93'),
+    };
+    for (final MapEntry<int, (int, String)> e in sizes.entries) {
+      final StickerPage page = e.key <= 150
+          ? StickerPage.a4
+          : StickerPage.square;
+      final (int px, String pt) = e.value;
+      final StickerSheet sheet = StickerSheet(page, sizeMm: e.key);
+      expect(sheet.sidePx, px, reason: '${e.key} mm');
+      final String pdf = latin1.decode(
+        await exportSticker(
+          scene,
+          design.copyWith(page: page, sizeMm: e.key),
+          format: StickerFormat.pdf,
+        ),
+      );
+      expect(pdf, contains('/Width $px /Height $px'), reason: '${e.key} mm');
+      expect(pdf, contains('$pt 0 0 $pt '), reason: '${e.key} mm');
+      expect(RegExp(r'/Im0 Do').allMatches(pdf), hasLength(1));
+    }
+    // The page keeps its size; the artwork sits in its middle.
+    final StickerDesign small = design.copyWith(
+      page: StickerPage.sticker,
+      sizeMm: 40,
+    );
+    final ui.ImageDescriptor png = await ui.ImageDescriptor.encoded(
+      await ui.ImmutableBuffer.fromUint8List(
+        await exportSticker(scene, small, format: StickerFormat.png),
+      ),
+    );
+    expect((png.width, png.height), (1181, 1181));
+    final StickerSheet sheet = StickerSheet.of(small);
+    expect((sheet.leftPx, sheet.topPx, sheet.sidePx), (354, 354, 472));
+    final String svg = utf8.decode(
+      await exportSticker(scene, small, format: StickerFormat.svg),
+    );
+    expect(svg, contains('width="100mm" height="100mm"'));
+    expect(svg, contains('translate(30 30) scale(0.04000)'));
+  });
+
+  test('several on a page: A4 with 5 cm stickers holds 3 × 5, centred, '
+      '5 mm apart, with cutting marks along every edge', () {
+    final StickerSheet a4 = StickerSheet(
+      StickerPage.a4,
+      sizeMm: 50,
+      tile: true,
+    );
+    expect((a4.columns, a4.rows, a4.tiles.length), (3, 5, 15));
+    expect(
+      <double>[for (final StickerTile t in a4.tiles.take(3)) t.leftMm],
+      <double>[25, 80, 135],
+    );
+    expect(
+      <double>[for (int r = 0; r < 5; r++) a4.tiles[r * 3].topMm],
+      <double>[13.5, 68.5, 123.5, 178.5, 233.5],
+    );
+    expect(
+      <int>[for (final StickerTile t in a4.tiles.take(3)) t.leftPx],
+      <int>[294, 944, 1594],
+    );
+    expect(
+      <int>[for (int r = 0; r < 5; r++) a4.tiles[r * 3].topPx],
+      <int>[158, 808, 1458, 2108, 2758],
+    );
+    // Every copy whole on the page, inside the margins, none overlapping.
+    for (final StickerTile t in a4.tiles) {
+      expect(t.leftMm, greaterThanOrEqualTo(12));
+      expect(t.topMm, greaterThanOrEqualTo(12));
+      expect(t.leftMm + 50, lessThanOrEqualTo(210 - 12));
+      expect(t.topMm + 50, lessThanOrEqualTo(297 - 12));
+      expect(t.leftPx + a4.sidePx, lessThanOrEqualTo(a4.widthPx));
+      expect(t.topPx + a4.sidePx, lessThanOrEqualTo(a4.heightPx));
+    }
+
+    // Turned, and the other pages and sizes.
+    final StickerSheet across = StickerSheet(
+      StickerPage.a4,
+      landscape: true,
+      sizeMm: 50,
+      tile: true,
+    );
+    expect((across.columns, across.rows), (5, 3));
+    int count(StickerPage page, int mm) =>
+        StickerSheet(page, sizeMm: mm, tile: true).tiles.length;
+    expect(count(StickerPage.a4, 40), 24);
+    expect(count(StickerPage.a4, 80), 6);
+    expect(count(StickerPage.a4, 100), 2);
+    expect(count(StickerPage.a5, 50), 6);
+    expect(count(StickerPage.letter, 40), 20);
+    // Too large for two, the largest, and the fixed formats: one copy.
+    expect(count(StickerPage.a4, 150), 1);
+    expect(StickerSheet(StickerPage.a4, tile: true).tiles, hasLength(1));
+    expect(count(StickerPage.sticker, 40), 1);
+    expect(count(StickerPage.square, 50), 1);
+    // Untiled: one copy in the middle.
+    expect(StickerSheet(StickerPage.a4, sizeMm: 50).tiles, hasLength(1));
+
+    // Marks: every edge in the margins (4 a column, 4 a row) and across
+    // every gap, never on a copy.
+    final List<(double, double, double, double)> marks = a4.marks(true);
+    expect(marks, hasLength(4 * 3 + 4 * 5 + 2 * 3 * 4 + 2 * 5 * 2));
+    expect(a4.marks(false), isEmpty);
+    for (final (double x1, double y1, double x2, double y2) in marks) {
+      for (final StickerTile t in a4.tiles) {
+        final Rect copy = Rect.fromLTWH(t.leftMm, t.topMm, 50, 50).deflate(.01);
+        expect(copy.contains(Offset(x1, y1)), isFalse);
+        expect(copy.contains(Offset(x2, y2)), isFalse);
+        expect(copy.contains(Offset((x1 + x2) / 2, (y1 + y2) / 2)), isFalse);
+      }
+      for (final double v in <double>[x1, x2]) {
+        expect(v, inInclusiveRange(0, 210));
+      }
+      for (final double v in <double>[y1, y2]) {
+        expect(v, inInclusiveRange(0, 297));
+      }
+    }
+    // Each cut of the grid has its marks: the left edge of the middle
+    // column, in the top margin and across the first gap.
+    expect(marks, contains((80.0, 13.5 - 9, 80.0, 13.5 - 2)));
+    expect(marks, contains((80.0, 63.5 + 1, 80.0, 68.5 - 1)));
+    // One copy keeps the 8 marks around it.
+    expect(StickerSheet(StickerPage.a4, sizeMm: 50).marks(true), hasLength(8));
+  });
+
+  test('several on a page in every file: the picture once in the PDF, '
+      'placed on each copy, the PNG with every copy and the SVG with one '
+      'drawing used on each', () async {
+    const StickerDesign design = StickerDesign(
+      texts: _texts,
+      theme: StickerTheme.ocean,
+      page: StickerPage.a4,
+      sizeMm: 50,
+      tile: true,
+    );
+    final StickerScene scene = StickerScene.build(
+      StickerScene.matrixFor(kDonationUrl, design),
+      design,
+    );
+    final StickerSheet sheet = StickerSheet.of(design);
+    final Uint8List pdf = await exportSticker(scene, design);
+    _expectValidPdf(pdf, widthPt: '595.28', heightPt: '841.89');
+    final String text = latin1.decode(pdf);
+    expect(RegExp('/Subtype /Image').allMatches(text), hasLength(1));
+    expect(text, contains('/Width 591 /Height 591'));
+    expect(RegExp(r'/Im0 Do').allMatches(text), hasLength(15));
+    // The first copy 25 mm from the left, 13.5 mm from the top.
+    expect(text, contains('141.73 0 0 141.73 70.87 661.89 cm'));
+    expect(RegExp(r' l S\n').allMatches(text), hasLength(76));
+
+    final ui.Image page = await renderStickerSheet(scene, sheet);
+    expect((page.width, page.height), (2480, 3508));
+    final ByteData rgba = (await page.toByteData())!;
+    page.dispose();
+    int at(int x, int y) {
+      final int i = 4 * (y * sheet.widthPx + x);
+      return 0xFF000000 |
+          rgba.getUint8(i) << 16 |
+          rgba.getUint8(i + 1) << 8 |
+          rgba.getUint8(i + 2);
+    }
+
+    for (final StickerTile t in sheet.tiles) {
+      // The sticker's paper just inside each copy's corner, white paper in
+      // the gap beside it.
+      expect(at(t.leftPx + 4, t.topPx + 4), StickerTheme.ocean.paper);
+      expect(at(t.leftPx - 25, t.topPx + 4), 0xFFFFFFFF);
+    }
+    // A copy cut out of the page reads as the code.
+    final StickerTile middle = sheet.tiles[7];
+    final int side = sheet.sidePx;
+    final Uint8List gray = Uint8List(side * side);
+    for (int y = 0; y < side; y++) {
+      for (int x = 0; x < side; x++) {
+        final int c = at(middle.leftPx + x, middle.topPx + y);
+        gray[y * side + x] =
+            ((c >> 16 & 0xFF) * 77 + (c >> 8 & 0xFF) * 150 + (c & 0xFF) * 29) >>
+            8;
+      }
+    }
+    expect(
+      decodeQrLuma(LumaFrame(width: side, height: side, bytes: gray)),
+      kDonationUrl,
+    );
+
+    final String svg = utf8.decode(
+      await exportSticker(scene, design, format: StickerFormat.svg),
+    );
+    expect(RegExp('<defs>').allMatches(svg), hasLength(1));
+    expect(RegExp('<use ').allMatches(svg), hasLength(15));
+    expect(svg, contains('<use xlink:href="#sticker" href="#sticker" x="25" '));
+    expect(RegExp('>Dom Kowalskich</text>').allMatches(svg), hasLength(1));
+    expect(RegExp('<line ').allMatches(svg), hasLength(76));
+    final String single = utf8.decode(
+      await exportSticker(
+        scene,
+        design.copyWith(tile: false),
+        format: StickerFormat.svg,
+      ),
+    );
+    expect(single, isNot(contains('<use ')));
+  });
+
+  test('the printed dot: the module of the actual code at the chosen size, '
+      'with a warning under 0.5 mm and a note under 0.7 mm', () {
+    expect(ModuleSize.of(0.3), ModuleSize.tiny);
+    expect(ModuleSize.of(0.499), ModuleSize.tiny);
+    expect(ModuleSize.of(0.5), ModuleSize.small);
+    expect(ModuleSize.of(0.699), ModuleSize.small);
+    expect(ModuleSize.of(0.7), ModuleSize.fine);
+    expect(ModuleSize.of(2), ModuleSize.fine);
+
+    final String link = _door(kDoorSlots).toLink();
+    final StickerDesign design = StickerDesign(
+      texts: stickerPresets(StickerKind.door).first,
+    );
+    final StickerScene scene = StickerScene.build(
+      StickerScene.matrixFor(link, design),
+      design,
+      kind: StickerKind.door,
+    );
+    final int grid = scene.matrix.size;
+    expect(grid, QrMatrix.encode(link).size);
+    expect(grid % 4, 1);
+    // The code with its quiet zone takes a fixed share of the artwork.
+    final double share = scene.module / StickerScene.side;
+    expect(share, closeTo(540 / 1000 / (grid + 8), 1e-12));
+    for (final int mm in StickerSheet.sizesMm(StickerPage.a4)) {
+      final StickerSheet sheet = StickerSheet(StickerPage.a4, sizeMm: mm);
+      expect(printedModuleMm(scene, sheet), closeTo(share * mm, 1e-9));
+    }
+    // A door's code: too small at 4 cm, fine at 15 cm, and
+    // the largest on A4 is fine.
+    double at(int mm) =>
+        printedModuleMm(scene, StickerSheet(StickerPage.a4, sizeMm: mm));
+    expect(ModuleSize.of(at(40)), ModuleSize.tiny);
+    expect(ModuleSize.of(at(150)), ModuleSize.fine);
+    expect(
+      ModuleSize.of(printedModuleMm(scene, StickerSheet(StickerPage.a4))),
+      ModuleSize.fine,
+    );
+    // The short install link has larger dots at the same size.
+    final StickerScene install = StickerScene.build(
+      StickerScene.matrixFor(kInstallPageUrl, design),
+      design,
+    );
+    expect(install.matrix.size, lessThan(grid));
+    expect(
+      printedModuleMm(install, StickerSheet(StickerPage.a4, sizeMm: 40)),
+      greaterThan(at(40)),
+    );
+  });
+
   test('the PDF has a valid structure, the page size in points and the '
       'picture at 300 dpi', () async {
     const StickerDesign design = StickerDesign(texts: _texts);
@@ -487,13 +841,27 @@ void main() {
       rgb: Uint8List(2 * 2 * 3),
       pixelsWide: 2,
       pixelsHigh: 2,
-      imageLeftPt: 10,
-      imageTopPt: 5,
+      imagePlacesPt: const <(double, double)>[(10, 5)],
       imageSidePt: 40,
       lines: const <(double, double, double, double)>[(0, 0, 5, 0)],
     );
     _expectValidPdf(pdf, widthPt: '100', heightPt: '50.5');
     expect(latin1.decode(pdf), contains('40 0 0 40 10 5.5 cm'));
+    // One picture, placed twice.
+    final String twice = latin1.decode(
+      buildStickerPdf(
+        widthPt: 100,
+        heightPt: 50.5,
+        rgb: Uint8List(2 * 2 * 3),
+        pixelsWide: 2,
+        pixelsHigh: 2,
+        imagePlacesPt: const <(double, double)>[(5, 5), (55, 5)],
+        imageSidePt: 40,
+      ),
+    );
+    expect(twice, contains('40 0 0 40 5 5.5 cm\n/Im0 Do'));
+    expect(twice, contains('40 0 0 40 55 5.5 cm\n/Im0 Do'));
+    expect(RegExp('/Subtype /Image').allMatches(twice), hasLength(1));
     expect(
       () => buildStickerPdf(
         widthPt: 1,
@@ -501,8 +869,7 @@ void main() {
         rgb: Uint8List(5),
         pixelsWide: 2,
         pixelsHigh: 2,
-        imageLeftPt: 0,
-        imageTopPt: 0,
+        imagePlacesPt: const <(double, double)>[(0, 0)],
         imageSidePt: 1,
       ),
       throwsArgumentError,
@@ -566,6 +933,8 @@ void main() {
       landscape: true,
       cropMarks: false,
       format: StickerFormat.svg,
+      sizeMm: 60,
+      tile: true,
     );
     expect(
       StickerDesign.fromJson(jsonDecode(jsonEncode(design.toJson())) as Map),

@@ -139,6 +139,10 @@ enum StickerPage {
       this == StickerPage.a5 ||
       this == StickerPage.letter;
 
+  /// Printed, so the artwork can be made smaller than the page allows (a
+  /// wallpaper fills its screen).
+  bool get sizable => this != StickerPage.wallpaper;
+
   String get label => switch (this) {
     StickerPage.a4 => 'A4',
     StickerPage.a5 => 'A5',
@@ -200,6 +204,8 @@ final class StickerDesign {
     this.landscape = false,
     this.cropMarks = true,
     this.format = StickerFormat.pdf,
+    this.sizeMm = largest,
+    this.tile = false,
   });
 
   /// The design a kind starts with: its first ready texts for [name] (and
@@ -218,6 +224,13 @@ final class StickerDesign {
   /// Longest line under the code.
   static const int maxCaption = 60;
 
+  /// [sizeMm] for the largest artwork the page holds.
+  static const int largest = 0;
+
+  /// The sides the printed artwork can be given, in millimetres (each page
+  /// offers those it holds, [StickerSheet.sizesMm]).
+  static const List<int> sizesMm = <int>[40, 50, 60, 80, 100, 120, 150, 200];
+
   final StickerTexts texts;
 
   /// The small "Zen" mark in the corner.
@@ -234,6 +247,14 @@ final class StickerDesign {
   final bool cropMarks;
   final StickerFormat format;
 
+  /// The printed side of the artwork, one of [sizesMm], or [largest]; a
+  /// size the page cannot hold prints as the largest.
+  final int sizeMm;
+
+  /// As many copies as the page holds, with room to cut between them (when
+  /// two or more fit, [StickerSheet]).
+  final bool tile;
+
   StickerDesign copyWith({
     StickerTexts? texts,
     bool? signature,
@@ -245,6 +266,8 @@ final class StickerDesign {
     bool? landscape,
     bool? cropMarks,
     StickerFormat? format,
+    int? sizeMm,
+    bool? tile,
   }) => StickerDesign(
     texts: texts ?? this.texts,
     signature: signature ?? this.signature,
@@ -256,6 +279,8 @@ final class StickerDesign {
     landscape: landscape ?? this.landscape,
     cropMarks: cropMarks ?? this.cropMarks,
     format: format ?? this.format,
+    sizeMm: sizeMm ?? this.sizeMm,
+    tile: tile ?? this.tile,
   );
 
   Map<String, Object> toJson() => <String, Object>{
@@ -271,6 +296,8 @@ final class StickerDesign {
     'landscape': landscape,
     'cropMarks': cropMarks,
     'format': format.name,
+    'sizeMm': sizeMm,
+    'tile': tile,
   };
 
   /// Named fields: an unknown one is ignored and a missing one keeps its
@@ -315,6 +342,11 @@ final class StickerDesign {
       landscape: flag('landscape', d.landscape),
       cropMarks: flag('cropMarks', d.cropMarks),
       format: pick(StickerFormat.values, 'format', d.format),
+      sizeMm: switch (json['sizeMm']) {
+        final int mm when sizesMm.contains(mm) => mm,
+        _ => d.sizeMm,
+      },
+      tile: flag('tile', d.tile),
     );
   }
 
@@ -330,7 +362,9 @@ final class StickerDesign {
       other.page == page &&
       other.landscape == landscape &&
       other.cropMarks == cropMarks &&
-      other.format == format;
+      other.format == format &&
+      other.sizeMm == sizeMm &&
+      other.tile == tile;
 
   @override
   int get hashCode => Object.hash(
@@ -344,6 +378,8 @@ final class StickerDesign {
     landscape,
     cropMarks,
     format,
+    sizeMm,
+    tile,
   );
 }
 

@@ -4,8 +4,9 @@ import 'dart:typed_data';
 
 /// A one-page PDF: a page of [widthPt] × [heightPt] points (1/72 inch)
 /// with one RGB picture ([rgb], [pixelsWide] × [pixelsHigh], 3 bytes a
-/// pixel, rows from the top) placed at [imageLeftPt], [imageTopPt] (from
-/// the page's top left), [imageSidePt] square, and thin grey [lines]
+/// pixel, rows from the top) placed [imageSidePt] square with its top left
+/// corner at each of [imagePlacesPt] (from the page's top left; the picture
+/// is stored once however many times it is placed), and thin grey [lines]
 /// (pairs of points, also from the top left) for cutting.
 ///
 /// Only what a printer needs: a catalog, the page, its drawing and the
@@ -17,8 +18,7 @@ Uint8List buildStickerPdf({
   required Uint8List rgb,
   required int pixelsWide,
   required int pixelsHigh,
-  required double imageLeftPt,
-  required double imageTopPt,
+  required List<(double, double)> imagePlacesPt,
   required double imageSidePt,
   List<(double, double, double, double)> lines =
       const <(double, double, double, double)>[],
@@ -43,13 +43,16 @@ Uint8List buildStickerPdf({
 
   final String n = _n(widthPt);
   final String h = _n(heightPt);
-  final StringBuffer draw = StringBuffer()
-    ..write('q\n')
-    ..write(
-      '${_n(imageSidePt)} 0 0 ${_n(imageSidePt)} ${_n(imageLeftPt)} '
-      '${_n(heightPt - imageTopPt - imageSidePt)} cm\n',
-    )
-    ..write('/Im0 Do\nQ\n');
+  final StringBuffer draw = StringBuffer();
+  for (final (double left, double top) in imagePlacesPt) {
+    draw
+      ..write('q\n')
+      ..write(
+        '${_n(imageSidePt)} 0 0 ${_n(imageSidePt)} ${_n(left)} '
+        '${_n(heightPt - top - imageSidePt)} cm\n',
+      )
+      ..write('/Im0 Do\nQ\n');
+  }
   if (lines.isNotEmpty) {
     draw.write('q\n0.55 G\n${_n(lineWidthPt)} w\n');
     for (final (double x1, double y1, double x2, double y2) in lines) {
