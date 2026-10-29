@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
+import 'package:zen/src/features/qr_sticker/qr_digits.dart';
 
 export 'package:zen/src/features/pebbles/design/pebble_card_look.dart'
     show PebbleCardLook, PebbleLookSource;
@@ -496,39 +497,12 @@ final class PebbleCard implements PebbleLookSource {
 /// [bytes] as one big-endian number in decimal, padded with zeros to the
 /// digits of the largest number of that many bytes (so the length tells
 /// how many bytes there are: [pebbleBytesFromDigits]).
-String pebbleDigits(List<int> bytes) {
-  BigInt v = BigInt.zero;
-  for (final int b in bytes) {
-    v = (v << 8) | BigInt.from(b);
-  }
-  return v.toString().padLeft(_digitsFor(bytes.length), '0');
-}
+String pebbleDigits(List<int> bytes) => qrDigits(bytes);
 
 /// The bytes [digits] stand for ([pebbleDigits]), or `null` when no
 /// number of bytes is written with that many digits.
-Uint8List? pebbleBytesFromDigits(String digits) {
-  int n = 0;
-  while (n <= 255 && _digitsFor(n) < digits.length) {
-    n++;
-  }
-  if (n > 255 || _digitsFor(n) != digits.length) {
-    return null;
-  }
-  BigInt v = BigInt.parse(digits);
-  if (v.bitLength > n * 8) {
-    return null;
-  }
-  final Uint8List out = Uint8List(n);
-  for (int i = n - 1; i >= 0; i--) {
-    out[i] = (v & BigInt.from(0xFF)).toInt();
-    v >>= 8;
-  }
-  return out;
-}
-
-/// The decimal digits of 256^[n] − 1.
-int _digitsFor(int n) =>
-    n == 0 ? 0 : ((BigInt.one << (8 * n)) - BigInt.one).toString().length;
+Uint8List? pebbleBytesFromDigits(String digits) =>
+    qrBytesFromDigits(digits, maxBytes: 255);
 
 /// [s] cut to at most [maxBytes] bytes of UTF-8 on a whole letter, ending
 /// in "…" when anything was cut.
