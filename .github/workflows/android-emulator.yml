@@ -48,6 +48,9 @@ concurrency:
 env:
   FLUTTER_VERSION: '3.47.1'
   SYSTEM_IMAGE: 'system-images;android-34;google_apis;x86_64'
+  # One folder for the virtual device, where avdmanager makes it and the
+  # emulator looks for it (each has its own default otherwise).
+  ANDROID_AVD_HOME: /home/runner/.android/avd
 
 jobs:
   emulator:
@@ -94,6 +97,7 @@ jobs:
       - name: Emulator image (in the background)
         run: |
           (
+            mkdir -p "$ANDROID_AVD_HOME"
             sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
             yes | "$sdkmanager" --licenses > /dev/null || true
             if "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null \
@@ -137,6 +141,7 @@ jobs:
           cat "$RUNNER_TEMP/avd.log"
           [ "$(cat "$RUNNER_TEMP/avd.status")" = 0 ]
           ls -l /dev/kvm
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           "$ANDROID_HOME/emulator/emulator" -avd zen -no-window -no-audio \
             -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
@@ -171,5 +176,6 @@ jobs:
       - name: Logs
         if: ${{ failure() || cancelled() }}
         run: |
-          adb logcat -d | tail -n 400 || true
+          # Bounded: without a running device adb would wait for one.
+          timeout 60 adb logcat -d | tail -n 400 || true
           tail -n 100 "$RUNNER_TEMP/emulator.log" || true

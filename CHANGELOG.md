@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.0 — 29.10.2026
+
 ### What's new
 - [en] Pebbles: paint a virtual stone on every side, stick its QR code somewhere and let others collect it — it stays for everyone to find.
 - [en] Search in chats, groups, the Tablica and settings, and print any QR code as a sticker in your own style and size.
