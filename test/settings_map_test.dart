@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,9 +8,11 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/settings/settings_search_index.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -212,6 +215,21 @@ const Map<String, String> _mergedRows = <String, String>{
   'settings-nav-stranger-messages': 'stranger-messages-from',
 };
 
+/// Keys of the map that are no setting of their own, so the settings
+/// search does not list them: a whole page, a part of another setting, a
+/// note, a screen.
+const Map<String, String> _notSearched = <String, String>{
+  'settings-security-section': 'the whole Bezpieczeństwo page',
+  'notification-privacy-choice': 'part of settings-notification-privacy',
+  'muted-post-authors-empty': 'what an empty page says',
+  'blocked-friends-screen': 'a screen of its own (its row is found)',
+  'settings-gif-keyboard-note': 'a note',
+  'settings-network-card': 'holds settings-tech-info-tile',
+  'public-peers': 'the whole Publiczne węzły page (its row is found)',
+  'storage-usage': 'holds storage-feed-limit-switch',
+  'settings-preferences-panel': 'holds its switches and the cleanup field',
+};
+
 Future<void> _settle() async {
   for (int i = 0; i < 20; i++) {
     await Future<void>.delayed(const Duration(milliseconds: 5));
@@ -339,6 +357,179 @@ void main() {
       expect(_pages.keys, contains(page));
     }
   });
+
+  test('the settings search knows every setting of the map and finds each '
+      'by its name', () {
+    final List<SettingsSearchEntry> index = settingsSearchIndex(
+      const SettingsSearchDevice.everything(),
+    );
+    final Map<String, SettingsSearchEntry> byKey =
+        <String, SettingsSearchEntry>{
+          for (final SettingsSearchEntry e in index) e.key: e,
+        };
+    expect(byKey, hasLength(index.length), reason: 'a key twice');
+    final Set<String> settings = <String>{
+      for (final MapEntry<String, List<String>> page in _pages.entries)
+        if (page.key.isNotEmpty) ...page.value,
+      for (final MapEntry<String, String> e in <MapEntry<String, String>>[
+        ..._androidOnly.entries,
+        ..._iosOnly.entries,
+      ])
+        if (e.value.isNotEmpty) e.key,
+    };
+    for (final String key in settings) {
+      if (_notSearched.containsKey(key)) {
+        continue;
+      }
+      expect(byKey, contains(key), reason: '$key is not in the search');
+    }
+    for (final SettingsSearchEntry e in index) {
+      // On the page of a row of the list.
+      expect(
+        <String>[..._rows, ..._androidOnly.keys],
+        contains(e.row),
+        reason: e.key,
+      );
+      for (final String typed in <String>[
+        e.title,
+        foldForSearch(e.title),
+        e.title.toUpperCase(),
+      ]) {
+        expect(
+          searchSettings(SearchQuery.parse(typed), index),
+          contains(e),
+          reason: '"$typed" does not find ${e.key}',
+        );
+      }
+    }
+  });
+
+  test('the settings search finds the words people use', () {
+    final List<SettingsSearchEntry> index = settingsSearchIndex(
+      const SettingsSearchDevice.everything(),
+    );
+    Iterable<String> keys(String typed) => searchSettings(
+      SearchQuery.parse(typed),
+      index,
+    ).map((SettingsSearchEntry e) => e.key);
+    expect(keys('motyw'), contains('settings-palette-picker'));
+    expect(keys('theme'), contains('settings-palette-picker'));
+    expect(keys('ciemny'), contains('settings-theme-mode-segmented'));
+    expect(keys('zrzuty'), contains('settings-secure-screens-switch'));
+    expect(keys('screenshot'), contains('settings-secure-screens-switch'));
+    expect(keys('haslo'), contains('settings-change-password-button'));
+    expect(keys('blokada'), contains('settings-lock-mode-dropdown'));
+    expect(keys('dzwiek'), contains('settings-notification-sounds'));
+    expect(keys('pamiec'), contains('storage-limits'));
+    expect(keys('kopie'), contains('storage-limits'));
+    expect(keys('wifi direct'), contains('settings-wifi-direct-switch'));
+    expect(keys('bluetooth'), contains('settings-bluetooth-links-switch'));
+    expect(keys('kamyczki'), contains('settings-serve-pebbles-switch'));
+    expect(keys('powiadomienia'), contains('settings-notice-message'));
+  });
+
+  testWidgets('every name the search shows is on its page, where the map '
+      'says', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester);
+    await _openSettings(tester);
+    final List<SettingsSearchEntry> index = settingsSearchIndex(
+      SettingsSearchDevice(
+        android: Platform.isAndroid,
+        ios: Platform.isIOS,
+        platform: defaultTargetPlatform,
+      ),
+    );
+    final Map<String, List<SettingsSearchEntry>> byRow =
+        <String, List<SettingsSearchEntry>>{};
+    for (final SettingsSearchEntry e in index) {
+      (byRow[e.row] ??= <SettingsSearchEntry>[]).add(e);
+    }
+    const Set<String> radios = <String>{
+      'settings-wifi-direct-switch',
+      'settings-bluetooth-links-switch',
+      'settings-multipeer-links-switch',
+    };
+    for (final MapEntry<String, List<SettingsSearchEntry>> row
+        in byRow.entries) {
+      await _tapRow(tester, row.key);
+      for (final SettingsSearchEntry e in row.value) {
+        final Set<String> seen = await _collect(tester, <String>[e.key]);
+        if (seen.isEmpty && radios.contains(e.key)) {
+          // Only where the device has the radio.
+          continue;
+        }
+        expect(seen, contains(e.key), reason: '${e.key} on ${row.key}');
+        // Section titles are shown in capitals: compared folded.
+        final String title = foldForSearch(e.title);
+        expect(
+          find
+              .byWidgetPredicate(
+                (Widget w) =>
+                    w is RichText &&
+                    foldForSearch(w.text.toPlainText()).contains(title),
+              )
+              .evaluate(),
+          isNotEmpty,
+          reason: '"${e.title}" (${e.key}) is not on ${row.key}',
+        );
+      }
+      await tester.pageBack();
+      await _route(tester);
+    }
+    expect(tester.takeException(), isNull);
+    await _tearDown(tester);
+  });
+
+  for (final (String typed, String key) in const <(String, String)>[
+    ('motyw', 'settings-palette-picker'),
+    ('zrzuty', 'settings-secure-screens-switch'),
+    ('dzwiek powiadomien', 'settings-notification-sounds'),
+  ]) {
+    testWidgets('"$typed" finds the setting on its page and opens it there '
+        '(320 px, text ×2)', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await _pumpApp(tester);
+      await _openSettings(tester);
+      await tester.enterText(
+        find.byKey(const Key('settings-search-field')),
+        typed,
+      );
+      await tester.pump();
+      final Finder result = find.byKey(Key('settings-search-result-$key'));
+      await tester.scrollUntilVisible(
+        result,
+        200,
+        scrollable: find.byWidget(_pageScrollable(tester)!.widget),
+      );
+      await tester.pump();
+      expect(
+        find.descendant(of: result, matching: find.textContaining(' › ')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('settings-search-empty')), findsNothing);
+      await tester.tap(result);
+      await _route(tester);
+      // The page is open, scrolled to the setting, which is marked.
+      final Finder setting = find.byKey(Key(key));
+      expect(setting, findsOneWidget);
+      final Rect shown = tester.getRect(setting);
+      expect(shown.top, lessThan(700));
+      expect(shown.bottom, greaterThan(0));
+      expect(find.byKey(const Key('settings-page-highlight')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pageBack();
+      await _route(tester);
+      await _tearDown(tester);
+    });
+  }
 
   testWidgets('every setting is on exactly one page, where the map says', (
     WidgetTester tester,
