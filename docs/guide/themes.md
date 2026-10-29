@@ -56,7 +56,7 @@ All names and artwork are original.
 - Every text colour is checked to keep a contrast of at least 4.5 : 1 on
   every surface, also over the animated backgrounds, in both versions of
   every theme.
-- One font set for every theme: Fredoka, Hanken Grotesk and JetBrains Mono.
+- One font set for every theme: Baloo 2, Hanken Grotesk and JetBrains Mono.
 
 ## Limits
 

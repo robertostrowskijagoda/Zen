@@ -342,7 +342,7 @@ String stickerSvg(
         out.writeln('<path fill="${_hex(color)}" d="${_d(ops)}"/>');
       case StickerText():
         final String family = shape.family == kStickerDisplayFont
-            ? "Fredoka, Quicksand, 'Hanken Grotesk', sans-serif"
+            ? "'Baloo 2', 'Hanken Grotesk', sans-serif"
             : "'Hanken Grotesk', sans-serif";
         for (final StickerTextLine line in shape.lines) {
           out.writeln(

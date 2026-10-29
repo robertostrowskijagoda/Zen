@@ -136,16 +136,16 @@ final class StickerText extends StickerShape {
 
 /// The fonts of the sticker (the app's own, so the print looks the same
 /// on every phone).
-const String kStickerDisplayFont = 'Fredoka';
+const String kStickerDisplayFont = 'Baloo 2';
 const String kStickerTextFont = 'Hanken Grotesk';
 
 TextStyle stickerTextStyle(String family, double size, int weight, int color) =>
     TextStyle(
       fontFamily: family,
-      // The title face has no ą, ć, ę, ń, ś, ź, ż, č, ő, ș, ğ ...: Quicksand
-      // draws them, not the phone's own font.
+      // The title face draws every Latin letter; the text face stands in for
+      // anything else it lacks.
       fontFamilyFallback: family == kStickerDisplayFont
-          ? const <String>['Quicksand', kStickerTextFont]
+          ? const <String>[kStickerTextFont]
           : null,
       fontSize: size,
       fontWeight: FontWeight.values[(weight ~/ 100 - 1).clamp(0, 8)],

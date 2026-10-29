@@ -108,7 +108,7 @@ decoded (the app says so).
 
 ## Fonts, icons and sounds
 
-- Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans: SIL Open Font
+- Baloo 2, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans: SIL Open Font
   License 1.1.
 - Material Icons: Apache-2.0.
 - Zen's sounds are synthesised from scratch by `tool/sounds/generate_sounds.py`
