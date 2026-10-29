@@ -38,12 +38,15 @@ final class StickerSubject {
   final String label;
   final String name;
 
-  /// The person's own invitation ("Mój kod").
+  /// The person's own invitation ("Mój kod"), with their name (not the
+  /// "Zen 1A2B" a profile without one shows).
   static StickerSubject invite(PeerShareProfile profile) => StickerSubject(
     kind: StickerKind.friendInvite,
     data: profile.qrData,
     label: t('Zaproszenie do znajomych'),
-    name: profile.displayName,
+    name: profile.displayName == 'Zen ${profile.shareId}'
+        ? ''
+        : profile.displayName,
   );
 
   /// The page about Zen.

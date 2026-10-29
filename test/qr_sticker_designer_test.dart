@@ -148,6 +148,17 @@ void main() {
       )
       .label;
 
+  test('an invitation sticker carries the person\'s name, never the '
+      '"Zen 1A2B" of a profile without one', () {
+    expect(StickerSubject.invite(_ada).name, 'Ada');
+    expect(StickerSubject.invite(_ada).data, _ada.qrData);
+    final PeerShareProfile nameless = PeerShareCodec.buildLocalProfile(
+      address: PeerShareCodec.normalizeAddress('201:5d1a:9c2e::7f3b'),
+    )!;
+    expect(nameless.displayName, startsWith('Zen '));
+    expect(StickerSubject.invite(nameless).name, '');
+  });
+
   testWidgets('fits the narrowest phone with text twice as large', (
     WidgetTester tester,
   ) async {
