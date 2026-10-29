@@ -7,10 +7,14 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gologme/log"
+	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -78,6 +82,25 @@ func (m *loopbackMesh) waitFindable(nodes ...*bridgeNode) {
 			return false
 		})
 	}
+}
+
+// waitFinding waits until node can find the others itself: its lookups go
+// nowhere until the bloom filter of its peer (the hub) reached it. It looks
+// the third node up, which leaves its sessions and paths with the others
+// cold.
+func (m *loopbackMesh) waitFinding(node *bridgeNode) {
+	m.t.Helper()
+	key := m.prober.PublicKey()
+	waitMesh(m.t, "the node never found the others", func() bool {
+		node.core.SendLookup(key)
+		time.Sleep(100 * time.Millisecond)
+		for _, path := range node.core.GetPaths() {
+			if bytes.Equal(path.Key, key) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // node is a new node on the mesh with a fresh key.
@@ -311,13 +334,21 @@ func talkingPair(t *testing.T) (*loopbackMesh, *bridgeNode, *bridgeNode) {
 }
 
 // restartTestNode stops node and starts it again with its key, as after an
-// update or a phone's restart; returns the new node once it reached the
-// mesh (as the app's start waits for), its packet loop running.
+// update or a phone's restart: the app hands the new node the pins it kept
+// (YggPqSetPinsJson); returns the new node once it reached the mesh (as the
+// app's start waits for), its packet loop running.
 func restartTestNode(t *testing.T, mesh *loopbackMesh, node *bridgeNode) *bridgeNode {
 	t.Helper()
 	key := ed25519.PrivateKey(node.config.PrivateKey)
+	var pins map[string]string
+	if endpoint, err := node.pqEndpointOf(); err == nil {
+		pins = endpoint.pinsSnapshot()
+	}
 	stopTestNode(node)
 	again := mesh.nodeWithKey(key)
+	if endpoint, err := again.pqEndpointOf(); err == nil {
+		endpoint.importPins(pins, false)
+	}
 	startPacketLoop(again)
 	waitMesh(t, "the restarted node never reached the hub", func() bool { return again.hasUpPeer() })
 	return again
@@ -371,10 +402,189 @@ func TestFriendReachesARestartedDeviceQuickly(t *testing.T) {
 	}
 }
 
+// R5-F5: a friend who writes to a device that restarted and says nothing
+// gets through within seconds: the device's new core drops the frame (the
+// friend's session is one of the old process), the device hails the friend
+// it never wrote to, and the friend sends again.
+func TestFriendReachesASilentlyRestartedDevice(t *testing.T) {
+	mesh, a, b := talkingPair(t)
+	b = restartTestNode(t, mesh, b)
+	// Back on the mesh a while, as when a friend writes some time later:
+	// found by the others, and finding them (the hub's bloom filter reached
+	// it on the hub's next router round).
+	mesh.waitFindable(b)
+	mesh.waitFinding(b)
+	took := deliverWithin(t, a, b, `{"type":"message","text":"halo?"}`, 30*time.Second)
+	t.Logf("friend to silently restarted device: %v", took)
+	if took > afterRestartBound {
+		t.Fatalf("the friend's message to the silently restarted device took %v (at most %v)", took, afterRestartBound)
+	}
+}
+
 // afterRestartBound is the longest a friend's first message to a device
 // that restarted may take on a loopback mesh: the device must first become
 // findable again (ironwood's router rounds).
 const afterRestartBound = 5 * time.Second
+
+// R5-F4: four devices sending to each other at once (short signals, ones
+// of several fragments, call media), the app asking about them all the
+// while, and one of them restarting every few seconds: no node stops
+// answering, no question of the app waits, and every pair still talks
+// afterwards.
+func TestNodesUnderLoadKeepAnswering(t *testing.T) {
+	if testing.Short() {
+		t.Skip("a storm of half a minute")
+	}
+	mesh := newLoopbackMesh(t)
+	const count = 4
+	slots := make([]atomic.Pointer[bridgeNode], count)
+	for index := range slots {
+		node := mesh.node()
+		startPacketLoop(node)
+		slots[index].Store(node)
+	}
+	mesh.waitFindable(slots[0].Load(), slots[1].Load(), slots[2].Load(), slots[3].Load())
+
+	stop := make(chan struct{})
+	var wait sync.WaitGroup
+	var slowest atomic.Int64
+	var sent, received atomic.Int64
+	big := strings.Repeat("zen ", 6000)
+	for from := range count {
+		for to := range count {
+			if from == to {
+				continue
+			}
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				for index := 0; ; index++ {
+					select {
+					case <-stop:
+						return
+					case <-time.After(time.Duration(5+index%15) * time.Millisecond):
+					}
+					node, target := slots[from].Load(), meshIP(slots[to].Load())
+					payload := fmt.Sprintf(`{"type":"ping","n":%d}`, index)
+					if index%4 == 0 {
+						payload = fmt.Sprintf(`{"type":"message","n":%d,"text":"%s"}`, index, big)
+					}
+					if sendSignal(node, target.String(), payload) == nil {
+						sent.Add(1)
+					}
+					if index%3 == 0 {
+						if packet, err := buildRelayPacket(node, target, "storm", []byte("media")); err == nil {
+							_ = node.writeMesh(packet, true)
+						}
+					}
+				}
+			}()
+		}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, ok := slots[from].Load().signalInbox.wait(50 * time.Millisecond); ok {
+					received.Add(1)
+				}
+			}
+		}()
+	}
+	for asker := range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := 0; ; index++ {
+				select {
+				case <-stop:
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+				node := slots[(asker+index)%count].Load()
+				started := time.Now()
+				normalizeNodeState(1, node)
+				node.publicPeerStates()
+				_ = node.view().sessions
+				if took := int64(time.Since(started)); took > slowest.Load() {
+					slowest.Store(took)
+				}
+			}
+		}()
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for index := 0; time.Now().Before(deadline); index++ {
+		time.Sleep(3 * time.Second)
+		slot := &slots[index%count]
+		restarted := restartTestNode(t, mesh, slot.Load())
+		slot.Store(restarted)
+		// The app greets its friends once it started.
+		for other := range slots {
+			if node := slots[other].Load(); node != restarted {
+				_ = sendSignal(restarted, meshIP(node).String(), `{"type":"hello"}`)
+			}
+		}
+	}
+	close(stop)
+	wait.Wait()
+	t.Logf("%d signals sent, %d received; slowest look of the app %v", sent.Load(), received.Load(), time.Duration(slowest.Load()))
+	if slowest := time.Duration(slowest.Load()); slowest > 2*nodeViewWait+time.Second {
+		t.Fatalf("a look of the app took %v", slowest)
+	}
+	for index := range slots {
+		node := slots[index].Load()
+		if !answersWithin(2*time.Second, func() { node.core.GetSessions() }) {
+			t.Fatalf("node %d stopped answering", index)
+		}
+	}
+	for from := range count {
+		for to := range count {
+			if from == to {
+				continue
+			}
+			sender, receiver := slots[from].Load(), slots[to].Load()
+			payload := fmt.Sprintf(`{"type":"message","text":"after the storm %d to %d"}`, from, to)
+			if err := sendSignal(sender, meshIP(receiver).String(), payload); err != nil {
+				t.Fatal(err)
+			}
+			if !arrives(receiver, sender, payload, 15*time.Second) {
+				t.Fatalf("after the storm %d to %d never arrived; %d has of %d: %s; %d has of %d: %s",
+					from, to, from, to, sessionState(sender, receiver), to, from, sessionState(receiver, sender))
+			}
+		}
+	}
+}
+
+// arrives waits up to limit for payload from from in to's inbox.
+func arrives(to, from *bridgeNode, payload string, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for {
+		message, ok := to.signalInbox.wait(time.Until(deadline))
+		if !ok {
+			return false
+		}
+		if message.Payload == payload && bytes.Equal(net.ParseIP(message.From), meshIP(from)) {
+			return true
+		}
+	}
+}
+
+// sessionState is what node's session layer holds of peer, whether it
+// pinned the peer and whether its mesh reader knows the peer's key
+// (diagnostics).
+func sessionState(node, peer *bridgeNode) string {
+	endpoint, err := node.pqEndpointOf()
+	if err != nil {
+		return err.Error()
+	}
+	_, pinned := endpoint.pinsSnapshot()[meshIP(peer).String()]
+	known := node.mesh.keyOf(*address.AddrForKey(peer.core.PublicKey())) != nil
+	return fmt.Sprintf("%s (pinned %v, key known to the mesh reader %v)", endpoint.peerState(meshIP(peer)), pinned, known)
+}
 
 // firstContactBound is the longest a first contact (or the first message
 // after a restart) may take on a loopback mesh.

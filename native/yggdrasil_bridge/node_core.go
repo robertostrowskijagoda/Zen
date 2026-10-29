@@ -257,6 +257,7 @@ func nodeInfoPrivacyOptions() []core.SetupOption {
 // signalling starts.
 func (node *bridgeNode) startMesh() {
 	node.mesh = newMeshIO(node.core, node.traffic.sent)
+	node.mesh.hail = node.hailPeer
 	node.mesh.start()
 }
 
