@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/features/qr_sticker/zen_qr_code.dart';
 
 /// The modules of one QR code, and which of them are the code's own
 /// patterns (the three finder eyes, the timing lines, the alignment
@@ -16,11 +17,12 @@ final class QrMatrix {
   /// [data] as a QR code. [robust] uses the highest error correction (H,
   /// about 30 % of the code can be lost), which a logo in the middle
   /// needs; otherwise M (about 15 %), the better one for print than the
-  /// L the app shows on screen.
+  /// L the app may show on screen. The code is the lowest version the
+  /// data fits, in its most compact segments ([zenQrCode]).
   factory QrMatrix.encode(String data, {bool robust = false}) {
-    final QrCode code = QrCode.fromData(
-      data: data,
-      errorCorrectLevel: robust ? QrErrorCorrectLevel.H : QrErrorCorrectLevel.M,
+    final QrCode code = zenQrCode(
+      data,
+      medium: robust ? ZenQrMedium.printWithLogo : ZenQrMedium.print,
     );
     final QrImage image = QrImage(code);
     final int size = image.moduleCount;

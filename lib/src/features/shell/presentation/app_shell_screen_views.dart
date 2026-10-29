@@ -2941,7 +2941,6 @@ class _LocalCodePanel extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     // The QR code is always dark on white: cameras read it best that way,
     // whatever the app's theme.
-    const Color qrInk = ZenFixed.qrInk;
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -2986,7 +2985,7 @@ class _LocalCodePanel extends StatelessWidget {
             const SizedBox(height: 16),
             Center(
               child: Container(
-                padding: const EdgeInsets.all(14),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: ZenFixed.qrPaper,
                   borderRadius: context.zenRadius(22),
@@ -2994,20 +2993,7 @@ class _LocalCodePanel extends StatelessWidget {
                     context,
                   ).tinted(zen, zen.accent, radius: 18, alpha: 0.18),
                 ),
-                child: QrImageView(
-                  data: profile.qrData,
-                  size: 184,
-                  padding: EdgeInsets.zero,
-                  backgroundColor: ZenFixed.qrPaper,
-                  eyeStyle: QrEyeStyle(
-                    color: qrInk,
-                    eyeShape: QrEyeShape.square,
-                  ),
-                  dataModuleStyle: QrDataModuleStyle(
-                    color: qrInk,
-                    dataModuleShape: QrDataModuleShape.square,
-                  ),
-                ),
+                child: ZenQrView(data: profile.qrData, size: 212),
               ),
             ),
             const SizedBox(height: 18),

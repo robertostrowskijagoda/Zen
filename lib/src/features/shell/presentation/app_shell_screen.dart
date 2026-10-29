@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/feature_flags.dart';
@@ -79,6 +78,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/relay/iphone_delivery_notice.dart';
 import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
 import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
@@ -126,11 +126,11 @@ import 'package:zen/src/features/update/store_build.dart';
 
 part 'app_shell_screen_notification_settings.dart';
 part 'app_shell_screen_notifications.dart';
-part 'app_shell_screen_views.dart';
-part 'app_shell_screen_settings_security.dart';
-part 'app_shell_screen_widgets.dart';
 part 'app_shell_screen_relay.dart';
+part 'app_shell_screen_settings_security.dart';
 part 'app_shell_screen_tabs.dart';
+part 'app_shell_screen_views.dart';
+part 'app_shell_screen_widgets.dart';
 
 enum ServiceHealth { active, syncing, stopped, failed }
 

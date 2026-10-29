@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -13,6 +12,7 @@ import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 
 // A QR code scans only dark on light: the housemate's code stays on white
@@ -795,7 +795,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Container(
-                          padding: const EdgeInsets.all(16),
+                          clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
                             color: _paper,
                             borderRadius: BorderRadius.circular(
@@ -803,11 +803,10 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                             ),
                             border: Border.all(color: zen.outlineSoft),
                           ),
-                          child: QrImageView(
+                          child: ZenQrView(
                             key: const Key('flat-home-qr'),
                             data: code.toQr(),
-                            size: 240,
-                            backgroundColor: _paper,
+                            size: 272,
                           ),
                         ),
                       ),
