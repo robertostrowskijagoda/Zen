@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -1049,9 +1050,17 @@ final class _StorePlace {
 
 /// The lock of one file's saves across isolates and processes: a
 /// `<file>.lock` created exclusively (which the system does atomically for
-/// every process), holding the owner's process id, removed when the save
-/// is done. A lock left by a process that died (another id, or older than
-/// [staleAfter]) is taken over.
+/// every process), holding its owner ([_owner]: the process id and this
+/// isolate's own token), removed when the save is done. A lock nobody
+/// holds any more is taken over at once: one of another process (on a
+/// phone the app and its service share one, so it is from before a
+/// restart), one of this very isolate (each of its saves waits its turn in
+/// `FileBinaryStore._writeQueues` before it takes the lock, so none of
+/// them holds it: a release that failed — Windows refuses to delete a file
+/// another program has open — or a folder put back from a copy), and one
+/// still empty a while after it was made (its owner died before it wrote
+/// its name). Another isolate's lock is waited for, up to [waitAtMost], or
+/// taken over once older than [staleAfter].
 final class _FileWriteLock {
   _FileWriteLock._(this._file);
 
@@ -1060,9 +1069,19 @@ final class _FileWriteLock {
   /// Longer than any save takes; a lock older than this was left behind.
   static const Duration staleAfter = Duration(seconds: 30);
 
+  /// Longer than an owner takes to write its name into the lock it made.
+  static const Duration unnamedAfter = Duration(seconds: 2);
+
   /// The longest a save waits for another one before it goes ahead
   /// anyway (still atomic: it only risks the backups' order).
   static const Duration waitAtMost = Duration(seconds: 10);
+
+  /// Who holds a lock this isolate took: the process and a token of this
+  /// isolate (statics are one per isolate), so two isolates of one process
+  /// tell their locks apart.
+  static final String _owner =
+      '$pid ${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+      '-${Random.secure().nextInt(1 << 32).toRadixString(36)}';
 
   static Future<_FileWriteLock> take(String path) async {
     final File file = File('$path.lock');
@@ -1072,9 +1091,9 @@ final class _FileWriteLock {
       try {
         await file.create(exclusive: true);
         try {
-          await file.writeAsString('$pid', flush: false);
+          await file.writeAsString(_owner, flush: false);
         } on FileSystemException {
-          // The lock holds by existing; the id only helps after a crash.
+          // The lock holds by existing; the name only helps after a crash.
         }
         return _FileWriteLock._(file);
       } on FileSystemException {
@@ -1099,12 +1118,17 @@ final class _FileWriteLock {
   static Future<bool> _isStale(File file) async {
     try {
       final String owner = (await file.readAsString()).trim();
-      if (owner.isNotEmpty && owner != '$pid') {
-        // Another process: on a phone the app and its service share one,
-        // so this one is from before a restart.
+      if (owner == _owner) {
         return true;
       }
-      return DateTime.now().difference(await file.lastModified()) > staleAfter;
+      final Duration age = DateTime.now().difference(await file.lastModified());
+      if (owner.isEmpty) {
+        return age > unnamedAfter;
+      }
+      if (owner.split(' ').first != '$pid') {
+        return true;
+      }
+      return age > staleAfter;
     } on FileSystemException {
       return false;
     } on FormatException {
