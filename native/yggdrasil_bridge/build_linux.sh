@@ -119,10 +119,14 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/zen-go-linux.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 echo "Go bridge: building $platform with $("$go_bin" version)"
+# No version-control stamp: the library is the same whatever state the
+# checkout is in, and in CI's image (a container running as root) git
+# refuses to read a checkout owned by the runner's user, which would stop
+# the build.
 (
   cd "$root"
   env GOOS=linux GOARCH="$goarch" CGO_ENABLED=1 \
-    "$go_bin" build -trimpath -buildmode=c-shared -ldflags='-s -w' \
+    "$go_bin" build -trimpath -buildvcs=false -buildmode=c-shared -ldflags='-s -w' \
     -o "$work/libyggdrasil_bridge.so" .
 )
 
