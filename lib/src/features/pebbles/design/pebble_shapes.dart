@@ -64,7 +64,31 @@ final class PebbleShapeParams {
 
   /// The bottom squashed flat.
   final double flatBottom;
+
+  /// The same shape, lower: its height ([ay]) at 62 % and at most [most].
+  PebbleShapeParams flatter(double most) => PebbleShapeParams(
+    ax: ax,
+    ay: (ay * 0.62).clamp(0.0, most),
+    az: az,
+    e1: e1,
+    e2: e2,
+    noise: noise,
+    noiseFreq: noiseFreq,
+    rough: rough,
+    taper: taper,
+    egg: egg,
+    lobes: lobes,
+    lobeCount: lobeCount,
+    waist: waist,
+    bend: bend,
+    dent: dent,
+    flatBottom: flatBottom,
+  );
 }
+
+/// The highest a pebble's shape gets (radius up, against 1 across): a flat
+/// stone, as people paint ([PebbleShapePreset.params]).
+const double kPebbleMaxHeight = 0.4;
 
 /// The stone shapes on offer: all of them stones as they lie by a river or
 /// on a beach (round, flat, long, lopsided, dented, chipped), never a
@@ -166,9 +190,16 @@ enum PebbleShapePreset {
   worn(PebbleShapeParams(ay: 0.48, az: 0.82, e1: 1.05, noise: 0.02)),
   sea(PebbleShapeParams(ay: 0.4, az: 0.75, egg: 0.1, bend: 0.06, noise: 0.035));
 
-  const PebbleShapePreset(this.params);
+  const PebbleShapePreset(this._built);
 
-  final PebbleShapeParams params;
+  final PebbleShapeParams _built;
+
+  /// The shape as drawn: painted pebbles are flat stones, so every shape
+  /// but [tall] is at most [kPebbleMaxHeight] high (designs keep their
+  /// index and simply come out flatter). The pebble page does the same
+  /// (tool/pages/k/stone.js).
+  PebbleShapeParams get params =>
+      this == tall ? _built : _built.flatter(kPebbleMaxHeight);
 
   static PebbleShapePreset byId(int id) =>
       id >= 0 && id < values.length ? values[id] : river;

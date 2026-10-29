@@ -2,6 +2,7 @@ package com.roj.zen
 
 import android.app.ActivityManager
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -161,6 +162,10 @@ object ZenPower {
                         }
                         result.success(null)
                     }
+                    "wakeScreenForNotice" -> {
+                        wakeScreenForNotice(app)
+                        result.success(null)
+                    }
                     "holdForCall" -> {
                         holdForCall(app, call.arguments as? Boolean ?: false)
                         result.success(null)
@@ -288,6 +293,42 @@ object ZenPower {
             holdUntil[tag] = now + ms
         } catch (error: Exception) {
             Log.w(TAG, "Shortening a hold failed", error)
+        }
+    }
+
+    /**
+     * A friend's message or invitation lights a dark screen for a few
+     * seconds, as other messengers do, so the notification shows on the
+     * lock screen (with only what its privacy level allows there). Not
+     * while the screen is on, and not under "Do not disturb", which may
+     * still let the notification itself through.
+     */
+    @Suppress("DEPRECATION")
+    fun wakeScreenForNotice(context: Context) {
+        try {
+            val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            if (power.isInteractive) {
+                return
+            }
+            val notifications =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            val filter = notifications?.currentInterruptionFilter
+                ?: NotificationManager.INTERRUPTION_FILTER_ALL
+            if (filter != NotificationManager.INTERRUPTION_FILTER_ALL &&
+                filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+            ) {
+                return
+            }
+            val lock = power.newWakeLock(
+                PowerManager.SCREEN_DIM_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "zen:notice_wakeup",
+            )
+            lock.setReferenceCounted(false)
+            lock.acquire(3000)
+        } catch (error: Exception) {
+            Log.w(TAG, "Lighting the screen for a notification failed", error)
         }
     }
 

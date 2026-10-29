@@ -64,7 +64,6 @@ final Map<String, List<String>> _pages = <String, List<String>>{
     'settings-panic-password-button',
     'settings-biometric-unlock-switch',
     'settings-lock-mode-dropdown',
-    'settings-secure-screens-switch',
     'settings-allow-no-password-switch',
   ],
   'settings-nav-contact': <String>[
@@ -142,7 +141,6 @@ const List<String> _before = <String>[
   'settings-panic-password-button',
   'settings-biometric-unlock-switch',
   'settings-lock-mode-dropdown',
-  'settings-secure-screens-switch',
   'settings-allow-no-password-switch',
   'settings-disguise-icon-switch',
   'settings-notification-privacy',
@@ -415,8 +413,7 @@ void main() {
     expect(keys('motyw'), contains('settings-palette-picker'));
     expect(keys('theme'), contains('settings-palette-picker'));
     expect(keys('ciemny'), contains('settings-theme-mode-segmented'));
-    expect(keys('zrzuty'), contains('settings-secure-screens-switch'));
-    expect(keys('screenshot'), contains('settings-secure-screens-switch'));
+    expect(keys('zrzuty'), isEmpty, reason: 'Zen never blocks screenshots');
     expect(keys('haslo'), contains('settings-change-password-button'));
     expect(keys('blokada'), contains('settings-lock-mode-dropdown'));
     expect(keys('dzwiek'), contains('settings-notification-sounds'));
@@ -485,7 +482,7 @@ void main() {
 
   for (final (String typed, String key) in const <(String, String)>[
     ('motyw', 'settings-palette-picker'),
-    ('zrzuty', 'settings-secure-screens-switch'),
+    ('blokada', 'settings-lock-mode-dropdown'),
     ('dzwiek powiadomien', 'settings-notification-sounds'),
   ]) {
     testWidgets('"$typed" finds the setting on its page and opens it there '

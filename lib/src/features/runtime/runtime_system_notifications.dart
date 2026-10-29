@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -852,6 +853,35 @@ final class FlutterLocalRuntimeSystemNotificationService
     }
   }
 
+  static const MethodChannel _power = MethodChannel('zen/power');
+
+  /// Android: a friend's message or invitation that alerts lights a dark
+  /// screen for a few seconds, as other messengers do, so it shows on the
+  /// lock screen (ZenPower.kt, `wakeScreenForNotice`: not while the screen
+  /// is on, not under "Do not disturb"). Not for a quiet one or an update
+  /// of one already on screen; calls and alarms take the screen anyway.
+  void _lightScreenFor(
+    RuntimeSystemNotification notification, {
+    required bool onlyAlertOnce,
+  }) {
+    if (kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android ||
+        notification.silent ||
+        onlyAlertOnce ||
+        (notification.category != RuntimeSystemNotificationCategory.message &&
+            notification.category !=
+                RuntimeSystemNotificationCategory.social)) {
+      return;
+    }
+    unawaited(
+      _power.invokeMethod<void>('wakeScreenForNotice').catchError((
+        Object error,
+      ) {
+        logZenWarning('Lighting the screen for a notification failed: $error');
+      }),
+    );
+  }
+
   @override
   Future<bool> show(RuntimeSystemNotification notification) async {
     if (notification.suppressionKey != null &&
@@ -912,6 +942,7 @@ final class FlutterLocalRuntimeSystemNotificationService
         payload: notification.routeKey,
       );
       _playOwnSound(notification, slotKey, onlyAlertOnce: onlyAlertOnce);
+      _lightScreenFor(notification, onlyAlertOnce: onlyAlertOnce);
       return true;
     } catch (error, stackTrace) {
       // Not the title: the diagnostics log must not collect who wrote.

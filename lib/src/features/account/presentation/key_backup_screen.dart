@@ -19,6 +19,7 @@ import 'package:zen/src/features/account/presentation/recovery_circle_list.dart'
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
+import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -275,21 +276,15 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            TextField(
-              key: const Key('key-file-password'),
+            PasswordTextField(
+              fieldKey: const Key('key-file-password'),
               controller: _filePassword,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
               decoration: InputDecoration(labelText: t('Hasło pliku')),
             ),
             const SizedBox(height: 8),
-            TextField(
-              key: const Key('key-file-password-again'),
+            PasswordTextField(
+              fieldKey: const Key('key-file-password-again'),
               controller: _filePassword2,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
               decoration: InputDecoration(
                 labelText: t('Hasło pliku jeszcze raz'),
               ),
@@ -411,12 +406,9 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
             text: t('To konto ma hasło. Podaj je, żeby zrobić kopię klucza.'),
           ),
           const SizedBox(height: 8),
-          TextField(
-            key: const Key('paper-backup-password'),
+          PasswordTextField(
+            fieldKey: const Key('paper-backup-password'),
             controller: _password,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
             decoration: InputDecoration(labelText: t('Hasło konta')),
             onSubmitted: (_) => unawaited(_unlock()),
           ),

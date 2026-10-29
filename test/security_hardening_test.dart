@@ -159,27 +159,17 @@ void main() {
     expect(await vault.seal(Uint8List.fromList(<int>[1, 2, 3])), isNull);
   });
 
-  testWidgets('secure screens hold capture protection while shown', (
+  testWidgets('a screen with private content never blocks captures', (
     WidgetTester tester,
   ) async {
     SecureWindow.lastApplied = false;
-    final ValueNotifier<bool> show = ValueNotifier<bool>(true);
     await tester.pumpWidget(
-      ProviderScope(
-        child: MaterialApp(
-          home: ValueListenableBuilder<bool>(
-            valueListenable: show,
-            builder: (BuildContext context, bool on, Widget? _) => on
-                ? const SecureScreen(child: SecureScreen(child: Text('tajne')))
-                : const Text('jawne'),
-          ),
-        ),
+      const MaterialApp(
+        home: SecureScreen(child: SecureScreen(child: Text('tajne'))),
       ),
     );
     await tester.pump();
-    expect(SecureWindow.lastApplied, isTrue);
-    show.value = false;
-    await tester.pump();
     expect(SecureWindow.lastApplied, isFalse);
+    expect(find.text('tajne'), findsOneWidget);
   });
 }

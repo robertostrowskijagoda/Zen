@@ -95,10 +95,10 @@ object ZenSecurityBridge {
 
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         val messenger = engine.dartExecutor.binaryMessenger
-        // From the first frame, as the app last left it: Dart says again once
-        // its settings are loaded, but a recent-apps preview or a screenshot
-        // could be taken before that.
-        applySecure(activity, wasSecure(activity))
+        // Zen never blocks captures (since 1.15.1): the protection an older
+        // version remembered is lifted from the first frame.
+        applySecure(activity, false)
+        rememberSecure(activity, false)
         MethodChannel(messenger, SECURE_WINDOW_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setSecure" -> {
@@ -234,14 +234,6 @@ object ZenSecurityBridge {
             activity.setRecentsScreenshotEnabled(!secure)
         }
     }
-
-    private fun wasSecure(activity: FragmentActivity): Boolean =
-        try {
-            activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(PREF_SECURE, true)
-        } catch (_: Exception) {
-            true
-        }
 
     private fun rememberSecure(activity: FragmentActivity, secure: Boolean) {
         try {

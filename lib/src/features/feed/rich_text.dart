@@ -128,7 +128,10 @@ final class _Style {
 }
 
 const List<String> _pairs = <String>['||', '**', '__', '~~', '*', '_'];
-final RegExp _url = RegExp(r'https?://[^\s<>()]+[^\s<>().,!?;:]');
+
+/// A web link in text people wrote (posts, messages, comments): http or
+/// https up to the first space, without a closing bracket or punctuation.
+final RegExp kTextLinkPattern = RegExp(r'https?://[^\s<>()]+[^\s<>().,!?;:]');
 
 bool _wordChar(String c) => RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(c);
 
@@ -177,7 +180,7 @@ void _plain(String text, _Style style, List<RichRun> out) {
 
 void _links(String text, _Style style, List<RichRun> out) {
   int at = 0;
-  for (final RegExpMatch m in _url.allMatches(text)) {
+  for (final RegExpMatch m in kTextLinkPattern.allMatches(text)) {
     if (m.start > at) {
       out.add(style.run(text.substring(at, m.start)));
     }

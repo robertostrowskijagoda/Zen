@@ -12,6 +12,7 @@ import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/zen_link_router.dart';
+import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
@@ -251,12 +252,9 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                       ),
                       if (_fileBytes != null) ...<Widget>[
                         const SizedBox(height: 8),
-                        TextField(
-                          key: const Key('key-restore-password'),
+                        PasswordTextField(
+                          fieldKey: const Key('key-restore-password'),
                           controller: _filePassword,
-                          obscureText: true,
-                          autocorrect: false,
-                          enableSuggestions: false,
                           decoration: InputDecoration(
                             labelText: t('Hasło pliku'),
                           ),
