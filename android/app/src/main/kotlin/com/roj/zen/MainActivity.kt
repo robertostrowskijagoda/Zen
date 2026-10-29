@@ -83,6 +83,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // The WebRTC state a background engine must not replace.
+        ZenWebRtcGuard.appEngineReady(flutterEngine)
         ZenCallBridge.register(flutterEngine, this)
         ZenSecurityBridge.register(flutterEngine, this)
         ZenUpdateBridge.register(flutterEngine, this)
@@ -102,6 +104,7 @@ class MainActivity : FlutterFragmentActivity() {
     // bridges live as long as the process (the background service keeps it),
     // and whatever they keep of the engine keeps this Activity too.
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        ZenWebRtcGuard.appEngineGone(flutterEngine)
         ZenCallBridge.unregister(flutterEngine)
         ZenSecurityBridge.unregister(flutterEngine)
         ZenUpdateBridge.unregister(flutterEngine)

@@ -18,6 +18,8 @@ class ZenApplication : Application() {
                     return
                 }
                 GeneratedPluginRegistrant.registerWith(flutterEngine)
+                // Calls run in the app's engine only (ZenWebRtcGuard).
+                ZenWebRtcGuard.keepOutOf(flutterEngine)
                 ZenCallBridge.register(flutterEngine, this@ZenApplication)
                 ZenMulticastLock.register(flutterEngine, this@ZenApplication)
                 // Alarms that wake the sleeping phone, timed holds.
