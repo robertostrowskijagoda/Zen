@@ -545,8 +545,8 @@ class _ReadableWidth extends StatelessWidget {
 /// never below a comfortable thumb target. The buttons take all the height
 /// there is: on the smallest phone, 320x568, the thirteen places get about
 /// 35 dp each (56 dp wide) and still fit without scrolling; taller phones
-/// give them more, up to [_sideTabMaxExtent]. Only a shorter window (a phone on its side, split
-/// screen) scrolls.
+/// give them more, up to [_sideTabMaxExtent]. Only a shorter window (a
+/// phone on its side, split screen) scrolls.
 const double _sideTabMaxExtent = 54;
 const double _sideTabMinExtent = 35;
 
