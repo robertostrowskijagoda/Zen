@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -28,6 +27,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -1236,12 +1236,7 @@ class _LiveTicketCodeState extends State<_LiveTicketCode> {
               height: 200,
               child: Center(child: CircularProgressIndicator()),
             )
-          : QrImageView(
-              key: const Key('event-ticket'),
-              data: code,
-              size: 200,
-              backgroundColor: ZenFixed.qrPaper,
-            ),
+          : ZenQrView(key: const Key('event-ticket'), data: code, size: 200),
     );
   }
 }

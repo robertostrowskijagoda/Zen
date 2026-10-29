@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -19,6 +18,7 @@ import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/account/presentation/recovery_circle_list.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -609,16 +609,15 @@ class _PaperBackupViewState extends State<PaperBackupView> {
       const SizedBox(height: 12),
       Center(
         child: Container(
-          padding: const EdgeInsets.all(12),
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: ZenFixed.qrPaper,
             borderRadius: context.zenRadius(20),
           ),
-          child: QrImageView(
+          child: ZenQrView(
             key: const Key('paper-backup-qr'),
             data: paperBackupQrData(widget.code),
-            size: 220,
-            backgroundColor: ZenFixed.qrPaper,
+            size: 244,
           ),
         ),
       ),

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
@@ -27,6 +26,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 
 /// "12.10.2026 18:00".
 String pyrDate(int millis) {
@@ -1182,6 +1182,7 @@ class _MeTab extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Container(
+                    clipBehavior: Clip.antiAlias,
                     // A QR code reads black on white, whatever the theme.
                     decoration: BoxDecoration(
                       color: ZenFixed.qrPaper,
@@ -1189,12 +1190,7 @@ class _MeTab extends StatelessWidget {
                         ZenLook.of(context).radius(20),
                       ),
                     ),
-                    padding: const EdgeInsets.all(12),
-                    child: QrImageView(
-                      data: code,
-                      size: 220,
-                      backgroundColor: ZenFixed.qrPaper,
-                    ),
+                    child: ZenQrView(data: code, size: 244),
                   ),
                   const SizedBox(height: 12),
                   ZenInfo(

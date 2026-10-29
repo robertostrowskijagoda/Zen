@@ -7,12 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/android_abi.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
@@ -543,17 +543,12 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   /// A QR code on a white rounded tile (scanners need the contrast).
   Widget _qr(String data, double size, {Key? key}) => Center(
     child: Container(
-      padding: const EdgeInsets.all(12),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: ZenFixed.qrPaper,
         borderRadius: context.zenRadius(20),
       ),
-      child: QrImageView(
-        key: key,
-        data: data,
-        size: size,
-        backgroundColor: ZenFixed.qrPaper,
-      ),
+      child: ZenQrView(key: key, data: data, size: size + 24),
     ),
   );
 

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -15,6 +14,7 @@ import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
 import 'package:zen/src/features/census/census_providers.dart';
 import 'package:zen/src/features/census/network_census.dart';
 import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -1482,16 +1482,15 @@ class _DonateCard extends StatelessWidget {
           const SizedBox(height: 14),
           Center(
             child: Container(
-              padding: const EdgeInsets.all(10),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: ZenFixed.qrPaper,
                 borderRadius: context.zenRadius(18),
               ),
-              child: QrImageView(
+              child: ZenQrView(
                 key: const Key('about-donate-qr'),
                 data: kDonationUrl,
-                size: 150,
-                backgroundColor: ZenFixed.qrPaper,
+                size: 170,
               ),
             ),
           ),
