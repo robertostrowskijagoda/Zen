@@ -205,7 +205,7 @@ void main() {
     expect(state.design, ladybird);
 
     await _tapKey(tester, 'pebble-tool-stone');
-    await _tapKey(tester, 'pebble-shape-heart');
+    await _tapKey(tester, 'pebble-shape-flatOval');
     expect(state.design.shape, 3);
     await _tapKey(tester, 'pebble-material-gold');
     expect(state.design.materialPreset.name, 'gold');
