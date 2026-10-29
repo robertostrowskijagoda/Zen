@@ -14,11 +14,12 @@
   <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
   <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/release.yml?label=release%20build&event=push&logo=githubactions&logoColor=white" alt="Release build status"></a>
   <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest"><img src="https://img.shields.io/github/v/release/robertostrowskijagoda/Zen?include_prereleases&sort=semver&label=latest%20release" alt="Latest release"></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/releases"><img src="https://img.shields.io/github/downloads/robertostrowskijagoda/Zen/total?label=downloads" alt="Downloads"></a>
   <a href="https://github.com/robertostrowskijagoda/Zen/commits/main"><img src="https://img.shields.io/github/last-commit/robertostrowskijagoda/Zen?label=last%20commit" alt="Last commit"></a>
   <br>
   <a href="docs/SECURITY_MODEL.md"><img src="https://img.shields.io/badge/post--quantum-ML--KEM--768%20%2B%20ML--DSA--65-6d28d9" alt="Post-quantum: ML-KEM-768 and ML-DSA-65"></a>
-  <a href="#platforms"><img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20iOS%20%C2%B7%20Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-0f766e" alt="Platforms: Android, iOS, Windows, macOS, Linux"></a>
-  <a href="#building-from-source"><img src="https://img.shields.io/badge/Flutter-3.47.1-02569B?logo=flutter&logoColor=white" alt="Flutter 3.47.1"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20iOS%20%C2%B7%20Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-0f766e" alt="Platforms: Android, iOS, Windows, macOS, Linux"></a>
+  <a href="docs/BUILDING.md"><img src="https://img.shields.io/badge/Flutter-3.47.1-02569B?logo=flutter&logoColor=white" alt="Flutter 3.47.1"></a>
   <a href="native/yggdrasil_bridge/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/robertostrowskijagoda/Zen?filename=native%2Fyggdrasil_bridge%2Fgo.mod&logo=go&logoColor=white&label=Go" alt="Go version"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
 </p>
@@ -28,11 +29,11 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><b>⬇ Windows</b></a>
   &nbsp;·&nbsp;
-  <a href="#iphone"><b>📱 iPhone</b></a>
+  <a href="https://robertostrowskijagoda.github.io/Zen/install/iphone/"><b>📱 iPhone</b></a>
   &nbsp;·&nbsp;
-  <a href="#mac"><b>💻 Mac</b></a>
+  <a href="https://robertostrowskijagoda.github.io/Zen/install/macos/"><b>💻 Mac</b></a>
   &nbsp;·&nbsp;
-  <a href="#linux"><b>🐧 Linux</b></a>
+  <a href="https://robertostrowskijagoda.github.io/Zen/install/linux/"><b>🐧 Linux</b></a>
   &nbsp;·&nbsp;
   <a href="docs/guide/README.md"><b>📖 User guide</b></a>
   &nbsp;·&nbsp;
@@ -60,6 +61,8 @@
   </picture>
 </p>
 
+<p align="center"><a href="https://robertostrowskijagoda.github.io/Zen/features/">More pictures and every feature on the website</a></p>
+
 > **Did someone show you a QR code?** The code opens an invitation page: if you
 > have Zen, the page opens it right away with the invitation; if you don't, it
 > shows the download buttons. After installing, come back to that page and tap
@@ -83,276 +86,74 @@ from small cells of people who know each other in person, where votes, trust
 and a common purse flow from the bottom up, with no headquarters that could be
 bribed or shut down.
 
+**Post-quantum.** Traffic recorded today could be decrypted once quantum
+computers can break today's public-key cryptography. Zen's key exchanges are
+hybrid **ML-KEM-768 + X25519** and its lasting signatures hybrid
+**Ed25519 + ML-DSA-65** (NIST FIPS 203 and 204): every signal between two
+devices, offline mailboxes, device identity, everything signed and kept, and
+the relay layer around calls. A hybrid stays safe as long as either half
+holds. A few parts stay classical (the Yggdrasil node key and address, the
+ring signature that registers a voting card, local link pair secrets until
+two devices first meet over the mesh, the AES key inside call frames); what
+is protected how, and why the rest is not:
+[security model](docs/SECURITY_MODEL.md).
+
 Using Zen to break the law is forbidden by the [Terms of use](docs/TERMS.md).
-
-## Post-quantum
-
-A quantum computer able to break today's public-key cryptography does not
-exist yet, but traffic recorded today could be decrypted once it does. Zen is
-built for that: **its key exchanges are hybrid ML-KEM-768 + X25519 and its
-lasting signatures hybrid Ed25519 + ML-DSA-65** (NIST FIPS 203 and 204), with
-the few exceptions listed below. A hybrid stays safe as long as either half
-holds.
-
-| Protected | How |
-|---|---|
-| Every signal between two devices: messages, sync, call set-up | a session per device pair, ML-KEM-768 + X25519, ChaCha20-Poly1305, no plaintext mode |
-| Offline mailboxes and the locked phone's inbox | sealed once more for the recipient's hybrid key |
-| Device identity | device keys pinned per address and bound to it by a hybrid signature |
-| Everything signed and kept: posts, profiles, devices, pyramid records, ballots, anonymous vote requests and votes, releases | Ed25519 + ML-DSA-65, valid only when both verify |
-| Calls | AES-128-GCM frames with per-call hybrid keys, inside a 256-bit ChaCha20-Poly1305 post-quantum relay layer |
-| Neighbours' doors, Bluetooth hellos, local link handshakes and pair secrets, dating boxes, food pickup addresses | ML-KEM-768 + X25519 |
-| Event tickets | hash-based (HMAC-SHA256), no signatures needed |
-| Links to public peers | TLS 1.3 with X25519MLKEM768 |
-| Data on your device | AES-256-GCM, a key from your password (Argon2id) |
-
-**Still classical, honestly:** the Yggdrasil node key and address (Ed25519,
-the mesh protocol itself; it routes, but no longer proves who you are), the
-ring signature that registers a voting card between cellmates (requests and
-votes themselves are signed post-quantum by those cards), the pair secret
-that lets devices recognise each other on local links until they first meet
-over the mesh, and the 128-bit AES key inside call frames (wrapped in the 256-bit layer).
-Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 
 ## What it can do
 
 - 💬 **[Chats and calls](docs/guide/chats-and-delivery.md):** one-to-one
   and group chats with photos, videos, files, voice notes and GIFs,
   reactions, replies, editing, forwarding and delete for everyone; a board
-  for every group; drag and drop and paste on computers; audio and video
-  calls with screen sharing. Messages for offline friends wait sealed in
-  their friends' mailboxes (devices that stay online come first), and the
-  icons tell you exactly where a message is.
+  for every group; audio and video calls with screen sharing. Messages for
+  offline friends wait sealed in their friends' mailboxes, and the icons
+  tell you exactly where a message is.
 - 🕸️ **[Friends and the graph](docs/guide/friends-and-graph.md):** friendship
-  levels that decide who sees what; a graph of who knows whom with a
-  timeline, bridges between your groups of friends, *who's worth meeting*,
-  full screen.
+  levels that decide who sees what, and a graph of who knows whom with a
+  timeline and *who's worth meeting*.
 - 📰 **[Feed and videos](docs/guide/feed-and-videos.md):** posts only for the
   people you choose, and a short-video section, ordered on your own phone.
 - 🍲 **[Meeting people](docs/guide/meeting-people.md):** *right now*
-  statuses, events through friends with offline tickets, dinner circles,
-  sharing food, people nearby over Bluetooth, and an **alarm** that works
-  from a locked Android phone.
+  statuses, events with offline tickets, dinner circles, sharing food,
+  people nearby over Bluetooth, and an **alarm** that works from a locked
+  Android phone.
 - 🚪 **[Neighbours](docs/guide/neighbours.md):** a QR code on your door; a
-  knock rings every phone of the household, and waits with friends when
-  nobody is home.
+  knock rings every phone of the household.
 - ❤️ **[Dating](docs/guide/dating.md):** through friends, up to three steps
-  away, with a private match test that tells nobody else anything.
-- 🔺 **[The pyramid](docs/guide/pyramid.md):** cells of three, promotion one
-  level at a time, anonymous cell votes, referendums, a court with appeals, a
-  common wallet with a hard issuance limit, and an animated history.
+  away, with a private match test.
+- 🔺 **[The pyramid](docs/guide/pyramid.md):** cells of three, anonymous cell
+  votes, referendums, a court with appeals and a common wallet.
 - 🚦 **[Introductions and gates](docs/guide/introductions-and-gates.md):**
-  reach people further away through friends, free or for points, with a route
-  planner.
+  reach people further away through friends.
 - 📡 **[Offline links](docs/guide/offline-links.md):** same Wi-Fi, Wi-Fi
   Direct and Bluetooth: Zen without the internet.
-- 🎨 **[Themes](docs/guide/themes.md):** 27 looks in five groups, from
-  Classic to Brass & Steam, each in a light and a dark version.
+- 🎨 **[Themes](docs/guide/themes.md):** 27 looks, each light and dark.
 - 👥 **[Several accounts](docs/guide/getting-started.md#several-accounts-on-one-device)**
-  on one device, hidden ones included. Getting an account back: a second
-  device of the account, a **full account copy** (an encrypted file), a
-  **key copy** (paper or file), or a **recovery circle** of 4 to 6 friends
-  you pick, who also keep an encrypted **copy with friends** of your
-  friends, groups and conversation texts.
-- ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)** and
+  on one device, hidden ones included, and several ways to get an account
+  back: a second device, an encrypted account copy, a key copy, or a
+  recovery circle of 4 to 6 friends.
+- ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)**,
   **[self-updates](docs/guide/updates.md)**, *Why isn't it working?*
   diagnostics, and **21 languages**.
 
-## Platforms
+## Install
 
-| System | Builds | Notes |
+| System | File | Step by step |
 |---|---|---|
-| Android | `Zen-arm64-v8a.apk` (most phones), `Zen-armeabi-v7a.apk` (older 32-bit phones), `Zen-x86_64.apk` (Chromebooks, emulators) | full feature set, background receiving while locked |
-| iPhone | `Zen-unsigned.ipa` (iOS 15+) | sideloaded; receives while open, in the background only now and then |
-| Windows | `Zen-Windows.zip` (x64), `Zen-Windows-arm64.zip` | the Visual C++ runtime is inside the ZIP |
-| Linux | `.tar.gz`, `.deb` (x64, arm64), `.flatpak` (x64) | Ubuntu 22.04+, Debian 12+, Mint 21+ (glibc 2.35+); other systems: Flatpak |
-| macOS | `Zen-macOS.zip` (12+, Apple Silicon and Intel) | |
+| Android | [Zen-arm64-v8a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk) (most phones; also `armeabi-v7a`, `x86_64`, or [Obtainium](https://obtainium.imranr.dev/)) | [install page](https://robertostrowskijagoda.github.io/Zen/install/android/) |
+| iPhone (iOS 15+) | through [SideStore](https://sidestore.io/), source `https://robertostrowskijagoda.github.io/Zen/apps.json` | [install page](https://robertostrowskijagoda.github.io/Zen/install/iphone/) |
+| Windows | [Zen-Windows.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip) (x64; also ARM64) | [install page](https://robertostrowskijagoda.github.io/Zen/install/windows/) |
+| Mac (12+) | [Zen-macOS.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-macOS.zip) (Apple Silicon and Intel) | [install page](https://robertostrowskijagoda.github.io/Zen/install/macos/) |
+| Linux | [Zen-Linux-x64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb) (Ubuntu 22.04+, Debian 12+, Mint 21+; also arm64, `.tar.gz`, Flatpak) | [install page](https://robertostrowskijagoda.github.io/Zen/install/linux/) |
 
-One account can run on several devices. Everything is on
-[GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest)
-(in Zen: **Settings → Zen on GitHub**).
-
-**Battery.** There is no push server, so a phone keeps its own few links to
-the network. To keep that cheap, an Android phone keeps 4 links to public
-peers (swapped when one stops answering), sends presence pings only to
-friends and only while Zen is on the screen, and **after 5 minutes in the
-background only receives** (no pings, scans or sync), with or without the
-lock, though it still holds friends' mail as one of their mailboxes; it
-wakes for short, timed moments instead of holding the processor or
-Wi-Fi awake. While the phone sleeps (Doze), mail from mailboxes can come a
-few minutes late. A computer on battery stops being a bridge for others and
-keeps only 4 public peers; plugged in, everything comes back. Animations
-run at a low frame rate and stop when the window is not visible; a setting
-(Appearance → Animations) can also make them follow the system's reduce-motion
-flag or turn them off.
-
-## How to install
-
-One recommended way for each system, with its own page that has numbered
-steps, pictures, the download and what to do when something goes wrong (in 21
-languages): **[the install page](https://robertostrowskijagoda.github.io/Zen/install/)** picks your system by itself.
-In Zen: **Settings → Invite → Friend doesn't have Zen? → How to install Zen
-on another phone / computer** shows a QR code to that page. Every download
-link uses `releases/latest/download/<file>`, so it follows each new release.
-
-### Android
-
-**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/android/)**: download
-[Zen-arm64-v8a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk) (the file for almost every phone),
-open it, allow your browser to install apps once (**Allow from this source**)
-and tap **Install**; if Play Protect warns about an unknown app, choose **More
-details → Install anyway**. Zen then updates itself.
-
-Other ways: [Zen-armeabi-v7a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk) for older 32-bit
-phones (also the one to try when the first file says "App not installed"),
-[Zen-x86_64.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk) for Chromebooks and emulators, or
-[Obtainium](https://obtainium.imranr.dev/) (add
-`https://github.com/robertostrowskijagoda/Zen`; one tap on the install page).
-
-**From 2027** Google requires apps from outside the store to come from verified
-developers. If your phone says the developer is not verified:
-
-1. **Settings → About phone** → tap **Build number** 7 times
-   (this turns on Developer options).
-2. **Settings → System → Developer options** → turn on **Apps from
-   unverified developers** and confirm with your screen lock.
-3. Restart the phone and **wait 24 hours** (this is Google's protection
-   against scammers who push people into a quick installation).
-4. Go back to the same option, choose **permanently** and install Zen as above.
-
-Option names may differ a little depending on the phone. You do this once.
-
-### iPhone
-
-**[Step by step, with pictures](https://robertostrowskijagoda.github.io/Zen/install/iphone/)**:
-**[SideStore](https://sidestore.io/)** installs Zen with your own Apple
-Account (a free one is enough). You need a computer and a cable once, Wi-Fi,
-a passcode on the iPhone and iOS 15 or later; about 15 minutes.
-
-1. On the iPhone install **LocalDevVPN** from the App Store, open it and tap
-   **Connect**. SideStore needs this VPN on whenever it installs or renews apps.
-2. On the computer install **iloader**
-   ([SideStore's guide](https://docs.sidestore.io/docs/installation/prerequisites)),
-   connect the iPhone by cable, sign in with your Apple Account and choose
-   **Install SideStore (Stable)**.
-3. On the iPhone: **Settings → General → VPN & Device Management** → your
-   Apple Account → trust it; on iOS 16 and later also **Settings → Privacy &
-   Security → Developer Mode**.
-4. Open SideStore (LocalDevVPN connected), sign in with the same Apple Account
-   and tap the **7 DAYS** counter next to SideStore in **My Apps**.
-5. Add Zen's source (**Add Zen to SideStore** on the install page, or in
-   SideStore **Sources → +**:
-   `https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen
-   from it.
-6. Let it renew by itself: in the Shortcuts app make a daily **Time of Day**
-   automation that runs immediately, with **Set VPN** (connect LocalDevVPN)
-   and SideStore's **Refresh All Apps**. An app signed with a free Apple
-   Account opens for 7 days; SideStore renews it on the phone, no computer
-   needed.
-7. New versions: Zen tells you, and its update button hands the new version
-   to SideStore (or **My Apps → Update** next to Zen).
-
-With a free Apple Account at most 3 apps from SideStore run at a time,
-SideStore included. If the 7 days run out, Zen only stops opening until it is
-renewed (LocalDevVPN on, tap the counter in SideStore); its data stays. After
-an iOS update SideStore may need a new pairing file
-([guide](https://docs.sidestore.io/docs/advanced/pairing-file)). The source
-always points to the latest release's
-[Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa).
-Other ways: **AltStore Classic** (the same source; it renews through AltServer
-on a computer) and Sideloadly (from a computer).
-
-**What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
-the background for long. Messages and calls arrive while Zen is open, and
-otherwise only when iOS wakes Zen for a short check now and then (no push
-notifications); until then they wait with the sender or in the mailboxes
-your friends' devices keep for you. Settings → Notifications and sounds →
-Background work can keep Zen
-receiving all the time, at a clear battery cost; see
-[iPhone: receiving in the background](docs/IOS_BACKGROUND.md). It works best when one friend has Zen on a computer (in
-the tray) or on Android: that device keeps the mail for the whole group of
-friends while the iPhones sleep. There is no Nearby (offline links with
-friends use Apple's Multipeer while Zen is open).
-
-**Won't work:** AltStore PAL (EU) installs only apps notarized by Apple
-(Zen isn't there yet); TrollStore works only up to iOS 17.0; "signers" with
-enterprise certificates get revoked and hand your app to strangers —
-**don't use them** (use only the install page's link).
-
-### Windows
-
-**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/windows/)**: download [Zen-Windows.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip),
-unpack the whole ZIP (it holds a folder `Zen`) and run `Zen\zen.exe`. Keep that
-folder whole and put nothing else in it: Zen updates itself in place only
-there. Nothing else needs installing: the Microsoft Visual C++ runtime Zen
-needs is in the folder. If Windows shows "Windows protected your PC", click
-**More info → Run anyway**.
-
-If Windows 11 says *Smart App Control blocked an app that may be unsafe*,
-there is no *Run anyway*: Zen is not code-signed yet. Either use Zen on
-another device, or turn Smart App Control off (**Windows Security → App &
-browser control → Smart App Control settings → Off**). That lowers
-protection for the whole computer; on Windows 11 before the April 2026
-update it can only be turned on again by reinstalling Windows.
-
-An antivirus program may also flag an unsigned new file by mistake: compare
-the file's SHA-256 with `SHA256SUMS` of the release (below) and report the
-false alarm to the antivirus maker.
-
-On a Windows ARM computer (Surface Pro X, Copilot+ PCs) you can also use the
-experimental native build
-[Zen-Windows-arm64.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows-arm64.zip);
-the x64 build runs there too, under emulation.
-
-### Mac
-
-**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/macos/)**: macOS 12 or newer, Apple Silicon and
-Intel. Download [Zen-macOS.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-macOS.zip), unpack it and move `Zen.app`
-to Applications. On first launch macOS will say it can't verify the developer:
-choose **Done**, then **System Settings → Privacy & Security → Open Anyway**,
-your password, **Open Anyway** (right-click → Open no longer works since macOS
-15; or in Terminal `xattr -dr com.apple.quarantine /Applications/Zen.app`).
-After an update macOS may ask for keychain access — choose **Always Allow**.
-
-### Linux
-
-**[Step by step](https://robertostrowskijagoda.github.io/Zen/install/linux/)**: on Debian, Ubuntu and Mint download
-[Zen-Linux-x64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb) and run
-`sudo apt install ./Zen-Linux-x64.deb` (ARM:
-[Zen-Linux-arm64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.deb)).
-
-Other ways: for x64 a Flatpak,
-[Zen-Linux-x64.flatpak](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.flatpak)
-(`flatpak install --user ./Zen-Linux-x64.flatpak`; not on Flathub; it does not
-update itself: install the new file the same way when Zen tells you), or
-[Zen-Linux-x64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.tar.gz)
-([arm64](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.tar.gz), for Raspberry Pi 4/5 and other 64-bit ARM
-computers): unpack it and run `Zen/zen`; `Zen/install-desktop-entry.sh` adds
-Zen to the menu and makes it open `zen://` links and Zen's own files.
-**Which systems:** the `.tar.gz` and `.deb` run on Ubuntu 22.04, Debian 12,
-Linux Mint 21 or newer, and on other distributions with glibc 2.35 or newer
-(the builds are made on Ubuntu 22.04 and checked for that); on older
-systems use the Flatpak (x64).
-Needed: GNOME Keyring or KWallet (the encryption key lives there), for the tray
-icon `libayatana-appindicator3-1`, and for voice notes and videos GStreamer
-with plugins (`gstreamer1.0-plugins-good`, `gstreamer1.0-libav`).
-
-The Linux and Mac builds are made by GitHub Actions together with the
-other release files; they are not signed and have not yet been checked on many
-real computers, so they may have bugs.
-
-On a computer the camera works (videos and QR codes), and so does Nearby when
-the computer has Bluetooth LE (a Mac only looks around, it cannot be seen).
-Calls can be recorded on every system (after everyone in the call is told).
-Offline links (Wi-Fi Direct on
-Windows, Bluetooth) work. Linux records and shrinks videos with GStreamer and
-encoders built into Zen.
-
-### From a friend
-
-Someone already has Zen? In the app: **Settings → Invite → Friend doesn't have
-Zen?** — it will send you the app
-over Quick Share, Bluetooth or Wi-Fi, even without internet.
+**[The install page](https://robertostrowskijagoda.github.io/Zen/install/)**
+picks your system by itself (21 languages). Every file, what to click past
+the system's warnings, what Zen can and cannot do on each system, battery
+use and why Zen is not in the stores: **[Installing Zen](docs/INSTALL.md)**.
+Someone already has Zen? **Settings → Invite → Friend doesn't have Zen?**
+sends you the app over Quick Share, Bluetooth or Wi-Fi, even without
+internet. Everything is on
+[GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest).
 
 ## Isn't it a virus? How to check
 
@@ -371,186 +172,59 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
    5C:F8:4B:A5:25:AC:80:4C:84:2F:B5:B9:2F:35:C5:49:F6:C0:7A:84:FB:E0:C2:80:49:13:91:91:C1:EE:F5:14
    ```
 
-## Why Zen is not on Google Play or the App Store
-
-The main reason is the stores' legal rules and policies, which Zen by design
-does not meet:
-
-- **Moderation.** Stores require the developer to review reports and remove
-  content and accounts (Apple guideline 1.2, Google Play's user-generated
-  content policy). Zen has no server and nobody in the middle who could.
-- **The pyramid's currency and wallet.** Financial and crypto rules call for a
-  company and financial licences.
-- **Paid gates.** In-app payments for digital services must go through the
-  store's billing, with a 15–30% commission.
-- **Dating.** Stores require age verification and a moderation team.
-- **Self-updating and background work.** Google Play forbids apps that update
-  themselves outside the store, and the App Store heavily restricts
-  background execution.
-- **Developer identity and paperwork.** Stores publish the developer's
-  details and require formalities such as encryption export declarations.
-
-**The cost:** the App Store charges 99 USD a year, Google Play 25 USD once,
-and the licences and legal work run into thousands. Zen is made by one person,
-for free.
-
-A store can also remove an app or demand changes at any time (independence),
-and nobody, not even a store, needs to know you have Zen (privacy).
-
-A store build exists anyway: the `appStoreOnly` flavor for Google Play and
-Galaxy Store can already be built. It is the same app with three differences
-the stores force: it does not update itself, does not hand its APK to others
-(it shares a link instead) and has no launcher disguise. It is not published
-yet ([docs/RELEASES.md](docs/RELEASES.md), point 6).
-
 ## Privacy and security
 
-- **No account, no phone number.** Your QR code is your address. Several
-  accounts can live on one device, and an account you keep off the list
-  can't be seen by anyone who picks the device up.
-- **Encryption, honestly:** see [Post-quantum](#post-quantum) above and the
-  [security model](docs/SECURITY_MODEL.md) for the threat model, the
-  classical exceptions and the limits.
+- **No account, no phone number.** Your QR code is your address; nobody in
+  the middle keeps your friends, messages or posts.
 - **On the device** everything is encrypted with your password (AES-256-GCM,
-  Argon2id), biometric unlock uses keys held by the security hardware, and
-  sensitive screens (like the wallet) are protected from screenshots. Zen
-  detects debuggers and hooking tools and then refuses to move money.
-- **Passwords with one meaning each.** The **app password** unlocks Zen on
-  this device. The **account password** protects your account key when you
-  recover through the circle (it may be the same as the app password). An
-  **emergency wipe password**, typed on the lock screen instead of the app
-  password, silently erases the data. The alarm's **duress PIN** ends an
-  alarm on the screen but warns your friends that you may be forced; it
-  erases nothing.
-- **Recovery circle.** You pick 4 to 6 friends (close friends and friends
-  are suggested, casual friends are not); each gets a piece of your key that
-  alone reveals nothing, and Zen shows who holds one and who has confirmed.
-  Save the list (names and their invitation codes) with your key copy. On a
-  new phone you type their codes; their devices get a help request, they
-  check it is really you and tap **Help**. With your account password two
-  of them are enough after 24 hours, without it four after 7 days; your old
-  devices get an alarm meanwhile and can stop it.
-- **Locked phone.** On Android the background service works without your
-  password: it holds a separate background key and only small kits (alarm,
-  Nearby, doors); what arrives while locked is stored sealed until you
-  unlock.
+  Argon2id); an emergency wipe password erases the data, and an account
+  kept off the list can't be seen by anyone who picks the device up.
 - **You decide who sees what:** friendship levels and per-field profile
-  visibility control who sees your friend list, statuses and posts, and who
-  may invite you to groups.
-- **Files from others are checked:** every photo is unpacked and saved again
-  before it is shown; a video or recording must really be one; Zen never
-  opens files by itself and warns before saving a program.
+  visibility.
 - **GIF search goes through an outside company**, KLIPY: it sees what you
-  search for, the GIF you pick and your IP address. The GIF then goes to
-  your friend as an ordinary encrypted picture, so the friend never contacts
-  KLIPY. **Settings → Messages and calls → GIFs** turns the search off; GIFs
-  from your keyboard and GIF files keep working.
-- **Location** comes from the system's own service (never Google Play
-  services) and goes only where a feature says (an alarm, a date-safety
-  request).
-- **Updates:** Zen asks GitHub for the newest release 20 seconds after start
-  and then at most once an hour (GitHub sees your IP address; when GitHub limits
-  requests, Zen waits as long as it asks), and checks a download
-  against `SHA256SUMS` and, on Android, Zen's signing certificate
-  ([details](docs/guide/updates.md)).
-- The legal texts: [privacy policy](docs/PRIVACY.md) and
-  [terms of use](docs/TERMS.md). Using Zen to break the law is forbidden by
-  the terms of use. Zen asks no one for their age, except the pyramid, which
-  asks for the birth year at entry.
+  search for, the GIF you pick and your IP address (your friend never
+  contacts it). **Settings → Messages and calls → GIFs** turns it off.
+- **Updates:** Zen asks GitHub for the newest release (GitHub sees your IP
+  address) and checks a download against `SHA256SUMS` and, on Android, Zen's
+  signing certificate ([details](docs/guide/updates.md)).
+- **What runs it:** devices connect through
+  [Yggdrasil](https://yggdrasil-network.github.io/), an open, encrypted mesh
+  network; the devices on the way (the public nodes Zen starts from
+  included) see your IP address and your network address, never what you
+  write. Running a bridge of your own:
+  [settings and public peers](docs/guide/settings-and-peers.md#your-own-bridge-for-advanced-users).
 
-Found a vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
-
-## What it runs on
-
-Zen has no servers of its own. Devices connect through
-[**Yggdrasil**](https://yggdrasil-network.github.io/) — an open, encrypted mesh network
-in which every device has its own address and traffic goes directly or through other
-devices that don't see the content. Zen adds its own (post-quantum) encryption on top.
-Those devices (including the public nodes Zen starts from) do see
-your IP address and your address in the network, that is, your invitation code — they
-don't see what you write. On top of that, the GIF search uses an outside company,
-KLIPY (above). The libraries Zen is built on: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
-The app is written in Flutter (Android, iPhone, Windows, Linux, macOS),
-and the network bridge in Go. The texts come in 21 languages; the language is chosen
-automatically or in Settings → Language.
-
-### Your own bridge (for advanced users)
-
-Zen on a computer helps others connect by itself when the router allows it. You can
-also set up a permanent bridge without Zen — an ordinary Yggdrasil node that runs
-around the clock and helps everyone (it can't see the content of messages):
-
-1. A computer that is always on and has a public IP address: a VPS server or a home
-   computer / Raspberry Pi with a port forwarded in the router.
-2. Install Yggdrasil following the
-   [instructions on the project's site](https://yggdrasil-network.github.io/installation.html)
-   (Linux, Windows, macOS, routers). The config file is created by `yggdrasil -genconf`.
-3. In the [configuration](https://yggdrasil-network.github.io/configuration.html)
-   put e.g. `tls://0.0.0.0:443` in `Listen`, and a few public nodes in `Peers`.
-   Restart the service and open that port in the firewall.
-4. Add your node to the
-   [list of public nodes](https://github.com/yggdrasil-network/public-peers)
-   (pull request). Zen takes its nodes from that list, so later versions of Zen will
-   connect through your bridge too.
-
-### Building from source
-
-You always need [Flutter](https://docs.flutter.dev/get-started/install)
-3.47.1 and [Go](https://go.dev/dl/) in the version from `native/yggdrasil_bridge/go.mod`
-(its `toolchain` line; any Go from 1.21 on downloads that version by itself).
-The Go network bridge builds itself on `flutter build` and `flutter run` — only
-when its sources changed (details: `docs/RELEASES.md`, point 3.1).
-
-| System | You need | Command |
-|---|---|---|
-| Android (one APK per ABI: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release --split-per-abi` |
-| Android for a store only (Google Play, Galaxy Store; the same app without self-update, APK handing and launcher disguise; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
-| Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
-| Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
-| Linux | packages below | `flutter build linux --release` |
-| macOS | Xcode with command line tools, CocoaPods | `flutter build macos --release` |
-| iPhone (on a Mac) | Xcode, CocoaPods | `flutter build ios --release --no-codesign` |
-
-**Linux** (Ubuntu, Debian):
-
-```
-sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-  libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev
-```
-
-The finished Zen is in `build/linux/x64/release/bundle/` (the `zen` file with the folders
-`lib/` and `data/`; on ARM64 `build/linux/arm64/…`). The `.deb` package is made by
-`linux/packaging/build_deb.sh`, the Flatpak by `linux/packaging/com.roj.zen.yml`
-(see `docs/RELEASES.md`). To work it needs a key service (GNOME Keyring or
-KWallet — the encryption key lives there), for the tray icon
-`libayatana-appindicator3-1` (in GNOME also the AppIndicator extensions) and for
-playback GStreamer with plugins.
-
-**macOS:** the app is `build/macos/Build/Products/Release/Zen.app` (Apple
-Silicon and Intel, macOS 12 or newer). It is not sandboxed (App Sandbox) —
-it runs system tools, e.g. `route` and `adb`; the reason is described
-in `macos/Runner/Release.entitlements`.
+The details: [security model](docs/SECURITY_MODEL.md) (threats, encryption,
+the locked phone, files from others, honest limits),
+[privacy policy](docs/PRIVACY.md) and [terms of use](docs/TERMS.md). Found a
+vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
 
 ## Documentation
+
+All of it, in reading order: **[docs/README.md](docs/README.md)**.
 
 | | |
 |---|---|
 | [User guide](docs/guide/README.md) | how every part of Zen works, with pictures |
-| [Security model](docs/SECURITY_MODEL.md) | threats, encryption, post-quantum and classical parts, hardening, limits |
-| [Dependencies](docs/DEPENDENCIES.md) | libraries, platform APIs and their licences |
+| [Installing Zen](docs/INSTALL.md) | every system, every file, the warnings to click past |
+| [Privacy policy](docs/PRIVACY.md), [terms of use](docs/TERMS.md) | what Zen does with data, and the rules |
+| [Security model](docs/SECURITY_MODEL.md) | threats, encryption, post-quantum and classical parts, limits |
 | [Protocol](docs/PROTOCOL.md) | frames and records on the wire |
-| [Releases](docs/RELEASES.md) | signing, publishing, distribution |
-| [Testing](docs/TESTING.md) | the simulator, several clients, visual tours, CI |
-| [SECURITY.md](SECURITY.md) | reporting a vulnerability |
+| [Building from source](docs/BUILDING.md), [testing](docs/TESTING.md), [releases](docs/RELEASES.md) | for developers and packagers |
 | [CHANGELOG.md](CHANGELOG.md) | history of changes |
+
+## Contributing
+
+Bug reports, translations and code are welcome: read
+[CONTRIBUTING.md](CONTRIBUTING.md) (the checks CI runs, and the contributor
+licence grant), then [build Zen from source](docs/BUILDING.md). Bugs and
+feature requests go to [GitHub Issues](https://github.com/robertostrowskijagoda/Zen/issues);
+vulnerabilities privately, as in [SECURITY.md](SECURITY.md).
 
 ## Community
 
 Questions, help with installing, ideas, or just talk with other people who
-use Zen: **[Zen on Discord](https://discord.gg/g4vHvpKV37)**. Bugs and
-feature requests go to [GitHub Issues](https://github.com/robertostrowskijagoda/Zen/issues);
-vulnerabilities privately, as in [SECURITY.md](SECURITY.md).
+use Zen: **[Zen on Discord](https://discord.gg/g4vHvpKV37)**.
 
 ## Support Zen
 
@@ -607,11 +281,3 @@ Licenses and thanks → Licenses; list of components in
 [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)). Contributions are accepted
 under the contributor licence grant in [CONTRIBUTING.md](CONTRIBUTING.md),
 which does not change the license anyone receives Zen under.
-
-**F-Droid and IzzyOnDroid** (not set up yet;
-[docs/RELEASES.md](docs/RELEASES.md), section 6.1): the license fits their
-rules, and Zen uses no Google Play services, Firebase or other proprietary
-libraries and no tracker. Still to do: an F-Droid build recipe (Flutter +
-the Go bridge, built as the store variant without the GitHub self-update),
-and F-Droid will probably mark the optional GIF search (KLIPY, a
-proprietary service) with the "NonFreeNet" anti-feature.
