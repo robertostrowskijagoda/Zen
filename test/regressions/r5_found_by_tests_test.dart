@@ -31,6 +31,49 @@ List<String> _idsOf(List<ChatMessage> messages) => <String>[
   for (final ChatMessage m in messages) m.id,
 ];
 
+const String _bridge = 'native/yggdrasil_bridge';
+
+/// The bridge's Go sources, without its tests.
+List<File> _goSources() =>
+    Directory(_bridge)
+        .listSync()
+        .whereType<File>()
+        .where(
+          (File f) => f.path.endsWith('.go') && !f.path.endsWith('_test.go'),
+        )
+        .toList()
+      ..sort((File a, File b) => a.path.compareTo(b.path));
+
+String _nameOf(File file) => file.path.split(RegExp(r'[/\\]')).last;
+
+/// [source] without its `//` comments (they name what the code no longer
+/// does).
+String _withoutComments(String source) =>
+    source.replaceAll(RegExp(r'//[^\n]*'), '');
+
+/// Each Go test function named in [tests] is in its file.
+void _expectGoTests(Map<String, List<String>> tests) {
+  for (final MapEntry<String, List<String>> e in tests.entries) {
+    final String source = File('$_bridge/${e.key}').readAsStringSync();
+    for (final String name in e.value) {
+      expect(
+        source,
+        contains('func $name(t *testing.T)'),
+        reason: '${e.key}: $name',
+      );
+    }
+  }
+}
+
+/// The seconds of the Go constant [name] (`const name = 3 * time.Second`).
+int _goSeconds(String source, String name) {
+  final RegExpMatch? match = RegExp(
+    'const $name = (\\d+) \\* time\\.Second',
+  ).firstMatch(source);
+  expect(match, isNotNull, reason: name);
+  return int.parse(match!.group(1)!);
+}
+
 void main() {
   late Directory root;
   late FileBinaryStore store;
@@ -170,31 +213,82 @@ void main() {
     expect(printed.join('\n'), contains('asynchronous gap'));
   });
 
-  test(
-    'R5-F4: the Go bridge never deadlocks when a session opens while '
-    'packets come in',
-    () {},
-    skip:
-        'R5-F4 open: the bridge packet loop (bridge_signaling.go, '
-        'startPacketLoop -> openSignal) writes the session reply from inside '
-        'the read loop (pq_session.go open(): e.write(source, reply)); when '
-        "ironwood's session actor waits for that same reader, every later "
-        'call into the core blocks for good, YggGetNodeInfo on the app UI '
-        'thread included (traffic_meter.go sampleTrafficAt -> GetSessions): '
-        'the app freezes. Found by tool/e2e.dart (test/e2e), about one run '
-        'in three on Windows; the goroutines are in the job log.',
-  );
+  // R5-F4 and R5-F5 live in the Go bridge, whose tests (native/
+  // yggdrasil_bridge, the bridge job of CI) guard the fixes on loopback
+  // nodes, and the real-node tests (test/e2e) on whole apps. Here: that
+  // those Go tests stay, and that nothing writes to the mesh core past the
+  // writer.
+  //
+  // R5-F4, before: the bridge packet loop (bridge_signaling.go,
+  // startPacketLoop -> openSignal) wrote the session reply from inside the
+  // read loop (pq_session.go open(): e.write(source, reply), through
+  // ipv6rwc); when ironwood's session actor waited for that same reader,
+  // every later call into the core blocked for good, YggGetNodeInfo on the
+  // app's UI thread included: the app froze (tool/e2e.dart, about one run in
+  // three on Windows). Fixed by mesh_io.go (a writer queue of its own,
+  // 7e03d33c) and node_view.go (the app's questions answered from a view of
+  // the core taken off its thread, 8f2621be).
+  test('R5-F4: the Go bridge never deadlocks when a session opens while '
+      'packets come in: only the mesh writer writes to the core', () {
+    final List<String> writers = <String>[
+      for (final File go in _goSources())
+        if (RegExp(
+          r'\.WriteTo\(|ipv6rwc\.',
+        ).hasMatch(_withoutComments(go.readAsStringSync())))
+          _nameOf(go),
+    ];
+    expect(writers, <String>['mesh_io.go']);
+  });
 
-  test(
-    'R5-F5: a first contact (and the first after a restart) takes seconds, '
-    'not 14',
-    () {},
-    skip:
-        'R5-F5 open: two devices that never talked (or one just restarted) '
-        'exchange nothing for about 14 s on one computer: the post-quantum '
-        'session is set up first and its multi-packet key frames meet the '
-        "one-packet buffer of Yggdrasil's ipv6rwc for a destination whose key "
-        'is still being looked up (likely; see R5-#9, #15). Measured by '
-        'test/e2e (kInvitationWithin, kAfterRestartWithin).',
-  );
+  test('R5-F4: the Go tests of the deadlock are there', () {
+    _expectGoTests(<String, List<String>>{
+      'packet_loop_test.go': <String>[
+        'TestPacketLoopNeverWaitsForTheMesh',
+        'TestNodeInfoAnswersWhileTheMeshCoreIsStalled',
+        'TestNodesUnderLoadKeepAnswering',
+      ],
+      'mesh_io_test.go': <String>[
+        'TestMeshSendNeverWaitsForTheCore',
+        'TestMeshIOUnderLoad',
+      ],
+      'node_view_test.go': <String>[
+        'TestCoreQueryNeverWaitsLongerThanItsWait',
+        'TestCoreActionGivesUpOnAStuckCore',
+      ],
+    });
+  });
+
+  // R5-F5, before: two devices that never talked (or one just restarted)
+  // exchanged nothing for about 14 s on one computer: the post-quantum
+  // session's key frames went in several packets while every layer below
+  // keeps one per destination still being set up. Fixed in mesh_io.go (one
+  // packet opens the way, what a restarted peer lost goes again: 7e03d33c,
+  // 73f076a3, 564205e9) and pq_session.go (c2bc5347, 492046b9); also
+  // test/e2e (kInvitationWithin, kAfterRestartWithin).
+  test('R5-F5: a first contact (and the first after a restart) takes '
+      'seconds, not 14', () {
+    _expectGoTests(<String, List<String>>{
+      'packet_loop_test.go': <String>[
+        'TestFirstContactArrivesQuickly',
+        'TestMessagesFlowQuicklyAfterARestart',
+        'TestFriendReachesARestartedDeviceQuickly',
+        'TestFriendReachesASilentlyRestartedDevice',
+        'TestAMessageSoonAfterARestartIsNotLost',
+      ],
+      'mesh_io_test.go': <String>[
+        'TestMeshOpensTheWayWithOnePacketAndThenSendsTheRest',
+        'TestMeshSendsAgainWhatWentAlongAPathThatBroke',
+        'TestMeshEchoesWhatGoesToANodeThatCameBack',
+        'TestMeshHailsANodeThatReachedItUnasked',
+      ],
+      'pq_session_test.go': <String>[
+        'TestPQFramesLostToARestartGoAgainWhenThePeerAsksForKeys',
+        'TestPQPeerThatRestartedHasItsWaySettle',
+        'TestPQHailedFriendSendsAgainWhatAPeerLostToARestart',
+      ],
+    });
+    final String loop = File('$_bridge/packet_loop_test.go').readAsStringSync();
+    expect(_goSeconds(loop, 'firstContactBound'), lessThanOrEqualTo(5));
+    expect(_goSeconds(loop, 'afterRestartBound'), lessThanOrEqualTo(5));
+  });
 }
