@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -147,6 +148,18 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
       note: _note.text,
       authorName: author,
     );
+    final PebbleCardText fitted = fitPebbleCardText(
+      name: _name.text,
+      note: _note.text,
+      authorName: author,
+      thumbnail: widget.thumbnail,
+    );
+    final int used = pebbleCardSize(
+      nameBytes: utf8.encode(fitted.name).length,
+      noteBytes: utf8.encode(fitted.note).length,
+      authorBytes: utf8.encode(fitted.authorName).length,
+      thumbnail: fitted.thumbnail != null,
+    );
     return Scaffold(
       key: const Key('pebble-publish-screen'),
       appBar: ZenSectionBar(title: t('Nowy kamyczek')),
@@ -197,6 +210,22 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
                 prefixIcon: const Icon(Icons.sticky_note_2_outlined),
               ),
             ),
+            Text(
+              t('Kod QR: {used} z {max} bajtów', <String, Object?>{
+                'used': used,
+                'max': kPebbleCardMaxBytes,
+              }),
+              key: const Key('pebble-publish-size'),
+              style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+            ),
+            if (fitted.note != _note.text.trim())
+              Text(
+                t('Notka zostanie skrócona do: „{note}”', <String, Object?>{
+                  'note': fitted.note,
+                }),
+                key: const Key('pebble-publish-cut'),
+                style: TextStyle(color: zen.danger, fontSize: 12.5),
+              ),
             if (!thumbnailFits)
               ZenInfo(
                 key: const Key('pebble-publish-long'),
