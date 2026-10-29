@@ -179,10 +179,8 @@ final class DemoAccount {
 
 const Map<String, String> _pl = <String, String>{
   'c1': 'Cześć! Zdjęcie z wczorajszego spaceru nad jeziorem.',
-  'c2': 'Pięknie! Musimy tam pojechać razem.',
   'c4': 'Jestem za. 10:00 przy moście?',
   'c5': 'Super, wezmę termos z herbatą.',
-  'c6': 'Do zobaczenia w sobotę!',
   'send': 'Wezmę też kanapki dla wszystkich',
   'p1':
       'Pierwszy przymrozek na działce. Kto pomoże w sobotę przy '
@@ -198,7 +196,7 @@ const Map<String, String> _pl = <String, String>{
   'g3': 'Pasuje. Wezmę mapę i apteczkę.',
   'g4': 'Ja biorę termosy. Kto ma miejsce w aucie?',
   'g5': 'Mam trzy wolne miejsca.',
-  'l0': 'Do zobaczenia w sobotę!',
+  'l0': 'Super, wezmę termos z herbatą.',
   'l1': 'Zdjęcia z wycieczki są w grupie.',
   'l2': 'Dzięki za przepis na zupę!',
   'l3': 'Zadzwonię po pracy.',
@@ -212,10 +210,8 @@ const Map<String, String> _pl = <String, String>{
 
 const Map<String, String> _en = <String, String>{
   'c1': 'Hi! A photo from yesterday\'s walk by the lake.',
-  'c2': 'Beautiful! We have to go there together.',
   'c4': 'Count me in. 10 am at the bridge?',
   'c5': 'Great, I\'ll bring a flask of tea.',
-  'c6': 'See you on Saturday!',
   'send': 'I\'ll bring sandwiches for everyone too',
   'p1':
       'First frost at the allotment. Anyone up for autumn tidying on '
@@ -231,7 +227,7 @@ const Map<String, String> _en = <String, String>{
   'g3': 'Works for me. I\'ll bring the map and a first-aid kit.',
   'g4': 'I\'ll take the flasks. Who has room in a car?',
   'g5': 'I have three free seats.',
-  'l0': 'See you on Saturday!',
+  'l0': "Great, I'll bring a flask of tea.",
   'l1': 'Photos from the hike are in the group.',
   'l2': 'Thanks for the soup recipe!',
   'l3': 'I\'ll call you after work.',
@@ -371,7 +367,7 @@ Uint8List drawLandscape(
 /// The photo of the conversation: an evening lake.
 Uint8List lakePhoto() => drawLandscape(
   640,
-  400,
+  320,
   top: <int>[255, 150, 112],
   bottom: <int>[255, 222, 182],
   sun: <int>[255, 246, 222],

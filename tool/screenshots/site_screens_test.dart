@@ -147,15 +147,6 @@ List<ChatMessage> _conversation(DemoAccount demo) {
       reactions: const <String, String>{'self': '❤️'},
     ),
     ChatMessage(
-      id: 'c2',
-      sender: 'self',
-      text: demo.text('c2'),
-      sentAtMillis: at(18, 5),
-      direction: ChatMessageDirection.outgoing,
-      deliveryState: ChatMessageDeliveryState.delivered,
-      readAtMillis: at(18, 6),
-    ),
-    ChatMessage(
       id: 'c3',
       sender: friend,
       text: '',
@@ -183,14 +174,6 @@ List<ChatMessage> _conversation(DemoAccount demo) {
       sentAtMillis: at(18, 14),
       direction: ChatMessageDirection.incoming,
       reactions: const <String, String>{'self': '😂'},
-    ),
-    ChatMessage(
-      id: 'c6',
-      sender: 'self',
-      text: demo.text('c6'),
-      sentAtMillis: at(18, 15),
-      direction: ChatMessageDirection.outgoing,
-      deliveryState: ChatMessageDeliveryState.delivered,
     ),
   ];
 }
@@ -273,7 +256,7 @@ SocialHubState _people(DemoAccount demo, Directory faces) {
     PeerPresence.background,
   ];
   final List<String> when = <String>[
-    '18:15',
+    '18:14',
     '17:40',
     '16:02',
     demo.text('yesterday'),
@@ -842,7 +825,7 @@ Future<void> _walk(
     await page(
       'conversation',
       () => ConversationScreen(peerAddress: friendAddress, title: friendName),
-      ready: _text(demo.text('c6')),
+      ready: _text(demo.text('c5')),
     );
     await page(
       'group',
@@ -980,7 +963,7 @@ Future<void> _sendFilm(
     ),
   );
   await _settle(tester);
-  await shots.until(_text(demo.text('c6')));
+  await shots.until(_text(demo.text('c5')));
   await shots.decode();
   final Finder field = find.byKey(const Key('conversation-composer-field'));
   if (field.evaluate().isEmpty) {
