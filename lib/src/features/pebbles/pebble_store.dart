@@ -35,6 +35,7 @@ final class PebbleEntry {
     this.keepers,
     this.foundSent = false,
     this.keptFrom,
+    this.madeHere = false,
   });
 
   final PebbleCard card;
@@ -60,6 +61,10 @@ final class PebbleEntry {
 
   /// The author's device that asked this one to keep the pebble.
   final String? keptFrom;
+
+  /// Made on this device (not one of the account's others): this one asks
+  /// the keepers and signs their list.
+  final bool madeHere;
 
   PebbleId get id => card.id;
 
@@ -88,6 +93,7 @@ final class PebbleEntry {
     keepers: keepers ?? this.keepers,
     foundSent: foundSent ?? this.foundSent,
     keptFrom: keptFrom ?? this.keptFrom,
+    madeHere: madeHere,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -100,6 +106,7 @@ final class PebbleEntry {
     if (keepers != null) 'k': keepers!.toJson(),
     if (foundSent) 'fs': true,
     'o': ?keptFrom,
+    if (madeHere) 'm': true,
   };
 
   static PebbleEntry? fromJson(Object? json) {
@@ -132,6 +139,7 @@ final class PebbleEntry {
       keepers: keepers != null && keepers.id == card.id ? keepers : null,
       foundSent: json['fs'] == true,
       keptFrom: json['o'] is String ? json['o'] as String : null,
+      madeHere: json['m'] == true,
     );
   }
 }
@@ -446,21 +454,39 @@ final class PebbleStore extends ChangeNotifier {
     await load();
     await disk.write(_designKey(card.id), design);
     final PebbleEntry? had = _entries[card.id];
-    final PebbleEntry e =
+    final PebbleEntry e = PebbleEntry(
+      card: card,
+      roles: <PebbleRole>{...?had?.roles, PebbleRole.created},
+      addedAtMillis: had?.addedAtMillis ?? now,
+      foundAtMillis: had?.foundAtMillis,
+      findNote: had?.findNote ?? '',
+      hasDesign: true,
+      keepers: had?.keepers,
+      madeHere: true,
+    );
+    _entries[card.id] = e;
+    _removed.remove(card.id);
+    await _save();
+    return e;
+  }
+
+  /// A pebble the account made on another of its devices (its design
+  /// follows from there).
+  Future<void> addFromOtherDevice(PebbleCard card) async {
+    await load();
+    final PebbleEntry? had = _entries[card.id];
+    if (had != null && had.created) {
+      return;
+    }
+    _entries[card.id] =
         (had ??
                 PebbleEntry(
                   card: card,
                   roles: const <PebbleRole>{},
                   addedAtMillis: now,
                 ))
-            .copyWith(
-              roles: <PebbleRole>{...?had?.roles, PebbleRole.created},
-              hasDesign: true,
-            );
-    _entries[card.id] = e;
-    _removed.remove(card.id);
+            .copyWith(roles: <PebbleRole>{...?had?.roles, PebbleRole.created});
     await _save();
-    return e;
   }
 
   /// Saves a collected pebble from its [card] at once (the design comes

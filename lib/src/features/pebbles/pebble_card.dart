@@ -265,6 +265,36 @@ final class PebbleCard {
     return decode(bytes)!;
   }
 
+  /// An unsigned card for showing a stone before it is published (its id,
+  /// author and signature are zeros: nobody takes it as a pebble).
+  static PebbleCard preview({
+    required PebbleCardLook look,
+    Uint8List? thumbnail,
+    String name = '',
+    String note = '',
+    String authorName = '',
+  }) {
+    final PebbleCardText text = fitPebbleCardText(
+      name: name,
+      note: note,
+      authorName: authorName,
+      thumbnail: thumbnail,
+    );
+    final Uint8List body = _encodeBody(
+      id: PebbleId(Uint8List(_idBytes)),
+      author: Uint8List(_keyBytes),
+      createdSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      look: look,
+      name: text.name,
+      note: text.note,
+      authorName: text.authorName,
+      thumbnail: text.thumbnail,
+    );
+    return decode(
+      Uint8List.fromList(<int>[...body, ...Uint8List(_signatureBytes)]),
+    )!;
+  }
+
   /// The card in [bytes], or `null` for anything malformed (the signature
   /// is not checked here: [verify]).
   static PebbleCard? decode(Uint8List bytes) {

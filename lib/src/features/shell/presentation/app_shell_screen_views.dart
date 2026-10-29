@@ -1095,6 +1095,10 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                       _LiveTechInfoSection(),
                       _OfflineLinksPanel(),
                       _BridgeHostSection(),
+                      Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: _Panel(child: PebbleServeSwitch()),
+                      ),
                     ],
                   ),
                   _SettingsNavTile(
@@ -4655,6 +4659,21 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
     final String? text = await ref.read(peerQrScannerProvider).scan(context);
     final String? normalized = text?.trim();
     if (normalized == null || normalized.isEmpty || !mounted) {
+      return;
+    }
+    // A pebble's code scanned here: its card, not an invitation.
+    final PebbleCard? pebble = pebbleCardFromLink(normalized);
+    if (pebble != null) {
+      final NavigatorState navigator = Navigator.of(context);
+      navigator.pop();
+      unawaited(
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (BuildContext context) =>
+                PebbleCollectScreen(card: pebble),
+          ),
+        ),
+      );
       return;
     }
     _applyTargetInput(normalized);
