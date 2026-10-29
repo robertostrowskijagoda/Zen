@@ -127,6 +127,94 @@ void main() {
       },
     );
 
+    Future<ProviderContainer> pumpSheetWithoutFriends(
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            builder: (BuildContext context, Widget? child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(2)),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: Builder(
+                builder: (BuildContext context) => TextButton(
+                  onPressed: () => CreateGroupSheet.show(context),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return container;
+    }
+
+    testWidgets('CreateGroupSheet without friends makes a group of one '
+        '(320 px, text ×2)', (WidgetTester tester) async {
+      final ProviderContainer container = await pumpSheetWithoutFriends(tester);
+      expect(
+        find.textContaining('Możesz utworzyć grupę i dodać ich później.'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const Key('create-group-name-field')),
+        'Na później',
+      );
+      // The keyboard closed (the focused field would scroll back to itself).
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      final Finder submit = find.byKey(const Key('create-group-submit-button'));
+      await tester.ensureVisible(submit);
+      await tester.pumpAndSettle();
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(find.byType(CreateGroupSheet), findsNothing);
+      final List<GroupProfile> groups = container
+          .read(socialHubControllerProvider)
+          .groupList;
+      expect(groups.map((GroupProfile g) => g.name), contains('Na później'));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('CreateGroupSheet says what is missing inside the sheet, '
+        'not behind it', (WidgetTester tester) async {
+      await pumpSheetWithoutFriends(tester);
+      final Finder submit = find.byKey(const Key('create-group-submit-button'));
+      await tester.ensureVisible(submit);
+      await tester.pumpAndSettle();
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(find.byType(CreateGroupSheet), findsOneWidget);
+      final Finder error = find.byKey(const Key('create-group-error'));
+      expect(
+        find.descendant(of: error, matching: find.text('Nadaj grupie nazwę.')),
+        findsOneWidget,
+      );
+      // Inside the sheet, so it can be seen and is not covered.
+      expect(
+        find.descendant(of: find.byType(CreateGroupSheet), matching: error),
+        findsOneWidget,
+      );
+      expect(find.byType(SnackBar), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('AppShell shows Grupy section header when groups are present', (
       WidgetTester tester,
     ) async {

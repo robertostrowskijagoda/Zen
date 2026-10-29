@@ -633,15 +633,26 @@ class _GroupConversationScreenState
   }
 
   void _showAddMemberDialog(GroupProfile group) {
-    final List<FriendProfile> acceptedFriends = ref
+    final List<FriendProfile> allFriends = ref
         .read(socialHubControllerProvider)
-        .acceptedFriends
+        .acceptedFriends;
+    final List<FriendProfile> acceptedFriends = allFriends
         .where((FriendProfile f) => !groupHasMember(group, f.address))
         .toList();
 
     if (acceptedFriends.isEmpty) {
+      // A group of one made before any friends: not "all are in already".
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t('Wszyscy Twoi znajomi są już w tej grupie.'))),
+        SnackBar(
+          content: Text(
+            allFriends.isEmpty
+                ? t(
+                    'Nie masz jeszcze znajomych, których można dodać. Dodaj '
+                    'znajomych, a potem zaproś ich do grupy.',
+                  )
+                : t('Wszyscy Twoi znajomi są już w tej grupie.'),
+          ),
+        ),
       );
       return;
     }

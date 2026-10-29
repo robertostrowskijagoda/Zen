@@ -34,21 +34,24 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
     super.dispose();
   }
 
+  /// What stops the group from being made, said inside the sheet (a
+  /// snack bar would sit behind it).
+  String? _error;
+  bool _busy = false;
+
   Future<void> _createGroup() async {
     final String name = _nameController.text.trim();
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     if (name.isEmpty) {
-      messenger.showSnackBar(SnackBar(content: Text(t('Nadaj grupie nazwę.'))));
+      setState(() => _error = t('Nadaj grupie nazwę.'));
       return;
     }
-    if (_selectedMembers.isEmpty) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(t('Wybierz co najmniej jedną osobę.'))),
-      );
-      return;
-    }
-
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
     try {
+      // With nobody chosen it is a group of one: people are invited later.
       final GroupProfile created = await ref
           .read(socialHubControllerProvider.notifier)
           .createGroup(
@@ -70,11 +73,10 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
       }
     } catch (error) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(t('Błąd tworzenia grupy: {error}', {'error': error})),
-          ),
-        );
+        setState(() {
+          _busy = false;
+          _error = t('Błąd tworzenia grupy: {error}', {'error': error});
+        });
       }
     }
   }
@@ -169,6 +171,11 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                   controller: _nameController,
                   autofocus: true,
                   textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) {
+                    if (_error != null) {
+                      setState(() => _error = null);
+                    }
+                  },
                   decoration: InputDecoration(
                     labelText: t('Nazwa grupy'),
                     hintText: t('np. Ekipa z pracy'),
@@ -253,13 +260,22 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                       ),
                     ),
                   ),
+                if (_error case final String error) ...<Widget>[
+                  const SizedBox(height: 16),
+                  ZenInfo(
+                    key: const Key('create-group-error'),
+                    icon: Icons.error_outline_rounded,
+                    tone: zen.danger,
+                    text: error,
+                  ),
+                ],
                 const SizedBox(height: 20),
                 FilledButton.icon(
                   key: const Key('create-group-submit-button'),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(52),
                   ),
-                  onPressed: _createGroup,
+                  onPressed: _busy ? null : _createGroup,
                   icon: const Icon(Icons.check_rounded),
                   label: Text(t('Utwórz grupę')),
                 ),
