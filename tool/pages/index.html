@@ -345,6 +345,7 @@
   function onLang() {
     $("lead").textContent = Zen.t(code ? "invLead" : "lead");
     $("title").textContent = Zen.t(code ? "invTitle" : "heroTitle");
+    if (code) { document.title = Zen.t("invTitle"); }
     setNoApp();
   }
   Zen.init({ texts: TEXTS, onLang: onLang });
