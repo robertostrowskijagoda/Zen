@@ -111,6 +111,15 @@ enum _FaceChoice {
 /// Brush radii in 1/256 of a face unit.
 const List<int> _brushSizes = <int>[4, 8, 14, 22, 34];
 
+/// What a screen reader says for the brush size [i] of [_brushSizes].
+String _brushSizeName(int i) => switch (i) {
+  0 => t('Pędzel bardzo cienki'),
+  1 => t('Pędzel cienki'),
+  2 => t('Pędzel średni'),
+  3 => t('Pędzel gruby'),
+  _ => t('Pędzel bardzo gruby'),
+};
+
 /// The pebble editor: a 3D stone to turn and paint on every side (top,
 /// bottom and sides), with brushes, spray, fills, an eraser, mirror
 /// painting, stamps, text along the surface, patterns per face, stone
@@ -877,6 +886,8 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
                   constraints: const BoxConstraints(maxWidth: 140),
                   child: Text(
                     typed.isEmpty ? f.label : typed,
+                    // Shown in the typeface; read out as its name.
+                    semanticsLabel: f.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: style(f, 17),
@@ -913,7 +924,7 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
           key: Key('pebble-${none ? 'colour2' : 'colour'}-$i'),
           colour: c,
           selected: c == selected,
-          label: t('Kolor {n}', <String, Object?>{'n': i + 1}),
+          label: pebbleColourName(c),
           onTap: () => pick(c),
         ),
     ],
@@ -927,22 +938,25 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
     double max,
     ValueChanged<double> changed, {
     ValueChanged<double>? done,
-  }) => Row(
-    children: <Widget>[
-      Flexible(child: Text(label)),
-      Expanded(
-        flex: 2,
-        child: Slider(
-          key: Key('pebble-$key'),
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          label: label,
-          onChanged: changed,
-          onChangeEnd: done,
+  }) => MergeSemantics(
+    // The name and the value read together.
+    child: Row(
+      children: <Widget>[
+        Flexible(child: Text(label)),
+        Expanded(
+          flex: 2,
+          child: Slider(
+            key: Key('pebble-$key'),
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            label: label,
+            onChanged: changed,
+            onChangeEnd: done,
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 
   Widget _mirrorSwitch() => SwitchListTile(
@@ -973,8 +987,12 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
             for (int i = 0; i < _brushSizes.length; i++)
               ChoiceChip(
                 key: Key('pebble-size-$i'),
-                tooltip: t('Rozmiar {n}', <String, Object?>{'n': i + 1}),
-                label: Icon(Icons.circle, size: 6.0 + i * 4),
+                tooltip: _brushSizeName(i),
+                label: Icon(
+                  Icons.circle,
+                  size: 6.0 + i * 4,
+                  semanticLabel: _brushSizeName(i),
+                ),
                 selected: i == _size,
                 onSelected: (_) => setState(() => _size = i),
               ),
@@ -1325,6 +1343,7 @@ class _StampButton extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
     button: true,
     label: PebbleStamps.label(id),
+    hint: t('Wybierz naklejkę'),
     child: InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),

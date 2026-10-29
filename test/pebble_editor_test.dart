@@ -7,6 +7,7 @@ import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
 import 'package:zen/src/features/pebbles/design/pebble_design.dart';
 import 'package:zen/src/features/pebbles/design/pebble_faces.dart';
 import 'package:zen/src/features/pebbles/design/pebble_fonts.dart';
+import 'package:zen/src/features/pebbles/design/pebble_materials.dart';
 import 'package:zen/src/features/pebbles/design/pebble_ready_designs.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_editor_screen.dart';
 import 'package:zen/src/features/pebbles/render/pebble_renderer.dart';
@@ -294,6 +295,48 @@ void main() {
     ]) {
       expect(find.byKey(Key(key)), findsOneWidget);
     }
+    semantics.dispose();
+  });
+
+  testWidgets('a screen reader hears the typeface names, the colour names '
+      'and the brush sizes (320 px, text ×2)', (WidgetTester tester) async {
+    final SemanticsHandle semantics = tester.ensureSemantics();
+    await _pumpEditor(
+      tester,
+      size: const Size(kNarrowestPhoneWidth, 568),
+      textScale: 2,
+    );
+    await _tapKey(tester, 'pebble-tool-text');
+    await tester.enterText(find.byKey(const Key('pebble-text')), 'Kasia');
+    await tester.pumpAndSettle();
+    final Set<String> fontLabels = <String>{};
+    for (final PebbleFont f in PebbleFont.values) {
+      final String label = tester
+          .getSemantics(find.byKey(Key('pebble-font-${f.index}')))
+          .label;
+      expect(label, contains(f.label), reason: f.name);
+      expect(label, isNot(contains('Kasia')), reason: f.name);
+      fontLabels.add(label);
+    }
+    expect(fontLabels, hasLength(PebbleFont.values.length));
+    final Set<String> colourLabels = <String>{};
+    for (int i = 0; i < pebblePaintColours.length; i++) {
+      final String label = tester
+          .getSemantics(find.byKey(Key('pebble-colour-$i')))
+          .label;
+      expect(label, isNot(matches(RegExp(r'^Kolor \d+$'))));
+      expect(label, isNot(startsWith('#')), reason: 'colour $i has a name');
+      colourLabels.add(label);
+    }
+    expect(colourLabels, hasLength(pebblePaintColours.length));
+    await _tapKey(tester, 'pebble-tool-brush');
+    final Set<String> sizes = <String>{
+      for (int i = 0; i < 5; i++)
+        tester.getSemantics(find.byKey(Key('pebble-size-$i'))).label,
+    };
+    expect(sizes, hasLength(5));
+    expect(sizes.any((String s) => s.contains('Rozmiar')), isFalse);
+    expect(tester.takeException(), isNull);
     semantics.dispose();
   });
 
