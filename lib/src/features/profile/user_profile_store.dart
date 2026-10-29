@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,6 +46,10 @@ final class FileUserProfileStore implements UserProfileStore {
       final UserProfile profile = UserProfile.fromJson(json);
       _carried = unknownFields(json, profile.toJson());
       return profile;
+    } on StateError {
+      // Locked (the app password not given yet): not "no profile". The
+      // controller asks again once it opens.
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -77,8 +82,14 @@ userProfileControllerProvider =
 final class UserProfileController extends Notifier<UserProfile> {
   bool _hydrationScheduled = false;
 
+  /// The saved profile was read (or there is none). Until then the state is
+  /// the default one, which must never be saved over the real profile.
+  bool _hydrated = false;
+  Timer? _retry;
+
   @override
   UserProfile build() {
+    ref.onDispose(() => _retry?.cancel());
     if (!_hydrationScheduled) {
       _hydrationScheduled = true;
       // Nothing awaits this, so an error would escape as an unhandled async
@@ -93,15 +104,29 @@ final class UserProfileController extends Notifier<UserProfile> {
 
   Future<void> _hydrate() async {
     // The microtask can be picked up after the container was torn down.
+    if (!ref.mounted || _hydrated) {
+      return;
+    }
+    final UserProfile? persisted;
+    try {
+      persisted = await ref.read(userProfileStoreProvider).load();
+    } on StateError {
+      // The store is still locked (read before the app was unlocked): the
+      // profile is not gone, it is read again in a moment. Read once only,
+      // it stayed the default for the whole session and looked reset.
+      _retry?.cancel();
+      _retry = Timer(const Duration(seconds: 1), () {
+        unawaitedLogged(
+          _hydrate(),
+          context: 'Hydrating the user profile failed',
+        );
+      });
+      return;
+    }
     if (!ref.mounted) {
       return;
     }
-    final UserProfile? persisted = await ref
-        .read(userProfileStoreProvider)
-        .load();
-    if (!ref.mounted) {
-      return;
-    }
+    _hydrated = true;
     if (persisted != null) {
       state = persisted;
     }
@@ -129,6 +154,11 @@ final class UserProfileController extends Notifier<UserProfile> {
     Map<String, String>? visibility,
     List<String>? nationalities,
   }) async {
+    // Never a change on top of the default profile over the saved one.
+    await _hydrate();
+    if (!ref.mounted) {
+      return;
+    }
     UserProfile next = state.copyWith(
       displayName: displayName,
       avatarPreset: avatarPreset,
