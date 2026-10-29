@@ -30,7 +30,7 @@ ICON = os.path.join(ROOT, "ios", "Runner", "Assets.xcassets", "AppIcon.appiconse
 OUT = os.path.join(ROOT, "tool", "pages")
 
 NAME = "Zen"
-TAGLINE = "A private messenger for people who know each other \u2014 no servers of its own, no ads"
+TAGLINE = "A private social network for people who know each other \u2014 no servers of its own, no ads"
 WIDTH, HEIGHT = 1200, 630
 
 # site.css, light theme.
