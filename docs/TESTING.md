@@ -397,6 +397,21 @@ fail when a picture the pages use is missing, too large, of the wrong size
 or not used, or an alt text is missing in a language. Run it again after a
 visible change to these screens and after the translations are up to date.
 
+### 4.3 The promo films (`tool/promo/make_promo.py`)
+
+```
+dart run tool/screenshots.dart                       # the screens, into build/shots/
+python tool/promo/make_promo.py --ffmpeg <ffmpeg>    # the films, into tool/pages/promo/
+```
+
+A 42-second film in Polish and English, vertical (1080 × 1920) and
+horizontal (1920 × 1080), drawn frame by frame from the frames in
+`build/shots/` and cut to the beats of a CC0 track. The script also leaves
+contact sheets in `build/promo/` (one frame every 2 seconds) to look over,
+and reads the end card's QR code back with the app's own decoder
+(`tool/promo/qr_test.dart`). How it works, what it writes and how to change
+the texts: [tool/promo/README.md](../tool/promo/README.md).
+
 ## 5. Translations
 
 Texts in code are in Polish in `t('…')` and `tn(n, one: …, few: …, many: …)`
