@@ -54,6 +54,13 @@ final class _SilentSecrets implements AppSecurityCredentialsStore {
   Future<void> delete(String key) => Completer<void>().future;
 }
 
+/// The upgrade fixtures were written on Windows and are read only there
+/// (test/start_upgrade_test.dart, `writtenElsewhere`).
+final Object _fixturesWrittenElsewhere = Platform.isWindows
+    ? false
+    : 'The upgrade fixtures were written on Windows, whose hidden file names '
+          'come from keys folded to lower case.';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   tearDown(() {
@@ -99,6 +106,7 @@ void main() {
         expect(hub.friends, isNotEmpty, reason: fixture.path);
       }
     },
+    skip: _fixturesWrittenElsewhere,
   );
 
   test('R5-#8: secure storage that does not answer after the update never '

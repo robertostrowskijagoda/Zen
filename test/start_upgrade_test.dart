@@ -48,6 +48,15 @@ Map<String, dynamic> _manifest(Directory fixture) =>
 
 String _nameOf(Directory folder) => folder.path.split(RegExp(r'[/\\]')).last;
 
+/// The fixtures were written on Windows, where the store folds every key to
+/// lower case before it hashes it into a hidden file name (binary_store.dart,
+/// `_canonicalKey`): elsewhere the same keys name other files, so the
+/// fixtures are read only there (CI: "Start on older data" and the shards).
+final Object writtenElsewhere = Platform.isWindows
+    ? false
+    : 'The upgrade fixtures were written on Windows, whose hidden file names '
+          'come from keys folded to lower case.';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(ZenStartTrace.debugReset);
@@ -77,99 +86,103 @@ void main() {
 
   for (final Directory fixture in fixtures) {
     final String version = _nameOf(fixture);
-    test('Zen $version data: the current build starts on it, unlocks it and '
-        'shows everything', () async {
-      final Map<String, dynamic> manifest = _manifest(fixture);
-      final Directory folder = copyFixture(
-        Directory('${fixture.path}/account'),
-        'zen-upgrade-$version-',
-      );
-      addTearDown(() => deleteQuietly(folder));
-      final MapSecrets secrets = MapSecrets(readSecrets(fixture));
-      final Stopwatch watch = Stopwatch()..start();
-
-      final HarnessStart start = await startZenOn(folder, secrets: secrets);
-
-      // The first screen: the lock screen of an account with a password.
-      expect(start.result.appSecurityService.hasPassword, isTrue);
-      expect(start.result.appSecurityService.isLocked, isTrue);
-      expect(start.result.initialSettings.themeMode, AppThemeMode.dark);
-      expect(start.result.initialSettings.autoCleanupDays, 9);
-      expect(
-        await start.result.appSecurityService.unlock(
-          manifest['password'] as String,
-        ),
-        isTrue,
-      );
-
-      expect(await start.result.stores.signalQueueStore.load(), hasLength(1));
-
-      final (ProviderContainer container, SocialHubState hub) =
-          await hydrateHub(start.result);
-      addTearDown(container.dispose);
-      expect(hub.snapshotUnreadable, isFalse);
-      final List<String> friends = (manifest['friends'] as List<dynamic>)
-          .cast<String>();
-      for (final String address in friends) {
-        expect(
-          hub.friendByAddress(address)?.status,
-          FriendRelationshipStatus.accepted,
-          reason: address,
+    test(
+      'Zen $version data: the current build starts on it, unlocks it and '
+      'shows everything',
+      skip: writtenElsewhere,
+      () async {
+        final Map<String, dynamic> manifest = _manifest(fixture);
+        final Directory folder = copyFixture(
+          Directory('${fixture.path}/account'),
+          'zen-upgrade-$version-',
         );
-      }
-      expect(
-        hub.friendByAddress(manifest['pending'] as String)?.status,
-        FriendRelationshipStatus.pendingIncoming,
-      );
-      expect(hub.groups.keys, contains(manifest['group']));
-      expect(
-        hub.inbox.map((InboxEntry e) => e.id),
-        containsAll(<String>['inbox-1', 'inbox-2']),
-      );
+        addTearDown(() => deleteQuietly(folder));
+        final MapSecrets secrets = MapSecrets(readSecrets(fixture));
+        final Stopwatch watch = Stopwatch()..start();
 
-      final stores = start.result.stores;
-      final List<ChatMessage> withA = await stores.messageTimelineStore.load(
-        friends.first,
-      );
-      expect(withA, hasLength(manifest['messagesWithA']));
-      expect(
-        await stores.messageTimelineStore.load('group:${manifest['group']}'),
-        hasLength(1),
-      );
-      // The signal queued before the update was read and taken by the
-      // hydration (its flush), not left behind or dropped unread.
-      expect(await stores.signalQueueStore.load(), isEmpty);
-      expect(
-        (await stores.groupStore.load()).keys,
-        contains(manifest['group']),
-      );
-      expect((await stores.userProfileStore.load())?.displayName, 'Fixture');
-      expect((await stores.relayStateStore.load()).currentRelays, friends);
+        final HarnessStart start = await startZenOn(folder, secrets: secrets);
 
-      final LedgerStore ledger = LedgerStore(clock: HlcClock());
-      await LedgerArchive(disk: stores.ledgerDisk).open(
-        ledger,
-        BlobStore(backend: DiskBlobChunkBackend(stores.ledgerDisk)),
-      );
-      expect(
-        ledger.entries(manifest['space'] as String).length,
-        greaterThanOrEqualTo(manifest['posts'] as int),
-      );
-
-      final ComposerDrafts drafts = ComposerDrafts(stores.ledgerDisk);
-      await drafts.load();
-      if (version.compareTo('1.14.0') >= 0) {
+        // The first screen: the lock screen of an account with a password.
+        expect(start.result.appSecurityService.hasPassword, isTrue);
+        expect(start.result.appSecurityService.isLocked, isTrue);
+        expect(start.result.initialSettings.themeMode, AppThemeMode.dark);
+        expect(start.result.initialSettings.autoCleanupDays, 9);
         expect(
-          drafts[ComposerDrafts.peerChat(friends.first)]?.text,
-          'Niewysłana wiadomość',
+          await start.result.appSecurityService.unlock(
+            manifest['password'] as String,
+          ),
+          isTrue,
         );
-        expect(drafts[ComposerDrafts.newPost]?.text, 'Szkic posta');
-      }
-      expect(watch.elapsed, lessThan(const Duration(seconds: 30)));
-    });
+
+        expect(await start.result.stores.signalQueueStore.load(), hasLength(1));
+
+        final (ProviderContainer container, SocialHubState hub) =
+            await hydrateHub(start.result);
+        addTearDown(container.dispose);
+        expect(hub.snapshotUnreadable, isFalse);
+        final List<String> friends = (manifest['friends'] as List<dynamic>)
+            .cast<String>();
+        for (final String address in friends) {
+          expect(
+            hub.friendByAddress(address)?.status,
+            FriendRelationshipStatus.accepted,
+            reason: address,
+          );
+        }
+        expect(
+          hub.friendByAddress(manifest['pending'] as String)?.status,
+          FriendRelationshipStatus.pendingIncoming,
+        );
+        expect(hub.groups.keys, contains(manifest['group']));
+        expect(
+          hub.inbox.map((InboxEntry e) => e.id),
+          containsAll(<String>['inbox-1', 'inbox-2']),
+        );
+
+        final stores = start.result.stores;
+        final List<ChatMessage> withA = await stores.messageTimelineStore.load(
+          friends.first,
+        );
+        expect(withA, hasLength(manifest['messagesWithA']));
+        expect(
+          await stores.messageTimelineStore.load('group:${manifest['group']}'),
+          hasLength(1),
+        );
+        // The signal queued before the update was read and taken by the
+        // hydration (its flush), not left behind or dropped unread.
+        expect(await stores.signalQueueStore.load(), isEmpty);
+        expect(
+          (await stores.groupStore.load()).keys,
+          contains(manifest['group']),
+        );
+        expect((await stores.userProfileStore.load())?.displayName, 'Fixture');
+        expect((await stores.relayStateStore.load()).currentRelays, friends);
+
+        final LedgerStore ledger = LedgerStore(clock: HlcClock());
+        await LedgerArchive(disk: stores.ledgerDisk).open(
+          ledger,
+          BlobStore(backend: DiskBlobChunkBackend(stores.ledgerDisk)),
+        );
+        expect(
+          ledger.entries(manifest['space'] as String).length,
+          greaterThanOrEqualTo(manifest['posts'] as int),
+        );
+
+        final ComposerDrafts drafts = ComposerDrafts(stores.ledgerDisk);
+        await drafts.load();
+        if (version.compareTo('1.14.0') >= 0) {
+          expect(
+            drafts[ComposerDrafts.peerChat(friends.first)]?.text,
+            'Niewysłana wiadomość',
+          );
+          expect(drafts[ComposerDrafts.newPost]?.text, 'Szkic posta');
+        }
+        expect(watch.elapsed, lessThan(const Duration(seconds: 30)));
+      },
+    );
   }
 
-  group('a damaged file never stops the start', () {
+  group('a damaged file never stops the start', skip: writtenElsewhere, () {
     final Directory? newest = fixtures.isEmpty ? null : fixtures.last;
     if (newest == null) {
       return;

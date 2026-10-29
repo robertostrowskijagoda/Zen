@@ -448,7 +448,10 @@ messages, a queued signal, notifications, presence, the profile, the relay
 state, posts in the ledger, drafts and the settings, sealed under a test
 password (`fixture.json` names it) with keys made for the fixture only;
 `secure_storage.json` stands in for the system's secure storage. Each
-folder is a few dozen kilobytes.
+folder is a few dozen kilobytes. The fixtures are written on Windows, where the
+store folds every key to lower case before it hashes it into a hidden file
+name; on Linux and macOS the same keys name other files, so the tests that
+read them are skipped there and *Start on older data* runs on Windows.
 
 `test/start_upgrade_test.dart` runs the app's real start sequence
 (`ZenBootstrapper` with the real file stores, the settings with their

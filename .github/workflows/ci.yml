@@ -283,14 +283,16 @@ jobs:
   # The app starting on the data every released version left behind
   # (test/fixtures/upgrade, one folder per release) and on every file a
   # start reads damaged in turn, with the start trace and the slow-start
-  # screen: cheap, Linux, no bridge. The same files run in the Windows
+  # screen: cheap, no bridge. The same files run in the Windows
   # shards too; this job says on its own when a start would hang or need
   # a data wipe after an update (docs/TESTING.md, "Upgrade fixtures").
   upgrade-start:
     name: Start on older data
     needs: plan
     if: ${{ needs.plan.outputs.code == 'true' }}
-    runs-on: ubuntu-24.04
+    # Windows: the fixtures were written there, and the store folds keys to
+    # lower case for its hidden file names only there.
+    runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
