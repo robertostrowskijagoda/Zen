@@ -1671,7 +1671,19 @@ void main() {
             MemorySocialSnapshotStore(),
           ),
           messageTimelineStoreProvider.overrideWithValue(timelineStore),
-          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+          // Writing to someone never makes them a friend: Maks is one.
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'maks.ygg': FriendProfile(
+                    address: 'maks.ygg',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);

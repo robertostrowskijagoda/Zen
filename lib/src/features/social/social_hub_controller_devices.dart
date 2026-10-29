@@ -345,6 +345,21 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       final FriendshipTick tick = _friendshipTick;
       final FriendshipBook before = state.book;
       FriendshipBook book = before;
+      // The removal entries every device writes for the account's others
+      // (all Zen 1.14.0 writes; each is taken once, as it comes: see
+      // DeviceChatSync). Read again here only for someone the book knows
+      // nothing of, so that a copy saved before such a removal does not
+      // bring them in; a friend kept here from before records is not taken
+      // away by an old entry read again.
+      removedAt.forEach((String address, int at) {
+        if (address.startsWith('group:') ||
+            at <= 0 ||
+            !isRoutablePeerAddress(address) ||
+            book.recordOf(address) != null) {
+          return;
+        }
+        book = book.remove(address, tick, at: FriendshipStamp(Hlc(at, 0), ''));
+      });
       records.forEach((String address, FriendshipRecord record) {
         final (String?, String)? seen = shown[address];
         book = book.merge(
