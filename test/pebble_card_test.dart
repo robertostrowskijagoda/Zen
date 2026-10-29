@@ -1,6 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_link.dart';
@@ -139,7 +142,12 @@ void main() {
       );
       final Uint8List v2 = Uint8List.fromList(card.bytes)..[0] = 2;
       expect(PebbleCard.decode(v2), isNull);
-      expect(PebbleCard.decode(Uint8List(kPebbleCardMaxBytes + 1)), isNull);
+      expect(
+        PebbleCard.decode(Uint8List(kPebbleCardFormatMaxBytes + 1)),
+        isNull,
+      );
+      expect(PebbleCard.fromText('${card.text}=='), isNull, reason: 'padded');
+      expect(PebbleCard.fromText('${card.text}!'), isNull);
     });
 
     test('maximal fields stay within 400 bytes', () async {
@@ -299,5 +307,76 @@ void main() {
       final Map<String, dynamic> moved = note.toJson()..['at'] = 1767300001;
       expect(await PebbleFoundNote.fromJson(moved)!.verify(), isFalse);
     });
+  });
+
+  group('the shared test vectors (tool/ci/pebble_card_vectors.json)', () {
+    final Map<String, dynamic> file =
+        jsonDecode(File('tool/ci/pebble_card_vectors.json').readAsStringSync())
+            as Map<String, dynamic>;
+
+    Uint8List hex(String h) => Uint8List.fromList(<int>[
+      for (int i = 0; i < h.length; i += 2)
+        int.parse(h.substring(i, i + 2), radix: 16),
+    ]);
+
+    String hexOf(List<int> b) =>
+        b.map((int x) => x.toRadixString(16).padLeft(2, '0')).join();
+
+    int colour(String c) => int.parse(c.substring(1), radix: 16);
+
+    test('RFC 8032 signatures check out', () async {
+      for (final Object? v in file['rfc8032'] as List<Object?>) {
+        final Map<String, dynamic> m = v! as Map<String, dynamic>;
+        expect(
+          await verifyClassicalSignature(
+            publicKey: b64(hex(m['key'] as String)),
+            message: hex(m['message'] as String),
+            signature: b64(hex(m['signature'] as String)),
+          ),
+          isTrue,
+        );
+      }
+    });
+
+    for (final Object? v in file['vectors'] as List<Object?>) {
+      final Map<String, dynamic> vector = v! as Map<String, dynamic>;
+      test(vector['name'], () async {
+        final PebbleCard? card = PebbleCard.fromText(vector['card'] as String);
+        final Map<String, dynamic>? want =
+            vector['expect'] as Map<String, dynamic>?;
+        if (want == null) {
+          expect(card, isNull);
+          return;
+        }
+        expect(card, isNotNull);
+        expect(card!.bytes.first, want['version']);
+        expect(hexOf(card.id.bytes), want['id']);
+        expect(hexOf(card.author), want['authorKey']);
+        expect(card.createdSeconds, want['created']);
+        expect(card.look.shapePreset, want['shape']);
+        expect(card.look.shapeSeed, want['seed']);
+        expect(card.look.material, want['material']);
+        expect(card.look.mainColor, colour(want['main'] as String));
+        expect(card.look.secondColor, colour(want['second'] as String));
+        expect(card.name, want['name']);
+        expect(card.note, want['note']);
+        expect(card.authorName, want['author']);
+        final Map<String, dynamic>? thumb =
+            want['thumbnail'] as Map<String, dynamic>?;
+        final ({List<int> palette, List<int> pixels})? t =
+            decodePebbleThumbnail(card.thumbnail);
+        if (thumb == null) {
+          expect(t, isNull);
+        } else {
+          expect(t!.palette, <int>[
+            for (final Object? c in thumb['palette'] as List<Object?>)
+              colour(c! as String),
+          ]);
+          expect(t.pixels, thumb['pixels']);
+        }
+        expect(await card.verify(), want['signature'] == 'valid');
+        expect(pebbleCardFromLink('${file['link']}${vector['card']}'), card);
+      });
+    }
   });
 }

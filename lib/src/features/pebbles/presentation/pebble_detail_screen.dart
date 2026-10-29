@@ -305,7 +305,14 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       const SizedBox(height: 16),
       FilledButton.icon(
         key: const Key('pebble-print-sticker'),
-        onPressed: () => unawaited(openPebbleSticker(context, card)),
+        onPressed: () => unawaited(
+          openPebbleSticker(
+            context,
+            link: pebbleWebLink(card),
+            name: card.name,
+            author: card.authorName,
+          ),
+        ),
         icon: const Icon(Icons.qr_code_2_rounded),
         label: Text(t('Wydrukuj naklejkę')),
       ),

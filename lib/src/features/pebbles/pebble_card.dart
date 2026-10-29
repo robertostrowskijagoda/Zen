@@ -9,11 +9,17 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 /// The version byte of the card format below.
 const int kPebbleCardVersion = 1;
 
-/// The longest card a link carries: the QR code stays readable on a
-/// sticker of about 5 × 5 cm. Cards made here always fit (the painted
-/// thumbnail is left out first, then the texts are shortened); a longer
-/// one is not taken.
+/// The longest card made here: the QR code stays readable on a sticker of
+/// about 5 × 5 cm. When the texts and the thumbnail do not fit, the
+/// thumbnail is left out first, then the texts are shortened. Cards from
+/// elsewhere are taken up to what the format allows
+/// ([kPebbleCardFormatMaxBytes]).
 const int kPebbleCardMaxBytes = 400;
+
+/// The longest well-formed card of format v1 (every text at its limit in
+/// letters of several bytes, with a thumbnail).
+const int kPebbleCardFormatMaxBytes =
+    1 + 16 + 32 + 4 + 12 + 3 + 160 + 255 + 128 + 1 + 176 + 64;
 
 /// The longest name, note and author's name, in characters.
 const int kPebbleNameMaxChars = 40;
@@ -298,7 +304,7 @@ final class PebbleCard {
   /// The card in [bytes], or `null` for anything malformed (the signature
   /// is not checked here: [verify]).
   static PebbleCard? decode(Uint8List bytes) {
-    if (bytes.length > kPebbleCardMaxBytes ||
+    if (bytes.length > kPebbleCardFormatMaxBytes ||
         bytes.length <
             pebbleCardSize(
               nameBytes: 0,
@@ -361,9 +367,16 @@ final class PebbleCard {
 
   /// The card in base64url [text] (padding optional), or `null`.
   static PebbleCard? fromText(String text) {
-    final Uint8List? raw = unb64(text.trim());
+    final String t = text.trim();
+    // Links carry it without padding, in the URL-safe alphabet only.
+    if (!_base64Url.hasMatch(t)) {
+      return null;
+    }
+    final Uint8List? raw = unb64(t);
     return raw == null ? null : decode(raw);
   }
+
+  static final RegExp _base64Url = RegExp(r'^[A-Za-z0-9_-]+$');
 
   /// base64url without padding, as links carry it.
   String get text => base64Url.encode(bytes).replaceAll('=', '');
