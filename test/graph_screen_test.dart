@@ -975,6 +975,88 @@ void main() {
     });
   }
 
+  for (final double width in <double>[320, 360, 411]) {
+    for (final double scale in <double>[1, 2]) {
+      testWidgets('graph: the chosen mode is whole in view, also the last one '
+          '(${width.round()} px, text ×${scale.round()})', (
+        WidgetTester tester,
+      ) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final _Host host = _Host(<String, String>{_ania: 'Ania'});
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              socialHubAutoHydrateProvider.overrideWithValue(false),
+              socialHubSeedProvider.overrideWithValue(
+                SocialHubState.empty().copyWith(
+                  book: FriendshipBook.restore(
+                    profiles: <String, FriendProfile>{
+                      _ania: _friend(_ania, 'Ania'),
+                    },
+                  ),
+                ),
+              ),
+              signalTransportProvider.overrideWithValue(
+                MemorySignalTransport(),
+              ),
+              ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+              meetServiceProvider.overrideWithValue(
+                MeetService(host: host, store: MeetStore(MemoryLedgerDisk())),
+              ),
+              pyramidServiceProvider.overrideWithValue(
+                PyramidService(
+                  host: MeetEventHost(
+                    host,
+                    address: () => '',
+                    name: () => 'Ja',
+                  ),
+                  disk: MemoryLedgerDisk(),
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: ZenTheme.dark(),
+              // Reopened where it was left: on the timeline, the last mode.
+              home: const GraphScreen(initial: GraphView(mode: GraphMode.time)),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        final Rect row = tester.getRect(find.byKey(const Key('graph-modes')));
+        Rect chip() => tester.getRect(find.byKey(const Key('graph-mode-time')));
+        expect(chip().left, greaterThanOrEqualTo(row.left), reason: '$chip');
+        expect(chip().right, lessThanOrEqualTo(row.right), reason: '$chip');
+        // Another mode chosen from the far start: in view as well.
+        final Finder first = find.byKey(const Key('graph-mode-presence'));
+        tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byKey(const Key('graph-modes')),
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position
+            .jumpTo(0);
+        await tester.pump();
+        await tester.tap(first);
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        final Rect presence = tester.getRect(first);
+        expect(presence.left, greaterThanOrEqualTo(row.left));
+        expect(presence.right, lessThanOrEqualTo(row.right));
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 5));
+      });
+    }
+  }
+
   testWidgets('graph: full screen with a button, F11, Esc and a double click; '
       'the controls hide by themselves; the mode comes back; it turns', (
     WidgetTester tester,

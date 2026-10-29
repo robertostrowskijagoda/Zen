@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -554,6 +555,13 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     with TickerProviderStateMixin {
   GraphMode _mode = GraphMode.presence;
   GraphFilters _filters = const GraphFilters();
+
+  /// The row of the modes, and the chip of the chosen one: kept in view
+  /// (a mode at the end of the row on a narrow phone is not cut off).
+  final ScrollController _modeRow = ScrollController();
+  final GlobalKey _chosenMode = GlobalKey();
+  GraphMode? _modeInView;
+  double _modeRowWidth = 0;
   RouteGoal _goal = RouteGoal.shortest;
   final TextEditingController _search = TextEditingController();
 
@@ -825,6 +833,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     _view
       ..removeListener(_onView)
       ..dispose();
+    _modeRow.dispose();
     _move.dispose();
     _clock.dispose();
     _labels.clear();
@@ -2123,6 +2132,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   /// under it: on a narrow phone nothing sits on top of the modes.
   Widget _modeBar(BuildContext context, List<GraphMode> modes) {
     final int active = _filters.active;
+    final double width = MediaQuery.sizeOf(context).width;
+    if (_modeInView != _mode || _modeRowWidth != width) {
+      _modeInView = _mode;
+      _modeRowWidth = width;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showChosenMode());
+    }
     return Padding(
       padding: const EdgeInsetsDirectional.only(top: 4, bottom: 4),
       child: Column(
@@ -2130,19 +2145,23 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         children: <Widget>[
           SingleChildScrollView(
             key: const Key('graph-modes'),
+            controller: _modeRow,
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsetsDirectional.symmetric(horizontal: 16),
             child: Row(
               spacing: 8,
               children: <Widget>[
                 for (final GraphMode m in modes)
-                  ChoiceChip(
-                    key: Key('graph-mode-${m.name}'),
-                    showCheckmark: false,
-                    avatar: ZenIcon(_modeIcon(m), size: 18),
-                    label: Text(m.label),
-                    selected: _mode == m,
-                    onSelected: (_) => _setMode(m),
+                  KeyedSubtree(
+                    key: _mode == m ? _chosenMode : null,
+                    child: ChoiceChip(
+                      key: Key('graph-mode-${m.name}'),
+                      showCheckmark: false,
+                      avatar: ZenIcon(_modeIcon(m), size: 18),
+                      label: Text(m.label),
+                      selected: _mode == m,
+                      onSelected: (_) => _setMode(m),
+                    ),
                   ),
               ],
             ),
@@ -2187,6 +2206,54 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         ],
       ),
     );
+  }
+
+  /// Scrolls the row of the modes, and only it, so the chosen mode's chip
+  /// is whole in view with a little room around it.
+  void _showChosenMode() {
+    final RenderObject? chip = _chosenMode.currentContext?.findRenderObject();
+    if (!mounted || chip is! RenderBox || !chip.attached) {
+      return;
+    }
+    if (!_modeRow.hasClients) {
+      return;
+    }
+    final ScrollPosition row = _modeRow.position;
+    final RenderAbstractViewport viewport = RenderAbstractViewport.of(chip);
+    final Rect room = Rect.fromLTWH(
+      -16,
+      0,
+      chip.size.width + 32,
+      chip.size.height,
+    );
+    // Its start at the row's start, or its end at the row's end.
+    final double atStart = viewport
+        .getOffsetToReveal(chip, 0, rect: room)
+        .offset;
+    final double atEnd = viewport.getOffsetToReveal(chip, 1, rect: room).offset;
+    final double target = row.pixels > atStart
+        ? atStart
+        : row.pixels < atEnd
+        ? atEnd
+        : row.pixels;
+    final double clamped = target.clamp(
+      row.minScrollExtent,
+      row.maxScrollExtent,
+    );
+    if (clamped == row.pixels) {
+      return;
+    }
+    if (MediaQuery.disableAnimationsOf(context)) {
+      row.jumpTo(clamped);
+    } else {
+      unawaited(
+        row.animateTo(
+          clamped,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    }
   }
 
   /// Asks the gatekeepers at the edge of what is known what lies further:
