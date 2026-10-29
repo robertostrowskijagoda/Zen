@@ -1527,10 +1527,10 @@ void main() {
 
     test('node reads every test card as tool/ci/pebble_cards.py wrote it and '
         'checks each signature as RFC 8032 does', () async {
+      // Every CI runner has node; so must a machine that runs this test.
       final String? node = _tool(<String>['node']);
       if (node == null) {
-        markTestSkipped('node is not installed');
-        return;
+        fail("node runs the pebble page's reader here: install Node.js");
       }
       final File vectors = File('tool/ci/pebble_card_vectors.json');
       final Map<String, dynamic> cards =
@@ -1597,8 +1597,7 @@ void main() {
             : <String>['python3', 'python'],
       );
       if (python == null) {
-        markTestSkipped('Python is not installed');
-        return;
+        fail('Python 3 runs tool/ci/pebble_cards.py here: install it');
       }
       final ProcessResult run = await Process.run(python, <String>[
         'tool/ci/pebble_cards.py',
