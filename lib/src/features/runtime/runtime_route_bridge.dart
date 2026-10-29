@@ -7,6 +7,7 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
@@ -14,11 +15,16 @@ import 'package:zen/src/features/groups/presentation/group_conversation_screen.d
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
+import 'package:zen/src/features/pebbles/pebble_card.dart';
+import 'package:zen/src/features/pebbles/pebble_link.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_profile_section.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
 class RuntimeRouteBridge extends ConsumerStatefulWidget {
@@ -227,6 +233,33 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.storage:
         // "Zen zajmuje więcej niż …": where the limit is raised.
         unawaited(openStorageSettingsPage(context));
+        break;
+      case RuntimeRouteTarget.pebble:
+        // A pebble's link: its card, and "Zbierz" (asked first: the link
+        // can come from anywhere).
+        final PebbleCard? card = pebbleCardFromLink(intent.rawInput);
+        if (card != null) {
+          unawaited(PebbleCollectScreen.open(context, card));
+        }
+        break;
+      case RuntimeRouteTarget.pebbles:
+        // "Prośba o przechowanie kamyczka": the requests wait there.
+        unawaited(PebblesScreen.open(context));
+        break;
+      case RuntimeRouteTarget.about:
+        // One of Zen's pages, scanned or opened in Zen: its own screen.
+        unawaited(AboutScreen.open(context));
+        break;
+      case RuntimeRouteTarget.installGuide:
+        // An install page: the guide, on the system the page was for.
+        unawaited(
+          InstallGuideScreen.open(
+            context,
+            initial: InstallSystem.values
+                .where((InstallSystem s) => s.name == intent.rawInput)
+                .firstOrNull,
+          ),
+        );
         break;
     }
     _handledIntentId = handledId;

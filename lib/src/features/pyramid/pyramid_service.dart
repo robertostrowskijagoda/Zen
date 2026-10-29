@@ -904,7 +904,7 @@ final class PyramidService extends ChangeNotifier {
         late: Map<String, int>.of(_late),
       );
     } on Object catch (error, stack) {
-      logZenError('Piramida: składanie w tle', error, stack);
+      logZenError('Pyramid: folding in the background', error, stack);
     }
     if (gen != _foldGen) {
       return;
@@ -1168,7 +1168,7 @@ final class PyramidService extends ChangeNotifier {
       await _refold();
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt piramidy', error, stack);
+      logZenError('Reading the pyramid', error, stack);
     }
   }
 
@@ -1839,7 +1839,7 @@ final class PyramidService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Piramida: ${payload['type']} do $to: $error');
+      logZenWarning('Pyramid: ${payload['type']} to $to: $error');
     }
   }
 
@@ -6460,7 +6460,7 @@ final class PyramidService extends ChangeNotifier {
       try {
         await _handle(type, _n(frame.from), frame.payload);
       } on Object catch (error, stack) {
-        logZenError('Piramida', error, stack);
+        logZenError('Pyramid', error, stack);
       }
       done.complete(true);
     });
@@ -7694,7 +7694,7 @@ final class PyramidService extends ChangeNotifier {
       try {
         changed = await _mergeShared(shared);
       } on Object catch (error, stack) {
-        logZenError('Piramida: stan z innego urządzenia', error, stack);
+        logZenError('Pyramid: state from another device', error, stack);
       }
       done.complete(changed);
     });

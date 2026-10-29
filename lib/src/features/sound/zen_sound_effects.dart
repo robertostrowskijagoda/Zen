@@ -126,7 +126,7 @@ final class VideoPlayerSoundOutput implements ZenSoundOutput {
       await player.play();
       return sound;
     } on Object catch (error) {
-      logZenWarning('Dźwięk $asset: $error');
+      logZenWarning('Sound $asset: $error');
       await sound.stop();
       return null;
     }

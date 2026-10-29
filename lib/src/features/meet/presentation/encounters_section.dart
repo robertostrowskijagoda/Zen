@@ -54,6 +54,7 @@ class EncountersSection extends StatelessWidget {
     required this.onOpen,
     required this.onMet,
     required this.onPlace,
+    this.friendOf,
     this.lookingInBackground = false,
     this.now,
     super.key,
@@ -61,6 +62,10 @@ class EncountersSection extends StatelessWidget {
 
   final EncounterLog log;
   final String Function(String friend) nameOf;
+
+  /// The friend an encounter's address is now (one of their other devices,
+  /// an address they had before): one person is one row, under one name.
+  final String Function(String address)? friendOf;
 
   /// Whether "met in person" is already signed for [friend].
   final bool Function(String friend) hasMet;
@@ -114,7 +119,23 @@ class EncountersSection extends StatelessWidget {
 
   Widget _build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final List<Encounter> encounters = log.encounters;
+    List<Encounter> encounters = log.encounters;
+    final String Function(String address)? friendOf = this.friendOf;
+    if (friendOf != null) {
+      List<Encounter> joined = <Encounter>[];
+      for (final Encounter e in encounters) {
+        joined = mergeEncounter(
+          joined,
+          Encounter(
+            friend: friendOf(e.friend),
+            start: e.start,
+            end: e.end,
+            place: e.place,
+          ),
+        );
+      }
+      encounters = joined;
+    }
     final List<EncounterCrowd> crowds = log.crowds;
     final bool empty = encounters.isEmpty && crowds.isEmpty;
     final DateTime today = (now ?? DateTime.now)();

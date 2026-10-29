@@ -10,11 +10,44 @@ import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
   group('FileSocialSnapshotStore', () {
+    test('keeps the friendship records and their clock', () async {
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'zen-social-store-records-',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        ),
+      );
+      const String fred = '200::f';
+      const String ola = '200::7';
+      final FriendshipBook book = FriendshipBook.empty
+          .invite(fred, (FriendProfile base) => base)
+          .admit(
+            fred,
+            FriendshipEvidence.theyAcceptedMine,
+            const FriendshipTick(100, 'phone'),
+          )
+          .remove(ola, const FriendshipTick(200, 'phone'));
+      await store.save(SocialHubState.empty().copyWith(book: book));
+      final SocialHubState loaded = (await store.load())!;
+      expect(loaded.book.records, book.records);
+      expect(loaded.book.clock, book.clock);
+      expect(
+        loaded.friendByAddress(fred)?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(loaded.removedFriendAt(ola), 200);
+    });
+
     test('round-trips friends and inbox state', () async {
       final Directory tempDir = await Directory.systemTemp.createTemp(
         'zen-social-store-test-',
@@ -33,19 +66,21 @@ void main() {
           generation: 3,
           capturedAtMillis: 99,
         ),
-        friends: const <String, FriendProfile>{
-          'ada.ygg': FriendProfile(
-            address: 'ada.ygg',
-            displayName: 'Ada',
-            nickname: 'Ada z chóru',
-            status: FriendRelationshipStatus.accepted,
-            isOnline: true,
-            lastPresenceAtMillis: 88,
-            lastMessagePreview: 'Hej!',
-            lastActivityLabel: 'Teraz',
-            unreadCount: 3,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            'ada.ygg': FriendProfile(
+              address: 'ada.ygg',
+              displayName: 'Ada',
+              nickname: 'Ada z chóru',
+              status: FriendRelationshipStatus.accepted,
+              isOnline: true,
+              lastPresenceAtMillis: 88,
+              lastMessagePreview: 'Hej!',
+              lastActivityLabel: 'Teraz',
+              unreadCount: 3,
+            ),
+          },
+        ),
         inbox: const <InboxEntry>[
           InboxEntry(
             id: 'accept-1',
@@ -149,14 +184,16 @@ void main() {
       );
       await store.save(
         SocialHubState.empty().copyWith(
-          friends: const <String, FriendProfile>{
-            'ada.ygg': FriendProfile(
-              address: 'ada.ygg',
-              displayName: 'Ada',
-              nickname: 'z chóru',
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: const <String, FriendProfile>{
+              'ada.ygg': FriendProfile(
+                address: 'ada.ygg',
+                displayName: 'Ada',
+                nickname: 'z chóru',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
           peerProfiles: const <String, PeerPublicProfile>{
             'ada.ygg': PeerPublicProfile(
               address: 'ada.ygg',

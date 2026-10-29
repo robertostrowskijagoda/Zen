@@ -565,7 +565,7 @@ final class OwnMediaKeeper {
         node.fetchFromOwnDevices(ids.toSet());
       }
     } on Object catch (error) {
-      logZenWarning('Pliki konta z innych urządzeń: $error');
+      logZenWarning('Account files from other devices: $error');
     }
   }
 }

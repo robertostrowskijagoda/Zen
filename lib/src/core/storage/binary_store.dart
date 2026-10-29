@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart'
+    show SecretBoxAuthenticationError;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/core/storage/storage_health.dart';
@@ -270,6 +274,14 @@ final class BinaryCodec {
   }
 }
 
+/// Whether [error], thrown while reading a stored file, says the file is
+/// damaged (cut short, overwritten, failing its check, past the size
+/// limit): such a file will never read, so it is set aside rather than
+/// tried at every start. A newer build's file is not damaged (it is held),
+/// and neither is a locked store or a failing disk.
+bool isDamagedStoredFile(Object error) =>
+    error is FormatException && error is! NewerFormatException;
+
 final class FileBinaryStore {
   FileBinaryStore(
     Directory rootDirectory, {
@@ -333,7 +345,15 @@ final class FileBinaryStore {
   final Set<String> _hiddenNamePrefixes;
   final int _maxFileBytes;
 
-  final Map<String, Future<void>> _writeLocks = <String, Future<void>>{};
+  /// Files (by path) whose save is under way in this isolate, for every
+  /// store: see [_locked].
+  static final Map<String, Future<void>> _writeQueues =
+      <String, Future<void>>{};
+
+  /// Files (by path) a read found unreadable while an earlier generation
+  /// still read: the next save sets them aside instead of keeping them as
+  /// the backup ([_writeLocked]).
+  static final Set<String> _unreadable = <String>{};
 
   /// Keys (canonical) whose file a newer build wrote: never written over or
   /// deleted while this build runs ([holdNewer]).
@@ -369,29 +389,74 @@ final class FileBinaryStore {
 
   Future<File> write(String key, Uint8List payload) async {
     if (_heldNewer.contains(_canonicalKey(key))) {
-      logZenWarning('Zapis pominięty: plik zapisała nowsza wersja Zen.');
+      logZenWarning('Save skipped: a newer Zen wrote the file.');
       return _fileFor(key);
     }
     final _StorePlace place = await _placeOf(key);
-    return _locked(place.canonicalKey, () => _writeLocked(place, payload));
+    return _locked(place.file.path, () => _writeLocked(place, payload));
   }
 
-  Future<T> _locked<T>(String lockKey, Future<T> Function() action) async {
-    while (_writeLocks.containsKey(lockKey)) {
+  /// Writes of one file, one at a time: in this isolate through a queue
+  /// shared by every store on the same folder (two stores, or a store and
+  /// a ledger disk on it, must not interleave the steps of [_writeLocked]),
+  /// and across isolates and processes (the Android app and its background
+  /// service share one process; a second desktop window has its own)
+  /// through a lock file next to it ([_FileWriteLock]).
+  Future<T> _locked<T>(String path, Future<T> Function() action) async {
+    while (_writeQueues.containsKey(path)) {
       try {
-        await _writeLocks[lockKey];
+        await _writeQueues[path];
       } catch (_) {}
     }
     final Completer<void> completer = Completer<void>();
-    _writeLocks[lockKey] = completer.future;
+    _writeQueues[path] = completer.future;
     try {
-      return await action();
+      final _FileWriteLock lock = await _FileWriteLock.take(path);
+      try {
+        return await action();
+      } finally {
+        await lock.release();
+      }
     } finally {
-      _writeLocks.remove(lockKey);
+      _writeQueues.remove(path);
       completer.complete();
     }
   }
 
+  /// The steps of a save, in order, for tests that stop a save at each of
+  /// them as a killed process would ([debugWriteStep]).
+  static const List<String> writeSteps = <String>[
+    'temporary written',
+    'temporary checked',
+    'older backup kept',
+    'backup kept',
+    'in place',
+  ];
+
+  /// Called at each of [writeSteps] with the file being written there;
+  /// a test throws from it to leave the files as a process killed at that
+  /// moment would.
+  @visibleForTesting
+  static void Function(String step, File file)? debugWriteStep;
+
+  /// Up to this size a file keeps two earlier generations (`.bak`,
+  /// `.bak2`): the small ones are what the app cannot do without (keys,
+  /// the identity, settings, indexes, the friend list). Bigger ones keep
+  /// one.
+  static const int kTwoBackupsUpTo = 256 * 1024;
+
+  /// A save that never leaves the key without a complete copy:
+  ///
+  /// 1. the sealed bytes go to a file of their own, flushed to the disk
+  ///    (`fsync`), and are read back and compared: a short or failed write
+  ///    never replaces anything;
+  /// 2. the copies before it move down a generation (`.bak` to `.bak2`, the
+  ///    file to `.bak`) — except a file this store found unreadable, which
+  ///    is set aside instead, so it never pushes the last good copy out;
+  /// 3. the new file is moved into place (an atomic rename).
+  ///
+  /// Killed at any point, a read finds the new file or an earlier complete
+  /// generation ([read] tries the file, then `.bak`, then `.bak2`).
   Future<File> _writeLocked(_StorePlace place, Uint8List payload) async {
     final File file = place.file;
     await file.parent.create(recursive: true);
@@ -416,51 +481,59 @@ final class FileBinaryStore {
         'Stored binary payload exceeds the configured limit.',
       );
     }
-    // Written to the side and moved into place, with the previous copy kept
-    // as a backup. Writing over the live file means a process killed mid-write
-    // (Android does that whenever it feels like it) leaves a truncated file
-    // that cannot be read back — and a snapshot that cannot be read back is
-    // how a friend list disappears.
     final File temporary = File(
       '${file.path}.${DateTime.now().microsecondsSinceEpoch}.$pid.tmp',
     );
-    await temporary.writeAsBytes(sealed, flush: true);
-    final File backup = File('${file.path}.bak');
-    if (await file.exists()) {
-      bool backedUp = false;
-      for (int attempt = 0; attempt < 3; attempt++) {
-        try {
-          if (await backup.exists()) {
-            await backup.delete();
-          }
-          await file.rename(backup.path);
-          backedUp = true;
-          break;
-        } catch (_) {
-          if (attempt < 2) {
-            await Future<void>.delayed(
-              Duration(milliseconds: 20 * (attempt + 1)),
-            );
-          }
-        }
+    try {
+      await temporary.writeAsBytes(sealed, flush: true);
+      debugWriteStep?.call(writeSteps[0], temporary);
+      if (!_sameBytes(await temporary.readAsBytes(), sealed)) {
+        throw FileSystemException(
+          'The saved file does not read back as written.',
+          temporary.path,
+        );
       }
-      if (!backedUp) {
-        // Best effort copy to backup if rename failed
-        try {
-          await file.copy(backup.path);
-        } catch (_) {}
-        try {
-          await file.delete();
-        } catch (_) {}
-      }
+      debugWriteStep?.call(writeSteps[1], temporary);
+    } on Object {
+      await _deleteQuietly(temporary);
+      rethrow;
     }
-    bool renamed = false;
+    final File backup = File('${file.path}.bak');
+    final File older = File('${file.path}.bak2');
+    final String path = file.path;
+    if (_unreadable.remove(path)) {
+      // Found unreadable here: it must not become the backup (that would
+      // push the last good copy out). Kept aside for a look by hand.
+      await _setAsideQuietly(file);
+    } else if (await file.exists()) {
+      if (sealed.length <= kTwoBackupsUpTo && await backup.exists()) {
+        await _replace(backup, older);
+        debugWriteStep?.call(writeSteps[2], older);
+      }
+      await _replace(file, backup);
+      debugWriteStep?.call(writeSteps[3], backup);
+    }
+    await _replace(temporary, file, fallbackBytes: sealed);
+    debugWriteStep?.call(writeSteps[4], file);
+    return file;
+  }
+
+  /// Moves [from] over [to] (an atomic rename, replacing it), retrying a
+  /// moment when the system holds a file (Windows, a reader or a virus
+  /// scanner). Should the rename keep failing, [fallbackBytes] are written
+  /// to [to] instead (flushed); without them [from] is copied.
+  static Future<void> _replace(
+    File from,
+    File to, {
+    Uint8List? fallbackBytes,
+  }) async {
+    Object? failure;
     for (int attempt = 0; attempt < 5; attempt++) {
       try {
-        await temporary.rename(file.path);
-        renamed = true;
-        break;
-      } catch (_) {
+        await from.rename(to.path);
+        return;
+      } on FileSystemException catch (error) {
+        failure = error;
         if (attempt < 4) {
           await Future<void>.delayed(
             Duration(milliseconds: 25 * (attempt + 1)),
@@ -468,27 +541,47 @@ final class FileBinaryStore {
         }
       }
     }
-    if (!renamed) {
-      // Fallback on Windows when rename encounters transient locks (errno 5)
-      try {
-        await temporary.copy(file.path);
-        renamed = true;
-      } catch (_) {
-        try {
-          await file.writeAsBytes(sealed, flush: true);
-          renamed = true;
-        } catch (_) {}
+    logZenWarning('Moving a saved file into place failed: $failure');
+    if (fallbackBytes != null) {
+      await to.writeAsBytes(fallbackBytes, flush: true);
+    } else {
+      await from.copy(to.path);
+    }
+    await _deleteQuietly(from);
+  }
+
+  static Future<void> _deleteQuietly(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
       }
-      try {
-        if (await temporary.exists()) {
-          await temporary.delete();
-        }
-      } catch (_) {}
-      if (!renamed) {
-        await file.writeAsBytes(sealed, flush: true);
+    } on FileSystemException {
+      // Swept with the leftovers later.
+    }
+  }
+
+  static Future<void> _setAsideQuietly(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.rename(
+          '${file.path}.damaged-${DateTime.now().millisecondsSinceEpoch}',
+        );
+      }
+    } on FileSystemException catch (error) {
+      logZenWarning('Setting a damaged file aside failed: $error');
+    }
+  }
+
+  static bool _sameBytes(List<int> a, List<int> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
       }
     }
-    return file;
+    return true;
   }
 
   void _reportSize(String canonicalKey, int bytes, int limit) {
@@ -564,9 +657,17 @@ final class FileBinaryStore {
     return removed;
   }
 
+  /// The payload of [key]: from its file, or — when that is missing or
+  /// cannot be read (a save killed halfway on a system without atomic
+  /// renames, a bad sector) — from the newest earlier generation that
+  /// reads (`.bak`, then `.bak2`). Null when nothing was ever saved.
+  /// Throws the file's error when no copy reads: a caller must never take
+  /// that for "nothing stored" and save emptiness over it.
   Future<Uint8List?> read(String key) async {
     final _StorePlace place = await _placeOf(key);
     final File file = place.file;
+    Object? failure;
+    StackTrace? failureStack;
     try {
       final Uint8List? primary = await _readFile(file, place.canonicalKey);
       if (primary != null) {
@@ -577,15 +678,44 @@ final class FileBinaryStore {
       // backup would be saved over it).
       holdNewer(key);
       rethrow;
-    } catch (error) {
-      // Fall through to the backup: an unreadable primary is exactly what the
-      // backup is for, and reporting "nothing stored" would let the caller
-      // start empty and then save that over everything.
-      if (!await File('${file.path}.bak').exists()) {
+    } on StateError {
+      // Locked: no copy opens now, and none is damaged.
+      rethrow;
+    } catch (error, stackTrace) {
+      failure = error;
+      failureStack = stackTrace;
+    }
+    for (final String suffix in const <String>['.bak', '.bak2']) {
+      final File earlier = File('${file.path}$suffix');
+      if (!await earlier.exists()) {
+        continue;
+      }
+      try {
+        final Uint8List? payload = await _readFile(earlier, place.canonicalKey);
+        if (payload == null) {
+          continue;
+        }
+        if (failure != null) {
+          _unreadable.add(file.path);
+          logZenWarning(
+            'Plik "${ZenStorageHealth.categoryOf(place.canonicalKey)}" był '
+            'nieczytelny; odczytany z wcześniejszej kopii ($suffix).',
+          );
+        }
+        return payload;
+      } on NewerFormatException {
         rethrow;
+      } on StateError {
+        rethrow;
+      } catch (error, stackTrace) {
+        failure ??= error;
+        failureStack ??= stackTrace;
       }
     }
-    return _readFile(File('${file.path}.bak'), place.canonicalKey);
+    if (failure != null) {
+      Error.throwWithStackTrace(failure, failureStack!);
+    }
+    return null;
   }
 
   Future<Uint8List?> _readFile(File file, String storageKey) async {
@@ -605,8 +735,32 @@ final class FileBinaryStore {
     } on UnsupportedStoredPayloadException {
       // Plaintext or another seal: never trusted, read as missing.
       return null;
+    } on SecretBoxAuthenticationError {
+      // Cut short, a byte changed: damage like any other, reported the
+      // same way ([isDamagedStoredFile]).
+      throw const FormatException('Stored payload fails its check.');
     }
     return _codec.decode(encoded);
+  }
+
+  /// [key]'s payload, or null when there is none, when a newer build wrote
+  /// it (held, see [holdNewer]) or when neither the file nor its backup can
+  /// be read: the file is then set aside ([quarantine]) and the caller
+  /// starts it afresh, instead of failing on it at every start. What is not
+  /// damage (the store locked, the disk failing) still throws.
+  Future<Uint8List?> readOrSetAside(String key) async {
+    try {
+      return await read(key);
+    } on NewerFormatException {
+      return null;
+    } on FormatException catch (error) {
+      logZenWarning(
+        'Stored file "${ZenStorageHealth.categoryOf(_canonicalKey(key))}" '
+        'is damaged: ${error.message}',
+      );
+      await quarantine(key);
+      return null;
+    }
   }
 
   Future<Uint8List> _seal(String storageKey, Uint8List encoded) async {
@@ -631,19 +785,66 @@ final class FileBinaryStore {
     return protector.unseal(bytes);
   }
 
+  /// Whether anything is kept for [key] (its file or an earlier
+  /// generation), without opening it.
+  Future<bool> exists(String key) async {
+    final File file = (await _placeOf(key)).file;
+    for (final String suffix in const <String>['', '.bak', '.bak2']) {
+      if (await File('${file.path}$suffix').exists()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Sets the file of [key] and its backup aside (renamed with
+  /// `.damaged-<time>` after their names, never read again but kept for a
+  /// look by hand) when neither can be read: the next read finds nothing
+  /// and the next write starts afresh. For a store the app cannot start
+  /// without, where an unreadable file must not ask for a wipe of the
+  /// whole app. Returns how many files were set aside.
+  Future<int> quarantine(String key) async {
+    final _StorePlace place = await _placeOf(key);
+    final String stamp = DateTime.now().millisecondsSinceEpoch.toString();
+    int moved = 0;
+    _unreadable.remove(place.file.path);
+    for (final File file in <File>[
+      place.file,
+      File('${place.file.path}.bak'),
+      File('${place.file.path}.bak2'),
+    ]) {
+      try {
+        if (await file.exists()) {
+          await file.rename('${file.path}.damaged-$stamp');
+          moved += 1;
+        }
+      } on FileSystemException catch (error) {
+        logZenWarning('Setting a damaged file aside failed: $error');
+      }
+    }
+    if (moved > 0) {
+      logZenWarning(
+        'Plik "${ZenStorageHealth.categoryOf(place.canonicalKey)}" był '
+        'nieczytelny; odłożony na bok, Zen zaczyna go od nowa.',
+      );
+    }
+    return moved;
+  }
+
   Future<void> delete(String key) async {
     if (_heldNewer.contains(_canonicalKey(key))) {
       return;
     }
     final _StorePlace place = await _placeOf(key);
-    await _deleteWithExtras(place.file);
+    await _locked(place.file.path, () => _deleteWithExtras(place.file));
   }
 
   Future<void> _deleteWithExtras(File file) async {
     if (await file.exists()) {
       await file.delete();
     }
-    for (final String suffix in const <String>['.bak', '.tmp']) {
+    _unreadable.remove(file.path);
+    for (final String suffix in const <String>['.bak', '.bak2', '.tmp']) {
       final File extra = File('${file.path}$suffix');
       if (await extra.exists()) {
         await extra.delete();
@@ -845,4 +1046,101 @@ final class _StorePlace {
 
   /// The file the key is written to and read from.
   final File file;
+}
+
+/// The lock of one file's saves across isolates and processes: a
+/// `<file>.lock` created exclusively (which the system does atomically for
+/// every process), holding its owner ([_owner]: the process id and this
+/// isolate's own token), removed when the save is done. A lock nobody
+/// holds any more is taken over at once: one of another process (on a
+/// phone the app and its service share one, so it is from before a
+/// restart), one of this very isolate (each of its saves waits its turn in
+/// `FileBinaryStore._writeQueues` before it takes the lock, so none of
+/// them holds it: a release that failed — Windows refuses to delete a file
+/// another program has open — or a folder put back from a copy), and one
+/// still empty a while after it was made (its owner died before it wrote
+/// its name). Another isolate's lock is waited for, up to [waitAtMost], or
+/// taken over once older than [staleAfter].
+final class _FileWriteLock {
+  _FileWriteLock._(this._file);
+
+  final File _file;
+
+  /// Longer than any save takes; a lock older than this was left behind.
+  static const Duration staleAfter = Duration(seconds: 30);
+
+  /// Longer than an owner takes to write its name into the lock it made.
+  static const Duration unnamedAfter = Duration(seconds: 2);
+
+  /// The longest a save waits for another one before it goes ahead
+  /// anyway (still atomic: it only risks the backups' order).
+  static const Duration waitAtMost = Duration(seconds: 10);
+
+  /// Who holds a lock this isolate took: the process and a token of this
+  /// isolate (statics are one per isolate), so two isolates of one process
+  /// tell their locks apart.
+  static final String _owner =
+      '$pid ${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+      '-${Random.secure().nextInt(1 << 32).toRadixString(36)}';
+
+  static Future<_FileWriteLock> take(String path) async {
+    final File file = File('$path.lock');
+    final Stopwatch waited = Stopwatch()..start();
+    int pause = 2;
+    while (true) {
+      try {
+        await file.create(exclusive: true);
+        try {
+          await file.writeAsString(_owner, flush: false);
+        } on FileSystemException {
+          // The lock holds by existing; the name only helps after a crash.
+        }
+        return _FileWriteLock._(file);
+      } on FileSystemException {
+        if (!await file.parent.exists()) {
+          await file.parent.create(recursive: true);
+          continue;
+        }
+        if (await _isStale(file) || waited.elapsed > waitAtMost) {
+          try {
+            await file.delete();
+          } on FileSystemException {
+            // Someone else took it over first.
+          }
+          continue;
+        }
+        await Future<void>.delayed(Duration(milliseconds: pause));
+        pause = pause >= 50 ? 50 : pause * 2;
+      }
+    }
+  }
+
+  static Future<bool> _isStale(File file) async {
+    try {
+      final String owner = (await file.readAsString()).trim();
+      if (owner == _owner) {
+        return true;
+      }
+      final Duration age = DateTime.now().difference(await file.lastModified());
+      if (owner.isEmpty) {
+        return age > unnamedAfter;
+      }
+      if (owner.split(' ').first != '$pid') {
+        return true;
+      }
+      return age > staleAfter;
+    } on FileSystemException {
+      return false;
+    } on FormatException {
+      return true;
+    }
+  }
+
+  Future<void> release() async {
+    try {
+      await _file.delete();
+    } on FileSystemException {
+      // Taken over as stale meanwhile; nothing to give back.
+    }
+  }
 }

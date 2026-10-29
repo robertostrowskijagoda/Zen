@@ -679,7 +679,7 @@ final class DatingService extends ChangeNotifier {
       }
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt randek', error, stack);
+      logZenError('Reading dating', error, stack);
     }
   }
 
@@ -1067,7 +1067,7 @@ final class DatingService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Randki: ${payload['type']} do $to: $error');
+      logZenWarning('Dating: ${payload['type']} to $to: $error');
     }
   }
 
@@ -2175,7 +2175,7 @@ final class DatingService extends ChangeNotifier {
       try {
         at = await currentPosition?.call();
       } on Object catch (error, stack) {
-        logZenError('Randki: położenie na żądanie', error, stack);
+        logZenError('Dating: location on request', error, stack);
       }
       if (at != null) {
         d
@@ -2244,7 +2244,7 @@ final class DatingService extends ChangeNotifier {
       try {
         await _tick();
       } on Object catch (error, stack) {
-        logZenError('Randki: terminy', error, stack);
+        logZenError('Dating: dates', error, stack);
       }
       done.complete();
     });
@@ -2270,7 +2270,7 @@ final class DatingService extends ChangeNotifier {
           _fromJson(json);
         }
       } on Object catch (error, stack) {
-        logZenError('Randki: odczyt terminów', error, stack);
+        logZenError('Dating: reading dates', error, stack);
       }
     }
     final int now = _now();
@@ -2371,7 +2371,7 @@ final class DatingService extends ChangeNotifier {
           await _handle(type, from, frame.payload);
         }
       } on Object catch (error, stack) {
-        logZenError('Randki', error, stack);
+        logZenError('Dating', error, stack);
       } finally {
         _outbox = null;
       }

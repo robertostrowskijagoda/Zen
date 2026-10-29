@@ -1,13 +1,16 @@
 import 'dart:collection';
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/locked_mailbox_writer.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -256,6 +259,35 @@ Future<_SimMesh> _meshWithRelays() async {
 }
 
 void main() {
+  test('a message queued while the app closes is kept, not lost to the '
+      "engine's providers being gone", () async {
+    final MemoryRelayStateStore store = MemoryRelayStateStore();
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async => throw StateError('no node in this test'),
+    );
+    addTearDown(runtime.dispose);
+    // Stopped with the app: the first try fails at once, the copy waits.
+    await runtime.stop();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        ...buildRelayTransportProviderOverrides(
+          runtime: runtime,
+          relayStateStore: store,
+        ),
+      ],
+    );
+    final RelayEngine engine = container.read(relayEngineProvider)!;
+    // The app closes (or another account opens) while a send is under way.
+    container.dispose();
+    await engine.submit(bob, _text('pa'));
+    expect(
+      (await store.load()).outbox.values.map(
+        (RelayOutboxEntry e) => e.recipient,
+      ),
+      <String>[bob],
+    );
+  });
+
   test(
     'online recipient gets the message exactly once, outbox clears',
     () async {
@@ -1559,6 +1591,78 @@ void main() {
     await mesh.advance(const Duration(hours: 3));
     state = await mesh.nodes[alice]!.state();
     expect(state.outbox, isEmpty);
+  });
+
+  test('a friend request to someone away is tried every few seconds at '
+      'first and every few minutes hours later; a chat message keeps its '
+      'long backoff', () async {
+    final _SimMesh mesh = _SimMesh();
+    final _SimNode scanner = mesh.add(alice);
+    mesh.add(bob);
+    await scanner.engine.activate();
+    await mesh.goOffline(bob);
+    // Strangers: no mailbox can carry the request, only alice herself.
+    await scanner.engine.submit(bob, <String, dynamic>{
+      'type': 'friend_request',
+      'senderName': 'Alice',
+    });
+    await scanner.engine.submit(bob, _text('hej'));
+    await mesh.settle();
+
+    Future<Map<String, Duration>> waits() async => <String, Duration>{
+      for (final RelayOutboxEntry e in (await scanner.state()).outbox.values)
+        e.payload['type'] as String: Duration(
+          milliseconds: e.nextDirectAttemptAtMillis - mesh.now,
+        ),
+    };
+
+    Future<void> live(Duration span) async {
+      final int end = mesh.now + span.inMilliseconds;
+      while (mesh.now < end) {
+        await mesh.advance(
+          scanner.engine.wantsFrequentTicks
+              ? const Duration(seconds: 5)
+              : const Duration(seconds: 30),
+        );
+      }
+    }
+
+    expect(scanner.engine.wantsFrequentTicks, isTrue);
+    await live(const Duration(minutes: 1));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(seconds: 3)),
+    );
+    await live(const Duration(minutes: 10));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(seconds: 30)),
+    );
+    await live(const Duration(hours: 5));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(minutes: 2)),
+    );
+    expect(
+      (await waits())['message'],
+      greaterThan(const Duration(minutes: 30)),
+      reason: 'a friend has mailboxes; the long steps spare the battery',
+    );
+    await live(const Duration(days: 2));
+    expect(
+      (await waits())['friend_request'],
+      lessThanOrEqualTo(const Duration(minutes: 15)),
+    );
+
+    // Back: the next try hands it over.
+    await mesh.goOnline(bob);
+    await live(const Duration(minutes: 15));
+    expect(
+      (await scanner.state()).outbox.values.map(
+        (RelayOutboxEntry e) => e.payload['type'],
+      ),
+      isNot(contains('friend_request')),
+    );
   });
 
   group('while the sender is locked', () {

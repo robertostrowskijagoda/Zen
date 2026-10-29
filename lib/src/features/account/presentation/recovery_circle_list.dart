@@ -109,7 +109,7 @@ class RecoveryCircleMembersView extends ConsumerWidget {
             Uint8List.fromList(utf8.encode(text)),
           );
     } on Object catch (error, stack) {
-      logZenError('Lista kręgu odzyskiwania', error, stack);
+      logZenError('Recovery circle list', error, stack);
       failure = error;
     }
     if (!context.mounted || (path == null && failure == null)) {

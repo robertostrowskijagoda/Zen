@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
+import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum RuntimeRouteTarget {
@@ -34,6 +35,22 @@ enum RuntimeRouteTarget {
 
   /// "Dane i pamięć" (`zen://storage`): Zen took more than its limit.
   storage,
+
+  /// A pebble's link (`zen://pebble#<card>`, the page's `/k/#<card>`):
+  /// collecting it; [rawInput] holds the link.
+  pebble,
+
+  /// "Kamyczki" (`zen://pebbles`): a friend asks to keep a pebble.
+  pebbles,
+
+  /// "O Zen": one of Zen's own pages (the main page without a code, about,
+  /// features, guide, support, promo) or the project's GitHub page, opened
+  /// or scanned in Zen.
+  about,
+
+  /// How to install Zen (the install pages, `…/install/` and
+  /// `…/install/<system>/`); [rawInput] holds the system's name, if any.
+  installGuide,
 }
 
 @immutable
@@ -146,6 +163,40 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.storage);
   }
 
+  /// A pebble's link, to collect it ([rawInput]: the link).
+  factory RuntimeRouteIntent.pebble({
+    required String id,
+    required String rawInput,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.pebble,
+      rawInput: rawInput,
+    );
+  }
+
+  /// "Kamyczki" (a request to keep a pebble).
+  factory RuntimeRouteIntent.pebbles({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.pebbles);
+  }
+
+  /// "O Zen" (one of Zen's pages).
+  factory RuntimeRouteIntent.about({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.about);
+  }
+
+  /// How to install Zen, on [system] when the page names one.
+  factory RuntimeRouteIntent.installGuide({
+    required String id,
+    String? system,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.installGuide,
+      rawInput: system,
+    );
+  }
+
   /// The Tablica, filtered by [filter] (a name of the feed's filters), at
   /// the post [postId] when given.
   factory RuntimeRouteIntent.feed({
@@ -233,6 +284,10 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.updates => t('Aktualizuj'),
     RuntimeRouteTarget.mailboxes => t('Wybierz skrzynkę'),
     RuntimeRouteTarget.storage => t('Otwórz Dane i pamięć'),
+    RuntimeRouteTarget.pebble => t('Zbierz kamyczek'),
+    RuntimeRouteTarget.pebbles => t('Otwórz Kamyczki'),
+    RuntimeRouteTarget.about => t('O Zen'),
+    RuntimeRouteTarget.installGuide => t('Jak zainstalować Zen'),
   };
 }
 
@@ -246,6 +301,9 @@ String buildMailboxesRouteKey() => 'zen://mailboxes';
 
 /// "Dane i pamięć" (Zen took more than its limit).
 String buildStorageRouteKey() => 'zen://storage';
+
+/// "Kamyczki" (a friend asks to keep a pebble).
+String buildPebblesRouteKey() => 'zen://pebbles';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
@@ -348,6 +406,10 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   if (uri == null) {
     return null;
   }
+  // A door sticker's own QR code (`zen-flat:<code>`, the in-app form).
+  if (uri.scheme == 'zen-flat') {
+    return _flatDoorIntent(id, trimmed.substring(FlatDoorCode.qrPrefix.length));
+  }
   // A universal invite link (https://…#CODE) opened in Zen: go straight to
   // adding that friend, the same as an in-app QR scan.
   if (uri.scheme == 'https' || uri.scheme == 'http') {
@@ -355,9 +417,15 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
     if (isZenPage(uri, path: 'm') && uri.fragment.isNotEmpty) {
       return _flatDoorIntent(id, uri.fragment);
     }
-    return PeerShareCodec.inviteCodeFromLink(trimmed) == null
-        ? null
-        : RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
+    // A pebble's page (`…/k/#<card>`) opened in Zen: collect it.
+    if (isPebbleLink(trimmed)) {
+      return RuntimeRouteIntent.pebble(id: id, rawInput: trimmed);
+    }
+    if (PeerShareCodec.inviteCodeFromLink(trimmed) != null) {
+      return RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
+    }
+    // Zen's other pages: their screen in the app, not the browser.
+    return _zenPageIntent(id, uri);
   }
   if (uri.scheme != 'zen') {
     return null;
@@ -376,6 +444,15 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'storage') {
     return RuntimeRouteIntent.storage(id: id);
+  }
+  if (uri.host == 'pebbles') {
+    return RuntimeRouteIntent.pebbles(id: id);
+  }
+  // `zen://pebble#<card>`: the pebble page's "Zbierz w Zen".
+  if (uri.host == 'pebble') {
+    return isPebbleLink(trimmed)
+        ? RuntimeRouteIntent.pebble(id: id, rawInput: trimmed)
+        : null;
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(
@@ -428,6 +505,41 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
       uri.pathSegments.isNotEmpty &&
       PeerShareCodec.addressFromInviteCode(uri.pathSegments.first) != null) {
     return RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
+  }
+  return null;
+}
+
+/// The in-app screen of one of Zen's own pages at [uri] (an install page,
+/// the main page without a code, about, features, guide, support, promo,
+/// the project's GitHub page); `null` for any other address, and for the
+/// door and pebble pages without a code.
+RuntimeRouteIntent? _zenPageIntent(String id, Uri uri) {
+  // The systems of tool/pages/install/ (InstallSystem's names).
+  for (final String system in const <String>[
+    'android',
+    'iphone',
+    'windows',
+    'macos',
+    'linux',
+  ]) {
+    if (isZenPage(uri, path: 'install/$system')) {
+      return RuntimeRouteIntent.installGuide(id: id, system: system);
+    }
+  }
+  if (isZenPage(uri, path: 'install')) {
+    return RuntimeRouteIntent.installGuide(id: id);
+  }
+  for (final String page in const <String>[
+    '',
+    'about',
+    'features',
+    'guide',
+    'support',
+    'promo',
+  ]) {
+    if (isZenPage(uri, path: page)) {
+      return RuntimeRouteIntent.about(id: id);
+    }
   }
   return null;
 }

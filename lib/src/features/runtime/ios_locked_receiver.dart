@@ -106,6 +106,7 @@ const MethodChannel _headlessChannel = MethodChannel('zen/background/headless');
 Future<void> zenIosBackgroundMain(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
+  installZenErrorLogging();
   bool stopped = false;
   _headlessChannel.setMethodCallHandler((MethodCall call) async {
     if (call.method == 'stop') {

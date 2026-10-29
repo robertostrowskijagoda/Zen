@@ -6,6 +6,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -36,13 +37,15 @@ void main() {
       final _LockedStore store = _LockedStore(
         MemorySocialSnapshotStore(
           SocialHubState.empty().copyWith(
-            friends: const <String, FriendProfile>{
-              'ada.ygg': FriendProfile(
-                address: 'ada.ygg',
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                'ada.ygg': FriendProfile(
+                  address: 'ada.ygg',
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
           ),
         ),
       );

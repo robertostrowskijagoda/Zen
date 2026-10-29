@@ -1,6 +1,6 @@
-# Zen protocol specification (draft, from the code after 1.11.0)
+# Protocol specification
 
-*Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
+*A draft, from the code of Zen 1.11.0 and later. Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
 reference. Markers: **[V]** read directly in code and consistent; **[P]**
 partly verified (shape known, details not all read); **[?]** uncertain or not
 read - check the file named. Field names are the JSON keys on the wire.
@@ -550,6 +550,59 @@ the resident shows up; the answer to "Let in" can travel back the same way.
 Doors answer no queries; while the app is locked (Android) the background
 service keeps the doors from its door kit and stores what arrives sealed.
 
+**Door code and sticker link** (`FlatDoorCode`, `flat_model.dart`): the
+code holds the household's key, the door token, the flat door's address,
+the name and, when there are any, the doors for sealed knocks (mailbox
+doors and the other residents' doors, sorted together, at most 14) with the
+sealing key; an invitation shown nearby adds when it stops working. It
+comes in two formats:
+
+- **Format 1**, JSON, base64url without padding:
+  `{v: 3, k, d, a, n, s, x, u}` (`s` the doors' 16-byte addresses
+  concatenated in base64url, `x` the X25519 sealing key, `u` the end in
+  milliseconds; `mv` names the oldest reader version when a newer one must
+  not be read by older builds). Phones pass codes to each other in this
+  form (`zen-flat:<code>`, the household's sync and nearby invitations),
+  and the stickers of Zen 1.14 and older carry it, so every build reads it.
+- **Format 2**, binary, written as decimal digits: the printed sticker's
+  link `https://robertostrowskijagoda.github.io/Zen/m#<digits>`. The digits
+  are the bytes as one big-endian number, padded with zeros to the digits of
+  256^n − 1 for n bytes (so the length gives n; like the pebble's QR card),
+  which a QR code holds in numeric mode at 3.3 bits a digit. Zen 1.14 and
+  older do not read it.
+
+| Field (format 2, big-endian) | Size |
+|---|---|
+| format = 2 (high four bits), number of doors 0–14 (low four bits) | u8 |
+| household key (Ed25519 public key) | 32 |
+| door token | 12 |
+| flat door's address without its first byte (always 0x02) | 15 |
+| each door for sealed knocks, the same way | 15 each |
+| sealing key (X25519), only with at least one door | 32 |
+| name (cut to 150 characters when read) | length in UTF-8 bytes (7 bits a byte, lowest first, high bit set while more follow) + UTF-8 |
+| records to the end: tag 1 = until (6 bytes, milliseconds) | u8 tag, u8 length, data |
+
+A reader skips record tags it does not know; a first byte with a format
+above 2 makes the app ask to update, anything malformed (a length no
+number of bytes has, a field cut short, bytes after the records, more than
+1024 bytes, a name that is not UTF-8) is not a door code. A code whose
+key, token or addresses are not in the form the app makes (a padded token,
+an address outside 200::/8) is printed in format 1 instead. The app reads
+both formats from any link form (`…/m#`, `zen://m/<code>`,
+`zen-flat:<code>`), and so does the door page (`tool/pages/m/door.js`),
+which shows only the name; the code stays after `#` and never reaches the
+web server.
+
+The whole link, its QR version at error correction M (as printed) for a
+15-byte name, and the module of a plain code 5 cm across with its quiet
+zone (with six doors a name of up to 19 bytes keeps version 11):
+
+| Doors | Format 1 | Format 2 |
+|---|---|---|
+| 0 | 244 characters, version 11, 0.72 mm | 76 bytes = 184 digits (230 characters), version 8, 0.88 mm |
+| 6 | 492 characters, version 17, 0.54 mm | 198 bytes = 477 digits (523 characters), version 11, 0.72 mm |
+| 14 | 720 characters, version 22, 0.44 mm | 318 bytes = 766 digits (812 characters), version 15, 0.59 mm |
+
 ### 2.8 Dating (`date_*`) [P]
 
 Only between friends (lanterns and what travels back also across opened gates), except the flooded lantern.
@@ -737,6 +790,158 @@ sketch cannot raise it), with fewer the maximum. The number shown is the
 larger estimate of the current and the previous month. Limits: two
 colluding friends, or a friend of a phone with a single other friend, can
 still inflate it; it is a rough guide only.
+
+### 2.16 Pebbles (`pbl_*`) [P]
+
+`lib/src/features/pebbles/` (`pebble_card.dart`, `pebble_hosting.dart`,
+`pebble_store.dart`, `pebble_service.dart`). A pebble is a painted stone a
+person makes and leaves as a QR sticker; whoever scans it collects it
+(collecting takes nothing away). A pebble is immutable: changing it makes a
+new one.
+
+**Identity.** `PebbleId` = the first 16 bytes of SHA-256 over
+`"zen-pebble/1" || author key (32) || created (u32, big-endian, Unix
+seconds) || design bytes`, written in base32 (RFC 4648, lower case, no
+padding, 26 characters). The design itself is opaque here (made by the
+editor, at most 64 KB); a copy from anyone is checked by recomputing the id
+from the card's author and time.
+
+A pebble has two cards: the **full card** (format v1), signed by the
+author, which travels with the design, to keepers and in profiles; and the
+**QR card** (format v2), only what the web page and the first contact
+need, which the sticker's QR code carries, so its modules stay large. The
+version byte tells them apart.
+
+**Full card, binary format v1** (all integers big-endian):
+
+| Field | Size |
+|---|---|
+| version = 1 | u8 |
+| PebbleId | 16 |
+| author account id (Ed25519 public key) | 32 |
+| created (Unix seconds) | u32 |
+| shape preset, shape seed, material preset | u8, u32, u8 |
+| main colour, second colour (RGB) | 3, 3 |
+| name (at most 40 characters) | u8 length + UTF-8 |
+| note (at most 100 characters) | u8 length + UTF-8 |
+| author's display name (at most 32 characters) | u8 length + UTF-8 |
+| thumbnail: 0, or 176 = 16 colours x 3 bytes, then 16 x 16 pixels of 4 bits, rows from the top, the left pixel in the high nibble (index 0 transparent) | u8 length + bytes |
+| Ed25519 signature over everything before it, by the author's account key | 64 |
+
+The texts are cut to their limits; the thumbnail is always kept. A card
+from elsewhere is taken while it is well formed (at most 852 bytes);
+another version, trailing bytes, a text over its limit or not UTF-8, a
+thumbnail of another length or base64 with padding is not. The signature
+is classical Ed25519 (like an event ticket, §4.1).
+
+**QR card, binary format v2** (not signed):
+
+| Field | Size |
+|---|---|
+| version = 2 | u8 |
+| PebbleId | 16 |
+| author account id (Ed25519 public key) | 32 |
+| shape preset, shape seed, material preset | u8, u32, u8 |
+| main colour, second colour (RGB) | 3, 3 |
+| name (at most 24 bytes; cut on a whole letter, ending in "…") | u8 length + UTF-8 |
+| author's display name (at most 16 bytes, cut the same way) | u8 length + UTF-8 |
+
+At most 103 bytes. The note, the date, the thumbnail and the signature are
+not in it: a finder saves the pebble from the QR card at once (shown with
+its look, without a date) and asks for the design; the `pbl_design` answer
+carries the full card, which takes the QR card's place only when it has the
+same id and author key, holds the author's signature and matches the
+design. Until then the pebble is not listed in the finder's profile. The
+first test builds put the full card in the QR code; those links are still
+read. Shared test vectors of both formats:
+`tool/ci/pebble_card_vectors.json`.
+
+**Links.** `https://robertostrowskijagoda.github.io/Zen/k/#<digits>`, the
+QR card as one big-endian number in decimal, padded with zeros to the
+digits of 256^n - 1 for its n bytes (so the count of digits gives n; a QR
+code writes digits in its numeric mode at 3.3 bits each, against 8 bits
+per 6 for base64url), and `zen://pebble#<same>`, which opens the collecting
+screen in the app. The fragment never reaches the server. Links with the
+base64url of a card (either format, no padding) are read too. The longest
+QR card makes a QR code of version 8 at error correction M (49 x 49
+modules); the printed full card of the first builds needed version 17 to
+20. `zen://pebbles` opens the person's pebbles (a keeping request's
+notification).
+
+**Signed records** (Ed25519, by the same keys as the card):
+
+- *Keeper list* `{id, v, r?, k, s}`: the author's list of the devices that
+  keep the pebble (at most 16 addresses), version `v` (milliseconds, newest
+  wins), `r: true` when the author retired the pebble (the list is then
+  empty). Signed bytes: `"zen-pebble-keepers/1\n" id "\n" v "\n" (1|0) "\n"`
+  followed by the addresses joined by `,`.
+- *Found note* `{id, f, at, s}`: the finder's account `f` found the pebble
+  at `at` (seconds). Signed bytes: `"zen-pebble-found/1\n" id "\n" f "\n" at`.
+
+**Frames** (direct, not reliable; an older Zen ignores them, §2.13):
+
+| type | Direction | Fields |
+|---|---|---|
+| `pbl_get` | finder -> author, keepers, friends | `id`, `a` author account, `h` hops (1 from a finder to its friend, else 0), `o` the asker (set only by a friend passing it on) |
+| `pbl_design` | any holder -> asker | `c` full card, `d` design (base64url), `k` newest keeper list known (optional) |
+| `pbl_keep_ask` | author -> friend | `c` card, `n` design size in bytes |
+| `pbl_keep_yes`, `pbl_keep_no` | friend -> author | `id` |
+| `pbl_keep_quit` | keeper -> author | `id` |
+| `pbl_keepers` | author -> keepers | `k` a new keeper list (or the retired one) |
+| `pbl_found` | finder -> author | `n` a found note |
+
+**Keepers.** A role separate from mailboxes. When a pebble is published,
+the author's device draws 6 friends (devices that answer best first,
+computers and phones mixed about half and half) and sends each
+`pbl_keep_ask`; the person answers a notification ("{author} asks you to
+keep their pebble ... It takes n KB."). A friend who agrees answers
+`pbl_keep_yes`; the author sends the design and a new signed keeper list to
+every keeper. A friend who says no, never answers within 2 days (asked again
+every 30 minutes meanwhile), resigns (`pbl_keep_quit`) or is blocked by the
+author is replaced by the next draw; the author can also draw again by
+hand. The role belongs to the pebble: a keeper keeps serving after the
+author removes them as a friend or stops using them as a mailbox. A retired
+list makes keepers drop their copy (collectors keep theirs). Only the device
+that made the pebble draws and signs; the account's other devices show it
+and fetch its design like any copy.
+
+**Serving.** A device hands a design to whoever asks (and is not blocked)
+when it is the author, a keeper of a pebble not retired, or a collector who
+did not turn off "serve collected pebbles" (on by default).
+
+**Finding a design.** A collected pebble is saved from its card at once and
+shown with the card's look; the design is asked for three devices at a
+time, 20 seconds apart, in this order: the author's devices (when this
+device knows the account: a friend's), the author's device that asked it to
+keep the pebble, the keepers of the newest list known, then its friends
+with `h: 1`. A friend who cannot serve passes the question on once (`h: 0`,
+`o`: the asker) to the author's devices it knows, the keepers it knows and
+up to 8 of its own friends, who answer the asker directly. After a full
+round the next one waits 1, 5, 15 minutes, then 1, 3 and 6 hours, driven by
+the app's wake beat (every 15 minutes). A design is taken only for a pebble
+this device wants and only when it matches the full card (for a pebble
+collected from its QR card, the full card that comes with it, checked as
+above); a keeper list only when the card's author signed it.
+
+**Limits.** At most 30 pebble frames per sender per minute, 60 designs
+served per minute, 10 questions passed on per friend per minute (the same
+question from the same friend once in 2 minutes); a design is at most
+64 KB; `o` is honoured only from a friend; nothing is sent to or taken from
+someone blocked. At most 500 pebbles collected, 200 kept for others and 20
+keeping requests waiting.
+
+**"Znaleziono".** After collecting, a finder whose account key is at hand
+sends a found note to the author's devices when it knows them (best effort,
+once); the author counts distinct finder accounts.
+
+**Profile.** The kind `pebbles` in the account's `profile` space, sealed for
+all friends (`Audience.all`): `{v: 1, c: [{c: card}], k: [{c: card, f:
+found at (ms), n: finder's note}], x: {id: removed at}}` with full cards
+only, newest first, at
+most 40 KB before sealing (the oldest collected ones are left out first).
+Friends see it; followers and friends of friends who hold the entry cannot
+open it. A made pebble in it counts only when the account signed it. The
+account's other devices take in what it lists, and its removals.
 
 ## 3. Layers above the frames
 
@@ -973,6 +1178,21 @@ A signed, append-only, per-device **log** for each **space**.
   author counts) and `film_pass` (a public film passed on to friends of
   friends: the signed film with its certificate, like a reshare); in
   `acts` also `post_ann` (notices of posts passed on beyond friends, below).
+- **Friends' copy** [V]: a `contacts` entry (sealed in `private`, for the
+  account's own devices) is {`v` 1, `friends` [{`a`, `n`?, `k`? nickname,
+  `b`? 1 when blocked}], `groups`, `r`? records}. `r` maps each normalized
+  address to `[mark, clock, device]`: mark `f` friend, `b` blocked, `x`
+  removed, `n` neither (unblocked); clock a hybrid logical clock
+  (`millis << 16 | counter`); device the writing device's address. Devices
+  merge `r` address by address, the later record winning (clock, then
+  device, then the stronger mark on an exact tie); a record dated more than
+  10 minutes ahead is refused. A friend record is only ever made by an
+  invitation answered (`FriendshipBook`, `friendship_book.dart`); a device
+  that holds a record the newest copy lacks or has older saves its own
+  copy. A copy without `r` (Zen 1.14.0) counts its friends as of unknown
+  time (older than any record) and its blocks as of the copy's time;
+  `contact_removed` {`a`} entries are taken once each as removals at their
+  ledger time.
 - **Post reach** [P]: a public post (`aud` `public`, not sealed) may be
   passed on up to 3 steps of friendship from its author; the post carries no
   reach of its own, and any other audience never goes past friends. Each
@@ -1354,9 +1574,11 @@ From 1.12.0 on, older formats are kept readable (the rules are in
 6. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
    apply), the pyramid rules version `rv` (3.4), dating lantern `v:5`,
-   alarm wave `v:6`, BLE hello `v:7`, the door sticker `v` (3; a sticker with
+   alarm wave `v:6`, BLE hello `v:7`, the door code `v` (3; a code with
    `v >= 3` and unknown fields is read, and its `mv` field names the oldest
-   reader, so a newer version can make older ones ask to update), dating
+   reader, so a newer version can make older ones ask to update) and the
+   sticker link's format 2 (its first byte; unknown records are skipped, a
+   higher format asks to update, §2.7), dating
    KDF/AAD labels `*.v1`, mailbox and inbox labels `*.v2`, the hybrid
    signature's `zen.sig.v1` and its ML-DSA derivation label
    `zen.sig.mldsa65.v1`, the session layer's `ZPQ1` and key record version 1, blob manifest

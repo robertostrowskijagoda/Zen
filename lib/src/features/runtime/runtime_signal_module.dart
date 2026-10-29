@@ -49,6 +49,18 @@ const Duration kPresencePingInterval = Duration(minutes: 2);
 /// such round (about 2 min after the node reached the network).
 const Duration kPresenceSettleAfterResume = Duration(seconds: 20);
 
+/// After a start, the friends who did not answer the first round of pings
+/// that could arrive are pinged again this long after it (once at each),
+/// and until then every ping to a friend not heard from yet says this Zen
+/// just started (kPresenceFreshKey): the first ping may wait for a session
+/// with them or go before the links carry it, and a locked phone that
+/// answered before the start answers such a ping at once (no further apart
+/// than kLockedFreshPongEvery). Nobody waits for the next round, 2 min on.
+const List<Duration> kPresenceStartRetries = <Duration>[
+  Duration(seconds: 25),
+  Duration(seconds: 50),
+];
+
 /// Each change of this device's state (on the screen, off it, closing) is
 /// told at once in an `away` frame, but only to the friends who have Zen
 /// open now (their last word, within [kPresenceForegroundFor], was
@@ -191,6 +203,12 @@ final class RuntimeSignalModule extends ZenModule {
   /// Zen was on the screen at the last change.
   bool _wasInteractive = false;
 
+  /// The core was told Zen left the screen (or got locked). It hears that
+  /// within the lifecycle event itself, before the social hub's lifecycle
+  /// snapshot follows (runtime_signal_bridge.dart), and what friends are
+  /// told must already say so.
+  bool _toldOffScreen = false;
+
   /// The last round of pings (wall time: a sleeping phone's timers stand
   /// still) and a timer that runs out a ping interval after it; while both
   /// say it was lately, coming back on the screen pings no one at once.
@@ -227,6 +245,15 @@ final class RuntimeSignalModule extends ZenModule {
   /// the presence remembered from before the start.
   int _reachableRounds = 0;
 
+  /// This run just started: pings to friends not heard from yet say so
+  /// until the pings again after the first round that could arrive are
+  /// over ([kPresenceStartRetries], [_retryTimer]).
+  bool _fresh = true;
+  Timer? _retryTimer;
+
+  /// What each device of each friend told of its presence in this run.
+  final PresenceDevices _devices = PresenceDevices();
+
   /// Without the network for [kPresenceNoNetworkAfter] ([_noNetworkTimer]
   /// runs meanwhile): friends' presence is in doubt.
   Timer? _noNetworkTimer;
@@ -255,6 +282,12 @@ final class RuntimeSignalModule extends ZenModule {
     final SignalTransport transport = _ref.read(signalTransportProvider);
     _transport = transport;
     _running = true;
+    // A run of its own (the core starts again once the node is back from
+    // the Android service): who heard what, and the rounds, start anew.
+    _reachableRounds = 0;
+    _fresh = true;
+    _heard.clear();
+    _told.clear();
     // Subscribe before starting. `frames` is a broadcast stream, so anything
     // emitted between start() and listen() is gone for good.
     _subscription = transport.frames.listen(
@@ -298,11 +331,44 @@ final class RuntimeSignalModule extends ZenModule {
 
   @override
   FutureOr<void> stop() {
+    if (_running && !_inService && (_noticeTimer != null || _wasInteractive)) {
+      // A change of this device's state still to be told ("leaving the
+      // screen" waits a moment for a glance to pass): it goes now, while
+      // the node is still up. A phone that locks hands its node to the
+      // service at once, and the friends who have Zen open would show it
+      // "online" until their next ping got an answer.
+      return _tellBeforeStopping().whenComplete(_stopNow);
+    }
+    _stopNow();
+  }
+
+  Future<void> _tellBeforeStopping() async {
+    if (!_ref.mounted) {
+      // The app itself is going away (its providers with it).
+      return;
+    }
+    try {
+      if (_noticeTimer == null && _isUiInteractive()) {
+        // Still on the screen: nothing changed.
+        return;
+      }
+      _noticeTimer?.cancel();
+      _noticeTimer = null;
+      _noticeDue = null;
+      await _sendNotices().timeout(const Duration(seconds: 2));
+    } on Object catch (error) {
+      logZenWarning('The presence change was not told before stopping: $error');
+    }
+  }
+
+  void _stopNow() {
     _running = false;
     _presenceTimer?.cancel();
     _presenceTimer = null;
     _settleTimer?.cancel();
     _settleTimer = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _pingedLately?.cancel();
     _pingedLately = null;
     _noticeTimer?.cancel();
@@ -337,6 +403,7 @@ final class RuntimeSignalModule extends ZenModule {
     if (_inService) {
       return;
     }
+    _toldOffScreen = !interactive;
     // The node's numbers are read often only while someone may look.
     _ref.read(runtimeNodeRuntimeProvider).setOnScreen(interactive);
     if (!interactive) {
@@ -535,8 +602,13 @@ final class RuntimeSignalModule extends ZenModule {
     );
   }
 
+  /// Whether frames are still taken: the module runs and its providers are
+  /// there. A frame handled across a stop (the app closing, an account
+  /// switch) ends at its next step instead of reading what is gone.
+  bool get _live => _running && _ref.mounted;
+
   Future<void> _handleFrame(SignalTransportFrame frame) async {
-    if (!_running) {
+    if (!_live) {
       return;
     }
     final String from = PeerShareCodec.normalizeAddress(frame.from);
@@ -587,7 +659,7 @@ final class RuntimeSignalModule extends ZenModule {
         );
         _noteTold(from, presence);
       }
-      if (isAcceptedFriend) {
+      if (isAcceptedFriend && _live) {
         // A ping is a friend's "I am here": Zen is on their screen (as far
         // as they show it).
         await _notePresence(hub, from, frame);
@@ -637,12 +709,17 @@ final class RuntimeSignalModule extends ZenModule {
   /// A weak acquaintance's status is not shown here, as this person's is not
   /// sent to them ([presenceVisibleTo]): only whether they can be reached.
   /// A friend whose Zen is older than [kPresenceSinceVersion] tells none at
-  /// all: unknown, not hidden.
+  /// all: unknown, not hidden. Taken with what the friend's other devices
+  /// told, and not at all when it came after something newer from the same
+  /// device ([PresenceDevices]).
   Future<void> _notePresence(
     SocialHubController hub,
     String from,
     SignalTransportFrame frame,
   ) {
+    if (!_live) {
+      return Future<void>.value();
+    }
     PresenceReport report = PresenceReport.fromPayload(frame.payload);
     if (_isWeakFriend(from)) {
       report = const PresenceReport(presence: PeerPresence.hidden);
@@ -650,18 +727,35 @@ final class RuntimeSignalModule extends ZenModule {
         _tellsNoPresence(frame.payload)) {
       report = const PresenceReport(presence: PeerPresence.unknown);
     }
+    final RuntimePresenceConfig config = _ref.read(
+      runtimePresenceConfigProvider,
+    );
+    final ({PresenceReport report, int at})? now = _devices.note(
+      friend: from,
+      device: PeerShareCodec.normalizeAddress(frame.sender),
+      report: report,
+      atMillis: frame.receivedAtMillis,
+      foregroundFor: config.foregroundFor,
+      backgroundFor: config.offlineAfter,
+    );
+    if (now == null) {
+      // Told before what this device heard from there already.
+      return Future<void>.value();
+    }
     if (_heard.length >= 2000) {
       _heard.clear();
     }
     _heard[from] = (
-      state: report.presence,
-      at: DateTime.now().millisecondsSinceEpoch,
+      state: now.report.presence,
+      at:
+          DateTime.now().millisecondsSinceEpoch -
+          (frame.receivedAtMillis - now.at),
     );
     return hub.updatePeerPresence(
       peerAddress: from,
-      report: report,
-      reachable: report.reachable,
-      observedAtMillis: frame.receivedAtMillis,
+      report: now.report,
+      reachable: now.report.reachable,
+      observedAtMillis: now.at,
     );
   }
 
@@ -686,7 +780,7 @@ final class RuntimeSignalModule extends ZenModule {
     Map<String, dynamic> payload,
   ) async {
     final PeerVersion? version = PeerVersion.fromPayload(payload);
-    if (version != null) {
+    if (version != null && _live) {
       // Kept whole (capabilities, the oldest Zen it still talks to): an
       // older build is told to update instead of quietly missing messages.
       _ref.read(peerHelloBookProvider.notifier).note(from, version);
@@ -730,7 +824,48 @@ final class RuntimeSignalModule extends ZenModule {
     await _pingAll(peersToPing, hubState);
     if (reachable && _running) {
       _armSettle(settleUnchecked: ++_reachableRounds >= 2);
+      if (_reachableRounds == 1) {
+        _retryUnanswered(0);
+      }
     }
+  }
+
+  /// The friends not heard from in this run are pinged again
+  /// [kPresenceStartRetries] after the first round that could arrive; once
+  /// those are over, pings no longer say this Zen just started.
+  void _retryUnanswered(int index) {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    if (index >= kPresenceStartRetries.length) {
+      _fresh = false;
+      return;
+    }
+    final Duration wait =
+        kPresenceStartRetries[index] -
+        (index == 0 ? Duration.zero : kPresenceStartRetries[index - 1]);
+    _retryTimer = Timer(wait, () {
+      _retryTimer = null;
+      if (!_running) {
+        return;
+      }
+      if (_presenceRuns()) {
+        final SocialHubState hubState = _ref.read(socialHubControllerProvider);
+        final Set<String> unanswered = <String>{
+          for (final FriendProfile friend in hubState.acceptedFriends)
+            if (!_heard.containsKey(
+              PeerShareCodec.normalizeAddress(friend.address),
+            ))
+              friend.address,
+        };
+        if (unanswered.isNotEmpty) {
+          unawaitedLogged(
+            _pingAll(unanswered, hubState),
+            context: 'Runtime presence ping of the unanswered failed',
+          );
+        }
+      }
+      _retryUnanswered(index + 1);
+    });
   }
 
   /// Once the answers to a round had time to come, friends who did not
@@ -790,6 +925,11 @@ final class RuntimeSignalModule extends ZenModule {
             ...presence,
             ...versionHello(),
             ..._hello(address),
+            // Not heard from since this Zen started: a locked phone
+            // answers at once (kPresenceStartRetries).
+            if (_fresh &&
+                !_heard.containsKey(PeerShareCodec.normalizeAddress(address)))
+              kPresenceFreshKey: true,
           },
         },
       );
@@ -937,7 +1077,11 @@ final class RuntimeSignalModule extends ZenModule {
         : left == null
         ? null
         : DateTime.now().difference(left);
-    return presenceFields(own: _ownPresence(), openedAgo: openedAgo);
+    return presenceFields(
+      own: _ownPresence(),
+      openedAgo: openedAgo,
+      sentAtMillis: DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   /// This device's state as friends should see it now: on the screen,
@@ -1129,7 +1273,8 @@ final class RuntimeSignalModule extends ZenModule {
 
   bool _isUiInteractive() {
     final AppSecurityService security = _ref.read(appSecurityServiceProvider);
-    return _ref.read(socialHubControllerProvider).lifecycle.isInteractive &&
+    return !_toldOffScreen &&
+        _ref.read(socialHubControllerProvider).lifecycle.isInteractive &&
         !isSecurityBlockingUi(security);
   }
 }

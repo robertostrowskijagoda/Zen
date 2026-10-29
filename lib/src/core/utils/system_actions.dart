@@ -140,7 +140,7 @@ Future<bool> openLinkHandlingSettings() async {
   try {
     return await _system.invokeMethod<bool>('openLinkSettings') ?? false;
   } on Object catch (error) {
-    logZenWarning('Ustawienia linków: $error');
+    logZenWarning('Link settings: $error');
     return false;
   }
 }

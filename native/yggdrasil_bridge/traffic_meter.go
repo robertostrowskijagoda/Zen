@@ -24,11 +24,11 @@ import (
 // phone's limit on it (transit_guard.go).
 //
 // Anyone on the mesh can send this node packets it drops (junk that does
-// not open, packets ipv6rwc refuses), and ironwood answers some of them
-// (a session init back): bytes in and out that are not the node's own as
-// the packet loop counts them, yet no transit either. So the node's own
+// not open, packets the mesh reader refuses), and ironwood answers some of
+// them (a session init back): bytes in and out that are not the node's own
+// as the packet loop counts them, yet no transit either. So the node's own
 // traffic is also taken from its end-to-end sessions (everything that
-// opened, whatever ipv6rwc made of it), and transit is at most what came in
+// opened, whatever the reader made of it), and transit is at most what came in
 // on one peering while another one sent as much: junk and the answers to it
 // travel over the same peering.
 const (
@@ -90,13 +90,23 @@ func (own *ownTraffic) totals() (rx, tx, packetsRx, packetsTx uint64) {
 	return rx, tx, own.packetsRx.Load(), own.packetsTx.Load()
 }
 
-// writeMesh writes one of the node's own packets to the mesh and counts it.
+// writeMesh hands one of the node's own packets to its mesh writer, which
+// counts it once written (mesh_io.go). It never waits for the mesh.
 func (node *bridgeNode) writeMesh(packet []byte, relay bool) error {
-	if _, err := node.iprwc.Write(packet); err != nil {
-		return err
+	if node.mesh == nil {
+		return errMeshStopped
 	}
-	node.traffic.sent(len(packet), relay)
-	return nil
+	return node.mesh.send(packet, relay)
+}
+
+// writeMeshSealed is writeMesh for a fragment of a sealed signal frame,
+// which the writer sends again while the way to its node settles
+// (mesh_io.go, echoes).
+func (node *bridgeNode) writeMeshSealed(packet []byte) error {
+	if node.mesh == nil {
+		return errMeshStopped
+	}
+	return node.mesh.sendSealed(packet)
 }
 
 // trafficLink is what a peering (or a session) had carried when it was last
@@ -346,14 +356,21 @@ func (meter *peerTrafficMeter) snapshot() map[string]any {
 
 // sampleTraffic feeds the meter with the node's peerings now; a phone logs
 // a window with unusual transit, and its transit guard (transit_guard.go)
-// takes every window.
+// takes every window. Only goroutines of the node's own call it: it asks
+// the core, which the app's thread never waits for (node_view.go).
 func (node *bridgeNode) sampleTraffic() {
 	node.sampleTrafficAt(time.Now())
 }
 
 func (node *bridgeNode) sampleTrafficAt(now time.Time) {
+	node.sampleTrafficWith(node.core.GetPeers(), node.core.GetSessions(), now)
+}
+
+// sampleTrafficWith is sampleTraffic with the peerings and sessions the
+// core listed at now.
+func (node *bridgeNode) sampleTrafficWith(peers []core.PeerInfo, sessions []core.SessionInfo, now time.Time) {
 	node.checkTransitHold(now)
-	estimate, ended := node.peerTraffic.sample(node.core.GetPeers(), node.core.GetSessions(), &node.traffic, node.nearPeers(), now)
+	estimate, ended := node.peerTraffic.sample(peers, sessions, &node.traffic, node.nearPeers(), now)
 	if !ended {
 		return
 	}
@@ -375,15 +392,15 @@ func (node *bridgeNode) nearPeers() func(uri string) bool {
 	}
 }
 
-// trafficState is the node's traffic for diagnostics: bytes over its
-// peerings since it started, their rates now (bytes per second), its own
-// packets and the transit estimate (see the top of this file), and the
-// links of the door host (door_node.go) when one runs.
-func (node *bridgeNode) trafficState() map[string]any {
-	node.sampleTraffic()
+// trafficStateWith is the node's traffic for diagnostics: bytes over its
+// peerings since it started, their rates now (bytes per second, from peers
+// as the core listed them), its own packets and the transit estimate (see
+// the top of this file), and the links of the door host (door_node.go)
+// when one runs. The node's view takes it with every sample (node_view.go).
+func (node *bridgeNode) trafficStateWith(peers []core.PeerInfo) map[string]any {
 	state := node.peerTraffic.snapshot()
 	var rxRate, txRate uint64
-	for _, peer := range node.core.GetPeers() {
+	for _, peer := range peers {
 		rxRate += peer.RXRate
 		txRate += peer.TXRate
 	}
@@ -403,7 +420,7 @@ func (node *bridgeNode) trafficState() map[string]any {
 	host := node.doorHost
 	node.doorMu.Unlock()
 	if host != nil {
-		state["doorHost"] = hostTraffic(host.core.GetPeers())
+		state["doorHost"] = hostTraffic(host.peerView())
 	}
 	return state
 }

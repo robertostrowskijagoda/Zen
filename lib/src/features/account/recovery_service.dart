@@ -311,7 +311,7 @@ final class RecoveryService {
     _frames = transport.frames.listen(
       (SignalTransportFrame f) => unawaitedLogged(
         _onFrame(f),
-        context: 'Obsługa wiadomości odzyskiwania nie udała się',
+        context: 'Handling a recovery message failed',
       ),
     );
     _timer = Timer.periodic(tickInterval, (_) {
@@ -496,7 +496,7 @@ final class RecoveryService {
         payload: const <String, dynamic>{'type': RecoveryMessages.help},
       );
     } on Object catch (error) {
-      logZenWarning('Prośba o pomoc w odzyskaniu nie wyszła: $error');
+      logZenWarning('Asking for recovery help was not sent: $error');
     }
     return true;
   }
@@ -570,7 +570,7 @@ final class RecoveryService {
           );
           _alarms.add(alarm);
           logZenWarning(
-            'Ktoś z kręgu chce wydać klucz odzyskiwania Twojego konta.',
+            'Someone in the circle wants to release the recovery key of this account.',
           );
           onAlarm?.call(alarm);
           _changed();
@@ -696,7 +696,7 @@ final class RecoveryService {
     try {
       return jsonDecode(utf8.decode(raw));
     } on FormatException {
-      logZenWarning('Dane odzyskiwania ($key) są uszkodzone.');
+      logZenWarning('Recovery data ($key) is damaged.');
       return null;
     }
   }

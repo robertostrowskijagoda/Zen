@@ -83,19 +83,23 @@ abstract final class ZenTechLog {
 
   /// Writes how Android ended the app's earlier runs (Android 11 on; only
   /// the ones not written yet). Once per isolate's start, after
-  /// [ZenDiagnosticsLog.attach].
+  /// [ZenDiagnosticsLog.attach]. The app and the background service start
+  /// together and both ask: the one that claims the newest record first
+  /// (a file made only if it is not there yet) writes them, so they are
+  /// written once, not once per isolate.
   static Future<void> noteExits({
     MethodChannel channel = const MethodChannel('zen/power'),
+    bool? android,
   }) async {
     final File? log = ZenDiagnosticsLog.file;
-    if (kIsWeb || !Platform.isAndroid || log == null) {
+    if (kIsWeb || !(android ?? Platform.isAndroid) || log == null) {
       return;
     }
     try {
-      final File seen = File(
-        '${log.parent.path}${Platform.pathSeparator}'
-        '${ZenDiagnosticsLog.filePrefix}-exits',
-      );
+      final String base =
+          '${log.parent.path}${Platform.pathSeparator}'
+          '${ZenDiagnosticsLog.filePrefix}-exits';
+      final File seen = File(base);
       int since = 0;
       if (await seen.exists()) {
         since = int.tryParse((await seen.readAsString()).trim()) ?? 0;
@@ -104,16 +108,35 @@ abstract final class ZenTechLog {
           await channel.invokeListMethod<Object?>('exitReasons') ??
           const <Object?>[];
       int newest = since;
-      for (final String line in exitLines(exits, since: since)) {
-        ZenDiagnosticsLog.write(line);
-      }
       for (final Object? exit in exits) {
         if (exit is Map && _int(exit['at']) > newest) {
           newest = _int(exit['at']);
         }
       }
-      if (newest > since) {
-        await seen.writeAsString('$newest', flush: true);
+      if (newest <= since) {
+        return;
+      }
+      try {
+        await File('$base-$newest').create(exclusive: true);
+      } on FileSystemException {
+        // The other isolate claimed these records: it writes them.
+        return;
+      }
+      for (final String line in exitLines(exits, since: since)) {
+        ZenDiagnosticsLog.write(line);
+      }
+      await seen.writeAsString('$newest', flush: true);
+      // Older claims are done with; this one stays, so an isolate that
+      // read the mark before it moved cannot claim the same records.
+      await for (final FileSystemEntity entity in log.parent.list()) {
+        final String name = entity.path.split(RegExp(r'[/\\]')).last;
+        final int? claimed =
+            name.startsWith('${ZenDiagnosticsLog.filePrefix}-exits-')
+            ? int.tryParse(name.split('-').last)
+            : null;
+        if (entity is File && claimed != null && claimed < newest) {
+          await entity.delete();
+        }
       }
     } on Object catch (error) {
       // An older build of the native side, or Android before 11.

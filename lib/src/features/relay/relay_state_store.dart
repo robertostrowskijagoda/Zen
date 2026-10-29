@@ -88,11 +88,27 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
   static String _payloadKey(String rid) =>
       'relay/out/${base64Url.encode(utf8.encode(rid)).replaceAll('=', '')}';
 
+  /// What can be read: a damaged file (neither it nor its backup reads)
+  /// is set aside ([FileBinaryStore.quarantine]) and left out — the state
+  /// itself starts fresh, a big payload's message is dropped from the
+  /// outbox, a friend's held mail is gone — and the rest loads. Never
+  /// throws for damage: the engine loads the state before every send, and
+  /// one bad file must not stop everything from going out. A newer build's
+  /// state still throws (it is kept; a fresh one would announce a new
+  /// identity to every friend).
   @override
   Future<RelayState> load() async {
     _lastContent.clear();
     _payloadFiles.clear();
-    final String? core = await _readString(storageKey);
+    final String? core;
+    try {
+      core = await _readString(storageKey);
+    } on NewerFormatException {
+      rethrow;
+    } on FormatException catch (error, stackTrace) {
+      await store.quarantine(storageKey);
+      return _fresh(error, stackTrace);
+    }
     if (core == null) {
       return RelayState();
     }
@@ -100,6 +116,7 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
     try {
       decoded = jsonDecode(core);
     } on FormatException catch (error, stackTrace) {
+      await store.quarantine(storageKey);
       return _fresh(error, stackTrace);
     }
     if (store.heldAsNewer(storageKey, decoded, current: kRelayStateFormat)) {
@@ -111,19 +128,19 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
         supported: kRelayStateFormat,
       );
     }
+    final RelayState state;
     try {
       if (decoded is Map && decoded['out'] is List) {
         final List<Object?> out = <Object?>[];
         for (final Object? item in decoded['out'] as List) {
           if (item is Map && item['pf'] != null && item['rid'] is String) {
             final String rid = item['rid'] as String;
-            final String? raw = await _readString(
+            final Object? payload = await _readJson(
               _payloadKey(rid),
               remember: false,
             );
-            final Object? payload = raw == null ? null : jsonDecode(raw);
             if (payload is! Map) {
-              // Its payload is gone: nothing left to send.
+              // Its payload is gone or damaged: nothing left to send.
               continue;
             }
             _payloadFiles.add(rid);
@@ -137,33 +154,51 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
         }
         decoded['out'] = out;
       }
-      final RelayState state = RelayState.fromJson(decoded);
-      final List<String> recipients = decoded is Map && decoded['mbx'] is List
-          ? (decoded['mbx'] as List).whereType<String>().toList()
-          : const <String>[];
-      for (final String recipient in recipients) {
-        final String? raw = await _readString(_mailKey(recipient));
-        if (raw == null) {
-          continue;
-        }
-        final Object? mail = jsonDecode(raw);
-        if (mail is! Map) {
-          continue;
-        }
-        final Map<String, Map<String, dynamic>> held =
-            <String, Map<String, dynamic>>{};
-        mail.forEach((Object? id, Object? envelope) {
-          if (id is String && envelope is Map) {
-            held[id] = Map<String, dynamic>.from(envelope);
-          }
-        });
-        if (held.isNotEmpty) {
-          state.mailbox[recipient] = held;
-        }
-      }
-      return state;
+      state = RelayState.fromJson(decoded);
     } catch (error, stackTrace) {
+      await store.quarantine(storageKey);
       return _fresh(error, stackTrace);
+    }
+    final List<String> recipients = decoded is Map && decoded['mbx'] is List
+        ? (decoded['mbx'] as List).whereType<String>().toList()
+        : const <String>[];
+    for (final String recipient in recipients) {
+      final Object? mail = await _readJson(_mailKey(recipient));
+      if (mail is! Map) {
+        continue;
+      }
+      final Map<String, Map<String, dynamic>> held =
+          <String, Map<String, dynamic>>{};
+      mail.forEach((Object? id, Object? envelope) {
+        if (id is String && envelope is Map) {
+          held[id] = Map<String, dynamic>.from(envelope);
+        }
+      });
+      if (held.isNotEmpty) {
+        state.mailbox[recipient] = held;
+      }
+    }
+    return state;
+  }
+
+  /// The JSON in [key]; null when it is missing, a newer build's, or
+  /// damaged (then set aside: [FileBinaryStore.readOrSetAside]).
+  Future<Object?> _readJson(String key, {bool remember = true}) async {
+    final Uint8List? bytes = await store.readOrSetAside(key);
+    if (bytes == null || bytes.isEmpty) {
+      return null;
+    }
+    try {
+      final String content = utf8.decode(bytes);
+      final Object? json = jsonDecode(content);
+      if (remember) {
+        _lastContent[key] = content;
+      }
+      return json;
+    } on FormatException {
+      logZenWarning('A relay file holds no JSON; left out.');
+      await store.quarantine(key);
+      return null;
     }
   }
 

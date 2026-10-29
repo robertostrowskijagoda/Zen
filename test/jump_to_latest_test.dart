@@ -7,6 +7,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -84,13 +85,15 @@ Future<MemoryMessageTimelineStore> _pumpDirect(WidgetTester tester) async {
         messageTimelineStoreProvider.overrideWithValue(store),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty().copyWith(
-            friends: const <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
           ),
         ),
       ],

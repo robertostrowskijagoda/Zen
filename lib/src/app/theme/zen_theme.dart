@@ -14,7 +14,12 @@ export 'package:zen/src/app/theme/zen_tones.dart';
 /// The faces of the app, the same in every look: display for titles,
 /// grotesk for body copy, mono for system labels.
 abstract final class ZenText {
-  static const String displayFamily = 'Fredoka';
+  /// Baloo 2: a round title face that draws every Latin letter of every
+  /// language Zen speaks (Polish ą ć ę ń ś ź ż, Czech č ř ů, Hungarian ő ű,
+  /// Romanian ș ț, Turkish ğ ş, Vietnamese) and Devanagari, in one font.
+  /// Scripts it has not (Arabic, Cyrillic, Chinese, Japanese, Korean) come
+  /// from the phone's own font, as for every other face of the app.
+  static const String displayFamily = 'Baloo 2';
   static const String sansFamily = 'Hanken Grotesk';
   static const String monoFamily = 'JetBrains Mono';
 }
@@ -30,7 +35,7 @@ final class ZenTypeface {
     this.display = ZenText.displayFamily,
     this.sansFallback = const <String>[ZenText.sansFamily, 'DM Sans'],
     this.monoFallback = const <String>[ZenText.monoFamily, 'Space Mono'],
-    this.displayFallback = const <String>[ZenText.displayFamily, 'Fredoka'],
+    this.displayFallback = const <String>[ZenText.sansFamily],
     this.monoTracking = 0.2,
     this.bodyTracking = 0,
     this.titleTracking = -0.4,
@@ -57,7 +62,7 @@ final class ZenTypeface {
 /// The one pairing of the app.
 abstract final class ZenTypefaces {
   static const ZenTypeface zen = ZenTypeface(
-    label: 'Fredoka + Hanken + JetBrains',
+    label: 'Baloo 2 + Hanken + JetBrains',
     sans: ZenText.sansFamily,
     mono: ZenText.monoFamily,
     display: ZenText.displayFamily,
@@ -919,6 +924,8 @@ abstract final class ZenTheme {
           fontSize: 20 * colors.typeface.displayScale,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.1,
+          // The face's own line is 1.6 em tall.
+          height: 1.2,
         ),
         actionsIconTheme: IconThemeData(
           color: lit ? colors.accent : colors.textSecondary,
@@ -1375,6 +1382,7 @@ abstract final class ZenTheme {
           color: colors.textPrimary,
           fontSize: 21 * colors.typeface.displayScale,
           fontWeight: FontWeight.w600,
+          height: 1.2,
         ),
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         shape: dialogShape,

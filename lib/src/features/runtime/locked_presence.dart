@@ -37,8 +37,9 @@ final class LockedPresenceKit {
   /// The most addresses a kit holds.
   static const int maxEntries = 2000;
 
-  /// The presence fields of a pong to [from] at [nowMillis]; empty when
-  /// [from] may not see them.
+  /// The presence fields of a pong to [from] at [nowMillis] (also the
+  /// order of what this device tells, after what the app told before it
+  /// locked); empty when [from] may not see them.
   Map<String, dynamic> pongFields(String from, int nowMillis) {
     if (!shownTo.contains(PeerShareCodec.normalizeAddress(from))) {
       return const <String, dynamic>{};
@@ -52,6 +53,7 @@ final class LockedPresenceKit {
                   ? nowMillis - lastOpenedAtMillis
                   : 0,
             ),
+      sentAtMillis: nowMillis,
     );
   }
 

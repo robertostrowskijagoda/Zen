@@ -35,7 +35,9 @@ final class EncryptedBinaryPayloadProtector
   final AppSecurityService _security;
 
   Future<Uint8List> _key({required bool sealing}) async {
-    final Uint8List? key = await _security.currentEncryptionKey();
+    final Uint8List? key = sealing
+        ? await _security.currentSealingKey()
+        : await _security.currentEncryptionKey();
     if (key == null) {
       throw StateError(
         sealing
@@ -106,7 +108,9 @@ final class EncryptedBinaryPayloadProtector
 
   @override
   Future<Uint8List?> fileNameKey() async {
-    final Uint8List? key = await _security.currentEncryptionKey();
+    // A save right after the lock needs the name too; the contents still
+    // open only with the key itself.
+    final Uint8List? key = await _security.currentSealingKey();
     return key == null ? null : securitySubkey(key, 'store.names');
   }
 

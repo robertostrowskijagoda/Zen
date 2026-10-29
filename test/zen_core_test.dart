@@ -31,6 +31,59 @@ void main() {
       await core.stop();
     });
 
+    // The node that does not come up (the service never lets go of it, a
+    // takeover stuck in the bridge) used to hold back every module after
+    // it: no posts, no mailbox, no nearby, for as long as it hung.
+    test('a module that hangs in its start never holds the others back; it '
+        'joins once its start is done', () async {
+      final List<String> log = <String>[];
+      final Completer<void> signalUp = Completer<void>();
+      final ZenCore core = ZenCore(
+        modules: <ZenModule>[
+          _Recording('signal', log, startGate: signalUp.future),
+          _Recording('ledger', log),
+          _Recording('meet', log),
+        ],
+        loadFlags: () async => const FeatureFlags(),
+        modulePatience: const Duration(milliseconds: 50),
+      );
+
+      await core.start().timeout(const Duration(seconds: 5));
+      expect(log, <String>['start signal', 'start ledger', 'start meet']);
+      expect(core.runningModules, <String>['ledger', 'meet']);
+
+      signalUp.complete();
+      await _settle();
+      expect(core.runningModules, <String>['ledger', 'meet', 'signal']);
+
+      await core.stop();
+      expect(log.sublist(3), <String>[
+        'stop signal',
+        'stop meet',
+        'stop ledger',
+      ]);
+    });
+
+    test('a module still starting when the core stops is stopped, and does '
+        'not join later', () async {
+      final List<String> log = <String>[];
+      final Completer<void> signalUp = Completer<void>();
+      final ZenCore core = ZenCore(
+        modules: <ZenModule>[
+          _Recording('signal', log, startGate: signalUp.future),
+          _Recording('ledger', log),
+        ],
+        loadFlags: () async => const FeatureFlags(),
+        modulePatience: const Duration(milliseconds: 50),
+      );
+      await core.start();
+      await core.stop();
+      expect(log, containsAll(<String>['stop signal', 'stop ledger']));
+      signalUp.complete();
+      await _settle();
+      expect(core.runningModules, isEmpty);
+    });
+
     test('stops the modules in reverse order, timers at once', () async {
       final List<String> log = <String>[];
       final ZenCore core = _core(<ZenModule>[

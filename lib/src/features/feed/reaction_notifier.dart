@@ -57,10 +57,8 @@ final class ReactionSystemNotifier {
   late final QuietTimer _timer = QuietTimer(
     quiet: quiet,
     atMost: atMost,
-    action: () => unawaitedLogged(
-      check(),
-      context: 'Powiadomienia o reakcjach nie powiodły się',
-    ),
+    action: () =>
+        unawaitedLogged(check(), context: 'Reaction notifications failed'),
   );
   bool _busy = false;
 

@@ -409,6 +409,9 @@ final class NearbyService extends ChangeNotifier {
   /// for the slots around now.
   Map<String, FriendNearbyKey> _friendKeys = <String, FriendNearbyKey>{};
   Map<String, String> _friendKeyText = <String, String>{};
+
+  /// Of [_friendKeys], a friend's other devices → the friend.
+  Map<String, String> _owners = <String, String>{};
   Map<String, List<(String, int)>> _hints = <String, List<(String, int)>>{};
   Map<String, String> _pairIds = <String, String>{};
   int _keysSlot = -1;
@@ -488,17 +491,41 @@ final class NearbyService extends ChangeNotifier {
   /// Phones seen nearby kept at most (the ones not seen for a while go).
   static const int maxPeople = 300;
 
-  List<NearbyPerson> get people {
+  /// Every phone seen lately, one per token (what is written to).
+  Iterable<NearbyPerson> get _around {
     final int t = _now();
-    return _people.values
-        .where((NearbyPerson p) => t - p.seenAt < fresh.inMilliseconds)
-        .toList()
-      ..sort((NearbyPerson a, NearbyPerson b) {
-        if ((a.friend == null) != (b.friend == null)) {
-          return a.friend == null ? 1 : -1;
-        }
-        return b.rssi.compareTo(a.rssi);
-      });
+    return _people.values.where(
+      (NearbyPerson p) => t - p.seenAt < fresh.inMilliseconds,
+    );
+  }
+
+  /// Who is near, as shown: one row per friend (whichever of their devices,
+  /// over Bluetooth or the network, with whichever token) and per phone (a
+  /// phone's token changes every 10 minutes, and for a while both are
+  /// fresh). Only what the radio shows anyway, the same Bluetooth device,
+  /// joins a stranger's tokens.
+  List<NearbyPerson> get people {
+    final Map<String, NearbyPerson> rows = <String, NearbyPerson>{};
+    for (final NearbyPerson p in _around) {
+      final String? friend = p.friend;
+      final String row = friend != null
+          ? 'f $friend'
+          : p.overBluetooth
+          ? 'd ${p.device}'
+          : 't ${p.token}';
+      final NearbyPerson? had = rows[row];
+      if (had == null ||
+          (p.overBluetooth && !had.overBluetooth) ||
+          (p.overBluetooth == had.overBluetooth && p.seenAt > had.seenAt)) {
+        rows[row] = p;
+      }
+    }
+    return rows.values.toList()..sort((NearbyPerson a, NearbyPerson b) {
+      if ((a.friend == null) != (b.friend == null)) {
+        return a.friend == null ? 1 : -1;
+      }
+      return b.rssi.compareTo(a.rssi);
+    });
   }
 
   List<NearbySession> get sessions => _sessions.values.toList();
@@ -564,11 +591,20 @@ final class NearbyService extends ChangeNotifier {
     final Map<String, List<(String, int)>> hints =
         <String, List<(String, int)>>{};
     final Map<String, String> pairIds = <String, String>{};
+    final Map<String, String> owners = <String, String>{};
     for (final MapEntry<String, String> e in stored.entries) {
       final String friend = e.key;
       final FriendNearbyKey? key = FriendNearbyKey.parse(e.value);
       if (key == null) {
         continue;
+      }
+      // A friend's other device is that friend (while they are one).
+      final String owner = meet.book.nearbyOwnerOf(friend);
+      if (owner != friend) {
+        if (!meet.host.isFriend(owner)) {
+          continue;
+        }
+        owners[friend] = owner;
       }
       keys[friend] = key;
       for (int s = slot - 1; s <= slot + 1; s++) {
@@ -578,7 +614,7 @@ final class NearbyService extends ChangeNotifier {
         ));
       }
       for (int s = slot - 2; s <= slot + 2; s++) {
-        pairIds[nearbyPairId(key.pair, s)] = friend;
+        pairIds[nearbyPairId(key.pair, s)] = owner;
       }
     }
     final Set<String> changed = <String>{
@@ -592,6 +628,7 @@ final class NearbyService extends ChangeNotifier {
     );
     _friendKeyText = stored;
     _friendKeys = keys;
+    _owners = owners;
     _hints = hints;
     _pairIds = pairIds;
     _pushAlarmKeys(keys.values);
@@ -896,7 +933,13 @@ final class NearbyService extends ChangeNotifier {
 
   /// The friend whose token [raw] is: the hint names the candidates, the
   /// hash chain proves it (a friend who knows the mask cannot make it).
+  /// One of a friend's other devices is the friend.
   String? _recognise(List<int> raw, String hint, String token) {
+    final String? device = _recogniseDevice(raw, hint, token);
+    return device == null ? null : _owners[device] ?? device;
+  }
+
+  String? _recogniseDevice(List<int> raw, String hint, String token) {
     final (String, int)? known = _recognised[token];
     if (known != null) {
       return known.$1;
@@ -991,7 +1034,7 @@ final class NearbyService extends ChangeNotifier {
       _refreshFriendKeys();
     }
     int sent = 0;
-    for (final NearbyPerson p in people) {
+    for (final NearbyPerson p in _around) {
       if (!p.overBluetooth || (only != null && !only(p))) {
         continue;
       }
@@ -1000,7 +1043,7 @@ final class NearbyService extends ChangeNotifier {
       if (alarm != null &&
           own != null &&
           friend != null &&
-          _friendKeys.containsKey(friend)) {
+          (_friendKeys.containsKey(friend) || _owners.containsValue(friend))) {
         out = _encode(
           AlarmWave.buildPair(
             id: alarm.id,
@@ -1056,7 +1099,7 @@ final class NearbyService extends ChangeNotifier {
     bool Function(NearbyPerson person)? only,
   ) async {
     int sent = 0;
-    for (final NearbyPerson p in people) {
+    for (final NearbyPerson p in _around) {
       if (!p.overBluetooth || (only != null && !only(p))) {
         continue;
       }
@@ -1301,7 +1344,7 @@ final class NearbyService extends ChangeNotifier {
     ];
     // Only to the phone that said hello when it still shows the same
     // token (the answer is longer now); else to every phone around.
-    final bool seen = people.any(
+    final bool seen = _around.any(
       (NearbyPerson p) => p.token == s.peerToken && p.overBluetooth,
     );
     final int sent = await _lookAroundAnd(

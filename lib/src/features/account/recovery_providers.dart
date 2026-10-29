@@ -102,7 +102,7 @@ final Provider<RecoveryService?> recoveryServiceProvider =
         };
       unawaitedLogged(
         service.start(),
-        context: 'Start odzyskiwania konta nie udał się',
+        context: 'Starting account recovery failed',
       );
       ref.onDispose(() {
         unawaitedLogged(service.stop(), context: 'Zatrzymanie odzyskiwania');
@@ -156,10 +156,10 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
       );
       unawaitedLogged(
         node.start().then((_) => service.start()),
-        context: 'Start kopii u kręgu nie udał się',
+        context: 'Starting the circle backup failed',
       );
       ref.onDispose(() {
-        unawaitedLogged(service.stop(), context: 'Zatrzymanie kopii u kręgu');
+        unawaitedLogged(service.stop(), context: 'Stopping the circle backup');
       });
       return service;
     });

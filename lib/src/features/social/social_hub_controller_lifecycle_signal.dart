@@ -213,6 +213,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       }
       return;
     }
+    if (_unsavedState) {
+      // A save failed while the app was locked: the store holds an older
+      // copy than memory (a friend removed right before the lock would
+      // come back from it). Memory stays and goes to the store now.
+      await _persistState();
+      return;
+    }
     final SocialHubState before = state;
     final SocialHubState? persisted;
     try {
@@ -235,16 +242,17 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         current != null &&
         (_callMedia.activeCallId == current.id ||
             _groupMedia.activeCallId == current.id);
-    final Map<String, FriendProfile> known = state.friends;
+    final FriendshipBook known = state.book;
     state = _withTrimmedInbox(
       persisted.copyWith(
         lifecycle: state.lifecycle,
         // What is in doubt here stays so: the other isolate heard nothing
-        // of it.
-        friends: _withRememberedPresence(
-          _canonicalizeFriends(persisted.friends),
+        // of it. What is settled here and later than the copy read (a
+        // removal right before the lock) stays too: the book merges both.
+        book: _withRememberedPresence(
+          persisted.book.mergeAll(known, _friendshipTick),
           nowMillis: DateTime.now().millisecondsSinceEpoch,
-          keep: (FriendProfile friend) => known[friend.address],
+          keep: (FriendProfile friend) => known.profileOf(friend.address),
         ),
         activeCall: mediaOwnsCall
             ? current
@@ -297,7 +305,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   Future<void> _hydrateFromStore({bool fromUnlock = false}) async {
     final SocialHubState? persisted;
     try {
-      persisted = await _snapshotStore.load();
+      // Bounded: everything the hub does waits behind this read (the work
+      // queue, the writers). A read that does not come back is taken as
+      // unreadable — saving stays paused, nothing is lost — and is tried
+      // again when the app comes back to the screen.
+      persisted = await _snapshotStore.load().timeout(kSnapshotReadTimeout);
     } on Object {
       if (_isSecurityBlockingUi && !_controllerDisposed) {
         // Read while the app was still locked (something above the lock
@@ -347,8 +359,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         // What each friend showed last is remembered: shown as it stands
         // now when it was confirmed lately, "status nieznany" otherwise
         // until they answer (or the answers had time to come).
-        friends: _withRememberedPresence(
-          _canonicalizeFriends(persisted.friends),
+        book: _withRememberedPresence(
+          persisted.book,
           nowMillis: DateTime.now().millisecondsSinceEpoch,
         ),
         groups: _canonicalizeGroups(persisted.groups),
@@ -438,6 +450,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       final bool friendsAlready = before == FriendRelationshipStatus.accepted;
       if (!friendsAlready) {
         await _handleIncomingSignal(signal, receivedAtMillis: receivedAtMillis);
+        if (_controllerDisposed || !ref.mounted) {
+          return;
+        }
       }
       if ((askedThemToo || friendsAlready) &&
           state
@@ -543,7 +558,27 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     _bumpTimelineRevision();
   }
 
+  /// [_handleIncomingSignalOnce], quiet when the hub goes away meanwhile (a
+  /// device stopped while a frame was being taken in): nothing is left to
+  /// show the frame to, and its queue copy is taken in at the next start.
   Future<void> _handleIncomingSignal(
+    ZenSignal signal, {
+    int? receivedAtMillis,
+  }) async {
+    try {
+      await _handleIncomingSignalOnce(
+        signal,
+        receivedAtMillis: receivedAtMillis,
+      );
+    } on Object {
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _handleIncomingSignalOnce(
     ZenSignal signal, {
     int? receivedAtMillis,
   }) async {
@@ -551,18 +586,30 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     final int timestamp =
         receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final FriendProfile? knownPeer = state.friendByAddress(signal.sender);
-    if (signal.type == ZenSignalType.friendAccept &&
-        knownPeer?.status != FriendRelationshipStatus.blocked &&
-        !FriendLifecycleReducer.isSolicitedRemoteAccept(knownPeer)) {
-      if (knownPeer?.status == FriendRelationshipStatus.pendingIncoming) {
-        // Their request already waits for the user; "accepting" on their
-        // own side skips nothing.
-        return;
+    if (signal.type == ZenSignalType.friendAccept) {
+      // What it means is the book's to say (see meaningOfAccept).
+      switch (state.book.meaningOfAccept(signal.sender)) {
+        case AcceptMeaning.admits || AcceptMeaning.repeated:
+          break;
+        case AcceptMeaning.nothing:
+          // Blocked, removed, or their own request already waits for the
+          // user: nothing to answer and nothing to show.
+          if (knownPeer?.status != FriendRelationshipStatus.blocked) {
+            return;
+          }
+        case AcceptMeaning.invitation:
+          // Nobody here invited them. An accept must never turn a stranger
+          // into a friend; it goes through everything below as the
+          // invitation it amounts to, which the user still has to confirm.
+          signal = _unsolicitedAcceptAsRequest(signal);
       }
-      // Nobody here invited them. An accept must never turn a stranger into
-      // a friend; it goes through everything below as the invitation it
-      // amounts to, which the user still has to confirm.
-      signal = _unsolicitedAcceptAsRequest(signal);
+    }
+    if (signal.type == ZenSignalType.message &&
+        state.book.standingOf(signal.sender) == FriendshipStanding.removed) {
+      // A removed friend's chat (they may not know yet, or write as to
+      // someone outside their friends): not let in, no notice. A new
+      // invitation from them is the way back.
+      return;
     }
     // Someone who is not a friend writing in an ordinary chat:
     // let in only within the limits, with their mini-profile.
@@ -903,6 +950,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                   groups: state.groups,
                   privacy: _noticePrivacyFor(signal),
                 ),
+                about: signal,
               );
         if (displayed && backgroundEntry.type != InboxEntryType.callInvite) {
           final Set<String> nextIds = backgroundAlerts
@@ -931,6 +979,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal,
             timestamp,
             appSettings: _appSettings,
+            tick: _friendshipTick,
             openConversationAddress: _openConversationAddress,
             openGroupId: _openGroupId,
             dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
@@ -955,6 +1004,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       signal,
       timestamp,
       appSettings: _appSettings,
+      tick: _friendshipTick,
       openConversationAddress: _openConversationAddress,
       openGroupId: _openGroupId,
       dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
@@ -1027,6 +1077,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           groups: state.groups,
           privacy: _noticePrivacyFor(signal),
         ),
+        about: signal,
       );
     }
 
@@ -1220,6 +1271,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         queued.signal,
         queued.receivedAtMillis,
         appSettings: _appSettings,
+        tick: _friendshipTick,
         openConversationAddress: _openConversationAddress,
         openGroupId: _openGroupId,
         dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,

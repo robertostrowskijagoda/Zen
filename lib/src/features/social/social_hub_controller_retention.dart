@@ -161,7 +161,10 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     final String nextPreview = lastMessage == null
         ? ''
         : chatPreviewLine(
-            chatMessageText(lastMessage),
+            chatMessageText(
+              lastMessage,
+              peerName: friend.hasProfileName ? friend.displayLabel : null,
+            ),
             type: lastMessage.type,
             fileName: lastMessage.fileName,
             mimeType: lastMessage.mimeType,
@@ -175,18 +178,16 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
         friend.unreadCount == nextUnreadCount) {
       return;
     }
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
-    );
-    _putFriend(
-      friends,
-      friend.copyWith(
-        lastMessagePreview: nextPreview,
-        lastActivityLabel: nextLabel,
-        unreadCount: nextUnreadCount,
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: nextPreview,
+          lastActivityLabel: nextLabel,
+          unreadCount: nextUnreadCount,
+        ),
       ),
     );
-    state = state.copyWith(friends: friends);
   }
 
   @override
@@ -222,20 +223,20 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     String? displayName,
   }) {
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
-    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-      state.friends,
+    // Only the line of someone already in the book: writing to someone
+    // never makes them a friend (the book has no way to).
+    state = state.copyWith(
+      book: state.book.edit(
+        peerAddress,
+        (FriendProfile base) => base.copyWith(
+          displayName: displayName ?? base.displayName,
+          isOnline: true,
+          lastPresenceAtMillis: timestamp,
+          lastMessagePreview: preview,
+          lastActivityLabel: t('Teraz'),
+          unreadCount: 0,
+        ),
+      ),
     );
-    final FriendProfile base =
-        friends[peerAddress] ?? FriendProfile(address: peerAddress);
-    friends[peerAddress] = base.copyWith(
-      displayName: displayName ?? base.displayName,
-      status: FriendRelationshipStatus.accepted,
-      isOnline: true,
-      lastPresenceAtMillis: timestamp,
-      lastMessagePreview: preview,
-      lastActivityLabel: t('Teraz'),
-      unreadCount: 0,
-    );
-    state = state.copyWith(friends: friends);
   }
 }

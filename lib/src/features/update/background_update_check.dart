@@ -10,6 +10,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/latest_release.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/store_build.dart';
@@ -23,11 +24,15 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// not wake the phone in Doze, so it runs on a wake that comes anyway (the
 /// mailbox polls); with nothing else on the beat, its own wake comes every
 /// [beatEvery] at most, and Doze puts it off to its next window. Each run
-/// only reads a small file; it asks GitHub when GitHub last
-/// answered [every] ago or longer, whoever asked (the app keeps the same
+/// only reads a small file; it asks ([LatestReleaseFinder]: the project's
+/// pages first, which have no rate limit, then GitHub) when the last
+/// answer is [every] old or older, whoever asked (the app keeps the same
 /// file, [UpdateNoticeStore], and asks every [kGithubCheckEvery] while it
-/// runs). Once when the service starts, too (after [firstAfter]), so a
-/// service that is restarted often still checks. A version still to be
+/// runs). A failed check is kept with its error (shown on the updates
+/// screen) and tried again on the next run, a beat later, or once the
+/// wait GitHub asked for is over. Once when the service starts, too (after
+/// [firstAfter]), so a service that is restarted often still checks. A
+/// version still to be
 /// announced comes with the release's short note (whats_new.dart) in the
 /// app's language, when the release has one that holds up, in the place
 /// of the notification of an older one; the notification of a version
@@ -37,6 +42,7 @@ final class BackgroundUpdateCheck {
     required Future<RuntimeSystemNotificationService?> Function() notices,
     UpdateNoticeStore? store,
     GithubJsonFetcher? fetchJson,
+    GithubTagFetcher? fetchTag,
     Sha256SumsFetcher? fetchText,
     int Function()? now,
     String Function()? language,
@@ -46,14 +52,16 @@ final class BackgroundUpdateCheck {
     this.firstAfter = const Duration(minutes: 2),
   }) : _notices = notices,
        store = store ?? FileUpdateNoticeStore(),
-       _fetchJson = fetchJson ?? GithubJsonCache().call,
+       _find = fetchJson == null
+           ? LatestReleaseFinder.standard()
+           : LatestReleaseFinder(fetchJson: fetchJson, fetchTag: fetchTag),
        _fetchText = fetchText ?? fetchSha256Sums,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
        _language = language ?? (() => ZenI18n.code);
 
   final Future<RuntimeSystemNotificationService?> Function() _notices;
   final UpdateNoticeStore store;
-  final GithubJsonFetcher _fetchJson;
+  final LatestReleaseFinder _find;
   final Sha256SumsFetcher _fetchText;
   final int Function() _now;
   final String Function() _language;
@@ -119,24 +127,36 @@ final class BackgroundUpdateCheck {
       }
     }
     final int now = _now();
-    if (!updateCheckDue(kept.checkedAtMillis, nowMillis: now, every: every)) {
+    if (!backgroundUpdateCheckDue(kept, nowMillis: now, every: every)) {
       return;
     }
     final GithubRelease? release;
     try {
-      release = GithubRelease.fromJson(
-        await _fetchJson(kGithubLatestReleaseUri),
-      );
+      release = (await _find()).release;
     } on GithubStatusException catch (e) {
       if (e.statusCode == HttpStatus.notFound) {
         // No published release: an answer all the same.
         await store.update((UpdateNoticeState s) => s.answered(at: now));
+      } else {
+        // An error answer (a rate limit, a server error): the next run
+        // tries again, after the wait GitHub asked for, if it asked.
+        final Duration? wait = e.retryAfter;
+        await store.update(
+          (UpdateNoticeState s) => s.failed(
+            at: now,
+            error: e,
+            retryAt: wait == null
+                ? null
+                : now + wait.inMilliseconds + Duration.millisecondsPerMinute,
+          ),
+        );
       }
-      logZenWarning('Sprawdzanie nowej wersji w tle: $e');
+      logZenWarning('Update check in the background: $e');
       return;
     } on Object catch (e) {
       // Not reached or no answer: the next run tries again.
-      logZenWarning('Sprawdzanie nowej wersji w tle: $e');
+      await store.update((UpdateNoticeState s) => s.failed(at: now, error: e));
+      logZenWarning('Update check in the background: $e');
       return;
     }
     final String? newer = release != null && release.isNewerThan(currentVersion)
@@ -172,10 +192,33 @@ final class BackgroundUpdateCheck {
       );
       return note?.linesFor(_language()) ?? const <String>[];
     } on Object catch (e) {
-      logZenWarning('What\'s new of ${release.version}: $e');
+      logZenWarning('What\'s new in ${release.version}: $e');
       return const <String>[];
     }
   }
+}
+
+/// Whether the background service asks now: the last answer is [every] old
+/// ([updateCheckDue]; a failed check leaves it as it was, so the next run
+/// on the beat tries again), and GitHub did not ask to wait until later
+/// ([UpdateNoticeState.retryAtMillis]; a wait longer than [every] is a
+/// clock set back, and ignored).
+bool backgroundUpdateCheckDue(
+  UpdateNoticeState state, {
+  required int nowMillis,
+  required Duration every,
+}) {
+  if (!updateCheckDue(
+    state.checkedAtMillis,
+    nowMillis: nowMillis,
+    every: every,
+  )) {
+    return false;
+  }
+  final int? retryAt = state.retryAtMillis;
+  return retryAt == null ||
+      retryAt <= nowMillis ||
+      retryAt - nowMillis > every.inMilliseconds;
 }
 
 /// The background service's [BackgroundUpdateCheck], started; null where

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -26,9 +25,11 @@ import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
@@ -507,6 +508,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               if (scanned == null) {
                                 return;
                               }
+                              // Another Zen code (a pebble, a door, one of
+                              // Zen's pages): its own screen.
+                              if (!_isDeviceCode(scanned) &&
+                                  zenLinkIntent(scanned) != null) {
+                                if (dialog.mounted) {
+                                  Navigator.of(dialog).pop(false);
+                                }
+                                openZenLink(ref, scanned);
+                                return;
+                              }
                               target.text = scanned;
                               setDialog(() => error = check(scanned));
                             },
@@ -949,7 +960,13 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   }
 
   Future<void> _scanHelper() async {
-    final String? scanned = await ref.read(peerQrScannerProvider).scan(context);
+    // A helper's code is their invitation link; other Zen codes open their
+    // own screen.
+    final String? scanned = await scanZenCode(
+      context,
+      ref,
+      accepts: _isDeviceCode,
+    );
     if (scanned == null || !mounted) {
       return;
     }
@@ -999,25 +1016,12 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             const SizedBox(height: 10),
             Center(
               child: Container(
-                padding: const EdgeInsets.all(10),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: ZenFixed.qrPaper,
                   borderRadius: context.zenRadius(16),
                 ),
-                child: QrImageView(
-                  data: me.qrData,
-                  size: 160,
-                  padding: EdgeInsets.zero,
-                  backgroundColor: ZenFixed.qrPaper,
-                  eyeStyle: QrEyeStyle(
-                    color: ZenFixed.qrInk,
-                    eyeShape: QrEyeShape.square,
-                  ),
-                  dataModuleStyle: QrDataModuleStyle(
-                    color: ZenFixed.qrInk,
-                    dataModuleShape: QrDataModuleShape.square,
-                  ),
-                ),
+                child: ZenQrView(data: me.qrData, size: 180),
               ),
             ),
             const SizedBox(height: 8),
@@ -1699,5 +1703,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
               ),
       ),
     );
+  }
+}
+
+/// Whether [text] is a device's code (its invitation code, link or QR, or a
+/// plain address).
+bool _isDeviceCode(String text) {
+  try {
+    parseRecoveryDevice(text);
+    return true;
+  } on FormatException {
+    return false;
   }
 }

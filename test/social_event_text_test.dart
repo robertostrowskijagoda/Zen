@@ -7,6 +7,7 @@ import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -23,6 +24,9 @@ void main() {
     'Odrzucono rozmowę {kind}.': 'Declined the {kind} call.',
     'wideo': 'video',
     'Ktoś': 'Someone',
+    '{name} opuścił(a) grupę.': '{name} left the group.',
+    'Połączenie gotowe. Możesz pisać od razu.':
+        'Connection ready. You can write right away.',
   };
 
   group('SocialEventText', () {
@@ -67,8 +71,16 @@ void main() {
       ZenI18n.debugUse('en', english);
       expect(event.render(), 'Declined the video call.');
       expect(
-        const SocialEventText('chat.connected').render(),
-        'Connected with Someone.',
+        const SocialEventText('group.left').render(),
+        'Someone left the group.',
+      );
+      // Saved before the friend's name was known: said without a name, not
+      // with a placeholder.
+      expect(
+        const SocialEventText('chat.connected', <String, String>{
+          'name': '',
+        }).render(),
+        'Connection ready. You can write right away.',
       );
     });
 
@@ -118,6 +130,61 @@ void main() {
       expect(chatMessageText(message), 'Połączenie z Ada jest gotowe.');
       ZenI18n.debugUse('en', english);
       expect(chatMessageText(message), 'Connected with Ada.');
+    });
+
+    test('in a chat with one friend, they say the name the friend has now', () {
+      ChatMessage note(String name) {
+        final SocialEventText event = SocialEventText(
+          'chat.connected',
+          <String, String>{'name': name},
+        );
+        return chatMessageWithEvent(
+          ChatMessage(
+            id: 'system-$name',
+            sender: 'system',
+            text: event.render(),
+            sentAtMillis: 1,
+            direction: ChatMessageDirection.system,
+          ),
+          event,
+        );
+      }
+
+      // Saved before the name was known (or with the old placeholder):
+      // the name comes in as soon as the chat knows it.
+      expect(
+        chatMessageText(note('')),
+        'Połączenie gotowe. Możesz pisać od razu.',
+      );
+      expect(
+        chatMessageText(note(''), peerName: 'Ada'),
+        'Połączenie z Ada jest gotowe.',
+      );
+      expect(
+        chatMessageText(note('Kontakt Zen'), peerName: 'Ada'),
+        'Połączenie z Ada jest gotowe.',
+      );
+      expect(
+        chatMessageText(note('Ada'), peerName: ''),
+        'Połączenie z Ada jest gotowe.',
+      );
+      // An event that names nobody stays as it is.
+      final ChatMessage declined = chatMessageWithEvent(
+        const ChatMessage(
+          id: 'system-call',
+          sender: 'system',
+          text: 'Odrzucono rozmowę audio.',
+          sentAtMillis: 1,
+          direction: ChatMessageDirection.system,
+        ),
+        const SocialEventText('call.declined', <String, String>{
+          'kind': 'audio',
+        }),
+      );
+      expect(
+        chatMessageText(declined, peerName: 'Ada'),
+        'Odrzucono rozmowę audio.',
+      );
     });
 
     test('older ones (plain text) and other messages stay as saved', () {
@@ -200,7 +267,9 @@ void main() {
               generation: 1,
               capturedAtMillis: 1,
             ),
-            friends: const <String, FriendProfile>{},
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{},
+            ),
             inbox: <InboxEntry>[
               accepted(),
               const InboxEntry(

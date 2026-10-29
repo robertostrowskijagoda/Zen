@@ -8,6 +8,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/search/presentation/search_highlight.dart';
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -400,7 +402,18 @@ class _MentionTextState extends ConsumerState<MentionText> {
     _clear();
     final ZenColors zen = ZenColors.of(context);
     final SocialHubState social = ref.watch(socialHubControllerProvider);
+    // A search found this text: its words are marked (in the text between
+    // the names).
+    final SearchQuery? searched = SearchHighlight.maybeOf(context);
     final List<InlineSpan> spans = <InlineSpan>[];
+    void plain(String part) {
+      if (searched == null) {
+        spans.add(TextSpan(text: part));
+      } else {
+        spans.addAll(searchMarked(context, part, searched));
+      }
+    }
+
     int at = 0;
     for (final RegExpMatch m in mentionTokenPattern.allMatches(widget.text)) {
       final int i = int.parse(m.group(1)!);
@@ -408,7 +421,7 @@ class _MentionTextState extends ConsumerState<MentionText> {
         continue;
       }
       if (m.start > at) {
-        spans.add(TextSpan(text: widget.text.substring(at, m.start)));
+        plain(widget.text.substring(at, m.start));
       }
       final Mention who = widget.mentions[i];
       final TapGestureRecognizer tap = TapGestureRecognizer()
@@ -431,7 +444,7 @@ class _MentionTextState extends ConsumerState<MentionText> {
       at = m.end;
     }
     if (at < widget.text.length) {
-      spans.add(TextSpan(text: widget.text.substring(at)));
+      plain(widget.text.substring(at));
     }
     return Text.rich(TextSpan(style: widget.style, children: spans));
   }

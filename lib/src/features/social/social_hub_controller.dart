@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -61,6 +62,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
@@ -239,6 +241,10 @@ const Duration _mentionAlertWindow = Duration(minutes: 10);
 /// person; past it they notify like any other message.
 const int kMaxMentionAlertsPerSender = 5;
 
+/// How long reading the stored snapshot (friends, groups, the inbox) may
+/// take at start before it counts as unreadable.
+const Duration kSnapshotReadTimeout = Duration(seconds: 45);
+
 /// Delays of the extra call-teardown attempts, relative to the first one.
 const List<Duration> _callTeardownRetryDelays = <Duration>[
   Duration(milliseconds: 400),
@@ -313,6 +319,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// Logged once per run: saving is paused over an unreadable snapshot.
   bool _loggedPausedSave = false;
+
+  /// The last save failed (the app locked under it): memory holds what the
+  /// store does not.
+  bool _unsavedState = false;
 
   /// Releases the writers. Called once the read came back — or failed, because
   /// an unreadable snapshot must not block saving for the rest of the session.
@@ -554,9 +564,42 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// Posts a system notification. Ringing-call window flags and the native
   /// popup are owned by [_syncRingingCallWindow], not by the shade entry.
+  /// Posts [notification]; [about]: the signal it tells of, for the line
+  /// the diagnostics log gets (kind, level, sender known, their version).
   Future<bool> _presentSystemNotification(
-    RuntimeSystemNotification notification,
-  ) async {
+    RuntimeSystemNotification notification, {
+    ZenSignal? about,
+  }) async {
+    if (about != null) {
+      final FriendProfile? friend = state.friendByAddress(about.sender);
+      final bool chat =
+          about.type == ZenSignalType.message ||
+          about.type == ZenSignalType.groupMessage;
+      noticeLogs[notification] = (
+        kind: switch (about.type) {
+          ZenSignalType.message => 'message',
+          ZenSignalType.groupMessage => 'group-message',
+          ZenSignalType.friendRequest ||
+          ZenSignalType.friendAccept ||
+          ZenSignalType.groupInvite => 'invitation',
+          _ => noticeLogKindOf(notification),
+        },
+        level: chat
+            ? _noticePrivacyFor(about)
+            : (notification.category ==
+                          RuntimeSystemNotificationCategory.call ||
+                      notification.category ==
+                          RuntimeSystemNotificationCategory.alarm
+                  ? null
+                  : _appSettings.notificationPrivacy),
+        known:
+            friend != null &&
+            friend.status == FriendRelationshipStatus.accepted &&
+            (friend.hasProfileName ||
+                state.nameFor(friend) != friend.displayLabel),
+        version: friend == null ? null : state.peerAppVersions[friend.address],
+      );
+    }
     return _systemNotifications.show(notification);
   }
 
@@ -806,9 +849,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// from 8 min ago, "ostatnio w sieci 2 godz. temu") is not older than it
   /// was.
   SocialHubState _withConfirmedPresence(SocialHubState hub) {
-    Map<String, FriendProfile>? friends;
-    for (final MapEntry<String, FriendProfile> entry in hub.friends.entries) {
-      final FriendProfile friend = entry.value;
+    final FriendshipBook book = hub.book.editAll((FriendProfile friend) {
       final String key = PeerShareCodec.normalizeAddress(friend.address);
       final int confirmed = _presenceConfirmedAt[key] ?? 0;
       final int seen = _presenceSeenAt[key] ?? 0;
@@ -818,18 +859,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       if (confirmed <= friend.presenceAtMillis &&
           seen <= friend.lastPresenceAtMillis &&
           opened <= friend.lastOpenedAtMillis) {
-        continue;
+        return friend;
       }
-      (friends ??= Map<String, FriendProfile>.from(
-        hub.friends,
-      ))[entry.key] = friend.copyWith(
+      return friend.copyWith(
         presenceAtMillis: max(confirmed, friend.presenceAtMillis),
         lastPresenceAtMillis: max(seen, friend.lastPresenceAtMillis),
         lastOpenedAtMillis: max(opened, friend.lastOpenedAtMillis),
       );
-    }
-    return friends == null ? hub : hub.copyWith(friends: friends);
+    });
+    return identical(book, hub.book) ? hub : hub.copyWith(book: book);
   }
+
+  /// This moment on this device, for what the friendship book records.
+  FriendshipTick get _friendshipTick => FriendshipTick.now(
+    PeerShareCodec.normalizeAddress(
+      ref.read(runtimeNodeSnapshotProvider).localAddress,
+    ),
+  );
 
   Timer? _persistSoonTimer;
 
@@ -879,8 +925,16 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         }
         return;
       }
-      await _snapshotStore.save(_withConfirmedPresence(state));
+      final SocialHubState saving = state;
+      await _snapshotStore.save(_withConfirmedPresence(saving));
+      if (identical(state, saving)) {
+        _unsavedState = false;
+      }
     } catch (error, stackTrace) {
+      // What is in memory is newer than the store now (a save after the
+      // lock): it must not be replaced by the older copy at the return to
+      // the screen, and goes to the store at the next chance.
+      _unsavedState = true;
       logZenError('Saving social hub state snapshot failed', error, stackTrace);
     } finally {
       _activePersist = null;
@@ -1023,6 +1077,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   });
 
   /// Stops retrying (and relaying) anything still queued for [peer].
+  /// Drops everything from [peer] kept in the queue for the app's return
+  /// (a removed friend's old acceptance would be replayed over the
+  /// removal).
+  Future<void> _dropQueuedSignalsFrom(String peer) async {
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> rest = queue
+        .where(
+          (QueuedSignal q) =>
+              !PeerShareCodec.addressesEqual(q.signal.sender, peer),
+        )
+        .toList(growable: false);
+    if (rest.length != queue.length) {
+      await _queueStore.save(rest);
+      state = state.copyWith(pendingSignalCount: rest.length);
+    }
+  }
+
   Future<void> _cancelQueuedTraffic(String peer, {String? keep}) async {
     try {
       await ref

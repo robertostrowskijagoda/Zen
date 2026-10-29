@@ -508,8 +508,8 @@ Future<RetentionResult> enforceStorageLimits(
     }
   }
   logZenMessage(
-    'Limity miejsca: usunięto '
-    '${expiredFiles + limitFiles + totalFiles + removedFiles} plików '
+    'Storage limits: deleted '
+    '${expiredFiles + limitFiles + totalFiles + removedFiles} files '
     '(${expiredBytes + limitBytes + totalBytes} B).',
   );
   return RetentionResult(

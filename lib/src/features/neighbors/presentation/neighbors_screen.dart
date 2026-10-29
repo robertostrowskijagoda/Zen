@@ -20,6 +20,7 @@ import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_door_screen.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbor_screen.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
 /// The tone of the neighbours screens.
@@ -206,14 +207,19 @@ String flatDate(int millis) {
 }
 
 /// Scans a QR (camera) or, where there is no camera, takes the code pasted.
+/// What [accepts] takes comes back; another Zen code (an invitation, a
+/// pebble, one of Zen's pages) opens its own screen instead ([scanZenCode])
+/// and nothing comes back; anything else comes back for the caller's own
+/// message.
 Future<String?> scanOrPaste(
   BuildContext context,
   WidgetRef ref, {
   required String title,
+  required bool Function(String text) accepts,
 }) async {
   final PeerQrScanner scanner = ref.read(peerQrScannerProvider);
   if (scanner.isSupported) {
-    return scanner.scan(context);
+    return scanZenCode(context, ref, accepts: accepts);
   }
   final TextEditingController c = TextEditingController();
   final String? text = await showDialog<String>(
@@ -248,8 +254,13 @@ Future<String?> scanOrPaste(
     ),
   );
   disposeLater(c);
-  return text == null || text.isEmpty ? null : text;
+  return routeScannedText(ref, text, accepts: accepts);
 }
+
+/// Whether [text] is a door code this screen reads, or one from a newer
+/// Zen (the screen asks to update).
+bool isFlatDoorText(String text) =>
+    FlatDoorCode.parse(text) != null || FlatDoorCode.isNewer(text);
 
 /// Knocks on the door [code] and tells how it went. With [ask] it
 /// asks first: a door link can come from any page or app, and a knock
@@ -488,6 +499,7 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
       context,
       ref,
       title: t('Kod domownika'),
+      accepts: (String t) => FlatHomeCode.parse(t) != null,
     );
     if (text == null || !mounted) {
       return;
@@ -695,6 +707,7 @@ class _FlatHome extends ConsumerWidget {
       context,
       ref,
       title: t('Kod z drzwi'),
+      accepts: isFlatDoorText,
     );
     if (text == null || !context.mounted) {
       return;

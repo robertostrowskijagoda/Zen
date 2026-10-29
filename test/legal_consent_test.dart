@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -51,6 +52,7 @@ Widget _gatedApp({
   required MemoryAppSettingsStore store,
   required LegalTexts texts,
   AppSettings initial = const AppSettings(),
+  Future<LegalTexts>? reading,
 }) => ProviderScope(
   overrides: [
     ...buildAppSettingsProviderOverrides(
@@ -59,7 +61,9 @@ Widget _gatedApp({
       hydrationEnabled: false,
     ),
     legalConsentRequiredProvider.overrideWithValue(true),
-    legalTextsProvider.overrideWith((Ref ref) async => texts),
+    legalTextsProvider.overrideWith(
+      (Ref ref) => reading ?? Future.value(texts),
+    ),
   ],
   child: MaterialApp(
     theme: ZenTheme.dark(),
@@ -318,6 +322,38 @@ void main() {
     expect(find.byKey(const Key('legal-consent')), findsOneWidget);
     expect(find.text('Dokumenty się zmieniły'), findsOneWidget);
     expect(find.text('aplikacja'), findsNothing);
+  });
+
+  testWidgets('accepted documents still being read show no "they changed" '
+      'screen, only a wait', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final AppSettings accepted = AppSettings(
+      legalAcceptedVersion: _texts().version,
+      legalAcceptedAtMillis: DateTime(2026, 10, 21).millisecondsSinceEpoch,
+    );
+    final Completer<LegalTexts> reading = Completer<LegalTexts>();
+    await tester.pumpWidget(
+      _gatedApp(
+        store: MemoryAppSettingsStore(accepted),
+        texts: _texts(),
+        initial: accepted,
+        reading: reading.future,
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('legal-consent')), findsNothing);
+    expect(find.text('Dokumenty się zmieniły'), findsNothing);
+    expect(find.text('aplikacja'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    reading.complete(_texts());
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('legal-consent')), findsNothing);
+    expect(find.text('aplikacja'), findsOneWidget);
   });
 
   testWidgets('without the requirement (tests, previews) nothing is asked', (

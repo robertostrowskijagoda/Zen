@@ -18,6 +18,7 @@ import 'package:zen/src/features/settings/presentation/animations_choice.dart';
 import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -296,13 +297,15 @@ void main() {
             ),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  ada: FriendProfile(
-                    address: ada,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    ada: FriendProfile(
+                      address: ada,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
               ),
             ),
           ],

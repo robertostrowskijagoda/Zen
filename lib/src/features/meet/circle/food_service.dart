@@ -275,7 +275,7 @@ final class FoodService extends ChangeNotifier {
       });
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt jedzenia', error, stack);
+      logZenError('Reading food', error, stack);
     }
   }
 

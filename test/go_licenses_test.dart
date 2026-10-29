@@ -115,11 +115,30 @@ void main() {
       multiLine: true,
     ).allMatches(pubspec);
     expect(families, isNotEmpty);
+    // A family is covered when the combined file names its authors ("The X
+    // Project Authors" or "The X Authors") or carries the first line of the
+    // licence shipped next to the font (holders like TypeTogether or
+    // Astigmatic name no project).
+    final Map<String, String> ownLines = <String, String>{
+      for (final File f
+          in Directory('assets/fonts')
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((File f) => f.path.endsWith('-OFL.txt')))
+        f.uri.pathSegments.last.replaceAll('-OFL.txt', ''): f
+            .readAsLinesSync()
+            .first
+            .trim(),
+    };
     for (final RegExpMatch m in families) {
+      final String family = m.group(1)!;
+      final String? own = ownLines[family.replaceAll(' ', '')];
       expect(
-        ofl,
-        contains('The ${m.group(1)} Project Authors'),
-        reason: '${m.group(1)}: add its copyright line to $kFontLicensePath',
+        ofl.contains('The $family Project Authors') ||
+            ofl.contains('The $family Authors') ||
+            (own != null && ofl.contains(own)),
+        isTrue,
+        reason: '$family: add its copyright line to $kFontLicensePath',
       );
     }
   });

@@ -14,6 +14,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
+import 'package:zen/src/features/update/latest_release.dart';
 import 'package:zen/src/features/update/newer_versions.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
@@ -91,19 +92,25 @@ bool githubUpdatesEnabledFor({
 /// for a release without this device's file, it points to the release
 /// page.
 ///
-/// Only one request to api.github.com per check, with no header but the
-/// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer:
-/// an unchanged release does not count against GitHub's rate limit of 60
-/// requests an hour per IP address, which people behind one mobile
-/// operator's address share). A failed check is tried again sooner than
-/// [checkEvery]: after the wait GitHub asks for, else after
-/// [retryFirst], doubling each time up to [checkEvery].
+/// A check asks the project's pages first (`release.json`, no rate limit),
+/// GitHub's API only when they do not answer, and GitHub's redirect from
+/// the newest release's page (the version alone) when the API does not
+/// answer either or refuses ([LatestReleaseFinder]); with no header but the
+/// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer).
+/// GitHub's API allows 60 requests an hour per IP address, which people
+/// behind one mobile operator's address share: it used to be the only
+/// source, and a check behind a used-up address failed again and again.
+/// A failed check is tried again sooner than [checkEvery]: after the wait
+/// GitHub asks for, else after [retryFirst], doubling each time up to
+/// [checkEvery]. The last successful check and the last error, here or in
+/// the Android background service, are kept ([noticeStore]) and shown.
 /// Complements the friend-to-friend updates (update_service.dart), which
 /// need no server at all.
 final class GithubUpdateService extends ChangeNotifier {
   GithubUpdateService({
     required this.installer,
     GithubJsonFetcher? fetchJson,
+    GithubTagFetcher? fetchTag,
     Sha256SumsFetcher? fetchSums,
     GithubDownloader? download,
     this.beforeDownload,
@@ -121,7 +128,9 @@ final class GithubUpdateService extends ChangeNotifier {
     this.checkEvery = kGithubCheckEvery,
     this.confirmAfter = const Duration(minutes: 2),
     this.retryFirst = const Duration(minutes: 15),
-  }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
+  }) : _find = fetchJson == null
+           ? LatestReleaseFinder.standard()
+           : LatestReleaseFinder(fetchJson: fetchJson, fetchTag: fetchTag),
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
        _openPage = openPage ?? openWebLink,
@@ -165,7 +174,7 @@ final class GithubUpdateService extends ChangeNotifier {
   /// ahead; a text: nothing is downloaded and the person is told it.
   final Future<String?> Function()? beforeDownload;
 
-  final GithubJsonFetcher _fetchJson;
+  final LatestReleaseFinder _find;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
 
@@ -190,8 +199,19 @@ final class GithubUpdateService extends ChangeNotifier {
   /// The newest version a friend named that made this isolate ask GitHub
   /// at once ([hintNewer]).
   String? _hinted;
+
+  /// A friend's newer version that came while a check ran or right after
+  /// one: asked about once [confirmAfter] is over ([_hintLater]).
+  String? _pendingHint;
+  Timer? _hintLater;
   String? _error;
+
+  /// When this isolate's last check got an answer.
   DateTime? _checkedAt;
+
+  /// What [noticeStore] held at the last look (the background service's
+  /// checks too).
+  UpdateNoticeState _kept = const UpdateNoticeState();
   int _unreachableInARow = 0;
   int _failedInARow = 0;
   bool _rateLimited = false;
@@ -222,7 +242,25 @@ final class GithubUpdateService extends ChangeNotifier {
   /// What GitHub answered when [state] is [GithubCheckState.failed].
   String? get error => _error;
 
-  DateTime? get checkedAt => _checkedAt;
+  /// The last successful check, here or in the Android background service.
+  DateTime? get checkedAt {
+    final DateTime? mine = _checkedAt;
+    final int? theirs = _kept.checkedAtMillis;
+    if (theirs == null ||
+        (mine != null && mine.millisecondsSinceEpoch >= theirs)) {
+      return mine;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(theirs);
+  }
+
+  /// The last failed check, here or in the Android background service, and
+  /// what went wrong (kept after later successes, for the updates screen).
+  DateTime? get lastErrorAt {
+    final int? at = _kept.failedAtMillis;
+    return at == null ? null : DateTime.fromMillisecondsSinceEpoch(at);
+  }
+
+  String? get lastError => _kept.error;
 
   /// When a failed check ([GithubCheckState.failed]) is tried again.
   DateTime? get nextCheckAt => _nextCheckAt;
@@ -348,11 +386,17 @@ final class GithubUpdateService extends ChangeNotifier {
         ? theirs
         : mine;
     final String? found = kept.newestVersion;
+    final GithubRelease? known = newer;
+    // A version found there that this isolate knows by its number alone
+    // (taken from the kept state): its files are asked for.
     final bool foundElsewhere =
         found != null &&
         theirs != null &&
         (mine == null || theirs > mine) &&
-        compareAppVersions(found, newer?.version ?? currentVersion) > 0;
+        compareAppVersions(found, currentVersion) > 0 &&
+        (known == null ||
+            !known.detailed ||
+            compareAppVersions(found, known.version) > 0);
     final DateTime? tried = _triedAt;
     final bool triedJustNow =
         tried != null && _now().difference(tried) < retryFirst;
@@ -372,7 +416,10 @@ final class GithubUpdateService extends ChangeNotifier {
   /// again), never while a check runs and not within [confirmAfter] of the
   /// last attempt. [signed]: a release of [version] that enough
   /// maintainers signed came from friends (update_service.dart): already
-  /// verified, it is announced at once as well.
+  /// verified, it is announced at once as well. A claim that comes while a
+  /// check runs, or within [confirmAfter] of the last attempt, is asked
+  /// about once that time is over (it used to wait for the next regular
+  /// check, an hour).
   Future<void> hintNewer(String version, {bool signed = false}) async {
     if (_disposed ||
         !isValidAppVersion(version) ||
@@ -390,21 +437,58 @@ final class GithubUpdateService extends ChangeNotifier {
     }
     final String? hinted = _hinted;
     final DateTime? tried = _triedAt;
+    if (hinted != null && compareAppVersions(version, hinted) <= 0) {
+      return;
+    }
     if (_checking != null ||
-        (hinted != null && compareAppVersions(version, hinted) <= 0) ||
         (tried != null && _now().difference(tried) < confirmAfter)) {
+      _hintAfterwards(version, tried);
       return;
     }
     _hinted = version;
     await check();
   }
 
-  /// The next [checkIfDue]: when the last answer turns [checkEvery] old.
+  /// [hintNewer] of [version] again once [confirmAfter] has passed since
+  /// [tried] (the newest such claim only).
+  void _hintAfterwards(String version, DateTime? tried) {
+    final String? pending = _pendingHint;
+    if (_disposed ||
+        (pending != null && compareAppVersions(pending, version) >= 0)) {
+      return;
+    }
+    _pendingHint = version;
+    final Duration left = tried == null
+        ? confirmAfter
+        : confirmAfter - _now().difference(tried);
+    _hintLater?.cancel();
+    _hintLater = Timer(left.isNegative ? Duration.zero : left, () {
+      final String? claim = _pendingHint;
+      _pendingHint = null;
+      _hintLater = null;
+      if (claim != null) {
+        unawaited(hintNewer(claim));
+      }
+    });
+  }
+
+  /// The next [checkIfDue]: when the last answer (here or in the
+  /// background service; it used to count only this isolate's, and woke
+  /// every minute while the service's was newer) turns [checkEvery] old,
+  /// and not before [retryFirst] after the last attempt (a failed check is
+  /// retried by its own timer).
   void _armNext() {
-    final DateTime? at = _checkedAt;
-    final Duration left = at == null
+    final DateTime? at = checkedAt;
+    Duration left = at == null
         ? checkEvery
         : at.add(checkEvery).difference(_now());
+    final DateTime? tried = _triedAt;
+    if (tried != null) {
+      final Duration pause = tried.add(retryFirst).difference(_now());
+      if (pause > left) {
+        left = pause;
+      }
+    }
     _arm(left < const Duration(minutes: 1) ? const Duration(minutes: 1) : left);
   }
 
@@ -413,17 +497,49 @@ final class GithubUpdateService extends ChangeNotifier {
     _next = _disposed ? null : Timer(wait, () => unawaited(checkIfDue()));
   }
 
-  /// What is kept, with the closed banner's version taken over.
+  /// What is kept, with the closed banner's version taken over, and the
+  /// version the background service found: shown at once (by its number;
+  /// its files come with this isolate's own check, see [checkIfDue]).
   Future<UpdateNoticeState> _readKept() async {
     final UpdateNoticeState kept = await noticeStore.read();
+    _kept = kept;
     final String? dismissed = kept.dismissedVersion;
     if (dismissed != null &&
         (_dismissedVersion == null ||
             compareAppVersions(dismissed, _dismissedVersion!) > 0)) {
       _dismissedVersion = dismissed;
-      _notify();
     }
+    final String? found = kept.newestVersion;
+    final GithubRelease? release = found == null
+        ? null
+        : GithubRelease.fromTag('v$found');
+    if (release != null && release.isNewerThan(currentVersion)) {
+      _take(release);
+    }
+    _notify();
     return kept;
+  }
+
+  /// Takes [release] as the newest one known here unless a newer one is
+  /// known already (answers of different places may lag behind one
+  /// another for a few minutes), or the same version with its files.
+  void _take(GithubRelease release) {
+    final GithubRelease? known = _latest;
+    if (known == null) {
+      _latest = release;
+      return;
+    }
+    final int order = compareAppVersions(release.version, known.version);
+    if (order > 0 || (order == 0 && (release.detailed || !known.detailed))) {
+      _latest = release;
+    }
+  }
+
+  /// Applies [change] to the kept state ([_kept] follows it).
+  Future<void> _keep(
+    UpdateNoticeState Function(UpdateNoticeState state) change,
+  ) async {
+    _kept = await noticeStore.update(change);
   }
 
   /// Closes the banner for this version, also after a restart.
@@ -433,9 +549,7 @@ final class GithubUpdateService extends ChangeNotifier {
     _notify();
     if (version != null) {
       unawaitedLogged(
-        noticeStore.update(
-          (UpdateNoticeState s) => s.copyWith(dismissedVersion: version),
-        ),
+        _keep((UpdateNoticeState s) => s.copyWith(dismissedVersion: version)),
         context: 'Keeping the closed update banner',
       );
     }
@@ -456,13 +570,11 @@ final class GithubUpdateService extends ChangeNotifier {
     _triedAt = _now();
     _notify();
     try {
-      final GithubRelease? release = GithubRelease.fromJson(
-        await _fetchJson(kGithubLatestReleaseUri),
-      );
+      final GithubRelease? release = (await _find()).release;
       _reached();
       _answered();
       if (release != null) {
-        _latest = release;
+        _take(release);
       }
       _state = newer != null
           ? GithubCheckState.newer
@@ -481,8 +593,9 @@ final class GithubUpdateService extends ChangeNotifier {
         _state = GithubCheckState.failed;
         _error = e.toString();
         _failedAgain(e.rateLimited, e.retryAfter);
+        await _keepFailure(e);
       }
-      logZenWarning('Sprawdzanie nowej wersji na GitHubie: $e');
+      logZenWarning('Update check: $e');
     } on Object catch (e) {
       if (isUnreachableError(e)) {
         _state = GithubCheckState.unreachable;
@@ -497,20 +610,26 @@ final class GithubUpdateService extends ChangeNotifier {
         _error = e.toString();
         _failedAgain(false, null);
       }
-      logZenWarning('Sprawdzanie nowej wersji na GitHubie: $e');
+      await _keepFailure(e);
+      logZenWarning('Update check: $e');
     }
   }
 
-  /// GitHub gave a real answer: kept for the Android background service
+  /// A check failed: kept with its error, for the updates screen (here and
+  /// in the other isolate).
+  Future<void> _keepFailure(Object error) async {
+    final int now = _now().millisecondsSinceEpoch;
+    await _keep((UpdateNoticeState s) => s.failed(at: now, error: error));
+  }
+
+  /// A check got a real answer: kept for the Android background service
   /// (which then waits before it asks), and a newer version announced,
   /// once, with its note.
   Future<void> _keepAnswer() async {
     final int now = _now().millisecondsSinceEpoch;
     final GithubRelease? release = newer;
     final String? found = release?.version;
-    await noticeStore.update(
-      (UpdateNoticeState s) => s.answered(at: now, newest: found),
-    );
+    await _keep((UpdateNoticeState s) => s.answered(at: now, newest: found));
     if (release == null) {
       return;
     }
@@ -547,15 +666,16 @@ final class GithubUpdateService extends ChangeNotifier {
       _whatsNewTriedFor = release.version;
     } on FormatException catch (e) {
       _whatsNewTriedFor = release.version;
-      logZenWarning('Co nowego w wersji ${release.version}: $e');
+      logZenWarning('What\'s new in ${release.version}: $e');
     } on Object catch (e) {
-      logZenWarning('Co nowego w wersji ${release.version}: $e');
+      logZenWarning('What\'s new in ${release.version}: $e');
     }
     _notify();
   }
 
-  /// GitHub gave a real answer: no retry pending.
+  /// A check got a real answer: no retry pending.
   void _answered() {
+    _checkedAt = _now();
     _failedInARow = 0;
     _rateLimited = false;
     _nextCheckAt = null;
@@ -581,8 +701,8 @@ final class GithubUpdateService extends ChangeNotifier {
     _retry = _disposed ? null : Timer(wait, () => unawaited(check()));
   }
 
+  /// Something answered (perhaps with an error): not unreachable.
   void _reached() {
-    _checkedAt = _now();
     _unreachableInARow = 0;
     _unreachableDismissed = false;
     _error = null;
@@ -594,7 +714,7 @@ final class GithubUpdateService extends ChangeNotifier {
   /// against the release's `SHA256SUMS` and the author's signature (when
   /// [verifiesAuthorSignature]) and installs it.
   Future<void> update() async {
-    final GithubRelease? release = newer;
+    GithubRelease? release = newer;
     final String? name = installer.assetName;
     // iPhone, iPad and Flatpak install nothing Zen downloads: never there.
     if (release == null ||
@@ -604,8 +724,14 @@ final class GithubUpdateService extends ChangeNotifier {
         !_downloadsUpdates(installer.target)) {
       return;
     }
+    if (!release.detailed) {
+      release = await _detailsOf(release);
+    }
+    // Known by its version alone (only GitHub's redirect answered): the
+    // download decides whether the file is there, and its size is not
+    // known; SHA256SUMS still decides whether it is installed.
     final int? size = release.assets[name];
-    if (size == null) {
+    if (release.detailed && size == null) {
       _finish(
         GithubInstallState.failed,
         t('Wydanie {version} nie ma jeszcze pliku {file}.', {
@@ -615,8 +741,7 @@ final class GithubUpdateService extends ChangeNotifier {
       );
       return;
     }
-    if (verifiesAuthorSignature &&
-        !release.assets.containsKey(kSignedSumsAssetName)) {
+    if (verifiesAuthorSignature && !release.mayHave(kSignedSumsAssetName)) {
       _finish(
         GithubInstallState.failed,
         t(
@@ -635,7 +760,7 @@ final class GithubUpdateService extends ChangeNotifier {
       try {
         refusal = await ask();
       } on Object catch (e, stack) {
-        logZenError('Aktualizacja z GitHuba', e, stack);
+        logZenError('Update from GitHub', e, stack);
         refusal = t('Aktualizacja nie udała się: {error}', {'error': e});
       } finally {
         _asking = false;
@@ -647,7 +772,7 @@ final class GithubUpdateService extends ChangeNotifier {
     }
     _install = GithubInstallState.downloading;
     _received = 0;
-    _total = size;
+    _total = size ?? 0;
     _installMessage = null;
     _notify();
     File? file;
@@ -661,17 +786,19 @@ final class GithubUpdateService extends ChangeNotifier {
       await _download(
         release.assetUri(name),
         file,
-        maxBytes: size,
+        maxBytes: size ?? kMaxGithubAssetBytes,
         onProgress: (int received) {
           _received = received;
-          final int percent = size <= 0 ? 0 : received * 100 ~/ size;
+          final int percent = size == null || size <= 0
+              ? 0
+              : received * 100 ~/ size;
           if (percent != shown) {
             shown = percent;
             _notify();
           }
         },
       );
-      if (await file.length() != size) {
+      if (size != null && await file.length() != size) {
         await file.delete();
         _finish(
           GithubInstallState.failed,
@@ -718,7 +845,7 @@ final class GithubUpdateService extends ChangeNotifier {
         outcome.message,
       );
     } on Object catch (e, stack) {
-      logZenError('Aktualizacja z GitHuba', e, stack);
+      logZenError('Update from GitHub', e, stack);
       try {
         if (file != null && await file.exists()) {
           await file.delete();
@@ -736,6 +863,22 @@ final class GithubUpdateService extends ChangeNotifier {
             : t('Aktualizacja nie udała się: {error}', {'error': e}),
       );
     }
+  }
+
+  /// [release], known by its version alone, with its files: asked once more
+  /// (the project's pages or GitHub's API may answer now); [release] as it
+  /// is when they do not, or name another version.
+  Future<GithubRelease> _detailsOf(GithubRelease release) async {
+    try {
+      final GithubRelease? found = (await _find()).release;
+      if (found != null && found.detailed && found.version == release.version) {
+        _take(found);
+        return found;
+      }
+    } on Object catch (error) {
+      logZenWarning('Update: the files of ${release.version}: $error');
+    }
+    return release;
   }
 
   /// iPhone and iPad ([GithubUpdateRoute.sideload]): opens SideStore with
@@ -831,7 +974,7 @@ final class GithubUpdateService extends ChangeNotifier {
     try {
       await _copy(url);
     } on Object catch (error) {
-      logZenWarning('Kopiowanie adresu aktualizacji: $error');
+      logZenWarning('Copying the update address: $error');
     }
     _finish(
       GithubInstallState.failed,
@@ -890,6 +1033,7 @@ final class GithubUpdateService extends ChangeNotifier {
     _next = null;
     _confirm?.cancel();
     _retry?.cancel();
+    _hintLater?.cancel();
     super.dispose();
   }
 }
@@ -933,11 +1077,14 @@ final Provider<GithubUpdateService?> githubUpdateServiceProvider =
       // A friend runs a newer Zen: GitHub is asked now; a release signed by
       // the maintainers that came from friends is announced at once.
       ref
+        // Also the version known before this service was made: listened
+        // to only for changes, a friend's version already known at start
+        // was never asked about.
         ..listen<String?>(friendsNewerVersionProvider, (_, String? version) {
           if (version != null) {
             unawaited(service.hintNewer(version));
           }
-        })
+        }, fireImmediately: true)
         ..listen<String?>(signedNewerVersionProvider, (_, String? version) {
           if (version != null) {
             unawaited(service.hintNewer(version, signed: true));

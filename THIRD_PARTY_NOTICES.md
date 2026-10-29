@@ -12,7 +12,7 @@ Where the full texts are:
 |---|---|---|---|
 | Dart and Flutter packages, the Flutter engine | each package's `LICENSE` (pub cache) | yes, collected by Flutter | — |
 | Go modules of the network bridge | `assets/licenses/go/`, `native/yggdrasil_bridge/LICENSES-GO.txt` (`tool/go_licenses.dart`) | yes | `LICENSES-GO.txt` |
-| Fonts | `assets/licenses/fonts/OFL.txt` | yes | — |
+| Fonts | `assets/licenses/fonts/OFL.txt`; the pebble fonts also each next to its file in `assets/fonts/pebbles/` | yes | — |
 | Native libraries, Material Icons, Zen's own sounds and images | `assets/licenses/native/` | yes | this file |
 
 `dart run tool/check_licenses.dart` (after `flutter pub get`) checks the licence
@@ -69,7 +69,8 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 
 | Asset | Licence |
 |---|---|
-| Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans (`assets/fonts`) | SIL Open Font License 1.1 |
+| Baloo 2 (The Baloo 2 Project Authors, Ek Type; the title face), Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans (`assets/fonts`) | SIL Open Font License 1.1 |
+| The words on pebbles, from Google Fonts (`assets/fonts/pebbles`, each with its `*-OFL.txt`): Abril Fatface (TypeTogether), Alfa Slab One (The Alfa Slab One Project Authors), Amatic SC (The Amatic SC Project Authors), Bangers (The Bangers Project Authors), Bungee (The Bungee Project Authors), Comic Neue (The Comic Neue Project Authors), Courgette (Sorkin Type Co), Indie Flower (The Indie Flower Authors), Quicksand (The Quicksand Project Authors), Righteous (Brian J. Bonislawsky, Astigmatic), Saira Stencil One (The Saira Stencil Project Authors), Titan One (Rodrigo Fuenzalida), Yeseva One (The Yeseva One Project Authors) | SIL Open Font License 1.1 (unchanged files; the Reserved Font Names stay with their authors) |
 | Material Icons (the icon font of the user interface; `ic_stat_call.xml` and `ic_pip_hang_up.xml` in `android/app/src/main/res/drawable`) | Apache-2.0, Copyright Google LLC |
 
 ## Zen's own sounds and images
@@ -82,6 +83,18 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
   Windows and Linux icon files) and **screenshots** (`docs/img`): made for
   Zen. GPL-3.0-only like the code; NOTICE section 4 keeps the name "Zen" and
   the logo out of the licence as marks.
+
+## The promo film's music
+
+The website's promo films (`tool/pages/promo`, made by
+`tool/promo/make_promo.py`; not part of the app) use **"Specular City" by
+vitalezzz**, from https://opengameart.org/content/specular-city, dedicated
+to the public domain under **CC0 1.0 Universal**
+(https://creativecommons.org/publicdomain/zero/1.0/). CC0 asks for no credit;
+we give it gladly. The excerpt the films use is
+`tool/promo/music/specular-city-excerpt.m4a`; where and when the track was
+retrieved and its checksum: `tool/promo/MUSIC_LICENSE.md`. The films' icons
+are Material Icons and their type Hanken Grotesk and Space Mono (above).
 
 ## Network services
 

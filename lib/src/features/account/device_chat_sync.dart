@@ -124,7 +124,7 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
       try {
         onNewOutgoing?.call(peer, m);
       } on Object catch (error, stack) {
-        logZenError('Kopia wiadomości dla innych urządzeń', error, stack);
+        logZenError('Message copies for other devices', error, stack);
       }
     }
   }
@@ -161,7 +161,9 @@ abstract interface class ChatSyncTarget {
     Uint8List? bytes,
     String? storedPath,
   });
-  Future<void> forgetFriendFromOtherDevice(String address);
+
+  /// [address] was removed on another device at [atMillis] (0: now).
+  Future<void> forgetFriendFromOtherDevice(String address, {int atMillis = 0});
   Future<void> forgetGroupFromOtherDevice(String groupId);
 }
 
@@ -250,7 +252,7 @@ final class DeviceChatSync {
       try {
         await work();
       } on Object catch (error, stack) {
-        logZenError('Wspólne rozmowy urządzeń', error, stack);
+        logZenError('Shared device conversations', error, stack);
       }
     });
   }
@@ -519,7 +521,7 @@ final class DeviceChatSync {
         final Object? a = body['a'];
         final Object? g = body['g'];
         if (a is String) {
-          await target.forgetFriendFromOtherDevice(a);
+          await target.forgetFriendFromOtherDevice(a, atMillis: e.hlc.millis);
         } else if (g is String) {
           await target.forgetGroupFromOtherDevice(g);
         }

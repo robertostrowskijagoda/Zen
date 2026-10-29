@@ -70,7 +70,9 @@ mixin _SocialHubProfileMixin on _SocialHubControllerBase {
     String peerAddress,
     Map<String, dynamic> payload,
   ) async {
-    if (!isRoutablePeerAddress(peerAddress)) {
+    // After the payload was built (its photo read): the app may have closed
+    // meanwhile, its providers with it.
+    if (!isRoutablePeerAddress(peerAddress) || !ref.mounted) {
       return;
     }
     try {
@@ -97,10 +99,12 @@ mixin _SocialHubProfileMixin on _SocialHubControllerBase {
       final FriendProfile? friend = state.friendByAddress(address);
       final String known = current?.name.trim() ?? '';
       if (friend != null && known.isNotEmpty && friend.displayName != known) {
-        final Map<String, FriendProfile> friends =
-            Map<String, FriendProfile>.from(state.friends);
-        _putFriend(friends, friend.copyWith(displayName: known));
-        state = state.copyWith(friends: friends);
+        state = state.copyWith(
+          book: state.book.edit(
+            address,
+            (FriendProfile f) => f.copyWith(displayName: known),
+          ),
+        );
         await _persistState();
       }
       return;
@@ -131,13 +135,13 @@ mixin _SocialHubProfileMixin on _SocialHubControllerBase {
     // Their name is theirs: a friend shows up under the name from their
     // newest profile (the nickname this user gave them stays as it is).
     final FriendProfile? friend = state.friendByAddress(address);
-    Map<String, FriendProfile>? friends;
-    if (friend != null && name.isNotEmpty && friend.displayName != name) {
-      friends = Map<String, FriendProfile>.from(state.friends);
-      _putFriend(friends, friend.copyWith(displayName: name));
-    }
     state = state.copyWith(
-      friends: friends,
+      book: friend != null && name.isNotEmpty && friend.displayName != name
+          ? state.book.edit(
+              address,
+              (FriendProfile f) => f.copyWith(displayName: name),
+            )
+          : null,
       peerProfiles: <String, PeerPublicProfile>{
         ...state.peerProfiles,
         address: PeerPublicProfile(

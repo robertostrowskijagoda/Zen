@@ -229,12 +229,12 @@ func publicPeerStates() map[string]string {
 }
 
 // publicPeerStates is what this node does with its public peers: the ones
-// it dials (up, connecting or failing, as the core tells) and the ones its
-// transit guard set aside.
+// it dials (up, connecting or failing, as the node's view of its core tells,
+// node_view.go) and the ones its transit guard set aside.
 func (node *bridgeNode) publicPeerStates() map[string]string {
 	up := make(map[string]bool)
 	failed := make(map[string]bool)
-	for _, info := range node.core.GetPeers() {
+	for _, info := range node.view().peers {
 		base := peerURIBase(info.URI)
 		if info.Up {
 			up[base] = true
@@ -332,7 +332,12 @@ func setPublicPeersJSON(payload string) (map[string]any, error) {
 	nodes.Range(func(_, value any) bool {
 		node := value.(*bridgeNode)
 		if node.core != nil && node.config != nil {
-			node.applyPublicPeers()
+			// The app's thread: a core slow to answer gets the list by
+			// itself (node_view.go).
+			_ = node.coreAction(func() error {
+				node.applyPublicPeers()
+				return nil
+			})
 			applied++
 		}
 		return true

@@ -7,6 +7,7 @@ import 'package:zen/src/app/app.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -14,6 +15,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -151,6 +153,81 @@ void main() {
     await tester.pump(kPresencePingInterval);
     expect(sent('ping'), 3);
   });
+
+  // Android closes the app on "back" (and on a swipe from the recent apps)
+  // by ending its engine right after the last lifecycle events: whatever
+  // waits for a later turn of the event loop never runs. The node hears
+  // "off screen" within the event itself, or the background service is
+  // kept off the identity while nothing receives.
+  for (final List<AppLifecycleState> leaving in <List<AppLifecycleState>>[
+    // "Back" (or a swipe away) that ends the engine.
+    <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.detached,
+    ],
+    // "Home", the recent apps, the screen locked: the engine stays.
+    <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ],
+    // Cut short: the first event that hides the app is the last one run.
+    <AppLifecycleState>[AppLifecycleState.inactive, AppLifecycleState.hidden],
+    // The engine ends without the steps in between.
+    <AppLifecycleState>[AppLifecycleState.detached],
+  ]) {
+    testWidgets(
+      'leaving the screen (${leaving.map((s) => s.name).join(' → ')}) '
+      'tells the node at once, before any queued work',
+      (WidgetTester tester) async {
+        final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+        addTearDown(runtime.dispose);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              signalTransportProvider.overrideWithValue(
+                MemorySignalTransport(),
+              ),
+              runtimeNodeRuntimeProvider.overrideWithValue(runtime),
+              socialHubSeedProvider.overrideWithValue(_seedState()),
+            ],
+            child: const ZenRewriteApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(runtime.owner.onScreen, isTrue);
+
+        for (final AppLifecycleState state in leaving) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+        // No pump, no microtask: the engine may be gone by then.
+        expect(runtime.owner.onScreen, isFalse);
+
+        final List<AppLifecycleState> comingBack = switch (leaving.last) {
+          AppLifecycleState.detached => <AppLifecycleState>[
+            AppLifecycleState.resumed,
+          ],
+          AppLifecycleState.paused => <AppLifecycleState>[
+            AppLifecycleState.hidden,
+            AppLifecycleState.inactive,
+            AppLifecycleState.resumed,
+          ],
+          _ => <AppLifecycleState>[
+            AppLifecycleState.inactive,
+            AppLifecycleState.resumed,
+          ],
+        };
+        for (final AppLifecycleState state in comingBack) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+        await tester.pump();
+        await tester.pump();
+        expect(runtime.owner.onScreen, isTrue, reason: 'back on screen');
+      },
+    );
+  }
 
   testWidgets('a glance at another app pings no one again; a friend who has '
       'Zen open hears "away" and "I am here" instead, each at most every '
@@ -619,12 +696,14 @@ const String _invitee = '200:1111:2222:3333:4444:5555:6666:9999';
 
 SocialHubState _seedState() {
   return SocialHubState.empty().copyWith(
-    friends: <String, FriendProfile>{
-      _adaAddress: const FriendProfile(
-        address: _adaAddress,
-        displayName: 'Ada',
-        status: FriendRelationshipStatus.accepted,
-      ),
-    },
+    book: FriendshipBook.restore(
+      profiles: <String, FriendProfile>{
+        _adaAddress: const FriendProfile(
+          address: _adaAddress,
+          displayName: 'Ada',
+          status: FriendRelationshipStatus.accepted,
+        ),
+      },
+    ),
   );
 }

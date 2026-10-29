@@ -124,7 +124,7 @@ final class CircleService extends ChangeNotifier {
       }
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt kółek', error, stack);
+      logZenError('Reading circles', error, stack);
     }
   }
 
@@ -1150,7 +1150,7 @@ final class CircleService extends ChangeNotifier {
     try {
       await host.send(to, payload);
     } on Object catch (error) {
-      logZenWarning('Kółko obiadowe: do $to: $error');
+      logZenWarning('Dinner circle: to $to: $error');
     }
   }
 }

@@ -30,15 +30,52 @@ tapped. The first button hides or shows the rail.
 
 ## Settings
 
+Every setting is in one place only. The list, top to bottom:
+
 | Section | What's inside |
 |---|---|
-| Invite | your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend |
-| About | version, about how many people use Zen and how many are in the pyramid, **Zen on GitHub** at the top, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
-| Zen on GitHub | the project page: code, releases, instructions and bug reports |
-| Privacy and security | app password, emergency wipe password and app lock, **notification content** (*Sender and content* by default, *Sender only* or *Notice only*; a chat can have its own level in its menu → *Notifications*), account and recovery (key copy, recovery circle, copy with friends, full account copy, second device), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, *Show when I last opened the app* (on by default), messages from non-friends |
-| Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), **notifications and sounds** (sounds in the app and of system notifications, and a switch for each kind of news: messages, group messages, calls, mentions, reactions to your posts, friends' posts, posts of further friends (off by default), invitations, updates; a switched-off kind posts no notification and plays no sound but stays in the in-app list, except for posts), storage limits, notifications and background operation (Android) |
-| App | permissions and Bluetooth, **Looking around in the background** (Android: how often and how long Bluetooth looks for people nearby), *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
-| Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, **delete this account from this device** |
+| *Run the setup again* | the first-start steps again, each with what is set now |
+| (top) | **Invite** (your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend), **About** (version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents with the date you accepted them, contact, support), **Zen on GitHub**, **Zen on Discord** |
+| Account and recovery | **Account and recovery** (key copy, recovery circle, copy with friends, full account copy, second device), **Accounts on this device** (with *Receive in the background*), **Devices** |
+| Privacy and security | **Security** (app password, emergency wipe password, fingerprint or face, auto-lock, blocking screenshots, use without a password, the disguised icon on Android), **Contact and visibility** (*Show when I last opened the app*, on by default; who may write to you without being a friend and what a first message costs; who may invite you to groups), **Blocked** |
+| Messages and calls | **Notifications and sounds** (everything about notifications, see below), **Call recordings**, **GIFs** (the *GIF search* switch and your own KLIPY key) |
+| Network | **Offline mailboxes**, **Network and service** (technical info, [offline links](offline-links.md), the bridge on a computer), **Public peers**, **Looking around in the background** (Android) |
+| App | **Appearance** (theme, mode, animations, colour), **Language**, **Data and storage** (room taken, limits, auto-cleaning, *Download photos and videos* and *Media over Wi-Fi only*), **Permissions and Bluetooth**, **Updates and Pass it on** |
+| Advanced | *Why isn't it working?*, **Diagnostics**, **Delete this account from this device** |
+
+**Notifications and sounds** holds everything about notifications, top to
+bottom: **notification content** (*Sender and content* by default, *Sender
+only* or *Notice only*; a chat can have its own level in its menu →
+*Notification content*), the **sounds** (sounds in the app and the sound of
+system notifications), a switch for **each kind of news** (messages, group
+messages, calls, mentions, reactions to your posts, friends' posts, posts of
+further friends (off by default), invitations, updates; a switched-off kind
+posts no notification and plays no sound but stays in the in-app list,
+except for posts), the **muted people** (whose posts never notify), and the
+**background work** that lets notifications arrive at all (Android:
+permissions, background delivery, battery, the full-screen call screen;
+iPhone: how Zen is woken and *Keep receiving in the background*).
+
+### What moved in 1.15
+
+Nothing was removed; rows that only opened a single setting were merged
+into the page of their topic.
+
+| Before (1.14) | Now (1.15) |
+|---|---|
+| Privacy and security → Notification content | Messages and calls → Notifications and sounds (at the top) |
+| Messages and calls → Muted people | Messages and calls → Notifications and sounds → Muted people |
+| Messages and calls → Notifications and background operation (Android) | Messages and calls → Notifications and sounds → Notifications and background operation |
+| Messages and calls → Background work (iPhone) | Messages and calls → Notifications and sounds → Background work |
+| Privacy and security → *Show when I last opened the app* | Privacy and security → Contact and visibility |
+| Privacy and security → Messages from non-friends | Privacy and security → Contact and visibility |
+| Privacy and security → Group invitations | Privacy and security → Contact and visibility |
+| Privacy and security → Account and recovery, Accounts on this device, Devices | Account and recovery (its own section) |
+| Messages and calls → *Download photos and videos*, *Media over Wi-Fi only* | App → Data and storage |
+| Messages and calls → Offline mailboxes | Network → Offline mailboxes |
+| Advanced → Network and service, Public peers | Network |
+| App → Looking around in the background (Android) | Network → Looking around in the background |
+| App → *Why isn't it working?* | Advanced → *Why isn't it working?* (also in the top bar when there is no network) |
 
 **Looking around in the background** (Android) lets Bluetooth look for
 people nearby without the Nearby screen open: by default for 8 seconds
@@ -103,7 +140,7 @@ cannot read it.
   *Connecting…*, *Not connecting* (a phone soon tries another one), *In
   reserve*, or *Paused for a while* (a phone keeps a single link for a
   while after too much of other people's mesh traffic passed through it).
-- **Settings → Advanced → Public peers:** see the list (the default one or
+- **Settings → Network → Public peers:** see the list (the default one or
   your own), add a peer (the address is checked strictly), remove one,
   switch one off (it is then never used), **Check peers** (reachable? latency in ms, does the key
   match?), **Pin key** (adds the `?key=` seen during the check, so a peer
@@ -112,9 +149,24 @@ cannot read it.
 - Your own node answers no "who are you" questions (operating system,
   version) and has no admin socket.
 
-**Your own bridge.** Zen on a computer helps others connect when the router
-allows it. You can also run a permanent Yggdrasil node yourself; see the
-[README](../../README.md#your-own-bridge-for-advanced-users).
+### Your own bridge (for advanced users)
+
+Zen on a computer helps others connect by itself when the router allows it. You can
+also set up a permanent bridge without Zen — an ordinary Yggdrasil node that runs
+around the clock and helps everyone (it can't see the content of messages):
+
+1. A computer that is always on and has a public IP address: a VPS server or a home
+   computer / Raspberry Pi with a port forwarded in the router.
+2. Install Yggdrasil following the
+   [instructions on the project's site](https://yggdrasil-network.github.io/installation.html)
+   (Linux, Windows, macOS, routers). The config file is created by `yggdrasil -genconf`.
+3. In the [configuration](https://yggdrasil-network.github.io/configuration.html)
+   put e.g. `tls://0.0.0.0:443` in `Listen`, and a few public nodes in `Peers`.
+   Restart the service and open that port in the firewall.
+4. Add your node to the
+   [list of public nodes](https://github.com/yggdrasil-network/public-peers)
+   (pull request). Zen takes its nodes from that list, so later versions of Zen will
+   connect through your bridge too.
 
 ## How many people use Zen
 

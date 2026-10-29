@@ -201,6 +201,22 @@ class SourceTest(unittest.TestCase):
         for apk in ("Zen-arm64-v8a.apk", "Zen-armeabi-v7a.apk", "Zen-x86_64.apk"):
             self.assertIn(apk, page["assets"])
 
+    def test_release_json_carries_what_the_app_update_check_needs(self):
+        # lib/src/features/update/github_release.dart reads tag, assets
+        # (name -> {"size": n}) and minVersion from it.
+        release = self.fake_release(contract_assets())
+        release["body"] = "Notes\nzen-min: 1.13.0\n"
+        _, page, _ = self.run_source(release)
+        self.assertEqual(page["tag"], "v9.9.9")
+        self.assertEqual(page["minVersion"], "1.13.0")
+        for name, asset in page["assets"].items():
+            self.assertIsInstance(asset["size"], int, name)
+        # A zen-min above the release itself, or none: no minimum.
+        release["body"] = "zen-min: 10.0.0"
+        self.assertEqual(self.run_source(release)[1]["minVersion"], "")
+        del release["body"]
+        self.assertEqual(self.run_source(release)[1]["minVersion"], "")
+
     def test_only_the_sidestore_source_and_the_release_data_are_written(self):
         # The fingerprint file is the test's own input.
         written = ["apps.json", "fingerprint.txt", "release.json"]
@@ -394,7 +410,7 @@ SITE_PAGES = ("index.html", "m/index.html", "about/index.html", "guide/index.htm
               "features/index.html", "support/index.html", "install/index.html",
               "install/android/index.html", "install/iphone/index.html",
               "install/windows/index.html", "install/macos/index.html",
-              "install/linux/index.html")
+              "install/linux/index.html", "promo/index.html")
 
 
 def language_tables(text):

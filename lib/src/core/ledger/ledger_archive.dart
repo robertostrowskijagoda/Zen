@@ -65,6 +65,49 @@ void holdNewerOn(LedgerDisk disk, String key) {
   }
 }
 
+/// Sets the file of [key] on [disk] aside ([FileBinaryStore.quarantine]; on
+/// another disk it is forgotten): it is damaged, and that part of the
+/// ledger starts afresh instead of failing on it at every start.
+Future<void> setAsideOn(LedgerDisk disk, String key) async {
+  if (disk is FileLedgerDisk) {
+    await disk.store.quarantine(key);
+  } else {
+    logZenWarning('A ledger file is damaged; it starts afresh.');
+    await disk.delete(key);
+  }
+}
+
+/// Whether something (readable or not) is stored under [key] on [disk],
+/// without opening it where the disk can tell ([FileBinaryStore.exists]).
+Future<bool> existsOn(LedgerDisk disk, String key) async {
+  if (disk is FileLedgerDisk) {
+    return disk.store.exists(key);
+  }
+  try {
+    return await disk.read(key) != null;
+  } on Object {
+    return true;
+  }
+}
+
+/// The bytes of [key] on [disk], or null when there are none, when a newer
+/// build wrote them (held, see [holdNewerOn]) or when the file is damaged
+/// ([isDamagedStoredFile]): it is then set aside ([setAsideOn]) and the
+/// caller starts that part afresh. A locked store or a failing disk still
+/// throws.
+Future<Uint8List?> readOrSetAsideOn(LedgerDisk disk, String key) async {
+  try {
+    return await disk.read(key);
+  } on NewerFormatException {
+    holdNewerOn(disk, key);
+    return null;
+  } on FormatException catch (error) {
+    logZenWarning('A ledger file is damaged: ${error.message}');
+    await setAsideOn(disk, key);
+    return null;
+  }
+}
+
 /// Whether the JSON document [json] read from [key] on [disk] names (in
 /// `v`) a format above [current]; the file is then held ([holdNewerOn])
 /// and the caller reads it as missing.
@@ -98,9 +141,18 @@ final class DiskBlobChunkBackend implements BlobChunkBackend {
   @override
   Iterable<String> get hashes => _known;
 
+  /// A damaged piece is set aside and forgotten: it is fetched again.
   @override
-  Future<Uint8List?> read(String hash) async =>
-      _known.contains(hash) ? disk.read(keyOf(hash)) : null;
+  Future<Uint8List?> read(String hash) async {
+    if (!_known.contains(hash)) {
+      return null;
+    }
+    final Uint8List? data = await readOrSetAsideOn(disk, keyOf(hash));
+    if (data == null) {
+      _known.remove(hash);
+    }
+    return data;
+  }
 
   @override
   Future<void> write(String hash, Uint8List data) async {
@@ -259,6 +311,12 @@ final class LedgerArchive {
     } on NewerFormatException {
       _holdNewer();
       return (index: null, unreadable: true);
+    } on FormatException {
+      // Neither the index nor its backup reads: set aside, and the logs
+      // come back from friends and own devices.
+      logZenWarning('The ledger index is damaged; starting from scratch.');
+      await setAsideOn(disk, indexKey);
+      return (index: null, unreadable: true);
     }
     if (raw == null) {
       return (index: null, unreadable: false);
@@ -267,7 +325,7 @@ final class LedgerArchive {
     try {
       index = jsonDecode(utf8.decode(raw));
     } on FormatException {
-      logZenWarning('Indeks dziennika jest uszkodzony; zaczynam od zera.');
+      logZenWarning('The ledger index is damaged; starting from scratch.');
       return (index: null, unreadable: true);
     }
     if (heldAsNewerOn(disk, indexKey, index, current: formatVersion)) {
@@ -275,7 +333,7 @@ final class LedgerArchive {
       return (index: null, unreadable: true);
     }
     if (index is! Map || !isReadableFormat(index, current: formatVersion)) {
-      logZenWarning('Indeks dziennika jest nieczytelny; zaczynam od zera.');
+      logZenWarning('The ledger index is unreadable; starting from scratch.');
       return (index: null, unreadable: true);
     }
     return (index: index, unreadable: false);
@@ -292,7 +350,7 @@ final class LedgerArchive {
   /// held as it is.
   Future<(Map<dynamic, dynamic>, String)?> _readFile(String key) async {
     try {
-      final Uint8List? raw = await disk.read(key);
+      final Uint8List? raw = await readOrSetAsideOn(disk, key);
       if (raw == null) {
         return null;
       }
@@ -332,7 +390,9 @@ final class LedgerArchive {
         '$certificatesPrefix$name',
       );
       if (file == null) {
-        logZenWarning('Certyfikaty urządzeń nieczytelne; dotrą od innych.');
+        logZenWarning(
+          'Device certificates unreadable; they will come from others.',
+        );
         continue;
       }
       final List<DeviceCertificate> certs = <DeviceCertificate>[
@@ -440,8 +500,8 @@ final class LedgerArchive {
       if (restored < count) {
         incompleteLogs.add('$space|$writer');
         logZenWarning(
-          'Dziennik $space odtworzony częściowo (${restored - base} z '
-          '${count - base}); reszta dotrze od innych.',
+          'Ledger $space partly restored (${restored - base} of '
+          '${count - base}); the rest will come from others.',
         );
       }
     }
@@ -478,7 +538,10 @@ final class LedgerArchive {
     int segment,
   ) async {
     try {
-      final Uint8List? data = await disk.read(logKeyOf(space, writer, segment));
+      final Uint8List? data = await readOrSetAsideOn(
+        disk,
+        logKeyOf(space, writer, segment),
+      );
       if (data == null) {
         return null;
       }
@@ -491,7 +554,7 @@ final class LedgerArchive {
 
   /// The revocations on disk (none when the file is missing or damaged).
   Future<List<DeviceRevocation>> _readRevocations() async {
-    final Uint8List? raw = await disk.read(revocationsKey);
+    final Uint8List? raw = await readOrSetAsideOn(disk, revocationsKey);
     if (raw == null) {
       return const <DeviceRevocation>[];
     }
@@ -512,7 +575,7 @@ final class LedgerArchive {
     _flushQueued = true;
     scheduleMicrotask(() {
       _flushQueued = false;
-      unawaitedLogged(flush(), context: 'Zapis dziennika nie udał się');
+      unawaitedLogged(flush(), context: 'Saving the ledger failed');
     });
   }
 
@@ -817,7 +880,9 @@ final class LedgerArchive {
         }
       }
     } on FormatException {
-      logZenWarning('Indeks dziennika nieczytelny; zostaje stan z pamięci.');
+      logZenWarning(
+        'The ledger index is unreadable; keeping the state in memory.',
+      );
     } finally {
       _paused = _heldNewer;
     }
@@ -841,7 +906,19 @@ final class LedgerArchive {
     int segmentSize = 200,
   }) async {
     final Map<String, Uint8List> out = <String, Uint8List>{};
-    final Uint8List? rawIndex = await disk.read(indexKey);
+    // A damaged file is left out of the backup (the rest still goes).
+    Future<Uint8List?> read(String key) async {
+      try {
+        return await disk.read(key);
+      } on FormatException catch (error) {
+        if (!isDamagedStoredFile(error)) {
+          rethrow;
+        }
+        return null;
+      }
+    }
+
+    final Uint8List? rawIndex = await read(indexKey);
     if (rawIndex == null) {
       return out;
     }
@@ -854,7 +931,7 @@ final class LedgerArchive {
     if (index is! Map || !isReadableFormat(index, current: formatVersion)) {
       return out;
     }
-    final Uint8List? revocations = await disk.read(revocationsKey);
+    final Uint8List? revocations = await read(revocationsKey);
     if (revocations != null) {
       out[revocationsKey] = revocations;
     }
@@ -863,7 +940,7 @@ final class LedgerArchive {
         continue;
       }
       final String key = '$certificatesPrefix$name';
-      final Uint8List? data = await disk.read(key);
+      final Uint8List? data = await read(key);
       if (data != null) {
         out[key] = data;
       }
@@ -884,7 +961,7 @@ final class LedgerArchive {
       final int base = log['b'] is int ? log['b'] as int : 0;
       for (int seg = base ~/ segmentSize; seg * segmentSize < count; seg++) {
         final String key = logKeyOf(space, writer, seg);
-        final Uint8List? data = await disk.read(key);
+        final Uint8List? data = await read(key);
         if (data != null) {
           out[key] = data;
         }
@@ -899,7 +976,7 @@ final class LedgerArchive {
           continue;
         }
         final String key = blobListKeyOf(shard);
-        final Uint8List? data = await disk.read(key);
+        final Uint8List? data = await read(key);
         if (data == null) {
           continue;
         }
@@ -925,7 +1002,7 @@ final class LedgerArchive {
             continue;
           }
           final String chunkKey = DiskBlobChunkBackend.keyOf(h);
-          final Uint8List? chunk = await disk.read(chunkKey);
+          final Uint8List? chunk = await read(chunkKey);
           if (chunk != null) {
             out[chunkKey] = chunk;
           }

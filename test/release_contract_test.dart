@@ -30,6 +30,18 @@ Set<String> _appAssetNames() => <String>{
 };
 
 void main() {
+  test('preparing a release reminds of the upgrade fixture the release '
+      'before it left behind', () {
+    expect(
+      missingUpgradeFixture('1.14.0', <String>['1.13.1', '1.14.0']),
+      isNull,
+    );
+    expect(
+      missingUpgradeFixture('1.14.1', <String>['1.13.1', '1.14.0']),
+      allOf(contains('v1.14.1'), contains('test/fixtures/upgrade/1.14.1')),
+    );
+  });
+
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());

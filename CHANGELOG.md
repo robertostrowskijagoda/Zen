@@ -10,6 +10,57 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Pebbles: paint a virtual stone on every side, stick its QR code somewhere and let others collect it — it stays for everyone to find.
+- [en] Search in chats, groups, the Tablica and settings, and print any QR code as a sticker in your own style and size.
+- [en] Zen starts reliably after an update, removed friends stay removed, and invitations and messages after a restart arrive within seconds.
+- [pl] Kamyczki: pomaluj wirtualny kamień z każdej strony, zostaw jego kod QR w ciekawym miejscu i daj innym go zebrać — zostaje dla każdego, kto go znajdzie.
+- [pl] Wyszukiwanie w czatach, grupach, na Tablicy i w ustawieniach oraz naklejki z dowolnym kodem QR w Twoim stylu i rozmiarze.
+- [pl] Zen niezawodnie startuje po aktualizacji, usunięci znajomi nie wracają, a zaproszenia i wiadomości po restarcie dochodzą w kilka sekund.
+
+### Pebbles
+- **Virtual painted pebbles**, like the painted stones people leave in places as finds. Design one in the 2.5D editor: turn the stone with a finger and paint straight onto the top, the bottom and every side (brush, spray, fill, eraser, mirror, stamps, curved text, patterns per face), on 31 natural stone shapes in 40 materials, with 148 stamps, 20 patterns, 26 ready designs, "Losuj" and 13 display fonts with Polish letters (open-licensed).
+- **Its QR code** opens a page on the website with the stone, its name and author and "Collect in Zen"; scanned in Zen it opens straight in the app. Collecting does not take it away: everyone can collect it. The code carries only a short preview, so its dots stay big; the note, the date, the whole painting and the author's signature come with the stone and are checked by the app.
+- **Kept by friends**: the author's phone asks six friends to keep the pebble (each one agrees), keepers stay keepers when they stop being the author's mailboxes, a keeper who declines or leaves is replaced, and everyone who collected it can pass it on too, so popular pebbles get easier to find.
+- **Kamyczki on the profile** (created and collected), seen by friends only; "Pokaż kod" shows a pebble's code full screen so another phone can scan it.
+
+### Reliability (field reports)
+- **Zen no longer freezes on its logo.** The Go bridge's packet loop wrote replies from inside itself, so a friend sending at the wrong moment could stop the node for good, and the screen waited on it; replies now go through their own writer and every question the app asks the node is answered within a fraction of a second. Every start step has a time limit and a log line, a slow start shows which step it waits for (with "Czekaj", "Zapisz dziennik" and "Uruchom bez…") and a damaged settings file is set aside instead of stopping every start — a data wipe is never needed.
+- **Files no longer break or lose data**: one writer per file across the app and the background service, every save written to its own temporary file, read back and checked before it replaces the old one, and the last good copies kept; a damaged file falls back to the previous copy, and a conversation is rebuilt from its pieces. A damaged account key no longer makes the ledger create a new account in its place.
+- **Removed friends stay removed**: who is a friend is decided in one place, synced between your devices with the newer change winning; only a new invitation brings someone back.
+- **Leaving with Back** no longer keeps the background service off the network for a minute.
+- **Notifications** honour the chosen privacy level in the background too, never come for people who are not friends or for meeting updates, and name friends on older Zen versions.
+- **Invitations** arrive within seconds (they could take hours when the first tries were lost), a restarted device is reachable within about a second, and the friend's real name shows in "połączenie z … jest gotowe".
+- **Presence**: a locked friend's status shows within seconds of a start, a late frame can no longer make a friend in the background look online, and a friend's devices are recognised together nearby.
+- **Updates** are found through the website first, which has no request limit (GitHub's API often refused phones on mobile data), the last check and its error show in Settings, and the update notice uses a visible channel.
+- **Diagnostics log**: readable on Windows, in time order across the app and the background service, repeats counted, no quoted message text.
+- **Optional**: "Nie blokuj od razu po zamknięciu aplikacji" (off by default) keeps Zen open for the lock delay after the app was closed, with the risk explained.
+
+### Settings and look
+- **Settings regrouped**: everything about notifications on one page, "Kontakt i widoczność", fewer one-setting pages; the settings search also finds settings inside the pages ("motyw", "zrzuty") and opens the page at them.
+- **The friends graph grows over time**: play, pause, a day slider and speed, over any mode.
+- **Titles use Baloo 2**, which has every Polish and other Latin letter, so no word mixes fonts any more.
+- A group can be made with only yourself and members added later.
+
+
+### Search
+- **Search in a chat and in a group**: the magnifier in the title bar (in the menu on a narrow phone) or Ctrl+F on a computer. The words found are marked in the messages, "3 z 12" says which match is shown, the arrows (or Enter and Shift+Enter) go to older and newer ones and the chat scrolls there, also far back in a long history. Esc closes it.
+- **Search on the chat list**: the field above the chats finds people and groups by name or by the nickname you gave, and messages of every conversation, grouped by conversation with the newest match first. A tap opens the chat at that message with its search on.
+- **Search on the Tablica** (posts, their authors and the comments you can see) and **in the settings** (a setting by its name or the line under it).
+- Case and Polish letters do not matter ("zolw" finds "żółw"), and every word typed has to be there. Search runs only on this device over what is already decrypted for the screen: nothing typed is sent anywhere or written down, and what was read for it is dropped when the field is cleared or the screen closed. Long histories are prepared in the background and searched in pieces, so the app stays smooth with tens of thousands of messages.
+
+### Printable QR stickers
+- **One sticker designer for every QR code worth printing**: "Mój kod", the door code (Neighbours), the install page and the collection open it with "Naklejka do druku". Texts above and below the code and a small line right under it (ready ones such as "Zeskanuj, żeby nas poznać" with the flat's or your name, or your own; they shrink to fit), a small "Zen" signature in the corner (on by default), six colour sets, a pattern in the margins (butterflies, leaves, confetti, stars, hearts, waves) and four code styles (classic, rounded, dots, round eyes), with Zen's logo in the middle wherever the code can carry it (highest error correction, under a tenth of the code, never on its patterns).
+- Every style keeps the code's finder eyes, timing lines and alignment marks whole, the quiet zone free and the code dark on white; the tests read every style of every kind back module by module and decode it, and CI reads the printed pictures again with zbar.
+- **Ready to print**: A4 (the default), A5, Letter, a 20 cm square, a 10 cm sticker or a phone wallpaper, upright or across. The artwork is a square in the middle of the page, with optional cutting lines, so it cuts out cleanly. The square can be printed 4, 5, 6, 8, 10, 12, 15 or 20 cm across (whatever the page holds) or as the largest the page takes; the designer shows the page at scale and how big one dot of the code comes out, warning when it gets too small for every camera. A small sticker can fill the page in rows (24 of 4 cm or 15 of 5 cm on A4), with gaps and cutting lines between them, in every file format. Saved as PDF (300 dpi), PNG, JPG or SVG to Downloads (the Files app on an iPhone); on Android also shared or printed through the system. The last design of each kind is remembered (in the encrypted store).
+- **About → "Naklejka promująca Zen"**: a sticker with the link to the page about Zen or your own invitation.
+- Codes that are secret or change stay on screen only: the key backup, copying the account, linking a device, event tickets, pyramid and housemate invitations, sharing the app over Wi-Fi.
+
+### Website
+- **A clearer website**: the strongest reasons first, a short FAQ, the story behind Zen on the About page and a page of promo materials (poster, a short film with CC0 music, a text to share and QR codes to print); every animation runs for everyone.
+- **Screenshots and short films of the app** on the home, about and features pages: a gallery that scrolls sideways (swipe, arrow buttons or arrow keys), in Polish or English, light or dark as the visitor's device is set, with alt texts in all 21 languages. They are made from the app itself with a made-up demo account by `dart run tool/screenshots.dart`, and CI checks that none is missing.
+- The lock screen's "I don't remember the password" and "Other account" use the app's font, not the phone's.
+
 ## 1.14.0 — 28.10.2026
 
 ### What's new

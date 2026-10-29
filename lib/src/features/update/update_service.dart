@@ -177,7 +177,7 @@ final class UpdateService extends ChangeNotifier {
         book.restore(json);
       }
     } on Object catch (error, stack) {
-      logZenError('Odczyt aktualizacji', error, stack);
+      logZenError('Reading updates', error, stack);
     }
     _subs
       ..add(host.frames.listen(_onFrame))
@@ -328,7 +328,7 @@ final class UpdateService extends ChangeNotifier {
     try {
       await host.send(peer, _offerPayload());
     } on Object catch (error) {
-      logZenWarning('Wiadomość o nowej wersji do $peer: $error');
+      logZenWarning('New version message to $peer: $error');
     }
   }
 

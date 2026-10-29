@@ -11,6 +11,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 final Provider<AppSecurityService> appSecurityServiceProvider =
@@ -27,6 +28,10 @@ final Provider<bool> appPasswordRequiredProvider = Provider<bool>(
 
 /// Shortest app password accepted.
 const int kMinAppPasswordLength = 8;
+
+/// How long after the lock what is being saved still seals
+/// ([AppSecurityService.currentSealingKey]).
+const Duration kLockWriteGrace = Duration(seconds: 3);
 
 /// Why biometric unlock is weaker than the password (shown wherever it can
 /// be turned on).
@@ -76,6 +81,14 @@ const String appSecurityMasterKeyFingerprintStorageKey =
 /// choosing it once more.
 const String appSecurityNeverLockMasterKeyStorageKey =
     'zen_rewrite_never_lock_master_key';
+
+/// "Nie blokuj od razu po zamknięciu aplikacji": the master key sealed by
+/// [ResumeSessionVault] (base64) when Zen leaves the screen, for a start
+/// before the lock delay is over. Opened (and deleted) by the next start;
+/// deleted when Zen comes back to the screen, is locked, the lock mode, its
+/// delay or the password changes, or the setting is turned off. Never the
+/// password.
+const String appSecurityResumeSessionStorageKey = 'zen_rewrite_resume_session';
 
 /// Whether the person wants biometric unlock: `1` on, `0` off. Absent: on
 /// where the hardware itself asks for the person before it unwraps
@@ -758,6 +771,19 @@ abstract class AppSecurityService extends ChangeNotifier {
   /// is the settings' (choosing another one drops the copy again).
   Future<bool> keepMasterKeyForNeverLock(String password);
 
+  /// Whether this device can keep the app open after it was closed
+  /// ("Nie blokuj od razu po zamknięciu aplikacji").
+  bool get canStayUnlockedAfterClose;
+
+  /// Zen leaves the screen: with "Nie blokuj od razu po zamknięciu
+  /// aplikacji" on, the key is sealed for the lock delay, so a start before
+  /// it is over opens without the password. Nothing otherwise.
+  Future<void> keepResumeSession();
+
+  /// Zen is back on the screen with the key in memory: what
+  /// [keepResumeSession] sealed goes.
+  Future<void> dropResumeSession();
+
   /// The app password and the panic password as a backup of the whole
   /// account carries them ([AppLockCopy]); `null` when they cannot be told
   /// (the backup then carries no lock, and the restored app asks for a new
@@ -779,6 +805,14 @@ abstract class AppSecurityService extends ChangeNotifier {
   Future<void> reset();
 
   Future<Uint8List?> currentEncryptionKey();
+
+  /// The key what is written now is sealed with: [currentEncryptionKey],
+  /// and for [kLockWriteGrace] after [lock] the key of the session just
+  /// locked, so a save of what the person did right before the lock (a
+  /// friend removed, then the phone locked) still lands instead of failing
+  /// and leaving the older copy to come back at the next start. It opens
+  /// nothing: reading still needs [currentEncryptionKey].
+  Future<Uint8List?> currentSealingKey();
 
   /// The secure storage this service keeps its credentials in (the lock
   /// screen keeps its failed-attempt counter there too).
@@ -813,13 +847,15 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     int passwordIterations, {
     PasswordCost? passwordCost,
     PlatformKeyVault? keyVault,
+    ResumeSessionVault? resumeVault,
   }) : _cost =
            passwordCost ??
            // Tests pass a token iteration count: keep Argon2id cheap too.
            (passwordIterations < 1000
                ? const PasswordCost(memoryKiB: 64, iterations: 1)
                : const PasswordCost()),
-       _vault = keyVault ?? const NoKeyVault();
+       _vault = keyVault ?? const NoKeyVault(),
+       _resumeVault = resumeVault ?? const NoResumeSessionVault();
 
   final AppSecurityCredentialsStore _credentialsStore;
 
@@ -827,6 +863,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   /// to crack offline).
   final PasswordCost _cost;
   final PlatformKeyVault _vault;
+  final ResumeSessionVault _resumeVault;
 
   String get _kdfJson =>
       jsonEncode(<String, Object>{'a': 'argon2id', ..._cost.toJson()});
@@ -911,7 +948,44 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   AppLockMode _lockMode = AppSettings.defaultLockMode;
   int _backgroundLockDelaySeconds =
       AppSettings.defaultBackgroundLockDelaySeconds;
+  bool _keepUnlockedAfterClose = false;
+
+  /// Whether a sealed key for a start after closing may be in the secret
+  /// store ([appSecurityResumeSessionStorageKey]).
+  bool _resumeSessionKept = false;
+
+  /// The last of the sealed key's writes and deletes still under way: they
+  /// run one after another (leaving the screen and coming back in quick
+  /// succession).
+  Future<void>? _resumeWork;
   Uint8List? _encryptionKey;
+
+  /// The key of the session just locked, for sealing only, until
+  /// [kLockWriteGrace] passed ([currentSealingKey]).
+  Uint8List? _lockGraceKey;
+  DateTime _lockGraceUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _lockGraceTimer;
+
+  void _keepForWritesAfterLock(Uint8List? key) {
+    _lockGraceTimer?.cancel();
+    _lockGraceKey = key;
+    _lockGraceUntil = DateTime.now().add(kLockWriteGrace);
+    // Dropped when the grace is over even if nothing asks for it again;
+    // on the root zone, so a screen's test clock does not hold it.
+    _lockGraceTimer = key == null
+        ? null
+        : Zone.root.createTimer(kLockWriteGrace, () {
+            _lockGraceKey = null;
+            _lockGraceTimer = null;
+          });
+  }
+
+  Uint8List? get _sealingGraceKey {
+    if (_lockGraceKey != null && DateTime.now().isAfter(_lockGraceUntil)) {
+      _lockGraceKey = null;
+    }
+    return _lockGraceKey;
+  }
 
   @override
   bool get isReady => _isReady;
@@ -969,8 +1043,11 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
           // does not match: nothing opens without the password.
           await _dropNeverLockKey();
         }
-        _isLocked = true;
-        _encryptionKey = null;
+        // Closed a moment ago with "Nie blokuj od razu po zamknięciu
+        // aplikacji": the key sealed then, while it still opens.
+        final Uint8List? resumed = await _takeResumeSession();
+        _isLocked = resumed == null;
+        _encryptionKey = resumed;
       }
     } else {
       final Uint8List? storedMasterKey = await _readDeviceMasterKey();
@@ -994,10 +1071,22 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     final bool leavesNeverLock =
         settings.lockMode != AppLockMode.never &&
         (_neverLockKeyKept || _lockMode == AppLockMode.never);
+    final bool turnsResumeOff =
+        !settings.keepUnlockedAfterClose && _keepUnlockedAfterClose;
+    // Another lock mode or delay: what was sealed was sealed for the old
+    // one.
+    final bool dropsResume =
+        turnsResumeOff ||
+        (_resumeSessionKept && !settings.keepUnlockedAfterClose) ||
+        settings.lockMode != _lockMode ||
+        settings.backgroundLockDelaySeconds != _backgroundLockDelaySeconds;
     _applySettingsState(settings);
     if (leavesNeverLock) {
       // Any other mode: the copy goes at once.
       await _dropNeverLockKey();
+    }
+    if (dropsResume) {
+      await _dropResumeSession(destroyKey: turnsResumeOff);
     }
     notifyListeners();
   }
@@ -1046,6 +1135,8 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     // person's own choice keeps one (keepMasterKeyForNeverLock).
     await _storeBiometricToken(currentMasterKey);
     await _credentialsStore.delete(appSecurityDeviceMasterKeyStorageKey);
+    // A new password: nothing kept under the old one opens Zen.
+    await _dropResumeSession();
     _hasPassword = true;
     _isLocked = false;
     notifyListeners();
@@ -1290,6 +1381,137 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   }
 
   @override
+  bool get canStayUnlockedAfterClose => _resumeVault.isAvailable;
+
+  /// Whether what is open now may be sealed for a start after closing.
+  bool get _resumeSessionWanted =>
+      _keepUnlockedAfterClose &&
+      _lockMode == AppLockMode.background &&
+      _hasPassword &&
+      !_isLocked &&
+      _resumeVault.isAvailable;
+
+  /// Runs [work] after the sealed key's writes and deletes before it.
+  Future<void> _inResumeOrder(Future<void> Function() work) {
+    final Future<void>? before = _resumeWork;
+    final Future<void> next = before == null
+        ? Future<void>.sync(work)
+        : before.then((_) => work());
+    final Future<void> settled = next.catchError((Object _) {});
+    _resumeWork = settled;
+    unawaited(
+      settled.whenComplete(() {
+        if (identical(_resumeWork, settled)) {
+          _resumeWork = null;
+        }
+      }),
+    );
+    return next;
+  }
+
+  @override
+  Future<void> keepResumeSession() => _inResumeOrder(() async {
+    final Uint8List? masterKey = _encryptionKey;
+    if (!_resumeSessionWanted || masterKey == null) {
+      return;
+    }
+    Uint8List? sealed;
+    try {
+      sealed = await _resumeVault.seal(
+        masterKey,
+        Duration(seconds: _backgroundLockDelaySeconds),
+      );
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Sealing the key for after closing failed',
+        error,
+        stackTrace,
+      );
+    }
+    if (sealed == null || !_resumeSessionWanted) {
+      // Nothing sealed, or locked meanwhile: nothing is kept.
+      return;
+    }
+    // Before the write: a lock meanwhile deletes it once it is written.
+    _resumeSessionKept = true;
+    try {
+      await _credentialsStore.write(
+        appSecurityResumeSessionStorageKey,
+        base64Encode(sealed),
+      );
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Keeping the key for after closing failed',
+        error,
+        stackTrace,
+      );
+    }
+  });
+
+  @override
+  Future<void> dropResumeSession() {
+    if (!_resumeSessionKept && !_keepUnlockedAfterClose) {
+      return Future<void>.value();
+    }
+    return _dropResumeSession();
+  }
+
+  /// Deletes the sealed key, after a write under way; [destroyKey]: the
+  /// vault's key too, so no copy of it opens anything any more.
+  Future<void> _dropResumeSession({bool destroyKey = false}) =>
+      _inResumeOrder(() async {
+        _resumeSessionKept = false;
+        await _deleteCredential(appSecurityResumeSessionStorageKey);
+        if (destroyKey) {
+          try {
+            await _resumeVault.wipe();
+          } on Object catch (error, stackTrace) {
+            logZenError(
+              'Destroying the key for after closing failed',
+              error,
+              stackTrace,
+            );
+          }
+        }
+      });
+
+  /// At the start: the master key sealed when Zen was closed, while it
+  /// still opens and the settings still want it; `null` otherwise.
+  /// Whatever was sealed is deleted either way: it serves one start.
+  Future<Uint8List?> _takeResumeSession() async {
+    String? stored;
+    try {
+      stored = await _credentialsStore.read(appSecurityResumeSessionStorageKey);
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Reading the key for after closing failed',
+        error,
+        stackTrace,
+      );
+    }
+    if (stored == null) {
+      return null;
+    }
+    await _deleteCredential(appSecurityResumeSessionStorageKey);
+    if (!_keepUnlockedAfterClose || _lockMode != AppLockMode.background) {
+      return null;
+    }
+    try {
+      return await _matchingMasterKey(
+        await _resumeVault.open(base64Decode(stored)),
+      );
+    } on Object catch (error, stackTrace) {
+      // Not something sealed: the password, as without it.
+      logZenError(
+        'Opening the key for after closing failed',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
+  }
+
+  @override
   Future<AppLockCopy?> lockCopy() async {
     final _StoredCheck password = await _storedCheck(
       appSecurityPasswordKdfStorageKey,
@@ -1405,6 +1627,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     // turned it on, and the device master key's plain copy goes.
     await _storeBiometricToken(masterKey);
     await _credentialsStore.delete(appSecurityDeviceMasterKeyStorageKey);
+    await _dropResumeSession();
     _hasPassword = true;
     _hasPanicPassword = panic != null;
     _isLocked = false;
@@ -1535,14 +1758,26 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       return;
     }
     _isLocked = true;
+    // Saves already under way (or started by the lock itself) still seal
+    // for a moment; nothing opens with it.
+    _keepForWritesAfterLock(_encryptionKey);
     _encryptionKey = null;
-    if (_neverLockKeyKept) {
+    final bool neverLock = _neverLockKeyKept;
+    // "Zablokuj teraz", the lock delay over, another account opened: the
+    // next start asks for the password, however soon it comes.
+    final bool resume = _resumeSessionKept || _keepUnlockedAfterClose;
+    if (neverLock || resume) {
       // Locked by hand under "Nigdy": the lock holds across a restart too
       // (with the panic password there to type), and a start from scratch
       // asks for the password until "Nigdy" is chosen again. The lock
-      // screen shows only once the copy is gone, so closing the app at
-      // once cannot bring it back.
-      unawaited(_dropNeverLockKey().whenComplete(notifyListeners));
+      // screen shows only once the copies are gone, so closing the app at
+      // once cannot bring them back.
+      unawaited(
+        Future.wait(<Future<void>>[
+          if (neverLock) _dropNeverLockKey(),
+          if (resume) _dropResumeSession(),
+        ]).whenComplete(notifyListeners),
+      );
       return;
     }
     notifyListeners();
@@ -1555,6 +1790,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityWrappedMasterKeyStorageKey,
     appSecurityDeviceMasterKeyStorageKey,
     appSecurityNeverLockMasterKeyStorageKey,
+    appSecurityResumeSessionStorageKey,
     appSecuritySealedBiometricTokenStorageKey,
     appSecurityPasswordHashStorageKey,
     // The node identity and what the background service may read.
@@ -1586,7 +1822,9 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   @override
   Future<void> reset() async {
     _encryptionKey = null;
+    _keepForWritesAfterLock(null);
     _neverLockKeyKept = false;
+    _resumeSessionKept = false;
     for (final String key in _keyMaterial) {
       await _deleteCredential(key);
     }
@@ -1595,6 +1833,15 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       await _vault.wipe();
     } on Object catch (error, stackTrace) {
       logZenError('Wiping the hardware key failed', error, stackTrace);
+    }
+    try {
+      await _resumeVault.wipe();
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Destroying the key for after closing failed',
+        error,
+        stackTrace,
+      );
     }
     for (final String key in _otherCredentials) {
       await _deleteCredential(key);
@@ -1618,6 +1865,14 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       return null;
     }
     return _encryptionKey;
+  }
+
+  @override
+  Future<Uint8List?> currentSealingKey() async {
+    if (!_isReady) {
+      return null;
+    }
+    return _encryptionKey ?? _sealingGraceKey;
   }
 
   Future<Uint8List?> _readDeviceMasterKey() async {
@@ -1701,6 +1956,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   void _applySettingsState(AppSettings settings) {
     _lockMode = settings.lockMode;
     _backgroundLockDelaySeconds = settings.backgroundLockDelaySeconds;
+    _keepUnlockedAfterClose = settings.keepUnlockedAfterClose;
   }
 }
 
@@ -1719,6 +1975,7 @@ final class LocalAppSecurityService extends _BaseAppSecurityService {
     int passwordIterations = 100000,
     super.passwordCost,
     super.keyVault,
+    super.resumeVault,
   }) : super(
          credentialsStore ?? const SecureStorageCredentialsStore(),
          passwordIterations,
@@ -1735,6 +1992,7 @@ final class MemoryAppSecurityService extends _BaseAppSecurityService {
     Uint8List? encryptionKey,
     int passwordIterations = 100000,
     super.keyVault,
+    super.resumeVault,
   }) : super(
          credentialsStore ?? MemorySecurityCredentialsStore(),
          passwordIterations,

@@ -233,7 +233,11 @@ class ZenThemePreview extends StatelessWidget {
                   data: theme,
                   child: DefaultTextStyle(
                     style: theme.textTheme.bodyMedium ?? const TextStyle(),
-                    child: const _MiniApp(),
+                    // A picture laid out at a fixed size and scaled as a
+                    // whole: the system's large text would only burst it.
+                    child: MediaQuery.withNoTextScaling(
+                      child: const _MiniApp(),
+                    ),
                   ),
                 ),
               ),
@@ -383,12 +387,16 @@ class _MiniApp extends StatelessWidget {
                               ),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               visualDensity: VisualDensity.compact,
-                              textStyle: const TextStyle(
+                            ),
+                            // The size only: the look's font stays.
+                            child: Text(
+                              t('Zapisz'),
+                              maxLines: 1,
+                              style: const TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            child: Text(t('Zapisz'), maxLines: 1),
                           ),
                           const SizedBox(width: 6),
                           Flexible(child: ZenPill(text: t('nowe'))),

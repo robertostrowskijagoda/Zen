@@ -33,6 +33,8 @@ stays private, and the limits.
 | 11 | [Themes and appearance](themes.md) | 27 looks in five groups, each light and dark |
 | 12 | [Settings and public peers](settings-and-peers.md) | Where things are, the public peers Zen connects through |
 | 13 | [Updates and releases](updates.md) | How Zen updates itself and how to check a download |
+| 14 | [Pebbles](pebbles.md) | Painted stones you leave as QR stickers, collecting them, who keeps them |
+| 15 | [The pebble editor](pebble-editor.md) | Shapes, materials, painting every side of the stone, stamps and ready designs |
 
 More for the technically minded:
 

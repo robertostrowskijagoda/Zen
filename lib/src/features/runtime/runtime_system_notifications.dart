@@ -9,6 +9,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -407,8 +408,27 @@ final class PrivacyRedactingNotificationService
   }
 
   @override
-  Future<bool> show(RuntimeSystemNotification notification) {
-    return delegate.show(redact(notification));
+  Future<bool> show(RuntimeSystemNotification notification) async {
+    final bool shown = await delegate.show(redact(notification));
+    if (shown) {
+      // One line in the diagnostics log per notification posted: what
+      // kind, at what level, whether the sender was known (the poster's
+      // own words, see noticeLogs), never the text or a name.
+      final bool ringsOrAlarms =
+          notification.category == RuntimeSystemNotificationCategory.call ||
+          notification.category == RuntimeSystemNotificationCategory.alarm;
+      logNoticePosted(
+        'ui',
+        noticeLogs[notification] ??
+            (
+              kind: noticeLogKindOf(notification),
+              level: ringsOrAlarms ? null : _level(),
+              known: false,
+              version: null,
+            ),
+      );
+    }
+    return shown;
   }
 
   @override
@@ -663,7 +683,19 @@ final class FlutterLocalRuntimeSystemNotificationService
   static const String _callChannelId = 'zen_calls_v4';
   static const String _alarmChannelId = 'zen_alarm_v2';
   static const String _transferChannelId = 'zen_transfers';
-  static const String _updateChannelId = 'zen_updates';
+
+  /// A channel keeps its importance too: the update notice's moved off the
+  /// low one ([retiredAndroidChannelIds]) to be seen.
+  static const String _updateChannelId = 'zen_updates_v2';
+
+  /// Channels Zen no longer posts to, deleted when the channels are
+  /// registered so the system settings do not list them twice.
+  @visibleForTesting
+  static const List<String> retiredAndroidChannelIds = <String>[
+    // The update notice at low importance: Samsung and Pixel put it among
+    // the silent notifications, without an icon in the status bar.
+    'zen_updates',
+  ];
 
   /// Android's FLAG_INSISTENT: the sound repeats until the notification is
   /// opened or cancelled (a friend's alarm).
@@ -740,11 +772,14 @@ final class FlutterLocalRuntimeSystemNotificationService
         enableVibration: false,
         showBadge: false,
       ),
+      // Default importance: an icon in the status bar and a place among
+      // the notifications that alert, still without a sound (once per
+      // version, nothing to answer at once).
       AndroidNotificationChannel(
         _updateChannelId,
         t('Aktualizacje'),
         description: t('Nowa wersja Zen, raz na wersję.'),
-        importance: Importance.low,
+        importance: Importance.defaultImportance,
         playSound: false,
         enableVibration: false,
         showBadge: false,
@@ -1082,6 +1117,17 @@ final class FlutterLocalRuntimeSystemNotificationService
       for (final AndroidNotificationChannel channel in androidChannels()) {
         await _createChannel(android, channel);
       }
+      for (final String id in retiredAndroidChannelIds) {
+        try {
+          await android.deleteNotificationChannel(channelId: id);
+        } catch (error, stackTrace) {
+          logZenError(
+            'Deleting the retired "$id" notification channel failed',
+            error,
+            stackTrace,
+          );
+        }
+      }
     }
     _initialized = true;
     try {
@@ -1123,6 +1169,11 @@ final class FlutterLocalRuntimeSystemNotificationService
     }
   }
 
+  /// What [notification] is posted with.
+  @visibleForTesting
+  NotificationDetails debugDetailsFor(RuntimeSystemNotification notification) =>
+      _detailsFor(notification);
+
   NotificationDetails _detailsFor(
     RuntimeSystemNotification notification, {
     bool fallback = false,
@@ -1161,12 +1212,12 @@ final class FlutterLocalRuntimeSystemNotificationService
         importance: isCall
             ? Importance.max
             : isUpdate
-            ? Importance.low
+            ? Importance.defaultImportance
             : Importance.high,
         priority: isCall
             ? Priority.max
             : isUpdate
-            ? Priority.low
+            ? Priority.defaultPriority
             : Priority.high,
         category: isAlarm
             ? AndroidNotificationCategory.alarm

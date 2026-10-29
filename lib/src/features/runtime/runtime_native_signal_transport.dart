@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/logging/zen_tech_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
@@ -375,11 +377,18 @@ final class RuntimeNodeOwner {
   /// The app is on screen: the service never takes the identity from it.
   bool onScreen = false;
 
+  /// A background owner's word that the app engine with this number is
+  /// gone (Android ended it, its last "off screen" may never have run): the
+  /// bridge takes that engine's node for this owner at once, on screen or
+  /// not. 0 for none.
+  int goneApp = 0;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'role': role.name,
     'engine': engine,
     'claim': claim,
     'onScreen': onScreen,
+    if (goneApp > 0) 'goneApp': goneApp,
   };
 
   /// Notes the number a start's answer ([result]) gave this owner.
@@ -447,6 +456,13 @@ final class RuntimeNodeYield {
 /// How often a background owner whose node another owner took looks again
 /// whether the identity is free (a start that takes nobody's node).
 const Duration kRuntimeYieldRetry = Duration(minutes: 1);
+
+/// How often the app on screen tells the bridge so again: the bridge's word
+/// lapses five seconds after the last one (nodeOnScreenFor in
+/// node_identity.go), so an app engine that ended without saying it left
+/// the screen keeps the background service off its identity for seconds,
+/// not for good. Only while on screen, where the phone is awake anyway.
+const Duration kRuntimeOnScreenBeat = Duration(seconds: 2);
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
 /// and macOS app).
@@ -676,21 +692,25 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       _previewMode = true,
       owner = RuntimeNodeOwner(RuntimeNodeRole.app),
       _yieldRetryAfter = kRuntimeYieldRetry,
+      _onScreenBeatEvery = kRuntimeOnScreenBeat,
       _snapshot = RuntimeTransportSnapshot.preview();
 
   RuntimeNodeRuntime.live({
     required RuntimeNodeSessionBootstrap bootstrap,
     RuntimeNodeOwner? owner,
     @visibleForTesting Duration yieldRetry = kRuntimeYieldRetry,
+    @visibleForTesting Duration onScreenBeat = kRuntimeOnScreenBeat,
   }) : _bootstrap = bootstrap,
        _previewMode = false,
        owner = owner ?? RuntimeNodeOwner(RuntimeNodeRole.app),
        _yieldRetryAfter = yieldRetry,
+       _onScreenBeatEvery = onScreenBeat,
        _snapshot = RuntimeTransportSnapshot.stopped();
 
   final RuntimeNodeSessionBootstrap? _bootstrap;
   final bool _previewMode;
   final Duration _yieldRetryAfter;
+  final Duration _onScreenBeatEvery;
 
   /// Whom the node is started for ([RuntimeNodeOwner]); the bootstrap names
   /// it to the bridge.
@@ -733,7 +753,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       await send(remoteAddress, payload);
       return true;
     } on Object catch (error) {
-      logZenWarning('Drzwi mieszkania nie wysłały: $error');
+      logZenWarning('Home door did not send: $error');
       return false;
     }
   }
@@ -886,7 +906,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
           address = session.startDoor?.call(seed);
         }
       } on Object catch (error) {
-        logZenWarning('Drzwi mieszkania nie ruszyły: $error');
+        logZenWarning('Home door did not start: $error');
       }
     }
     _setDoorAddress(address);
@@ -914,7 +934,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       session.setMailboxDoors?.call(_mailboxSeeds);
     } on Object catch (error) {
-      logZenWarning('Drzwi znajomych nie ruszyły: $error');
+      logZenWarning('Friend doors did not start: $error');
     }
   }
 
@@ -964,7 +984,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       add(uri);
     } catch (error) {
-      logZenWarning('Dodanie mostu $uri nie udało się: $error');
+      logZenWarning('Adding bridge $uri failed: $error');
     }
   }
 
@@ -976,7 +996,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     try {
       remove(uri);
     } catch (error) {
-      logZenWarning('Usunięcie mostu $uri nie udało się: $error');
+      logZenWarning('Removing bridge $uri failed: $error');
     }
   }
 
@@ -986,6 +1006,10 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   int _recoveryAttempt = 0;
   bool _autoRecoveryEnabled = false;
   Future<void>? _starting;
+
+  /// The owner's own logic stopped the node ([stop]) and nothing started it
+  /// since: a send waits for no start of its own then ([_startForSend]).
+  bool _stoppedOnPurpose = false;
   RuntimeTransportSnapshot _snapshot;
   int _lifecycleToken = 0;
 
@@ -1064,6 +1088,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     if (_heldByService || _yielded || _retired || _disposed) {
       return Future<void>.value();
     }
+    _stoppedOnPurpose = false;
     if (_previewMode) {
       if (_snapshot.serviceRunning) {
         return Future<void>.value();
@@ -1140,6 +1165,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       );
       return;
     }
+    _stoppedOnPurpose = true;
     _yielded = false;
     _lookingAgain = false;
     _yieldRetry?.cancel();
@@ -1148,12 +1174,30 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     await _stopNode();
   }
 
+  /// What a send or a relay waits for: the start under way, or one of its
+  /// own while the node is not up yet or was lost. Never a start after the
+  /// owner stopped the node on purpose: a frame of work still under way
+  /// (a queued message's first try, a presence notice, a reply) would start
+  /// the node behind the owner's back — a node that closing the app, an
+  /// account switch, a wipe or the iPhone's locked session had just
+  /// stopped, running on beside the next owner of the identity until
+  /// something stopped it again, while friends' sessions went from one
+  /// node to the other.
+  Future<void> _startForSend() {
+    if (_stoppedOnPurpose) {
+      return _starting ?? Future<void>.value();
+    }
+    return start();
+  }
+
   /// Stops the node without a word about who may start it next.
   Future<void> _stopNode({String? errorMessage}) async {
     _autoRecoveryEnabled = false;
     _cancelRecoveryTimer();
     _lifecycleToken += 1;
     _snapshotRefreshTimer?.cancel();
+    _onScreenBeat?.cancel();
+    _onScreenBeat = null;
     _snapshotRefreshTimer = null;
     await _forwardingSubscription?.cancel();
     _forwardingSubscription = null;
@@ -1238,7 +1282,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     // The session can be missing while the runtime is (re)starting — e.g.
     // right after a background/foreground handoff on Android. Wait for the
     // start instead of silently dropping the payload.
-    await start();
+    await _startForSend();
     final RuntimeNodeSession? session = _session;
     if (session == null) {
       if (_previewMode) {
@@ -1277,7 +1321,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     if (_previewMode) {
       return 0;
     }
-    await start();
+    await _startForSend();
     final RuntimeNodeSession? session = _session;
     if (session == null) {
       return 0;
@@ -1339,6 +1383,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         if (owner.onScreen) {
           _tellOnScreen(session, true);
         }
+        _syncOnScreenBeat();
         for (final String uri in _extraPeers) {
           _addPeerNow(uri);
         }
@@ -1354,7 +1399,13 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       } catch (error, stackTrace) {
         lastError = error;
         final bool outranked = isNodeOwnerYield(error);
-        if (!outranked) {
+        if (!outranked && attempt < maxAttempts) {
+          // Tried again: a warning; only the last attempt is an error.
+          logZenWarning(
+            'Runtime live bootstrap attempt $attempt/$maxAttempts failed: '
+            '$error',
+          );
+        } else if (!outranked) {
           logZenError(
             'Runtime live bootstrap attempt $attempt/$maxAttempts failed',
             error,
@@ -1483,15 +1534,53 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     if (session != null) {
       _tellOnScreen(session, onScreen);
     }
+    _syncOnScreenBeat();
     if (onScreen) {
       _refreshSoon?.call();
     }
   }
 
-  void _tellOnScreen(RuntimeNodeSession session, bool onScreen) {
+  /// Says "on screen" to the bridge again every [kRuntimeOnScreenBeat]
+  /// while Zen is on the screen and the node runs.
+  Timer? _onScreenBeat;
+
+  void _syncOnScreenBeat() {
+    final RuntimeNodeSession? session = _session;
+    if (!_onScreen ||
+        _disposed ||
+        session == null ||
+        session.setOnScreen == null) {
+      _onScreenBeat?.cancel();
+      _onScreenBeat = null;
+      return;
+    }
+    _onScreenBeat ??= Timer.periodic(_onScreenBeatEvery, (_) {
+      final RuntimeNodeSession? current = _session;
+      if (!_onScreen || _disposed || current == null) {
+        _onScreenBeat?.cancel();
+        _onScreenBeat = null;
+        return;
+      }
+      _tellOnScreen(current, true, again: true);
+    });
+  }
+
+  /// Tells the bridge whether Zen is on screen; [again]: the beat's word,
+  /// which a failure ends quietly (the next read of the node finds out
+  /// what became of it) instead of a warning every beat.
+  void _tellOnScreen(
+    RuntimeNodeSession session,
+    bool onScreen, {
+    bool again = false,
+  }) {
     try {
       session.setOnScreen?.call(onScreen);
     } on Object catch (error) {
+      if (again) {
+        _onScreenBeat?.cancel();
+        _onScreenBeat = null;
+        return;
+      }
       logZenWarning('The bridge did not hear whether Zen is on screen: $error');
     }
   }
@@ -1609,6 +1698,8 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     );
     _cancelRecoveryTimer();
     _snapshotRefreshTimer?.cancel();
+    _onScreenBeat?.cancel();
+    _onScreenBeat = null;
     unawaitedLogged(
       _forwardingSubscription?.cancel(),
       context: 'Runtime frame forwarding cancellation failed',
@@ -1645,8 +1736,10 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   // The user's public peers (public_peers.dart) before the node dials any.
   await applyStoredPublicPeers(bridge);
   // Whom the node is for: the bridge settles which owner of the identity
-  // runs it (node_identity.go).
-  final Map<String, dynamic> startResult = bridge.startNode(
+  // runs it (node_identity.go). Off this isolate's thread: taking the
+  // identity over stops the other owner's node (the Android service's)
+  // inside this call, and that must never freeze the screen.
+  final Map<String, dynamic> startResult = await startNodeOffThread(
     withNodeOwner(withNodePeerTarget(configJson, config.peerTarget), owner),
   );
   owner?.started(startResult);
@@ -1682,7 +1775,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
       ),
       onStop: () async {
         await pins.stop();
-        bridge.stopNode(handle);
+        await stopNodeOffThread(handle);
         ZenTechLog.nodeStopped(handle);
       },
     ),
@@ -1912,12 +2005,8 @@ Future<String?> _readNodeConfig(
 
 /// Writes [bytes] so that [file] is always either the old or the new
 /// content, never half of it (a crash or a dead battery mid-write).
-Future<void> _writeAtomically(File file, Uint8List bytes) async {
-  await file.parent.create(recursive: true);
-  final File tmp = File('${file.path}.tmp');
-  await tmp.writeAsBytes(bytes, flush: true);
-  await tmp.rename(file.path);
-}
+Future<void> _writeAtomically(File file, Uint8List bytes) =>
+    writeFileAtomically(file, bytes);
 
 Future<File> _runtimeConfigFile([
   Future<Directory> Function()? supportDirectoryOf,
@@ -1930,6 +2019,86 @@ Future<File> _runtimeConfigFile([
   await runtimeDirectory.create(recursive: true);
   return File(
     '${runtimeDirectory.path}${Platform.pathSeparator}yggdrasil.config.json',
+  );
+}
+
+/// How long a node start or stop may take in the bridge before its caller
+/// stops waiting (the bridge call goes on in its helper isolate).
+const Duration kNodeCallTimeout = Duration(seconds: 45);
+
+/// Runs [call] (a blocking call into the bridge) on a helper isolate and
+/// gives its answer, or a [TimeoutException] after [timeout]. A node
+/// start or stop runs inside the Go library for as long as it takes:
+/// stopping a node closes its links, and taking an identity over stops
+/// the other owner's node first. Called on the UI isolate that froze the
+/// screen (and every timer of the start with it) for that long; a call
+/// that never came back froze it for good.
+@visibleForTesting
+Future<T> runNodeCallOffThread<T>(
+  T Function() call, {
+  Duration timeout = kNodeCallTimeout,
+  String what = 'node call',
+}) {
+  final Future<T> running = Isolate.run<T>(call, debugName: 'zen-$what');
+  return running.timeout(
+    timeout,
+    onTimeout: () {
+      logZenWarning(
+        'The bridge has not answered a $what for ${timeout.inSeconds} s; '
+        'not waiting for it any longer.',
+      );
+      throw TimeoutException('The bridge did not answer a $what.', timeout);
+    },
+  );
+}
+
+/// Starts a node in the bridge off this isolate's thread
+/// ([runNodeCallOffThread]). A start that answers only after its caller
+/// gave up is stopped again: nobody would call on that node.
+Future<Map<String, dynamic>> startNodeOffThread(
+  String configJson, {
+  Duration timeout = kNodeCallTimeout,
+}) {
+  final Future<Map<String, dynamic>> started = _startNodeInHelper(configJson);
+  return started.timeout(
+    timeout,
+    onTimeout: () {
+      logZenWarning(
+        'The bridge has not started the node in ${timeout.inSeconds} s; '
+        'not waiting for it any longer.',
+      );
+      unawaited(
+        started.then((Map<String, dynamic> late) async {
+          final int? handle = (late['handle'] as num?)?.toInt();
+          if (handle != null && handle >= 0) {
+            await stopNodeOffThread(handle);
+          }
+        }, onError: (Object _) {}),
+      );
+      throw TimeoutException('The bridge did not start the node.', timeout);
+    },
+  );
+}
+
+/// The start itself, in a function of its own: the closure sent to the
+/// helper isolate must hold nothing but the config.
+Future<Map<String, dynamic>> _startNodeInHelper(String configJson) =>
+    Isolate.run(
+      () => YggdrasilBridgeFfi.load().startNode(configJson),
+      debugName: 'zen-node-start',
+    );
+
+/// Stops the node [handle] in the bridge off this isolate's thread.
+Future<void> stopNodeOffThread(
+  int handle, {
+  Duration timeout = kNodeCallTimeout,
+}) async {
+  await runNodeCallOffThread<void>(
+    () {
+      YggdrasilBridgeFfi.load().stopNode(handle);
+    },
+    timeout: timeout,
+    what: 'node stop',
   );
 }
 

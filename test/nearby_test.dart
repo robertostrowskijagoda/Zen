@@ -146,8 +146,13 @@ final class _Phone implements MeetHost {
   final StreamController<SignalTransportFrame> frames =
       StreamController<SignalTransportFrame>.broadcast();
 
+  /// What this phone sent over the network (to, payload).
+  final List<(String, Map<String, dynamic>)> sentLog =
+      <(String, Map<String, dynamic>)>[];
+
   @override
   Future<void> send(String to, Map<String, dynamic> payload) async {
+    sentLog.add((to, payload));
     final _Phone? other = mesh[to];
     if (other == null) {
       return;
@@ -255,6 +260,78 @@ void main() {
       bob.nearby.people.where((NearbyPerson p) => p.friend == 'ania'),
       isNotEmpty,
     );
+  });
+
+  test('a friend\'s two devices nearby are that friend: one row under their '
+      'name, and neither asks again for the other\'s keys', () async {
+    final _Air air = _Air();
+    final Map<String, _Phone> mesh = <String, _Phone>{};
+    final _Phone ania = _Phone(air, mesh, 'ania', <String>['bob']);
+    // Ania's computer, an own device of her account.
+    final _Phone laptop = _Phone(air, mesh, 'ania2', <String>['bob']);
+    final _Phone bob = _Phone(air, mesh, 'bob', <String>['ania']);
+    await ania.meet.shareNearbySecret('bob');
+    await laptop.meet.nearbyPrivateKey();
+    // The account routing hands the computer's keys over as from Ania.
+    await bob.meet.handle(
+      SignalTransportFrame(
+        from: 'ania',
+        device: 'ania2',
+        payload: <String, dynamic>{
+          'type': MeetTypes.nearbyKey,
+          'z': laptop.meet.nearbyKeysFor('bob'),
+        },
+        receivedAtMillis: 0,
+      ),
+    );
+    await ania.nearby.setVisible(true);
+    await laptop.nearby.setVisible(true);
+    await bob.nearby.startScanning();
+    ania.radio.broadcast(rssi: -60);
+    laptop.radio.broadcast(rssi: -75);
+    await _settle();
+
+    final NearbyPerson row = bob.nearby.people.single;
+    expect(row.friend, 'ania');
+    expect(row.rssi, -60, reason: 'the newest over Bluetooth');
+
+    // Each device's hello names its own keys: both match.
+    bool askedForKeys() => bob.sentLog.any(
+      ((String, Map<String, dynamic>) s) =>
+          s.$2['type'] == MeetTypes.request &&
+          (s.$2['w'] as List<dynamic>).contains('k'),
+    );
+    await bob.meet.onHello('ania', ania.meet.helloFor('bob'), device: 'ania');
+    await bob.meet.onHello(
+      'ania',
+      laptop.meet.helloFor('bob'),
+      device: 'ania2',
+    );
+    expect(askedForKeys(), isFalse);
+  });
+
+  test('a phone whose token just changed is one row, not two names', () async {
+    final _Air air = _Air();
+    final Map<String, _Phone> mesh = <String, _Phone>{};
+    final _Phone obcy = _Phone(air, mesh, 'obcy', <String>[]);
+    final _Phone bob = _Phone(air, mesh, 'bob', <String>[]);
+    final int slot = kNearbySlot.inMilliseconds;
+    final int edge = (bob.clock ~/ slot + 1) * slot;
+    obcy.clock = bob.clock = edge - 20 * 1000;
+    await obcy.nearby.setVisible(true);
+    await bob.nearby.startScanning();
+    obcy.radio.broadcast();
+    await _settle();
+    final String before = bob.nearby.people.single.pseudonym;
+
+    // Forty seconds on, the next slot: a new token, a new pseudonym.
+    obcy.clock = bob.clock = edge + 20 * 1000;
+    await obcy.nearby.setVisible(true);
+    obcy.radio.broadcast();
+    await _settle();
+    final NearbyPerson now = bob.nearby.people.single;
+    expect(now.pseudonym, isNot(before));
+    expect(now.pseudonym, obcy.nearby.myPseudonym);
   });
 
   test('a hello carries no address; the answer comes over Bluetooth, '
@@ -567,7 +644,9 @@ void main() {
         ..broadcast();
     }
     await _settle();
-    expect(bob.nearby.people, hasLength(2));
+    // One phone (one Bluetooth device), whatever tokens it shows, and not
+    // Ania.
+    expect(bob.nearby.people, hasLength(1));
     expect(
       bob.nearby.people.every((NearbyPerson p) => p.friend == null),
       isTrue,

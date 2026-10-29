@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- What ZenFileProvider may hand out: only the installer copy that
-     "Podaj dalej" puts in the cache for the share sheet. -->
+     "Podaj dalej" puts in the cache for the share sheet, and the printable
+     QR sticker being shared or printed. -->
 <paths>
     <cache-path
         name="shared_apk"
         path="shared_apk/" />
+    <cache-path
+        name="shared_sticker"
+        path="shared_sticker/" />
 </paths>

@@ -127,12 +127,21 @@ class FriendsNewerVersionBanner extends ConsumerWidget {
 }
 
 /// A warning that this build must be updated: in the error colours, leads
-/// to "Aktualizacje i Podaj dalej".
+/// to "Aktualizacje i Podaj dalej" (or wherever [onTap] leads, with
+/// [icon]).
 class UpdateWarningTile extends StatelessWidget {
-  const UpdateWarningTile({required this.title, required this.body, super.key});
+  const UpdateWarningTile({
+    required this.title,
+    required this.body,
+    this.icon = Icons.system_update_outlined,
+    this.onTap,
+    super.key,
+  });
 
   final String title;
   final String body;
+  final IconData icon;
+  final void Function(BuildContext context)? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -145,16 +154,14 @@ class UpdateWarningTile extends StatelessWidget {
         borderRadius: radius,
         child: InkWell(
           borderRadius: radius,
-          onTap: () => unawaited(UpdatesScreen.open(context)),
+          onTap: () => onTap != null
+              ? onTap!(context)
+              : unawaited(UpdatesScreen.open(context)),
           child: Padding(
             padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
             child: Row(
               children: <Widget>[
-                Icon(
-                  Icons.system_update_outlined,
-                  color: scheme.onErrorContainer,
-                  size: 22,
-                ),
+                Icon(icon, color: scheme.onErrorContainer, size: 22),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

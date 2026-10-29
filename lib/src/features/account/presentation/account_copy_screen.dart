@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -18,7 +17,9 @@ import 'package:zen/src/features/account/presentation/account_devices_screen.dar
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
@@ -172,16 +173,15 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
                   child: Column(
                     children: <Widget>[
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(
                           color: ZenFixed.qrPaper,
                           borderRadius: context.zenRadius(20),
                         ),
-                        child: QrImageView(
+                        child: ZenQrView(
                           key: const Key('account-copy-qr'),
                           data: ticket.encode(),
-                          size: 200,
-                          backgroundColor: ZenFixed.qrPaper,
+                          size: 224,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -332,7 +332,14 @@ class _AccountCopyReceiveScreenState
   }
 
   Future<void> _scan() async {
-    final String? text = await ref.read(peerQrScannerProvider).scan(context);
+    final String? text = await scanZenCode(
+      context,
+      ref,
+      accepts: (String text) =>
+          AccountCopyTicket.parse(text) != null ||
+          AccountCopyTicket.otherVersion(text) != null ||
+          zenLinkIntent(text) == null,
+    );
     if (text != null && text.trim().isNotEmpty) {
       _code.text = text.trim();
       await _connect();

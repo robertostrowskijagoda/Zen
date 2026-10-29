@@ -45,7 +45,8 @@ enum GraphMode {
   /// The shortest or cheapest way to a person.
   route,
 
-  /// How the graph grew: 3, 6, 12 months ago (dates kept on this phone).
+  /// How the graph grew, played or at any day (dates kept on this phone);
+  /// the same timeline also opens over every other mode.
   time,
 
   /// Friends who alone connect circles, and circles without connections.

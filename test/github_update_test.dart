@@ -500,7 +500,8 @@ void main() {
     test('a newer release is offered', () async {
       final GithubUpdateService s = service(
         fetchJson: (Uri uri) async {
-          expect(uri, kGithubLatestReleaseUri);
+          // The project's pages first; GitHub's API only when they fail.
+          expect(uri, kZenReleaseInfoUri);
           return _releaseJson('v1.12.0');
         },
       );

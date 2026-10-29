@@ -11,6 +11,7 @@ import 'package:zen/src/domain/signals/queued_signal.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 void main() {
@@ -43,13 +44,15 @@ void main() {
           generation: 2,
           capturedAtMillis: 3,
         ),
-        friends: const <String, FriendProfile>{
-          'ada.ygg': FriendProfile(
-            address: 'ada.ygg',
-            displayName: 'Ada',
-            status: FriendRelationshipStatus.accepted,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            'ada.ygg': FriendProfile(
+              address: 'ada.ygg',
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.accepted,
+            ),
+          },
+        ),
         inbox: const <InboxEntry>[
           InboxEntry(
             id: 'i-1',

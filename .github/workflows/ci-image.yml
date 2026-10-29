@@ -1,0 +1,126 @@
+# Builds the image of CI's Linux build (.github/images/linux-build: Ubuntu
+# 22.04, the build tools, Flutter and Go), publishes it to
+# ghcr.io/robertostrowskijagoda/zen-ci and, when its digest is new, opens a
+# pull request that writes it into .github/images/linux-build/image.txt and
+# starts CI on it: that run builds Linux in the new image, so an image that
+# breaks the build never reaches main. ci.yml uses the image only by that
+# digest and only while the Dockerfile is the one it was built from; without
+# it (before the first run, after a change of the Dockerfile, when the
+# package is not public) the job installs its tools on the runner as before
+# (tool/ci/ci_plan.py).
+#
+# Runs on main when the image's files change, once a month (the system's
+# security updates) and by hand (Actions -> CI image -> Run workflow, from
+# main). This is the only workflow that may write packages.
+#
+# Once, after the first run: GitHub -> your profile -> Packages -> zen-ci ->
+# Package settings -> Change visibility -> Public (ci_plan.py pulls it
+# without a login, as every job does, pull requests from forks included),
+# and check that "Manage Actions access" lists this repository with the Write
+# role (the first push from this workflow links the package to the
+# repository, which gives it that role). docs/TESTING.md, section 6.
+#
+# Actions are pinned to commit SHAs; the image is built with the runner's
+# docker, no third-party action. The token: packages to push the image,
+# contents and pull-requests for the branch and the pull request (only
+# image.txt is ever committed), actions to start CI on that branch (a push
+# made with this token starts no workflow).
+name: CI image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/images/linux-build/Dockerfile'
+      - '.github/images/linux-build/Dockerfile.dockerignore'
+      - '.github/workflows/ci-image.yml'
+  schedule:
+    - cron: '41 3 7 * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/robertostrowskijagoda/zen-ci
+
+jobs:
+  build:
+    name: Build and publish the Linux build image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The repository is the build context; Dockerfile.dockerignore lets in
+      # only the files of the head start.
+      - name: Build
+        run: >-
+          docker build --pull
+          --file .github/images/linux-build/Dockerfile
+          --tag "$IMAGE:candidate" .
+
+      - name: The tools are there
+        run: |
+          docker run --rm "$IMAGE:candidate" sh -c '
+            set -e
+            flutter --version
+            go version
+            for tool in git clang cmake ninja pkg-config g++ make xvfb-run xauth \
+                dpkg-deb dpkg-shlibdeps objdump file python3 curl; do
+              command -v "$tool" > /dev/null || { echo "missing: $tool"; exit 1; }
+            done
+            pkg-config --exists gtk+-3.0 gstreamer-1.0 libsecret-1 ayatana-appindicator3-0.1 libpulse'
+
+      - name: Publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag "$IMAGE:candidate" "$IMAGE:$tag"
+          docker tag "$IMAGE:candidate" "$IMAGE:latest"
+          docker push "$IMAGE:$tag" | tee "$RUNNER_TEMP/push.log"
+          docker push "$IMAGE:latest"
+          docker logout ghcr.io
+          digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' "$RUNNER_TEMP/push.log" | tail -n 1)
+          test -n "$digest"
+          echo "Published $IMAGE:$tag ($digest)." >> "$GITHUB_STEP_SUMMARY"
+          echo "reference=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+
+      - name: image.txt for the new image
+        id: record
+        env:
+          REFERENCE: ${{ steps.publish.outputs.reference }}
+        run: python3 tool/ci/ci_plan.py record .github/images/linux-build "$REFERENCE" >> "$GITHUB_OUTPUT"
+
+      - name: Pull request
+        if: steps.record.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REFERENCE: ${{ steps.publish.outputs.reference }}
+        run: |
+          branch="ci-image/${GITHUB_SHA::7}-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add .github/images/linux-build/image.txt
+          git commit -m "Use the new Linux build image"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Use the new Linux build image" \
+            --body "CI's Linux build moves to $REFERENCE, built from the current .github/images/linux-build/Dockerfile. This changes only image.txt; the CI run of this pull request builds Linux in the new image." \
+            || echo "Open the pull request by hand: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?expand=1" >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run ci.yml --ref "$branch"

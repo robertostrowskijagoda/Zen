@@ -36,6 +36,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -49,17 +50,19 @@ const String _defaultAdaPreview =
 
 SocialHubState _defaultAdaSocialState() {
   return SocialHubState.empty().copyWith(
-    friends: const <String, FriendProfile>{
-      _defaultAdaAddress: FriendProfile(
-        address: _defaultAdaAddress,
-        displayName: 'Ada',
-        status: FriendRelationshipStatus.accepted,
-        isOnline: true,
-        lastMessagePreview: _defaultAdaPreview,
-        lastActivityLabel: 'Teraz',
-        unreadCount: 1,
-      ),
-    },
+    book: FriendshipBook.restore(
+      profiles: const <String, FriendProfile>{
+        _defaultAdaAddress: FriendProfile(
+          address: _defaultAdaAddress,
+          displayName: 'Ada',
+          status: FriendRelationshipStatus.accepted,
+          isOnline: true,
+          lastMessagePreview: _defaultAdaPreview,
+          lastActivityLabel: 'Teraz',
+          unreadCount: 1,
+        ),
+      },
+    ),
   );
 }
 
@@ -205,14 +208,16 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                _defaultAdaAddress: FriendProfile(
-                  address: _defaultAdaAddress,
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.blocked,
-                  blockNote: 'Spam',
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _defaultAdaAddress: FriendProfile(
+                    address: _defaultAdaAddress,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.blocked,
+                    blockNote: 'Spam',
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -744,13 +749,15 @@ void main() {
           overrides: [
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  peerAddress: FriendProfile(
-                    address: peerAddress,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    peerAddress: FriendProfile(
+                      address: peerAddress,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
                 activeCall: const CallSession(
                   id: 'call-shell-1',
                   peerAddress: peerAddress,
@@ -810,13 +817,15 @@ void main() {
             callMediaSessionControllerProvider.overrideWithValue(callMedia),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  peerAddress: FriendProfile(
-                    address: peerAddress,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    peerAddress: FriendProfile(
+                      address: peerAddress,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
               ),
             ),
           ],
@@ -882,13 +891,15 @@ void main() {
             callMediaSessionControllerProvider.overrideWithValue(callMedia),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  peerAddress: FriendProfile(
-                    address: peerAddress,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    peerAddress: FriendProfile(
+                      address: peerAddress,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
                 activeCall: const CallSession(
                   id: 'call-shell-2',
                   peerAddress: peerAddress,
@@ -955,13 +966,15 @@ void main() {
             callMediaSessionControllerProvider.overrideWithValue(callMedia),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  peerAddress: FriendProfile(
-                    address: peerAddress,
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    peerAddress: FriendProfile(
+                      address: peerAddress,
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
                 activeCall: const CallSession(
                   id: 'call-notification-accept',
                   peerAddress: peerAddress,
@@ -1027,13 +1040,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                peerAddress: FriendProfile(
-                  address: peerAddress,
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  peerAddress: FriendProfile(
+                    address: peerAddress,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
               activeCall: const CallSession(
                 id: 'call-shell-surface',
                 peerAddress: peerAddress,
@@ -1073,13 +1088,15 @@ void main() {
         callMediaSessionControllerProvider.overrideWithValue(callMedia),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty().copyWith(
-            friends: const <String, FriendProfile>{
-              peerAddress: FriendProfile(
-                address: peerAddress,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                peerAddress: FriendProfile(
+                  address: peerAddress,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
             activeCall: const CallSession(
               id: 'call-shell-controls',
               peerAddress: peerAddress,
@@ -1128,13 +1145,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                peerAddress: FriendProfile(
-                  address: peerAddress,
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  peerAddress: FriendProfile(
+                    address: peerAddress,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
               activeCall: const CallSession(
                 id: 'call-chat-surface',
                 peerAddress: peerAddress,
@@ -1179,12 +1198,14 @@ void main() {
           // sent can be completed by the other side's accept.
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  status: FriendRelationshipStatus.pendingOutgoing,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    status: FriendRelationshipStatus.pendingOutgoing,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -1622,13 +1643,15 @@ void main() {
           ),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -1682,13 +1705,15 @@ void main() {
           ),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -1728,13 +1753,15 @@ void main() {
           messageTimelineStoreProvider.overrideWithValue(timelineStore),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -1792,13 +1819,15 @@ void main() {
         ),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty().copyWith(
-            friends: const <String, FriendProfile>{
-              '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
-                address: '200:1111:2222:3333:4444:5555:6666:7777',
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                  address: '200:1111:2222:3333:4444:5555:6666:7777',
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
           ),
         ),
       ],
@@ -1849,13 +1878,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
-                  address: '200:1111:2222:3333:4444:5555:6666:7777',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                    address: '200:1111:2222:3333:4444:5555:6666:7777',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -1929,13 +1960,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
               activeCall: const CallSession(
                 id: 'call-1',
                 peerAddress: 'ada.ygg',
@@ -1982,13 +2015,15 @@ void main() {
             ),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
-                    address: '200:1111:2222:3333:4444:5555:6666:7777',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                      address: '200:1111:2222:3333:4444:5555:6666:7777',
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
                 activeCall: const CallSession(
                   id: 'call-1',
                   peerAddress: '200:1111:2222:3333:4444:5555:6666:7777',
@@ -2063,13 +2098,15 @@ void main() {
           ),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
-                  address: '200:1111:2222:3333:4444:5555:6666:7777',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                    address: '200:1111:2222:3333:4444:5555:6666:7777',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
               activeCall: const CallSession(
                 id: 'call-controls',
                 peerAddress: '200:1111:2222:3333:4444:5555:6666:7777',
@@ -2327,13 +2364,15 @@ void main() {
                 capturedAtMillis: 0,
               ),
             ).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.pendingOutgoing,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.pendingOutgoing,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2395,13 +2434,15 @@ void main() {
                 capturedAtMillis: 0,
               ),
             ).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2465,13 +2506,15 @@ void main() {
                 capturedAtMillis: 0,
               ),
             ).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2542,13 +2585,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
               inbox: const <InboxEntry>[
                 InboxEntry(
                   id: 'accept-ada',
@@ -2595,13 +2640,15 @@ void main() {
           signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2688,13 +2735,15 @@ void main() {
             appSecurityServiceProvider.overrideWithValue(security),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  'ada.ygg': FriendProfile(
-                    address: 'ada.ygg',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    'ada.ygg': FriendProfile(
+                      address: 'ada.ygg',
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
               ),
             ),
           ],
@@ -2826,13 +2875,15 @@ void main() {
           signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2874,13 +2925,15 @@ void main() {
           overrides: [
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  'ada.ygg': FriendProfile(
-                    address: 'ada.ygg',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    'ada.ygg': FriendProfile(
+                      address: 'ada.ygg',
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                  },
+                ),
               ),
             ),
           ],
@@ -2926,13 +2979,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -2973,14 +3028,16 @@ void main() {
           overrides: [
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: const <String, FriendProfile>{
-                  'ada.ygg': FriendProfile(
-                    address: 'ada.ygg',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                    isTyping: true,
-                  ),
-                },
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    'ada.ygg': FriendProfile(
+                      address: 'ada.ygg',
+                      displayName: 'Ada',
+                      status: FriendRelationshipStatus.accepted,
+                      isTyping: true,
+                    ),
+                  },
+                ),
               ),
             ),
           ],
@@ -3013,13 +3070,15 @@ void main() {
         overrides: [
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],
@@ -3090,6 +3149,131 @@ void main() {
     // Answered: the card goes, the code screen stays.
     expect(find.text('OTRZYMANO ZAPROSZENIE'), findsNothing);
     expect(find.text('Mój kod'), findsOneWidget);
+  });
+
+  testWidgets('a request arriving while the code is on screen shows up there '
+      'at once, in the notification list too, and can be declined right '
+      'there', (WidgetTester tester) async {
+    await tester.pumpWidget(const ProviderScope(child: ZenRewriteApp()));
+    await tester.pump();
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AppShellScreen)),
+    );
+    await tester.tap(find.byKey(const Key('status-my-code')));
+    await tester.pumpAndSettle();
+
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .receiveSignal(
+          const ZenSignal(
+            type: ZenSignalType.friendRequest,
+            sender: 'kuba.ygg',
+            displayName: 'Kuba',
+          ),
+        );
+    // No navigation, no reload: the card is on the code screen as it is.
+    await tester.pumpAndSettle();
+    expect(find.text('OTRZYMANO ZAPROSZENIE'), findsOneWidget);
+    expect(find.text('Kuba'), findsOneWidget);
+    expect(find.byKey(const Key('qr-request-kuba.ygg')), findsOneWidget);
+    // In the notification list as before.
+    expect(
+      container
+          .read(socialHubControllerProvider)
+          .inbox
+          .where((InboxEntry e) => e.type == InboxEntryType.friendRequest)
+          .map((InboxEntry e) => e.peerAddress),
+      <String>['kuba.ygg'],
+    );
+
+    await tester.tap(find.byKey(const Key('qr-reject-kuba.ygg')));
+    await tester.pumpAndSettle();
+    expect(find.text('OTRZYMANO ZAPROSZENIE'), findsNothing);
+    expect(
+      container.read(socialHubControllerProvider).friendByAddress('kuba.ygg'),
+      isNull,
+    );
+    expect(find.text('Mój kod'), findsOneWidget);
+  });
+
+  group('the note that a friendship is ready names the friend', () {
+    Future<ProviderContainer> openInvitation(WidgetTester tester) async {
+      // An invitation sent by scanning a code: the name is not known yet.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            socialHubSeedProvider.overrideWithValue(
+              SocialHubState.empty().copyWith(
+                book: FriendshipBook.restore(
+                  profiles: const <String, FriendProfile>{
+                    'ada.ygg': FriendProfile(
+                      address: 'ada.ygg',
+                      status: FriendRelationshipStatus.pendingOutgoing,
+                    ),
+                  },
+                ),
+              ),
+            ),
+          ],
+          child: const ZenRewriteApp(),
+        ),
+      );
+      await tester.pump();
+      return ProviderScope.containerOf(
+        tester.element(find.byType(AppShellScreen)),
+      );
+    }
+
+    Future<void> openChat(WidgetTester tester) async {
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('conversation-card-ada.ygg')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('by the name the answer brings', (WidgetTester tester) async {
+      final ProviderContainer container = await openInvitation(tester);
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.friendAccept,
+              sender: 'ada.ygg',
+              displayName: 'Ada',
+            ),
+          );
+      await openChat(tester);
+      expect(find.text('Połączenie z Ada jest gotowe.'), findsOneWidget);
+      expect(find.textContaining('Kontakt Zen'), findsNothing);
+    });
+
+    testWidgets('without a placeholder until the name is known, then by the '
+        'name', (WidgetTester tester) async {
+      final ProviderContainer container = await openInvitation(tester);
+      final SocialHubController hub = container.read(
+        socialHubControllerProvider.notifier,
+      );
+      await hub.receiveSignal(
+        const ZenSignal(type: ZenSignalType.friendAccept, sender: 'ada.ygg'),
+      );
+      await openChat(tester);
+      expect(find.textContaining('Kontakt Zen jest gotowe'), findsNothing);
+      expect(
+        find.text('Połączenie gotowe. Możesz pisać od razu.'),
+        findsOneWidget,
+      );
+
+      // Her profile comes: the note on the screen says her name.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.profileUpdate,
+          sender: 'ada.ygg',
+          displayName: 'Ada',
+          sentAtMillis: 1,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Połączenie z Ada jest gotowe.'), findsOneWidget);
+    });
   });
 }
 

@@ -9,8 +9,12 @@ Used by .github/workflows/pages.yml (Python 3, standard library only):
   link on the install page). It names the unsigned iPhone file of the
   latest published release; SideStore signs it with the person's own
   Apple ID when it installs it.
-- `release.json`: the version, date, files and sizes of that release and
-  the Android signing certificate fingerprint, for the install page.
+- `release.json`: the version, tag, date, files and sizes of that release,
+  the oldest Zen it still supports (`minVersion`, its `zen-min:` line) and
+  the Android signing certificate fingerprint, for the install page and
+  for the app's update check, which asks here first (no rate limit, unlike
+  GitHub's API) and checks every file it installs against the release's
+  own SHA256SUMS.
 
 Everything about the app comes from the release itself, never from the
 default branch: AltStore refuses an app whose permissions differ from the
@@ -124,6 +128,23 @@ def build_number(repo, tag, token):
         return None
     match = re.search(r"^version:\s*([0-9][0-9.]*)\+(\d+)", text, re.M)
     return (match.group(1), match.group(2)) if match else None
+
+
+ZEN_MIN = re.compile(r"^\s*zen-min:\s*(\d{1,4}\.\d{1,4}\.\d{1,4})\s*$", re.M)
+
+
+def version_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def min_version(body, version):
+    """The `zen-min: X.Y.Z` line of the release notes (as the app reads it,
+    kZenMinLine), when it is not above the release itself; "" otherwise."""
+    match = ZEN_MIN.search(body or "") if isinstance(body, str) else None
+    if not match or not re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}", version or ""):
+        return ""
+    found = match.group(1)
+    return found if version_key(found) <= version_key(version) else ""
 
 
 def usage_descriptions(info):
@@ -391,6 +412,7 @@ def sources(args):
         "tag": tag,
         "date": date,
         "url": (release or {}).get("html_url", ""),
+        "minVersion": min_version((release or {}).get("body"), tag[1:] if tag.startswith("v") else ""),
         "assets": assets,
         "apkCertificateSha256": pinned[0] if pinned else "",
         "apkCertificatesSha256": pinned,

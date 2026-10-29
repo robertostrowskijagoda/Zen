@@ -39,11 +39,22 @@ final class SignalTransportFrame {
     required this.receivedAtMillis,
     this.door = false,
     this.senderKey,
+    this.device,
   });
 
   final String from;
   final Map<String, dynamic> payload;
   final int receivedAtMillis;
+
+  /// The device that sent it, when [from] names the friend it belongs to
+  /// instead (the account routing hands a friend's other devices' frames
+  /// over as from the address the app knows them by); `null`: [from]
+  /// itself. What each device tells of itself (presence, its nearby keys)
+  /// is kept per device by it.
+  final String? device;
+
+  /// [device], or [from] when it is the device itself.
+  String get sender => device ?? from;
 
   /// Fingerprint (SHA-256, hex) of the sender's post-quantum device key
   /// that sealed and authenticated the frame (pq_session.go); null where

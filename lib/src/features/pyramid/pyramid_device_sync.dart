@@ -108,7 +108,7 @@ final class PyramidDeviceSync {
       try {
         await work();
       } on Object catch (error, stack) {
-        logZenError('Piramida na urządzeniach konta', error, stack);
+        logZenError('Pyramid on the account devices', error, stack);
       }
     });
   }

@@ -189,7 +189,7 @@ final class PlanService extends ChangeNotifier {
         );
       notifyListeners();
     } on Object catch (error, stack) {
-      logZenError('Odczyt planów', error, stack);
+      logZenError('Reading plans', error, stack);
     }
   }
 

@@ -94,6 +94,6 @@ final class PyramidCellChats {
       if (await apply(wanted)) {
         _last = signature;
       }
-    }(), context: 'Czaty komórek piramidy');
+    }(), context: 'Pyramid cell chats');
   }
 }

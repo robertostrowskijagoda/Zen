@@ -37,7 +37,7 @@ Set<String> datingGateContacts(Ref ref) {
           PeerShareCodec.normalizeAddress(c.asker),
     };
   } on Object catch (error, stack) {
-    logZenError('Randki: bramy', error, stack);
+    logZenError('Dating: gates', error, stack);
     return const <String>{};
   }
 }
@@ -117,7 +117,7 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
   );
   unawaitedLogged(
     dating.load().then((_) => dating.tick()),
-    context: 'Odczyt randek',
+    context: 'Reading dating',
   );
   listenFrames(ref, dating.handle, 'Randki');
   ref.onDispose(dating.dispose);
@@ -130,11 +130,11 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
 /// (the lantern not right at start, so it does not mark when the app was
 /// opened).
 void datingMinute(DatingService dating, int minute) {
-  unawaitedLogged(dating.tick(), context: 'Randki: terminy');
+  unawaitedLogged(dating.tick(), context: 'Dating: dates');
   if (minute % 10 != 0) {
     return;
   }
-  unawaitedLogged(dating.maybePublish(), context: 'Randki: latarnia');
+  unawaitedLogged(dating.maybePublish(), context: 'Dating: beacon');
   if (dating.mySafeDate != null) {
     unawaitedLogged(
       currentFix().then((GeoFix? fix) async {
@@ -142,7 +142,7 @@ void datingMinute(DatingService dating, int minute) {
           await dating.updateSafeLocation(fix.lat, fix.lon);
         }
       }),
-      context: 'Randki: położenie',
+      context: 'Dating: location',
     );
   }
 }

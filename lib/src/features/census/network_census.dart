@@ -298,7 +298,9 @@ final class NetworkCensus extends ChangeNotifier {
         _read(json);
       }
     } on Object catch (error) {
-      logZenWarning('Licznik sieci jest uszkodzony; zaczynam od zera: $error');
+      logZenWarning(
+        'The network census is damaged; starting from scratch: $error',
+      );
     }
     _roll();
     if (_addSelf()) {

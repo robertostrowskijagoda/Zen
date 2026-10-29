@@ -185,12 +185,21 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         // From the first of the two (hidden comes before paused).
+        final bool leaving = _pausedAt == null;
         _pausedAt ??= DateTime.now();
         _startBackgroundLock(security);
+        if (leaving) {
+          // "Nie blokuj od razu po zamknięciu aplikacji": should the system
+          // close Zen now, a start before the delay is over still opens.
+          unawaited(security.keepResumeSession());
+        }
         break;
       case AppLifecycleState.detached:
         if (security.lockMode == AppLockMode.appClose) {
           security.lock();
+        } else if (_pausedAt == null) {
+          // Closed straight from the screen (a computer's window).
+          unawaited(security.keepResumeSession());
         }
         break;
       case AppLifecycleState.resumed:
@@ -201,6 +210,9 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
             DateTime.now().difference(_pausedAt!) >
                 Duration(seconds: security.backgroundLockDelaySeconds)) {
           security.lock();
+        } else {
+          // Back in time, the key in memory: nothing waits outside it.
+          unawaited(security.dropResumeSession());
         }
         _pausedAt = null;
         break;
@@ -276,6 +288,17 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
             !(security.encryptionEnabled &&
                 security.hasPassword &&
                 security.isLocked)) {
+          // The documents are still being read and were accepted before:
+          // wait for their version rather than flash "they changed".
+          if (legalVersionNow(ref.watch(legalTextsProvider)) == null &&
+              ref
+                  .watch(appSettingsControllerProvider)
+                  .legalAcceptedVersion
+                  .isNotEmpty) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
           // Before anything is made (the app password, the account): the
           // terms, the privacy policy and the licence notice; asked again
           // when their version changes (after unlocking, if locked).
@@ -779,28 +802,30 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             Center(
               child: TextButton(
                 key: const Key('app-unlock-forgot-button'),
-                style: TextButton.styleFrom(
-                  foregroundColor: zen.textMuted,
-                  textStyle: const TextStyle(fontSize: 12.5),
-                ),
+                style: TextButton.styleFrom(foregroundColor: zen.textMuted),
                 onPressed: _isSubmitting
                     ? null
                     : () => setState(() => _forgot = true),
-                child: Text(t('Nie pamiętam hasła — zacznij od nowa')),
+                child: Text(
+                  t('Nie pamiętam hasła — zacznij od nowa'),
+                  // The size only: the app's font stays.
+                  style: const TextStyle(fontSize: 12.5),
+                ),
               ),
             ),
             // Discreet: the same on every device, accounts or not.
             Center(
               child: TextButton(
                 key: const Key('app-unlock-other-account'),
-                style: TextButton.styleFrom(
-                  foregroundColor: zen.textMuted,
-                  textStyle: const TextStyle(fontSize: 12.5),
-                ),
+                style: TextButton.styleFrom(foregroundColor: zen.textMuted),
                 onPressed: _isSubmitting
                     ? null
                     : () => setState(() => _other = true),
-                child: Text(t('Inne konto')),
+                child: Text(
+                  t('Inne konto'),
+                  // The size only: the app's font stays.
+                  style: const TextStyle(fontSize: 12.5),
+                ),
               ),
             ),
           ],

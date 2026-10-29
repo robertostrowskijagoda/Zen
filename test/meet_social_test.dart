@@ -15,6 +15,7 @@ import 'package:zen/src/features/meet/presentation/graph_screen.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -319,18 +320,20 @@ void main() {
     final String b = addr('b2');
     final String x = addr('x9');
     final SocialHubState social = SocialHubState.empty().copyWith(
-      friends: <String, FriendProfile>{
-        a: FriendProfile(
-          address: a,
-          displayName: 'Ania',
-          status: FriendRelationshipStatus.accepted,
-        ),
-        b: FriendProfile(
-          address: b,
-          displayName: 'Bob',
-          status: FriendRelationshipStatus.accepted,
-        ),
-      },
+      book: FriendshipBook.restore(
+        profiles: <String, FriendProfile>{
+          a: FriendProfile(
+            address: a,
+            displayName: 'Ania',
+            status: FriendRelationshipStatus.accepted,
+          ),
+          b: FriendProfile(
+            address: b,
+            displayName: 'Bob',
+            status: FriendRelationshipStatus.accepted,
+          ),
+        },
+      ),
     );
     final MeetBook book = MeetBook()
       ..friendLists[a] = <String, String>{x: 'Xawery', b: 'Bob'}

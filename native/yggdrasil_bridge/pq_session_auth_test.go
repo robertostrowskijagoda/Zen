@@ -40,6 +40,9 @@ func (n *pqTestNet) pqImpostor(nodeKey ed25519.PrivateKey, ip net.IP) *pqEndpoin
 			return nil
 		},
 		now: func() time.Time { return n.clock },
+		after: func(d time.Duration, f func()) {
+			n.timers = append(n.timers, pqTestTimer{at: n.clock.Add(d), f: f})
+		},
 	}
 }
 
@@ -248,14 +251,22 @@ func TestPQUnknownChallengeStartsANewSession(t *testing.T) {
 	a.mu.Lock()
 	a.peers[bIP.String()].send.acked = false
 	a.mu.Unlock()
-	network.clock = network.clock.Add(pqUnknownReplyInterval)
+	network.clock = network.clock.Add(pqUnknownReplyInterval + pqResendWindow)
+	stale := a.peers[bIP.String()].send
 
 	mustSend(t, a, bIP, "zgubione")
-	network.pump()
+	// The frame opens no session at B; B's answer ends A's session.
+	network.deliver(network.queue[0])
+	network.queue = network.queue[1:]
 	if got := network.take(bIP); len(got) != 0 {
 		t.Fatalf("B opened a session without its challenge: %q", got)
 	}
-	if a.peers[bIP.String()].send != nil {
+	network.pump()
+	// It went again under a new session, made with B's new challenge.
+	if got := network.take(bIP); len(got) != 1 || got[0] != "zgubione" {
+		t.Fatalf("B got %q", got)
+	}
+	if session := a.peers[bIP.String()].send; session == nil || session == stale {
 		t.Fatal("B's answer must end A's session")
 	}
 	mustSend(t, a, bIP, "znowu")

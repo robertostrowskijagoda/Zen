@@ -7,7 +7,7 @@
 #
 # The baseline is Ubuntu 22.04 (glibc 2.35, GCC 12's libstdc++ 3.4.30),
 # which the release is built on: Ubuntu 22.04+, Debian 12+, Linux Mint 21+
-# (README, "Linux"). A binary linked on a newer system picks up newer symbol
+# (docs/INSTALL.md, "Linux"). A binary linked on a newer system picks up newer symbol
 # versions (e.g. __isoc23_strtol@GLIBC_2.38) and then fails to start on
 # older ones with "GLIBC_2.38 not found". Needs objdump (binutils).
 set -eu

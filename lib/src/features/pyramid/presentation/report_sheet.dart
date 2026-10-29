@@ -101,7 +101,7 @@ Future<bool> _deleteLocal(Future<void> Function() deleteLocal) async {
     await deleteLocal();
     return true;
   } on Object catch (error, stackTrace) {
-    logZenError('Usuwanie zgłoszonej treści', error, stackTrace);
+    logZenError('Deleting reported content', error, stackTrace);
     return false;
   }
 }

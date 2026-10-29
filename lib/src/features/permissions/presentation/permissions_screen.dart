@@ -156,7 +156,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         await _platform.request(p);
       }
     } on Object catch (error) {
-      logZenWarning('Uprawnienia (${p.name}): $error');
+      logZenWarning('Permissions (${p.name}): $error');
     }
     _asked.add(p);
     if (!mounted) {
@@ -202,7 +202,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         await nearby.setVisible(true);
       }
     } on Object catch (error, stack) {
-      logZenError('Widoczność w pobliżu', error, stack);
+      logZenError('Visibility nearby', error, stack);
     }
   }
 
@@ -220,7 +220,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
           .read(appSettingsControllerProvider.notifier)
           .setPermissionsSetupDone(true);
     } on Object catch (error, stack) {
-      logZenError('Zapis ustawień', error, stack);
+      logZenError('Saving settings', error, stack);
       if (mounted) {
         setState(() => _finishing = false);
       }

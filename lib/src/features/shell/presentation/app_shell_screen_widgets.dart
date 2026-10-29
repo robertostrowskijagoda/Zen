@@ -580,10 +580,10 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
           },
           onHover: (bool hovering) => setState(() => _isHovered = hovering),
           onLongPress: () {
-            _showConversationActionSheet(context, ref, conversation);
+            _showConversationActionSheet(context, conversation);
           },
           onSecondaryTap: () {
-            _showConversationActionSheet(context, ref, conversation);
+            _showConversationActionSheet(context, conversation);
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -729,10 +729,20 @@ class _SheetAction extends StatelessWidget {
 
 void _showConversationActionSheet(
   BuildContext context,
-  WidgetRef ref,
   ConversationPreview conversation,
 ) {
   final ZenColors zen = ZenColors.of(context);
+  // The card that opened the sheet may be gone by the time an action is
+  // picked (the list re-sorts as friends' presence changes): what follows
+  // the sheet (a confirmation, then the change itself) runs from the
+  // navigator and the provider scope, which outlive the card. From the
+  // card's context the confirmation of "Usuń znajomego" threw and the
+  // friend was never removed.
+  final NavigatorState navigator = Navigator.of(context);
+  final ProviderContainer container = ProviderScope.containerOf(
+    context,
+    listen: false,
+  );
   final bool pending =
       conversation.status == FriendRelationshipStatus.pendingOutgoing;
   final bool online = conversation.isOnline && !pending;
@@ -836,7 +846,7 @@ void _showConversationActionSheet(
                   danger: true,
                   onTap: () async {
                     Navigator.of(sheetContext).pop();
-                    await ref
+                    await container
                         .read(socialHubControllerProvider.notifier)
                         .cancelOutgoingRequest(
                           peerAddress: conversation.address,
@@ -850,7 +860,11 @@ void _showConversationActionSheet(
                   danger: true,
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    _confirmAndBlockFriend(context, ref, conversation);
+                    _confirmAndBlockFriend(
+                      navigator.context,
+                      container,
+                      conversation,
+                    );
                   },
                 ),
               ] else ...<Widget>[
@@ -861,7 +875,7 @@ void _showConversationActionSheet(
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     _openConversationScreen(
-                      context,
+                      navigator.context,
                       peerAddress: conversation.address,
                       title: conversation.name,
                     );
@@ -873,7 +887,11 @@ void _showConversationActionSheet(
                   tone: zen.tone(ZenTone.people),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    _promptFriendNickname(context, ref, conversation);
+                    _promptFriendNickname(
+                      navigator.context,
+                      container,
+                      conversation,
+                    );
                   },
                 ),
                 _SheetAction(
@@ -883,7 +901,11 @@ void _showConversationActionSheet(
                   danger: true,
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    _confirmAndClearHistory(context, ref, conversation);
+                    _confirmAndClearHistory(
+                      navigator.context,
+                      container,
+                      conversation,
+                    );
                   },
                 ),
                 _SheetAction(
@@ -893,7 +915,11 @@ void _showConversationActionSheet(
                   danger: true,
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    _confirmAndRemoveFriend(context, ref, conversation);
+                    _confirmAndRemoveFriend(
+                      navigator.context,
+                      container,
+                      conversation,
+                    );
                   },
                 ),
                 _SheetAction(
@@ -903,7 +929,11 @@ void _showConversationActionSheet(
                   danger: true,
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    _confirmAndBlockFriend(context, ref, conversation);
+                    _confirmAndBlockFriend(
+                      navigator.context,
+                      container,
+                      conversation,
+                    );
                   },
                 ),
               ],
@@ -917,7 +947,7 @@ void _showConversationActionSheet(
 
 Future<void> _confirmAndRemoveFriend(
   BuildContext context,
-  WidgetRef ref,
+  ProviderContainer container,
   ConversationPreview conversation,
 ) async {
   final bool? confirmed = await showDialog<bool>(
@@ -952,7 +982,7 @@ Future<void> _confirmAndRemoveFriend(
   );
 
   if (confirmed == true) {
-    await ref
+    await container
         .read(socialHubControllerProvider.notifier)
         .removeFriend(peerAddress: conversation.address);
   }
@@ -960,7 +990,7 @@ Future<void> _confirmAndRemoveFriend(
 
 Future<void> _confirmAndBlockFriend(
   BuildContext context,
-  WidgetRef ref,
+  ProviderContainer container,
   ConversationPreview conversation,
 ) async {
   final bool? confirmed = await showDialog<bool>(
@@ -997,7 +1027,7 @@ Future<void> _confirmAndBlockFriend(
   );
 
   if (confirmed == true) {
-    await ref
+    await container
         .read(socialHubControllerProvider.notifier)
         .blockFriend(peerAddress: conversation.address);
   }
@@ -1005,7 +1035,7 @@ Future<void> _confirmAndBlockFriend(
 
 Future<void> _confirmAndClearHistory(
   BuildContext context,
-  WidgetRef ref,
+  ProviderContainer container,
   ConversationPreview conversation,
 ) async {
   final bool? confirmed = await showDialog<bool>(
@@ -1046,7 +1076,7 @@ Future<void> _confirmAndClearHistory(
   );
 
   if (confirmed == true) {
-    await ref
+    await container
         .read(socialHubControllerProvider.notifier)
         .clearConversationHistory(peerAddress: conversation.address);
   }
@@ -1054,10 +1084,10 @@ Future<void> _confirmAndClearHistory(
 
 Future<void> _promptFriendNickname(
   BuildContext context,
-  WidgetRef ref,
+  ProviderContainer container,
   ConversationPreview conversation,
 ) async {
-  final FriendProfile? friend = ref
+  final FriendProfile? friend = container
       .read(socialHubControllerProvider)
       .friendByAddress(conversation.address);
   if (friend == null) {
@@ -1071,7 +1101,7 @@ Future<void> _promptFriendNickname(
     return;
   }
   try {
-    await ref
+    await container
         .read(socialHubControllerProvider.notifier)
         .setFriendNickname(
           peerAddress: conversation.address,

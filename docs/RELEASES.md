@@ -9,10 +9,12 @@ UI strings quoted below are the app's English labels ("Pass it on" is the
 in-app way of handing Zen to a friend).
 
 - **Repository:** https://github.com/robertostrowskijagoda/Zen
-- **Website:** the human-facing page is the repository `README.md`. The only
-  file on GitHub Pages is the invitation page (`tool/pages/index.html`,
-  workflow `pages.yml`); it opens Zen with the code from a QR code or shows
-  the download links.
+- **Website:** https://robertostrowskijagoda.github.io/Zen/ (`tool/pages`,
+  deployed by `pages.yml`): the invitation page (it opens Zen
+  with the code from a QR code or shows the download links), the install
+  pages, the guide, features, support, about and promo materials pages,
+  and the SideStore source. On GitHub the human-facing page is the
+  repository `README.md`, with the details in `docs/INSTALL.md`.
 - **Android package:** `com.roj.zen`.
 - **License:** `LICENSE` — GPL-3.0-only (the unmodified GNU text), with
   additional terms under GPL section 7 in `NOTICE`: copies keep the author
@@ -52,7 +54,15 @@ in-app way of handing Zen to a friend).
    address, the hreflang alternates of its 21 languages (`?lang=xx`,
    English without it), Open Graph and Twitter card tags (the picture
    `og-image.png` and the icons of `manifest.webmanifest` are drawn by
-   `tool/ci/site_images.py`; run it again after the icon changes) and, on
+   `tool/ci/site_images.py`; run it again after the icon changes; the
+   app's screenshots and short films in `tool/pages/shots/` are made by
+   `dart run tool/screenshots.dart`, see docs/TESTING.md, section 4.2,
+   and are worth making again before a release that changes these
+   screens; the poster, its preview and the QR codes of the about page in
+   `tool/pages/promo/`, shown on the promo materials page, are drawn by
+   `python tool/ci/promo_materials.py`, with the QR encoder of
+   `tool/ci/qr.py`; run it again after the screenshots, the address or the
+   poster's texts change) and, on
    the home, about and install pages, structured data (SoftwareApplication,
    no ratings). At every deployment `tool/ci/site_files.py` writes
    `sitemap.xml` (only the pages without `noindex`, so neither the
@@ -195,7 +205,11 @@ key, so every release must be signed with this key.
    a tag run stops at once while either list is empty
    (`dart run tool/release.dart pinned`).
 3. `git push origin HEAD`, open a pull request to `main` (changes reach
-   `main` only through pull requests), wait for green CI and merge it with
+   `main` only through pull requests), wait for green CI — including the
+   **Android emulator** workflow (a fresh install and an install over the
+   previous release get past the logo, a monkey run without a crash) and
+   the **End-to-end on Linux** job of CI (real nodes: invitations,
+   messages, mailboxes, restarts), see `docs/TESTING.md` — and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
    `main`). Then `git push origin v1.12.0`. Approve the `release`
    environment when GitHub asks. It asks once, when every build is done
@@ -222,15 +236,18 @@ key, so every release must be signed with this key.
    ping and pong) and/or put a line `zen-min: X.Y.Z` in the release
    description; older builds then show "update to X.Y.Z or newer".
 7. Publish the draft as a full release: not a pre-release, with "Set as
-   the latest release" ticked (the app asks only for `releases/latest`,
-   which never shows a draft or a pre-release). This starts `pages.yml`,
+   the latest release" ticked (the app asks only for the latest release,
+   through the pages' `release.json` and `releases/latest`, which never
+   show a draft or a pre-release). This starts `pages.yml`,
    which refreshes the install page data and the SideStore / AltStore
    source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
    finds the release within an hour, and at once when it starts or comes
    back to the screen an hour or more after its last check; an Android
-   phone that receives in the background finds it within about 4 to 5
+   phone that receives in the background finds it within about 2 to 2.5
    hours also while Zen is closed (Doze can put that off to its next
-   window). A phone whose friend already runs the new version asks GitHub
+   window). The app asks the pages' `release.json` first, so the release
+   reaches it once the Pages run after the release has finished (a few
+   minutes); builds up to 1.14.0 ask GitHub's API only. A phone whose friend already runs the new version asks GitHub
    as soon as that friend's version reaches it (section 8.5).
 
 The checks behind it: `test/release_contract_test.dart` (the app's file
@@ -292,12 +309,15 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    APKs, without signing and without a release. No job of `release.yml`
    uses a cache (no Flutter, pub, Gradle or Go cache): a cache another run
    wrote could change what gets signed; the run is fast because the builds
-   run side by side. **Windows ARM64 is
+   run side by side. Nor does it run in CI's prebuilt Linux build image
+   (`.github/images/linux-build`, [TESTING.md](TESTING.md#6-github-actions)):
+   a release is built only from what its own jobs download and check, with
+   no input another workflow wrote. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
    `SHA256SUMS` is computed without it. Locally:
-   `flutter build apk|windows|linux|macos --release` (requirements: README,
-   "Building from source").
+   `flutter build apk|windows|linux|macos --release` (requirements:
+   [BUILDING.md](BUILDING.md)).
 4. **Files under exactly these names** (what `release.yml` produces):
    - `Zen-arm64-v8a.apk`, `Zen-armeabi-v7a.apk`, `Zen-x86_64.apk` — one APK
      per ABI (`flutter build apk --release --split-per-abi --target-platform
@@ -370,7 +390,8 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    (no self-update, no APK handing, no icon camouflage). Never
    attach them to a GitHub release or hand them to people to sideload.
 
-   The README links to `…/releases/latest/download/Zen-arm64-v8a.apk`,
+   The README, INSTALL.md and the install pages link to
+   `…/releases/latest/download/Zen-arm64-v8a.apk`,
    `…/releases/latest/download/Zen-Windows.zip`
    and `…/releases/latest/download/Zen-unsigned.ipa`, so fixed names always
    give the newest version in one click (likewise the other two APKs,
@@ -501,7 +522,7 @@ bridge → `flutter build ios --release --no-codesign` → `Zen-unsigned.ipa`
 Run workflow; the file is in the run's artifacts) or as part of `release.yml`
 for a `v*` tag, which attaches it to the release. The package is unsigned —
 SideStore (or AltStore) signs it on the phone with the person's own Apple
-Account (README, section "iPhone"; the install page adds the source
+Account ([INSTALL.md](INSTALL.md#iphone); the install page adds the source
 `apps.json` and links `releases/latest/download/Zen-unsigned.ipa`, which
 follows every release). The app's update notice on iPhone and iPad
 downloads nothing itself: after "turn on LocalDevVPN", **Update in
@@ -535,7 +556,7 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   job (Ubuntu 24.04). **GitHub retires the `ubuntu-22.04` images in April
   2027** (with brownouts before): by then move the Linux jobs into an
   `ubuntu:22.04` / `debian:12` container, or raise the baseline together
-  with the README.
+  with the README and INSTALL.md.
 - **libwebrtc.** `flutter_webrtc` downloads the prebuilt libwebrtc for
   Windows and Linux (`libwebrtc.m150.7871.03`) without a checksum of its
   own. `tool/ci/check_libwebrtc.py <platform> <bundle>` hashes the library
@@ -705,8 +726,8 @@ State as of 15.10.2026 (sources: section 6.6):
   or sum, and a **signed manifest** with the donation link, author and
   repository (section 8.2) and a canary (section 8.3).
 - **Windows:** no Authenticode signature today, so SmartScreen shows "Windows
-  protected your PC" (the README says what to click), and **Smart App
-  Control** on Windows 11 blocks Zen with no "Run anyway" (the README and
+  protected your PC" ([INSTALL.md](INSTALL.md#windows) says what to click), and **Smart App
+  Control** on Windows 11 blocks Zen with no "Run anyway" (INSTALL.md and
   the install page explain turning it off, with its cost). Antivirus
   programs may flag new unsigned files (section 3, step 5).
   Zen-Windows-arm64.zip is the same. The lasting fix is code signing:
@@ -1174,32 +1195,47 @@ marker spreading by gossip is not done.
 
 ### 8.5 Updates from GitHub (on)
 
-Independent of section 8: every build except the store one asks
-`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` (one GET,
-only the User-Agent `Zen`;
-`lib/src/features/update/github_update_service.dart`) whenever GitHub's
-last answer is an hour old or older (`kGithubCheckEvery`): 20 s after
-start, when the app comes back to the screen and every hour while it
-stays open. On Android the background service
-(`background_update_check.dart`, started in every mode of the service,
-also while the app is locked) asks while Zen is closed once the last
-answer is 4 h old (`kBackgroundGithubCheckEvery`): it rides the service's
-shared wake as work that does not wake the phone in Doze, looks every hour
-whether a check is due (one small file, `update_check.json`, which the app
-and the service share, so whoever asked last counts) and asks at most once
-in those 4 h. A friend whose ping or pong names a newer version than any
-known here makes the app ask at once (once per version, not within 2
-minutes of the last attempt): the friend's claim is unsigned, GitHub's
-answer decides. A release that 2 maintainers signed, coming from friends
-(section 8, off today), is announced at once. It sends `If-None-Match`
-with the last `ETag`, so an unchanged answer (304) costs no rate limit.
-At one request an hour per device, about 60 devices behind one address
-(a mobile operator's shared IP) may meet GitHub's limit of 60 requests an
-hour; the app then waits as GitHub asks. On an error it retries after
-GitHub's `Retry-After` (or the `x-ratelimit-reset` time when
-`x-ratelimit-remaining` is 0) plus a minute, otherwise after 15 min, 30,
-60 (never later than the next regular check), and shows when; a good
-answer clears the backoff. A 404 is its own state ("no published release
+Independent of section 8: every build except the store one looks for the
+newest release (`lib/src/features/update/latest_release.dart`; only the
+User-Agent `Zen` and `If-None-Match` with the last `ETag`) in this order:
+the pages' `release.json` (written by `pages.yml` from the latest release,
+`tool/ci/release_source.py`: tag, files and sizes, `minVersion`; GitHub
+Pages has no rate limit), then
+`api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` when the
+pages do not answer, then, when the API refuses or does not answer either
+(not for its 404), the redirect of
+`github.com/robertostrowskijagoda/Zen/releases/latest` to
+`…/releases/tag/vX.Y.Z`, which names the version alone (no API quota). No
+source is trusted for more than the version: every file is checked against
+that tag's `SHA256SUMS` (and signature, and on Android the certificate),
+downloaded from github.com; a version known from the redirect alone is
+downloaded without a known size. Builds up to 1.14.0 asked the API only:
+GitHub allows 60 unauthenticated requests an hour per IP address, which a
+mobile operator's shared address often has used up (403 or 429), and such
+a phone then found nothing for hours. The app looks
+(`github_update_service.dart`) whenever the last answer is an hour old or
+older (`kGithubCheckEvery`): 20 s after start, when the app comes back to
+the screen and every hour while it stays open. On Android the background
+service (`background_update_check.dart`, started in every mode of the
+service, also while the app is locked) looks while Zen is closed once the
+last answer is 2 h old (`kBackgroundGithubCheckEvery`): it rides the
+service's shared wake as work that does not wake the phone in Doze, looks
+every 30 minutes whether a check is due (one small file,
+`update_check.json`, which the app and the service share, so whoever asked
+last counts) and asks at most once in those 2 h when checks succeed; a
+failed check is tried again on the next beat, or once the wait GitHub
+asked for is over. The file also keeps the last successful check and the
+last error (time and text), which the updates screen shows ("Sprawdzono …",
+"Ostatni błąd …"), and the version the service found, which the app shows
+at once. A friend whose ping or pong names a newer version than any
+known here makes the app ask at once (once per version; within 2 minutes
+of the last attempt it asks when those 2 minutes are over): the friend's
+claim is unsigned, the answer decides. A release that 2 maintainers
+signed, coming from friends (section 8, off today), is announced at once.
+On an error the app retries after GitHub's `Retry-After` (or the
+`x-ratelimit-reset` time when `x-ratelimit-remaining` is 0) plus a minute,
+otherwise after 15 min, 30, 60 (never later than the next regular check),
+and shows when; a good answer clears the backoff. A 404 is its own state ("no published release
 of Zen on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the
 release description is the oldest version still supported (section 3,
 step 6). A newer version is announced once with a quiet notification,

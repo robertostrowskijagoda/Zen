@@ -60,7 +60,7 @@ final class AlarmShortcutChannel {
       .receiveBroadcastStream()
       .where((Object? e) => e is Map && e['type'] == 'power')
       .map<void>((Object? _) {})
-      .handleError((Object error) => logZenWarning('Skrót alarmu: $error'));
+      .handleError((Object error) => logZenWarning('Alarm shortcut: $error'));
 
   static bool get supported => !kIsWeb && Platform.isAndroid;
 
@@ -83,7 +83,7 @@ final class AlarmShortcutChannel {
     } on MissingPluginException {
       // An engine without the bridge: nothing to tell.
     } on PlatformException catch (error) {
-      logZenWarning('Skrót alarmu ($method): ${error.message}');
+      logZenWarning('Alarm shortcut ($method): ${error.message}');
     }
   }
 }

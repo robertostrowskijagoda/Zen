@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
 /// The few colours that do not follow the theme, on purpose, in one place
@@ -28,14 +29,44 @@ abstract final class ZenFixed {
   /// Behind a photo or a video shown whole (letterboxing).
   static const Color photoBackdrop = Color(0xFF000000);
 
-  /// A printed door sticker: black ink on white paper, exactly as it
-  /// will come out of a printer.
+  /// White paper under a code shown to a housemate's camera. (Printed
+  /// stickers take their colours from qr_sticker/sticker_design.dart.)
   static const Color paper = Color(0xFFFFFFFF);
-  static const Color ink = Color(0xFF151515);
-  static const Color inkSoft = Color(0xFF555555);
-  static const Color inkFaint = Color(0xFF8A8A8A);
-  static const Color paperTint = Color(0xFFF1F1F1);
-  static const Color paperEdge = Color(0x22000000);
+}
+
+/// The app bar of a page whose colours do not follow the theme (a code on
+/// [ZenFixed.qrPaper], a photo on [ZenFixed.photoBackdrop]): the title,
+/// every icon and the system's status icons in [foreground], whatever the
+/// theme. `foregroundColor` alone is not enough: the theme's title style
+/// has a colour of its own (pale in a dark theme, dark in a light one).
+AppBar zenFixedAppBar(
+  BuildContext context, {
+  required Color background,
+  required Color foreground,
+  Widget? title,
+  List<Widget>? actions,
+  Key? key,
+}) {
+  final TextStyle? themed = Theme.of(context).appBarTheme.titleTextStyle;
+  return AppBar(
+    key: key,
+    backgroundColor: background,
+    foregroundColor: foreground,
+    surfaceTintColor: background,
+    elevation: 0,
+    scrolledUnderElevation: 0,
+    titleTextStyle: (themed ?? const TextStyle(fontSize: 20)).copyWith(
+      color: foreground,
+    ),
+    iconTheme: IconThemeData(color: foreground),
+    actionsIconTheme: IconThemeData(color: foreground),
+    systemOverlayStyle:
+        ThemeData.estimateBrightnessForColor(background) == Brightness.light
+        ? SystemUiOverlayStyle.dark
+        : SystemUiOverlayStyle.light,
+    title: title,
+    actions: actions,
+  );
 }
 
 /// The emergency red of the alarm: the theme's danger colour, made deep

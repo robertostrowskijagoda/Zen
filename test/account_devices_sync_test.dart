@@ -109,8 +109,10 @@ final class _Target implements ChatSyncTarget {
   }
 
   @override
-  Future<void> forgetFriendFromOtherDevice(String address) async =>
-      forgottenFriends.add(address);
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) async => forgottenFriends.add(address);
 
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) async =>
@@ -308,6 +310,30 @@ void main() {
     tearDown(() {
       container.dispose();
       dir.deleteSync(recursive: true);
+    });
+
+    test('a copy that lacks a removal known here is answered with this '
+        "device's own; one that agrees is not", () async {
+      final String ola = _a('200::7');
+      final Map<String, dynamic> listing = <String, dynamic>{
+        'v': 1,
+        'friends': <Object>[
+          <String, dynamic>{'a': ola, 'n': 'Ola'},
+        ],
+        'groups': <Object>[],
+      };
+      await hub.importContactsBackup(listing);
+      expect(hub.contactsBackupBehind(hub.contactsBackup()), isFalse);
+      await hub.removeFriend(peerAddress: ola);
+      // Another device saved later, still listing Ola (as Zen 1.14.0 does,
+      // or a newer one that has not heard of the removal yet).
+      expect(hub.contactsBackupBehind(listing), isTrue);
+      await hub.importContactsBackup(listing, backupAt: 1 << 50);
+      expect(
+        container.read(socialHubControllerProvider).friendByAddress(ola),
+        isNull,
+      );
+      expect(hub.contactsBackupBehind(hub.contactsBackup()), isFalse);
     });
 
     test(

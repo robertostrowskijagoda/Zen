@@ -31,8 +31,9 @@ What to include (in English or Polish):
 - **The release process**: GitHub Actions workflows (`.github/workflows`),
   APK signing, `SHA256SUMS`, files in Releases (including the Linux `.deb`
   packages).
-- **The invite page** (`tool/pages`,
-  https://robertostrowskijagoda.github.io/Zen/).
+- **The website** (`tool/pages`, https://robertostrowskijagoda.github.io/Zen/):
+  the invitation page, the install pages and the SideStore / AltStore
+  source (`apps.json`).
 
 Only the **latest release** receives fixes. Report bugs in Yggdrasil, Flutter
 or other libraries to their authors — but let us know here too if they affect

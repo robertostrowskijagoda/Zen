@@ -6,7 +6,7 @@ Zen itself is GPL-3.0-only with additional terms ([LICENSE](../LICENSE),
 it. The full licence texts: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md),
 `assets/licenses/` and, in the app, **About → Licenses and thanks**.
 
-Versions: Flutter **3.47.1** (Dart 3.11), Go from
+Versions: Flutter **3.47.1** (Dart 3.13; `pubspec.yaml` asks for Dart 3.11.4 or newer), Go from
 [`native/yggdrasil_bridge/go.mod`](../native/yggdrasil_bridge/go.mod)
 (language **1.26**, built with the `toolchain` **go1.26.10**), Yggdrasil
 **0.5.14**. Exact package versions are in `pubspec.lock` (every build uses
@@ -108,7 +108,7 @@ decoded (the app says so).
 
 ## Fonts, icons and sounds
 
-- Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans: SIL Open Font
+- Baloo 2, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans: SIL Open Font
   License 1.1.
 - Material Icons: Apache-2.0.
 - Zen's sounds are synthesised from scratch by `tool/sounds/generate_sounds.py`

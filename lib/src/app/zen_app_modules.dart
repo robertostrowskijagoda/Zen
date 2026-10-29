@@ -18,6 +18,7 @@ import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
 import 'package:zen/src/features/runtime/local_links_controller.dart';
@@ -54,6 +55,8 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(recoveryServiceProvider);
       // The copy of this account's data at its recovery circle.
       ref.read(circleBackupServiceProvider);
+      // Pebbles: keeping, serving and finding their designs.
+      ref.read(pebbleServiceProvider);
       // The rest of a copy of the account taken before a restart.
       unawaited(ref.read(accountImportControllerProvider).start());
       // A computer offers itself as a mesh bridge.
@@ -87,7 +90,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       // on all the account's devices.
       unawaitedLogged(
         ref.read(accountDevicesKeeperProvider).start(),
-        context: 'Stan konta na urządzeniach',
+        context: 'Account state on devices',
       );
       ref.read(nearbyServiceProvider);
       ref.read(eventServiceProvider);

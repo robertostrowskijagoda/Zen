@@ -16,7 +16,9 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 /// how close they are. Only "Tak" signs the "met in person"
 /// attestation; each side of a meeting confirms it on its own phone.
 /// Returns the level chosen, or `null` for "Nie" ("Znajomy" stays, nothing
-/// is signed).
+/// is signed). Someone who is a friend already (met again nearby, at a
+/// dinner) starts at the level they have: confirming the meeting never
+/// moves a close friend back to "Znajomy".
 Future<FriendLevel?> showMetLevelPrompt(
   BuildContext context, {
   required String address,
@@ -26,9 +28,13 @@ Future<FriendLevel?> showMetLevelPrompt(
     context,
     listen: false,
   );
+  final FriendLevel initial =
+      container.read(ledgerNodeProvider)?.levelOf(address) ??
+      FriendLevel.friend;
   final FriendLevel? level = await showDialog<FriendLevel>(
     context: context,
-    builder: (BuildContext context) => MetLevelDialog(name: name),
+    builder: (BuildContext context) =>
+        MetLevelDialog(name: name, initial: initial),
   );
   if (level == null) {
     return null;
@@ -51,16 +57,23 @@ Future<FriendLevel?> showMetLevelPrompt(
 
 /// „Poznaliśmy się osobiście?” with the three levels of closeness.
 class MetLevelDialog extends StatefulWidget {
-  const MetLevelDialog({this.name = '', super.key});
+  const MetLevelDialog({
+    this.name = '',
+    this.initial = FriendLevel.friend,
+    super.key,
+  });
 
   final String name;
+
+  /// The level chosen at first: what they are to this person now.
+  final FriendLevel initial;
 
   @override
   State<MetLevelDialog> createState() => _MetLevelDialogState();
 }
 
 class _MetLevelDialogState extends State<MetLevelDialog> {
-  FriendLevel _level = FriendLevel.friend;
+  late FriendLevel _level = widget.initial;
 
   String _hint(FriendLevel l) => switch (l) {
     FriendLevel.weak => t(

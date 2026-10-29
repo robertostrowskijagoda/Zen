@@ -377,10 +377,8 @@ final class FriendPostNotifier {
   late final QuietTimer _timer = QuietTimer(
     quiet: quiet,
     atMost: atMost,
-    action: () => unawaitedLogged(
-      check(),
-      context: 'Powiadomienia o postach nie powiodły się',
-    ),
+    action: () =>
+        unawaitedLogged(check(), context: 'Post notifications failed'),
   );
 
   /// The check under way: the next one waits for it, never runs beside it.
@@ -410,10 +408,7 @@ final class FriendPostNotifier {
   /// last check counts as seeing what was announced.
   void minute() {
     if (!_disposed && lookingAtFeed()) {
-      unawaitedLogged(
-        check(),
-        context: 'Powiadomienia o postach nie powiodły się',
-      );
+      unawaitedLogged(check(), context: 'Post notifications failed');
     }
   }
 

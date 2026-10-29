@@ -10,6 +10,7 @@ import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -94,18 +95,20 @@ void main() {
           relayEngineProvider.overrideWithValue(engine),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ada: FriendProfile(
-                  address: _ada,
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-                _ewa: FriendProfile(
-                  address: _ewa,
-                  displayName: 'Ewa',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ada: FriendProfile(
+                    address: _ada,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                  _ewa: FriendProfile(
+                    address: _ewa,
+                    displayName: 'Ewa',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
             ),
           ),
         ],

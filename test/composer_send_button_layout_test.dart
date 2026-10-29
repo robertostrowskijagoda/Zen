@@ -8,6 +8,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -38,7 +39,7 @@ const Map<String, ({double x, double cap})?> _faces =
     <String, ({double x, double cap})?>{
       // The app's own.
       'Hanken Grotesk': (x: 0.493, cap: 0.697),
-      'Fredoka': (x: 0.5, cap: 0.7),
+      'Baloo 2': (x: 0.46, cap: 0.602),
       'DM Sans': (x: 0.526, cap: 0.7),
       // A tall ascent (1.12 em), like some phones' own fonts.
       'Space Mono': (x: 0.496, cap: 0.7),
@@ -58,13 +59,15 @@ Widget _chat(String face) => ProviderScope(
     socialHubAutoHydrateProvider.overrideWithValue(false),
     socialHubSeedProvider.overrideWithValue(
       SocialHubState.empty().copyWith(
-        friends: const <String, FriendProfile>{
-          'ada.ygg': FriendProfile(
-            address: 'ada.ygg',
-            displayName: 'Ada',
-            status: FriendRelationshipStatus.accepted,
-          ),
-        },
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            'ada.ygg': FriendProfile(
+              address: 'ada.ygg',
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.accepted,
+            ),
+          },
+        ),
       ),
     ),
   ],

@@ -3,13 +3,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
+import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 
 /// The install page on GitHub Pages (`tool/pages/install`): the steps for
@@ -333,16 +335,15 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                       // QR codes stay black on white, so every camera reads
                       // them.
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(
                           color: ZenFixed.qrPaper,
                           borderRadius: context.zenRadius(20),
                         ),
-                        child: QrImageView(
+                        child: ZenQrView(
                           key: const Key('install-page-qr'),
                           data: kInstallPageUrl,
-                          size: 180,
-                          backgroundColor: ZenFixed.qrPaper,
+                          size: 204,
                         ),
                       ),
                     ),
@@ -355,6 +356,17 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                         onPressed: () => unawaited(_openPage()),
                         icon: const Icon(Icons.open_in_new_rounded),
                         label: Text(t('Otwórz stronę instalacji')),
+                      ),
+                    ),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: StickerButton(
+                        key: const Key('install-sticker'),
+                        subject: StickerSubject(
+                          kind: StickerKind.installPage,
+                          data: kInstallPageUrl,
+                          label: t('Strona instalacji'),
+                        ),
                       ),
                     ),
                   ],

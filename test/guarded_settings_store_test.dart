@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/guarded_settings_store.dart';
@@ -90,6 +92,24 @@ void main() {
     expect((await file.load())!.gifApiKey, 'klucz123');
   });
 
+  // Secure storage that never answers (the Keystore after an update or a
+  // restore) used to hold the start on the logo for good.
+  test('secure storage that does not answer never holds the start', () async {
+    final MemoryAppSettingsStore file = MemoryAppSettingsStore(
+      const AppSettings(lockMode: AppLockMode.background, autoCleanupDays: 4),
+    );
+    final GuardedAppSettingsStore store = GuardedAppSettingsStore(
+      inner: file,
+      secrets: _SilentSecrets(),
+      secretsTimeout: const Duration(milliseconds: 100),
+    );
+    final AppSettings loaded = (await store.load().timeout(
+      const Duration(seconds: 5),
+    ))!;
+    expect(loaded.autoCleanupDays, 4);
+    expect(loaded.lockMode, AppLockMode.background);
+  });
+
   test('resetting the app forgets the protected settings', () async {
     final MemorySecurityCredentialsStore secrets =
         MemorySecurityCredentialsStore();
@@ -119,4 +139,15 @@ final class _BrokenSecrets implements AppSecurityCredentialsStore {
 
   @override
   Future<void> delete(String key) async => throw StateError('no storage');
+}
+
+final class _SilentSecrets implements AppSecurityCredentialsStore {
+  @override
+  Future<String?> read(String key) => Completer<String?>().future;
+
+  @override
+  Future<void> write(String key, String value) => Completer<void>().future;
+
+  @override
+  Future<void> delete(String key) => Completer<void>().future;
 }

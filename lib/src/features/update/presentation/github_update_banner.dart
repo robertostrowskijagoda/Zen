@@ -430,6 +430,25 @@ class GithubUpdateCard extends ConsumerWidget {
         final GithubRelease? newer = service.newer;
         final DateTime? at = service.checkedAt;
         final DateTime? retryAt = service.nextCheckAt;
+        // The last successful check and the last error, here or in the
+        // Android background service (whose checks the card would not
+        // show otherwise).
+        final DateTime? errorAt = service.lastErrorAt;
+        final String? lastError = service.lastError;
+        final List<String> history = <String>[
+          if (at != null &&
+              (newer != null || service.state != GithubCheckState.upToDate))
+            t('Sprawdzono {date} o {time}', {
+              'date': ZenFormat.date(at),
+              'time': ZenFormat.time(at),
+            }),
+          if (errorAt != null && lastError != null)
+            t('Ostatni błąd {date} o {time}: {error}', {
+              'date': ZenFormat.date(errorAt),
+              'time': ZenFormat.time(errorAt),
+              'error': lastError,
+            }),
+        ];
         final String? retryText = retryAt == null
             ? null
             : t('Spróbuję ponownie {date} o {time}.', {
@@ -537,6 +556,18 @@ class GithubUpdateCard extends ConsumerWidget {
                                 style: TextStyle(
                                   color: zen.textSecondary,
                                   fontSize: 13.5,
+                                ),
+                              ),
+                            ],
+                            if (history.isNotEmpty) ...<Widget>[
+                              const SizedBox(height: 4),
+                              Text(
+                                history.join('\n'),
+                                key: const Key('github-check-history'),
+                                style: TextStyle(
+                                  color: zen.textMuted,
+                                  fontSize: 12.5,
+                                  height: 1.35,
                                 ),
                               ),
                             ],

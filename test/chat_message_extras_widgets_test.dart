@@ -9,6 +9,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 Widget _app(Widget child) => MaterialApp(
@@ -184,13 +185,15 @@ void main() {
             capturedAtMillis: 0,
           ),
         ).copyWith(
-          friends: const <String, FriendProfile>{
-            'ada': FriendProfile(
-              address: 'ada',
-              displayName: 'Ada',
-              status: FriendRelationshipStatus.accepted,
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: const <String, FriendProfile>{
+              'ada': FriendProfile(
+                address: 'ada',
+                displayName: 'Ada',
+                status: FriendRelationshipStatus.accepted,
+              ),
+            },
+          ),
           groups: const <String, GroupProfile>{
             'g1': GroupProfile(
               id: 'g1',

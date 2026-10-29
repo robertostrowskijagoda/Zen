@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -375,13 +376,9 @@ final class FileBackgroundVault implements BackgroundVault {
       _credentials,
       createKey: createKey,
     ).sealFor(_capabilityStorageKey, json);
-    final File file = await _capability();
-    await file.parent.create(recursive: true);
-    // Beside the file and moved over it: the service reads either the old
-    // capability or the new one, never half of one.
-    final File next = File('${file.path}.next');
-    await next.writeAsBytes(sealed, flush: true);
-    await next.rename(file.path);
+    // The service reads either the old capability or the new one, never
+    // half of one.
+    await writeFileAtomically(await _capability(), sealed);
   }
 
   @override

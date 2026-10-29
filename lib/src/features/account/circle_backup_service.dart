@@ -241,7 +241,7 @@ final class CircleBackupService {
       try {
         await work();
       } on Object catch (error, stackTrace) {
-        logZenError('Kopia u kręgu', error, stackTrace);
+        logZenError('Circle backup', error, stackTrace);
       }
     });
   }
@@ -357,7 +357,7 @@ final class CircleBackupService {
     try {
       await transport.send(remoteAddress: to, payload: payload);
     } on Object catch (error) {
-      logZenWarning('Kopia u kręgu: wysyłka nie powiodła się: $error');
+      logZenWarning('Circle backup: sending failed: $error');
     }
   }
 
@@ -378,7 +378,7 @@ final class CircleBackupService {
       case CircleBackupMessages.ok:
         await _onOk(from, p);
       case CircleBackupMessages.no:
-        logZenWarning('Kopia u kręgu odrzucona: ${p['why']}');
+        logZenWarning('Circle backup refused: ${p['why']}');
       case CircleBackupMessages.fetch:
         await _onFetch(from, p);
       case CircleBackupMessages.manifest:
@@ -684,7 +684,7 @@ final class CircleBackupService {
     );
     final CircleBackupContent? content = opened.content;
     if (content == null) {
-      logZenWarning('Kopia u kręgu nie otwiera się: ${opened.error}');
+      logZenWarning('Circle backup does not open: ${opened.error}');
       // Another holder's copy may open: start looking again.
       _target = null;
       _targetFrom = null;

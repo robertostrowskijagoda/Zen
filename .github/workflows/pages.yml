@@ -7,8 +7,10 @@
 #   /apps.json     an AltStore / SideStore source: "Add Zen source" in
 #                  SideStore installs the release's Zen-unsigned.ipa and
 #                  keeps it up to date (tool/ci/release_source.py);
-#   /release.json  version, files and sizes, and the Android signing
-#                  certificate fingerprint, for the install page;
+#   /release.json  version, tag, files and sizes, zen-min and the Android
+#                  signing certificate fingerprint, for the install page
+#                  and for the app's update check (asked before GitHub's
+#                  rate-limited API);
 #   /zen-icon.png  the app icon the source names;
 #   /sitemap.xml   every page that may be indexed, in its 21 languages,
 #                  dated by its last commit (tool/ci/site_files.py);

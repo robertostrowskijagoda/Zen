@@ -24,6 +24,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -201,11 +202,13 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-                _celina: _friend(_celina, 'Celina'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                  _celina: _friend(_celina, 'Celina'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(transport),
@@ -387,10 +390,12 @@ void main() {
     final String loner = addr('f7');
     final String far = addr('99');
     final SocialHubState social = SocialHubState.empty().copyWith(
-      friends: <String, FriendProfile>{
-        for (final String x in <String>[a, b, c, d, e, f, loner])
-          x: _friend(x, 'N$x'),
-      },
+      book: FriendshipBook.restore(
+        profiles: <String, FriendProfile>{
+          for (final String x in <String>[a, b, c, d, e, f, loner])
+            x: _friend(x, 'N$x'),
+        },
+      ),
     );
     final MeetBook book = MeetBook()
       ..friendLists[a] = <String, String>{b: 'B', c: 'C', d: 'D'}
@@ -431,10 +436,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -562,10 +569,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -707,11 +716,13 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-                _celina: _friend(_celina, 'Celina'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                  _celina: _friend(_celina, 'Celina'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(transport),
@@ -864,11 +875,13 @@ void main() {
     expect(container.read(graphNotesProvider).notes.neglectWeeks, 4);
     await tapKey(const Key('graph-mode-time'));
     expect(find.byKey(const Key('graph-time-bar')), findsOneWidget);
-    await tapKey(const Key('graph-time-3'));
+    tester
+        .widget<Slider>(find.byKey(const Key('graph-time-slider')))
+        .onChanged!(0.5);
     await tester.pump();
     expect(find.byKey(const Key('graph-time-state')), findsOneWidget);
     await tapKey(const Key('graph-time-play'));
-    await tester.pump(const Duration(seconds: 7));
+    await tester.pump(const Duration(seconds: 13));
     await tester.pump();
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -895,10 +908,12 @@ void main() {
             socialHubAutoHydrateProvider.overrideWithValue(false),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
-                friends: <String, FriendProfile>{
-                  _ania: _friend(_ania, 'Ania'),
-                  _bartek: _friend(_bartek, 'Bartek'),
-                },
+                book: FriendshipBook.restore(
+                  profiles: <String, FriendProfile>{
+                    _ania: _friend(_ania, 'Ania'),
+                    _bartek: _friend(_bartek, 'Bartek'),
+                  },
+                ),
               ),
             ),
             signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -960,6 +975,88 @@ void main() {
     });
   }
 
+  for (final double width in <double>[320, 360, 411]) {
+    for (final double scale in <double>[1, 2]) {
+      testWidgets('graph: the chosen mode is whole in view, also the last one '
+          '(${width.round()} px, text ×${scale.round()})', (
+        WidgetTester tester,
+      ) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final _Host host = _Host(<String, String>{_ania: 'Ania'});
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              socialHubAutoHydrateProvider.overrideWithValue(false),
+              socialHubSeedProvider.overrideWithValue(
+                SocialHubState.empty().copyWith(
+                  book: FriendshipBook.restore(
+                    profiles: <String, FriendProfile>{
+                      _ania: _friend(_ania, 'Ania'),
+                    },
+                  ),
+                ),
+              ),
+              signalTransportProvider.overrideWithValue(
+                MemorySignalTransport(),
+              ),
+              ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+              meetServiceProvider.overrideWithValue(
+                MeetService(host: host, store: MeetStore(MemoryLedgerDisk())),
+              ),
+              pyramidServiceProvider.overrideWithValue(
+                PyramidService(
+                  host: MeetEventHost(
+                    host,
+                    address: () => '',
+                    name: () => 'Ja',
+                  ),
+                  disk: MemoryLedgerDisk(),
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: ZenTheme.dark(),
+              // Reopened where it was left: on the timeline, the last mode.
+              home: const GraphScreen(initial: GraphView(mode: GraphMode.time)),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        final Rect row = tester.getRect(find.byKey(const Key('graph-modes')));
+        Rect chip() => tester.getRect(find.byKey(const Key('graph-mode-time')));
+        expect(chip().left, greaterThanOrEqualTo(row.left), reason: '$chip');
+        expect(chip().right, lessThanOrEqualTo(row.right), reason: '$chip');
+        // Another mode chosen from the far start: in view as well.
+        final Finder first = find.byKey(const Key('graph-mode-presence'));
+        tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byKey(const Key('graph-modes')),
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position
+            .jumpTo(0);
+        await tester.pump();
+        await tester.tap(first);
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        final Rect presence = tester.getRect(first);
+        expect(presence.left, greaterThanOrEqualTo(row.left));
+        expect(presence.right, lessThanOrEqualTo(row.right));
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 5));
+      });
+    }
+  }
+
   testWidgets('graph: full screen with a button, F11, Esc and a double click; '
       'the controls hide by themselves; the mode comes back; it turns', (
     WidgetTester tester,
@@ -982,10 +1079,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -1077,7 +1176,11 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{_ania: _friend(_ania, 'Ania')},
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
@@ -1135,10 +1238,12 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                _ania: _friend(_ania, 'Ania'),
-                _bartek: _friend(_bartek, 'Bartek'),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  _ania: _friend(_ania, 'Ania'),
+                  _bartek: _friend(_bartek, 'Bartek'),
+                },
+              ),
             ),
           ),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),

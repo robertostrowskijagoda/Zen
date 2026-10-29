@@ -9,6 +9,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// What the app opens next: the account and, when its password was already
@@ -83,6 +84,9 @@ AppSecurityService defaultZenAccountSecurity(ZenAccountScope scope) =>
       keyVault: scope.isDefault
           ? platformKeyVault()
           : SharedKeyVault(platformKeyVault()),
+      // A start always opens the default account: only its key may wait
+      // for one.
+      resumeVault: scope.isDefault ? platformResumeSessionVault() : null,
     );
 
 final Provider<ZenAccountSecurityFactory> zenAccountSecurityFactoryProvider =

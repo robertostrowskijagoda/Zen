@@ -5,6 +5,7 @@ SocialHubState _applySignal(
   ZenSignal signal,
   int receivedAtMillis, {
   required AppSettings appSettings,
+  required FriendshipTick tick,
   required String? openConversationAddress,
   String? openGroupId,
   Set<String>? dismissedOrRejectedGroupIds,
@@ -12,37 +13,44 @@ SocialHubState _applySignal(
   if (!_isSignalAllowedFromPeer(current, signal)) {
     return current;
   }
-  final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
-    current.friends,
-  );
+  final FriendshipBook book = current.book;
+  final Map<String, FriendProfile> friends = current.friends;
   final InboxEntry inboxEntry = _buildInboxEntry(
     signal: signal,
     receivedAtMillis: receivedAtMillis,
     friends: current.friends,
     groups: current.groups,
   );
+  // A friendship made by an answer: their name, the chat ready.
+  FriendProfile connected(FriendProfile base) => _withAppRetentionDefaults(
+    _friendReducer
+        .applyAccepted(current: base, displayName: signal.displayName)
+        .copyWith(
+          isOnline: true,
+          lastPresenceAtMillis: receivedAtMillis,
+          lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
+          lastActivityLabel: t('Teraz'),
+        ),
+    appSettings,
+  );
 
   switch (signal.type) {
     case ZenSignalType.friendRequest:
-      final FriendProfile? requester = _friendFromMap(friends, signal.sender);
-      if (requester != null &&
-          requester.status == FriendRelationshipStatus.pendingOutgoing) {
+      final FriendProfile? requester = book.profileOf(signal.sender);
+      if (requester?.status == FriendRelationshipStatus.pendingOutgoing) {
         // Both asked each other at the same time: that is consent from both
         // sides, so the friendship is made here (and an accept goes back,
         // see receiveSignal) instead of two requests waiting on each other.
-        final FriendProfile mutual = _friendReducer
-            .applyAccepted(current: requester, displayName: signal.displayName)
-            .copyWith(
-              isOnline: true,
-              lastPresenceAtMillis: receivedAtMillis,
-              lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-              lastActivityLabel: t('Teraz'),
-            );
-        _putFriend(friends, _withAppRetentionDefaults(mutual, appSettings));
-        return current.copyWith(friends: friends);
+        return current.copyWith(
+          book: book.admit(
+            signal.sender,
+            FriendshipEvidence.bothInvited,
+            tick,
+            shape: connected,
+          ),
+        );
       }
-      if (requester != null &&
-          requester.status == FriendRelationshipStatus.accepted) {
+      if (requester?.status == FriendRelationshipStatus.accepted) {
         // Friends already: a request again changes nothing. It is the copy
         // of an invitation kept for the queue and replayed after the person
         // accepted it (which made the friend a pending request again), or
@@ -50,98 +58,96 @@ SocialHubState _applySignal(
         // answers that one).
         return current;
       }
+      FriendshipBook next = book;
       List<InboxEntry> requestInbox = current.inbox;
       if (requester == null) {
         // A new invitation: strangers can send any number of them, so the
         // oldest unanswered ones make room (accepted friends never do).
-        for (final String evicted in _evictOldestPendingIncoming(
-          friends,
-          keep: kMaxPendingIncomingFriendRequests - 1,
-        )) {
+        final (FriendshipBook roomy, List<String> evicted) = book
+            .withoutOldestInvitations(
+              keep: kMaxPendingIncomingFriendRequests - 1,
+            );
+        next = roomy;
+        for (final String evictedPeer in evicted) {
           requestInbox = _removeEntriesForPeer(
             requestInbox,
-            evicted,
+            evictedPeer,
             types: const <InboxEntryType>{InboxEntryType.friendRequest},
           );
         }
       }
-      final FriendProfile updated = _friendReducer.applyIncomingRequest(
-        address: signal.sender,
-        displayName: signal.displayName ?? '',
-        requestMessage: signal.content,
-        current: requester,
-      );
-      final FriendProfile resolved = _withAppRetentionDefaults(
-        updated,
-        appSettings,
-      );
-      _putFriend(friends, resolved);
       return current.copyWith(
-        friends: friends,
+        book: next.invitedBy(
+          signal.sender,
+          (FriendProfile base) => _withAppRetentionDefaults(
+            _friendReducer.applyIncomingRequest(
+              address: signal.sender,
+              displayName: signal.displayName ?? '',
+              requestMessage: signal.content,
+              current: base,
+            ),
+            appSettings,
+          ),
+        ),
         inbox: _prependSocialLifecycleInbox(requestInbox, inboxEntry),
       );
     case ZenSignalType.friendAccept:
-      final FriendProfile? acceptedBase = _friendFromMap(
-        friends,
-        signal.sender,
-      );
-      if (acceptedBase?.status == FriendRelationshipStatus.pendingIncoming ||
-          acceptedBase?.status == FriendRelationshipStatus.blocked) {
-        // Their request already waits for the user's answer; an accept on
-        // top of it changes nothing.
-        return current;
-      }
-      if (acceptedBase == null ||
-          !FriendLifecycleReducer.isSolicitedRemoteAccept(acceptedBase)) {
-        // Nobody here invited them: an accept cannot make a stranger a
-        // friend. It is handled as the invitation it really is, which the
-        // user still has to confirm.
-        return _applySignal(
-          current,
-          _unsolicitedAcceptAsRequest(signal),
-          receivedAtMillis,
-          appSettings: appSettings,
-          openConversationAddress: openConversationAddress,
-          openGroupId: openGroupId,
-          dismissedOrRejectedGroupIds: dismissedOrRejectedGroupIds,
-        );
-      }
-      final FriendProfile updated = _friendReducer
-          .applyAccepted(current: acceptedBase, displayName: signal.displayName)
-          .copyWith(
-            isOnline: true,
-            lastPresenceAtMillis: receivedAtMillis,
-            lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-            lastActivityLabel: t('Teraz'),
+      switch (book.meaningOfAccept(signal.sender)) {
+        case AcceptMeaning.nothing:
+          return current;
+        case AcceptMeaning.invitation:
+          // Nobody here invited them: an accept cannot make a stranger a
+          // friend. It is handled as the invitation it really is, which
+          // the user still has to confirm.
+          return _applySignal(
+            current,
+            _unsolicitedAcceptAsRequest(signal),
+            receivedAtMillis,
+            appSettings: appSettings,
+            tick: tick,
+            openConversationAddress: openConversationAddress,
+            openGroupId: openGroupId,
+            dismissedOrRejectedGroupIds: dismissedOrRejectedGroupIds,
           );
-      final FriendProfile resolved = _withAppRetentionDefaults(
-        updated,
-        appSettings,
-      );
-      _putFriend(friends, resolved);
-      return current.copyWith(friends: friends);
-    case ZenSignalType.friendReject:
-      final FriendProfile? rejected = _friendFromMap(friends, signal.sender);
-      if (rejected?.status == FriendRelationshipStatus.pendingOutgoing) {
-        _removeFriend(friends, signal.sender);
+        case AcceptMeaning.admits:
+          return current.copyWith(
+            book: book.admit(
+              signal.sender,
+              FriendshipEvidence.theyAcceptedMine,
+              tick,
+              shape: connected,
+            ),
+          );
+        case AcceptMeaning.repeated:
+          return current.copyWith(book: book.edit(signal.sender, connected));
       }
+    case ZenSignalType.friendReject:
       return current.copyWith(
-        friends: friends,
+        book:
+            book.profileOf(signal.sender)?.status ==
+                FriendRelationshipStatus.pendingOutgoing
+            ? book.withdraw(signal.sender)
+            : null,
         inbox: _prependSocialLifecycleInbox(current.inbox, inboxEntry),
       );
     case ZenSignalType.friendCancel:
-      final FriendProfile? cancelled = _friendFromMap(friends, signal.sender);
-      if (cancelled?.status == FriendRelationshipStatus.pendingIncoming) {
-        _removeFriend(friends, signal.sender);
-      }
       return current.copyWith(
-        friends: friends,
+        book:
+            book.profileOf(signal.sender)?.status ==
+                FriendRelationshipStatus.pendingIncoming
+            ? book.withdraw(signal.sender)
+            : null,
         inbox: _prependSocialLifecycleInbox(current.inbox, inboxEntry),
       );
     case ZenSignalType.friendRemove:
-      _removeFriend(friends, signal.sender);
+      // They ended it: the book remembers it, so that nothing that comes
+      // later brings them back on its own.
       return current.copyWith(
-        friends: friends,
+        book:
+            book.profileOf(signal.sender)?.status ==
+                FriendRelationshipStatus.accepted
+            ? book.remove(signal.sender, tick)
+            : book.withdraw(signal.sender),
         activeCall:
             _currentCallMatches(
               call: current.activeCall,
@@ -152,21 +158,16 @@ SocialHubState _applySignal(
         inbox: _prependSocialLifecycleInbox(current.inbox, inboxEntry),
       );
     case ZenSignalType.typing:
-      final FriendProfile? typingFriend = _friendFromMap(
-        friends,
-        signal.sender,
-      );
-      if (typingFriend != null) {
-        _putFriend(
-          friends,
-          typingFriend.copyWith(
+      return current.copyWith(
+        book: book.edit(
+          signal.sender,
+          (FriendProfile typingFriend) => typingFriend.copyWith(
             isOnline: true,
             lastPresenceAtMillis: receivedAtMillis,
             isTyping: signal.isTyping,
           ),
-        );
-      }
-      return current.copyWith(friends: friends);
+        ),
+      );
     case ZenSignalType.message:
       final bool isConversationOpen =
           PeerShareCodec.addressesEqual(
@@ -174,14 +175,10 @@ SocialHubState _applySignal(
             openConversationAddress ?? '',
           ) &&
           current.lifecycle.isInteractive;
-      final FriendProfile? currentFriend = _friendFromMap(
-        friends,
-        signal.sender,
-      );
-      if (currentFriend != null) {
-        _putFriend(
-          friends,
-          currentFriend.copyWith(
+      return current.copyWith(
+        book: book.edit(
+          signal.sender,
+          (FriendProfile currentFriend) => currentFriend.copyWith(
             isOnline: true,
             isTyping: false,
             lastPresenceAtMillis: receivedAtMillis,
@@ -197,10 +194,7 @@ SocialHubState _applySignal(
             lastActivityLabel: t('Teraz'),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
-        );
-      }
-      return current.copyWith(
-        friends: friends,
+        ),
         inbox: isConversationOpen
             ? current.inbox
             : _prependInbox(current.inbox, inboxEntry),
@@ -431,8 +425,7 @@ SocialHubState _applySignal(
               ? signal.callId!.trim()
               : 'call-$receivedAtMillis-${signal.sender}',
           peerAddress: signal.sender,
-          displayName:
-              friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+          displayName: _labelFor(signal, friends: friends),
           kind: _callKind(signal.content),
           status: CallSessionStatus.ringing,
           startedAtMillis: receivedAtMillis,
@@ -472,8 +465,7 @@ SocialHubState _applySignal(
                     ? signal.callId!.trim()
                     : 'call-$receivedAtMillis-${signal.sender}',
                 peerAddress: signal.sender,
-                displayName:
-                    friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+                displayName: _labelFor(signal, friends: friends),
                 kind: _callKind(signal.content),
                 status: CallSessionStatus.ringing,
                 startedAtMillis: receivedAtMillis,
@@ -666,11 +658,7 @@ InboxEntry _buildInboxEntry({
 }) {
   final String label = signal.type == ZenSignalType.groupMessage
       ? _groupSenderLabel(signal, friends)
-      : _resolvedPeerLabel(
-          address: signal.sender,
-          displayName: signal.displayName,
-          knownName: friends?[signal.sender]?.displayLabel,
-        );
+      : _labelFor(signal, friends: friends);
   final String groupName = _groupNameOf(signal, groups);
   return switch (signal.type) {
     ZenSignalType.friendRequest => InboxEntry.fromEvents(
@@ -1139,7 +1127,7 @@ NoticeText? _chatNoticeText({
       sender: _resolvedPeerLabel(
         address: signal.sender,
         displayName: signal.displayName,
-        knownName: friends?[signal.sender]?.displayLabel,
+        knownName: _namedFriendLabel(friends?[signal.sender], signal),
       ),
       preview: _signalPreviewText(signal),
     );
@@ -1175,7 +1163,7 @@ RuntimeSystemNotification _systemNotificationFromEntry({
   final String senderLabel = _resolvedPeerLabel(
     address: signal.sender,
     displayName: signal.displayName,
-    knownName: friends?[signal.sender]?.displayLabel,
+    knownName: _namedFriendLabel(friends?[signal.sender], signal),
   );
   final String title;
   final String body;
@@ -1439,11 +1427,29 @@ String? _backgroundAlertDedupKeyForEntry(InboxEntry entry) {
 }
 
 String _labelFor(ZenSignal signal, {Map<String, FriendProfile>? friends}) {
-  return _resolvedPeerLabel(
-    address: signal.sender,
-    displayName: signal.displayName,
-    knownName: _friendIn(friends, signal.sender)?.displayLabel,
-  );
+  final FriendProfile? friend = _friendIn(friends, signal.sender);
+  if (friend == null) {
+    return _resolvedPeerLabel(
+      address: signal.sender,
+      displayName: signal.displayName,
+    );
+  }
+  return _realNameFor(signal, friends: friends) ?? friend.displayLabel;
+}
+
+/// The name of [signal]'s sender when it is known: the one a friend told
+/// before, else the one the signal carries (an answer to an invitation
+/// brings it); null when neither is a real name. The placeholder of a
+/// friend whose name is not known yet ("Kontakt Zen") never wins over the
+/// name in the signal: an accepted invitation used to say "Połączenie z
+/// Kontakt Zen jest gotowe" although the answer named the person.
+String? _realNameFor(ZenSignal signal, {Map<String, FriendProfile>? friends}) {
+  final FriendProfile? friend = _friendIn(friends, signal.sender);
+  if (friend != null && friend.hasProfileName) {
+    return friend.displayLabel;
+  }
+  final String carried = sanitizePeerName(signal.displayName);
+  return isRealPeerName(signal.sender, carried) ? carried : null;
 }
 
 /// The entry for [address] in [friends], whatever its status.
@@ -1501,6 +1507,19 @@ String _groupSenderLabel(
 /// group this device does not have).
 String _groupNameOf(ZenSignal signal, Map<String, GroupProfile>? groups) =>
     groups?[signal.groupId ?? '']?.name ?? signal.groupName ?? '';
+
+/// [friend]'s name when they told one; `null` for the "Kontakt Zen"
+/// placeholder, so the name their message carries is used instead (a
+/// friend whose profile never came, e.g. from an older Zen, was announced
+/// as "Kontakt Zen" although the message named them).
+String? _namedFriendLabel(FriendProfile? friend, ZenSignal signal) {
+  if (friend == null || friend.hasProfileName) {
+    return friend?.displayLabel;
+  }
+  return (signal.displayName?.trim().isNotEmpty ?? false)
+      ? null
+      : friend.displayLabel;
+}
 
 String _resolvedPeerLabel({
   required String address,
@@ -1603,77 +1622,6 @@ List<InboxEntry> _removeEntriesForPeer(
       .toList(growable: false);
 }
 
-FriendProfile? _friendFromMap(
-  Map<String, FriendProfile> friends,
-  String address,
-) {
-  final String canonical = PeerShareCodec.normalizeAddress(address);
-  final FriendProfile? direct = friends[canonical] ?? friends[address];
-  if (direct != null) {
-    return direct;
-  }
-  for (final FriendProfile friend in friends.values) {
-    if (PeerShareCodec.addressesEqual(friend.address, canonical)) {
-      return friend;
-    }
-  }
-  return null;
-}
-
-/// Stores [profile] under its canonical address (dropping stale spellings
-/// of it). A profile without a real name never wipes the name the peer
-/// already told, and the nickname stays what this user set unless
-/// [nicknameChanged].
-void _putFriend(
-  Map<String, FriendProfile> friends,
-  FriendProfile profile, {
-  bool nicknameChanged = false,
-}) {
-  final String canonical = PeerShareCodec.normalizeAddress(profile.address);
-  final FriendProfile? existing = _friendFromMap(friends, canonical);
-  final List<String> staleKeys = <String>[];
-  friends.forEach((String key, FriendProfile current) {
-    if (key == canonical) {
-      return;
-    }
-    if (PeerShareCodec.addressesEqual(key, canonical) ||
-        PeerShareCodec.addressesEqual(current.address, canonical)) {
-      staleKeys.add(key);
-    }
-  });
-  for (final String key in staleKeys) {
-    friends.remove(key);
-  }
-  FriendProfile stored = profile.address == canonical
-      ? profile
-      : profile.copyWith(address: canonical);
-  if (existing != null) {
-    if (existing.hasProfileName && !stored.hasProfileName) {
-      stored = stored.copyWith(displayName: existing.displayName);
-    }
-    if (!nicknameChanged) {
-      stored = stored.copyWith(nickname: existing.nickname);
-    }
-  }
-  friends[canonical] = stored;
-}
-
-void _removeFriend(Map<String, FriendProfile> friends, String address) {
-  final String canonical = PeerShareCodec.normalizeAddress(address);
-  final List<String> staleKeys = <String>[];
-  friends.forEach((String key, FriendProfile existing) {
-    if (key == canonical ||
-        key == address ||
-        PeerShareCodec.addressesEqual(key, canonical) ||
-        PeerShareCodec.addressesEqual(existing.address, canonical)) {
-      staleKeys.add(key);
-    }
-  });
-  for (final String key in staleKeys) {
-    friends.remove(key);
-  }
-}
-
 /// [friend]'s presence as it stands at [nowMillis] when nothing was heard
 /// from them for a while (read back from the store, back on the network or
 /// on the screen), [confirmedAtMillis], [seenAtMillis] and [openedAtMillis]
@@ -1743,35 +1691,23 @@ FriendProfile _rememberedPresence(
   );
 }
 
-/// [friends] as read back from the store at [nowMillis]: each one's
+/// [book] as read back from the store at [nowMillis]: each one's
 /// presence as [_rememberedPresence] has it, unless [keep] gives it (what
 /// memory knows of that friend).
-Map<String, FriendProfile> _withRememberedPresence(
-  Map<String, FriendProfile> friends, {
+FriendshipBook _withRememberedPresence(
+  FriendshipBook book, {
   required int nowMillis,
   FriendProfile? Function(FriendProfile friend)? keep,
-}) {
-  return <String, FriendProfile>{
-    for (final MapEntry<String, FriendProfile> e in friends.entries)
-      e.key: switch (keep?.call(e.value)) {
-        final FriendProfile known =>
-          e.value.presence == PeerPresence.hidden
-              ? e.value
-              : e.value.copyWith(presenceDoubt: known.presenceDoubt),
-        null => _rememberedPresence(e.value, nowMillis: nowMillis),
-      },
-  };
-}
-
-Map<String, FriendProfile> _canonicalizeFriends(
-  Map<String, FriendProfile> friends,
-) {
-  final Map<String, FriendProfile> next = <String, FriendProfile>{};
-  for (final FriendProfile friend in friends.values) {
-    _putFriend(next, friend);
-  }
-  return next;
-}
+}) => book.editAll(
+  (FriendProfile friend) => switch (keep?.call(friend)) {
+    final FriendProfile known =>
+      friend.presence == PeerPresence.hidden ||
+              friend.presenceDoubt == known.presenceDoubt
+          ? friend
+          : friend.copyWith(presenceDoubt: known.presenceDoubt),
+    null => _rememberedPresence(friend, nowMillis: nowMillis),
+  },
+);
 
 /// Friend gate: every signal arriving over the mesh must come from a peer
 /// with a relationship that authorizes that signal type. The mesh itself
@@ -2168,28 +2104,6 @@ ZenSignal _unsolicitedAcceptAsRequest(ZenSignal signal) {
     sender: signal.sender,
     displayName: signal.displayName,
   );
-}
-
-/// Removes the oldest pending incoming requests until at most [keep] remain.
-/// The map keeps insertion order, so the first ones are the oldest.
-List<String> _evictOldestPendingIncoming(
-  Map<String, FriendProfile> friends, {
-  required int keep,
-}) {
-  final List<String> pendingKeys = <String>[
-    for (final MapEntry<String, FriendProfile> entry in friends.entries)
-      if (entry.value.status == FriendRelationshipStatus.pendingIncoming)
-        entry.key,
-  ];
-  final int excess = pendingKeys.length - keep;
-  if (excess <= 0) {
-    return const <String>[];
-  }
-  final List<String> evicted = pendingKeys.sublist(0, excess);
-  for (final String key in evicted) {
-    friends.remove(key);
-  }
-  return evicted;
 }
 
 /// Removes the oldest group invitations not answered yet until at most

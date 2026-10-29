@@ -88,6 +88,28 @@ Map<String, Object?> _githubJson(Directory dist, String tag) =>
       ],
     };
 
+/// `release.json` of the project's pages for that release.
+Map<String, Object?> _pagesJson(Directory dist, String tag) =>
+    <String, Object?>{
+      'version': tag.substring(1),
+      'build': '1',
+      'tag': tag,
+      'date': '2026-10-28',
+      'url': 'https://github.com/robertostrowskijagoda/Zen/releases/tag/$tag',
+      'minVersion': '',
+      'assets': <String, Object?>{
+        for (final Map<String, Object?> a
+            in (_githubJson(dist, tag)['assets']! as List<Object?>)
+                .cast<Map<String, Object?>>())
+          a['name']! as String: <String, Object?>{
+            'url': a['browser_download_url'],
+            'size': a['size'],
+          },
+      },
+      'apkCertificateSha256': '',
+      'apkCertificatesSha256': <String>[],
+    };
+
 final class _Installer implements GithubUpdateInstaller {
   _Installer(this.dir, this.assetName) : target = _targetOf(assetName);
 
@@ -156,8 +178,10 @@ _github(
   return (
     json: (Uri uri) async {
       requests.add(uri);
-      expect(uri, kGithubLatestReleaseUri);
-      return _githubJson(dist, tag);
+      // The project's pages answer first, as tool/ci/release_source.py
+      // writes release.json.
+      expect(uri, kZenReleaseInfoUri);
+      return _pagesJson(dist, tag);
     },
     download:
         (

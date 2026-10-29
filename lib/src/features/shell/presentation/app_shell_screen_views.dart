@@ -291,13 +291,17 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
     super.dispose();
   }
 
+  /// The conversations whose name (or the nickname given) has every word
+  /// typed, with or without Polish letters.
   List<ConversationPreview> _filter(List<ConversationPreview> source) {
-    final String query = _searchController.text.trim().toLowerCase();
+    final SearchQuery query = SearchQuery.parse(_searchController.text);
     if (query.isEmpty) {
       return source;
     }
     return source
-        .where((ConversationPreview c) => c.name.toLowerCase().contains(query))
+        .where(
+          (ConversationPreview c) => query.matches('${c.name} ${c.nickname}'),
+        )
         .toList(growable: false);
   }
 
@@ -354,7 +358,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
             .toList(growable: false),
       _ChatFilter.all => allAcceptedConversations,
     };
-    final String groupQuery = _searchController.text.trim().toLowerCase();
+    final SearchQuery groupQuery = SearchQuery.parse(_searchController.text);
+    // Long enough to look through messages too: they are listed under the
+    // conversations (MessageSearchResults), which then also says when
+    // nothing was found.
+    final bool searchingMessages = groupQuery.searchesMessages;
     ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.groups,
@@ -364,8 +372,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
         .read(socialHubControllerProvider)
         .groupList
         .where(
-          (GroupProfile g) =>
-              groupQuery.isEmpty || g.name.toLowerCase().contains(groupQuery),
+          (GroupProfile g) => groupQuery.isEmpty || groupQuery.matches(g.name),
         )
         .where(
           (GroupProfile g) =>
@@ -390,40 +397,52 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
             child: ListView(
               key: const Key('chats-tab-body'),
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
+              // While messages are searched the whole list stays built:
+              // the results at its end keep reading (and what they read)
+              // also off screen. It is short then: only what matches.
+              scrollCacheExtent: searchingMessages
+                  ? const ScrollCacheExtent.pixels(20000)
+                  : null,
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      TextField(
-                        key: const Key('chats-search-field'),
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          hintText: t('Szukaj rozmowy'),
-                          // Wraps rather than ending in "…" (French,
-                          // Italian on a narrow phone).
-                          hintMaxLines: 2,
-                          prefixIcon: const Icon(
-                            Icons.search_rounded,
-                            size: 20,
-                          ),
-                          suffixIcon: _searchController.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: t('Wyczyść'),
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
+                      // Its own node for screen readers: else the field's
+                      // bounds are those of the whole block with the
+                      // filters, and a tap at their middle misses it.
+                      Semantics(
+                        container: true,
+                        child: TextField(
+                          key: const Key('chats-search-field'),
+                          controller: _searchController,
+                          onChanged: (_) => setState(() {}),
+                          textInputAction: TextInputAction.search,
+                          decoration: InputDecoration(
+                            hintText: t('Szukaj rozmów i wiadomości'),
+                            // Wraps rather than ending in "…" (French,
+                            // Italian on a narrow phone).
+                            hintMaxLines: 2,
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 20,
+                            ),
+                            suffixIcon: _searchController.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: t('Wyczyść'),
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                    ),
+                                    color: zen.textMuted,
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
                                   ),
-                                  color: zen.textMuted,
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() {});
-                                  },
-                                ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -595,17 +614,20 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       in pendingConversations)
                     _ConversationCard(conversation: conversation),
                 ],
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: ZenSection(t('Rozmowy'), top: 12),
-                ),
+                if (!searchingMessages || conversations.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: ZenSection(t('Rozmowy'), top: 12),
+                  ),
                 AnimatedSwitcher(
                   duration: ZenMotion.enabled && !ZenMotion.offIn(context)
                       ? const Duration(milliseconds: 240)
                       : Duration.zero,
                   switchInCurve: Curves.easeOutCubic,
                   switchOutCurve: Curves.easeInCubic,
-                  child: conversations.isEmpty
+                  child: conversations.isEmpty && searchingMessages
+                      ? const SizedBox.shrink()
+                      : conversations.isEmpty
                       ? _EmptyChats(
                           key: ValueKey<String>(
                             'empty-${_selectedFilter.name}-${_searchController.text.isEmpty}',
@@ -637,6 +659,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                               ),
                           ],
                         ),
+                ),
+                // Messages of every conversation with the words typed.
+                MessageSearchResults(
+                  key: const Key('chats-message-search'),
+                  query: _searchController.text,
                 ),
               ],
             ),
@@ -778,11 +805,123 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _SettingsScreen extends ConsumerWidget {
+class _SettingsScreen extends ConsumerStatefulWidget {
   const _SettingsScreen();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
+  /// Finds a setting by its name (or what is written under it).
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// What this device shows of the settings pages, for their search.
+  SettingsSearchDevice _searchDevice() {
+    final AppSettings settings = ref.read(appSettingsControllerProvider);
+    return SettingsSearchDevice(
+      android: Platform.isAndroid,
+      ios: Platform.isIOS,
+      inAppSounds: !Platform.isIOS,
+      platform: defaultTargetPlatform,
+      disguise: !kIsWeb && Platform.isAndroid && !isStoreBuild,
+      hasPassword: ref.read(appSecurityServiceProvider).hasPassword,
+      gifSearch: settings.gifSearch,
+      classicPalette: settings.palette == AppPalette.classic,
+      wifiDirect: ref.read(wifiDirectAvailableProvider),
+      bluetoothLinks: ref.read(bluetoothLinksAvailableProvider),
+      multipeerLinks: ref.read(multipeerLinksAvailableProvider),
+    );
+  }
+
+  /// [sections] as they are, or, while something is typed in the search
+  /// field, only the rows that match it (in their groups) and, below, the
+  /// settings on the pages they open ("Wygląd › Motyw").
+  List<Widget> _searched(List<Widget> sections) {
+    final ZenColors zen = ZenColors.of(context);
+    final SearchQuery query = SearchQuery.parse(_search.text);
+    final Widget field = Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      // Its own node for screen readers (bounds of the field itself).
+      child: Semantics(
+        container: true,
+        child: TextField(
+          key: const Key('settings-search-field'),
+          controller: _search,
+          onChanged: (_) => setState(() {}),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: t('Szukaj ustawienia'),
+            hintMaxLines: 2,
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: t('Wyczyść'),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    color: zen.textMuted,
+                    onPressed: () {
+                      _search.clear();
+                      setState(() {});
+                    },
+                  ),
+          ),
+        ),
+      ),
+    );
+    if (query.isEmpty) {
+      return <Widget>[field, ...sections];
+    }
+    final List<Widget> found = <Widget>[
+      for (final _SettingsGroup group in sections.whereType<_SettingsGroup>())
+        if (group.matching(query) case final _SettingsGroup shown) shown,
+    ];
+    // The settings on the pages the rows open, by the row that opens each.
+    final Map<String, _SettingsNavTile> rows = <String, _SettingsNavTile>{
+      for (final _SettingsGroup group in sections.whereType<_SettingsGroup>())
+        for (final _SettingsNavTile row
+            in group.tiles.whereType<_SettingsNavTile>())
+          if (row.key case final ValueKey<String> key) key.value: row,
+    };
+    final List<Widget> deep = <Widget>[
+      for (final SettingsSearchEntry e in searchSettings(
+        query,
+        settingsSearchIndex(_searchDevice()),
+      ))
+        if (rows[e.row] case final _SettingsNavTile row)
+          _SettingsSearchResult(
+            key: Key('settings-search-result-${e.key}'),
+            entry: e,
+            onTap: () => row.open(context, highlight: e.key),
+          ),
+    ];
+    if (deep.isNotEmpty) {
+      found.add(_SettingsGroup(title: t('Na stronach ustawień'), tiles: deep));
+    }
+    return <Widget>[
+      field,
+      if (found.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            t('Nie ma ustawienia „{query}”.', {'query': _search.text.trim()}),
+            key: const Key('settings-search-empty'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: zen.textSecondary),
+          ),
+        ),
+      ...found,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final AppShellState state = ref.watch(appShellControllerProvider);
     final AppSettings settings = ref.watch(appSettingsControllerProvider);
     final int blockedCount = ref.watch(
@@ -799,7 +938,7 @@ class _SettingsScreen extends ConsumerWidget {
           child: ListView(
             key: const Key('settings-tab-body'),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
+            children: _searched(<Widget>[
               // The first-start setup again, every step, with what is set
               // now.
               FilledButton.tonalIcon(
@@ -855,37 +994,14 @@ class _SettingsScreen extends ConsumerWidget {
               const _QuickLockPanel(),
               // Friends run a newer Zen: a quiet hint, gone otherwise.
               const FriendsNewerVersionBanner(),
+              // The account key here cannot be read: what to do.
+              const DamagedIdentityBanner(),
+              // One topic per row, each topic in one place: a setting is
+              // never in two rows (docs/guide/settings-and-peers.md has the
+              // map).
               _SettingsGroup(
-                title: t('Prywatność i bezpieczeństwo'),
+                title: t('Konto i odzyskiwanie'),
                 tiles: <Widget>[
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-security'),
-                    tone: ZenTone.privacy,
-                    icon: Icons.shield_outlined,
-                    title: t('Bezpieczeństwo'),
-                    subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
-                    pageTitle: t('Bezpieczeństwo'),
-                    pageChildren: const <Widget>[_SettingsSecuritySection()],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-notification-privacy'),
-                    icon: Icons.notifications_off_outlined,
-                    tone: ZenTone.privacy,
-                    title: t('Treść powiadomień'),
-                    subtitle: settings.notificationPrivacy.label,
-                    pageChildren: <Widget>[
-                      _SectionIntro(
-                        title: t('Co mówi powiadomienie'),
-                        caption: t(
-                          'Na ekranie blokady, w zasłonce i w historii '
-                          'powiadomień systemu. Rozmowa może mieć własny '
-                          'poziom (menu rozmowy → Treść powiadomień).',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const NotificationPrivacySettingChoice(),
-                    ],
-                  ),
                   if (ref.watch(ledgerNodeEnabledProvider))
                     _SettingsNavTile(
                       key: const Key('settings-nav-account'),
@@ -929,6 +1045,34 @@ class _SettingsScreen extends ConsumerWidget {
                       onTap: () =>
                           unawaited(AccountDevicesScreen.open(context)),
                     ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Prywatność i bezpieczeństwo'),
+                tiles: <Widget>[
+                  // Passwords, the lock, the screen and the disguise.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-security'),
+                    tone: ZenTone.privacy,
+                    icon: Icons.shield_outlined,
+                    title: t('Bezpieczeństwo'),
+                    subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
+                    pageTitle: t('Bezpieczeństwo'),
+                    pageChildren: const <Widget>[_SettingsSecuritySection()],
+                  ),
+                  // Who sees what of you and who may reach you, on one page.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-contact'),
+                    icon: Icons.visibility_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Kontakt i widoczność'),
+                    subtitle: t(
+                      'Status dla znajomych, wiadomości spoza znajomych, '
+                      'zaproszenia do grup',
+                    ),
+                    pageTitle: t('Kontakt i widoczność'),
+                    pageChildren: const <Widget>[_ContactSettingsSection()],
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-blocked-button'),
                     icon: Icons.block_outlined,
@@ -941,47 +1085,27 @@ class _SettingsScreen extends ConsumerWidget {
                           }),
                     onTap: () => _openBlockedFriendsScreen(context),
                   ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-group-invites'),
-                    icon: Icons.group_add_outlined,
-                    tone: ZenTone.people,
-                    title: t('Zaproszenia do grup'),
-                    subtitle: settings.groupInviteFrom.label,
-                    pageTitle: t('Zaproszenia do grup'),
-                    pageChildren: const <Widget>[GroupInviteFromTile()],
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-show-last-opened'),
-                    icon: Icons.history_toggle_off_rounded,
-                    tone: ZenTone.privacy,
-                    title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
-                    subtitle: t(
-                      'Znajomi widzą, czy masz Zen otwarty, w tle czy '
-                      'offline, a przy tym, kiedy ostatnio go otwierałeś. '
-                      'Słabi znajomi nie widzą żadnego z tych statusów.',
-                    ),
-                    value: settings.showLastOpened,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setShowLastOpened(value),
-                    ),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-stranger-messages'),
-                    icon: Icons.mark_chat_unread_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Wiadomości spoza znajomych'),
-                    subtitle: t('Kto może napisać pierwszy'),
-                    pageTitle: t('Wiadomości spoza znajomych'),
-                    pageChildren: const <Widget>[StrangerMessagesFromTile()],
-                  ),
                 ],
               ),
               _SettingsGroup(
                 title: t('Wiadomości i połączenia'),
                 tiles: <Widget>[
-                  const _RelayNavTile(),
+                  // Everything about notifications: what they say, the
+                  // sounds, each kind, the muted people, the background.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-notifications'),
+                    icon: Icons.notifications_outlined,
+                    tone: ZenTone.communication,
+                    title: t('Powiadomienia i dźwięki'),
+                    subtitle: t(
+                      '{privacy} · dźwięki, rodzaje powiadomień, praca w tle',
+                      {'privacy': settings.notificationPrivacy.label},
+                    ),
+                    pageTitle: t('Powiadomienia i dźwięki'),
+                    pageChildren: const <Widget>[
+                      _NotificationSettingsSection(),
+                    ],
+                  ),
                   if (ref.watch(ledgerNodeEnabledProvider))
                     _SettingsNavTile(
                       key: const Key('settings-nav-recordings'),
@@ -1005,115 +1129,37 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('GIF-y'),
                     pageChildren: const <Widget>[_GifSettingsSection()],
                   ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-auto-media'),
-                    icon: Icons.download_for_offline_outlined,
-                    tone: ZenTone.media,
-                    title: t('Pobieraj zdjęcia i filmy'),
-                    subtitle: t(
-                      'Media z postów pobierają się same. Wyłącz, żeby '
-                      'oszczędzać transfer.',
-                    ),
-                    value: settings.autoDownloadMedia,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setAutoDownloadMedia(value),
-                    ),
-                  ),
-                  _SettingsSwitchTile(
-                    key: const Key('settings-media-wifi-only'),
-                    icon: Icons.wifi_rounded,
-                    tone: ZenTone.network,
-                    title: t('Media tylko przez Wi-Fi'),
-                    subtitle: t(
-                      'Zdjęcia i filmy nie pobierają się same przez dane '
-                      'komórkowe. Można je pobrać dotknięciem.',
-                    ),
-                    value: settings.mediaOnlyOnWifi,
-                    onChanged: (bool value) => unawaited(
-                      ref
-                          .read(appSettingsControllerProvider.notifier)
-                          .setMediaOnlyOnWifi(value),
-                    ),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-notifications'),
-                    icon: Icons.notifications_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Powiadomienia i dźwięki'),
-                    subtitle: t(
-                      'Dźwięki oraz rodzaje powiadomień: wiadomości, '
-                      'połączenia, reakcje, posty',
-                    ),
-                    pageTitle: t('Powiadomienia i dźwięki'),
-                    pageChildren: const <Widget>[
-                      _NotificationSettingsSection(),
-                    ],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-muted-post-authors'),
-                    icon: Icons.notifications_off_outlined,
-                    tone: ZenTone.communication,
-                    title: t('Wyciszone osoby'),
-                    subtitle: settings.mutedPostAuthors.isEmpty
-                        ? t('Nikogo nie wyciszono')
-                        : tn(
-                            settings.mutedPostAuthors.length,
-                            one: 'Bez powiadomień o postach: {n} osoba',
-                            few: 'Bez powiadomień o postach: {n} osoby',
-                            many: 'Bez powiadomień o postach: {n} osób',
-                          ),
-                    pageTitle: t('Wyciszone osoby'),
-                    pageChildren: const <Widget>[_MutedPostAuthorsSection()],
-                  ),
-                  if (Platform.isAndroid)
-                    _SettingsNavTile(
-                      key: const Key('settings-nav-delivery'),
-                      icon: Icons.notifications_active_outlined,
-                      tone: ZenTone.communication,
-                      title: t('Powiadomienia i praca w tle'),
-                      subtitle: t(
-                        'Uprawnienia, dostarczanie w tle, ekran połączeń',
-                      ),
-                      pageTitle: t('Powiadomienia i praca w tle'),
-                      pageChildren: const <Widget>[
-                        _BackgroundDeliverySection(),
-                        SizedBox(height: 12),
-                        _BatteryOptimizationSection(),
-                        SizedBox(height: 12),
-                        _FullScreenCallSection(),
-                      ],
-                    ),
-                  if (Platform.isIOS)
-                    _SettingsNavTile(
-                      key: const Key('settings-nav-ios-background'),
-                      icon: Icons.notifications_active_outlined,
-                      tone: ZenTone.communication,
-                      title: t('Praca w tle'),
-                      subtitle: t(
-                        'Sprawdzanie skrzynek w tle, odbieranie cały czas',
-                      ),
-                      pageTitle: t('Praca w tle'),
-                      pageChildren: const <Widget>[
-                        _Panel(child: IosBackgroundSection()),
-                      ],
-                    ),
                 ],
               ),
               _SettingsGroup(
-                title: t('Aplikacja'),
+                title: t('Sieć'),
                 tiles: <Widget>[
-                  // The same steps as on the first start.
+                  const _RelayNavTile(),
                   _SettingsNavTile(
-                    key: const Key('settings-nav-permissions'),
-                    icon: Icons.verified_user_outlined,
-                    tone: ZenTone.privacy,
-                    title: t('Uprawnienia i Bluetooth'),
-                    subtitle: Platform.isAndroid
-                        ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
-                        : t('Powiadomienia, mikrofon i kamera'),
-                    onTap: () => unawaited(PermissionsScreen.open(context)),
+                    key: const Key('settings-nav-network'),
+                    icon: Icons.hub_outlined,
+                    tone: ZenTone.network,
+                    title: t('Sieć i usługa'),
+                    subtitle: state.connectionLabel,
+                    pageTitle: t('Sieć i usługa'),
+                    pageChildren: const <Widget>[
+                      _LiveTechInfoSection(),
+                      _OfflineLinksPanel(),
+                      _BridgeHostSection(),
+                      Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: _Panel(child: PebbleServeSwitch()),
+                      ),
+                    ],
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-public-peers'),
+                    icon: Icons.public_rounded,
+                    tone: ZenTone.network,
+                    title: t('Publiczne węzły'),
+                    subtitle: t('Przez które węzły Zen łączy się z siecią'),
+                    pageTitle: t('Publiczne węzły'),
+                    pageChildren: const <Widget>[PublicPeersSection()],
                   ),
                   // How often Bluetooth looks around in the background.
                   if (Platform.isAndroid)
@@ -1126,16 +1172,11 @@ class _SettingsScreen extends ConsumerWidget {
                       pageTitle: t('Rozglądanie w tle'),
                       pageChildren: const <Widget>[NearbyLookSettingsSection()],
                     ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-health'),
-                    icon: Icons.health_and_safety_outlined,
-                    tone: ZenTone.network,
-                    title: t('Dlaczego nie działa?'),
-                    subtitle: t(
-                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
-                    ),
-                    onTap: () => unawaited(HealthScreen.open(context)),
-                  ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Aplikacja'),
+                tiles: <Widget>[
                   _SettingsNavTile(
                     key: const Key('settings-nav-appearance'),
                     icon: Icons.palette_outlined,
@@ -1161,6 +1202,7 @@ class _SettingsScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  // Room, limits, cleaning and what downloads by itself.
                   _SettingsNavTile(
                     key: const Key('settings-nav-data'),
                     icon: Icons.storage_outlined,
@@ -1180,6 +1222,17 @@ class _SettingsScreen extends ConsumerWidget {
                     pageTitle: t('Dane i pamięć'),
                     pageChildren: _storagePageChildren(),
                   ),
+                  // The same steps as on the first start.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-permissions'),
+                    icon: Icons.verified_user_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Uprawnienia i Bluetooth'),
+                    subtitle: Platform.isAndroid
+                        ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
+                        : t('Powiadomienia, mikrofon i kamera'),
+                    onTap: () => unawaited(PermissionsScreen.open(context)),
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-updates'),
                     icon: Icons.system_update_alt_rounded,
@@ -1196,26 +1249,14 @@ class _SettingsScreen extends ConsumerWidget {
                 title: t('Zaawansowane'),
                 tiles: <Widget>[
                   _SettingsNavTile(
-                    key: const Key('settings-nav-network'),
-                    icon: Icons.hub_outlined,
+                    key: const Key('settings-nav-health'),
+                    icon: Icons.health_and_safety_outlined,
                     tone: ZenTone.network,
-                    title: t('Sieć i usługa'),
-                    subtitle: state.connectionLabel,
-                    pageTitle: t('Sieć i usługa'),
-                    pageChildren: const <Widget>[
-                      _LiveTechInfoSection(),
-                      _OfflineLinksPanel(),
-                      _BridgeHostSection(),
-                    ],
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-public-peers'),
-                    icon: Icons.public_rounded,
-                    tone: ZenTone.network,
-                    title: t('Publiczne węzły'),
-                    subtitle: t('Przez które węzły Zen łączy się z siecią'),
-                    pageTitle: t('Publiczne węzły'),
-                    pageChildren: const <Widget>[PublicPeersSection()],
+                    title: t('Dlaczego nie działa?'),
+                    subtitle: t(
+                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
+                    ),
+                    onTap: () => unawaited(HealthScreen.open(context)),
                   ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-diagnostics'),
@@ -1254,7 +1295,7 @@ class _SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-            ],
+            ]),
           ),
         ),
       ),
@@ -1268,6 +1309,19 @@ class _SettingsGroup extends StatelessWidget {
 
   final String title;
   final List<Widget> tiles;
+
+  /// The group with only the rows [query] matches (all of them when the
+  /// group's own title does); `null` when none does.
+  _SettingsGroup? matching(SearchQuery query) {
+    if (title.isNotEmpty && query.matches(title)) {
+      return this;
+    }
+    final List<Widget> shown = <Widget>[
+      for (final Widget tile in tiles)
+        if (query.matches(_settingsRowText(tile))) tile,
+    ];
+    return shown.isEmpty ? null : _SettingsGroup(title: title, tiles: shown);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1299,6 +1353,57 @@ class _SettingsGroup extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// What the settings search looks at in a row: its title, what is written
+/// under it and the title of the page it opens.
+String _settingsRowText(Widget tile) => switch (tile) {
+  _SettingsNavTile(:final String title, :final String subtitle) =>
+    '$title $subtitle ${tile.pageTitle ?? ''} '
+        '${_settingsRowKeywords(tile.key)}',
+  _SettingsSwitchTile(:final String title, :final String subtitle) =>
+    '$title $subtitle',
+  _RelayNavTile() =>
+    '${t('Skrzynki offline')} '
+        '${t('Znajomi, którzy przechowają Twoje wiadomości')} '
+        '${_settingsRowKeywords(const Key('settings-relay-button'))}',
+  _ => '',
+};
+
+/// The other words a row of the settings list is found by.
+String _settingsRowKeywords(Key? key) => key is ValueKey<String>
+    ? (kSettingsRowKeywords[key.value] ?? const <String>[]).join(' ')
+    : '';
+
+/// A setting on a settings page that the search found: "Page › Setting",
+/// what is written under it; opens the page at it.
+class _SettingsSearchResult extends StatelessWidget {
+  const _SettingsSearchResult({
+    super.key,
+    required this.entry,
+    required this.onTap,
+  });
+
+  final SettingsSearchEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: _SettingsRowBody(
+        icon: Icons.subdirectory_arrow_right_rounded,
+        tone: zen.tone(ZenTone.system),
+        title: '${entry.page} › ${entry.title}',
+        subtitle: entry.subtitle,
+        trailing: Padding(
+          padding: const EdgeInsetsDirectional.only(end: 2),
+          child: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
+        ),
+      ),
     );
   }
 }
@@ -1398,20 +1503,32 @@ class _SettingsNavTile extends StatelessWidget {
   /// What the row is about: its colour in every theme.
   final ZenTone tone;
 
+  /// Opens what the row opens; its own page scrolled to the setting whose
+  /// widget has the key [highlight] (the settings search).
+  void open(BuildContext context, {String? highlight}) {
+    final VoidCallback? own = onTap;
+    if (own != null) {
+      own();
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => _SettingsPage(
+            title: pageTitle ?? title,
+            highlight: highlight,
+            children: pageChildren ?? const <Widget>[],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return InkWell(
-      onTap:
-          onTap ??
-          () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) => _SettingsPage(
-                title: pageTitle ?? title,
-                children: pageChildren ?? const <Widget>[],
-              ),
-            ),
-          ),
+      onTap: () => open(context),
       child: _SettingsRowBody(
         icon: icon,
         tone: zen.tone(danger ? ZenTone.safety : tone),
@@ -1467,11 +1584,12 @@ class _SettingsSwitchTile extends StatelessWidget {
 }
 
 /// Ustawienia → Dane i pamięć: how much room Zen takes, the defaults for
-/// the data and the limits.
+/// the data, what downloads by itself and the limits.
 List<Widget> _storagePageChildren() => <Widget>[
   const _Panel(child: StorageUsageSection()),
   const SizedBox(height: 12),
   const _DataSection(),
+  const _MediaDownloadSettings(),
   const SizedBox(height: 12),
   _SectionIntro(
     title: t('Limity przechowywania'),
@@ -1493,24 +1611,230 @@ Future<void> openStorageSettingsPage(BuildContext context) =>
       ),
     );
 
-/// A settings sub-page: the panels of one topic, nothing else.
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage({required this.title, required this.children});
+/// Ustawienia → Dane i pamięć: whether photos and videos of posts download
+/// by themselves, and whether only over Wi-Fi.
+class _MediaDownloadSettings extends ConsumerWidget {
+  const _MediaDownloadSettings();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppSettings settings = ref.watch(appSettingsControllerProvider);
+    final AppSettingsController controller = ref.read(
+      appSettingsControllerProvider.notifier,
+    );
+    return _SettingsGroup(
+      title: '',
+      tiles: <Widget>[
+        _SettingsSwitchTile(
+          key: const Key('settings-auto-media'),
+          icon: Icons.download_for_offline_outlined,
+          tone: ZenTone.media,
+          title: t('Pobieraj zdjęcia i filmy'),
+          subtitle: t(
+            'Media z postów pobierają się same. Wyłącz, żeby '
+            'oszczędzać transfer.',
+          ),
+          value: settings.autoDownloadMedia,
+          onChanged: (bool value) =>
+              unawaited(controller.setAutoDownloadMedia(value)),
+        ),
+        _SettingsSwitchTile(
+          key: const Key('settings-media-wifi-only'),
+          icon: Icons.wifi_rounded,
+          tone: ZenTone.network,
+          title: t('Media tylko przez Wi-Fi'),
+          subtitle: t(
+            'Zdjęcia i filmy nie pobierają się same przez dane '
+            'komórkowe. Można je pobrać dotknięciem.',
+          ),
+          value: settings.mediaOnlyOnWifi,
+          onChanged: (bool value) =>
+              unawaited(controller.setMediaOnlyOnWifi(value)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Ustawienia → Kontakt i widoczność: what friends see of you, and who
+/// may write to you or invite you without being a friend.
+class _ContactSettingsSection extends ConsumerWidget {
+  const _ContactSettingsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool showLastOpened = ref.watch(
+      appSettingsControllerProvider.select((AppSettings s) => s.showLastOpened),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _SettingsGroup(
+          title: '',
+          tiles: <Widget>[
+            _SettingsSwitchTile(
+              key: const Key('settings-show-last-opened'),
+              icon: Icons.history_toggle_off_rounded,
+              tone: ZenTone.privacy,
+              title: t('Pokazuj, kiedy ostatnio otwierałem aplikację'),
+              subtitle: t(
+                'Znajomi widzą, czy masz Zen otwarty, w tle czy '
+                'offline, a przy tym, kiedy ostatnio go otwierałeś. '
+                'Słabi znajomi nie widzą żadnego z tych statusów.',
+              ),
+              value: showLastOpened,
+              onChanged: (bool value) => unawaited(
+                ref
+                    .read(appSettingsControllerProvider.notifier)
+                    .setShowLastOpened(value),
+              ),
+            ),
+          ],
+        ),
+        const _SettingsGroup(
+          title: '',
+          tiles: <Widget>[StrangerMessagesFromTile(), GroupInviteFromTile()],
+        ),
+      ],
+    );
+  }
+}
+
+/// A settings sub-page: the panels of one topic, nothing else. Opened from
+/// the settings search, it scrolls to the setting found ([highlight], the
+/// key of its widget) and marks it for a moment.
+class _SettingsPage extends StatefulWidget {
+  const _SettingsPage({
+    required this.title,
+    required this.children,
+    this.highlight,
+  });
 
   final String title;
   final List<Widget> children;
+  final String? highlight;
+
+  @override
+  State<_SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<_SettingsPage> {
+  final GlobalKey _content = GlobalKey();
+
+  /// Where the found setting is in the page's content, while it is marked.
+  Rect? _mark;
+  bool _markShown = false;
+  Timer? _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.highlight != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _goToFound());
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade?.cancel();
+    super.dispose();
+  }
+
+  /// The element of the found setting, when the page shows it (one only
+  /// shown in some states may be missing: the page opens all the same).
+  Element? _found() {
+    final Key key = Key(widget.highlight!);
+    Element? hit;
+    void visit(Element e) {
+      if (hit != null) {
+        return;
+      }
+      if (e.widget.key == key) {
+        hit = e;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    _content.currentContext?.visitChildElements(visit);
+    return hit;
+  }
+
+  Future<void> _goToFound() async {
+    final Element? found = _found();
+    if (!mounted || found == null) {
+      return;
+    }
+    await Scrollable.ensureVisible(
+      found,
+      alignment: 0.15,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    if (!mounted) {
+      return;
+    }
+    final RenderObject? box = found.renderObject;
+    final RenderObject? content = _content.currentContext?.findRenderObject();
+    if (box is! RenderBox || content is! RenderBox || !box.attached) {
+      return;
+    }
+    final Offset at = box.localToGlobal(Offset.zero, ancestor: content);
+    setState(() {
+      _mark = at & box.size;
+      _markShown = true;
+    });
+    _fade = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) {
+        setState(() => _markShown = false);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Rect? mark = _mark;
     return Scaffold(
-      appBar: AppBar(title: PageTitle(title)),
+      appBar: AppBar(title: PageTitle(widget.title)),
       body: SelectionArea(
         child: SafeArea(
           top: false,
-          child: ListView(
+          // Every panel built at once (pages are short): the found setting
+          // is there to scroll to even when it starts off screen.
+          child: SingleChildScrollView(
             key: const Key('settings-page-body'),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: children,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Column(
+                  key: _content,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: widget.children,
+                ),
+                if (mark != null)
+                  Positioned.fromRect(
+                    rect: mark.inflate(4),
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        key: const Key('settings-page-highlight'),
+                        opacity: _markShown ? 1 : 0,
+                        duration: const Duration(milliseconds: 400),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: zen.accent.withValues(alpha: 0.10),
+                            borderRadius: context.zenRadius(14),
+                            border: Border.all(color: zen.accent, width: 2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1744,7 +2068,7 @@ class _BridgeHostStatusCard extends StatelessWidget {
                       ? null
                       : () => unawaitedLogged(
                           host.runOnce(),
-                          context: 'Sprawdzenie mostu nie udało się',
+                          context: 'Checking the bridge failed',
                         ),
                   icon: const Icon(Icons.refresh_rounded),
                 ),
@@ -2585,10 +2909,10 @@ class _GroupCardState extends ConsumerState<_GroupCard> {
           },
           onHover: (bool hovering) => setState(() => _isHovered = hovering),
           onLongPress: () {
-            _showGroupActionSheet(context, ref, group);
+            _showGroupActionSheet(context, group);
           },
           onSecondaryTap: () {
-            _showGroupActionSheet(context, ref, group);
+            _showGroupActionSheet(context, group);
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -2679,12 +3003,16 @@ Color _groupTone(ZenColors zen, GroupProfile group) {
   return zenTone(zen, hash % 8);
 }
 
-void _showGroupActionSheet(
-  BuildContext context,
-  WidgetRef ref,
-  GroupProfile group,
-) {
+void _showGroupActionSheet(BuildContext context, GroupProfile group) {
   final ZenColors zen = ZenColors.of(context);
+  // What follows the sheet runs from the navigator and the provider scope:
+  // the card that opened it may be gone by then (see
+  // _showConversationActionSheet).
+  final NavigatorState navigator = Navigator.of(context);
+  final ProviderContainer container = ProviderScope.containerOf(
+    context,
+    listen: false,
+  );
 
   showModalBottomSheet<void>(
     context: context,
@@ -2749,7 +3077,7 @@ void _showGroupActionSheet(
                 tone: zen.accent,
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  Navigator.of(context).push(
+                  navigator.push(
                     MaterialPageRoute<void>(
                       builder: (BuildContext context) =>
                           GroupConversationScreen(
@@ -2768,7 +3096,7 @@ void _showGroupActionSheet(
                 onTap: () async {
                   Navigator.of(sheetContext).pop();
                   final bool? confirmed = await showDialog<bool>(
-                    context: context,
+                    context: navigator.context,
                     builder: (BuildContext dialogContext) {
                       return AlertDialog(
                         scrollable: true,
@@ -2807,7 +3135,7 @@ void _showGroupActionSheet(
                     },
                   );
                   if (confirmed == true) {
-                    await ref
+                    await container
                         .read(socialHubControllerProvider.notifier)
                         .leaveGroup(groupId: group.id);
                   }
@@ -2831,7 +3159,6 @@ class _LocalCodePanel extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     // The QR code is always dark on white: cameras read it best that way,
     // whatever the app's theme.
-    const Color qrInk = ZenFixed.qrInk;
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -2876,7 +3203,7 @@ class _LocalCodePanel extends StatelessWidget {
             const SizedBox(height: 16),
             Center(
               child: Container(
-                padding: const EdgeInsets.all(14),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: ZenFixed.qrPaper,
                   borderRadius: context.zenRadius(22),
@@ -2884,20 +3211,7 @@ class _LocalCodePanel extends StatelessWidget {
                     context,
                   ).tinted(zen, zen.accent, radius: 18, alpha: 0.18),
                 ),
-                child: QrImageView(
-                  data: profile.qrData,
-                  size: 184,
-                  padding: EdgeInsets.zero,
-                  backgroundColor: ZenFixed.qrPaper,
-                  eyeStyle: QrEyeStyle(
-                    color: qrInk,
-                    eyeShape: QrEyeShape.square,
-                  ),
-                  dataModuleStyle: QrDataModuleStyle(
-                    color: qrInk,
-                    dataModuleShape: QrDataModuleShape.square,
-                  ),
-                ),
+                child: ZenQrView(data: profile.qrData, size: 212),
               ),
             ),
             const SizedBox(height: 18),
@@ -2972,6 +3286,11 @@ class _LocalCodePanel extends StatelessWidget {
                 );
               },
               child: Text(t('Kopiuj sam kod')),
+            ),
+            // The same code, printed: a sticker for the fridge, a poster.
+            StickerButton(
+              key: const Key('my-invite-sticker'),
+              subject: StickerSubject.invite(profile),
             ),
           ],
         ),
@@ -4544,6 +4863,14 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
     final String? text = await ref.read(peerQrScannerProvider).scan(context);
     final String? normalized = text?.trim();
     if (normalized == null || normalized.isEmpty || !mounted) {
+      return;
+    }
+    // Another Zen code scanned here (a pebble, a door sticker, one of Zen's
+    // pages): its own screen in the app, not an invitation.
+    final RuntimeRouteIntent? other = zenLinkIntent(normalized);
+    if (other != null && other.target != RuntimeRouteTarget.addFriend) {
+      Navigator.of(context).pop();
+      openZenLink(ref, normalized);
       return;
     }
     _applyTargetInput(normalized);

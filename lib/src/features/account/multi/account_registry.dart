@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -110,9 +111,7 @@ final class ZenAccountRegistry {
     }
     await dir.create(recursive: true);
     final Uint8List salt = _randomBytes(_saltBytes);
-    final File tmp = File('${file.path}.tmp');
-    await tmp.writeAsBytes(salt, flush: true);
-    await tmp.rename(file.path);
+    await writeFileAtomically(file, salt);
     final int decoys = minDecoys + _random.nextInt(maxDecoys - minDecoys + 1);
     for (int i = 0; i < decoys; i++) {
       await _plantDecoy(dir);

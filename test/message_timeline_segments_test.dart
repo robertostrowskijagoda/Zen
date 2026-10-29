@@ -466,8 +466,8 @@ void main() {
       expect(_ids(await again.load(_ada)).last, 'm8');
     });
 
-    test('an index that cannot be read: nothing shown, nothing '
-        'written', () async {
+    test('an index that cannot be read is rebuilt from its pieces: '
+        'nothing lost, the conversation goes on', () async {
       final _CountingDisk disk = _CountingDisk();
       final FileMessageTimelineStore store = FileMessageTimelineStore.onDisk(
         disk,
@@ -477,15 +477,13 @@ void main() {
       final FileMessageTimelineStore again = FileMessageTimelineStore.onDisk(
         disk,
       );
-      expect(await again.load(_ada), isEmpty);
-      disk.reset();
-      await expectLater(again.append(_ada, _m(1)), throwsFormatException);
-      await expectLater(
-        again.save(_ada, <ChatMessage>[_m(1)]),
-        throwsFormatException,
+      expect(_ids(await again.load(_ada)), <String>['m0']);
+      await again.append(_ada, _m(1));
+      expect(_ids(await again.load(_ada)), <String>['m0', 'm1']);
+      expect(
+        _ids(await FileMessageTimelineStore.onDisk(disk).load(_ada)),
+        <String>['m0', 'm1'],
       );
-      expect(disk.writes, isEmpty);
-      expect(disk.files.containsKey(seg(0)), isTrue);
     });
 
     test('a store that is locked reads nothing and writes nothing', () async {

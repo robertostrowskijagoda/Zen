@@ -1,0 +1,8 @@
+# The published image of this folder's Dockerfile, by digest, and the
+# SHA-256 of the Dockerfile it was built from. Written by
+# .github/workflows/ci-image.yml (in a pull request of its own); read by the
+# job "What to run" of ci.yml (tool/ci/ci_plan.py), which runs the Linux
+# build in this image only while both lines are set and the Dockerfile is
+# unchanged. Empty: the job sets up its tools on the runner.
+image=
+dockerfile-sha256=

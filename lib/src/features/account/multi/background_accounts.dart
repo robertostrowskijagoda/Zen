@@ -10,6 +10,7 @@ import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -338,6 +339,7 @@ final class BackgroundAccountNode {
     Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
+    int goneApp = 0,
   }) async {
     final Directory support = Directory(
       '${accounts.path}${Platform.pathSeparator}${account.folder}',
@@ -350,17 +352,20 @@ final class BackgroundAccountNode {
       credentials: secrets.forAccount(account.secret),
       notices: notices,
       waitTimeout: waitTimeout,
+      goneApp: goneApp,
     );
   }
 
   /// The node of the account whose data is in [support] and whose entries
   /// [credentials] reads (a computer's default account while its window is
-  /// locked, too).
+  /// locked, too). [goneApp]: the app engine Android ended (0 for none),
+  /// whose node the bridge gives this one at once (node_identity.go).
   static Future<BackgroundAccountNode?> openAt({
     required Directory support,
     required AppSecurityCredentialsStore credentials,
     required RuntimeSystemNotificationService notices,
     Duration waitTimeout = const Duration(seconds: 30),
+    int goneApp = 0,
   }) async {
     Future<Directory> folder() async => support;
     final FileBackgroundVault vault = FileBackgroundVault(
@@ -383,6 +388,15 @@ final class BackgroundAccountNode {
         credentials: credentials,
       ).read(),
     );
+    // What its pongs may tell friends ("w tle", when Zen was last open),
+    // as the account left it when it was last open; without it a pong
+    // says nothing of presence and the friends lose the state shown.
+    final LockedPresenceKit? presenceKit = LockedPresenceKit.fromJson(
+      await lockedPresenceKitFile(
+        supportDirectory: folder,
+        credentials: credentials,
+      ).read(),
+    );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
         waitTimeout: waitTimeout,
@@ -397,6 +411,8 @@ final class BackgroundAccountNode {
       // again once the identity is free (node_identity.go).
       role: RuntimeNodeRole.service,
     );
+    // The app engine Android ended may have run this account.
+    runtime.owner.goneApp = goneApp;
     if (doorKit != null && !doorKit.isEmpty) {
       runtime
         ..setDoorKey(doorKit.doorKey)
@@ -416,6 +432,7 @@ final class BackgroundAccountNode {
         meshLinked: runtime.meshLinked,
         doorFrames: runtime.doorFrames,
         knocks: doorKit?.knockWatch(),
+        presence: presenceKit,
       ),
       outboxKit == null || outboxKit.items.isEmpty
           ? null
@@ -434,6 +451,7 @@ final class BackgroundAccountNode {
     Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
+    int goneApp = 0,
   }) async {
     final List<BackgroundAccountNode> nodes = <BackgroundAccountNode>[];
     int slot = 0;
@@ -449,6 +467,7 @@ final class BackgroundAccountNode {
           notices: GenericAccountNotices(notices, slot: slot),
           waitTimeout: waitTimeout,
           secrets: secrets,
+          goneApp: goneApp,
         );
         if (node != null) {
           nodes.add(node);

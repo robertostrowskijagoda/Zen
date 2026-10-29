@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
@@ -148,7 +150,7 @@ final class ZenFormatGuard extends ChangeNotifier {
     if (area.isEmpty || !_areas.add(area)) {
       return;
     }
-    logZenWarning('Dane "$area" zapisała nowsza wersja Zen; bez zmian.');
+    logZenWarning('Data "$area" was written by a newer Zen; left as it is.');
     notifyListeners();
   }
 
@@ -169,3 +171,25 @@ final class ZenFormatGuard extends ChangeNotifier {
 /// file unreadable.
 T enumAt<T>(List<T> values, int index, T fallback) =>
     index >= 0 && index < values.length ? values[index] : fallback;
+
+/// Sets a plain file the app keeps outside its stores aside when it cannot
+/// be read (not text, not JSON): renamed `<name>.damaged-<time>`, kept for
+/// a look by hand and never read again, so the defaults take over once and
+/// the next start does not stumble over it again. Never throws.
+Future<void> setAsideDamagedFile(File file, Object error) async {
+  logZenWarning('${_nameOf(file)} is damaged ($error); set aside.');
+  try {
+    if (await file.exists()) {
+      await file.rename(
+        '${file.path}.damaged-${DateTime.now().millisecondsSinceEpoch}',
+      );
+    }
+  } on FileSystemException catch (failure) {
+    logZenWarning('Setting a damaged file aside failed: $failure');
+  }
+}
+
+String _nameOf(File file) {
+  final String path = file.path.replaceAll('\\', '/');
+  return path.substring(path.lastIndexOf('/') + 1);
+}

@@ -19,6 +19,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -171,14 +172,16 @@ final class _Device {
         socialHubAutoHydrateProvider.overrideWithValue(false),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty(lifecycle: _focused).copyWith(
-            friends: <String, FriendProfile>{
-              for (final String friend in friends)
-                friend: FriendProfile(
-                  address: friend,
-                  displayName: 'F-$friend',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                for (final String friend in friends)
+                  friend: FriendProfile(
+                    address: friend,
+                    displayName: 'F-$friend',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+              },
+            ),
             groups: <String, GroupProfile>{
               groupId: GroupProfile(
                 id: groupId,

@@ -626,7 +626,7 @@ final class PostReachService implements HeldPosts {
       }
       _trim();
     } on Object catch (error) {
-      logZenWarning('Odczyt postów dalszych znajomych nie udał się: $error');
+      logZenWarning('Reading posts of friends of friends failed: $error');
     }
   }
 

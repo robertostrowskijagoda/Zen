@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AsyncSnapshot, ConnectionState;
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/persistent_stores.dart';
+import 'package:zen/src/app/start_trace.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/logging/zen_tech_log.dart';
@@ -28,6 +30,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -254,6 +257,7 @@ final class ZenBootstrapper {
     Future<void> Function()? prepareAccounts,
     Future<bool> Function()? receivesInBackground,
     this.maxCriticalStepRetries = 1,
+    this.timeouts = const ZenStartTimeouts(),
   }) : assert(maxCriticalStepRetries >= 0),
        _prepareForegroundLaunch = prepareForegroundLaunch,
        _prepareAccounts =
@@ -279,6 +283,11 @@ final class ZenBootstrapper {
              keyVault: ZenAccounts.current.isDefault
                  ? platformKeyVault()
                  : SharedKeyVault(platformKeyVault()),
+             // Staying open after closing: the default account only (a
+             // start always opens that one).
+             resumeVault: ZenAccounts.current.isDefault
+                 ? platformResumeSessionVault()
+                 : null,
            )),
        _appSettingsStoreBuilder =
            appSettingsStoreBuilder ?? buildZenAppSettingsStoreForDirectory,
@@ -311,7 +320,17 @@ final class ZenBootstrapper {
   final RuntimeNodeRuntimeBuilder _runtimeBuilder;
   final int maxCriticalStepRetries;
 
+  /// How long each step of [bootstrap] may take.
+  final ZenStartTimeouts timeouts;
+
+  /// The start up to the first screen. Every step has a time limit
+  /// ([timeouts]); a step the app can start without (the accounts folder,
+  /// the background service, the diagnostics log) gives way when it fails
+  /// or takes too long, and nothing here waits on the Android background
+  /// service: whether it runs the node is settled after the first screen
+  /// (`AndroidBackgroundRuntimeBridge`).
   Future<ZenBootstrapResult> bootstrap() async {
+    ZenStartTrace.begin();
     final ZenAccountOpening? opening = this.opening;
     if (opening != null) {
       // Before anything reads a folder or a secret: all of them are this
@@ -320,55 +339,76 @@ final class ZenBootstrapper {
     }
     final Future<void> Function()? prepareAccounts = _prepareAccounts;
     if (prepareAccounts != null) {
-      try {
-        await prepareAccounts();
-      } on Object catch (error, stackTrace) {
-        logZenError('Preparing the accounts folder failed', error, stackTrace);
-      }
+      await ZenStartTrace.run<void>(
+        ZenStartStep('accounts', label: t('folder kont'), optional: true),
+        prepareAccounts,
+        timeout: timeouts.optional,
+        fallback: () {},
+        fallbackOnError: true,
+      );
     }
-    await _runCriticalStep<void>('prepare foreground runtime', () async {
-      final Future<void> Function()? prepareForegroundLaunch =
-          _prepareForegroundLaunch;
-      if (prepareForegroundLaunch == null) {
-        return;
-      }
-      await prepareForegroundLaunch();
-    });
+    final Future<void> Function()? prepareForegroundLaunch =
+        _prepareForegroundLaunch;
+    if (prepareForegroundLaunch != null) {
+      await _runStep<void>(
+        ZenStartStep(
+          'background-service',
+          label: t('usługa w tle'),
+          optional: true,
+        ),
+        prepareForegroundLaunch,
+        timeout: timeouts.optional,
+        fallback: () {},
+      );
+    }
     final ZenBootstrapSettingsState settingsState =
-        await _runCriticalStep<ZenBootstrapSettingsState>(
-          'init settings',
+        await _runStep<ZenBootstrapSettingsState>(
+          ZenStartStep('settings', label: t('ustawienia')),
           initSettings,
+          timeout: timeouts.settings,
         );
     // From here on both isolates record into the same on-device log.
-    await ZenDiagnosticsLog.attach(
-      settingsState.supportDirectory,
-      source: 'ui',
+    await ZenStartTrace.run<void>(
+      ZenStartStep(
+        'diagnostics-log',
+        label: t('dziennik diagnostyczny'),
+        optional: true,
+      ),
+      () => ZenDiagnosticsLog.attach(
+        settingsState.supportDirectory,
+        source: 'ui',
+      ),
+      timeout: timeouts.optional,
+      fallback: () {},
+      fallbackOnError: true,
     );
     logZenMessage('App bootstrap running.');
     unawaited(ZenTechLog.noteExits());
     final AppSecurityService appSecurityService =
-        await _runCriticalStep<AppSecurityService>(
-          'init security',
+        await _runStep<AppSecurityService>(
+          ZenStartStep('app-lock', label: t('blokada aplikacji')),
           () => initSecurity(settings: settingsState.settings),
+          timeout: timeouts.security,
         );
-    final ZenPersistentStores stores =
-        await _runCriticalStep<ZenPersistentStores>(
-          'init storage',
-          () => initStorage(
-            supportDirectory: settingsState.supportDirectory,
-            appSettingsStore: settingsState.appSettingsStore,
-            appSecurityService: appSecurityService,
-          ),
-        );
+    final ZenPersistentStores stores = await _runStep<ZenPersistentStores>(
+      ZenStartStep('stores', label: t('magazyn danych')),
+      () => initStorage(
+        supportDirectory: settingsState.supportDirectory,
+        appSettingsStore: settingsState.appSettingsStore,
+        appSecurityService: appSecurityService,
+      ),
+      timeout: timeouts.storage,
+    );
     // Plain copies a player left behind (a crash, a killed app).
     unawaited(wipeMediaTemporaryFiles());
     final ZenBootstrapRuntimeState runtimeState =
-        await _runCriticalStep<ZenBootstrapRuntimeState>(
-          'init runtime',
+        await _runStep<ZenBootstrapRuntimeState>(
+          ZenStartStep('network', label: t('sieć')),
           () => initRuntime(
             settings: settingsState.settings,
             appSecurityService: appSecurityService,
           ),
+          timeout: timeouts.runtime,
         );
     return ZenBootstrapResult(
       runtime: runtimeState.runtime,
@@ -382,6 +422,8 @@ final class ZenBootstrapper {
   @visibleForTesting
   Future<ZenBootstrapSettingsState> initSettings() async {
     final Directory supportDirectory = await _supportDirectoryLoader();
+    // The steps so far and every one from here are on disk at once.
+    ZenStartTrace.attach(supportDirectory);
     final AppSettingsStore appSettingsStore = _appSettingsStoreBuilder(
       supportDirectory,
     );
@@ -477,40 +519,87 @@ final class ZenBootstrapper {
     bool on = false;
     final Future<bool> Function()? receives = _receivesInBackground;
     if (receives != null) {
-      try {
-        on = await receives();
-      } on Object catch (error, stackTrace) {
-        logZenError('Reading "Odbieraj w tle" failed', error, stackTrace);
-      }
+      on = await ZenStartTrace.run<bool>(
+        ZenStartStep(
+          'receive-in-background',
+          label: t('odbieranie w tle'),
+          optional: true,
+        ),
+        receives,
+        timeout: timeouts.optional,
+        fallback: () => false,
+        fallbackOnError: true,
+      );
     }
     return on
         ? FallbackKeyedProtector(background, master)
         : FallbackKeyedProtector(master, background);
   }
 
-  Future<T> _runCriticalStep<T>(
-    String label,
-    Future<T> Function() action,
-  ) async {
+  /// [action] as [step], tried again up to [maxCriticalStepRetries]
+  /// times when it fails (never when it ran out of time: it may still be
+  /// running). With [fallback] the start goes on without it after the
+  /// last failure or the time limit.
+  Future<T> _runStep<T>(
+    ZenStartStep step,
+    Future<T> Function() action, {
+    required Duration timeout,
+    T Function()? fallback,
+  }) async {
     final int maxAttempts = maxCriticalStepRetries + 1;
-    Object? lastError;
-    StackTrace? lastStackTrace;
-    for (int attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (int attempt = 1; ; attempt += 1) {
       try {
-        return await action();
+        return await ZenStartTrace.run<T>(
+          step,
+          action,
+          timeout: timeout,
+          fallback: fallback,
+        );
+      } on ZenStartStepTimeout {
+        rethrow;
       } catch (error, stackTrace) {
-        lastError = error;
-        lastStackTrace = stackTrace;
         logZenError(
-          'Bootstrap step "$label" failed on attempt $attempt/$maxAttempts',
+          'Bootstrap step "${step.id}" failed on attempt $attempt/$maxAttempts',
           error,
           stackTrace,
         );
-        if (attempt >= maxAttempts) {
-          rethrow;
+        if (attempt < maxAttempts) {
+          continue;
         }
+        if (fallback != null) {
+          return fallback();
+        }
+        rethrow;
       }
     }
-    Error.throwWithStackTrace(lastError!, lastStackTrace!);
   }
+}
+
+/// How long each step of [ZenBootstrapper.bootstrap] may take before the
+/// start gives up on it (an optional step: goes on without it).
+@immutable
+final class ZenStartTimeouts {
+  const ZenStartTimeouts({
+    this.optional = const Duration(seconds: 6),
+    this.settings = const Duration(seconds: 20),
+    this.security = const Duration(seconds: 45),
+    this.storage = const Duration(seconds: 20),
+    this.runtime = const Duration(seconds: 20),
+  });
+
+  /// A step the app can start without.
+  final Duration optional;
+
+  /// The data folder and the settings file (with their protected copy).
+  final Duration settings;
+
+  /// The app lock: the secure storage (Android Keystore and the like).
+  final Duration security;
+
+  /// The encrypted stores.
+  final Duration storage;
+
+  /// The node runtime (built, not started: that comes after the first
+  /// screen).
+  final Duration runtime;
 }

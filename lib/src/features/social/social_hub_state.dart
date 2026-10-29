@@ -10,6 +10,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 
@@ -135,7 +136,7 @@ const LifecycleSnapshot _defaultLifecycle = LifecycleSnapshot(
 final class SocialHubState {
   const SocialHubState({
     required this.lifecycle,
-    required this.friends,
+    this.book = FriendshipBook.empty,
     this.groups = const <String, GroupProfile>{},
     required this.inbox,
     required this.pendingSignalCount,
@@ -159,7 +160,6 @@ final class SocialHubState {
   }) {
     return SocialHubState(
       lifecycle: lifecycle,
-      friends: const <String, FriendProfile>{},
       groups: const <String, GroupProfile>{},
       inbox: const <InboxEntry>[],
       pendingSignalCount: 0,
@@ -169,39 +169,42 @@ final class SocialHubState {
   }
 
   factory SocialHubState.preview() {
-    return const SocialHubState(
+    return SocialHubState(
       lifecycle: _defaultLifecycle,
-      friends: <String, FriendProfile>{
-        'ada.ygg': FriendProfile(
-          address: 'ada.ygg',
-          displayName: 'Ada',
-          status: FriendRelationshipStatus.accepted,
-          isOnline: true,
-          presence: PeerPresence.online,
-          lastMessagePreview:
-              'Jestem online, mogę wejść na rozmowę za 5 minut.',
-          lastActivityLabel: 'Teraz',
-          unreadCount: 2,
-        ),
-        'maks.ygg': FriendProfile(
-          address: 'maks.ygg',
-          displayName: 'Maks',
-          status: FriendRelationshipStatus.accepted,
-          isOnline: true,
-          presence: PeerPresence.background,
-          lastMessagePreview:
-              'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
-          lastActivityLabel: '08:41',
-        ),
-        'nina.ygg': FriendProfile(
-          address: 'nina.ygg',
-          displayName: 'Nina',
-          status: FriendRelationshipStatus.accepted,
-          lastMessagePreview: 'Transfer skończył się bez zrywania połączenia.',
-          lastActivityLabel: 'Wczoraj',
-        ),
-      },
-      groups: <String, GroupProfile>{
+      book: FriendshipBook.restore(
+        profiles: const <String, FriendProfile>{
+          'ada.ygg': FriendProfile(
+            address: 'ada.ygg',
+            displayName: 'Ada',
+            status: FriendRelationshipStatus.accepted,
+            isOnline: true,
+            presence: PeerPresence.online,
+            lastMessagePreview:
+                'Jestem online, mogę wejść na rozmowę za 5 minut.',
+            lastActivityLabel: 'Teraz',
+            unreadCount: 2,
+          ),
+          'maks.ygg': FriendProfile(
+            address: 'maks.ygg',
+            displayName: 'Maks',
+            status: FriendRelationshipStatus.accepted,
+            isOnline: true,
+            presence: PeerPresence.background,
+            lastMessagePreview:
+                'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
+            lastActivityLabel: '08:41',
+          ),
+          'nina.ygg': FriendProfile(
+            address: 'nina.ygg',
+            displayName: 'Nina',
+            status: FriendRelationshipStatus.accepted,
+            lastMessagePreview:
+                'Transfer skończył się bez zrywania połączenia.',
+            lastActivityLabel: 'Wczoraj',
+          ),
+        },
+      ),
+      groups: const <String, GroupProfile>{
         'preview-group-1': GroupProfile(
           id: 'preview-group-1',
           name: 'Projekt Zen',
@@ -213,7 +216,7 @@ final class SocialHubState {
           lastActivityLabel: 'Teraz',
         ),
       },
-      inbox: <InboxEntry>[
+      inbox: const <InboxEntry>[
         InboxEntry(
           id: 'preview-accept',
           type: InboxEntryType.friendAccepted,
@@ -241,13 +244,19 @@ final class SocialHubState {
         ),
       ],
       pendingSignalCount: 0,
-      backgroundAlerts: <InboxEntry>[],
+      backgroundAlerts: const <InboxEntry>[],
       pendingLaunchIntent: null,
     );
   }
 
   final LifecycleSnapshot lifecycle;
-  final Map<String, FriendProfile> friends;
+
+  /// Who is a friend, who is invited, who is blocked or was removed: the
+  /// only way to change it (see [FriendshipBook]).
+  final FriendshipBook book;
+
+  /// Every entry of [book] by normalized address (read only).
+  Map<String, FriendProfile> get friends => book.profiles;
   final Map<String, GroupProfile> groups;
   final List<InboxEntry> inbox;
   final int pendingSignalCount;
@@ -306,6 +315,10 @@ final class SocialHubState {
   /// [FriendProfile.address]. Self-reported: only for the "friends have a
   /// newer Zen" hint, never for anything that guards security.
   final Map<String, String> peerAppVersions;
+
+  /// When [address] was removed as a friend, `null` when it was not (or
+  /// the friendship was made again since).
+  int? removedFriendAt(String address) => book.removedAt(address);
 
   /// Seconds messages in conversation [key] live (0 = they stay).
   int disappearSecondsFor(String key) {
@@ -405,23 +418,11 @@ final class SocialHubState {
 
   GroupProfile? groupById(String id) => groups[id];
 
-  FriendProfile? friendByAddress(String address) {
-    final String canonical = PeerShareCodec.normalizeAddress(address);
-    final FriendProfile? direct = friends[canonical] ?? friends[address];
-    if (direct != null) {
-      return direct;
-    }
-    for (final FriendProfile friend in friends.values) {
-      if (PeerShareCodec.addressesEqual(friend.address, canonical)) {
-        return friend;
-      }
-    }
-    return null;
-  }
+  FriendProfile? friendByAddress(String address) => book.profileOf(address);
 
   SocialHubState copyWith({
     LifecycleSnapshot? lifecycle,
-    Map<String, FriendProfile>? friends,
+    FriendshipBook? book,
     Map<String, GroupProfile>? groups,
     List<InboxEntry>? inbox,
     int? pendingSignalCount,
@@ -441,7 +442,7 @@ final class SocialHubState {
   }) {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
-      friends: friends ?? this.friends,
+      book: book ?? this.book,
       groups: groups ?? this.groups,
       inbox: inbox ?? this.inbox,
       pendingSignalCount: pendingSignalCount ?? this.pendingSignalCount,

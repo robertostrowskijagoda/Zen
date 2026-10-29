@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -14,6 +13,9 @@ import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
 import 'package:zen/src/features/census/census_providers.dart';
 import 'package:zen/src/features/census/network_census.dart';
+import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
+import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
@@ -128,6 +130,20 @@ class AboutScreen extends StatelessWidget {
                 title: t('Zen na Discordzie'),
                 subtitle: t('Pytania, nowości i rozmowy o Zen'),
                 url: kZenDiscordUrl,
+              ),
+              Consumer(
+                builder: (BuildContext context, WidgetRef ref, Widget? _) =>
+                    _LinkTile(
+                      key: const Key('about-promo-sticker'),
+                      icon: Icons.qr_code_2_rounded,
+                      tone: zenTone(zen, 3),
+                      title: t('Naklejka promująca Zen'),
+                      subtitle: t(
+                        'Kod QR do wydruku: strona o Zen albo Twoje '
+                        'zaproszenie do znajomych',
+                      ),
+                      onTap: () => unawaited(openZenPromoSticker(context, ref)),
+                    ),
               ),
               for (final AboutSection section in AboutSection.values)
                 _SectionTile(section: section),
@@ -1466,16 +1482,15 @@ class _DonateCard extends StatelessWidget {
           const SizedBox(height: 14),
           Center(
             child: Container(
-              padding: const EdgeInsets.all(10),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: ZenFixed.qrPaper,
                 borderRadius: context.zenRadius(18),
               ),
-              child: QrImageView(
+              child: ZenQrView(
                 key: const Key('about-donate-qr'),
                 data: kDonationUrl,
-                size: 150,
-                backgroundColor: ZenFixed.qrPaper,
+                size: 170,
               ),
             ),
           ),
@@ -1484,6 +1499,16 @@ class _DonateCard extends StatelessWidget {
             t('Zeskanuj aparatem innego telefonu albo skopiuj link.'),
             textAlign: TextAlign.center,
             style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+          ),
+          Center(
+            child: StickerButton(
+              key: const Key('about-donate-sticker'),
+              subject: StickerSubject(
+                kind: StickerKind.donation,
+                data: kDonationUrl,
+                label: t('Wsparcie Zen'),
+              ),
+            ),
           ),
           const SizedBox(height: 10),
           SelectableText(

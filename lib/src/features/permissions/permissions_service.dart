@@ -144,7 +144,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
     } on MissingPluginException {
       return const <Object?, Object?>{};
     } on PlatformException catch (error) {
-      logZenWarning('Uprawnienia: ${error.message}');
+      logZenWarning('Permissions: ${error.message}');
       return const <Object?, Object?>{};
     }
   }
@@ -206,7 +206,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
     try {
       return await checkLocationPermission();
     } on Object catch (error) {
-      logZenWarning('Uprawnienia (położenie): $error');
+      logZenWarning('Permissions (location): $error');
       return null;
     }
   }
@@ -223,7 +223,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         } on MissingPluginException {
           // An engine without the bridge: nothing to ask.
         } on PlatformException catch (error) {
-          logZenWarning('Uprawnienia (${permission.name}): ${error.message}');
+          logZenWarning('Permissions (${permission.name}): ${error.message}');
         }
       case ZenPermission.bluetooth:
         await _radio.requestPermissions();
@@ -235,7 +235,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         try {
           await requestLocationPermission();
         } on Object catch (error) {
-          logZenWarning('Uprawnienia (położenie): $error');
+          logZenWarning('Permissions (location): $error');
         }
       case ZenPermission.backgroundLocation:
         try {
@@ -248,7 +248,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
             await openAndroidAppSettings();
           }
         } on Object catch (error) {
-          logZenWarning('Uprawnienia (położenie w tle): $error');
+          logZenWarning('Permissions (background location): $error');
         }
       case ZenPermission.fullScreen:
         await requestCallFullScreenIntentPermission();
@@ -302,7 +302,7 @@ final class WindowsPermissionsPlatform implements PermissionsPlatform {
     try {
       await Process.run('explorer', <String>[page]);
     } on Object catch (error) {
-      logZenWarning('Ustawienia Windows: $error');
+      logZenWarning('Windows settings: $error');
     }
   }
 

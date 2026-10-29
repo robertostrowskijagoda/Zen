@@ -6,6 +6,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/resume_session.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -79,6 +80,41 @@ void main() {
     expect(find.text('aplikacja'), findsNothing);
   });
 
+  testWidgets("the small buttons under the password keep the app's font (a "
+      "button's own text style would put the phone's font there)", (
+    WidgetTester tester,
+  ) async {
+    final MemoryAppSecurityService security = await pumpGate(tester);
+    security.lock();
+    await tester.pump();
+    final String? family = tester
+        .widget<RichText>(
+          find
+              .descendant(
+                of: find.byKey(const Key('app-unlock-password-field')),
+                matching: find.byType(RichText),
+              )
+              .first,
+        )
+        .text
+        .style
+        ?.fontFamily;
+    expect(family, isNotNull);
+    for (final String key in <String>[
+      'app-unlock-forgot-button',
+      'app-unlock-other-account',
+    ]) {
+      final RichText text = tester.widget<RichText>(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(RichText),
+        ),
+      );
+      expect(text.text.style?.fontFamily, family, reason: key);
+      expect(text.text.style?.fontSize, 12.5, reason: key);
+    }
+  });
+
   testWidgets('coming back in time stops the countdown', (
     WidgetTester tester,
   ) async {
@@ -89,6 +125,65 @@ void main() {
     await tester.pump(const Duration(minutes: 5));
     expect(security.isLocked, isFalse);
     expect(find.text('aplikacja'), findsOneWidget);
+  });
+
+  testWidgets('"Nie blokuj od razu po zamknięciu aplikacji": the key waits '
+      'sealed while Zen is away, and goes when it is back or locked', (
+    WidgetTester tester,
+  ) async {
+    const AppSettings settings = AppSettings(
+      lockMode: AppLockMode.background,
+      backgroundLockDelaySeconds: 30,
+      keepUnlockedAfterClose: true,
+    );
+    final MemorySecurityCredentialsStore credentials =
+        MemorySecurityCredentialsStore();
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      settings: settings,
+      credentialsStore: credentials,
+      hasPassword: true,
+      passwordIterations: 10,
+      resumeVault: ClockResumeSessionVault(
+        sinceBootMillis: () => 60 * 60 * 1000,
+        now: () => DateTime.utc(2026, 10, 28, 12),
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(settings),
+          ),
+          appSecurityServiceProvider.overrideWithValue(security),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          builder: (BuildContext context, Widget? child) =>
+              AppSecurityGate(child: child!),
+          home: const Scaffold(body: Text('aplikacja')),
+        ),
+      ),
+    );
+    await tester.pump();
+    Future<String?> kept() =>
+        credentials.read(appSecurityResumeSessionStorageKey);
+
+    expect(await kept(), isNull);
+    leave(tester);
+    await tester.pump();
+    expect(await kept(), isNotNull);
+    await comeBack(tester);
+    await tester.pump();
+    expect(await kept(), isNull);
+    expect(security.isLocked, isFalse);
+
+    leave(tester);
+    await tester.pump();
+    expect(await kept(), isNotNull);
+    await tester.pump(const Duration(seconds: 31));
+    expect(security.isLocked, isTrue);
+    await tester.pump();
+    expect(await kept(), isNull);
   });
 
   testWidgets('other lock modes do not lock in the background', (

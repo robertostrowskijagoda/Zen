@@ -44,7 +44,11 @@ import (
 // challenge is given — never per frame. A receiver that gets a frame of a
 // session or challenge it does not know (it restarted, it is the other
 // process of the same device) answers 'N' with a fresh challenge, and the
-// sender starts a new session.
+// sender starts a new session. A frame sent just as the receiver restarted
+// never gets that far (the receiver's new mesh core drops it while it sets
+// up a session with the sender's core), so a node's key record says when
+// it holds no session of the peer's ("fresh"): the peer then drops its own
+// and sends again what went lately under it.
 //
 // Device keys are pinned per address on first sight (pins): a record with
 // another key for a pinned address is refused, so a broken node key cannot
@@ -54,7 +58,7 @@ import (
 // Wire (signals: the signal text before fragmentation; media: the payload
 // of a relay packet):
 //
-//	"ZPQ1" 'K' flags(1: want, challenge) record [chid(16) ct(1120)]
+//	"ZPQ1" 'K' flags(1: want, challenge, fresh) record [chid(16) ct(1120)]
 //	"ZPQ1" 'D' flags(1: opening) sid(16) counter(8) [chid(16) ct(1120)]
 //	       AEAD(signal text)
 //	"ZPQ1" 'M' flags(1: opening) sid(16) counter(8) [chid(16) ct(1120)]
@@ -70,14 +74,17 @@ import (
 // the frame header plus the sender's and the recipient's address, so a
 // session belongs to one ordered pair and cannot be moved to another.
 const (
-	pqMagic            = "ZPQ1"
-	pqKindKeys         = 'K'
-	pqKindData         = 'D'
-	pqKindMedia        = 'M'
-	pqKindAck          = 'A'
-	pqKindUnknown      = 'N'
-	pqFlagWant         = 0x01
-	pqFlagChallenge    = 0x02
+	pqMagic         = "ZPQ1"
+	pqKindKeys      = 'K'
+	pqKindData      = 'D'
+	pqKindMedia     = 'M'
+	pqKindAck       = 'A'
+	pqKindUnknown   = 'N'
+	pqFlagWant      = 0x01
+	pqFlagChallenge = 0x02
+	// The sender holds no session of the receiver's. Peers up to 1.14 never
+	// set it and ignore it.
+	pqFlagFresh        = 0x04
 	pqFlagCiphertext   = 0x01
 	pqSessionIDSize    = 16
 	pqChallengeIDSize  = 16
@@ -101,8 +108,14 @@ const (
 	pqReplayWindow         = 1024
 	// Media of several calls with one peer shares a session; a wider
 	// window keeps reordered packets of a busy video call.
-	pqMediaReplayWindow    = 4096
-	pqKeyRequestInterval   = 2 * time.Second
+	pqMediaReplayWindow  = 4096
+	pqKeyRequestInterval = time.Second
+	// While frames wait for a peer's record, it is asked again this many
+	// times, without waiting for the app's next send: every
+	// pqKeyRequestInterval for the first pqKeyReasksSteady, then twice as
+	// long each time (within pqPendingTTL).
+	pqKeyReasks            = 6
+	pqKeyReasksSteady      = 3
 	pqKeyReplyInterval     = time.Second
 	pqUnknownReplyInterval = time.Second
 	pqAckInterval          = 250 * time.Millisecond
@@ -110,7 +123,17 @@ const (
 	pqPendingPerPeer       = 64
 	pqPendingBytesPerPeer  = 4 * 1024 * 1024
 	pqPendingBytesTotal    = 16 * 1024 * 1024
-	pqMaxPeers             = 4096
+	// Signal frames sent lately are kept this long (within these limits):
+	// when the peer answers that it does not know their session (it
+	// restarted, or the other process of the device took its address
+	// over), they go again under a new one instead of being lost. A
+	// peer answers at once, so a short while is enough, and it keeps a
+	// frame the peer did open before it restarted from coming twice.
+	pqResendWindow       = 10 * time.Second
+	pqResendPerPeer      = 16
+	pqResendBytesPerPeer = 256 * 1024
+	pqResendBytesTotal   = 4 * 1024 * 1024
+	pqMaxPeers           = 4096
 	// A challenge given to a peer is kept this long (a session opened with
 	// it must reach this node within that time) ...
 	pqChallengeKeep  = 6 * time.Hour
@@ -150,6 +173,13 @@ var errPQNotReady = errors.New("pq: no session with the peer yet")
 // isPQWire reports whether a signal text belongs to the session layer.
 func isPQWire(wire string) bool {
 	return len(wire) > len(pqMagic) && wire[:len(pqMagic)] == pqMagic
+}
+
+// isPQDataWire reports whether a signal text is a sealed signal frame
+// ('D'): a copy of one is dropped unopened (its counter was seen), so the
+// mesh writer may send it again (mesh_io.go, echoes).
+func isPQDataWire(wire []byte) bool {
+	return isPQWire(string(wire[:min(len(wire), len(pqMagic)+1)])) && wire[len(pqMagic)] == pqKindData
 }
 
 type pqSessionID [pqSessionIDSize]byte
@@ -197,6 +227,14 @@ type pqPendingFrame struct {
 	until time.Time
 }
 
+// pqSentFrame is a signal frame sent lately under session (see
+// pqResendWindow).
+type pqSentFrame struct {
+	wire    []byte
+	session pqSessionID
+	at      time.Time
+}
+
 type pqPeer struct {
 	ip net.IP
 	// The peer's device key, from its verified record (nil: not known yet),
@@ -211,9 +249,17 @@ type pqPeer struct {
 	challenge    *pqChallenge
 	pending      []pqPendingFrame
 	pendingBytes int
-	keysAskedAt  time.Time
-	keysSentAt   time.Time
-	unknownAt    time.Time
+	// Asks again for the record armed while frames wait, and how many
+	// were made for the frames waiting now (see reask).
+	reaskArmed bool
+	reasks     int
+	// Signal frames sent lately, oldest first, to send again under a new
+	// session should the peer not know theirs.
+	sent        []pqSentFrame
+	sentBytes   int
+	keysAskedAt time.Time
+	keysSentAt  time.Time
+	unknownAt   time.Time
 	// New KEM openings in the current minute (a stranger cannot make this
 	// node decapsulate without end).
 	sessionsMinute time.Time
@@ -253,10 +299,17 @@ type pqEndpoint struct {
 	pins         map[string]*pqPin
 	newPins      pqBucket
 	pendingBytes int
+	sentBytes    int
 	foreignKEM   pqBucket
 	// Sends a signal text (already sealed, or a control message) to a peer.
 	write func(destination net.IP, wire []byte) error
-	now   func() time.Time
+	// Tells the mesh writer a peer holds no session of this node's (it
+	// restarted): the way to it settles (meshIO.settle). May be nil; set
+	// before the endpoint is used.
+	settle func(ip net.IP)
+	now    func() time.Time
+	// Runs f after d (time.AfterFunc; tests run it by hand).
+	after func(d time.Duration, f func())
 }
 
 func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, []byte) error) (*pqEndpoint, error) {
@@ -287,6 +340,7 @@ func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, 
 		pins:        make(map[string]*pqPin),
 		write:       write,
 		now:         time.Now,
+		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 	}, nil
 }
 
@@ -371,6 +425,7 @@ func (e *pqEndpoint) evictPeerLocked() {
 	}
 	if oldest != nil {
 		e.pendingBytes -= oldest.pendingBytes
+		e.sentBytes -= oldest.sentBytes
 		delete(e.peers, oldestKey)
 	}
 }
@@ -385,7 +440,10 @@ func appendOpening(frame []byte, id pqChallengeID, ciphertext []byte) []byte {
 	return append(frame, ciphertext...)
 }
 
-func (e *pqEndpoint) keysFrame(want bool, challenge *pqChallengeID, ciphertext []byte) []byte {
+// keysFrame is this node's record (a 'K' frame): asking for the peer's
+// (want), with a challenge for it, and saying this node holds no session
+// of the peer's (fresh, pqFlagFresh).
+func (e *pqEndpoint) keysFrame(want bool, challenge *pqChallengeID, ciphertext []byte, fresh bool) []byte {
 	frame := make([]byte, 0, len(pqMagic)+2+len(e.record)+pqOpeningSize)
 	frame = append(frame, pqMagic...)
 	flags := byte(0)
@@ -394,6 +452,9 @@ func (e *pqEndpoint) keysFrame(want bool, challenge *pqChallengeID, ciphertext [
 	}
 	if challenge != nil {
 		flags |= pqFlagChallenge
+	}
+	if fresh {
+		flags |= pqFlagFresh
 	}
 	frame = append(frame, pqKindKeys, flags)
 	frame = append(frame, e.record...)
@@ -616,21 +677,104 @@ func (e *pqEndpoint) send(destination net.IP, wire []byte) error {
 		return err
 	}
 	if session == nil {
+		e.dropExpiredLocked(peer, now)
+		if len(peer.pending) == 0 {
+			peer.reasks = 0
+		}
 		e.holdLocked(peer, wire, now)
-		ask := e.askLocked(peer, now, pqKeyRequestInterval)
+		var request []byte
+		if e.askLocked(peer, now, pqKeyRequestInterval) {
+			request = e.requestFrameLocked(peer)
+		}
+		e.armReaskLocked(peer)
 		e.mu.Unlock()
-		if ask {
-			return e.write(destination16, e.keysFrame(true, nil, nil))
+		if request != nil {
+			return e.write(destination16, request)
 		}
 		return nil
 	}
 	job := e.frameLocked(peer, session, pqKindData, wire)
-	refresh := e.refreshLocked(peer, now)
+	e.keepSentLocked(peer, session.id, bytes.Clone(wire), now)
+	var request []byte
+	if e.refreshLocked(peer, now) {
+		request = e.requestFrameLocked(peer)
+	}
 	e.mu.Unlock()
-	if refresh {
-		_ = e.write(destination16, e.keysFrame(true, nil, nil))
+	if request != nil {
+		_ = e.write(destination16, request)
 	}
 	return e.write(destination16, job.seal(e.local))
+}
+
+// keepSentLocked keeps wire, just sent to peer under session, for
+// pqResendWindow within the limits; older frames go first.
+func (e *pqEndpoint) keepSentLocked(peer *pqPeer, session pqSessionID, wire []byte, now time.Time) {
+	e.dropOldSentLocked(peer, now)
+	if len(wire) > pqResendBytesPerPeer {
+		return
+	}
+	for len(peer.sent) > 0 &&
+		(len(peer.sent) >= pqResendPerPeer ||
+			peer.sentBytes+len(wire) > pqResendBytesPerPeer ||
+			e.sentBytes+len(wire) > pqResendBytesTotal) {
+		e.dropFirstSentLocked(peer)
+	}
+	if e.sentBytes+len(wire) > pqResendBytesTotal {
+		return
+	}
+	peer.sent = append(peer.sent, pqSentFrame{wire: wire, session: session, at: now})
+	peer.sentBytes += len(wire)
+	e.sentBytes += len(wire)
+}
+
+func (e *pqEndpoint) dropFirstSentLocked(peer *pqPeer) {
+	size := len(peer.sent[0].wire)
+	peer.sent = peer.sent[1:]
+	peer.sentBytes -= size
+	e.sentBytes -= size
+}
+
+func (e *pqEndpoint) dropOldSentLocked(peer *pqPeer, now time.Time) {
+	for len(peer.sent) > 0 && now.Sub(peer.sent[0].at) > pqResendWindow {
+		e.dropFirstSentLocked(peer)
+	}
+}
+
+// resendLocked puts the frames sent lately under session (which the peer
+// does not know) back in front of what peer holds, to go under the next
+// session; they are not kept for it any more.
+func (e *pqEndpoint) resendLocked(peer *pqPeer, session pqSessionID, now time.Time) {
+	e.dropOldSentLocked(peer, now)
+	var again []pqPendingFrame
+	kept := peer.sent[:0:0]
+	for _, sent := range peer.sent {
+		if sent.session == session {
+			again = append(again, pqPendingFrame{wire: sent.wire, until: now.Add(pqPendingTTL)})
+		} else {
+			kept = append(kept, sent)
+		}
+	}
+	if len(again) == 0 {
+		return
+	}
+	peer.sent = kept
+	e.sentBytes -= peer.sentBytes
+	peer.sentBytes = 0
+	for _, sent := range kept {
+		peer.sentBytes += len(sent.wire)
+	}
+	e.sentBytes += peer.sentBytes
+	for _, frame := range again {
+		peer.pendingBytes += len(frame.wire)
+		e.pendingBytes += len(frame.wire)
+	}
+	peer.pending = append(again, peer.pending...)
+	for len(peer.pending) > 0 &&
+		(len(peer.pending) > pqPendingPerPeer ||
+			peer.pendingBytes > pqPendingBytesPerPeer ||
+			e.pendingBytes > pqPendingBytesTotal) {
+		e.dropFirstPendingLocked(peer)
+	}
 }
 
 // sealMedia seals a relay frame (call media) for destination. Media is
@@ -651,20 +795,113 @@ func (e *pqEndpoint) sealMedia(destination net.IP, frame []byte) ([]byte, error)
 		return nil, err
 	}
 	if session == nil {
-		ask := e.askLocked(peer, now, pqKeyRequestInterval)
+		var request []byte
+		if e.askLocked(peer, now, pqKeyRequestInterval) {
+			request = e.requestFrameLocked(peer)
+		}
 		e.mu.Unlock()
-		if ask {
-			_ = e.write(destination16, e.keysFrame(true, nil, nil))
+		if request != nil {
+			_ = e.write(destination16, request)
 		}
 		return nil, errPQNotReady
 	}
 	job := e.frameLocked(peer, session, pqKindMedia, frame)
-	refresh := e.refreshLocked(peer, now)
+	var request []byte
+	if e.refreshLocked(peer, now) {
+		request = e.requestFrameLocked(peer)
+	}
 	e.mu.Unlock()
-	if refresh {
-		_ = e.write(destination16, e.keysFrame(true, nil, nil))
+	if request != nil {
+		_ = e.write(destination16, request)
 	}
 	return job.seal(e.local), nil
+}
+
+// armReaskLocked asks peer again for its record (and a challenge) a while
+// from now, while frames wait for it. Only the app's next send asked again
+// before, and a friend request waited for the relay engine's backoff (10 s,
+// 30 s, minutes). The mesh writer opens the way before it sends more than
+// one packet (mesh_io.go), but a request can still be lost: in the second
+// or two a node needs to be found after it came on the mesh, or while two
+// cores set up their sessions anew after one of them restarted (ironwood
+// heals a session that went out of step only on the next packet, a second
+// later).
+func (e *pqEndpoint) armReaskLocked(peer *pqPeer) {
+	if peer.reaskArmed || peer.reasks >= pqKeyReasks || len(peer.pending) == 0 {
+		return
+	}
+	peer.reaskArmed = true
+	ip := bytes.Clone(peer.ip)
+	e.after(pqReaskDelay(peer.reasks), func() { e.reask(ip) })
+}
+
+// pqReaskDelay is the wait before asking again after reasks times.
+func pqReaskDelay(reasks int) time.Duration {
+	if reasks < pqKeyReasksSteady {
+		return pqKeyRequestInterval
+	}
+	return pqKeyRequestInterval << (reasks - pqKeyReasksSteady + 1)
+}
+
+// reask is armReaskLocked's timer: asks again while frames still wait for
+// ip's record or challenge.
+func (e *pqEndpoint) reask(ip net.IP) {
+	e.mu.Lock()
+	peer := e.peers[ip.String()]
+	if peer == nil {
+		e.mu.Unlock()
+		return
+	}
+	peer.reaskArmed = false
+	now := e.now()
+	e.dropExpiredLocked(peer, now)
+	if len(peer.pending) == 0 || (peer.publicKey != nil && peer.usableChallenge(now) != nil) {
+		peer.reasks = 0
+		e.mu.Unlock()
+		return
+	}
+	peer.reasks++
+	var request []byte
+	if e.askLocked(peer, now, pqKeyRequestInterval) {
+		request = e.requestFrameLocked(peer)
+	}
+	e.armReaskLocked(peer)
+	e.mu.Unlock()
+	if request != nil {
+		_ = e.write(ip, request)
+	}
+}
+
+// hail asks a known contact at ip for its record when this node knows
+// nothing of it: the mesh writer calls it when the contact reached this
+// node unasked and nothing of it came through (mesh_io.go), as a frame of a
+// session this node no longer holds does after a restart. The request says
+// this node holds no session of the contact's (pqFlagFresh), so the contact
+// sends again what it sent lately. Only pinned addresses are asked.
+func (e *pqEndpoint) hail(ip net.IP) {
+	ip16 := ip.To16()
+	if ip16 == nil || ip.To4() != nil {
+		return
+	}
+	e.mu.Lock()
+	if e.pins[ip16.String()] == nil {
+		e.mu.Unlock()
+		return
+	}
+	if known := e.peers[ip16.String()]; known != nil && known.publicKey != nil {
+		e.mu.Unlock()
+		return
+	}
+	now := e.now()
+	peer := e.peerLocked(ip16, now)
+	var request []byte
+	if e.askLocked(peer, now, pqKeyRequestInterval) {
+		request = e.requestFrameLocked(peer)
+	}
+	e.mu.Unlock()
+	if request != nil {
+		_ = e.write(ip16, request)
+	}
 }
 
 // holdLocked keeps wire for peer until its key record arrives, within
@@ -714,10 +951,12 @@ func (e *pqEndpoint) flushLocked(peer *pqPeer, now time.Time) []pqSealJob {
 	jobs := make([]pqSealJob, 0, len(peer.pending))
 	for _, pending := range peer.pending {
 		jobs = append(jobs, e.frameLocked(peer, session, pqKindData, pending.wire))
+		e.keepSentLocked(peer, session.id, pending.wire, now)
 	}
 	e.pendingBytes -= peer.pendingBytes
 	peer.pending = nil
 	peer.pendingBytes = 0
+	peer.reasks = 0
 	return jobs
 }
 
@@ -846,6 +1085,20 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		debugf("[ZEN-GO] pq: key record from %s is not the pinned one\n", source)
 		return
 	}
+	restarted := flags&pqFlagFresh != 0 && peer.send != nil
+	if restarted {
+		// The peer holds no session of this node's (it restarted, or the
+		// other process of the device took its address over): this node's
+		// goes, and what went lately under it goes again under the next
+		// one, as after 'N'. Frames sent while the peer restarted reached
+		// nobody: its new core dropped them while it set up a session with
+		// this node's core, so nobody could say the session was unknown.
+		// The challenge in hand went with the peer's old state too.
+		id := peer.send.id
+		peer.send = nil
+		e.resendLocked(peer, id, now)
+		peer.challenge = nil
+	}
 	if hasChallenge {
 		e.takeChallengeLocked(peer, body[1+pqRecordSize:], now)
 	}
@@ -855,14 +1108,22 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 		reply = e.replyKeysLocked(peer, now)
 	}
 	jobs := e.flushLocked(peer, now)
-	ask := reply == nil && len(peer.pending) > 0 && peer.usableChallenge(now) == nil &&
-		e.askLocked(peer, now, pqKeyRequestInterval)
+	var request []byte
+	if reply == nil && len(peer.pending) > 0 && peer.usableChallenge(now) == nil &&
+		e.askLocked(peer, now, pqKeyRequestInterval) {
+		request = e.requestFrameLocked(peer)
+	}
 	e.mu.Unlock()
+	if restarted && e.settle != nil {
+		// What goes to the peer the next seconds may still die below (its
+		// core and this node's set up their session anew; mesh_io.go).
+		e.settle(source)
+	}
 	if reply != nil {
 		_ = e.write(source, reply)
 	}
-	if ask {
-		_ = e.write(source, e.keysFrame(true, nil, nil))
+	if request != nil {
+		_ = e.write(source, request)
 	}
 	e.writeJobs(source, jobs)
 }
@@ -872,9 +1133,16 @@ func (e *pqEndpoint) receiveKeys(source net.IP, body []byte) {
 func (e *pqEndpoint) replyKeysLocked(peer *pqPeer, now time.Time) []byte {
 	want := peer.usableChallenge(now) == nil
 	if id, ciphertext, ok := e.issueChallengeLocked(peer, now); ok {
-		return e.keysFrame(want, &id, ciphertext)
+		return e.keysFrame(want, &id, ciphertext, len(peer.receive) == 0)
 	}
-	return e.keysFrame(want, nil, nil)
+	return e.keysFrame(want, nil, nil, len(peer.receive) == 0)
+}
+
+// requestFrameLocked is a key request to peer: this node's record with the
+// want flag, and the fresh flag while this node holds no session of the
+// peer's.
+func (e *pqEndpoint) requestFrameLocked(peer *pqPeer) []byte {
+	return e.keysFrame(true, nil, nil, len(peer.receive) == 0)
 }
 
 func (e *pqEndpoint) receiveAck(source net.IP, body []byte) {
@@ -916,6 +1184,9 @@ func (e *pqEndpoint) receiveUnknown(source net.IP, body []byte) {
 		return
 	}
 	peer.send = nil
+	// What went lately under it did not open there: it goes again under
+	// the next session (a pong to a friend whose app just started again).
+	e.resendLocked(peer, id, now)
 	if hasChallenge && peer.publicKey != nil {
 		e.takeChallengeLocked(peer, body[1+pqSessionIDSize:], now)
 	} else {
@@ -928,13 +1199,20 @@ func (e *pqEndpoint) receiveUnknown(source net.IP, body []byte) {
 		reply = e.replyKeysLocked(peer, now)
 	}
 	jobs := e.flushLocked(peer, now)
-	ask := reply == nil && peer.usableChallenge(now) == nil && e.askLocked(peer, now, pqKeyRequestInterval)
+	var request []byte
+	if reply == nil && peer.usableChallenge(now) == nil && e.askLocked(peer, now, pqKeyRequestInterval) {
+		request = e.requestFrameLocked(peer)
+	}
 	e.mu.Unlock()
+	if e.settle != nil {
+		// As after a key request saying so (receiveKeys).
+		e.settle(source)
+	}
 	if reply != nil {
 		_ = e.write(source, reply)
 	}
-	if ask {
-		_ = e.write(source, e.keysFrame(true, nil, nil))
+	if request != nil {
+		_ = e.write(source, request)
 	}
 	e.writeJobs(source, jobs)
 }

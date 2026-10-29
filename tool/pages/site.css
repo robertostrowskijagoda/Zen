@@ -21,7 +21,8 @@
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+/* The owner's decision: animations run for every visitor, whatever the system says about reduced motion (prefers-reduced-motion). */
+html { scroll-behavior: smooth; }
 body {
   margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
   font: 16px/1.55 var(--font); overflow-wrap: break-word;
@@ -163,17 +164,16 @@ main.prose { max-width: 780px; }
   font: 700 16px/1.2 var(--font); text-align: center; text-decoration: none; cursor: pointer;
   -webkit-tap-highlight-color: transparent; max-width: 100%;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .btn, .chip, .doc, .topnav a, .langpick, .os-card, .topic, .feat, .acc {
-    transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease,
-      border-color .15s ease, filter .15s ease;
-  }
-  .btn:hover, .doc:hover { transform: translateY(-2px); }
-  .reveal { animation: rise .5s ease both; }
-  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-  .pulse { animation: pulse 2.2s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
+/* The owner's decision: animations run for every visitor, whatever the system says about reduced motion (prefers-reduced-motion). */
+.btn, .chip, .doc, .topnav a, .langpick, .os-card, .topic, .feat, .acc {
+  transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease,
+    border-color .15s ease, filter .15s ease;
 }
+.btn:hover, .doc:hover { transform: translateY(-2px); }
+.reveal { animation: rise .5s ease both; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.pulse { animation: pulse 2.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
 .btn:active, .doc:active { transform: translateY(1px) scale(.985); }
 .btn.primary {
   background: linear-gradient(135deg, var(--btn1), var(--btn2)); color: #fff;
@@ -552,10 +552,111 @@ main.prose { max-width: 780px; }
   margin: 22px 0 10px; font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
 }
 .layout { max-width: 1040px; margin: 0 auto; padding: 4px 16px 24px; }
-.layout main { padding: 0; max-width: none; min-width: 0; }
+/* No auto margins: a grid item with them shrinks to its content, and a row
+   of screenshots would then widen the page instead of scrolling. */
+.layout main { padding: 0; margin: 0; max-width: none; min-width: 0; }
 .tpl { position: relative; }
 .tpl .btn { margin-top: 4px; }
 .support-box { text-align: center; }
 .support-box .btn { margin: 6px 0; }
+
+/* Screenshots of the app (shots/<lang>/, made by tool/screenshots.dart): a
+   row that scrolls sideways on its own, never the page, snapping to each
+   picture; buttons and arrow keys too (site.js). Each picture keeps its
+   size before it loads (width and height on the img). */
+.gallery { position: relative; }
+.gallery-track {
+  display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding-inline: 16px;
+  padding: 6px 16px 16px; margin: 0 -16px; scrollbar-width: thin;
+}
+.gallery-track:focus-visible { outline-offset: -3px; }
+.shot { flex: none; width: min(64vw, 232px); margin: 0; scroll-snap-align: center; text-align: center; }
+.shot.wide { width: min(86vw, 520px); }
+.shot img, .film img {
+  display: block; width: 100%; height: auto; border-radius: 26px; background: var(--card);
+  border: 7px solid #18161f; box-shadow: var(--shadow);
+}
+.shot.wide img { border-radius: 12px; border-width: 5px; }
+@media (prefers-color-scheme: dark) { .shot img, .film img { border-color: #33304a; } }
+.shot figcaption, .film figcaption { margin-top: 10px; font-size: 14.5px; font-weight: 600; }
+.gallery-nav { display: flex; justify-content: center; gap: 12px; margin-top: 4px; }
+.gallery-nav button {
+  display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text);
+  cursor: pointer; box-shadow: var(--shadow);
+}
+.gallery-nav button:hover { background: var(--soft); border-color: var(--link); }
+.gallery-nav button:disabled { opacity: .4; cursor: default; box-shadow: none; }
+.gallery-prev .ico { transform: scaleX(-1); }
+html[dir="rtl"] .gallery-prev .ico { transform: none; }
+html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
+.films { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px; }
+.film { flex: none; width: min(72vw, 250px); margin: 0; text-align: center; }
+
+/* Home page: the download under the promise, the reasons (most tempting
+   first), how it works, the idea, questions and one last call. */
+.get { text-align: center; }
+.get .stack { margin-top: 4px; }
+.get .get-more { margin-top: 16px; }
+.get .get-more .btn { min-height: 44px; font-size: 15px; }
+#have a { font-weight: 700; }
+/* Seven reasons fill whole rows: the first (and on wide screens the last)
+   takes two columns. */
+.adv { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 560px) {
+  .adv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .adv > li:first-child { grid-column: span 2; }
+}
+@media (min-width: 900px) {
+  .adv { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .adv > li:last-child { grid-column: span 2; }
+}
+.adv > li:first-child { border: 2px solid var(--btn1); box-shadow: 0 0 0 4px var(--glow), var(--shadow); }
+.adv > li:first-child h3 { font-size: 20px; }
+.adv .fi { margin-bottom: 10px; }
+.adv + .hint { margin-top: 18px; }
+.steps {
+  list-style: none; margin: 0 auto; padding: 0; counter-reset: st; max-width: 900px;
+  display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.steps > li {
+  counter-increment: st; padding: 18px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 20px; box-shadow: var(--shadow);
+}
+.steps > li::before {
+  content: counter(st); display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 10px;
+  border-radius: 50%; color: #fff; font-weight: 800; background: linear-gradient(135deg, var(--btn1), var(--btn2));
+}
+.steps h3 { margin: 0 0 6px; font-size: 18px; }
+.steps p { margin: 0; color: var(--muted); font-size: 15px; }
+.story { border-inline-start: 4px solid var(--btn2); }
+.story p { font-size: 16.5px; }
+.story .sig { color: var(--muted); font-style: italic; font-weight: 600; }
+.sec .story { text-align: start; }
+.sec .story h2 { font-size: clamp(21px, 4vw, 26px); }
+.sec .story .btn { margin-top: 4px; }
+.final { text-align: center; }
+.final .cta-row { margin-top: 10px; }
+
+/* Promo materials: poster previews, the film, texts to copy, the QR code. */
+.posters { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px; }
+.poster { flex: none; width: min(80vw, 300px); margin: 0; text-align: center; }
+.poster img {
+  display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line);
+  box-shadow: var(--shadow); background: var(--card);
+}
+.poster figcaption { margin-top: 10px; display: grid; gap: 8px; justify-items: center; }
+.dl { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.promo-film { margin: 0 auto; max-width: 340px; text-align: center; }
+.promo-film video {
+  display: block; width: 100%; height: auto; border-radius: 18px; background: #000; box-shadow: var(--shadow);
+}
+.promo-film figcaption { margin-top: 10px; }
+.shares { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.share h3 { font-size: 16px; color: var(--muted); }
+.share p { font-size: 15.5px; overflow-wrap: anywhere; }
+.qr-card { display: grid; justify-items: center; gap: 14px; }
+.qr-card .qr { width: min(64vw, 260px); height: auto; border-radius: 10px; border: 1px solid var(--line); }
 
 /* Right-to-left pages. */

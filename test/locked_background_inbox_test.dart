@@ -26,6 +26,7 @@ import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -233,23 +234,25 @@ void main() {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: const <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-              _troll: FriendProfile(
-                address: _troll,
-                displayName: 'T',
-                status: FriendRelationshipStatus.blocked,
-              ),
-              _stranger: FriendProfile(
-                address: _stranger,
-                displayName: 'S',
-                status: FriendRelationshipStatus.pendingIncoming,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                _troll: FriendProfile(
+                  address: _troll,
+                  displayName: 'T',
+                  status: FriendRelationshipStatus.blocked,
+                ),
+                _stranger: FriendProfile(
+                  address: _stranger,
+                  displayName: 'S',
+                  status: FriendRelationshipStatus.pendingIncoming,
+                ),
+              },
+            ),
             groups: const <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',
@@ -288,13 +291,15 @@ void main() {
               capturedAtMillis: 0,
             ),
           ).copyWith(
-            friends: const <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
             groups: const <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',
@@ -1160,6 +1165,35 @@ void main() {
       expect(receiver.keptCount, kLockedStrangerFramesPerSender);
       await receive(_troll, <String, dynamic>{'type': 'message', '_rid': 'z'});
       expect(receiver.keptCount, kLockedStrangerFramesPerSender);
+    });
+
+    test('a stranger\'s request tried again (its acknowledgement got lost) '
+        'is acknowledged every time and costs nothing of the budget', () async {
+      await startReceiver(await publishFor(_masterKey()));
+      transport.sentSignals.clear();
+      // The scanner tries again every few seconds until it hears back.
+      for (int i = 0; i < kLockedStrangerFramesPerSender + 5; i++) {
+        await receive(_stranger, <String, dynamic>{
+          'type': 'friend_request',
+          '_rid': 'fr',
+        });
+      }
+      expect(receiver.keptCount, 1);
+      expect(
+        transport.sentSignals.where(
+          (s) =>
+              s.remoteAddress == _stranger &&
+              s.payload['type'] == 'rly_ack' &&
+              s.payload['rid'] == 'fr',
+        ),
+        hasLength(kLockedStrangerFramesPerSender + 5),
+      );
+      // Something new from them still has its place.
+      await receive(_stranger, <String, dynamic>{
+        'type': 'friend_request',
+        '_rid': 'fr-new',
+      });
+      expect(receiver.keptCount, 2);
     });
 
     test(

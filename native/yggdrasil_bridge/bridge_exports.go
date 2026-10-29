@@ -106,7 +106,8 @@ func YggStartNode(configJSON *C.char) *C.char {
 
 // YggSetNodeOnScreen tells whether the app that runs the node is on screen
 // (onScreen 1) or not: the background service never takes the identity of a
-// node over while its app is on screen (node_identity.go).
+// node over while its app is on screen (node_identity.go). "On screen"
+// lapses unless the app says it again within nodeOnScreenFor.
 //
 //export YggSetNodeOnScreen
 func YggSetNodeOnScreen(handle C.int, onScreen C.int) *C.char {
@@ -153,11 +154,25 @@ func (node *bridgeNode) shutdown(handle int32) error {
 		guard.close()
 	}
 	if node.multicast != nil {
-		if err := node.multicast.Stop(); err != nil {
+		// The multicast module's actor may be waiting for the core (it opens
+		// its listeners there).
+		var err error
+		if !within(nodeStopWait, func() { err = node.multicast.Stop() }) {
+			if node.logger != nil {
+				node.logger.Warnf("node %d: multicast did not stop within %v", handle, nodeStopWait)
+			}
+		} else if err != nil {
 			return err
 		}
 	}
-	node.core.Stop()
+	if node.mesh != nil {
+		node.mesh.stop()
+	}
+	if !stopCore(node.core, nodeStopWait) && node.logger != nil {
+		// Its links close by themselves once it gets to it; the key is let
+		// go anyway, or the app could never start the node again.
+		node.logger.Warnf("node %d: the mesh core did not stop within %v", handle, nodeStopWait)
+	}
 	nodes.Delete(handle)
 	// The key is free for the next node only now that this one is down.
 	node.identity.release()
@@ -173,34 +188,41 @@ func YggGetNodeInfo(handle C.int) *C.char {
 	})
 }
 
+// YggGetPeersJson, YggGetPathsJson, YggGetTreeJson and YggGetSessionsJson
+// answer from the node's view: never waiting for its core longer than
+// nodeViewWait (node_view.go).
+//
 //export YggGetPeersJson
 func YggGetPeersJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(buildPeerJSON(node.core.GetPeers()))
+		return responseOK(buildPeerJSON(node.view().peers))
 	})
 }
 
 //export YggGetPathsJson
 func YggGetPathsJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(node.core.GetPaths())
+		return responseOK(node.viewPaths())
 	})
 }
 
 //export YggGetTreeJson
 func YggGetTreeJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(node.core.GetTree())
+		return responseOK(node.viewTree())
 	})
 }
 
 //export YggGetSessionsJson
 func YggGetSessionsJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(node.core.GetSessions())
+		return responseOK(node.view().sessions)
 	})
 }
 
+// YggRetryPeersNow and the calls below that change the node's peerings wait
+// for the core at most nodeActionWait (node_view.go).
+//
 //export YggRetryPeersNow
 func YggRetryPeersNow(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
@@ -212,10 +234,13 @@ func YggRetryPeersNow(handle C.int) *C.char {
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
 		if runtimeManagedPeerCount() > 0 {
-			node.runPeerProbeCycle()
+			go node.runPeerProbeCycle()
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
-		node.core.RetryPeersNow()
+		_ = node.coreAction(func() error {
+			node.core.RetryPeersNow()
+			return nil
+		})
 		return responseOK(normalizeNodeState(int32(handle), node))
 	})
 }
@@ -237,10 +262,15 @@ func YggAddPeer(handle C.int, peerURI *C.char) *C.char {
 		}
 		// A friend's bridge is dialled also while a phone holds
 		// (transit_guard.go never sets bridges aside).
-		if err := node.core.AddPeer(parsed, ""); err != nil {
+		if err := node.coreAction(func() error {
+			if err := node.core.AddPeer(parsed, ""); err != nil {
+				return err
+			}
+			node.updateConfiguredPeer(uri, true)
+			return nil
+		}); err != nil {
 			return responseError(err)
 		}
-		node.updateConfiguredPeer(uri, true)
 		return responseOK(normalizeNodeState(int32(handle), node))
 	})
 }
@@ -260,10 +290,15 @@ func YggRemovePeer(handle C.int, peerURI *C.char) *C.char {
 			// Set aside on battery, never dialled.
 			return responseOK(normalizeNodeState(int32(handle), node))
 		}
-		if err := node.core.RemovePeer(parsed, ""); err != nil {
+		if err := node.coreAction(func() error {
+			if err := node.core.RemovePeer(parsed, ""); err != nil {
+				return err
+			}
+			node.updateConfiguredPeer(uri, false)
+			return nil
+		}); err != nil {
 			return responseError(err)
 		}
-		node.updateConfiguredPeer(uri, false)
 		return responseOK(normalizeNodeState(int32(handle), node))
 	})
 }
@@ -275,7 +310,9 @@ func YggCallPeer(handle C.int, peerURI *C.char) *C.char {
 		if err != nil {
 			return responseError(err)
 		}
-		if err := node.core.CallPeer(parsed, ""); err != nil {
+		if err := node.coreAction(func() error {
+			return node.core.CallPeer(parsed, "")
+		}); err != nil {
 			return responseError(err)
 		}
 		return responseOK(normalizeNodeState(int32(handle), node))

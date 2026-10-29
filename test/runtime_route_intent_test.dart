@@ -117,15 +117,21 @@ void main() {
   test('door sticker links open the neighbours knock', () {
     final FlatDoorCode door = FlatDoorCode(
       key: base64Url.encode(List<int>.filled(32, 7)),
-      door: 'abc',
+      door: 'AAECAwQFBgcICQoL',
       inbox: PeerShareCodec.normalizeAddress('200::d1'),
       name: 'Nowakowie, m. 12',
     );
+    // The JSON (format 1, older stickers) and link format 2 (digits).
     final String code = door.encode();
+    final String digits = door.linkCode!;
+    expect(door.toLink(), '${PeerShareCodec.invitePageUrl}m#$digits');
     for (final String routeKey in <String>[
       'zen://m/$code',
-      door.toLink(),
       '${PeerShareCodec.invitePageUrl}m#$code',
+      'zen-flat:$code',
+      door.toLink(),
+      'zen://m/$digits',
+      'zen-flat:$digits',
     ]) {
       final RuntimeRouteIntent? intent = runtimeRouteIntentFromRouteKey(
         id: 'door',
@@ -135,12 +141,16 @@ void main() {
       final FlatDoorCode? back = FlatDoorCode.parse(intent!.rawInput!);
       expect(back?.key, door.key, reason: routeKey);
       expect(back?.inbox, door.inbox, reason: routeKey);
+      expect(back?.door, door.door, reason: routeKey);
     }
     for (final String routeKey in <String>[
       'zen://m/nonsense',
       'zen://m/',
       'https://example.org/m#$code',
+      'https://example.org/m#$digits',
       '${PeerShareCodec.invitePageUrl}m#nonsense',
+      '${PeerShareCodec.invitePageUrl}m#${digits.substring(1)}',
+      'zen://m/${digits.substring(1)}',
     ]) {
       expect(
         runtimeRouteIntentFromRouteKey(id: 'door', routeKey: routeKey)?.target,

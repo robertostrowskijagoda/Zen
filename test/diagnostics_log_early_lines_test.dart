@@ -25,17 +25,22 @@ void main() {
       final String log = await _settled(ZenDiagnosticsLog.read);
 
       final List<String> lines = log.trim().split('\n');
-      expect(lines.first, contains('--- test attached'));
       // The oldest lines beyond the limit are dropped.
       expect(log, isNot(contains('early line 5\n')));
       expect(log, contains('early line 6\n'));
       expect(log, isNot(contains('tajne.ico')));
       final int early = lines.indexWhere((String l) => l.contains('line 6'));
       final int last = lines.indexWhere((String l) => l.contains('tray icon'));
+      final int attached = lines.indexWhere(
+        (String l) => l.contains('--- test attached'),
+      );
       final int after = lines.indexWhere((String l) => l.contains('after the'));
-      expect(early, greaterThan(0));
+      // In time order: the early lines before the attach line (after it
+      // they broke the merge with the other isolate's file).
+      expect(early, 0);
       expect(last, greaterThan(early));
-      expect(after, greaterThan(last));
+      expect(attached, greaterThan(last));
+      expect(after, greaterThan(attached));
     },
   );
 }

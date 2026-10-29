@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -10,17 +9,20 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_link.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
-import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/update/presentation/friends_version_banner.dart';
 
 /// "Urządzenia": this account's devices, linking a new one and cutting
 /// off a lost one.
@@ -63,12 +65,13 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
         setState(() {});
       }
     });
-    unawaited(
-      _node?.start().then((_) {
+    unawaitedLogged(
+      _node?.start().whenComplete(() {
         if (mounted) {
           setState(() {});
         }
       }),
+      context: 'The devices wait for a ledger that did not start',
     );
   }
 
@@ -193,7 +196,9 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
       body: SafeArea(
         top: false,
         child: !ready
-            ? const _Starting()
+            ? (DamagedIdentityNotice.instance.damaged
+                  ? const _DamagedIdentity()
+                  : const _Starting())
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: <Widget>[
@@ -303,6 +308,89 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
 }
 
 /// "The account is starting" placeholder.
+/// In the settings while this device's account identity cannot be read
+/// ([DamagedIdentityNotice]): leads to "Urządzenia", which shows the ways
+/// back to the account. Nothing shows otherwise.
+class DamagedIdentityBanner extends StatelessWidget {
+  const DamagedIdentityBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: DamagedIdentityNotice.instance,
+    builder: (BuildContext context, Widget? _) =>
+        DamagedIdentityNotice.instance.damaged
+        ? UpdateWarningTile(
+            key: const Key('identity-damaged-banner'),
+            icon: Icons.key_off_rounded,
+            title: t('Klucza konta na tym urządzeniu nie da się odczytać'),
+            body: t(
+              'Posty, profil i Twoje urządzenia są wyłączone. Zobacz, jak '
+              'wrócić do konta.',
+            ),
+            onTap: (BuildContext context) =>
+                unawaited(AccountDevicesScreen.open(context)),
+          )
+        : const SizedBox.shrink(),
+  );
+}
+
+/// This device's account identity cannot be read (both copies damaged):
+/// what is off, and the two ways back to the same account. A new account
+/// is never made in its place.
+class _DamagedIdentity extends StatelessWidget {
+  const _DamagedIdentity();
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ListView(
+      key: const Key('devices-identity-damaged'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      children: <Widget>[
+        ZenInfo(
+          icon: Icons.warning_amber_rounded,
+          tone: zen.danger,
+          title: t('Klucza konta na tym urządzeniu nie da się odczytać'),
+          text: t(
+            'Plik z kluczem konta jest uszkodzony. Rozmowy, znajomi i grupy '
+            'działają, ale posty, profil i Twoje pozostałe urządzenia są '
+            'wyłączone. Zen nie zakłada nowego konta w jego miejsce: dołącz '
+            'to urządzenie do swojego konta z innego swojego urządzenia albo '
+            'przywróć klucz z kopii.',
+          ),
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          key: const Key('devices-damaged-join-account'),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+          onPressed: () => unawaited(
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const _LinkReceiveScreen(),
+              ),
+            ),
+          ),
+          icon: const Icon(Icons.login_rounded),
+          label: Text(
+            t('Dołącz z innego swojego urządzenia'),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          key: const Key('devices-damaged-restore-key'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+          ),
+          onPressed: () => unawaited(KeyRestoreScreen.open(context)),
+          icon: const Icon(Icons.key_rounded),
+          label: Text(t('Przywróć klucz z kopii'), textAlign: TextAlign.center),
+        ),
+      ],
+    );
+  }
+}
+
 class _Starting extends StatelessWidget {
   const _Starting();
 
@@ -500,7 +588,13 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
   }
 
   Future<void> _scan() async {
-    final String? text = await ref.read(peerQrScannerProvider).scan(context);
+    // Another device's code is its invitation link; other Zen codes open
+    // their own screen.
+    final String? text = await scanZenCode(
+      context,
+      ref,
+      accepts: (String text) => _codeOf(text) != null,
+    );
     if (text != null && text.trim().isNotEmpty) {
       final String? code = _codeOf(text);
       _code.text = code ?? text.trim();
@@ -593,7 +687,7 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
         );
       });
     } on Object catch (error) {
-      logZenWarning('Podłączenie urządzenia: $error');
+      logZenWarning('Linking a device: $error');
       setState(
         () => _message = '$error'.replaceFirst('TimeoutException: ', ''),
       );
@@ -822,16 +916,12 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
                 child: Column(
                   children: <Widget>[
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      clipBehavior: Clip.antiAlias,
                       decoration: BoxDecoration(
                         color: ZenFixed.qrPaper,
                         borderRadius: context.zenRadius(20),
                       ),
-                      child: QrImageView(
-                        data: profile.qrData,
-                        size: 180,
-                        backgroundColor: ZenFixed.qrPaper,
-                      ),
+                      child: ZenQrView(data: profile.qrData, size: 204),
                     ),
                     const SizedBox(height: 14),
                     Text(

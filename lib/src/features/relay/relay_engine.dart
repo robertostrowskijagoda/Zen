@@ -109,6 +109,17 @@ final class RelayConfig {
       Duration(hours: 2),
       Duration(hours: 4),
     ],
+    this.firstContactRetrySchedule = const <(int, Duration)>[
+      // The first two minutes: the other phone is usually right there.
+      (40, Duration(seconds: 3)),
+      // Up to twenty minutes, then six hours, then a day: someone back
+      // after a while (an iPhone that opens Zen for a moment) still hears
+      // it within minutes.
+      (36, Duration(seconds: 30)),
+      (170, Duration(minutes: 2)),
+      (216, Duration(minutes: 5)),
+      (1, Duration(minutes: 15)),
+    ],
     this.depositRetryInterval = const Duration(minutes: 2),
     this.depositRetryMaxInterval = const Duration(minutes: 30),
     this.networkQuietGap = const Duration(minutes: 10),
@@ -183,6 +194,16 @@ final class RelayConfig {
   /// steps only spare the battery while the recipient is really away; one
   /// that stays around without confirming is tried on the schedule.
   final List<Duration> directRetrySchedule;
+
+  /// Waits between direct tries of a first contact ([kFirstContactTypes]: a
+  /// friend request, the answer to one), as (tries, wait) steps; the last
+  /// wait repeats. The recipient is no friend yet, so no mailbox can carry
+  /// it, and nothing tells when it comes back: the device tries itself, and
+  /// often (one small frame a try, only until it is acknowledged). The
+  /// first tries to an address nobody talked to are lost while the mesh
+  /// looks the way up; with the long steps of [directRetrySchedule] an
+  /// invitation to someone back from an hour offline came hours later.
+  final List<(int, Duration)> firstContactRetrySchedule;
 
   /// Wait between deposit tries at a mailbox that did not confirm, for the
   /// first ten minutes of a payload's life; it then grows step by step up to
@@ -564,6 +585,13 @@ const Set<String> _directOnlyPayloadTypes = <String>{
   // resident shows up (the other mailboxes took the same knock).
   'flat_seal',
   'flat_held',
+};
+
+/// Reliable payloads that make a first contact: tried directly on
+/// [RelayConfig.firstContactRetrySchedule].
+const Set<String> kFirstContactTypes = <String>{
+  'friend_request',
+  'friend_accept',
 };
 
 /// Key marking a payload as reliable: `rly_ack` echoes it back.
@@ -1031,6 +1059,8 @@ final class RelayEngine {
     state.outbox[rid] = entry;
     _unsent.add(entry);
     _track(state, entry, now);
+    // Its next try and its deposit are due within seconds.
+    _frequentTicks = true;
     return rid;
   }
 
@@ -1541,7 +1571,8 @@ final class RelayEngine {
       return true;
     }
     for (final RelayOutboxEntry entry in state.outbox.values) {
-      if (entry.nextDirectAttemptAtMillis - now < soon ||
+      if ((entry.nextDirectAttemptAtMillis - now < soon &&
+              !_onTheSlowTick(entry)) ||
           now - entry.createdAtMillis <
               config.depositAfter.inMilliseconds * 3) {
         return true;
@@ -1549,6 +1580,15 @@ final class RelayEngine {
     }
     return false;
   }
+
+  /// A first contact past its quick first tries waits half a minute or
+  /// more between tries: the slow tick serves it, it keeps no fast ticks
+  /// going while the other phone stays away.
+  bool _onTheSlowTick(RelayOutboxEntry entry) =>
+      kFirstContactTypes.contains(entry.payload['type']) &&
+      entry.directAttempts > 0 &&
+      (_directWait(entry, entry.directAttempts - 1) ?? Duration.zero) >=
+          const Duration(seconds: 30);
 
   /// Makes everything queued due now: on the next tick each payload is tried
   /// directly and each mailbox that has not confirmed gets its copy.
@@ -3120,21 +3160,39 @@ final class RelayEngine {
 
   /// When [entry] was last tried directly (0: never), as its backoff tells.
   int _lastDirectAttemptAt(RelayOutboxEntry entry) {
-    final List<Duration> schedule = config.directRetrySchedule;
-    if (entry.directAttempts == 0 || schedule.isEmpty) {
+    if (entry.directAttempts == 0) {
       return 0;
     }
-    final Duration wait =
-        schedule[min(entry.directAttempts - 1, schedule.length - 1)];
-    return entry.nextDirectAttemptAtMillis - wait.inMilliseconds;
+    final Duration? wait = _directWait(entry, entry.directAttempts - 1);
+    return wait == null
+        ? 0
+        : entry.nextDirectAttemptAtMillis - wait.inMilliseconds;
+  }
+
+  /// The wait after the direct try number [tried] (0: the first) of
+  /// [entry]; null when there is no schedule.
+  Duration? _directWait(RelayOutboxEntry entry, int tried) {
+    if (kFirstContactTypes.contains(entry.payload['type'])) {
+      final List<(int, Duration)> steps = config.firstContactRetrySchedule;
+      int left = tried;
+      for (final (int tries, Duration wait) in steps) {
+        if (left < tries) {
+          return wait;
+        }
+        left -= tries;
+      }
+      if (steps.isNotEmpty) {
+        return steps.last.$2;
+      }
+    }
+    final List<Duration> schedule = config.directRetrySchedule;
+    return schedule.isEmpty ? null : schedule[min(tried, schedule.length - 1)];
   }
 
   /// [entry] counted as tried now, with its next try on the backoff.
   RelayOutboxEntry _scheduleNextDirect(RelayOutboxEntry entry, int now) {
-    final List<Duration> schedule = config.directRetrySchedule;
-    final Duration wait = schedule.isEmpty
-        ? config.messageTtl
-        : schedule[min(entry.directAttempts, schedule.length - 1)];
+    final Duration wait =
+        _directWait(entry, entry.directAttempts) ?? config.messageTtl;
     return entry.copyWith(
       directAttempts: entry.directAttempts + 1,
       nextDirectAttemptAtMillis: now + wait.inMilliseconds,

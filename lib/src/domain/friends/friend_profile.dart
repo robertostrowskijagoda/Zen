@@ -95,14 +95,7 @@ final class FriendProfile {
       hasProfileName ? displayName.trim() : t('Kontakt Zen');
 
   /// True when the peer has told its real name (not a generated label).
-  bool get hasProfileName {
-    final String trimmed = displayName.trim();
-    if (trimmed.isEmpty || trimmed == 'Kontakt Zen') {
-      return false;
-    }
-    final String shareId = PeerShareCodec.shareIdForAddress(address);
-    return trimmed != shareId && trimmed != 'Zen $shareId';
-  }
+  bool get hasProfileName => isRealPeerName(address, displayName);
 
   /// True when this user gave the peer a nickname.
   bool get hasNickname => nickname.trim().isNotEmpty;
@@ -163,3 +156,15 @@ final class FriendProfile {
 }
 
 const Object _sentinel = Object();
+
+/// Whether [name] is a name the peer at [address] gave itself, not a label
+/// made up for it (empty, "Kontakt Zen", the raw share code or the
+/// "Zen <code>" placeholder a nameless app sends).
+bool isRealPeerName(String address, String? name) {
+  final String trimmed = name?.trim() ?? '';
+  if (trimmed.isEmpty || trimmed == 'Kontakt Zen') {
+    return false;
+  }
+  final String shareId = PeerShareCodec.shareIdForAddress(address);
+  return trimmed != shareId && trimmed != 'Zen $shareId';
+}

@@ -118,7 +118,8 @@ void registerGoLicenses({AssetBundle? bundle}) {
   LicenseRegistry.addLicense(() => goLicenseEntries(assets));
 }
 
-/// The bundled fonts (assets/fonts), all under the SIL Open Font License.
+/// The bundled fonts (assets/fonts, assets/fonts/pebbles), all under the
+/// SIL Open Font License.
 const String kFontLicensePath = 'assets/licenses/fonts/OFL.txt';
 
 /// NOTICE, one license entry per Go module listed in the index, the native
@@ -135,11 +136,24 @@ Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
   final String? fonts = await _load(assets, kFontLicensePath);
   if (fonts != null) {
     yield LicenseEntryWithLineBreaks(const <String>[
-      'Fredoka',
+      'Baloo 2',
       'Hanken Grotesk',
       'JetBrains Mono',
       'Space Mono',
       'DM Sans',
+      'Abril Fatface',
+      'Alfa Slab One',
+      'Amatic SC',
+      'Bangers',
+      'Bungee',
+      'Comic Neue',
+      'Courgette',
+      'Indie Flower',
+      'Quicksand',
+      'Righteous',
+      'Saira Stencil One',
+      'Titan One',
+      'Yeseva One',
     ], fonts);
   }
 }
@@ -186,7 +200,7 @@ Future<String?> _load(AssetBundle assets, String key) async {
   try {
     return await assets.loadString(key);
   } on Object catch (error) {
-    logZenWarning('Licencje: nie wczytałem $key: $error');
+    logZenWarning('Licenses: $key not loaded: $error');
     return null;
   }
 }

@@ -16,7 +16,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 	"github.com/yggdrasil-network/yggdrasil-go/src/multicast"
 )
 
@@ -27,8 +26,10 @@ type bridgeResponse struct {
 }
 
 type bridgeNode struct {
-	core      *core.Core
-	iprwc     *ipv6rwc.ReadWriteCloser
+	core *core.Core
+	// The node's own packets on the mesh: the packet loop reads, a writer
+	// of its own writes (mesh_io.go).
+	mesh      *meshIO
 	config    *config.NodeConfig
 	configMu  sync.RWMutex
 	multicast *multicast.Multicast
@@ -95,6 +96,12 @@ type bridgeNode struct {
 	// the node (node_identity.go); nil in tests that build a node by hand.
 	identity *nodeIdentityClaim
 	lastCall atomic.Int64
+	// What the app reads of the core, asked off its thread, and the
+	// changes of the core's peerings under way (node_view.go).
+	sample  coreQuery[nodeSample]
+	paths   coreQuery[[]core.PathEntryInfo]
+	tree    coreQuery[[]core.TreeEntryInfo]
+	actions atomic.Int32
 }
 
 type configSummary struct {
@@ -196,7 +203,16 @@ const (
 	// The desktop's latency probe of the pool only feeds the diagnostics
 	// ("selectedPeer"): rarely, never on battery (power_source.go).
 	peerProbeRefreshInterval = 6 * time.Hour
-	signalChunkSize          = 1300
+	// Base64 text in one signal fragment as senders up to 1.14 cut them:
+	// what the number of fragments a signal may have is reckoned with
+	// (maxSignalChunks).
+	signalChunkSize = 1300
+	// Base64 text in one fragment as this bridge cuts them (doors too): a
+	// whole session-layer key record, challenge or opening frame fits one
+	// packet, so none of them is split across packets of which the mesh may
+	// keep only the last (mesh_io.go). Receivers since 1.13 take fragments
+	// of up to maxSignalEncodedBytes.
+	signalSendChunkSize = 8 * 1024
 	// Most signals queued for the app at once (see signal_inbox.go).
 	signalInboxCapacity = 2048
 	signalTTL           = 90 * time.Second

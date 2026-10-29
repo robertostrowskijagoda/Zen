@@ -74,7 +74,7 @@ final Provider<FoodService> foodServiceProvider = Provider<FoodService>((
     // "Kółko i przyjaciele", "Gotuję dziś" for close friends only.
     closeFriends: meet.host.closeFriends,
   );
-  unawaitedLogged(food.load(), context: 'Odczyt jedzenia');
+  unawaitedLogged(food.load(), context: 'Reading food');
   listenFrames(ref, food.handle, 'Jedzenie');
   ref.onDispose(food.dispose);
   return food;

@@ -718,7 +718,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         await _appendSystemMessage(
           peerAddress: signal.sender,
           event: SocialEventText('chat.connected', <String, String>{
-            'name': _labelFor(signal, friends: state.friends),
+            // Not known yet: said without a name, the chat puts the name in
+            // once their profile tells it.
+            'name': _realNameFor(signal, friends: state.friends) ?? '',
           }),
           timestamp: timestamp,
         );

@@ -184,6 +184,36 @@ class LockModeSettingChoice extends ConsumerWidget {
                 ),
             ],
           ),
+          // Not for an additional account: a start always opens the
+          // default one.
+          if (security.hasPassword &&
+              security.canStayUnlockedAfterClose &&
+              ref.read(zenAccountProvider).isDefault) ...<Widget>[
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              key: const Key('settings-lock-keep-after-close'),
+              contentPadding: EdgeInsets.zero,
+              value: settings.keepUnlockedAfterClose,
+              title: Text(t('Nie blokuj od razu po zamknięciu aplikacji')),
+              subtitle: Text(
+                t(
+                  'Gdy zamkniesz Zen albo zamknie go system, przez ten sam '
+                  'czas otworzy się bez hasła. To ryzyko: kto w tym czasie '
+                  'weźmie Twój odblokowany telefon, otworzy Zen bez hasła. '
+                  'Włącz tylko, jeśli telefon ma blokadę ekranu. Po '
+                  'restarcie telefonu, po wyłączeniu jego blokady ekranu i '
+                  'po „Zablokuj teraz” hasło jest potrzebne zawsze.',
+                ),
+                style: TextStyle(
+                  color: zen.warning,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              onChanged: (bool on) =>
+                  unawaited(controller.setKeepUnlockedAfterClose(on)),
+            ),
+          ],
         ],
         // Without a lock for a while in the background the phone
         // only receives anyway (android_background_runtime.dart).

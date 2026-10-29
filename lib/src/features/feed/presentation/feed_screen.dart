@@ -22,6 +22,7 @@ import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_items.dart';
 import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/feed_search.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/post_mentions.dart';
@@ -58,6 +59,7 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart'
     show PyramidService;
 import 'package:zen/src/features/pyramid/pyramid_state.dart'
     show PyrMember, PyramidState;
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/shell/composer_drafts.dart';
@@ -127,6 +129,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   /// The ids of what the wall shows, as last built.
   List<String> _shownIds = const <String>[];
 
+  /// The search field over the wall is open: only posts with the words
+  /// typed (in the text, the author's name or a comment) are shown.
+  bool _searching = false;
+  final TextEditingController _searchText = TextEditingController();
+
   static const String _filterKey = 'ui/feed_filter';
 
   @override
@@ -190,7 +197,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         setState(() {});
       }
     });
-    unawaited(
+    // A ledger that cannot start (its identity damaged) is said in the
+    // settings; here the feed just stays empty.
+    unawaitedLogged(
       _node?.start().then((_) async {
         _feedRevision++;
         await _checkReshares();
@@ -198,6 +207,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           setState(() {});
         }
       }),
+      context: 'The feed waits for a ledger that did not start',
     );
   }
 
@@ -206,6 +216,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     feedFilterRequest.removeListener(_onFilterRequest);
     feedPostRequest.removeListener(_onPostRequest);
     _scroll.dispose();
+    _searchText.dispose();
     _pyramid?.removeListener(_onPyramid);
     unawaited(_updates?.cancel());
     unawaited(_storeChanges?.cancel());
@@ -1010,7 +1021,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final FeedFilter filter = filters.contains(_filter)
         ? _filter
         : FeedFilter.all;
-    final List<FeedItem> items = composeFeed(
+    final SearchQuery searched = _searching
+        ? SearchQuery.parse(_searchText.text)
+        : SearchQuery.empty;
+    final List<FeedItem> composed = composeFeed(
       filter,
       wall: posts,
       pyramid: pyramid,
@@ -1020,6 +1034,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           node.levelOf(p.authorAddress) == FriendLevel.close,
       depth: _reach?.depth ?? kDefaultFeedDepth,
     );
+    final List<FeedItem> items = searchFeed(composed, searched);
     _shownIds = <String>[for (final FeedItem i in items) i.id];
     final Set<String> mutedAuthors = ref.watch(
       appSettingsControllerProvider.select(
@@ -1027,10 +1042,24 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       ),
     );
     final List<Widget> header = <Widget>[
-      _ComposerPrompt(
-        onWrite: () => unawaited(_compose()),
-        onPhoto: () => unawaited(_compose(withPhotos: true)),
-      ),
+      if (_searching)
+        TextField(
+          key: const Key('feed-search-field'),
+          controller: _searchText,
+          autofocus: true,
+          onChanged: (_) => setState(() {}),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: t('Szukaj w postach i komentarzach'),
+            hintMaxLines: 2,
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          ),
+        )
+      else
+        _ComposerPrompt(
+          onWrite: () => unawaited(_compose()),
+          onPhoto: () => unawaited(_compose(withPhotos: true)),
+        ),
       if (filters.isNotEmpty) ...<Widget>[
         const SizedBox(height: 12),
         _FilterChips(filters: filters, selected: filter, onSelect: _pick),
@@ -1147,6 +1176,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     };
 
     Widget feedEnd() {
+      if (!searched.isEmpty &&
+          !items.any((FeedItem i) => i is! FeedAlarmItem)) {
+        return ZenEmpty(
+          key: const Key('feed-end'),
+          icon: Icons.search_off_rounded,
+          title: t('Na Tablicy nie ma nic z „{query}”.', {
+            'query': _searchText.text.trim(),
+          }),
+        );
+      }
       if (!items.any((FeedItem i) => i is! FeedAlarmItem)) {
         return switch (filter) {
           FeedFilter.pyramid => ZenEmpty(
@@ -1226,6 +1265,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       appBar: ZenSectionBar(
         title: t('Tablica'),
         actions: <Widget>[
+          if (node != null)
+            IconButton(
+              key: const Key('feed-search-button'),
+              tooltip: _searching
+                  ? t('Zamknij wyszukiwanie')
+                  : t('Szukaj na Tablicy'),
+              icon: Icon(
+                _searching ? Icons.search_off_rounded : Icons.search_rounded,
+              ),
+              onPressed: () => setState(() {
+                _searching = !_searching;
+                _searchText.clear();
+              }),
+            ),
           if (node != null)
             Padding(
               padding: const EdgeInsetsDirectional.only(end: 8),
@@ -3043,9 +3096,10 @@ class _PhotoViewerState extends State<_PhotoViewer> {
     return Scaffold(
       key: const Key('feed-photo-viewer'),
       backgroundColor: ZenFixed.photoBackdrop,
-      appBar: AppBar(
-        backgroundColor: ZenFixed.photoBackdrop,
-        foregroundColor: ZenFixed.onPhoto,
+      appBar: zenFixedAppBar(
+        context,
+        background: ZenFixed.photoBackdrop,
+        foreground: ZenFixed.onPhoto,
         title: widget.images.length > 1
             ? Text('${_index + 1} / ${widget.images.length}')
             : null,

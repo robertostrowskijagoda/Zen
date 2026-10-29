@@ -33,6 +33,7 @@ import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -148,14 +149,16 @@ void main() {
               generation: 3,
               capturedAtMillis: _at,
             ),
-            friends: <String, FriendProfile>{
-              _ada: FriendProfile(
-                address: _ada,
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-                unreadCount: 2,
-              ),
-            },
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                  unreadCount: 2,
+                ),
+              },
+            ),
             inbox: const <InboxEntry>[
               InboxEntry(
                 id: 'i1',

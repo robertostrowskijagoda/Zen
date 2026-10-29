@@ -121,6 +121,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(backgroundLockDelaySeconds: value));
   }
 
+  /// "Nie blokuj od razu po zamknięciu aplikacji" on or off.
+  Future<void> setKeepUnlockedAfterClose(bool value) async {
+    await _save(state.copyWith(keepUnlockedAfterClose: value));
+  }
+
   /// Uses [key] for GIFs from now on; an empty key goes back to the shared
   /// app key.
   Future<void> setGifApiKey(String key) async {
@@ -202,6 +207,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
 
   Future<void> setBridgeEnabled(bool value) async {
     await _save(state.copyWith(bridgeEnabled: value));
+  }
+
+  /// "Udostępniaj zebrane kamyczki".
+  Future<void> setServePebbles(bool value) async {
+    await _save(state.copyWith(servePebbles: value));
   }
 
   /// "Znajomi w tej samej sieci Wi-Fi"; the local links

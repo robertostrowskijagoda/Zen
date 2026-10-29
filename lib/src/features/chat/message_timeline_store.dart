@@ -4,7 +4,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/storage/format_version.dart';
@@ -136,8 +138,8 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       _cache.clear();
       return const <ChatMessage>[];
     } on Object {
-      // A damaged index: nothing to show, as before. Nothing is written
-      // over it either.
+      // A newer build's index: nothing to show, and nothing is written
+      // over it (a damaged one starts afresh in [_open]).
       return const <ChatMessage>[];
     }
   }
@@ -146,7 +148,7 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
   Future<void> append(String peerAddress, ChatMessage message) {
     final String key = _keyFor(peerAddress);
     return _serial(key, () async {
-      final _Thread thread = await _open(key);
+      final _Thread thread = await _open(key, before: message.sentAtMillis);
       final List<ChatMessage> all = thread.all;
       if (all.isNotEmpty && all.last.sentAtMillis > message.sentAtMillis) {
         // Older than what came since (held by relays while offline): it goes
@@ -199,9 +201,11 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
 
   /// The conversation under [key]: from memory while the index on disk has
   /// the generation it was read with, else read again. Throws when the
-  /// index cannot be read (or the store is locked): nothing may then be
-  /// written.
-  Future<_Thread> _open(String key) async {
+  /// store is locked or a newer build wrote the index: nothing may then be
+  /// written. A damaged index starts the conversation afresh
+  /// ([_restartDamaged]; its note dated before [before], the message about
+  /// to be added).
+  Future<_Thread> _open(String key, {int? before}) async {
     final _ThreadIndex? index;
     try {
       index = _ThreadIndex.decode(await disk.read(_indexKey(key)));
@@ -209,6 +213,8 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       // A newer build's conversation: kept as it is (never written).
       holdNewerOn(disk, _indexKey(key));
       rethrow;
+    } on FormatException catch (error) {
+      return _restartDamaged(key, error, before: before);
     }
     final _Thread? cached = _cache[key];
     if (index == null) {
@@ -234,6 +240,114 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       ),
     );
   }
+
+  /// The index of [key] cannot be read (neither it nor its backups: cut
+  /// short, a byte changed, past the size limit). Before, every message to
+  /// and from that friend failed on it for good. The pieces themselves are
+  /// still there under their numbers, so the conversation is rebuilt from
+  /// them: the numbers are tried from 0 up ([_findSegments]), every
+  /// message of every piece that reads is kept (the newest copy of one
+  /// that is in two pieces), in the order they were sent, and written
+  /// afresh with a new index; the damaged index is set aside. Only what no
+  /// piece holds any more is lost, and then a note in the conversation
+  /// says so.
+  Future<_Thread> _restartDamaged(
+    String key,
+    FormatException error, {
+    int? before,
+  }) async {
+    logZenWarning(
+      'A conversation index is damaged (${error.message}); rebuilding it '
+      'from its pieces.',
+    );
+    await setAsideOn(disk, _indexKey(key));
+    _cache.remove(key);
+    final List<_Segment> found = <_Segment>[];
+    for (final int id in await _findSegments(key)) {
+      found.add(await _readSegment(key, id, 0));
+    }
+    final Map<String, ({int order, ChatMessage message})> byId =
+        <String, ({int order, ChatMessage message})>{};
+    int order = 0;
+    for (final _Segment segment in found) {
+      for (final ChatMessage m in segment.messages) {
+        final int at = byId[m.id]?.order ?? order++;
+        byId[m.id] = (order: at, message: m);
+      }
+    }
+    final List<({int order, ChatMessage message})> kept = byId.values.toList()
+      ..sort(
+        (a, b) => a.message.sentAtMillis != b.message.sentAtMillis
+            ? a.message.sentAtMillis.compareTo(b.message.sentAtMillis)
+            : a.order.compareTo(b.order),
+      );
+    List<ChatMessage> messages = <ChatMessage>[
+      for (final ({int order, ChatMessage message}) k in kept) k.message,
+    ];
+    final bool lost = found.isEmpty || found.any((_Segment s) => !s.readable);
+    if (lost) {
+      final int now = min(
+        DateTime.now().millisecondsSinceEpoch,
+        before == null ? 1 << 62 : before - 1,
+      );
+      messages = insertChronologically(
+        messages,
+        ChatMessage(
+          id: 'system-history-unreadable-$now',
+          sender: 'system',
+          text: found.isEmpty
+              ? t(
+                  'Starszych wiadomości tej rozmowy nie udało się odczytać '
+                  '(plik był uszkodzony). Nowe zapisują się normalnie.',
+                )
+              : t(
+                  'Części starszych wiadomości tej rozmowy nie udało się '
+                  'odczytać (plik był uszkodzony). Reszta została '
+                  'odzyskana.',
+                ),
+          sentAtMillis: now,
+          direction: ChatMessageDirection.system,
+        ),
+      );
+    }
+    logZenWarning(
+      'Conversation rebuilt: ${kept.length} messages from ${found.length} '
+      'pieces${lost ? ', some unreadable' : ''}.',
+    );
+    int nextId = 0;
+    for (final _Segment segment in found) {
+      nextId = max(nextId, segment.id + 1);
+    }
+    // Readable pieces are replaced by the rebuilt ones; unreadable ones stay
+    // named (never written over), as with any index.
+    await _rewriteAll(
+      key,
+      _Thread(gen: null, nextId: nextId, segments: found),
+      messages,
+    );
+    return _cache[key]!;
+  }
+
+  /// The numbers of the pieces of [key] on disk. Numbers count up from 0
+  /// and the pieces an index no longer needs are deleted, so the ones in
+  /// use sit after a gap at most as long as the conversation had pieces
+  /// when it was last written afresh; the search ends after
+  /// [_segmentProbeGap] missing numbers in a row.
+  Future<List<int>> _findSegments(String key) async {
+    final List<int> ids = <int>[];
+    int missing = 0;
+    for (int id = 0; missing < _segmentProbeGap; id++) {
+      if (await existsOn(disk, _segmentKey(key, id))) {
+        ids.add(id);
+        missing = 0;
+      } else {
+        missing++;
+      }
+    }
+    return ids;
+  }
+
+  static const int _segmentProbeGap = 1024;
 
   /// A piece; one that is gone counts as empty, one that cannot be read is
   /// kept as it is (never written over, its messages not shown).

@@ -14,7 +14,6 @@ import (
 	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
 // pqTestNet carries frames between session endpoints in memory, in order,
@@ -26,6 +25,13 @@ type pqTestNet struct {
 	sent      []pqTestFrame
 	delivered map[string][]string
 	clock     time.Time
+	timers    []pqTestTimer
+}
+
+// pqTestTimer is an endpoint's timer, run by advance.
+type pqTestTimer struct {
+	at time.Time
+	f  func()
 }
 
 type pqTestFrame struct {
@@ -56,6 +62,9 @@ func (n *pqTestNet) add(fill byte) (*pqEndpoint, net.IP) {
 		n.t.Fatal(err)
 	}
 	endpoint.now = func() time.Time { return n.clock }
+	endpoint.after = func(d time.Duration, f func()) {
+		n.timers = append(n.timers, pqTestTimer{at: n.clock.Add(d), f: f})
+	}
 	n.endpoints[ip.String()] = endpoint
 	return endpoint, ip
 }
@@ -75,6 +84,42 @@ func (n *pqTestNet) pump() {
 	for len(n.queue) > 0 {
 		frame := n.queue[0]
 		n.queue = n.queue[1:]
+		n.deliver(frame)
+	}
+}
+
+// advance moves the clock on by d, running the timers that come due on
+// the way (in their order), each followed by delivering what it sent
+// unless drop says otherwise.
+func (n *pqTestNet) advance(d time.Duration, drop func(pqTestFrame) bool) {
+	end := n.clock.Add(d)
+	for {
+		next := -1
+		for index, timer := range n.timers {
+			if !timer.at.After(end) && (next < 0 || timer.at.Before(n.timers[next].at)) {
+				next = index
+			}
+		}
+		if next < 0 {
+			break
+		}
+		timer := n.timers[next]
+		n.timers = append(n.timers[:next], n.timers[next+1:]...)
+		n.clock = timer.at
+		timer.f()
+		n.pumpDropping(drop)
+	}
+	n.clock = end
+}
+
+// pumpDropping is pump, losing the frames drop picks.
+func (n *pqTestNet) pumpDropping(drop func(pqTestFrame) bool) {
+	for len(n.queue) > 0 {
+		frame := n.queue[0]
+		n.queue = n.queue[1:]
+		if drop != nil && drop(frame) {
+			continue
+		}
 		n.deliver(frame)
 	}
 }
@@ -217,14 +262,19 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 
 	// B starts again (a restart, the other process of the device): same
 	// key, no sessions, no challenges.
-	network.clock = network.clock.Add(pqKeyRequestInterval)
+	network.clock = network.clock.Add(pqResendWindow + pqKeyRequestInterval)
 	network.add(2)
-	mustSend(t, a, bIP, "lost")
+	stale := a.peers[bIP.String()].send.id
+	mustSend(t, a, bIP, "first after the restart")
 	network.pump()
-	if got := network.take(bIP); len(got) != 0 {
-		t.Fatalf("a frame of a session B does not know opened: %q", got)
+	// The frame of the old session does not open at B, B says it does not
+	// know the session, and the frame goes again under a new one: not lost
+	// (a pong to a friend whose app just started again, which a locked
+	// phone would not send again for minutes).
+	if got := network.take(bIP); len(got) != 1 || got[0] != "first after the restart" {
+		t.Fatalf("B got %q", got)
 	}
-	if a.peers[bIP.String()].send != nil {
+	if session := a.peers[bIP.String()].send; session == nil || session.id == stale {
 		t.Fatal("B's answer must make A start a new session")
 	}
 	mustSend(t, a, bIP, "again")
@@ -233,6 +283,193 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 		t.Fatalf("B got %q", got)
 	}
 	_ = aIP
+}
+
+// R5-F5: a frame sent to a friend whose device has just restarted never
+// reaches the device's new session layer: the new core knows no session of
+// this node's core, drops the packet and sets up a new session, so nobody
+// answers that the session layer's session is unknown. The device's first
+// word after its start is a key request (it lost this node's record and
+// challenge); this node then knows its own session with the device is gone
+// too, and what it sent lately goes again under a new one.
+func TestPQFramesLostToARestartGoAgainWhenThePeerAsksForKeys(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	restarted, _ := network.add(2)
+	mustSend(t, a, bIP, "lost on the way")
+	network.queue = nil
+	// The device's app greets its friends once it started.
+	mustSend(t, restarted, aIP, "hello after the start")
+	network.pump()
+	if got := network.take(aIP); len(got) != 1 || got[0] != "hello after the start" {
+		t.Fatalf("A got %q", got)
+	}
+	if got := network.take(bIP); len(got) != 1 || got[0] != "lost on the way" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+	mustSend(t, a, bIP, "next")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "next" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+}
+
+// R5-F5: a friend's key request saying it holds no session of this node's,
+// from a friend this node had a session with (it restarted), has the mesh
+// writer let the way to it settle (mesh_io.go, echoes); a first contact
+// does not.
+func TestPQPeerThatRestartedHasItsWaySettle(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	var settled []string
+	a.settle = func(ip net.IP) { settled = append(settled, ip.String()) }
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+	if len(settled) != 0 {
+		t.Fatalf("a first contact settled %v", settled)
+	}
+
+	network.clock = network.clock.Add(time.Second)
+	restarted, _ := network.add(2)
+	mustSend(t, restarted, aIP, "hello after the start")
+	network.pump()
+	if got := network.take(aIP); len(got) != 1 || got[0] != "hello after the start" {
+		t.Fatalf("A got %q", got)
+	}
+	if len(settled) == 0 || settled[0] != bIP.String() {
+		t.Fatalf("settled %v, want %s", settled, bIP)
+	}
+}
+
+// R5-F5: a device that restarted and says nothing: a friend's frame to it
+// is dropped by its new core, which tells the mesh writer of a path it never
+// asked for; hailed by the device, the friend sends the frame again. Only
+// contacts the device knows (pins the app handed back) are hailed.
+func TestPQHailedFriendSendsAgainWhatAPeerLostToARestart(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+	pins := b.pinsSnapshot()
+
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	restarted, _ := network.add(2)
+	_, strangerIP := pqTestNode(t, 9)
+	restarted.hail(strangerIP)
+	if len(network.queue) != 0 {
+		t.Fatal("a stranger was hailed")
+	}
+	restarted.importPins(pins, false)
+	mustSend(t, a, bIP, "lost on the way")
+	network.queue = nil
+	restarted.hail(aIP)
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "lost on the way" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+	restarted.hail(aIP)
+	network.pump()
+	if got := network.take(bIP); len(got) != 0 {
+		t.Fatalf("a known friend hailed again resent %q", got)
+	}
+}
+
+// A key request from a peer whose challenge is old (it asks for a new one
+// before it may start sessions with it no more) sends nothing again.
+func TestPQKeyRequestForAFreshChallengeResendsNothing(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+
+	network.clock = network.clock.Add(pqChallengeRefresh + time.Minute)
+	mustSend(t, a, bIP, "recent")
+	network.pump()
+	// B's challenge from A is due for a refresh: it asks along with its frame.
+	mustSend(t, b, aIP, "with a refresh")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "recent" {
+		t.Fatalf("B got %q", got)
+	}
+	if got := network.take(aIP); len(got) != 1 || got[0] != "with a refresh" {
+		t.Fatalf("A got %q", got)
+	}
+}
+
+func TestPQFramesResentAfterARestartAreOnlyTheLatest(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, bIP := network.add(2)
+	mustSend(t, a, bIP, "opened before")
+	network.pump()
+	network.take(bIP)
+
+	// Sent well before B restarted: B may have opened it, so it is not
+	// sent again.
+	mustSend(t, a, bIP, "long ago")
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	network.queue = nil
+	network.add(2)
+	mustSend(t, a, bIP, "just now")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "just now" {
+		t.Fatalf("B got %q", got)
+	}
+	// Sent again once: B knowing the new session, nothing comes twice.
+	mustSend(t, a, bIP, "next")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "next" {
+		t.Fatalf("B got %q", got)
+	}
+	peer := a.peers[bIP.String()]
+	if peer.sentBytes <= 0 || a.sentBytes != peer.sentBytes {
+		t.Fatalf("kept %d bytes for B, %d in all", peer.sentBytes, a.sentBytes)
+	}
+}
+
+func TestPQFramesKeptForResendingAreBounded(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, bIP := network.add(2)
+	mustSend(t, a, bIP, "hello")
+	network.pump()
+	for index := 0; index < 3*pqResendPerPeer; index++ {
+		mustSend(t, a, bIP, fmt.Sprintf("frame %d", index))
+	}
+	network.pump()
+	peer := a.peers[bIP.String()]
+	if len(peer.sent) != pqResendPerPeer {
+		t.Fatalf("%d frames kept, at most %d", len(peer.sent), pqResendPerPeer)
+	}
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	mustSend(t, a, bIP, "later")
+	if len(peer.sent) != 1 || a.sentBytes != len("later") {
+		t.Fatalf("old frames kept: %d (%d bytes)", len(peer.sent), a.sentBytes)
+	}
 }
 
 func TestPQSessionsRotate(t *testing.T) {
@@ -320,6 +557,67 @@ func TestPQPendingFramesAreBounded(t *testing.T) {
 	}
 }
 
+func TestPQFirstContactAsksAgainWhenTheKeyExchangeIsLost(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	keys := func(from net.IP) func(pqTestFrame) bool {
+		return func(frame pqTestFrame) bool {
+			return frame.from.Equal(from) && frame.wire[len(pqMagic)] == pqKindKeys
+		}
+	}
+
+	// A's request: lost on the way (the mesh was still looking B up).
+	mustSend(t, a, bIP, "zaproszenie")
+	network.pumpDropping(keys(aIP))
+	// Asked again within pqKeyRequestInterval, not at the app's next send;
+	// B's answer is lost in turn (its way back was not known yet).
+	network.advance(pqKeyRequestInterval, keys(bIP))
+	if got := network.take(bIP); len(got) != 0 {
+		t.Fatalf("B got %q without a session", got)
+	}
+	// And again: this time everything arrives, the held frame with it.
+	network.advance(2*pqKeyRequestInterval, nil)
+	if got := network.take(bIP); len(got) != 1 || got[0] != "zaproszenie" {
+		t.Fatalf("B got %q", got)
+	}
+	if peer := a.peers[bIP.String()]; len(peer.pending) != 0 || peer.reasks != 0 {
+		t.Fatalf("still %d held, %d asks", len(peer.pending), peer.reasks)
+	}
+	// A timer still armed asks nothing more.
+	sent := len(network.sent)
+	network.advance(pqPendingTTL, nil)
+	if len(network.sent) != sent || len(network.timers) != 0 {
+		t.Fatalf("%d more frames, %d timers once the session is there", len(network.sent)-sent, len(network.timers))
+	}
+	_ = b
+}
+
+func TestPQAsksAgainOnlyAFewTimesForAPeerThatIsNotThere(t *testing.T) {
+	network := newPQTestNet(t)
+	a, _ := network.add(1)
+	_, silent := pqTestNode(t, 9) // never answers
+	mustSend(t, a, silent, "hej")
+	network.advance(pqPendingTTL+time.Second, nil)
+	requests := 0
+	for _, frame := range network.sent {
+		if frame.wire[len(pqMagic)] == pqKindKeys {
+			requests++
+		}
+	}
+	if requests != 1+pqKeyReasks {
+		t.Fatalf("%d key requests for one held frame", requests)
+	}
+	if len(network.timers) != 0 {
+		t.Fatalf("%d timers left for a peer that never answered", len(network.timers))
+	}
+	// A later frame starts over.
+	mustSend(t, a, silent, "znowu")
+	if a.peers[silent.String()].reasks != 0 || len(network.timers) != 1 {
+		t.Fatal("a new frame must be asked for again")
+	}
+}
+
 func TestPQReplayWindow(t *testing.T) {
 	var window pqReplay
 	for _, counter := range []uint64{0, 1, 5, 3} {
@@ -378,15 +676,14 @@ func TestPQSignalsBetweenTwoMeshNodes(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(yggCore.Stop)
-		iprwc := ipv6rwc.NewReadWriteCloser(yggCore)
-		iprwc.SetMTU(iprwc.MaxMTU())
 		node := &bridgeNode{
 			core:           yggCore,
-			iprwc:          iprwc,
 			config:         cfg,
 			logger:         logger,
 			signalPartials: make(map[string]*signalReassembly),
 		}
+		node.startMesh()
+		t.Cleanup(node.mesh.stop)
 		startPacketLoop(node)
 		return node
 	}

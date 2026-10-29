@@ -37,6 +37,7 @@ import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
+import 'package:zen/src/features/chat/presentation/reveal_message.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
@@ -50,6 +51,10 @@ import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/search/chat_search_controller.dart';
+import 'package:zen/src/features/search/presentation/chat_search_bar.dart';
+import 'package:zen/src/features/search/presentation/search_highlight.dart';
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -80,10 +85,19 @@ class ConversationScreen extends ConsumerStatefulWidget {
     super.key,
     required this.peerAddress,
     required this.title,
+    this.initialMessageId,
+    this.searchText,
   });
 
   final String peerAddress;
   final String title;
+
+  /// The message to show first (a search result on the chat list).
+  final String? initialMessageId;
+
+  /// Opens with the conversation's search showing these words (the search
+  /// on the chat list that led here).
+  final String? searchText;
 
   @override
   ConsumerState<ConversationScreen> createState() => _ConversationScreenState();
@@ -133,7 +147,51 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   String? _highlightId;
   Timer? _highlightTimer;
 
+  /// Search inside this conversation (the app bar's magnifier, Ctrl+F).
+  final ChatSearchController _search = ChatSearchController();
+  int _searchJumps = 0;
+
+  /// Bumped with each scroll to a match: an earlier one still on its way
+  /// stops.
+  int _searchReveals = 0;
+
+  /// The message to scroll to once the conversation is read, without a
+  /// search ([ConversationScreen.initialMessageId]).
+  late String? _pendingJump = widget.searchText == null
+      ? widget.initialMessageId
+      : null;
+
   GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// The search moved to another match, or closed.
+  void _onSearchChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    if (_search.jumps == _searchJumps) {
+      return;
+    }
+    _searchJumps = _search.jumps;
+    final String? id = _search.currentId;
+    final List<ChatMessage>? thread = ref
+        .read(conversationMessagesProvider(widget.peerAddress))
+        .asData
+        ?.value;
+    if (id == null || thread == null) {
+      return;
+    }
+    final int reveal = ++_searchReveals;
+    unawaited(
+      revealChatMessage(
+        controller: _scrollController,
+        bubbleKeys: _bubbleKeys,
+        ids: <String>[for (final ChatMessage m in thread) m.id],
+        id: id,
+        stillWanted: () => mounted && reveal == _searchReveals,
+      ),
+    );
+  }
 
   /// Who [who] is in this chat (`self`, the friend's address).
   String _nameOf(String who) {
@@ -162,25 +220,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       );
       return;
     }
-    BuildContext? target = _bubbleKeys[id]?.currentContext;
-    if (target == null && _scrollController.hasClients) {
-      // Not built yet (off screen): about there first.
-      final ScrollPosition position = _scrollController.position;
-      await _scrollController.animateTo(
-        position.maxScrollExtent * index / math.max(1, thread.length - 1),
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-      await WidgetsBinding.instance.endOfFrame;
-      target = _bubbleKeys[id]?.currentContext;
-    }
-    if (target != null && target.mounted) {
-      await Scrollable.ensureVisible(
-        target,
-        alignment: 0.3,
-        duration: const Duration(milliseconds: 250),
-      );
-    }
+    // Not built yet when off screen: the list finds it.
+    await revealChatMessage(
+      controller: _scrollController,
+      bubbleKeys: _bubbleKeys,
+      ids: <String>[for (final ChatMessage m in thread) m.id],
+      id: id,
+    );
     if (!mounted) {
       return;
     }
@@ -199,6 +245,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _socialHubController = ref.read(socialHubControllerProvider.notifier);
     _drafts = ref.read(composerDraftsProvider);
     _composerController.addListener(_onComposerChanged);
+    _search.addListener(_onSearchChanged);
+    final String? searchText = widget.searchText;
+    if (searchText != null) {
+      _search.open(text: searchText, at: widget.initialMessageId);
+    }
     _restoreDraft();
     Future<void>.microtask(() {
       _socialHubController.enterConversation(widget.peerAddress);
@@ -266,6 +317,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   @override
   void dispose() {
     _highlightTimer?.cancel();
+    _search
+      ..removeListener(_onSearchChanged)
+      ..dispose();
     _composerController.removeListener(_onComposerChanged);
     if (_lastTypingSentAt != null) {
       _socialHubController.sendTypingState(
@@ -287,8 +341,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      SecureScreen(child: Builder(builder: _buildScreen));
+  Widget build(BuildContext context) => SecureScreen(
+    // Ctrl+F searches, Esc closes the search.
+    child: ChatSearchShortcuts(
+      search: _search,
+      child: Builder(builder: _buildScreen),
+    ),
+  );
 
   Widget _buildScreen(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -363,10 +422,25 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           disappearSeconds: disappearSeconds,
           postsMuted: postsMuted,
         );
+    // On a narrow phone the magnifier would push the name out of the bar:
+    // the search is in the menu there.
+    final bool searchInBar = MediaQuery.sizeOf(context).width >= 400;
+    if (hasMessages && !searchInBar) {
+      menuItems.insert(
+        0,
+        PopupMenuItem<_ConversationMenuAction>(
+          key: const Key('conversation-search-menu'),
+          value: _ConversationMenuAction.search,
+          child: Text(t('Szukaj w rozmowie')),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
+        // While searching: the field (and closing it) under the title.
+        bottom: _search.active ? ChatSearchBar(search: _search) : null,
         title: InkWell(
           key: const Key('conversation-open-profile'),
           borderRadius: context.zenRadius(12),
@@ -533,11 +607,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ],
             ),
           ],
+          if (hasMessages && searchInBar) ChatSearchButton(search: _search),
           PopupMenuButton<_ConversationMenuAction>(
             key: const Key('conversation-menu-button'),
             position: PopupMenuPosition.under,
             onSelected: (_ConversationMenuAction action) async {
               switch (action) {
+                case _ConversationMenuAction.search:
+                  _search.open();
+                  return;
                 case _ConversationMenuAction.acceptRequest:
                   if (friend != null) {
                     await _acceptFriend();
@@ -787,6 +865,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     skipLoadingOnReload: true,
                     data: (List<ChatMessage> thread) {
                       _scheduleScrollToBottom(thread);
+                      _search.updateThread(
+                        thread,
+                        hidden: (ChatMessage m) => hiddenByMe.hides(id: m.id),
+                        hiddenVersion: hiddenByMe,
+                      );
                       final bool animateEntrance =
                           !_messageEntrancePlayed && thread.isNotEmpty;
                       if (thread.isNotEmpty) {
@@ -878,10 +961,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                       KeyedSubtree(
                                         key: _bubbleKey(message.id),
                                         child: _MessageBubble(
+                                          searched: _search.isMatch(message.id)
+                                              ? _search.query
+                                              : null,
                                           message: message,
                                           conversationKey: widget.peerAddress,
                                           highlighted:
-                                              _highlightId == message.id,
+                                              _highlightId == message.id ||
+                                              _search.currentId == message.id,
                                           actions: extras
                                               ? chatMessageActions(
                                                   context,
@@ -925,6 +1012,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                 )
                                               : null,
                                           nameOf: _nameOf,
+                                          peerName:
+                                              friend?.hasProfileName == true
+                                              ? friend!.displayLabel
+                                              : null,
                                           entranceDelay:
                                               animateEntrance &&
                                                   fromEnd <
@@ -983,24 +1074,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ),
                 ),
               ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: zen.surface,
-                  border: Border(top: BorderSide(color: zen.outlineSoft)),
+              // While searching: the matches and arrows instead of the
+              // field to write in.
+              if (_search.active)
+                ChatSearchNavigator(search: _search)
+              else
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: zen.surface,
+                    border: Border(top: BorderSide(color: zen.outlineSoft)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (_replyTo != null)
+                        ChatReplyComposerBar(
+                          reply: _replyTo!,
+                          senderLabel: _nameOf(_replyTo!.sender),
+                          onCancel: () => setState(() => _replyTo = null),
+                        ),
+                      _buildComposer(friend),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (_replyTo != null)
-                      ChatReplyComposerBar(
-                        reply: _replyTo!,
-                        senderLabel: _nameOf(_replyTo!.sender),
-                        onCancel: () => setState(() => _replyTo = null),
-                      ),
-                    _buildComposer(friend),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -1243,12 +1339,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String localAddress = ref
         .read(appShellControllerProvider)
         .localAddress;
+    // The chosen name only: `displayName` is "Ja" for someone who never
+    // chose one, and the friend would be shown as "Ja".
     final String? senderDisplayName =
         PeerShareCodec.buildLocalProfile(
           address: localAddress,
-          displayName: profile.displayName,
+          displayName: profile.publicName,
         )?.displayName ??
-        (profile.displayName.isNotEmpty ? profile.displayName : null);
+        (profile.publicName.trim().isNotEmpty
+            ? profile.publicName.trim()
+            : null);
 
     await _handleConversationAction(
       () => _socialHubController.acceptFriendRequest(
@@ -1335,6 +1435,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         thread.last.isOutgoing;
     _newestShownId = newest;
     if (first) {
+      if (widget.initialMessageId != null) {
+        // Opened at a message: the place remembered from before gives way.
+        _scrollMemory.restore(const <String>[]);
+        final String? jump = _pendingJump;
+        _pendingJump = null;
+        if (jump != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              unawaited(_jumpToMessage(jump, thread));
+            }
+          });
+        }
+        return;
+      }
       if (_scrollMemory.hasAnchor) {
         final List<String> remembered = <String>[
           for (final ChatMessage m in thread) m.id,

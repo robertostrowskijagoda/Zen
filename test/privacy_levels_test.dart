@@ -14,6 +14,7 @@ import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -260,14 +261,16 @@ void main() {
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
-              friends: <String, FriendProfile>{
-                for (final String a in <String>[weak, mid, close])
-                  a: FriendProfile(
-                    address: a,
-                    displayName: a,
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-              },
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{
+                  for (final String a in <String>[weak, mid, close])
+                    a: FriendProfile(
+                      address: a,
+                      displayName: a,
+                      status: FriendRelationshipStatus.accepted,
+                    ),
+                },
+              ),
             ),
           ),
         ],

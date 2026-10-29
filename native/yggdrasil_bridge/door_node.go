@@ -17,12 +17,10 @@ import (
 	"sync"
 	"time"
 
-	iwt "github.com/Arceliar/ironwood/types"
 	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
-	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
 // The flat's door (neighbours). The sticker on the door carries the
@@ -149,9 +147,10 @@ type doorNode struct {
 	// Only its fragment buffers (signal_reassembly.go) are used, so knocks
 	// split into fragments do not mix with the main node's.
 	assembler *bridgeNode
-	// Sends from the door. Only its write side is used: reading through it
-	// would answer the core's protocol packets.
-	rwc *ipv6rwc.ReadWriteCloser
+	// The door's packets on the mesh: run reads (below Core.ReadFrom, which
+	// would answer the core's protocol packets) and never writes; a writer
+	// of its own sends (mesh_io.go).
+	mesh *meshIO
 	// The session layer of the door (nil: plain, tests of the main node's
 	// plain mode only).
 	pq *pqEndpoint
@@ -219,8 +218,11 @@ type doorHost struct {
 	main *bridgeNode
 	mu   sync.Mutex
 	// The public peers it dials now: as GetPeers lists them → as dialled.
-	peers    map[string]string
-	offset   int
+	peers  map[string]string
+	offset int
+	// Its peerings as the app reads them, asked off the app's thread
+	// (node_view.go).
+	links    coreQuery[[]core.PeerInfo]
 	quit     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
@@ -313,7 +315,7 @@ func (host *doorHost) watch() {
 			return
 		case <-ticker.C:
 		}
-		if host.meshUp() {
+		if host.meshUp(host.core.GetPeers()) {
 			missed = 0
 			continue
 		}
@@ -335,20 +337,26 @@ func (host *doorHost) peerCount() int {
 }
 
 // meshUp reports whether the host has a working link to one of its public
-// peers.
-func (host *doorHost) meshUp() bool {
+// peers, among links as GetPeers listed them.
+func (host *doorHost) meshUp(links []core.PeerInfo) bool {
 	host.mu.Lock()
 	peers := make(map[string]bool, len(host.peers))
 	for base := range host.peers {
 		peers[base] = true
 	}
 	host.mu.Unlock()
-	for _, peer := range host.core.GetPeers() {
+	for _, peer := range links {
 		if peer.Up && peers[peerURIBase(peer.URI)] {
 			return true
 		}
 	}
 	return false
+}
+
+// peerView is the host's peerings as the app reads them: never waiting for
+// its core longer than nodeViewWait.
+func (host *doorHost) peerView() []core.PeerInfo {
+	return host.links.get(nodeViewFresh, nodeViewWait, host.core.GetPeers)
 }
 
 // repeer dials the public peers doorHostPeers picks now and drops the ones
@@ -427,11 +435,12 @@ func doorHostPeers(candidates []string, avoid string, offset, count int) []strin
 }
 
 // treeParentURI is the peering of the main node's parent in the mesh tree
-// ("" while it has none).
+// ("" while it has none), from the node's view: a door starts on the app's
+// thread (node_view.go).
 func (node *bridgeNode) treeParentURI() string {
 	self := node.core.PublicKey()
 	var parent ed25519.PublicKey
-	for _, entry := range node.core.GetTree() {
+	for _, entry := range node.viewTree() {
 		if bytes.Equal(entry.Key, self) {
 			parent = entry.Parent
 		}
@@ -439,7 +448,7 @@ func (node *bridgeNode) treeParentURI() string {
 	if len(parent) == 0 || bytes.Equal(parent, self) {
 		return ""
 	}
-	for _, peer := range node.core.GetPeers() {
+	for _, peer := range node.view().peers {
 		if bytes.Equal(peer.Key, parent) {
 			return peer.URI
 		}
@@ -450,7 +459,7 @@ func (node *bridgeNode) treeParentURI() string {
 func (host *doorHost) stop() {
 	host.stopOnce.Do(func() {
 		close(host.quit)
-		host.core.Stop()
+		stopCore(host.core, nodeStopWait)
 	})
 }
 
@@ -511,8 +520,6 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		done:      make(chan struct{}),
 		mailbox:   mailbox,
 	}
-	door.rwc = ipv6rwc.NewReadWriteCloser(doorCore)
-	door.rwc.SetMTU(door.rwc.MaxMTU())
 	if !main.pqPlain {
 		door.pq, err = newPQEndpoint(private, net.IP(append([]byte(nil), door.ip[:]...)), door.writeWire)
 		if err != nil {
@@ -520,12 +527,33 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 			return nil, err
 		}
 	}
-	// The host calls the door (the door dials nobody).
-	if err := host.core.AddPeer(peerURI, ""); err != nil {
-		doorCore.Stop()
-		return nil, err
+	door.mesh = newMeshIO(doorCore, nil)
+	if door.pq != nil {
+		door.pq.settle = door.mesh.settle
 	}
-	host.core.RetryPeersNow()
+	door.mesh.start()
+	// The host calls the door (the door dials nobody). This runs on the
+	// app's thread: a host core that does not answer within nodeActionWait
+	// gets the peering by itself, and the door shows as not linked till then.
+	added := make(chan error, 1)
+	go func() {
+		err := host.core.AddPeer(peerURI, "")
+		if err == nil {
+			host.core.RetryPeersNow()
+		}
+		added <- err
+	}()
+	timer := time.NewTimer(nodeActionWait)
+	defer timer.Stop()
+	select {
+	case err := <-added:
+		if err != nil {
+			door.mesh.stop()
+			doorCore.Stop()
+			return nil, err
+		}
+	case <-timer.C:
+	}
 	go door.run(main)
 	return door, nil
 }
@@ -584,22 +612,15 @@ func (door *doorNode) run(main *bridgeNode) {
 // trafficPacket is the IPv6 packet in what the door's session layer read
 // from the key from, or false for anything else. The door reads below
 // Core.ReadFrom, which would answer the core's protocol packets (getSelf,
-// getPeers, getTree, nodeinfo) itself; here they are dropped. As in
-// ipv6rwc, the packet must be addressed to the door and come from the
-// sender key's own address.
+// getPeers, getTree, nodeinfo) itself; here they are dropped. The packet
+// must be addressed to the door and come from the sender key's own address
+// (meshIO.accept, which notes the key for the answers).
 func (door *doorNode) trafficPacket(session []byte, from net.Addr) ([]byte, bool) {
 	if len(session) < 1+40 || session[0] != doorSessionTraffic {
 		return nil, false
 	}
-	key, ok := from.(iwt.Addr)
-	if !ok || len(key) != ed25519.PublicKeySize {
-		return nil, false
-	}
 	packet := session[1:]
-	if packet[0]>>4 != 6 || !bytes.Equal(packet[24:40], door.ip[:]) {
-		return nil, false
-	}
-	if !bytes.Equal(packet[8:24], address.AddrForKey(ed25519.PublicKey(key))[:]) {
+	if !door.mesh.accept(packet, from) {
 		return nil, false
 	}
 	return packet, true
@@ -657,27 +678,20 @@ func (door *doorNode) send(remoteAddress, payload string) error {
 	return nil
 }
 
-// doorChunkSize is the base64 text one packet of a door carries: a whole
-// session-layer key record or opening frame fits one. While ironwood (and
-// ipv6rwc's address lookup) opens a session to a new peer it keeps only the
-// last packet written, so a frame split in small fragments always lost all
-// but its last on first contact and the session layer had to ask again.
-const doorChunkSize = 8 * 1024
-
 // writeWire splits a signal text into fragments and sends them from the
 // door's address to destination (the session layer's frames too).
 func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
-	size := doorChunkSize
-	if limit := int(door.rwc.MTU()) - 1024; limit < size {
+	size := signalSendChunkSize
+	if limit := door.mesh.MTU() - 1024; limit < size {
 		size = max(limit, signalChunkSize)
 	}
-	encoded := base64.StdEncoding.EncodeToString(wire)
-	chunks := make([]string, 0, len(encoded)/size+1)
-	for start := 0; start < len(encoded) || len(chunks) == 0; start += size {
-		chunks = append(chunks, encoded[start:min(start+size, len(encoded))])
-	}
+	chunks := splitSignalWire(string(wire), size)
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
 	source := net.IP(append([]byte(nil), door.ip[:]...))
+	write := func(packet []byte) error { return door.mesh.send(packet, false) }
+	if isPQDataWire(wire) {
+		write = door.mesh.sendSealed
+	}
 	for index, chunk := range chunks {
 		envelope, err := json.Marshal(signalEnvelope{
 			ID:      packetID,
@@ -693,7 +707,7 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 			door.stats.fail("write error", err)
 			return err
 		}
-		if _, err := door.rwc.Write(packet); err != nil {
+		if err := write(packet); err != nil {
 			door.stats.fail("write error", err)
 			return err
 		}
@@ -702,23 +716,26 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 	return nil
 }
 
-// stop shuts the door and drops the host's peering to it.
+// stop shuts the door and drops the host's peering to it. It runs on the
+// app's thread: neither core is waited for longer than nodeStopWait.
 func (door *doorNode) stop() {
 	door.stopOnce.Do(func() {
 		close(door.quit)
-		_ = door.host.core.RemovePeer(door.peerURI, "")
+		door.mesh.stop()
+		within(nodeStopWait, func() { _ = door.host.core.RemovePeer(door.peerURI, "") })
 		door.listener.Cancel()
 		// Stopping the core ends run's reads.
-		door.core.Stop()
+		stopCore(door.core, nodeStopWait)
 	})
 }
 
 // linked reports whether the door's host has its link to the door up and is
-// on the mesh itself.
+// on the mesh itself (from the host's view, node_view.go).
 func (door *doorNode) linked() bool {
-	for _, peer := range door.host.core.GetPeers() {
+	links := door.host.peerView()
+	for _, peer := range links {
 		if peer.URI == door.linkURI && peer.Up {
-			return door.host.meshUp()
+			return door.host.meshUp(links)
 		}
 	}
 	return false
@@ -937,8 +954,8 @@ func (node *bridgeNode) stopDoor() {
 // doorState is what the app learns about the door: never its key.
 func (node *bridgeNode) doorState() map[string]any {
 	node.doorMu.Lock()
-	defer node.doorMu.Unlock()
 	door := node.door
+	node.doorMu.Unlock()
 	if door == nil {
 		return map[string]any{"running": false}
 	}

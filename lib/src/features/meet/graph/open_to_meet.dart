@@ -414,7 +414,7 @@ final class OpenToMeetService extends ChangeNotifier {
         _book = OpenToMeetBook.fromJson(json);
       }
     } on Object catch (error, stack) {
-      logZenError('Graf: odczyt otwartych na poznanie', error, stack);
+      logZenError('Graph: reading open to meet', error, stack);
     }
     _reindex();
     _changed();
@@ -427,7 +427,7 @@ final class OpenToMeetService extends ChangeNotifier {
         Uint8List.fromList(utf8.encode(jsonEncode(_book.toJson()))),
       );
     } on Object catch (error, stack) {
-      logZenError('Graf: zapis otwartych na poznanie', error, stack);
+      logZenError('Graph: saving open to meet', error, stack);
     }
   }
 
@@ -649,7 +649,7 @@ final class OpenToMeetService extends ChangeNotifier {
         try {
           await host.send(f, payload);
         } on Object catch (error) {
-          logZenWarning('Graf: wysłanie otwartych na poznanie do $f: $error');
+          logZenWarning('Graph: sending open to meet to $f: $error');
           continue;
         }
         if (empty) {

@@ -13,7 +13,7 @@
 | Bluetooth | on | Android, Linux (BLE); Windows (paired devices) | messages and photos; calls may not work |
 | Apple Multipeer | off | iPhone, Mac (while Zen is open) | everything |
 
-Change them in **Settings → Advanced → Network and service**,
+Change them in **Settings → Network → Network and service**,
 section *Connectivity without the internet*. The
 settings show how many devices are linked directly ("Wi-Fi Direct: 1").
 The first start asks for what Wi-Fi Direct and Bluetooth need ("Nearby
@@ -63,6 +63,6 @@ on. Their phones form a group and the chat just works.
 - Bluetooth is slow: calls may not work over it.
 - Apple Multipeer works only while Zen is on screen.
 - *Nearby* (people around you over Bluetooth) is a different feature: see
-  [Meeting people](meeting-people.md#nearby-bluetooth-android).
+  [Meeting people](meeting-people.md#nearby-bluetooth).
 
 [Back to the guide](README.md)

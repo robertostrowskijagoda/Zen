@@ -133,7 +133,7 @@ final class AccountRoutingTransport implements SignalTransport {
           try {
             await _onMirrored?.call(to, p);
           } on Object catch (error, stack) {
-            logZenError('Kopia wiadomości z innego urządzenia', error, stack);
+            logZenError('A message copy from another device', error, stack);
           }
         }
       }
@@ -156,6 +156,7 @@ final class AccountRoutingTransport implements SignalTransport {
       from: contact,
       payload: frame.payload,
       receivedAtMillis: frame.receivedAtMillis,
+      device: frame.from,
     );
   }
 
@@ -199,7 +200,7 @@ final class AccountRoutingTransport implements SignalTransport {
     try {
       await delegate.send(remoteAddress: to, payload: payload);
     } on Object catch (error) {
-      logZenWarning('Wysłanie do innego urządzenia nie udało się: $error');
+      logZenWarning('Sending to another device failed: $error');
     }
   }
 

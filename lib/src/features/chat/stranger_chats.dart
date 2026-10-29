@@ -650,7 +650,7 @@ final Provider<StrangerChatBook> strangerChatsProvider =
         termsOf: (String address) => pyramidMessageTerms(pyramid(), address),
         onPriceChanged: () => unawaitedLogged(
           syncMessagePrice(pyramid(), strangerPriceLevels(book)),
-          context: 'Cena pierwszej wiadomości',
+          context: 'First message price',
         ),
       );
       unawaitedLogged(book.load(), context: 'Rozmowy z nieznajomymi');

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,12 +7,24 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
-/// The name a saved copy of the log gets: `zen-dziennik-<date>-<time>.txt`.
+/// The name a saved copy of the log gets:
+/// `zen-dziennik-<date>-<time to the second>.txt` (a second copy saved
+/// within the same minute no longer replaces the first).
 String diagnosticsLogFileName(DateTime now) {
   String two(int value) => value.toString().padLeft(2, '0');
   return 'zen-dziennik-${now.year}${two(now.month)}${two(now.day)}-'
-      '${two(now.hour)}${two(now.minute)}.txt';
+      '${two(now.hour)}${two(now.minute)}${two(now.second)}.txt';
 }
+
+/// The saved file's bytes: UTF-8 with its byte order mark, without which
+/// Windows' Notepad and PowerShell read the file as the local code page
+/// and show "…", "—" and Polish letters as garbage.
+List<int> diagnosticsLogFileBytes(String text) => <int>[
+  0xEF,
+  0xBB,
+  0xBF,
+  ...utf8.encode(text),
+];
 
 /// Saves the whole log ([ZenDiagnosticsLog.read], both isolates) as a
 /// plain file and says where it went: the system save dialog on a computer;
@@ -64,5 +77,8 @@ Future<String?> _askOnDesktop(String name) => FilePicker.platform.saveFile(
 
 Future<void> _write(String path) async {
   await ZenDiagnosticsLog.settled;
-  await File(path).writeAsString(await ZenDiagnosticsLog.read(), flush: true);
+  await File(path).writeAsBytes(
+    diagnosticsLogFileBytes(await ZenDiagnosticsLog.read()),
+    flush: true,
+  );
 }

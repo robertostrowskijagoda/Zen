@@ -87,7 +87,7 @@ final Provider<IntroService> introServiceProvider = Provider<IntroService>((
     wallet: PyramidGateWallet(() => gatePyramid(ref)),
     passes: strangers,
   );
-  unawaitedLogged(intro.load(), context: 'Odczyt przedstawień');
+  unawaitedLogged(intro.load(), context: 'Reading introductions');
   listenFrames(ref, intro.handle, 'Przedstawienia');
   // Friend requests due from answers that came while the app was away are
   // made once the friends are read; new friends get this person's gate
@@ -98,7 +98,7 @@ final Provider<IntroService> introServiceProvider = Provider<IntroService>((
     ),
     (int? previous, int next) {
       if (next > 0) {
-        unawaitedLogged(intro.settle(), context: 'Przedstawienia: zaproszenia');
+        unawaitedLogged(intro.settle(), context: 'Introductions: invitations');
         unawaitedLogged(intro.shareGates(), context: 'Bramy: warunki');
       }
     },
@@ -116,12 +116,12 @@ void introMinute(Ref ref, int minute) {
     return;
   }
   final IntroService intro = ref.read(introServiceProvider);
-  unawaitedLogged(intro.tick(), context: 'Bramy: obowiązki');
+  unawaitedLogged(intro.tick(), context: 'Gates: duties');
   unawaitedLogged(
     syncMessagePrice(
       gatePyramid(ref),
       strangerPriceLevels(ref.read(strangerChatsProvider)),
     ),
-    context: 'Cena pierwszej wiadomości',
+    context: 'First message price',
   );
 }
