@@ -62,7 +62,7 @@ WORDS = {
         "sub": "Prywatna sieć społecznościowa dla ludzi, którzy się znają.",
         "points": [
             "Bez reklam i śledzenia. Nikt nie czyta Twoich rozmów.",
-            "Działa bez internetu, gdy znajomi są blisko.",
+            "Tylko ludzie, których naprawdę znasz.",
             "Za darmo, z otwartym kodem.",
             "Szyfrowanie odporne na komputery kwantowe.",
         ],
@@ -74,7 +74,7 @@ WORDS = {
         "sub": "A private social network for people who know each other.",
         "points": [
             "No ads, no tracking. Nobody reads your conversations.",
-            "Works without the internet when friends are close.",
+            "Only people you actually know.",
             "Free, with open source code.",
             "Encryption built to withstand quantum computers.",
         ],
