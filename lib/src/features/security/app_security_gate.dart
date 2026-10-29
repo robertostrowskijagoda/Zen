@@ -791,28 +791,30 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             Center(
               child: TextButton(
                 key: const Key('app-unlock-forgot-button'),
-                style: TextButton.styleFrom(
-                  foregroundColor: zen.textMuted,
-                  textStyle: const TextStyle(fontSize: 12.5),
-                ),
+                style: TextButton.styleFrom(foregroundColor: zen.textMuted),
                 onPressed: _isSubmitting
                     ? null
                     : () => setState(() => _forgot = true),
-                child: Text(t('Nie pamiętam hasła — zacznij od nowa')),
+                child: Text(
+                  t('Nie pamiętam hasła — zacznij od nowa'),
+                  // The size only: the app's font stays.
+                  style: const TextStyle(fontSize: 12.5),
+                ),
               ),
             ),
             // Discreet: the same on every device, accounts or not.
             Center(
               child: TextButton(
                 key: const Key('app-unlock-other-account'),
-                style: TextButton.styleFrom(
-                  foregroundColor: zen.textMuted,
-                  textStyle: const TextStyle(fontSize: 12.5),
-                ),
+                style: TextButton.styleFrom(foregroundColor: zen.textMuted),
                 onPressed: _isSubmitting
                     ? null
                     : () => setState(() => _other = true),
-                child: Text(t('Inne konto')),
+                child: Text(
+                  t('Inne konto'),
+                  // The size only: the app's font stays.
+                  style: const TextStyle(fontSize: 12.5),
+                ),
               ),
             ),
           ],
