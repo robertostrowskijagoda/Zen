@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -267,13 +268,8 @@ final class BackgroundKitFile {
       _credentials,
       createKey: createKey,
     ).sealFor(storageKey, Uint8List.fromList(utf8.encode(jsonEncode(json))));
-    final File target = await file();
-    await target.parent.create(recursive: true);
-    // Beside the file and moved over it: the service reads the old one or
-    // the new one, never half of one.
-    final File next = File('${target.path}.next');
-    await next.writeAsBytes(sealed, flush: true);
-    await next.rename(target.path);
+    // The service reads the old one or the new one, never half of one.
+    await writeFileAtomically(await file(), sealed);
   }
 
   /// The document last written; `null` when there is none or it does not

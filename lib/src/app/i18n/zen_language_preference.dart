@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Locale;
 
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 
 /// The file in the app's support folder (a profile's own folder with
@@ -61,12 +63,9 @@ Future<void> writeZenLanguagePreference(
       }
       return;
     }
-    await file.parent.create(recursive: true);
-    // Through a temporary file and a rename: the background service may be
-    // reading the file at the same moment and must never see half of it.
-    final File temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(known, flush: true);
-    await temporary.rename(file.path);
+    // The background service may be reading the file at the same moment
+    // and must never see half of it.
+    await writeFileAtomically(file, utf8.encode(known));
   } on Object catch (error) {
     logZenWarning('Saving the language preference failed: $error');
   }

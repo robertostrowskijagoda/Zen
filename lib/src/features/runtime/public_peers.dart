@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 
@@ -462,10 +463,7 @@ class PublicPeersStore {
       }
       return;
     }
-    await file.parent.create(recursive: true);
-    final File tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(jsonEncode(list.toJson()), flush: true);
-    await tmp.rename(file.path);
+    await writeFileAtomically(file, utf8.encode(jsonEncode(list.toJson())));
   }
 }
 

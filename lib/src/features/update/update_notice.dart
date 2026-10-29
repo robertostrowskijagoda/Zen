@@ -7,6 +7,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -320,13 +321,12 @@ final class FileUpdateNoticeStore implements UpdateNoticeStore {
 
   Future<void> _write(UpdateNoticeState state) async {
     try {
-      final File file = await _file();
-      await file.parent.create(recursive: true);
-      // Through a temporary file and a rename: the other isolate may be
-      // reading the file at the same moment and must never see half of it.
-      final File temporary = File('${file.path}.tmp');
-      await temporary.writeAsString(jsonEncode(state.toJson()), flush: true);
-      await temporary.rename(file.path);
+      // The other isolate may be reading the file at the same moment and
+      // must never see half of it.
+      await writeFileAtomically(
+        await _file(),
+        utf8.encode(jsonEncode(state.toJson())),
+      );
     } on Object catch (error) {
       logZenWarning('Saving the update check state failed: $error');
     }
