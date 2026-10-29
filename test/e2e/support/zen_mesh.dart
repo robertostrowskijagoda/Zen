@@ -39,17 +39,20 @@ import '../../support/friends_world.dart' show RecordingNotices;
 const int kZenDesktopPeerPort = 32913;
 
 /// How long an invitation may take to show at the invited person, the
-/// first contact of two devices included. Two devices on this computer
-/// take about 14 s today: the post-quantum session of a first contact is
-/// set up first (pq_session.go), and its multi-packet key frames meet
-/// Yggdrasil's single-packet buffer for a destination whose key is still
-/// being looked up (ipv6rwc.go). Lower it once that is fixed (R5-#9).
-const Duration kInvitationWithin = Duration(seconds: 20);
+/// first contact of two devices included. On this computer it shows within
+/// about a tenth of a second once the invited device can be found, a second
+/// or two after it came on the mesh (ironwood's router rounds): the bridge
+/// opens the way with one packet before the post-quantum session layer's key
+/// frames follow, so none of them is lost while every layer below keeps only
+/// one packet per destination (mesh_io.go; it took about 14 s before, R5-#9).
+const Duration kInvitationWithin = Duration(seconds: 5);
 
 /// How long the first message to or from a device that just restarted may
-/// take: its post-quantum sessions are gone with the old process, so the
-/// first contact of [kInvitationWithin] repeats (about 14 s today).
-const Duration kAfterRestartWithin = kInvitationWithin;
+/// take: its sessions on every layer went with the old process, while its
+/// friends still hold theirs (R5-F5). On this computer it takes from a few
+/// milliseconds to about two seconds: ironwood can lose a packet then, and
+/// the bridge sends it again a little over a second later (mesh_io.go).
+const Duration kAfterRestartWithin = Duration(seconds: 5);
 
 /// How long a message between friends whose devices both run may take.
 const Duration kMessageWithin = Duration(seconds: 10);
@@ -156,12 +159,14 @@ final class ZenMesh {
         'peers': <String>['tls://127.0.0.1:$kZenDesktopPeerPort'],
       }),
     );
-    final Map<String, dynamic> hub = bridge.startNode(
-      bridge.generateConfigJson(),
-    );
+    final Stopwatch keying = Stopwatch()..start();
+    final String hubConfig = _hubConfig(bridge);
+    keying.stop();
+    final Map<String, dynamic> hub = bridge.startNode(hubConfig);
     final int handle = (hub['handle'] as num).toInt();
     final ZenMesh mesh = ZenMesh._(base, bridge, handle);
     addTearDown(mesh.close);
+    mesh.timings.add("the hub's key took ${keying.elapsedMilliseconds} ms");
     // The hub's port must be ours: otherwise the devices would dial
     // whatever else listens there.
     final Socket socket = await Socket.connect(
@@ -171,6 +176,26 @@ final class ZenMesh {
     );
     socket.destroy();
     return mesh;
+  }
+
+  /// The hub's node config: a new identity whose key is below any a device
+  /// is likely to get. Ironwood roots the mesh's spanning tree at the lowest
+  /// key, which on the real mesh is a long-standing node far below every
+  /// Zen device's, so a device coming on (or back) never moves the root.
+  /// With a random key the hub would be the lowest only now and then: a
+  /// device below it would become the root when it came on and again when
+  /// it restarted, moving every node's place in the tree under the test.
+  static String _hubConfig(NodeSignalBridge bridge) {
+    while (true) {
+      final String config = bridge.generateConfigJson();
+      final Object? key =
+          (jsonDecode(config) as Map<String, dynamic>)['PrivateKey'];
+      // The seed, then the public key, in hex: the public key's first byte
+      // 0 and its second below 0x10, as the Go tests' hub (newTestMesh).
+      if (key is String && key.length == 128 && key.startsWith('000', 64)) {
+        return config;
+      }
+    }
   }
 
   /// A new device, started; [name] is the name its person chose.
@@ -374,7 +399,16 @@ final class ZenDevice {
   final List<String> _trace = <String>[];
   static final Stopwatch _clock = Stopwatch()..start();
 
+  /// When a frame of each type from each address last reached the app (wall
+  /// time, ms), by the type and the address with a space between.
+  final Map<String, int> _heardAt = <String, int>{};
+
   List<String> get trace => List<String>.unmodifiable(_trace);
+
+  /// When a frame of [type] from [from] last reached this device's app (wall
+  /// time, ms; 0: never).
+  int heardAtMillis(ZenDevice from, String type) =>
+      _heardAt['$type ${PeerShareCodec.normalizeAddress(from.address)}'] ?? 0;
   int _generation = 0;
 
   ProviderContainer get container {
@@ -406,7 +440,9 @@ final class ZenDevice {
 
   String _address = '';
 
-  /// When the device last finished starting (wall time, ms).
+  /// When the device last began to start (wall time, ms): whatever reached it
+  /// from then on came after the start. Not when the start finished: a
+  /// friend's answer to the greetings of the start can come before that.
   int startedAtMillis = 0;
 
   /// What the device's QR code says (the "Mój kod" screen).
@@ -428,6 +464,7 @@ final class ZenDevice {
   /// then the core with all its modules; returns once the node reached the
   /// hub. The device is on the screen afterwards.
   Future<void> start({Duration within = const Duration(seconds: 60)}) async {
+    final int beganAt = DateTime.now().millisecondsSinceEpoch;
     await directory.create(recursive: true);
     final Stopwatch watch = Stopwatch()..start();
     final FileCredentialsStore secrets = FileCredentialsStore(
@@ -493,8 +530,8 @@ final class ZenDevice {
     _frameWatch = boot.runtime.frames.listen((SignalTransportFrame frame) {
       _trace.add(
         '${_clock.elapsedMilliseconds} ms: node frame '
-        '${frame.payload['type'] ?? frame.payload.keys.take(3).join(',')} '
-        'from ${mesh.nameOf(frame.from)}',
+        '${frame.payload['type'] ?? frame.payload.keys.take(3).join(',')}'
+        '${_detail(frame.payload)} from ${mesh.nameOf(frame.from)}',
       );
     });
     _appFrameWatch?.cancel();
@@ -503,8 +540,12 @@ final class ZenDevice {
     ) {
       _trace.add(
         '${_clock.elapsedMilliseconds} ms: app frame '
-        '${frame.payload['type']} from ${mesh.nameOf(frame.from)}',
+        '${frame.payload['type']}${_detail(frame.payload)} '
+        'from ${mesh.nameOf(frame.from)}',
       );
+      _heardAt['${frame.payload['type']} '
+              '${PeerShareCodec.normalizeAddress(frame.from)}'] =
+          DateTime.now().millisecondsSinceEpoch;
     });
     await hub.whenHydrated.timeout(within);
     final ZenCore core = container.read(zenCoreProvider);
@@ -515,7 +556,22 @@ final class ZenDevice {
       () => address.isNotEmpty && runtime.snapshot.peers > 0,
       within: within - watch.elapsed,
     );
-    startedAtMillis = DateTime.now().millisecondsSinceEpoch;
+    startedAtMillis = beganAt;
+  }
+
+  /// What the trace tells of a frame besides its type: a message's text and
+  /// which message it is, or which message an acknowledgement is for.
+  static String _detail(Map<String, dynamic> payload) {
+    final Object? id = payload['msgId'];
+    // 'outgoing-<time>-<address>': the time tells the messages apart.
+    final String which = id is String
+        ? ' ${id.split('-').elementAtOrNull(1) ?? id}'
+        : '';
+    final Object? text = payload['text'];
+    if (payload['type'] == 'message' && text is String) {
+      return ' "$text"$which';
+    }
+    return which;
   }
 
   /// Stops the core and the node as closing the app does; the files stay.

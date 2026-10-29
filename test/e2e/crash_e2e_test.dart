@@ -46,8 +46,16 @@ Future<void> main() async {
       await crashSecrets.copy(secrets.path);
       await ola.start();
       expect(ola.friendOf(ala)?.status, FriendRelationshipStatus.accepted);
+      mesh.mark('Ala writes after the crash');
       await ala.send(ola, 'po awarii');
-      await ola.waitForText(ala, 'po awarii', within: kAfterRestartWithin);
+      final Duration took = await ola.waitForText(
+        ala,
+        'po awarii',
+        within: kAfterRestartWithin,
+      );
+      mesh.timings.add(
+        'the message after the crash took ${took.inMilliseconds} ms',
+      );
       mesh.report();
     },
     skip: skip,

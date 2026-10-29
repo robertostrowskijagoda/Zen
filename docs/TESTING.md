@@ -11,7 +11,11 @@ From fastest to most "real":
 
 In addition: Go bridge tests (`go test` in `native/yggdrasil_bridge`,
 `test_native.ps1`; among them the post-quantum session layer, local links, LAN
-discovery, Bluetooth and Wi-Fi Direct logic and the door node), translation checks (section 5), GitHub Actions on every
+discovery, Bluetooth and Wi-Fi Direct logic, the door node, and real
+Yggdrasil nodes on a loopback mesh in `packet_loop_test.go`: a packet loop
+held while a friend keeps sending, a node whose core stopped answering, a
+first contact, restarts, and a storm of sends with restarts; see
+"The Go bridge's mesh" below), translation checks (section 5), GitHub Actions on every
 push (section 6), real Zen devices with real nodes on one computer
 (section 7), every stored file damaged at random (section 8), the app on
 an Android emulator (section 9) and one regression test per reported bug
@@ -57,6 +61,32 @@ checks of every screen in every language, which are split into
 `test/ui_text_fit_1_test.dart` … `_4_test.dart` so that the four parts run
 side by side. Split a new long file the same way rather than letting it
 grow past a minute or two.
+
+### The Go bridge's mesh
+
+`packet_loop_test.go` runs real Yggdrasil cores on a loopback hub, under
+the bridge's own nodes, and holds them to what the app needs of them:
+a node's packet loop never waits for the mesh (a loop held while the peer
+keeps sending must not leave the node deaf for good), what the app asks
+of a node answers while its core is stalled, a first contact between
+two devices on the mesh arrives within a few milliseconds of the way being
+found, a device that restarted reaches its friends and is reached within a
+few seconds (also when a friend writes just as it restarts, when it says
+nothing, and when a friend writes again a moment after the two talked
+again, `TestAMessageSoonAfterARestartIsNotLost`: ironwood can lose that
+message, and the mesh writer sends it again), and four devices sending to
+each other while one restarts every few seconds keep answering and talking
+(`TestNodesUnderLoadKeepAnswering`, half a minute, skipped by
+`go test -short`). The mesh writer's own logic
+runs against a fake core in `mesh_io_test.go`, the bounded questions to a
+core in `node_view_test.go`.
+
+`go test -race` reports three data races, all inside ironwood's Debug API:
+`encrypted.Debug.GetSessions` reads the byte counters each session's actor
+writes, `network.Debug.GetPeers` the latency each peer's actor writes. They
+are in the library (the bridge's traffic meter and the door's link check
+call those functions since before), not in the bridge's code; every test
+that asks a core for its sessions or peers while traffic flows shows them.
 
 ## 1. Network simulator (`lib/src/dev/sim/sim_network.dart`)
 
@@ -455,7 +485,9 @@ data folder), its own Yggdrasil node from the Go bridge and all the app's
 modules (`ZenCore`); only the screens are missing. The nodes meet through
 one more node, the hub, listening on this computer's peering port (32913);
 the bridge's public peer list is the hub alone, so nothing reaches the
-internet, and the radios for friends nearby are off.
+internet, and the radios for friends nearby are off. The hub's key is below
+any device's, so the hub is the root of the mesh's tree, as a long-standing
+node is on the real mesh: a device that comes on or restarts never moves it.
 `test/e2e/support/zen_mesh.dart` (`ZenMesh`, `ZenDevice`) does the
 plumbing; a scenario reads like what people do:
 
@@ -474,7 +506,7 @@ await ola.restart();                   // stop, start again on the same folder
 |---|---|
 | `friends_e2e_test.dart` | invitation by QR code and acceptance with time limits, both names shown (never "Kontakt Zen"), messages both ways, a friend in the background shown "w tle", one notification per message naming the sender and the text, a removed friend who keeps writing stays removed, also after a restart |
 | `mailbox_e2e_test.dart` | a friend's device picks a mailbox; the friend is away, the sender writes and leaves, the friend comes back and gets the message from the mailbox; a post reaches a friend of a friend |
-| `restart_e2e_test.dart` | a restart keeps the identity, friends, names and chats, presence is confirmed again after the start, messages flow again |
+| `restart_e2e_test.dart` | a restart keeps the identity, friends, names and chats, a friend's message right after the start and the answer get through within seconds, presence is confirmed again after the start |
 | `crash_e2e_test.dart` | a device whose folder is copied file by file during a burst of writes (a power cut) starts from that copy, keeps its friend and receives again |
 
 ```
@@ -504,9 +536,12 @@ keeps a trace of the frames that reached it (`mesh.describe()`), printed
 when a wait fails; `mesh.report()` prints the time each step took.
 
 Time limits (`zen_mesh.dart`): `kInvitationWithin` and
-`kAfterRestartWithin` (20 s today: the first contact of two devices, and
-the first after a restart, take about 14 s, R5-F5), `kMessageWithin`
-(10 s). Lower them as the fixes land.
+`kAfterRestartWithin` (5 s: on this computer an invitation shows within
+about a tenth of a second once the invited device can be found, a second or
+two after it came on the mesh, and the first message to a device that just
+restarted takes from a few milliseconds to about two seconds, as ironwood
+can lose a packet then and the bridge sends it again; both took about 14 s
+before the bridge's mesh writer, R5-F5), `kMessageWithin` (10 s).
 
 Not covered here: Android's locked receiver (it runs only on Android; the
 simulator covers it, section 1.1), the account's second device (linking),
