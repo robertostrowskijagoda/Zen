@@ -550,6 +550,59 @@ the resident shows up; the answer to "Let in" can travel back the same way.
 Doors answer no queries; while the app is locked (Android) the background
 service keeps the doors from its door kit and stores what arrives sealed.
 
+**Door code and sticker link** (`FlatDoorCode`, `flat_model.dart`): the
+code holds the household's key, the door token, the flat door's address,
+the name and, when there are any, the doors for sealed knocks (mailbox
+doors and the other residents' doors, sorted together, at most 14) with the
+sealing key; an invitation shown nearby adds when it stops working. It
+comes in two formats:
+
+- **Format 1**, JSON, base64url without padding:
+  `{v: 3, k, d, a, n, s, x, u}` (`s` the doors' 16-byte addresses
+  concatenated in base64url, `x` the X25519 sealing key, `u` the end in
+  milliseconds; `mv` names the oldest reader version when a newer one must
+  not be read by older builds). Phones pass codes to each other in this
+  form (`zen-flat:<code>`, the household's sync and nearby invitations),
+  and the stickers of Zen 1.14 and older carry it, so every build reads it.
+- **Format 2**, binary, written as decimal digits: the printed sticker's
+  link `https://robertostrowskijagoda.github.io/Zen/m#<digits>`. The digits
+  are the bytes as one big-endian number, padded with zeros to the digits of
+  256^n − 1 for n bytes (so the length gives n; like the pebble's QR card),
+  which a QR code holds in numeric mode at 3.3 bits a digit. Zen 1.14 and
+  older do not read it.
+
+| Field (format 2, big-endian) | Size |
+|---|---|
+| format = 2 (high four bits), number of doors 0–14 (low four bits) | u8 |
+| household key (Ed25519 public key) | 32 |
+| door token | 12 |
+| flat door's address without its first byte (always 0x02) | 15 |
+| each door for sealed knocks, the same way | 15 each |
+| sealing key (X25519), only with at least one door | 32 |
+| name (cut to 150 characters when read) | length in UTF-8 bytes (7 bits a byte, lowest first, high bit set while more follow) + UTF-8 |
+| records to the end: tag 1 = until (6 bytes, milliseconds) | u8 tag, u8 length, data |
+
+A reader skips record tags it does not know; a first byte with a format
+above 2 makes the app ask to update, anything malformed (a length no
+number of bytes has, a field cut short, bytes after the records, more than
+1024 bytes, a name that is not UTF-8) is not a door code. A code whose
+key, token or addresses are not in the form the app makes (a padded token,
+an address outside 200::/8) is printed in format 1 instead. The app reads
+both formats from any link form (`…/m#`, `zen://m/<code>`,
+`zen-flat:<code>`), and so does the door page (`tool/pages/m/door.js`),
+which shows only the name; the code stays after `#` and never reaches the
+web server.
+
+The whole link, its QR version at error correction M (as printed) for a
+15-byte name, and the module of a plain code 5 cm across with its quiet
+zone (with six doors a name of up to 19 bytes keeps version 11):
+
+| Doors | Format 1 | Format 2 |
+|---|---|---|
+| 0 | 244 characters, version 11, 0.72 mm | 76 bytes = 184 digits (230 characters), version 8, 0.88 mm |
+| 6 | 492 characters, version 17, 0.54 mm | 198 bytes = 477 digits (523 characters), version 11, 0.72 mm |
+| 14 | 720 characters, version 22, 0.44 mm | 318 bytes = 766 digits (812 characters), version 15, 0.59 mm |
+
 ### 2.8 Dating (`date_*`) [P]
 
 Only between friends (lanterns and what travels back also across opened gates), except the flooded lantern.
@@ -1521,9 +1574,11 @@ From 1.12.0 on, older formats are kept readable (the rules are in
 6. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
    apply), the pyramid rules version `rv` (3.4), dating lantern `v:5`,
-   alarm wave `v:6`, BLE hello `v:7`, the door sticker `v` (3; a sticker with
+   alarm wave `v:6`, BLE hello `v:7`, the door code `v` (3; a code with
    `v >= 3` and unknown fields is read, and its `mv` field names the oldest
-   reader, so a newer version can make older ones ask to update), dating
+   reader, so a newer version can make older ones ask to update) and the
+   sticker link's format 2 (its first byte; unknown records are skipped, a
+   higher format asks to update, §2.7), dating
    KDF/AAD labels `*.v1`, mailbox and inbox labels `*.v2`, the hybrid
    signature's `zen.sig.v1` and its ML-DSA derivation label
    `zen.sig.mldsa65.v1`, the session layer's `ZPQ1` and key record version 1, blob manifest
