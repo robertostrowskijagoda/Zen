@@ -83,6 +83,18 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
   Zen. GPL-3.0-only like the code; NOTICE section 4 keeps the name "Zen" and
   the logo out of the licence as marks.
 
+## The promo film's music
+
+The website's promo films (`tool/pages/promo`, made by
+`tool/promo/make_promo.py`; not part of the app) use **"Specular City" by
+vitalezzz**, from https://opengameart.org/content/specular-city, dedicated
+to the public domain under **CC0 1.0 Universal**
+(https://creativecommons.org/publicdomain/zero/1.0/). CC0 asks for no credit;
+we give it gladly. The excerpt the films use is
+`tool/promo/music/specular-city-excerpt.m4a`; where and when the track was
+retrieved and its checksum: `tool/promo/MUSIC_LICENSE.md`. The films' icons
+are Material Icons and their type Hanken Grotesk and Space Mono (above).
+
 ## Network services
 
 Zen has no servers of its own. These services are used at run time; they are
