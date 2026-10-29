@@ -10,6 +10,19 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Your profile no longer looks reset after a restart, read messages always show their ticks, and pebble previews are sharp.
+- [en] After painting a pebble Zen says plainly where it is kept and how friends keep it for you.
+- [pl] Profil nie wygląda już na wyzerowany po ponownym uruchomieniu, odczytane wiadomości zawsze mają swoje fajki, a podglądy kamyczków są wyraźne.
+- [pl] Po pomalowaniu kamyczka Zen jasno mówi, gdzie jest przechowywany i jak znajomi przechowają go za Ciebie.
+
+### Fixes
+- **Profile reset after a restart**: the own profile was read once at start, and when that happened before the app was unlocked (the store refuses then), the default profile stayed for the whole session and a change made then could be saved over the real one. It is read again once the store opens, and no change is saved on top of the default profile.
+- **Ticks**: a read message always shows as read, and read receipts are recorded in the same queue as delivery changes, so neither writes over the other.
+- **Pebble previews** are drawn smoothed instead of as 16 × 16 squares.
+- **Pebble keepers**: right after publishing, the pebble says that it lives only on your phone until a friend keeps it (unreachable while the phone is off), that Zen asks friends by itself, and where to see who agreed (Kamyczki → the pebble → "Opiekunowie").
+- **Calls**: the diagnostics log now names where a native crash happened (the first libraries and functions of its stack, Android 12+), to find the crash a friend's phone had when answering calls. Sounds that stayed off were the phone's quiet modes (silent, vibrate, "Do not disturb" or Samsung's bedtime mode), as designed.
+
 ## 1.15.1 — 29.10.2026
 
 ### What's new
