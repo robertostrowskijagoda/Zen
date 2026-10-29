@@ -275,18 +275,6 @@ final class _Shape {
       y *= k;
       z *= k;
     }
-    if (p.heart > 0) {
-      final double phi = math.atan2(x, z);
-      final double dip = math.pi - phi.abs();
-      final double shape =
-          0.86 +
-          0.3 * math.pow(math.sin(phi).abs(), 0.8).toDouble() -
-          0.34 * math.exp(-(dip * dip) / 0.12) +
-          0.22 * math.exp(-(phi * phi) / 0.18);
-      final double k = 1 + p.heart * (shape - 1);
-      x *= k;
-      z *= k;
-    }
     if (p.waist > 0) {
       final double k = 1 - p.waist * math.exp(-(xn * xn) / 0.12);
       z *= k;

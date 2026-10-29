@@ -397,7 +397,7 @@ enum PebbleReadyDesign {
         return k.build();
       case owl:
         final PebbleSketch k = PebbleSketch(
-          _stone(PebbleShapePreset.pear, PebbleMaterial.brownRiver),
+          _stone(PebbleShapePreset.lopsided, PebbleMaterial.brownRiver),
         );
         k
           ..patternAll(
@@ -600,7 +600,7 @@ enum PebbleReadyDesign {
         return k.build();
       case strawberry:
         final PebbleSketch k = PebbleSketch(
-          _stone(PebbleShapePreset.teardrop, PebbleMaterial.glossRed),
+          _stone(PebbleShapePreset.almond, PebbleMaterial.glossRed),
         );
         k
           ..patternAll(
@@ -730,7 +730,7 @@ enum PebbleReadyDesign {
         return k.build();
       case heart:
         final PebbleSketch k = PebbleSketch(
-          _stone(PebbleShapePreset.heart, PebbleMaterial.glossRed),
+          _stone(PebbleShapePreset.flatOval, PebbleMaterial.glossRed),
         );
         k
           ..stamp(
@@ -797,7 +797,7 @@ enum PebbleReadyDesign {
         return k.build();
       case fox:
         final PebbleSketch k = PebbleSketch(
-          _stone(PebbleShapePreset.triangle, PebbleMaterial.glossOrange),
+          _stone(PebbleShapePreset.wedge, PebbleMaterial.glossOrange),
         );
         k
           ..stamp(PebbleFace.top, PebbleStampIds.fox, 0, 0.05, 0.9)
@@ -947,7 +947,10 @@ PebbleDesign pebbleRandomDesign(int seed) {
     PebbleShapePreset.river,
     PebbleShapePreset.skipping,
     PebbleShapePreset.egg,
-    PebbleShapePreset.heart,
+    PebbleShapePreset.flatOval,
+    PebbleShapePreset.flatRound,
+    PebbleShapePreset.worn,
+    PebbleShapePreset.sea,
     PebbleShapePreset.wide,
     PebbleShapePreset.dented,
     PebbleShapePreset.pillow,

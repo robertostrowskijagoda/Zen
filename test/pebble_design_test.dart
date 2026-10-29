@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -121,6 +122,43 @@ void main() {
       expect(PebbleShapePreset.values.length, lessThan(256));
       expect(PebbleMaterial.values.length, lessThan(256));
       expect(PebbleStamps.count, lessThan(65536));
+    });
+
+    test('every shape is a natural stone, and so is every ready design\'s', () {
+      // A figure (a heart, a star, a clover, a crescent, a dice) needs deep
+      // lobes, a heart's notch, a strong bend or waist, or sharp corners;
+      // a stone has at most a hint of them.
+      for (final PebbleShapePreset s in PebbleShapePreset.values) {
+        final PebbleShapeParams p = s.params;
+        final String what = s.name;
+        expect(p.lobes, lessThanOrEqualTo(0.06), reason: what);
+        expect(p.waist, lessThanOrEqualTo(0.2), reason: what);
+        expect(p.bend.abs(), lessThanOrEqualTo(0.4), reason: what);
+        expect(p.egg.abs(), lessThanOrEqualTo(0.32), reason: what);
+        expect(
+          math.min(p.e1, p.e2),
+          greaterThanOrEqualTo(0.45),
+          reason: '$what: no box corners',
+        );
+      }
+      for (final PebbleReadyDesign d in PebbleReadyDesign.values) {
+        final int shape = d.build().shape;
+        expect(PebbleShapePreset.byId(shape).index, shape, reason: d.name);
+      }
+      // The ids of the first test builds' figures now give stones.
+      for (final (int id, PebbleShapePreset now) in <(int, PebbleShapePreset)>[
+        (3, PebbleShapePreset.flatOval),
+        (8, PebbleShapePreset.wedge),
+        (12, PebbleShapePreset.lopsided),
+        (17, PebbleShapePreset.almond),
+        (20, PebbleShapePreset.chipped),
+        (22, PebbleShapePreset.flatRound),
+        (25, PebbleShapePreset.blocky),
+        (26, PebbleShapePreset.bumpy),
+      ]) {
+        expect(PebbleShapePreset.byId(id), now);
+      }
+      expect(PebbleShapePreset.byId(200), PebbleShapePreset.river);
     });
 
     test('every label is there', () {
