@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
-import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart'
@@ -15,11 +13,13 @@ import 'package:zen/src/features/feed/presentation/feed_screen.dart'
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/pebbles/pebble_card.dart';
+import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/pebbles/pebble_parts.dart';
 import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_detail_screen.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/qr_sticker/zen_qr_code.dart';
 
 /// "Stwórz kamyczek": the editor, then a name and a note, then publishing
 /// (signed with the account key; keepers are drawn) and the stone's screen
@@ -142,23 +142,22 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
     final String author = ref.watch(
       userProfileControllerProvider.select((p) => p.displayName),
     );
-    final bool thumbnailFits = pebbleThumbnailFits(
-      name: _name.text,
-      note: _note.text,
-      authorName: author,
-    );
     final PebbleCardText fitted = fitPebbleCardText(
       name: _name.text,
       note: _note.text,
       authorName: author,
       thumbnail: widget.thumbnail,
     );
-    final int used = pebbleCardSize(
-      nameBytes: utf8.encode(fitted.name).length,
-      noteBytes: utf8.encode(fitted.note).length,
-      authorBytes: utf8.encode(fitted.authorName).length,
-      thumbnail: fitted.thumbnail != null,
+    final PebbleCard preview = PebbleCard.preview(
+      look: widget.look,
+      thumbnail: widget.thumbnail,
+      name: _name.text,
+      note: _note.text,
+      authorName: author,
     );
+    // What the sticker's code will carry: the QR card, never the note.
+    final PebbleCard onSticker = preview.qrCard;
+    final int modules = zenQrCode(pebbleWebLink(preview)).moduleCount;
     return Scaffold(
       key: const Key('pebble-publish-screen'),
       appBar: ZenSectionBar(title: t('Nowy kamyczek')),
@@ -170,13 +169,7 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
             Center(
               child: PebbleView(
                 design: widget.design,
-                card: PebbleCard.preview(
-                  look: widget.look,
-                  thumbnail: widget.thumbnail,
-                  name: _name.text,
-                  note: _note.text,
-                  authorName: author,
-                ),
+                card: preview,
                 size: 200,
                 interactive: true,
               ),
@@ -210,13 +203,23 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
               ),
             ),
             Text(
-              t('Kod QR: {used} z {max} bajtów', <String, Object?>{
-                'used': used,
-                'max': kPebbleCardMaxBytes,
-              }),
+              t(
+                'Kod QR na naklejce: {n} × {n} kratek. Notka do niego nie '
+                'trafia: znalazca dostanie ją razem z kamyczkiem.',
+                <String, Object?>{'n': modules},
+              ),
               key: const Key('pebble-publish-size'),
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
+            if (onSticker.name != preview.name)
+              Text(
+                t(
+                  'Na naklejce nazwa będzie skrócona: „{name}”',
+                  <String, Object?>{'name': onSticker.name},
+                ),
+                key: const Key('pebble-publish-short-name'),
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
             if (fitted.note != _note.text.trim())
               Text(
                 t('Notka zostanie skrócona do: „{note}”', <String, Object?>{
@@ -224,15 +227,6 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
                 }),
                 key: const Key('pebble-publish-cut'),
                 style: TextStyle(color: zen.danger, fontSize: 12.5),
-              ),
-            if (!thumbnailFits)
-              ZenInfo(
-                key: const Key('pebble-publish-long'),
-                icon: Icons.qr_code_2_rounded,
-                text: t(
-                  'Przy tak długiej notce podgląd malunku nie zmieści się w '
-                  'kodzie QR. Strona pokaże kamyczek w jego kolorach.',
-                ),
               ),
             const SizedBox(height: 8),
             Text(

@@ -753,7 +753,13 @@ padding, 26 characters). The design itself is opaque here (made by the
 editor, at most 64 KB); a copy from anyone is checked by recomputing the id
 from the card's author and time.
 
-**Card, binary format v1** (the public preview; all integers big-endian):
+A pebble has two cards: the **full card** (format v1), signed by the
+author, which travels with the design, to keepers and in profiles; and the
+**QR card** (format v2), only what the web page and the first contact
+need, which the sticker's QR code carries, so its modules stay large. The
+version byte tells them apart.
+
+**Full card, binary format v1** (all integers big-endian):
 
 | Field | Size |
 |---|---|
@@ -769,21 +775,45 @@ from the card's author and time.
 | thumbnail: 0, or 176 = 16 colours x 3 bytes, then 16 x 16 pixels of 4 bits, rows from the top, the left pixel in the high nibble (index 0 transparent) | u8 length + bytes |
 | Ed25519 signature over everything before it, by the author's account key | 64 |
 
-A card Zen makes is at most 400 bytes, so the QR code stays readable on a
-sticker of about 5 x 5 cm: when the texts and the thumbnail do not fit, the
-thumbnail is left out, then the note, the name and the author's name are
-shortened (the form shows the bytes used). A card from elsewhere is taken
-while it is well formed (at most 852 bytes); another version, trailing
-bytes, a text over its limit or not UTF-8, a thumbnail of another length or
-base64 with padding is not. The signature is classical Ed25519 (like an
-event ticket, §4.1): it must fit the QR code and is checked on the spot by
-anyone holding the card. Shared test vectors: `tool/ci/pebble_card_vectors.json`.
+The texts are cut to their limits; the thumbnail is always kept. A card
+from elsewhere is taken while it is well formed (at most 852 bytes);
+another version, trailing bytes, a text over its limit or not UTF-8, a
+thumbnail of another length or base64 with padding is not. The signature
+is classical Ed25519 (like an event ticket, §4.1).
 
-**Links.** `https://robertostrowskijagoda.github.io/Zen/k/#<base64url(card)>`
-(no padding; the fragment never reaches the server) and
-`zen://pebble#<same>`, which opens the collecting screen in the app; the
-in-app QR scanner takes both. `zen://pebbles` opens the person's pebbles
-(a keeping request's notification).
+**QR card, binary format v2** (not signed):
+
+| Field | Size |
+|---|---|
+| version = 2 | u8 |
+| PebbleId | 16 |
+| author account id (Ed25519 public key) | 32 |
+| shape preset, shape seed, material preset | u8, u32, u8 |
+| main colour, second colour (RGB) | 3, 3 |
+| name (at most 24 bytes; cut on a whole letter, ending in "…") | u8 length + UTF-8 |
+| author's display name (at most 16 bytes, cut the same way) | u8 length + UTF-8 |
+
+At most 103 bytes. The note, the date, the thumbnail and the signature are
+not in it: a finder saves the pebble from the QR card at once (shown with
+its look, without a date) and asks for the design; the `pbl_design` answer
+carries the full card, which takes the QR card's place only when it has the
+same id and author key, holds the author's signature and matches the
+design. Until then the pebble is not listed in the finder's profile. The
+first test builds put the full card in the QR code; those links are still
+read. Shared test vectors of both formats:
+`tool/ci/pebble_card_vectors.json`.
+
+**Links.** `https://robertostrowskijagoda.github.io/Zen/k/#<digits>`, the
+QR card as one big-endian number in decimal, padded with zeros to the
+digits of 256^n - 1 for its n bytes (so the count of digits gives n; a QR
+code writes digits in its numeric mode at 3.3 bits each, against 8 bits
+per 6 for base64url), and `zen://pebble#<same>`, which opens the collecting
+screen in the app. The fragment never reaches the server. Links with the
+base64url of a card (either format, no padding) are read too. The longest
+QR card makes a QR code of version 8 at error correction M (49 x 49
+modules); the printed full card of the first builds needed version 17 to
+20. `zen://pebbles` opens the person's pebbles (a keeping request's
+notification).
 
 **Signed records** (Ed25519, by the same keys as the card):
 
@@ -800,7 +830,7 @@ in-app QR scanner takes both. `zen://pebbles` opens the person's pebbles
 | type | Direction | Fields |
 |---|---|---|
 | `pbl_get` | finder -> author, keepers, friends | `id`, `a` author account, `h` hops (1 from a finder to its friend, else 0), `o` the asker (set only by a friend passing it on) |
-| `pbl_design` | any holder -> asker | `c` card, `d` design (base64url), `k` newest keeper list known (optional) |
+| `pbl_design` | any holder -> asker | `c` full card, `d` design (base64url), `k` newest keeper list known (optional) |
 | `pbl_keep_ask` | author -> friend | `c` card, `n` design size in bytes |
 | `pbl_keep_yes`, `pbl_keep_no` | friend -> author | `id` |
 | `pbl_keep_quit` | keeper -> author | `id` |
@@ -836,8 +866,9 @@ with `h: 1`. A friend who cannot serve passes the question on once (`h: 0`,
 up to 8 of its own friends, who answer the asker directly. After a full
 round the next one waits 1, 5, 15 minutes, then 1, 3 and 6 hours, driven by
 the app's wake beat (every 15 minutes). A design is taken only for a pebble
-this device wants and only when it matches the card; a keeper list only
-when the card's author signed it.
+this device wants and only when it matches the full card (for a pebble
+collected from its QR card, the full card that comes with it, checked as
+above); a keeper list only when the card's author signed it.
 
 **Limits.** At most 30 pebble frames per sender per minute, 60 designs
 served per minute, 10 questions passed on per friend per minute (the same
@@ -852,7 +883,8 @@ once); the author counts distinct finder accounts.
 
 **Profile.** The kind `pebbles` in the account's `profile` space, sealed for
 all friends (`Audience.all`): `{v: 1, c: [{c: card}], k: [{c: card, f:
-found at (ms), n: finder's note}], x: {id: removed at}}`, newest first, at
+found at (ms), n: finder's note}], x: {id: removed at}}` with full cards
+only, newest first, at
 most 40 KB before sealing (the oldest collected ones are left out first).
 Friends see it; followers and friends of friends who hold the entry cannot
 open it. A made pebble in it counts only when the account signed it. The

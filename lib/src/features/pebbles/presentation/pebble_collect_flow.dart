@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -56,7 +55,11 @@ class PebbleCollectScreen extends ConsumerStatefulWidget {
 
 class _PebbleCollectScreenState extends ConsumerState<PebbleCollectScreen> {
   final TextEditingController _note = TextEditingController();
-  late final Future<bool> _valid = widget.card.verify();
+  // A QR card carries no signature: the full card that comes with the
+  // design is checked then ([PebbleHosting]).
+  late final Future<bool> _valid = widget.card.isFull
+      ? widget.card.verify()
+      : Future<bool>.value(true);
   bool _busy = false;
   String? _error;
 
@@ -156,15 +159,22 @@ class _PebbleCollectScreenState extends ConsumerState<PebbleCollectScreen> {
             ],
             const SizedBox(height: 6),
             Text(
-              t('{author} · {date}', <String, Object?>{
-                'author': card.authorName.isEmpty
-                    ? t('Autor nieznany')
-                    : card.authorName,
-                'date': ZenFormat.date(card.created),
-              }),
+              pebbleByline(card),
               textAlign: TextAlign.center,
               style: TextStyle(color: zen.textMuted, fontSize: 13),
             ),
+            if (!card.isFull) ...<Widget>[
+              const SizedBox(height: 12),
+              ZenInfo(
+                key: const Key('pebble-collect-later'),
+                icon: Icons.downloading_rounded,
+                text: t(
+                  'Notkę i pełny wygląd zobaczysz, gdy kamyczek pobierze się '
+                  'od autora albo jego znajomych. Wtedy Zen sprawdzi też '
+                  'podpis autora.',
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             FutureBuilder<bool>(
               future: _valid,

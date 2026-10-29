@@ -76,6 +76,7 @@ final class PebbleEntry {
   bool get retired => keepers?.retired ?? false;
 
   PebbleEntry copyWith({
+    PebbleCard? card,
     Set<PebbleRole>? roles,
     int? foundAtMillis,
     String? findNote,
@@ -84,7 +85,7 @@ final class PebbleEntry {
     bool? foundSent,
     String? keptFrom,
   }) => PebbleEntry(
-    card: card,
+    card: card ?? this.card,
     roles: roles ?? this.roles,
     addedAtMillis: addedAtMillis,
     foundAtMillis: foundAtMillis ?? this.foundAtMillis,
@@ -544,6 +545,20 @@ final class PebbleStore extends ChangeNotifier {
                   ? null
                   : PeerShareCodec.normalizeAddress(from),
             );
+    await _save();
+    return true;
+  }
+
+  /// The full card [full] of a pebble collected from its QR card takes
+  /// the QR card's place (checked by the caller: the same pebble, the
+  /// author's signature); false when the pebble is not here.
+  Future<bool> replaceCard(PebbleCard full) async {
+    await load();
+    final PebbleEntry? e = _entries[full.id];
+    if (e == null || !full.isFull || !e.card.isSamePebble(full)) {
+      return false;
+    }
+    _entries[full.id] = e.copyWith(card: full);
     await _save();
     return true;
   }

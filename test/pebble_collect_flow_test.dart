@@ -1,19 +1,25 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/films/presentation/film_camera.dart';
 import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_hosting.dart';
 import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_code_screen.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
+import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/qr_frame_decoder.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 // Collecting a pebble: from its link to the collection, saved at once from
@@ -141,6 +147,101 @@ void main() {
     await tester.runAsync(service.stop);
   });
 
+  testWidgets('a sticker\'s QR card is collected at once; the note, the '
+      'date and the signature come with the design', (
+    WidgetTester tester,
+  ) async {
+    final PebbleCard qr = card.qrCard;
+    final PebbleService service = await pumpCollect(tester, qr);
+    expect(find.text('Biedronka'), findsOneWidget);
+    expect(find.text('Kasia'), findsOneWidget, reason: 'no date yet');
+    expect(find.text('niedaleko Wisły w Warszawie'), findsNothing);
+    expect(find.byKey(const Key('pebble-collect-later')), findsOneWidget);
+    expect(find.byKey(const Key('pebble-collect-invalid')), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('pebble-collect-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('pebble-collect-button')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    final PebbleEntry? e = service.store.entry(card.id);
+    expect(e!.collected, isTrue);
+    expect(e.card, qr);
+    expect(find.byKey(const Key('pebble-detail-screen')), findsOneWidget);
+    // Not shown to friends until the signed card came.
+    expect(
+      pebbleProfileBody(
+        created: const <PebbleEntry>[],
+        collected: <PebbleEntry>[e],
+      )['k'],
+      isEmpty,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(service.stop);
+  });
+
+  testWidgets('"Pokaż kod" shows the pebble\'s code on white, and the app\'s '
+      'scanner reads it from the screen like a printed one', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final PebbleService service = await pumpCollect(tester, card);
+    await tester.tap(find.byKey(const Key('pebble-collect-button')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('pebble-show-code-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pebble-code-screen')), findsOneWidget);
+    final ZenQrView view = tester.widget<ZenQrView>(
+      find.byKey(const Key('pebble-code-qr')),
+    );
+    expect(view.data, pebbleWebLink(card));
+    // Large: most of the screen's width.
+    expect(
+      tester.getSize(find.byKey(const Key('pebble-code-qr'))).width,
+      greaterThan(300),
+    );
+    final RenderRepaintBoundary boundary = tester.renderObject(
+      find.descendant(
+        of: find.byKey(const Key('pebble-code-qr')),
+        matching: find.byType(RepaintBoundary),
+      ),
+    );
+    final String? read = await tester.runAsync<String?>(() async {
+      final ui.Image image = await boundary.toImage(pixelRatio: 3);
+      final ByteData rgba = (await image.toByteData())!;
+      final Uint8List px = rgba.buffer.asUint8List();
+      final Uint8List gray = Uint8List(image.width * image.height);
+      for (int i = 0; i < gray.length; i++) {
+        gray[i] =
+            (px[4 * i] * 77 + px[4 * i + 1] * 150 + px[4 * i + 2] * 29) >> 8;
+      }
+      final LumaFrame frame = LumaFrame(
+        width: image.width,
+        height: image.height,
+        bytes: gray,
+      );
+      image.dispose();
+      return decodeQrLuma(frame);
+    });
+    expect(read, pebbleWebLink(card));
+    // What the scanner read opens the same pebble.
+    expect(pebbleCardFromLink(read), card.qrCard);
+    final RuntimeRouteIntent? intent = runtimeRouteIntentFromRouteKey(
+      id: 'scan',
+      routeKey: read,
+    );
+    expect(intent?.target, RuntimeRouteTarget.pebble);
+    expect(PebbleCodeScreen(card: card).card, card);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(service.stop);
+  });
+
   testWidgets('a forged card cannot be collected', (WidgetTester tester) async {
     final PebbleService service = await pumpCollect(tester, forged);
     expect(find.byKey(const Key('pebble-collect-invalid')), findsOneWidget);
@@ -165,7 +266,7 @@ void main() {
         routeKey: link,
       );
       expect(intent?.target, RuntimeRouteTarget.pebble, reason: link);
-      expect(pebbleCardFromLink(intent!.rawInput), card);
+      expect(pebbleCardFromLink(intent!.rawInput), card.qrCard);
     }
     expect(
       runtimeRouteIntentFromRouteKey(id: 'x', routeKey: 'zen://pebble#zzz'),

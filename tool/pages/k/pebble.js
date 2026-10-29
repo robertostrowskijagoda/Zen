@@ -1,9 +1,19 @@
-// The pebble card of the pebble page (/k/#<card>): read from base64url and
-// checked against its author's signature, all in the visitor's browser (the
-// card never leaves it: it stays after the "#").
+// The pebble card of the pebble page (/k/#<card>): read, and checked
+// against its author's signature when it carries one, all in the visitor's
+// browser (the card never leaves it: it stays after the "#").
 //
-// The card (format v1, integers big-endian; tool/ci/pebble_cards.py writes
-// test cards and documents every field): version 1, the pebble id (16),
+// Stickers carry the QR card (format v2) as decimal digits: the card's
+// bytes as one big-endian number, padded with zeros to the digits of
+// 256^n - 1 for its n bytes. It holds version 2, the pebble id (16), the
+// author's key (32), shape preset (u8), shape seed (u32), material preset
+// (u8), main and second colour (RGB), the name (u8 length + at most 24
+// bytes of UTF-8) and the author (u8 length + at most 16 bytes). It is not
+// signed: the app checks the author's signature on the full card that
+// comes with the design, and the page says so.
+//
+// The first test builds' links carry the full card (format v1, integers
+// big-endian, base64url; tool/ci/pebble_cards.py writes test cards of both
+// formats and documents every field): version 1, the pebble id (16),
 // the author's key (Ed25519, 32), created (u32 Unix seconds), shape preset
 // (u8), shape seed (u32), material preset (u8), main and second colour
 // (RGB), the name, note and author (u8 length + UTF-8 each), the thumbnail
@@ -49,10 +59,87 @@
     return decodeURIComponent(s);
   }
 
-  // The card in [link] (the base64url text after "#"), or null when it is
-  // not a whole, well-formed card of version 1.
+  // The decimal digits of 256^n - 1, for n = 0 to 255 (worked out on whole
+  // digits, no floating point).
+  var DIGITS = (function () {
+    var table = [0], d = [1];
+    for (var n = 1; n <= 255; n++) {
+      var carry = 0;
+      for (var i = 0; i < d.length; i++) {
+        var v = d[i] * 256 + carry;
+        d[i] = v % 10;
+        carry = Math.floor(v / 10);
+      }
+      while (carry) { d.push(carry % 10); carry = Math.floor(carry / 10); }
+      table.push(d.length);
+    }
+    return table;
+  })();
+
+  // The bytes the decimal [text] stands for, or null when no number of
+  // bytes is written with that many digits (or the number is too large).
+  function fromDigits(text) {
+    if (typeof text !== "string" || !/^[0-9]+$/.test(text)) { return null; }
+    var n = DIGITS.indexOf(text.length);
+    if (n < 1) { return null; }
+    var out = new Uint8Array(n);
+    for (var i = 0; i < text.length; i++) {
+      var carry = text.charCodeAt(i) - 48;
+      for (var j = n - 1; j >= 0; j--) {
+        var v = out[j] * 10 + carry;
+        out[j] = v & 255;
+        carry = v >> 8;
+      }
+      if (carry) { return null; }
+    }
+    return out;
+  }
+
+  // The QR card in [b] (format v2), or null.
+  function decodeQr(b) {
+    if (b.length < 1 + 16 + 32 + 12 + 2 || b.length > 1 + 16 + 32 + 12 + 1 + 24 + 1 + 16) { return null; }
+    var at = 1;
+    function take(n) {
+      if (at + n > b.length) { throw new Error("short"); }
+      var part = b.subarray(at, at + n);
+      at += n;
+      return part;
+    }
+    function u8() { return take(1)[0]; }
+    function u32() { var p = take(4); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]; }
+    function rgb() { var p = take(3); return [p[0], p[1], p[2]]; }
+    function limited(max) { var n = u8(); if (n > max) { throw new Error("long"); } return text(take(n)); }
+    try {
+      var card = { version: 2 };
+      card.id = take(16);
+      card.authorKey = take(32);
+      card.shape = u8();
+      card.seed = u32();
+      card.material = u8();
+      card.main = rgb();
+      card.second = rgb();
+      card.name = limited(24);
+      card.author = limited(16);
+      card.note = "";
+      card.created = null;
+      card.thumbnail = null;
+      if (at !== b.length) { return null; }
+      return card;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // The card in [link] (the text after "#": the digits of a QR card, or
+  // the base64url of a card), or null when it is not a whole, well-formed
+  // card of version 1 or 2.
   function decode(link) {
+    if (/^[0-9]+$/.test(link)) {
+      var q = fromDigits(link);
+      return q && q[0] === 2 ? decodeQr(q) : null;
+    }
     var b = fromBase64Url(link);
+    if (b && b.length && b[0] === 2) { return decodeQr(b); }
     if (!b || b.length < 1 + 16 + 32 + 4 + 1 + 4 + 1 + 6 + 3 + 1 + 64 || b[0] !== 1) { return null; }
     var at = 1;
     function take(n) {
@@ -226,9 +313,11 @@
     }
   }
 
-  // "valid" (signed by the key in the card), "invalid", or "unknown" when
-  // this browser cannot check it.
+  // "valid" (signed by the key in the card), "invalid", "unknown" when
+  // this browser cannot check it, or "unsigned" for a QR card (the app
+  // checks the full card's signature).
   function verify(card) {
+    if (card.version === 2) { return Promise.resolve("unsigned"); }
     return verifyNative(card.authorKey, card.signature, card.signed).then(function (ok) {
       return ok === null ? verifyPure(card.authorKey, card.signature, card.signed) : ok;
     }).then(function (ok) {
@@ -242,6 +331,7 @@
     verifyNative: verifyNative,
     verifyPure: verifyPure,
     fromBase64Url: fromBase64Url,
+    fromDigits: fromDigits,
     hex: hex
   };
   if (typeof module === "object" && module.exports) {
