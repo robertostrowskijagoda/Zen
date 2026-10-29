@@ -96,6 +96,12 @@ type bridgeNode struct {
 	// the node (node_identity.go); nil in tests that build a node by hand.
 	identity *nodeIdentityClaim
 	lastCall atomic.Int64
+	// What the app reads of the core, asked off its thread, and the
+	// changes of the core's peerings under way (node_view.go).
+	sample  coreQuery[nodeSample]
+	paths   coreQuery[[]core.PathEntryInfo]
+	tree    coreQuery[[]core.TreeEntryInfo]
+	actions atomic.Int32
 }
 
 type configSummary struct {

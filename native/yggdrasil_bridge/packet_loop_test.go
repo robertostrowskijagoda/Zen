@@ -216,6 +216,62 @@ func TestPacketLoopNeverWaitsForTheMesh(t *testing.T) {
 	}
 }
 
+// stallCore leaves node's mesh core stalled as behind a packet loop that
+// stopped (the one R5-F4 left waiting in a write): its reader takes one
+// packet and no more (ironwood starts reading with the first read), and
+// from sends it enough for its session actors to wait for each other.
+func stallCore(t *testing.T, node, from *bridgeNode) {
+	t.Helper()
+	go func() {
+		buffer := make([]byte, 64*1024)
+		_, _, _ = node.core.ReadFrom(buffer)
+	}()
+	startPacketLoop(from)
+	warmPaths(t, node.core, from.core)
+	// The sender's writer sends once the way is open: a moment later.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		floodRaw(from, node, 32)
+		if !answersWithin(500*time.Millisecond, func() { node.core.GetSessions() }) {
+			return
+		}
+	}
+	t.Fatal("the mesh core did not stall")
+}
+
+// R5-F4: what the app asks of a node on its UI thread answers also while
+// the node's mesh core does not: the screen never freezes on a core that
+// stopped answering (the "logo that never goes away"), and the node stops.
+func TestNodeInfoAnswersWhileTheMeshCoreIsStalled(t *testing.T) {
+	mesh := newLoopbackMesh(t)
+	a, b := mesh.node(), mesh.node()
+	stallCore(t, a, b)
+	if !answersWithin(2*time.Second, func() { normalizeNodeState(1, a) }) {
+		t.Fatal("the node info waited for the stalled mesh core")
+	}
+	hub, _ := url.Parse(mesh.hubURI)
+	for name, call := range map[string]func(){
+		"the node info again": func() { normalizeNodeState(1, a) },
+		"the peers":           func() { buildPeerJSON(a.view().peers) },
+		"the sessions":        func() { _ = a.view().sessions },
+		"the paths":           func() { a.viewPaths() },
+		"the tree":            func() { a.viewTree() },
+		"the public peers":    func() { a.publicPeerStates() },
+		"the door":            func() { a.doorState() },
+		"a peer call":         func() { _ = a.coreAction(func() error { return a.core.CallPeer(hub, "") }) },
+		"a message":           func() { _ = sendSignal(a, meshIP(b).String(), `{"type":"ping"}`) },
+	} {
+		// Each within the view's wait (the stalled question is not waited
+		// for again) or a change's, never for good.
+		if !answersWithin(nodeActionWait+time.Second, call) {
+			t.Fatalf("%s waited for the stalled mesh core", name)
+		}
+	}
+	if !answersWithin(nodeStopWait+2*time.Second, func() { _ = a.shutdown(1) }) {
+		t.Fatal("the node did not stop")
+	}
+}
+
 // R5-F5: the first message between two devices on the mesh that never
 // talked arrives at once: the key lookup, ironwood's session and path and
 // the session layer's key request and answer are set up without losing a

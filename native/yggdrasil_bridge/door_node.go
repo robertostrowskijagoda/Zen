@@ -218,8 +218,11 @@ type doorHost struct {
 	main *bridgeNode
 	mu   sync.Mutex
 	// The public peers it dials now: as GetPeers lists them → as dialled.
-	peers    map[string]string
-	offset   int
+	peers  map[string]string
+	offset int
+	// Its peerings as the app reads them, asked off the app's thread
+	// (node_view.go).
+	links    coreQuery[[]core.PeerInfo]
 	quit     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
@@ -312,7 +315,7 @@ func (host *doorHost) watch() {
 			return
 		case <-ticker.C:
 		}
-		if host.meshUp() {
+		if host.meshUp(host.core.GetPeers()) {
 			missed = 0
 			continue
 		}
@@ -334,20 +337,26 @@ func (host *doorHost) peerCount() int {
 }
 
 // meshUp reports whether the host has a working link to one of its public
-// peers.
-func (host *doorHost) meshUp() bool {
+// peers, among links as GetPeers listed them.
+func (host *doorHost) meshUp(links []core.PeerInfo) bool {
 	host.mu.Lock()
 	peers := make(map[string]bool, len(host.peers))
 	for base := range host.peers {
 		peers[base] = true
 	}
 	host.mu.Unlock()
-	for _, peer := range host.core.GetPeers() {
+	for _, peer := range links {
 		if peer.Up && peers[peerURIBase(peer.URI)] {
 			return true
 		}
 	}
 	return false
+}
+
+// peerView is the host's peerings as the app reads them: never waiting for
+// its core longer than nodeViewWait.
+func (host *doorHost) peerView() []core.PeerInfo {
+	return host.links.get(nodeViewFresh, nodeViewWait, host.core.GetPeers)
 }
 
 // repeer dials the public peers doorHostPeers picks now and drops the ones
@@ -426,11 +435,12 @@ func doorHostPeers(candidates []string, avoid string, offset, count int) []strin
 }
 
 // treeParentURI is the peering of the main node's parent in the mesh tree
-// ("" while it has none).
+// ("" while it has none), from the node's view: a door starts on the app's
+// thread (node_view.go).
 func (node *bridgeNode) treeParentURI() string {
 	self := node.core.PublicKey()
 	var parent ed25519.PublicKey
-	for _, entry := range node.core.GetTree() {
+	for _, entry := range node.viewTree() {
 		if bytes.Equal(entry.Key, self) {
 			parent = entry.Parent
 		}
@@ -438,7 +448,7 @@ func (node *bridgeNode) treeParentURI() string {
 	if len(parent) == 0 || bytes.Equal(parent, self) {
 		return ""
 	}
-	for _, peer := range node.core.GetPeers() {
+	for _, peer := range node.view().peers {
 		if bytes.Equal(peer.Key, parent) {
 			return peer.URI
 		}
@@ -449,7 +459,7 @@ func (node *bridgeNode) treeParentURI() string {
 func (host *doorHost) stop() {
 	host.stopOnce.Do(func() {
 		close(host.quit)
-		host.core.Stop()
+		stopCore(host.core, nodeStopWait)
 	})
 }
 
@@ -684,24 +694,26 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 	return nil
 }
 
-// stop shuts the door and drops the host's peering to it.
+// stop shuts the door and drops the host's peering to it. It runs on the
+// app's thread: neither core is waited for longer than nodeStopWait.
 func (door *doorNode) stop() {
 	door.stopOnce.Do(func() {
 		close(door.quit)
 		door.mesh.stop()
-		_ = door.host.core.RemovePeer(door.peerURI, "")
+		within(nodeStopWait, func() { _ = door.host.core.RemovePeer(door.peerURI, "") })
 		door.listener.Cancel()
 		// Stopping the core ends run's reads.
-		door.core.Stop()
+		stopCore(door.core, nodeStopWait)
 	})
 }
 
 // linked reports whether the door's host has its link to the door up and is
-// on the mesh itself.
+// on the mesh itself (from the host's view, node_view.go).
 func (door *doorNode) linked() bool {
-	for _, peer := range door.host.core.GetPeers() {
+	links := door.host.peerView()
+	for _, peer := range links {
 		if peer.URI == door.linkURI && peer.Up {
-			return door.host.meshUp()
+			return door.host.meshUp(links)
 		}
 	}
 	return false
@@ -920,8 +932,8 @@ func (node *bridgeNode) stopDoor() {
 // doorState is what the app learns about the door: never its key.
 func (node *bridgeNode) doorState() map[string]any {
 	node.doorMu.Lock()
-	defer node.doorMu.Unlock()
 	door := node.door
+	node.doorMu.Unlock()
 	if door == nil {
 		return map[string]any{"running": false}
 	}
