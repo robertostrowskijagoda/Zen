@@ -110,28 +110,10 @@ class _SettingsSecuritySection extends ConsumerWidget {
               margin: EdgeInsets.symmetric(vertical: 4),
               child: LockModeSettingChoice(),
             ),
-            ZenSection(t('Prywatność ekranu'), top: 16),
-            ZenGroup(
-              children: <Widget>[
-                SwitchListTile.adaptive(
-                  key: const Key('settings-secure-screens-switch'),
-                  secondary: ZenIconBadge(
-                    icon: Icons.screenshot_monitor_outlined,
-                    tone: zen.tone(ZenTone.media),
-                    size: 40,
-                  ),
-                  value: settings.secureScreens,
-                  title: Text(t('Blokuj zrzuty i nagrywanie ekranu')),
-                  subtitle: Text(
-                    t(
-                      'Rozmowy, nagrania, konto i urządzenia nie trafią na '
-                      'zrzut, nagranie ekranu ani podgląd ostatnich aplikacji.',
-                    ),
-                    style: TextStyle(color: zen.textSecondary, height: 1.35),
-                  ),
-                  onChanged: controller.setSecureScreens,
-                ),
-                if (!security.hasPassword)
+            if (!security.hasPassword) ...<Widget>[
+              ZenSection(t('Prywatność ekranu'), top: 16),
+              ZenGroup(
+                children: <Widget>[
                   SwitchListTile.adaptive(
                     key: const Key('settings-allow-no-password-switch'),
                     secondary: ZenIconBadge(
@@ -150,8 +132,9 @@ class _SettingsSecuritySection extends ConsumerWidget {
                     ),
                     onChanged: controller.setAllowNoAppPassword,
                   ),
-              ],
-            ),
+                ],
+              ),
+            ],
             if (!kIsWeb && Platform.isAndroid && !isStoreBuild) ...<Widget>[
               ZenSection(t('Kamuflaż'), top: 16),
               ZenGroup(

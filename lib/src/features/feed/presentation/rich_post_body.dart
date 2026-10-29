@@ -3,9 +3,8 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/chat/presentation/linked_text.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/mentions.dart';
@@ -130,16 +129,8 @@ class _RichPostBodyState extends State<RichPostBody> {
         ..onTap = () => setState(() => _revealed.add(id));
     } else if (r.link) {
       tap = TapGestureRecognizer()
-        ..onTap = () {
-          // No browser jumps from a post: the link is copied, the user
-          // decides where to open it.
-          unawaited(copyWithExpiry(r.text));
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            SnackBar(
-              content: Text(t('Skopiowano link: {link}', {'link': r.text})),
-            ),
-          );
-        };
+        // Opens in the browser (copied where it cannot).
+        ..onTap = () => unawaited(openTextLink(context, r.text));
     }
     if (tap != null) {
       _recognizers.add(tap);

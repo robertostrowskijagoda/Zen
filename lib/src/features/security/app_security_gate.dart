@@ -23,6 +23,7 @@ import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
+import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -1307,11 +1308,9 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          TextField(
-            key: const Key('app-password-new'),
+          PasswordTextField(
+            fieldKey: const Key('app-password-new'),
             controller: _password,
-            obscureText: true,
-            enableIMEPersonalizedLearning: false,
             textInputAction: TextInputAction.next,
             decoration: InputDecoration(
               labelText: t('Hasło'),
@@ -1326,11 +1325,9 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const Key('app-password-repeat'),
+          PasswordTextField(
+            fieldKey: const Key('app-password-repeat'),
             controller: _repeat,
-            obscureText: true,
-            enableIMEPersonalizedLearning: false,
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(
               labelText: t('Powtórz hasło'),

@@ -39,6 +39,8 @@
       case 4: f = { sx: 1, sz: between(0.82, 0.94), sy: between(0.56, 0.68), e: between(0.66, 0.78), taper: 0 }; break; // chunky
       default: f = { sx: 1, sz: between(0.52, 0.62), sy: between(0.36, 0.46), e: between(0.82, 0.92), taper: between(0, 0.1) }; // long
     }
+    // Flat, as people paint pebbles (the app's kPebbleMaxHeight).
+    f.sy = Math.min(f.sy * 0.62, 0.4);
     f.ey = between(0.62, 0.8);
     f.bumps = [];
     for (var i = 0; i < 4; i++) {

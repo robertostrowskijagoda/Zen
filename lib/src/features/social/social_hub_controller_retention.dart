@@ -1,6 +1,10 @@
 part of 'social_hub_controller.dart';
 
 mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
+  /// The last change of delivery states queued per conversation
+  /// ([_updateMessageDeliveryState]).
+  final Map<String, Future<void>> _deliveryEdits = <String, Future<void>>{};
+
   @override
   Future<void> _applyRetentionAcrossConversations({
     required int nowMillis,
@@ -195,6 +199,37 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     required String peerAddress,
     required String messageId,
     required ChatMessageDeliveryState deliveryState,
+  }) {
+    // One change of a conversation's delivery states at a time: the
+    // friend's receipt and the send's own "sent" read and write the same
+    // conversation, and the one read first must not write over the other
+    // (the first message of a conversation, slower to send, kept one tick
+    // although its receipt had come).
+    final String key = PeerShareCodec.normalizeAddress(peerAddress);
+    final Future<void> before = _deliveryEdits[key] ?? Future<void>.value();
+    final Future<void> edit = before.then(
+      (_) => _updateMessageDeliveryStateNow(
+        peerAddress: peerAddress,
+        messageId: messageId,
+        deliveryState: deliveryState,
+      ),
+    );
+    final Future<void> settled = edit.catchError((Object _) {});
+    _deliveryEdits[key] = settled;
+    unawaited(
+      settled.then((_) {
+        if (identical(_deliveryEdits[key], settled)) {
+          _deliveryEdits.remove(key);
+        }
+      }),
+    );
+    return edit;
+  }
+
+  Future<void> _updateMessageDeliveryStateNow({
+    required String peerAddress,
+    required String messageId,
+    required ChatMessageDeliveryState deliveryState,
   }) async {
     if (!ref.mounted) {
       return;
@@ -205,6 +240,11 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
       (ChatMessage message) => message.id == messageId,
     );
     if (index < 0 || thread[index].deliveryState == deliveryState) {
+      return;
+    }
+    // A receipt that came back is final: a late "sent" or "failed" from
+    // the send never takes it back.
+    if (thread[index].deliveryState == ChatMessageDeliveryState.delivered) {
       return;
     }
     final List<ChatMessage> next = List<ChatMessage>.from(
