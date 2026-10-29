@@ -99,6 +99,15 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     icon: Icons.smart_display_outlined,
     selectedIcon: Icons.smart_display_rounded,
   ),
+  // Painted pebbles: made, found and collected, one tap away (they were
+  // only on the profile and went unnoticed).
+  _ShellTab(
+    id: 'pebbles',
+    group: _RailGroup.posts,
+    label: t('Kamyczki'),
+    icon: Icons.landscape_outlined,
+    selectedIcon: Icons.landscape_rounded,
+  ),
   _ShellTab(
     id: 'meet',
     group: _RailGroup.meeting,
@@ -405,6 +414,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     'chats' => const SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
     'feed' => const FeedScreen(),
     'films' => const FilmsScreen(),
+    'pebbles' => const PebblesScreen(),
     'meet' => const MeetHubScreen(),
     'nearby' => const NearbyScreen(),
     'graph' => const GraphScreen(),
@@ -533,12 +543,12 @@ class _ReadableWidth extends StatelessWidget {
 
 /// Height of one rail button (tap area included): roomy on a tall phone,
 /// never below a comfortable thumb target. The buttons take all the height
-/// there is: on the smallest phone, 320x568, the twelve places get about
-/// 38 dp each (56 dp wide) and still fit without scrolling; from 360x640 up
-/// they are 48 dp. Only a shorter window (a phone on its side, split
+/// there is: on the smallest phone, 320x568, the thirteen places get about
+/// 35 dp each (56 dp wide) and still fit without scrolling; taller phones
+/// give them more, up to [_sideTabMaxExtent]. Only a shorter window (a phone on its side, split
 /// screen) scrolls.
 const double _sideTabMaxExtent = 54;
-const double _sideTabMinExtent = 36;
+const double _sideTabMinExtent = 35;
 
 /// The rail's own gaps above the first group and below the alarm.
 const double _railTopGap = 4;
