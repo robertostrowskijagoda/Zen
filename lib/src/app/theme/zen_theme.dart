@@ -15,6 +15,13 @@ export 'package:zen/src/app/theme/zen_tones.dart';
 /// grotesk for body copy, mono for system labels.
 abstract final class ZenText {
   static const String displayFamily = 'Fredoka';
+
+  /// Draws the letters Fredoka has not: it stops at Basic Latin and
+  /// Latin-1, so ą, ć, ę, ń, ś, ź, ż (Polish), č, ř, ů (Czech), ő, ű
+  /// (Hungarian), ș, ț (Romanian), ğ, ş (Turkish) and Vietnamese would come
+  /// from the phone's own font in the middle of a word. Quicksand is as
+  /// round, covers all of them and is bundled already (for the pebbles).
+  static const String displayGapFamily = 'Quicksand';
   static const String sansFamily = 'Hanken Grotesk';
   static const String monoFamily = 'JetBrains Mono';
 }
@@ -30,7 +37,10 @@ final class ZenTypeface {
     this.display = ZenText.displayFamily,
     this.sansFallback = const <String>[ZenText.sansFamily, 'DM Sans'],
     this.monoFallback = const <String>[ZenText.monoFamily, 'Space Mono'],
-    this.displayFallback = const <String>[ZenText.displayFamily, 'Fredoka'],
+    this.displayFallback = const <String>[
+      ZenText.displayGapFamily,
+      ZenText.sansFamily,
+    ],
     this.monoTracking = 0.2,
     this.bodyTracking = 0,
     this.titleTracking = -0.4,

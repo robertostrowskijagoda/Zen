@@ -85,6 +85,9 @@ Future<void> _loadFonts() async {
   }
 
   await load('Fredoka', <String>['assets/fonts/Fredoka-Variable.ttf']);
+  await load('Quicksand', <String>[
+    'assets/fonts/pebbles/Quicksand-Variable.ttf',
+  ]);
   await load('Hanken Grotesk', <String>[
     'assets/fonts/HankenGrotesk-Variable.ttf',
   ]);

@@ -142,6 +142,11 @@ const String kStickerTextFont = 'Hanken Grotesk';
 TextStyle stickerTextStyle(String family, double size, int weight, int color) =>
     TextStyle(
       fontFamily: family,
+      // The title face has no ą, ć, ę, ń, ś, ź, ż, č, ő, ș, ğ ...: Quicksand
+      // draws them, not the phone's own font.
+      fontFamilyFallback: family == kStickerDisplayFont
+          ? const <String>['Quicksand', kStickerTextFont]
+          : null,
       fontSize: size,
       fontWeight: FontWeight.values[(weight ~/ 100 - 1).clamp(0, 8)],
       color: Color(color),
