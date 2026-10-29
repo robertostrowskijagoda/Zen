@@ -12,7 +12,7 @@ Where the full texts are:
 |---|---|---|---|
 | Dart and Flutter packages, the Flutter engine | each package's `LICENSE` (pub cache) | yes, collected by Flutter | — |
 | Go modules of the network bridge | `assets/licenses/go/`, `native/yggdrasil_bridge/LICENSES-GO.txt` (`tool/go_licenses.dart`) | yes | `LICENSES-GO.txt` |
-| Fonts | `assets/licenses/fonts/OFL.txt` | yes | — |
+| Fonts | `assets/licenses/fonts/OFL.txt`; the pebble fonts also each next to its file in `assets/fonts/pebbles/` | yes | — |
 | Native libraries, Material Icons, Zen's own sounds and images | `assets/licenses/native/` | yes | this file |
 
 `dart run tool/check_licenses.dart` (after `flutter pub get`) checks the licence
@@ -70,6 +70,7 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 | Asset | Licence |
 |---|---|
 | Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans (`assets/fonts`) | SIL Open Font License 1.1 |
+| The words on pebbles, from Google Fonts (`assets/fonts/pebbles`, each with its `*-OFL.txt`): Abril Fatface (TypeTogether), Alfa Slab One (The Alfa Slab One Project Authors), Amatic SC (The Amatic SC Project Authors), Bangers (The Bangers Project Authors), Bungee (The Bungee Project Authors), Comic Neue (The Comic Neue Project Authors), Courgette (Sorkin Type Co), Indie Flower (The Indie Flower Authors), Quicksand (The Quicksand Project Authors), Righteous (Brian J. Bonislawsky, Astigmatic), Saira Stencil One (The Saira Stencil Project Authors), Titan One (Rodrigo Fuenzalida), Yeseva One (The Yeseva One Project Authors) | SIL Open Font License 1.1 (unchanged files; the Reserved Font Names stay with their authors) |
 | Material Icons (the icon font of the user interface; `ic_stat_call.xml` and `ic_pip_hang_up.xml` in `android/app/src/main/res/drawable`) | Apache-2.0, Copyright Google LLC |
 
 ## Zen's own sounds and images

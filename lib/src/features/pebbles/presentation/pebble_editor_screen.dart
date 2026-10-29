@@ -12,6 +12,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
 import 'package:zen/src/features/pebbles/design/pebble_design.dart';
 import 'package:zen/src/features/pebbles/design/pebble_faces.dart';
+import 'package:zen/src/features/pebbles/design/pebble_fonts.dart';
 import 'package:zen/src/features/pebbles/design/pebble_materials.dart';
 import 'package:zen/src/features/pebbles/design/pebble_patterns.dart';
 import 'package:zen/src/features/pebbles/design/pebble_ready_designs.dart';
@@ -835,6 +836,60 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
     child: Text(text, style: theme.textTheme.labelLarge),
   );
 
+  /// The typefaces, each showing the words typed (or its own name) in
+  /// itself, the chosen one larger above them in the chosen colour.
+  Widget _fontPicker(ThemeData theme) {
+    final String typed = _textField.text.trim();
+    final PebbleFont chosen = PebbleFont.byId(_font);
+    TextStyle style(PebbleFont f, double size) =>
+        TextStyle(fontFamily: f.family, fontWeight: f.weight, fontSize: size);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Container(
+          key: const Key('pebble-font-preview'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            // A pale stone, so the words show in any colour.
+            color: const Color(0xFFE6E0D4),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            typed.isEmpty ? t('Twój napis') : typed,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: style(chosen, 30).copyWith(color: Color(_colour)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          key: const Key('pebble-fonts'),
+          spacing: 6,
+          runSpacing: 6,
+          children: <Widget>[
+            for (final PebbleFont f in PebbleFont.values)
+              ChoiceChip(
+                key: Key('pebble-font-${f.index}'),
+                tooltip: f.label,
+                label: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Text(
+                    typed.isEmpty ? f.label : typed,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style(f, 17),
+                  ),
+                ),
+                selected: f.index == _font,
+                onSelected: (_) => setState(() => _font = f.index),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _colours(
     ThemeData theme,
     int selected,
@@ -1015,6 +1070,8 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
                   : next,
             ),
           ],
+          // The typefaces below show what is typed.
+          onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
             labelText: t('Napis'),
             helperText: t('Potem dotknij kamyczka, żeby go umieścić.'),
@@ -1036,26 +1093,8 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
           100,
           (double v) => setState(() => _curve = v.round()),
         ),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: <Widget>[
-            for (int i = 0; i < pebbleFonts.length; i++)
-              ChoiceChip(
-                key: Key('pebble-font-$i'),
-                tooltip: t('Krój pisma {n}', <String, Object?>{'n': i + 1}),
-                label: Text(
-                  'Aa',
-                  style: TextStyle(
-                    fontFamily: pebbleFonts[i],
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                selected: i == _font,
-                onSelected: (_) => setState(() => _font = i),
-              ),
-          ],
-        ),
+        _label(theme, t('Krój pisma')),
+        _fontPicker(theme),
         _label(theme, t('Kolor')),
         _colours(theme, _colour, (int c) => setState(() => _colour = c)),
       ],

@@ -8,6 +8,7 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/widgets.dart' show StringCharacters;
 import 'package:zen/src/features/pebbles/design/pebble_design.dart';
 import 'package:zen/src/features/pebbles/design/pebble_faces.dart';
+import 'package:zen/src/features/pebbles/design/pebble_fonts.dart';
 import 'package:zen/src/features/pebbles/design/pebble_materials.dart';
 import 'package:zen/src/features/pebbles/design/pebble_paths.dart';
 import 'package:zen/src/features/pebbles/design/pebble_patterns.dart';
@@ -69,13 +70,6 @@ final class PebbleAtlas {
   @override
   int get hashCode => tile.hashCode;
 }
-
-const List<String> pebbleFonts = <String>[
-  'Fredoka',
-  'Hanken Grotesk',
-  'Space Mono',
-  'DM Sans',
-];
 
 /// Paints designs into textures. Textures are kept for the last stones
 /// drawn; every image handed out is the caller's own handle (dispose it).
@@ -565,17 +559,17 @@ final class _OpPainter {
   }
 
   void _text(ui.Canvas canvas, PebbleTextOp op) {
-    final String family = pebbleFonts[op.font.clamp(0, pebbleFonts.length - 1)];
+    final PebbleFont font = PebbleFont.byId(op.font);
     final List<TextPainter> glyphs = <TextPainter>[
       for (final String ch in op.text.characters)
         TextPainter(
           text: TextSpan(
             text: ch,
             style: TextStyle(
-              fontFamily: family,
+              fontFamily: font.family,
               fontSize: 100,
               height: 1.1,
-              fontWeight: FontWeight.w700,
+              fontWeight: font.weight,
               color: ui.Color(op.colour),
             ),
           ),

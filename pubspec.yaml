@@ -84,6 +84,49 @@ flutter:
     - family: DM Sans
       fonts:
         - asset: assets/fonts/DMSans-Variable.ttf
+    # The words painted on pebbles (PebbleFont), Google Fonts under the SIL
+    # Open Font License; each licence is next to its font.
+    - family: Quicksand
+      fonts:
+        - asset: assets/fonts/pebbles/Quicksand-Variable.ttf
+    - family: Indie Flower
+      fonts:
+        - asset: assets/fonts/pebbles/IndieFlower-Regular.ttf
+    - family: Amatic SC
+      fonts:
+        - asset: assets/fonts/pebbles/AmaticSC-Bold.ttf
+          weight: 700
+    - family: Courgette
+      fonts:
+        - asset: assets/fonts/pebbles/Courgette-Regular.ttf
+    - family: Comic Neue
+      fonts:
+        - asset: assets/fonts/pebbles/ComicNeue-Bold.ttf
+          weight: 700
+    - family: Bangers
+      fonts:
+        - asset: assets/fonts/pebbles/Bangers-Regular.ttf
+    - family: Titan One
+      fonts:
+        - asset: assets/fonts/pebbles/TitanOne-Regular.ttf
+    - family: Saira Stencil One
+      fonts:
+        - asset: assets/fonts/pebbles/SairaStencilOne-Regular.ttf
+    - family: Righteous
+      fonts:
+        - asset: assets/fonts/pebbles/Righteous-Regular.ttf
+    - family: Bungee
+      fonts:
+        - asset: assets/fonts/pebbles/Bungee-Regular.ttf
+    - family: Abril Fatface
+      fonts:
+        - asset: assets/fonts/pebbles/AbrilFatface-Regular.ttf
+    - family: Yeseva One
+      fonts:
+        - asset: assets/fonts/pebbles/YesevaOne-Regular.ttf
+    - family: Alfa Slab One
+      fonts:
+        - asset: assets/fonts/pebbles/AlfaSlabOne-Regular.ttf
 
   assets:
     - assets/branding/

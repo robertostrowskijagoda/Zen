@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
 import 'package:zen/src/features/pebbles/design/pebble_faces.dart';
+import 'package:zen/src/features/pebbles/design/pebble_fonts.dart';
 import 'package:zen/src/features/pebbles/design/pebble_materials.dart';
 import 'package:zen/src/features/pebbles/design/pebble_patterns.dart';
 import 'package:zen/src/features/pebbles/design/pebble_shapes.dart';
@@ -144,7 +145,9 @@ final class PebbleTextOp extends PebbleOp {
   });
 
   static const int maxBytes = 80;
-  static const int fontCount = 4;
+
+  /// How many typefaces a text may name ([PebbleFont]).
+  static final int fontCount = PebbleFont.values.length;
 
   @override
   final int face;
@@ -159,6 +162,8 @@ final class PebbleTextOp extends PebbleOp {
 
   /// -100…100: how much the line bends (positive arches upwards).
   final int curve;
+
+  /// The typeface: a [PebbleFont]'s index.
   final int font;
 
   double get height => size / 200;
