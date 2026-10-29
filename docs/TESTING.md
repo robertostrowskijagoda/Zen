@@ -701,8 +701,15 @@ build.
   started; then the commit installed over it: past the logo on the old
   data, the same node identity (the SHA-256 of its config, handed to the
   test), and no file of the old version lost;
-- `monkey` — 500 random events inside Zen (seed 20261028), then no
-  crash and no "not responding" in monkey's output or the crash log.
+- `monkey` — the commit's app, then 500 random events inside Zen (seed
+  20261028), then no crash and no "not responding" in monkey's output or
+  the crash log.
+
+The start test is built into the app (`flutter build apk -t
+integration_test/app_start_test.dart`), installed with adb, opened from the
+launcher, and its result read from the log: `flutter test -d` cannot start
+Zen, whose launcher entry is an activity-alias (the icon can change), since
+flutter's tool looks for the launch activity among plain activities only.
 
 Locally, with an emulator or a phone in debug mode:
 `sh tool/ci/android_smoke.sh fresh`, `... monkey 500 1`.
