@@ -202,6 +202,46 @@ const List<int> pebblePaintColours = <int>[
   0xFFC4C8CE,
 ];
 
+/// What a screen reader says for a colour of [pebblePaintColours] (any
+/// other colour: its hex code).
+String pebbleColourName(int argb) => switch (argb | 0xFF000000) {
+  0xFFFFFFFF => t('biały'),
+  0xFFF3EEE3 => t('kremowy'),
+  0xFFBDBDBD => t('jasnoszary'),
+  0xFF6B6B6B => t('ciemnoszary'),
+  0xFF1A1A1A => t('czarny'),
+  0xFFFFD6DE => t('bladoróżowy'),
+  0xFFFF7A9C => t('różowy'),
+  0xFFE5243B => t('czerwony'),
+  0xFF9E1328 => t('bordowy'),
+  0xFFFFB27A => t('brzoskwiniowy'),
+  0xFFFF7F11 => t('pomarańczowy'),
+  0xFFC05A0A => t('rdzawy'),
+  0xFFFFF09A => t('jasnożółty'),
+  0xFFFFD21F => t('żółty'),
+  0xFFC99A00 => t('musztardowy'),
+  0xFFC9F29B => t('jasnozielony'),
+  0xFF6BCB3B => t('zielony'),
+  0xFF2E8B3E => t('leśna zieleń'),
+  0xFF145A2A => t('butelkowa zieleń'),
+  0xFFA6F0E6 => t('miętowy'),
+  0xFF1FB5A8 => t('turkusowy'),
+  0xFF0E6E6A => t('morski'),
+  0xFFAED8FF => t('błękitny'),
+  0xFF3E8EEA => t('niebieski'),
+  0xFF1846A8 => t('kobaltowy'),
+  0xFF0B1F5C => t('granatowy'),
+  0xFFDCC6FF => t('lawendowy'),
+  0xFF9B5DE5 => t('fioletowy'),
+  0xFF5B2A9E => t('śliwkowy'),
+  0xFF8B5A33 => t('brązowy'),
+  0xFF5A3A20 => t('ciemnobrązowy'),
+  0xFFD4A93A => t('złoty'),
+  0xFFC4C8CE => t('srebrny'),
+  final int other =>
+    '#${(other & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}',
+};
+
 /// Harmonious colour sets for "Losuj" and the patterns' second colours.
 const List<List<int>> pebblePalettes = <List<int>>[
   <int>[0xFF264653, 0xFF2A9D8F, 0xFFE9C46A, 0xFFF4A261, 0xFFE76F51],
