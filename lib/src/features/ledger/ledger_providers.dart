@@ -235,12 +235,20 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   // signed key that contradicts the session, or a pin, is warned about in
   // the chat with that address.
   final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
-  void warnKeyMismatch(String address) => unawaitedLogged(
-    ref
-        .read(socialHubControllerProvider.notifier)
-        .warnDeviceKeyMismatch(address),
-    context: 'Device key warning',
-  );
+  // The node's callbacks may come after the provider went (the app closed,
+  // another account opened): nothing to tell then.
+  void warnKeyMismatch(String address) {
+    if (!ref.mounted) {
+      return;
+    }
+    unawaitedLogged(
+      ref
+          .read(socialHubControllerProvider.notifier)
+          .warnDeviceKeyMismatch(address),
+      context: 'Device key warning',
+    );
+  }
+
   node
     ..onSessionKeys = (Map<String, String> keys, {bool force = false}) {
       runtime.vouchSessionKeys(keys, force: force);
@@ -248,15 +256,23 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     ..onDeviceKeyMismatch = warnKeyMismatch
     // A friend's device its owner unlinked (lost or stolen): said in the
     // chat with that friend.
-    ..onDeviceUnlinked = (String address) => unawaitedLogged(
-      ref
-          .read(socialHubControllerProvider.notifier)
-          .warnDeviceUnlinked(address),
-      context: 'Unlinked device warning',
-    );
+    ..onDeviceUnlinked = (String address) {
+      if (!ref.mounted) {
+        return;
+      }
+      unawaitedLogged(
+        ref
+            .read(socialHubControllerProvider.notifier)
+            .warnDeviceUnlinked(address),
+        context: 'Unlinked device warning',
+      );
+    };
   // A friend met on a new device (theirs, or this one after a restore):
   // the profiles go both ways, so names and photos are there at once.
   node.onPeerLearnt = (String address, String account) {
+    if (!ref.mounted) {
+      return;
+    }
     final SocialHubState social = ref.read(socialHubControllerProvider);
     String? friend;
     if (social.friendByAddress(address)?.status ==
@@ -381,7 +397,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   Timer? contactsTimer;
   Future<void> takeContacts() async {
     final Map<String, dynamic>? backup = node.latestContacts();
-    if (backup != null) {
+    if (backup != null && ref.mounted) {
       final SocialHubController hub = ref.read(
         socialHubControllerProvider.notifier,
       );
@@ -390,7 +406,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
         removedAt: node.contactRemovals(),
         backupAt: node.latestContactsMillis,
       );
-      if (hub.contactsBackupBehind(backup)) {
+      if (ref.mounted && hub.contactsBackupBehind(backup)) {
         // This device knows of a removal (or a friendship) the newest copy
         // lacks: its own copy goes out, so the devices end up agreeing
         // whichever saved last.
@@ -402,6 +418,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   unawaitedLogged(
     node.start().then((_) async {
       await takeContacts();
+      if (!ref.mounted) {
+        return;
+      }
       // What this device knows goes out once at the start when the newest
       // copy says otherwise (a removal whose copy was cut short by the
       // lock): the copy is otherwise written only on a change.

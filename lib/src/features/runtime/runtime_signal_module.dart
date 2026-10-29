@@ -595,8 +595,13 @@ final class RuntimeSignalModule extends ZenModule {
     );
   }
 
+  /// Whether frames are still taken: the module runs and its providers are
+  /// there. A frame handled across a stop (the app closing, an account
+  /// switch) ends at its next step instead of reading what is gone.
+  bool get _live => _running && _ref.mounted;
+
   Future<void> _handleFrame(SignalTransportFrame frame) async {
-    if (!_running) {
+    if (!_live) {
       return;
     }
     final String from = PeerShareCodec.normalizeAddress(frame.from);
@@ -647,7 +652,7 @@ final class RuntimeSignalModule extends ZenModule {
         );
         _noteTold(from, presence);
       }
-      if (isAcceptedFriend) {
+      if (isAcceptedFriend && _live) {
         // A ping is a friend's "I am here": Zen is on their screen (as far
         // as they show it).
         await _notePresence(hub, from, frame);
@@ -705,6 +710,9 @@ final class RuntimeSignalModule extends ZenModule {
     String from,
     SignalTransportFrame frame,
   ) {
+    if (!_live) {
+      return Future<void>.value();
+    }
     PresenceReport report = PresenceReport.fromPayload(frame.payload);
     if (_isWeakFriend(from)) {
       report = const PresenceReport(presence: PeerPresence.hidden);
@@ -765,7 +773,7 @@ final class RuntimeSignalModule extends ZenModule {
     Map<String, dynamic> payload,
   ) async {
     final PeerVersion? version = PeerVersion.fromPayload(payload);
-    if (version != null) {
+    if (version != null && _live) {
       // Kept whole (capabilities, the oldest Zen it still talks to): an
       // older build is told to update instead of quietly missing messages.
       _ref.read(peerHelloBookProvider.notifier).note(from, version);
