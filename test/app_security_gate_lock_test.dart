@@ -80,6 +80,41 @@ void main() {
     expect(find.text('aplikacja'), findsNothing);
   });
 
+  testWidgets("the small buttons under the password keep the app's font (a "
+      "button's own text style would put the phone's font there)", (
+    WidgetTester tester,
+  ) async {
+    final MemoryAppSecurityService security = await pumpGate(tester);
+    security.lock();
+    await tester.pump();
+    final String? family = tester
+        .widget<RichText>(
+          find
+              .descendant(
+                of: find.byKey(const Key('app-unlock-password-field')),
+                matching: find.byType(RichText),
+              )
+              .first,
+        )
+        .text
+        .style
+        ?.fontFamily;
+    expect(family, isNotNull);
+    for (final String key in <String>[
+      'app-unlock-forgot-button',
+      'app-unlock-other-account',
+    ]) {
+      final RichText text = tester.widget<RichText>(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(RichText),
+        ),
+      );
+      expect(text.text.style?.fontFamily, family, reason: key);
+      expect(text.text.style?.fontSize, 12.5, reason: key);
+    }
+  });
+
   testWidgets('coming back in time stops the countdown', (
     WidgetTester tester,
   ) async {

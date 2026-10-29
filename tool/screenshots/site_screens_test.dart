@@ -833,14 +833,9 @@ Future<void> _walk(
   );
 
   if (!phone) {
-    // The computer: the chat list and the open conversation side by side
-    // when the window is wide enough.
+    // The computer: the rail and the chat list in a wide window.
     await shots.tap(find.byKey(const Key('side-tab-chats')));
-    await page(
-      'desktop',
-      () => ConversationScreen(peerAddress: friendAddress, title: friendName),
-      ready: _text(demo.text('c6')),
-    );
+    await shots.shot('desktop', ready: _text(demo.text('group')));
   } else {
     await shots.tap(find.byKey(const Key('side-tab-chats')));
     await shots.shot('chats', ready: _text(demo.text('group')));

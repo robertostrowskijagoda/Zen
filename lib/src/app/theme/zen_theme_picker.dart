@@ -383,12 +383,16 @@ class _MiniApp extends StatelessWidget {
                               ),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               visualDensity: VisualDensity.compact,
-                              textStyle: const TextStyle(
+                            ),
+                            // The size only: the look's font stays.
+                            child: Text(
+                              t('Zapisz'),
+                              maxLines: 1,
+                              style: const TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            child: Text(t('Zapisz'), maxLines: 1),
                           ),
                           const SizedBox(width: 6),
                           Flexible(child: ZenPill(text: t('nowe'))),

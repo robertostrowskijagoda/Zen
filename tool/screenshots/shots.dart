@@ -26,8 +26,8 @@ enum ShotSize {
   /// A phone: 360 x 780 dp at 3x, 1080 x 2340 pixels.
   phone(360, 780, 3),
 
-  /// A computer window: 1440 x 900 pixels.
-  desktop(1440, 900, 1);
+  /// A computer window: 1152 x 720 dp at 1.25x, 1440 x 900 pixels.
+  desktop(1152, 720, 1.25);
 
   const ShotSize(this.width, this.height, this.ratio);
 
