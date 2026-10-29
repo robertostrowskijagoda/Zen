@@ -12,9 +12,9 @@ in-app way of handing Zen to a friend).
 - **Website:** https://robertostrowskijagoda.github.io/Zen/ (`tool/pages`,
   deployed by `pages.yml`): the invitation page (it opens Zen
   with the code from a QR code or shows the download links), the install
-  pages, the guide, features, support and about pages, and the SideStore
-  source. On GitHub the human-facing page is the repository `README.md`,
-  with the details in `docs/INSTALL.md`.
+  pages, the guide, features, support, about and promo materials pages,
+  and the SideStore source. On GitHub the human-facing page is the
+  repository `README.md`, with the details in `docs/INSTALL.md`.
 - **Android package:** `com.roj.zen`.
 - **License:** `LICENSE` — GPL-3.0-only (the unmodified GNU text), with
   additional terms under GPL section 7 in `NOTICE`: copies keep the author
@@ -58,7 +58,11 @@ in-app way of handing Zen to a friend).
    app's screenshots and short films in `tool/pages/shots/` are made by
    `dart run tool/screenshots.dart`, see docs/TESTING.md, section 4.2,
    and are worth making again before a release that changes these
-   screens) and, on
+   screens; the poster, its preview and the QR codes of the about page in
+   `tool/pages/promo/`, shown on the promo materials page, are drawn by
+   `python tool/ci/promo_materials.py`, with the QR encoder of
+   `tool/ci/qr.py`; run it again after the screenshots, the address or the
+   poster's texts change) and, on
    the home, about and install pages, structured data (SoftwareApplication,
    no ratings). At every deployment `tool/ci/site_files.py` writes
    `sitemap.xml` (only the pages without `noindex`, so neither the

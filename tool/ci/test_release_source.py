@@ -410,7 +410,7 @@ SITE_PAGES = ("index.html", "m/index.html", "about/index.html", "guide/index.htm
               "features/index.html", "support/index.html", "install/index.html",
               "install/android/index.html", "install/iphone/index.html",
               "install/windows/index.html", "install/macos/index.html",
-              "install/linux/index.html")
+              "install/linux/index.html", "promo/index.html")
 
 
 def language_tables(text):
