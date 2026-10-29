@@ -57,7 +57,7 @@ void main() {
     );
     door = FlatDoorCode(
       key: base64Url.encode(List<int>.filled(32, 7)),
-      door: 'abc',
+      door: 'AAECAwQFBgcICQoL',
       inbox: _ada,
       name: 'Nowakowie, m. 12',
     );
@@ -80,8 +80,14 @@ void main() {
   });
 
   test('a door sticker in every form: knocking', () {
+    // Link format 2 in digits (new stickers) and the JSON (older stickers,
+    // codes in the app).
+    expect(door.toLink(), '${_base}m#${door.linkCode}');
     for (final String link in <String>[
       door.toLink(),
+      'zen://m/${door.linkCode}',
+      'zen-flat:${door.linkCode}',
+      '${_base}m#${door.encode()}',
       door.toQr(),
       'zen://m/${door.encode()}',
     ]) {

@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/neighbors/flat_door_mail.dart';
+import 'package:zen/src/features/qr_sticker/qr_digits.dart';
+import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -425,8 +428,23 @@ final class FlatDoorCode {
   /// a download page exists; everything after `#` stays on the phone.
   static const String linkMarker = '/m#';
 
+  /// The format of the printed sticker's code ([linkCode]), in the high
+  /// four bits of its first byte. Only this one is read; a higher one is a
+  /// newer Zen's ([isNewer]). (Format 1 is the JSON of [encode].)
+  static const int linkFormat = 2;
+
+  /// The longest [linkCode] read, in bytes.
+  static const int maxLinkBytes = 1024;
+
+  /// The record of a [linkCode] with [until] (6 bytes, big-endian).
+  static const int _untilRecord = 1;
+
+  static final RegExp _digits = RegExp(r'^[0-9]+$');
+
   /// What goes into the code: the flat identifier, the door token and the
-  /// door's address; never a resident's.
+  /// door's address; never a resident's. Phones pass it to each other and
+  /// show it in the app in this form, which every Zen reads; the printed
+  /// sticker carries [linkCode].
   String encode() => base64Url
       .encode(
         utf8.encode(
@@ -448,15 +466,110 @@ final class FlatDoorCode {
   /// The link form for the printed sticker: an ordinary camera opens the
   /// page (`/m#<code>`), which opens Zen (`zen://m/<code>`) or shows how to
   /// get it. The code stays after `#`, so it never reaches the web server.
-  String toLink() => '${PeerShareCodec.invitePageUrl}m#${encode()}';
+  /// It is [linkCode], the shortest form, so the printed modules stay large
+  /// (the JSON of [encode] only for fields not in the form the app makes).
+  String toLink() => '${PeerShareCodec.invitePageUrl}m#${linkCode ?? encode()}';
 
-  static FlatDoorCode? parse(String text) => fromJson(_decode(text));
+  /// The sticker's code in link format 2: the fields in bytes, written as
+  /// one number in decimal digits ([qrDigits]), which a QR code holds in
+  /// its numeric mode at 3.3 bits a digit. Big-endian:
+  ///
+  /// * format ([linkFormat]) in the high four bits, the number of mailbox
+  ///   doors (0–[kStickerSealDoors]) in the low four
+  /// * the household's key (32)
+  /// * the door token (12)
+  /// * the door's address without its first byte, always 0x02 (15)
+  /// * each mailbox door's address the same way (15 each)
+  /// * the sealing key (32), when there are mailbox doors
+  /// * the name: its length in UTF-8 bytes (7 bits a byte, the lowest
+  ///   first, the high bit set while more follow), then the UTF-8
+  /// * records to the end: a tag, a length and that many bytes; tag 1 is
+  ///   [until] (6 bytes), and a reader skips tags it does not know
+  ///
+  /// `null` when a field is not in the form the app makes (a key or token
+  /// of another length or spelling, an address outside 200::/8).
+  String? get linkCode {
+    final Uint8List? flat = unb64(key, length: 32);
+    final Uint8List? token = unb64(door, length: 12);
+    final Uint8List? address = addressBytes(inbox);
+    final FlatMailDoor? m = mail;
+    final List<Uint8List?> slots = <Uint8List?>[
+      for (final String s in m?.slots ?? const <String>[]) addressBytes(s),
+    ];
+    final Uint8List? seal = m == null ? null : decodeRelayKey(m.seal);
+    final int? u = until;
+    if (flat == null ||
+        b64(flat) != key ||
+        token == null ||
+        b64(token).replaceAll('=', '') != door ||
+        address == null ||
+        address.first != 0x02 ||
+        slots.length > kStickerSealDoors ||
+        slots.any((Uint8List? s) => s == null || s.first != 0x02) ||
+        (m != null && (slots.isEmpty || seal == null || b64(seal) != m.seal)) ||
+        (u != null && (u < 0 || u >= 1 << 48))) {
+      return null;
+    }
+    final BytesBuilder out = BytesBuilder(copy: false)
+      ..addByte(linkFormat << 4 | slots.length)
+      ..add(flat)
+      ..add(token)
+      ..add(address.sublist(1));
+    for (final Uint8List? s in slots) {
+      out.add(s!.sublist(1));
+    }
+    if (seal != null) {
+      out.add(seal);
+    }
+    final Uint8List label = utf8.encode(name);
+    for (int n = label.length; ; n >>= 7) {
+      if (n < 0x80) {
+        out.addByte(n);
+        break;
+      }
+      out.addByte(n & 0x7f | 0x80);
+    }
+    out.add(label);
+    if (u != null) {
+      out
+        ..addByte(_untilRecord)
+        ..addByte(6);
+      for (int shift = 40; shift >= 0; shift -= 8) {
+        out.addByte((u >> shift) & 0xff);
+      }
+    }
+    return qrDigits(out.takeBytes());
+  }
+
+  /// The door code in [text]: `zen-flat:<code>`, a sticker link
+  /// (`…/m#<code>`) or `zen://m/<code>` routed here as `zen-flat:`; the code
+  /// in link format 2 ([linkCode]) or the JSON of [encode], which old
+  /// stickers carry.
+  static FlatDoorCode? parse(String text) {
+    final String? code = _code(text);
+    if (code == null) {
+      return null;
+    }
+    if (_digits.hasMatch(code)) {
+      final Uint8List? bytes = qrBytesFromDigits(code, maxBytes: maxLinkBytes);
+      return bytes == null ? null : _fromLinkBytes(bytes);
+    }
+    return fromJson(_json(code));
+  }
 
   /// Whether [text] is a door code a newer Zen made that this build must
-  /// not read (its `mv` is above [currentVersion]): "update Zen" rather
-  /// than "not a door code".
+  /// not read (its `mv`, or the format of a sticker link, is above what
+  /// this build reads): "update Zen" rather than "not a door code".
   static bool isNewer(String text) {
-    final Object? json = _decode(text);
+    final String? code = _code(text);
+    if (code == null) {
+      return false;
+    }
+    if (_digits.hasMatch(code)) {
+      final Uint8List? bytes = qrBytesFromDigits(code, maxBytes: maxLinkBytes);
+      return bytes != null && bytes.isNotEmpty && bytes.first >> 4 > linkFormat;
+    }
+    final Object? json = _json(code);
     return json is Map && _neededVersion(json) > currentVersion;
   }
 
@@ -465,8 +578,9 @@ final class FlatDoorCode {
     return needs is int ? needs : oldestVersion;
   }
 
-  /// The JSON inside a code or a sticker link; null when it is neither.
-  static Object? _decode(String text) {
+  /// The code inside [text], a door code or a sticker link; null when it is
+  /// neither.
+  static String? _code(String text) {
     final String t = text.trim();
     String? code;
     if (t.startsWith(qrPrefix)) {
@@ -477,7 +591,12 @@ final class FlatDoorCode {
         code = t.substring(i + linkMarker.length);
       }
     }
-    if (code == null || code.isEmpty || code.length > 2000) {
+    return code == null || code.isEmpty || code.length > 2600 ? null : code;
+  }
+
+  /// The JSON of a code [encode] wrote; null when it is not one.
+  static Object? _json(String code) {
+    if (code.length > 2000) {
       return null;
     }
     try {
@@ -485,6 +604,66 @@ final class FlatDoorCode {
         utf8.decode(base64Url.decode(base64Url.normalize(code))),
       );
     } on Object {
+      return null;
+    }
+  }
+
+  /// The code in the bytes of a [linkCode]; null when they are not one
+  /// this build reads.
+  static FlatDoorCode? _fromLinkBytes(Uint8List b) {
+    if (b.isEmpty || b.first >> 4 != linkFormat) {
+      return null;
+    }
+    final int doors = b.first & 0x0f;
+    if (doors > kStickerSealDoors) {
+      return null;
+    }
+    int at = 1;
+    Uint8List take(int n) {
+      if (at + n > b.length) {
+        throw const FormatException('Too short');
+      }
+      return Uint8List.sublistView(b, at, at += n);
+    }
+
+    String node(Uint8List rest) => addressFromBytes(<int>[0x02, ...rest]);
+    try {
+      final String key = b64(take(32));
+      final String door = b64(take(12)).replaceAll('=', '');
+      final String inbox = node(take(15));
+      final List<String> slots = <String>[
+        for (int i = 0; i < doors; i++) node(take(15)),
+      ];
+      final String? seal = doors == 0 ? null : b64(take(32));
+      int length = 0;
+      for (int shift = 0; ; shift += 7) {
+        final int v = take(1).first;
+        length |= (v & 0x7f) << shift;
+        if (v < 0x80) {
+          break;
+        }
+        if (shift >= 14) {
+          return null;
+        }
+      }
+      final String name = utf8.decode(take(length));
+      int? until;
+      while (at < b.length) {
+        final int tag = take(1).first;
+        final Uint8List data = take(take(1).first);
+        if (tag == _untilRecord && data.length == 6) {
+          until = data.fold<int>(0, (int v, int byte) => v << 8 | byte);
+        }
+      }
+      return FlatDoorCode(
+        key: key,
+        door: door,
+        inbox: inbox,
+        name: name.length > 150 ? name.substring(0, 150) : name,
+        mail: seal == null ? null : FlatMailDoor(slots: slots, seal: seal),
+        until: until,
+      );
+    } on FormatException {
       return null;
     }
   }
