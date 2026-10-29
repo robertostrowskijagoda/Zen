@@ -194,6 +194,8 @@ final class PebbleService {
   final PebbleHosting hosting;
   final LedgerNode? node;
 
+  static const String _profileHashKey = 'pebbles/profile_hash';
+
   QuietTimer? _profileTimer;
   StreamSubscription<LogEntry>? _added;
   bool _publishing = false;
@@ -286,16 +288,29 @@ final class PebbleService {
           store.collected.isEmpty) {
         return false;
       }
-      final Map<String, dynamic>? open = previous == null
-          ? null
-          : n.bodyOf(previous);
-      if (open != null && canonicalJson(open) == canonicalJson(body)) {
-        return false;
+      final String hash = sha256Hex(utf8.encode(canonicalJson(body)));
+      if (previous != null) {
+        final Map<String, dynamic>? open = n.bodyOf(previous);
+        if (open != null) {
+          if (canonicalJson(open) == canonicalJson(body)) {
+            return false;
+          }
+        } else {
+          // Not opened yet: what this device wrote last time.
+          final Uint8List? saved = await n.disk.read(_profileHashKey);
+          if (saved != null && utf8.decode(saved) == '${previous.id}|$hash') {
+            return false;
+          }
+        }
       }
-      await n.publish(
+      final LogEntry written = await n.publish(
         kPebblesProfileKind,
         await n.seal(Audience.all, body),
         spaceKind: 'profile',
+      );
+      await n.disk.write(
+        _profileHashKey,
+        Uint8List.fromList(utf8.encode('${written.id}|$hash')),
       );
       return true;
     } finally {
