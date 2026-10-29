@@ -203,11 +203,10 @@
 
   <section class="sec" id="films">
     <h2 data-i="filmsTitle">In motion</h2>
+    <!-- The owner's decision: the films play whatever the visitor's system says about reduced motion, so there is no still-poster source here. -->
     <div class="films">
       <figure class="film">
         <picture>
-          <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="../shots/en/send-message-dark-poster.webp">
-          <source media="(prefers-reduced-motion: reduce)" srcset="../shots/en/send-message-light-poster.webp">
           <source media="(prefers-color-scheme: dark)" srcset="../shots/en/send-message-dark.webp">
           <img src="../shots/en/send-message-light.webp" width="540" height="1170" loading="lazy" decoding="async" alt="A short animation: typing a message to a friend and sending it." data-ia="fla_send">
         </picture>
@@ -215,8 +214,6 @@
       </figure>
       <figure class="film">
         <picture>
-          <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="../shots/en/graph-growth-dark-poster.webp">
-          <source media="(prefers-reduced-motion: reduce)" srcset="../shots/en/graph-growth-light-poster.webp">
           <source media="(prefers-color-scheme: dark)" srcset="../shots/en/graph-growth-dark.webp">
           <img src="../shots/en/graph-growth-light.webp" width="540" height="1170" loading="lazy" decoding="async" alt="A short animation: the friends graph growing over a year, friend by friend." data-ia="fla_graph">
         </picture>

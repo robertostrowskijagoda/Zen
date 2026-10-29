@@ -1328,8 +1328,8 @@ void main() {
       expect(_read('about/index.html'), contains('href="#shots"'));
     });
 
-    test("a visitor who asked for less motion sees the films' still "
-        'posters', () {
+    test("the films play for every visitor: the owner's decision is that "
+        'reduced motion does not swap them for still posters', () {
       final String features = _read('features/index.html');
       final List<String> films = <String>[
         for (final RegExpMatch m in RegExp(
@@ -1340,20 +1340,39 @@ void main() {
       ];
       expect(films, hasLength(kSiteFilms.length));
       for (final String film in films) {
-        final int still = film.indexOf(
-          'media="(prefers-reduced-motion: reduce) and '
-          '(prefers-color-scheme: dark)"',
-        );
-        final int stillLight = film.indexOf(
-          'media="(prefers-reduced-motion: reduce)"',
-        );
-        final int moving = film.indexOf('media="(prefers-color-scheme: dark)"');
-        // The first source that fits wins: the posters come first.
-        expect(still, greaterThan(0));
-        expect(stillLight, greaterThan(still));
-        expect(moving, greaterThan(stillLight));
-        expect(film, contains('-poster.webp'));
+        expect(film, isNot(contains('prefers-reduced-motion')));
+        expect(film, isNot(contains('-poster.webp')));
+        // The animated picture itself, light and dark.
+        expect(film, contains('media="(prefers-color-scheme: dark)"'));
+        expect(film, contains('<img src='));
       }
+    });
+
+    test("no style or script on the site reads the visitor's reduced-motion "
+        'setting', () {
+      final List<File> files = Directory(_site)
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where(
+            (File f) =>
+                f.path.endsWith('.css') ||
+                f.path.endsWith('.js') ||
+                f.path.endsWith('.html'),
+          )
+          .toList();
+      expect(files, isNotEmpty);
+      for (final File f in files) {
+        final String text = f.readAsStringSync();
+        expect(
+          text,
+          isNot(contains('prefers-reduced-motion:')),
+          reason: f.path,
+        );
+      }
+      expect(
+        _read('site.css'),
+        contains("The owner's decision: animations run for every visitor"),
+      );
     });
 
     test('the pictures follow the language shown (English where there are '
@@ -1368,7 +1387,9 @@ void main() {
       );
       expect(js, contains('function showShots()'));
       expect(js, contains('function galleries()'));
-      expect(js, contains('prefers-reduced-motion: reduce'));
+      // The owner's decision: the row glides whatever the system asks.
+      expect(js, isNot(contains('matchMedia("(prefers-reduced-motion')));
+      expect(js, contains('behavior: "smooth"'));
       for (final String key in <String>['ArrowLeft', 'ArrowRight', 'Home']) {
         expect(js, contains('"$key"'), reason: key);
       }
@@ -1510,10 +1531,12 @@ void main() {
       }
     });
 
-    test('the stone is drawn on the phone, respects less motion and keeps '
-        'still while off screen', () {
+    test('the stone is drawn on the phone, turns whatever the system says '
+        'about reduced motion and keeps still while off screen', () {
       final String stone = _read('k/stone.js');
-      expect(stone, contains('prefers-reduced-motion: reduce'));
+      expect(stone, isNot(contains('matchMedia("(prefers-reduced-motion')));
+      expect(stone, isNot(contains('!reduce')));
+      expect(stone, contains('var moving = turning;'));
       expect(stone, contains('IntersectionObserver'));
       expect(stone, contains('deviceorientation'));
       expect(stone, contains('getContext("webgl"'));

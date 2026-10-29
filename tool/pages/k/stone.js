@@ -3,8 +3,8 @@
 // soft bumps, resting on its flatter side), in its two colours and
 // material, with the painted top (the card's 16 x 16 thumbnail, smoothed)
 // and a soft shadow. WebGL lights it and turns it slowly; the pointer, a
-// drag or the phone's tilt turns it too. A visitor who asked for less
-// motion gets a still stone that turns only when dragged. Without WebGL a
+// drag or the phone's tilt turns it too, for every visitor: the owner's
+// decision is that animations ignore prefers-reduced-motion. Without WebGL a
 // flat drawing of the same stone. It need not match the app's mesh exactly.
 //
 //   var stone = ZenStone.show(canvas, {shape, seed, material, main: [r, g, b],
@@ -479,7 +479,7 @@
   }
 
   function show(canvas, look) {
-    var reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    // The owner's decision: animations run for every visitor, whatever the system says about reduced motion (prefers-reduced-motion).
     var f = form(look);
     var draw = null;
     try { draw = webgl(canvas, look, mesh(f)); } catch (e) { draw = null; }
@@ -489,7 +489,7 @@
     var yaw = -0.55, dragYaw = 0, dragTilt = 0;
     var follow = [0, 0], aim = [0, 0], tilt0 = null;
     var visible = true, frame = 0, last = 0, clock = 0;
-    var moving = turning && !reduce;
+    var moving = turning;
 
     function size() {
       var ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -534,7 +534,7 @@
           dragYaw = dragging.yaw + (e.clientX - dragging.x) * 0.012;
           dragTilt = Math.max(-0.5, Math.min(0.5, dragging.tilt + (e.clientY - dragging.y) * 0.006));
           again();
-        } else if (e.pointerType === "mouse" && !reduce) {
+        } else if (e.pointerType === "mouse") {
           aim = [Math.max(-1, Math.min(1, (e.clientX - box.left) / box.width * 2 - 1)),
             Math.max(-1, Math.min(1, (e.clientY - box.top) / box.height * 2 - 1))];
           again();
@@ -546,16 +546,14 @@
       canvas.addEventListener("pointerleave", function (e) {
         if (e.pointerType === "mouse") { aim = [0, 0]; again(); }
       });
-      if (!reduce) {
-        // The phone's tilt, from where it was first held.
-        window.addEventListener("deviceorientation", function (e) {
-          if (e.beta === null || e.gamma === null) { return; }
-          if (!tilt0) { tilt0 = [e.beta, e.gamma]; }
-          aim = [Math.max(-1, Math.min(1, (e.gamma - tilt0[1]) / 30)),
-            Math.max(-1, Math.min(1, (e.beta - tilt0[0]) / 30))];
-          again();
-        });
-      }
+      // The phone's tilt, from where it was first held.
+      window.addEventListener("deviceorientation", function (e) {
+        if (e.beta === null || e.gamma === null) { return; }
+        if (!tilt0) { tilt0 = [e.beta, e.gamma]; }
+        aim = [Math.max(-1, Math.min(1, (e.gamma - tilt0[1]) / 30)),
+          Math.max(-1, Math.min(1, (e.beta - tilt0[0]) / 30))];
+        again();
+      });
       if ("IntersectionObserver" in window) {
         new IntersectionObserver(function (entries) {
           visible = entries[0].isIntersecting;

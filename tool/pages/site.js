@@ -361,7 +361,7 @@
   // its own (swipe, the arrow buttons, or the arrow keys once it has focus),
   // never the page; each button rests at its end of the row.
   function galleries() {
-    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // The owner's decision: animations run for every visitor, whatever the system says about reduced motion (prefers-reduced-motion).
     Array.prototype.forEach.call(document.querySelectorAll(".gallery"), function (g) {
       var track = g.querySelector(".gallery-track");
       var prev = g.querySelector(".gallery-prev"), next = g.querySelector(".gallery-next");
@@ -383,7 +383,7 @@
       function go(n) {
         var i = Math.max(0, Math.min(items.length - 1, current() + n));
         if (items[i]) {
-          items[i].scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest", inline: "center" });
+          items[i].scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
         }
       }
       function ends() {
@@ -403,7 +403,7 @@
         } else if (e.key === "Home" || e.key === "End") {
           e.preventDefault();
           var far = (track.scrollWidth - track.clientWidth) * sign();
-          track.scrollTo({ left: e.key === "Home" ? 0 : far, behavior: reduce ? "auto" : "smooth" });
+          track.scrollTo({ left: e.key === "Home" ? 0 : far, behavior: "smooth" });
         }
       });
       track.addEventListener("scroll", ends, { passive: true });
