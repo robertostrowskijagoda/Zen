@@ -383,66 +383,18 @@ void main() {
     expect(security.isLocked, isFalse);
   });
 
-  testWidgets('Android: the whole window stays protected while the setting '
-      'is on, the lock screen and the chat list included', (
+  testWidgets('the window allows captures: a start lifts any protection an '
+      'older version left, and no screen puts it back', (
     WidgetTester tester,
   ) async {
-    SecureWindow.lastApplied = false;
+    SecureWindow.lastApplied = true;
     await tester.pumpWidget(
-      const ProviderScope(
-        child: MaterialApp(home: SecureAppWindow(child: Text('lista'))),
+      const MaterialApp(
+        home: SecureAppWindow(child: SecureScreen(child: Text('rozmowa'))),
       ),
     );
     await tester.pump();
-    expect(SecureWindow.lastApplied, isTrue);
-
-    final ProviderContainer container = ProviderScope.containerOf(
-      tester.element(find.text('lista')),
-    );
-    await container
-        .read(appSettingsControllerProvider.notifier)
-        .setSecureScreens(false);
-    await tester.pump();
     expect(SecureWindow.lastApplied, isFalse);
-
-    await container
-        .read(appSettingsControllerProvider.notifier)
-        .setSecureScreens(true);
-    await tester.pump();
-    expect(SecureWindow.lastApplied, isTrue);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    expect(SecureWindow.lastApplied, isFalse);
+    expect(find.text('rozmowa'), findsOneWidget);
   });
-
-  testWidgets(
-    'computers: only the protected screens are kept out of captures',
-    (WidgetTester tester) async {
-      SecureWindow.lastApplied = false;
-      final ValueNotifier<bool> open = ValueNotifier<bool>(false);
-      await tester.pumpWidget(
-        ProviderScope(
-          child: MaterialApp(
-            home: SecureAppWindow(
-              child: ValueListenableBuilder<bool>(
-                valueListenable: open,
-                builder: (BuildContext context, bool on, Widget? _) => on
-                    ? const SecureScreen(child: Text('rozmowa'))
-                    : const Text('lista'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-      expect(SecureWindow.lastApplied, isFalse);
-      open.value = true;
-      await tester.pump();
-      expect(SecureWindow.lastApplied, isTrue);
-      open.value = false;
-      await tester.pump();
-      expect(SecureWindow.lastApplied, isFalse);
-    },
-    variant: TargetPlatformVariant.only(TargetPlatform.windows),
-  );
 }

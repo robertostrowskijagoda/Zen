@@ -262,29 +262,12 @@ List<SettingsSearchEntry> settingsSearchIndex(SettingsSearchDevice device) {
       keywords: const <String>['blokada', 'zablokuj', 'lock'],
     ),
     SettingsSearchEntry(
-      key: 'settings-secure-screens-switch',
+      key: 'settings-allow-no-password-switch',
       row: securityRow,
       page: security,
-      title: t('Blokuj zrzuty i nagrywanie ekranu'),
-      subtitle: t(
-        'Rozmowy, nagrania, konto i urządzenia nie trafią na '
-        'zrzut, nagranie ekranu ani podgląd ostatnich aplikacji.',
-      ),
-      keywords: const <String>[
-        'zrzut ekranu',
-        'prywatność ekranu',
-        'screenshot',
-        'screen recording',
-      ],
+      title: t('Pozwól używać aplikacji bez hasła'),
+      keywords: const <String>['hasło', 'password'],
     ),
-    if (!device.hasPassword)
-      SettingsSearchEntry(
-        key: 'settings-allow-no-password-switch',
-        row: securityRow,
-        page: security,
-        title: t('Pozwól używać aplikacji bez hasła'),
-        keywords: const <String>['hasło', 'password'],
-      ),
     if (device.disguise)
       SettingsSearchEntry(
         key: 'settings-disguise-icon-switch',
