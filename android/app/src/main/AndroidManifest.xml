@@ -34,6 +34,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 14+: lighting a dark screen for a friend's message (ZenPower.kt). -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The mesh node only stays reachable while the foreground service lives.
          Without the exemption aggressive OEM battery managers kill it (and the
