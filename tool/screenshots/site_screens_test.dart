@@ -53,6 +53,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/storage_breakdown.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -293,7 +294,7 @@ SocialHubState _people(DemoAccount demo, Directory faces) {
   }
   final List<DemoPerson> f = demo.friends;
   return SocialHubState.preview().copyWith(
-    friends: friends,
+    book: FriendshipBook.restore(profiles: friends),
     peerProfiles: profiles,
     groups: <String, GroupProfile>{
       _groupId: GroupProfile(

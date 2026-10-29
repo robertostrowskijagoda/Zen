@@ -362,7 +362,7 @@ does on a device. The same frames always give the same files, but the
 pictures are not byte-identical from day to day: dates that come from the
 clock (the graph's timeline, "today", the time of the message sent in the
 film) follow the day of the run. That is why CI does not compare pixels:
-`--check` (in the "Format and analyze" job) and `test/pages_site_test.dart`
+`--check` (in the "Docs and site" job) and `test/pages_site_test.dart`
 fail when a picture the pages use is missing, too large, of the wrong size
 or not used, or an alt text is missing in a language. Run it again after a
 visible change to these screens and after the translations are up to date.
@@ -456,7 +456,7 @@ cover that and the slow-start screen.
 | Job | Where | What it does |
 |---|---|---|
 | What to run | Ubuntu | decides whether a pull request changes code or only documentation, and whether the Linux build runs in the prebuilt image (`tool/ci/ci_plan.py`, below) |
-| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`) and the Python tests of `tool/ci`; when only documentation changed, also the app's tests that read it (`legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`) |
+| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`) |
 | Format and analyze | Windows | `dart format` (no changes) and `flutter analyze` |
 | Tests (1 of 6) … (6 of 6) | Windows | the app's tests (including translations), a sixth of the files each, at the same time (`dart run tool/test.dart --shard N/6`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
