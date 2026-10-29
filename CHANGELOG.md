@@ -18,6 +18,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ### Fixes and changes
 - **Notifications on a dark screen**: a friend's message or invitation that alerts lights the screen for a few seconds, as other messengers do, so it shows on the lock screen (with only what its privacy level allows there); not under "Do not disturb" and not for quiet notifications.
+- **Show password**: an eye button shows or hides the password while setting the app password and when saving or restoring the key backup (unlocking had it already).
 - **Links** in messages, comments and posts are underlined and open in the browser with a tap (copied where they cannot be opened).
 - **Screenshots and screen recording are allowed everywhere**: the "Blokuj zrzuty i nagrywanie ekranu" setting is gone, and the protection older versions left on the window is lifted at start.
 - **Delivery ticks**: a friend's receipt is no longer overwritten by the send's own later "sent", which left the first message of a chat with one tick.
