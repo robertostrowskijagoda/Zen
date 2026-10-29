@@ -167,6 +167,67 @@ void main() {
     },
   );
 
+  // Android ends the app's engine right after the last lifecycle events
+  // when it is closed with "back": the heartbeat sent within the event must
+  // already say "off screen" (the lifecycle snapshot is updated a turn
+  // later), and it names the app's engine, which the service names to the
+  // bridge when the engine is gone.
+  testWidgets('the heartbeat sent as the app leaves the screen says so at '
+      'once, and names the app engine', (WidgetTester tester) async {
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+    runtime.owner.engine = 7;
+    final _FakeAndroidBackgroundServiceController service =
+        _FakeAndroidBackgroundServiceController();
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      settings: const AppSettings(),
+      hasPassword: true,
+      locked: false,
+      encryptionKey: Uint8List.fromList(
+        List<int>.generate(32, (int index) => index + 3),
+      ),
+    );
+    addTearDown(runtime.dispose);
+    await runtime.start();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          ..._bridgeOverrides(
+            service: service,
+            runtime: runtime,
+            security: security,
+            vault: _FakeBackgroundVault(),
+          ),
+        ],
+        child: const MaterialApp(
+          home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(service.onScreenBeats.last, isTrue);
+    expect(service.engineBeats.last, 7);
+
+    for (final AppLifecycleState state in <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    // No pump: the engine may be gone by then.
+    expect(service.onScreenBeats.last, isFalse);
+    expect(service.engineBeats.last, 7);
+
+    for (final AppLifecycleState state in <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    expect(service.onScreenBeats.last, isTrue);
+    await tester.pump();
+  });
+
   test('the parked service wakes the phone for its watchdog only while the '
       'app is off screen, and rarely otherwise', () {
     expect(
@@ -1096,13 +1157,17 @@ final class _FakeAndroidBackgroundServiceController
   /// Whether the app said it is on screen, heartbeat by heartbeat.
   final List<bool> onScreenBeats = <bool>[];
 
+  /// The app engine each heartbeat named.
+  final List<int> engineBeats = <int>[];
+
   @override
   Future<void> initialize() async {}
 
   @override
-  void sendHeartbeat({required bool onScreen}) {
+  void sendHeartbeat({required bool onScreen, required int engine}) {
     heartbeatCount += 1;
     onScreenBeats.add(onScreen);
+    engineBeats.add(engine);
   }
 
   final StreamController<AndroidBackgroundServiceEvent> serviceEvents =
