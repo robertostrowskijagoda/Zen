@@ -11,10 +11,16 @@ Questions, ideas or want to talk a change over before you start? Join
 
 - One change per pull request, with a short description of what it changes
   and why.
-- The checks CI runs (docs/TESTING.md):
-  - `dart format lib test tool`, `flutter analyze` and `flutter test`;
+- The checks CI runs ([docs/TESTING.md](docs/TESTING.md), section 6; how
+  to build: [docs/BUILDING.md](docs/BUILDING.md)):
+  - `dart format lib test tool`, `flutter analyze` and the tests
+    (`dart run tool/test.dart` runs all of them in parallel; or
+    `flutter test test/<file>_test.dart` for one file);
   - `go vet ./...` and `go test ./...` in `native/yggdrasil_bridge`;
-  - for changes to the release workflow or the install page:
+  - for changes to the documentation: `python3 tool/ci/check_links.py` (no
+    broken links). A pull request that changes only documentation runs
+    only these checks and the tests that read the documentation;
+  - for changes to the workflows, the release or the website:
     `dart run tool/release.dart check`, `python3 tool/ci/test_release_source.py`,
     `python3 tool/ci/test_ci_checks.py` and `python3 tool/ci/test_check_libwebrtc.py`;
   - `flutter pub get --enforce-lockfile`: a change to `pubspec.yaml` comes

@@ -1,6 +1,6 @@
-# Zen protocol specification (draft, from the code after 1.11.0)
+# Protocol specification
 
-*Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
+*A draft, from the code of Zen 1.11.0 and later. Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
 reference. Markers: **[V]** read directly in code and consistent; **[P]**
 partly verified (shape known, details not all read); **[?]** uncertain or not
 read - check the file named. Field names are the JSON keys on the wire.
