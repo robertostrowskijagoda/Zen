@@ -69,6 +69,17 @@ func (node *bridgeNode) openSignal(source net.IP, wire string) (string, string, 
 	return text, key, ok
 }
 
+// hailPeer has the session layer ask a contact that reached the node
+// unasked for its keys (mesh_io.go, pqEndpoint.hail).
+func (node *bridgeNode) hailPeer(ip net.IP) {
+	if node.pqPlain {
+		return
+	}
+	if endpoint, err := node.pqEndpointOf(); err == nil {
+		endpoint.hail(ip)
+	}
+}
+
 // sealRelayFrame seals a relay frame (call media) for destination
 // (pq_session.go, kind 'M').
 func (node *bridgeNode) sealRelayFrame(destination net.IP, frame []byte) ([]byte, error) {

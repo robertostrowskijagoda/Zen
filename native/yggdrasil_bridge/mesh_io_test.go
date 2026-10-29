@@ -376,3 +376,129 @@ func TestMeshRetriesAWayThatDoesNotOpen(t *testing.T) {
 	waitMeshIO(t, "no opening packet", func() bool { return len(c.written()) == 1 })
 	waitMeshIO(t, "the opening packet never went again", func() bool { return len(c.written()) == 2 })
 }
+
+// R5-F5: a node the core found a path to although this node never wrote to
+// it (a friend that still holds a session with this node's previous
+// process) is hailed once nothing of it came through within meshHailAfter,
+// and again while nothing comes; not one that sent something meanwhile, nor
+// one this node writes to.
+func TestMeshHailsANodeThatReachedItUnasked(t *testing.T) {
+	c := newFakeMeshCore(t)
+	m := newMeshIO(c, nil)
+	var mu sync.Mutex
+	var hailed []string
+	m.hail = func(ip net.IP) {
+		mu.Lock()
+		defer mu.Unlock()
+		hailed = append(hailed, ip.String())
+	}
+	m.start()
+	t.Cleanup(m.stop)
+	silent, silentIP := meshPeer(t)
+	talking, talkingIP := meshPeer(t)
+	written, writtenIP := meshPeer(t)
+	if err := m.send(meshPacketTo(t, m, writtenIP, "to it"), false); err != nil {
+		t.Fatal(err)
+	}
+	waitMeshIO(t, "no lookup", func() bool { return len(c.lookedUp()) > 0 })
+	c.found(silent)
+	c.found(talking)
+	c.found(written)
+	incoming, _ := buildYggPacket(talkingIP, net.IP(m.local[:]), yggSignalPort, []byte("hi"))
+	m.accept(incoming, iwt.Addr(talking))
+	got := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), hailed...)
+	}
+	waitMeshIO(t, "the silent node was never hailed", func() bool { return len(got()) > 0 })
+	time.Sleep(300 * time.Millisecond)
+	if hails := got(); len(hails) != 1 || hails[0] != silentIP.String() {
+		t.Fatalf("hailed %v, want only %s", hails, silentIP)
+	}
+	// Nothing came: hailed again (the first may not have opened there).
+	deadline := time.Now().Add(2*meshHailAfter + time.Second)
+	for len(got()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if hails := got(); len(hails) != 2 || hails[1] != silentIP.String() {
+		t.Fatalf("hailed %v, want %s twice", hails, silentIP)
+	}
+}
+
+// R5-F4: everything that reaches the writer at once — sends from many
+// goroutines, packets read from many senders, path notifications, ways
+// opening, a stop in the middle — never blocks a caller, and once every
+// way opened nothing is left counting against the budget.
+func TestMeshIOUnderLoad(t *testing.T) {
+	c := newFakeMeshCore(t)
+	m := newTestMeshIO(t, c)
+	type peer struct {
+		key ed25519.PublicKey
+		ip  net.IP
+	}
+	peers := make([]peer, 40)
+	for index := range peers {
+		peers[index].key, peers[index].ip = meshPeer(t)
+	}
+	packets := make([][]byte, len(peers))
+	for index, to := range peers {
+		size := 40 + (index%5)*2000
+		packets[index] = meshPacketTo(t, m, to.ip, string(bytes.Repeat([]byte{'z'}, size)))
+	}
+	var wait sync.WaitGroup
+	for sender := range 8 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := range 400 {
+				_ = m.send(packets[(sender*7+index)%len(peers)], index%3 == 0)
+			}
+		}()
+	}
+	for reader := range 4 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := range 400 {
+				from := peers[(reader*11+index)%len(peers)]
+				packet, _ := buildYggPacket(from.ip, net.IP(m.local[:]), yggSignalPort, []byte("in"))
+				m.accept(packet, iwt.Addr(from.key))
+			}
+		}()
+	}
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		for index, to := range peers {
+			c.found(to.key)
+			if index%2 == 0 {
+				c.open(to.key)
+			}
+		}
+	}()
+	wait.Wait()
+	for _, to := range peers {
+		c.open(to.key)
+	}
+	m.signal()
+	waitMeshIO(t, "held packets never went once every way opened", func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.queueBytes == 0 && m.heldBytes == 0
+	})
+	// A stop while senders still send: they hear it at once.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for index := range 1000 {
+			_ = m.send(packets[index%len(peers)], false)
+		}
+	}()
+	m.stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a send waited for a stopped writer")
+	}
+}

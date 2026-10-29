@@ -323,6 +323,44 @@ func TestPQFramesLostToARestartGoAgainWhenThePeerAsksForKeys(t *testing.T) {
 	}
 }
 
+// R5-F5: a device that restarted and says nothing: a friend's frame to it
+// is dropped by its new core, which tells the mesh writer of a path it never
+// asked for; hailed by the device, the friend sends the frame again. Only
+// contacts the device knows (pins the app handed back) are hailed.
+func TestPQHailedFriendSendsAgainWhatAPeerLostToARestart(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+	pins := b.pinsSnapshot()
+
+	network.clock = network.clock.Add(pqResendWindow + time.Second)
+	restarted, _ := network.add(2)
+	_, strangerIP := pqTestNode(t, 9)
+	restarted.hail(strangerIP)
+	if len(network.queue) != 0 {
+		t.Fatal("a stranger was hailed")
+	}
+	restarted.importPins(pins, false)
+	mustSend(t, a, bIP, "lost on the way")
+	network.queue = nil
+	restarted.hail(aIP)
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "lost on the way" {
+		t.Fatalf("the restarted device got %q", got)
+	}
+	restarted.hail(aIP)
+	network.pump()
+	if got := network.take(bIP); len(got) != 0 {
+		t.Fatalf("a known friend hailed again resent %q", got)
+	}
+}
+
 // A key request from a peer whose challenge is old (it asks for a new one
 // before it may start sessions with it no more) sends nothing again.
 func TestPQKeyRequestForAFreshChallengeResendsNothing(t *testing.T) {

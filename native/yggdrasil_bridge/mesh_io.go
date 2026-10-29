@@ -44,6 +44,15 @@ import (
 // session and a path for the key; then they all go, in order. A destination
 // whose key is not known yet is looked up first (the path notification
 // brings the key).
+//
+// Hails. A friend that still holds a session with this node's previous
+// process (it restarted) reaches the new core with a packet no session here
+// opens: the core drops it and sets up a new session with the friend, and
+// nothing reaches the packet loop. The core's path notification for a node
+// this node never wrote to tells it happened; when nothing of that node
+// comes through within meshHailAfter, the session layer asks it for its
+// keys (pqEndpoint.hail), saying that it holds no session of its, and the
+// friend sends again what it sent lately.
 const (
 	// Bytes of packets waiting for the writer and held for ways that are
 	// still opening, all destinations together; a phone keeps less, under
@@ -74,6 +83,11 @@ const (
 	// packet went out, then twice as long each time up to meshCheckMax.
 	meshCheckFirst = 5 * time.Millisecond
 	meshCheckMax   = 200 * time.Millisecond
+	// After its own lookup found a path, the writer gives a session the
+	// core may start by itself a round and a half of the lookup's time
+	// (within these bounds) before its opening packet starts one.
+	meshOpenWait    = 20 * time.Millisecond
+	meshOpenWaitMax = time.Second
 	// Keys of node addresses remembered: in two generations of up to
 	// meshKeysPerGeneration each, so a stranger sending from many keys
 	// only ever pushes out the ones heard from longest ago.
@@ -83,6 +97,19 @@ const (
 	meshMaxWays  = 4096
 	meshWayIdle  = 2 * time.Minute
 	meshWaySweep = 30 * time.Second
+	// A node the core found a path to unasked (see hails below) is hailed
+	// when nothing of it came through this long after, at most once in
+	// meshHailEvery; path notifications kept for the writer at most.
+	meshHailAfter = time.Second
+	meshHailTries = 6
+	meshHailEvery = 10 * time.Minute
+	meshMaxFound  = 256
+	// Signal packets written lately are kept this long (at most so many
+	// per destination and bytes in all), to go again when the path they
+	// went along turns out to have broken (meshWriter.again).
+	meshRecentFor    = 2 * time.Second
+	meshRecentPerWay = 8
+	meshRecentBytes  = 1 << 20
 )
 
 var (
@@ -121,10 +148,15 @@ type meshIO struct {
 	budget int
 	// Counts a packet once it is written (the traffic meter); may be nil.
 	sent func(size int, media bool)
+	// Asks a contact that reached this node unasked for its keys (the
+	// session layer, pqEndpoint.hail); may be nil. Set before start.
+	hail func(ip net.IP)
 
 	mu sync.Mutex
-	// Keys by node address, newer and older generation.
-	keys, oldKeys map[address.Address]ed25519.PublicKey
+	// What the node knows of node addresses, newer and older generation.
+	keys, oldKeys map[address.Address]*meshKnown
+	// Addresses the core found paths to since the writer last looked.
+	found []address.Address
 	// Packets for the writer, oldest first, and what the writer holds
 	// for ways that are opening, together within budget.
 	queue      []meshPacket
@@ -151,8 +183,8 @@ func newMeshIO(c meshCore, sent func(size int, media bool)) *meshIO {
 		mtu:     int(c.MTU()),
 		budget:  phoneOr(meshPhoneQueueBytes, meshQueueBytes),
 		sent:    sent,
-		keys:    make(map[address.Address]ed25519.PublicKey),
-		oldKeys: make(map[address.Address]ed25519.PublicKey),
+		keys:    make(map[address.Address]*meshKnown),
+		oldKeys: make(map[address.Address]*meshKnown),
 		wake:    make(chan struct{}, 1),
 		quit:    make(chan struct{}),
 		done:    make(chan struct{}),
@@ -258,12 +290,29 @@ func (m *meshIO) pathFound(key ed25519.PublicKey) {
 	}
 }
 
-// learn notes key for addr; the writer is woken for a new key or a path.
+// meshKnown is what the node knows of a node address: its key, and when a
+// packet from it last came through (zero: none did).
+type meshKnown struct {
+	key   ed25519.PublicKey
+	heard time.Time
+}
+
+// learn notes key for addr, from a packet that came through, or from a
+// path the core found; the writer is woken for a new key or a path.
 func (m *meshIO) learn(addr address.Address, key ed25519.PublicKey, path bool) {
 	m.mu.Lock()
-	fresh := !bytes.Equal(m.keyLocked(addr), key)
+	known := m.knownLocked(addr)
+	fresh := known == nil || !bytes.Equal(known.key, key)
 	if fresh {
-		m.storeKeyLocked(addr, bytes.Clone(key))
+		known = &meshKnown{key: bytes.Clone(key)}
+		m.storeKnownLocked(addr, known)
+	}
+	if path {
+		if len(m.found) < meshMaxFound {
+			m.found = append(m.found, addr)
+		}
+	} else {
+		known.heard = time.Now()
 	}
 	m.mu.Unlock()
 	if fresh || path {
@@ -272,25 +321,25 @@ func (m *meshIO) learn(addr address.Address, key ed25519.PublicKey, path bool) {
 	}
 }
 
-// keyLocked is the key of addr (nil: unknown); one of the older generation
-// moves to the newer. m.mu is held.
-func (m *meshIO) keyLocked(addr address.Address) ed25519.PublicKey {
-	if key, ok := m.keys[addr]; ok {
-		return key
+// knownLocked is what the node knows of addr (nil: nothing); an entry of
+// the older generation moves to the newer. m.mu is held.
+func (m *meshIO) knownLocked(addr address.Address) *meshKnown {
+	if known, ok := m.keys[addr]; ok {
+		return known
 	}
-	if key, ok := m.oldKeys[addr]; ok {
-		m.storeKeyLocked(addr, key)
-		return key
+	if known, ok := m.oldKeys[addr]; ok {
+		m.storeKnownLocked(addr, known)
+		return known
 	}
 	return nil
 }
 
-func (m *meshIO) storeKeyLocked(addr address.Address, key ed25519.PublicKey) {
+func (m *meshIO) storeKnownLocked(addr address.Address, known *meshKnown) {
 	if _, ok := m.keys[addr]; !ok && len(m.keys) >= meshKeysPerGeneration {
 		m.oldKeys = m.keys
-		m.keys = make(map[address.Address]ed25519.PublicKey, meshKeysPerGeneration)
+		m.keys = make(map[address.Address]*meshKnown, meshKeysPerGeneration)
 	}
-	m.keys[addr] = key
+	m.keys[addr] = known
 	delete(m.oldKeys, addr)
 }
 
@@ -298,7 +347,18 @@ func (m *meshIO) storeKeyLocked(addr address.Address, key ed25519.PublicKey) {
 func (m *meshIO) keyOf(addr address.Address) ed25519.PublicKey {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.keyLocked(addr)
+	if known := m.knownLocked(addr); known != nil {
+		return known.key
+	}
+	return nil
+}
+
+// heardSince reports whether a packet from addr came through since since.
+func (m *meshIO) heardSince(addr address.Address, since time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	known := m.knownLocked(addr)
+	return known != nil && !known.heard.Before(since)
 }
 
 func (m *meshIO) signal() {
@@ -308,15 +368,16 @@ func (m *meshIO) signal() {
 	}
 }
 
-// take hands the queue to the writer: its packets now count as held.
-func (m *meshIO) take() []meshPacket {
+// take hands the queue to the writer (its packets now count as held), and
+// the addresses the core found paths to meanwhile.
+func (m *meshIO) take() ([]meshPacket, []address.Address) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	packets := m.queue
-	m.queue = nil
+	packets, found := m.queue, m.found
+	m.queue, m.found = nil, nil
 	m.heldBytes += m.queueBytes
 	m.queueBytes = 0
-	return packets
+	return packets, found
 }
 
 // release gives back the budget of packets the writer wrote or dropped.
@@ -343,6 +404,21 @@ type meshWay struct {
 	checks  int
 	checkAt time.Time
 	used    time.Time
+	// When the writer last did something that has the core look the node
+	// up (a lookup, an opening packet), and the signal packets written to
+	// it lately, oldest first (see again).
+	sought time.Time
+	recent []meshSent
+	// When the writer's own lookup found the path, and how long it took
+	// (a round trip to the node).
+	found time.Time
+	rtt   time.Duration
+}
+
+// meshSent is a packet written lately.
+type meshSent struct {
+	data []byte
+	at   time.Time
 }
 
 // meshWriter is the writer goroutine's own state.
@@ -351,8 +427,14 @@ type meshWriter struct {
 	ways map[address.Address]*meshWay
 	// The ways with packets held.
 	waiting map[address.Address]*meshWay
-	events  uint64
-	swept   time.Time
+	// Nodes the core found a path to unasked (to be hailed), and when each
+	// was last hailed.
+	hails  map[address.Address]*meshHail
+	hailed map[address.Address]time.Time
+	// Bytes of the packets written lately that the ways keep (see again).
+	recentBytes int
+	events      uint64
+	swept       time.Time
 }
 
 // run is the writer: it writes what is queued, holds what goes to a way
@@ -363,6 +445,8 @@ func (m *meshIO) run() {
 		m:       m,
 		ways:    make(map[address.Address]*meshWay),
 		waiting: make(map[address.Address]*meshWay),
+		hails:   make(map[address.Address]*meshHail),
+		hailed:  make(map[address.Address]time.Time),
 		swept:   time.Now(),
 	}
 	timer := time.NewTimer(time.Hour)
@@ -376,15 +460,135 @@ func (m *meshIO) run() {
 		case <-timer.C:
 		}
 		now := time.Now()
-		for _, packet := range m.take() {
+		packets, found := m.take()
+		for _, packet := range packets {
 			w.route(packet, now)
 		}
-		if next := w.progress(time.Now()); next > 0 {
+		w.unasked(found, now)
+		next := w.progress(time.Now())
+		if hail := w.hail(time.Now()); hail > 0 && (next == 0 || hail < next) {
+			next = hail
+		}
+		if next > 0 {
 			timer.Reset(next)
 		} else {
 			timer.Stop()
 		}
 	}
+}
+
+// unasked takes the paths the core found that the writer did not look for:
+// to a node this node never wrote to (see hails at the top of this file),
+// or a new path to one it writes to. The core then looked the node up by
+// itself: its path broke (the node restarted elsewhere in the tree), and
+// what went lately may have died on the old one; it goes again (again).
+func (w *meshWriter) unasked(found []address.Address, now time.Time) {
+	for _, addr := range found {
+		if way := w.ways[addr]; way != nil {
+			if len(way.held) > 0 && !way.asked.IsZero() && way.found.IsZero() {
+				// The writer's own lookup: how long it took is a round trip.
+				way.found = now
+				way.rtt = now.Sub(way.asked)
+			} else if len(way.held) == 0 && now.Sub(way.sought) >= meshRecentFor {
+				w.again(addr, way, now)
+			}
+			continue
+		}
+		if w.m.hail == nil {
+			continue
+		}
+		if last, ok := w.hailed[addr]; ok && now.Sub(last) < meshHailEvery {
+			continue
+		}
+		if _, ok := w.hails[addr]; !ok {
+			w.hails[addr] = &meshHail{found: now, due: now.Add(meshHailAfter)}
+		}
+	}
+}
+
+// meshHail is a node to be hailed: when the core found the path to it, when
+// the next hail is due and how many went.
+type meshHail struct {
+	found time.Time
+	due   time.Time
+	tries int
+}
+
+// keep notes a signal packet just written to way (media goes once: a late
+// frame of a call is worse than a lost one).
+func (w *meshWriter) keep(way *meshWay, packet meshPacket, now time.Time) {
+	w.forget(way, now)
+	if packet.media {
+		return
+	}
+	if len(way.recent) >= meshRecentPerWay || w.recentBytes+len(packet.data) > meshRecentBytes {
+		if len(way.recent) == 0 {
+			return
+		}
+		w.recentBytes -= len(way.recent[0].data)
+		way.recent = way.recent[1:]
+	}
+	way.recent = append(way.recent, meshSent{data: packet.data, at: now})
+	w.recentBytes += len(packet.data)
+}
+
+// forget lets go of what went to way longer than meshRecentFor ago.
+func (w *meshWriter) forget(way *meshWay, now time.Time) {
+	for len(way.recent) > 0 && now.Sub(way.recent[0].at) >= meshRecentFor {
+		w.recentBytes -= len(way.recent[0].data)
+		way.recent = way.recent[1:]
+	}
+}
+
+// again writes once more what went to way lately.
+func (w *meshWriter) again(addr address.Address, way *meshWay, now time.Time) {
+	w.forget(way, now)
+	if len(way.recent) == 0 {
+		return
+	}
+	debugf("[ZEN-GO] mesh: the path to %s changed, %d packet(s) go again\n", net.IP(addr[:]), len(way.recent))
+	recent := way.recent
+	way.recent = nil
+	for _, sent := range recent {
+		w.recentBytes -= len(sent.data)
+		w.write(way.key, meshPacket{to: addr, data: sent.data})
+	}
+}
+
+// hail hails the nodes found unasked whose time came and of which nothing
+// came through since, and tells when the next is due (0: none). A node is
+// hailed again every meshHailAfter (meshHailTries in all): the first hails
+// often do not open there, as the two cores' sessions are still out of step
+// (ironwood heals that only on later packets, seconds later).
+func (w *meshWriter) hail(now time.Time) time.Duration {
+	next := time.Duration(0)
+	for addr, hail := range w.hails {
+		if now.Before(hail.due) {
+			if wait := hail.due.Sub(now); next == 0 || wait < next {
+				next = wait
+			}
+			continue
+		}
+		if w.m.heardSince(addr, hail.found) || (hail.tries == 0 && len(w.hailed) >= meshMaxWays) {
+			delete(w.hails, addr)
+			continue
+		}
+		if hail.tries == 0 {
+			w.hailed[addr] = now
+		}
+		hail.tries++
+		debugf("[ZEN-GO] mesh: hailing %s, which reached this node unasked (try %d)\n", net.IP(addr[:]), hail.tries)
+		w.m.hail(net.IP(append([]byte(nil), addr[:]...)))
+		if hail.tries >= meshHailTries {
+			delete(w.hails, addr)
+			continue
+		}
+		hail.due = now.Add(meshHailAfter)
+		if wait := hail.due.Sub(now); next == 0 || wait < next {
+			next = wait
+		}
+	}
+	return next
 }
 
 // way is the state of addr, made if needed.
@@ -409,6 +613,7 @@ func (w *meshWriter) route(packet meshPacket, now time.Time) {
 	}
 	if way.key != nil && len(way.held) == 0 && !way.open.IsZero() && now.Sub(way.open) < meshOpenFor {
 		w.write(way.key, packet)
+		w.keep(way, packet, now)
 		w.m.release(len(packet.data))
 		return
 	}
@@ -472,6 +677,7 @@ func (w *meshWriter) progress(now time.Time) time.Duration {
 					way.retries++
 				}
 				way.asked = now
+				way.sought = now
 				debugf("[ZEN-GO] mesh: looking up %s (retry %d, %d held)\n", net.IP(addr[:]), way.retries, len(way.held))
 				w.m.core.SendLookup(addr.GetKey())
 			}
@@ -497,6 +703,23 @@ func (w *meshWriter) progress(now time.Time) time.Duration {
 			continue
 		}
 		way.open = time.Time{}
+		if way.opened.IsZero() && !way.found.IsZero() {
+			// The writer's lookup just found the path. It also let go a
+			// packet the core held for the node meanwhile, maybe a session
+			// init of its own (a friend's frame of a session this node no
+			// longer holds); the session it starts comes after a round
+			// trip. An opening packet now would start a second one, and the
+			// node takes only the first of two acknowledgements made within
+			// the same second (ironwood counts them in seconds): the
+			// sessions would not match, and neither side could open the
+			// other's packets until one started yet another in a later
+			// second.
+			if wait := way.found.Add(min(max(meshOpenWait, way.rtt*3/2), meshOpenWaitMax)); now.Before(wait) {
+				way.checkAt = wait
+				soonest(wait)
+				continue
+			}
+		}
 		if way.opened.IsZero() || !now.Before(way.opened.Add(retryDelay(way.retries))) {
 			if way.opened.IsZero() {
 				way.retries = 0
@@ -511,6 +734,7 @@ func (w *meshWriter) progress(now time.Time) time.Duration {
 			// index, sealed frames have counters).
 			w.write(way.key, way.held[0])
 			way.opened = now
+			way.sought = now
 			way.checks = 0
 		}
 		way.checkAt = now.Add(min(meshCheckFirst<<min(way.checks, 8), meshCheckMax))
@@ -542,10 +766,12 @@ func (w *meshWriter) flush(way *meshWay, now time.Time) {
 	way.open = now
 	way.opened = time.Time{}
 	way.asked = time.Time{}
+	way.found = time.Time{}
 	way.retries = 0
 	way.checks = 0
 	for _, packet := range held {
 		w.write(way.key, packet)
+		w.keep(way, packet, now)
 		w.m.release(len(packet.data))
 	}
 }
@@ -573,11 +799,20 @@ func (w *meshWriter) expire(way *meshWay, now time.Time) {
 func (w *meshWriter) sweep(now time.Time, full bool) {
 	w.swept = now
 	for addr, way := range w.ways {
+		w.forget(way, now)
 		if len(way.held) > 0 {
 			continue
 		}
 		if full || now.Sub(way.used) >= meshWayIdle {
+			for _, sent := range way.recent {
+				w.recentBytes -= len(sent.data)
+			}
 			delete(w.ways, addr)
+		}
+	}
+	for addr, last := range w.hailed {
+		if now.Sub(last) >= meshHailEvery {
+			delete(w.hailed, addr)
 		}
 	}
 }
