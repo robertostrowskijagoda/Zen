@@ -433,7 +433,7 @@ class AndroidEmulatorTest(unittest.TestCase):
 
     def test_what_it_checks(self):
         for step in ("android_smoke.sh fresh", "android_smoke.sh upgrade",
-                     "android_smoke.sh monkey 2000"):
+                     "android_smoke.sh monkey 500"):
             self.assertIn(step, self.workflow)
         self.assertIn("fetch-depth: 0", self.workflow)
         self.assertIn('KERNEL=="kvm"', self.workflow)

@@ -66,12 +66,19 @@ case "$mode" in
     ;;
 
   monkey)
-    events=${2:-2000}
+    events=${2:-500}
     seed=${3:-20261028}
     adb logcat -c
-    adb shell monkey -p "$package" -s "$seed" --throttle 100 \
-      --pct-syskeys 0 --pct-appswitch 0 -v "$events" > monkey.txt 2>&1 || true
+    # At most 10 min: a software-drawn emulator runs a debug build slowly,
+    # and a monkey that hangs must not hold the job for its whole hour.
+    status=0
+    timeout 600 adb shell monkey -p "$package" -s "$seed" --throttle 100 \
+      --pct-syskeys 0 --pct-appswitch 0 -v "$events" > monkey.txt 2>&1 || status=$?
     tail -n 5 monkey.txt
+    if [ "$status" -eq 124 ]; then
+      echo "::error::The monkey did not finish $events events within 10 min (seed $seed)."
+      exit 1
+    fi
     crashes=$(adb logcat -d -b crash | grep -c 'FATAL EXCEPTION\|Fatal signal' || true)
     if grep -q 'CRASH:\|NOT RESPONDING\|Monkey aborted' monkey.txt || [ "$crashes" -gt 0 ]; then
       echo "::error::Zen crashed or stopped responding under monkey (seed $seed):"

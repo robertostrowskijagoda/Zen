@@ -701,11 +701,11 @@ build.
   started; then the commit installed over it: past the logo on the old
   data, the same node identity (the SHA-256 of its config, handed to the
   test), and no file of the old version lost;
-- `monkey` — 2000 random events inside Zen (seed 20261028), then no
+- `monkey` — 500 random events inside Zen (seed 20261028), then no
   crash and no "not responding" in monkey's output or the crash log.
 
 Locally, with an emulator or a phone in debug mode:
-`sh tool/ci/android_smoke.sh fresh`, `... monkey 2000 1`.
+`sh tool/ci/android_smoke.sh fresh`, `... monkey 500 1`.
 
 ## 10. Field report → regression test (`test/regressions`)
 

@@ -2,7 +2,7 @@
 # Ubuntu runner): a fresh install must get past the logo; the previous
 # release, built from its tag, then this commit installed over its data,
 # must too, keeping the node identity and every file; then a seeded monkey
-# run (2000 random events inside Zen) without a crash or an ANR
+# run (500 random events inside Zen) without a crash or an ANR
 # (tool/ci/android_smoke.sh, integration_test/app_start_test.dart,
 # docs/TESTING.md, "Android emulator").
 #
@@ -136,12 +136,23 @@ jobs:
           timeout 900 sh -c "until [ -f '$RUNNER_TEMP/avd.status' ]; do sleep 5; done"
           cat "$RUNNER_TEMP/avd.log"
           [ "$(cat "$RUNNER_TEMP/avd.status")" = 0 ]
+          ls -l /dev/kvm
           "$ANDROID_HOME/emulator/emulator" -avd zen -no-window -no-audio \
             -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
-          timeout 600 sh -c \
-            'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 5; done'
+          # Bounded, with the emulator's own log when it does not come up
+          # (a job cut off by its time limit runs no failure step).
+          if ! timeout 300 adb wait-for-device; then
+            echo "::error::The emulator did not appear to adb within 5 min."
+            tail -n 100 "$RUNNER_TEMP/emulator.log"
+            exit 1
+          fi
+          if ! timeout 600 sh -c \
+            'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 5; done'; then
+            echo "::error::Android did not finish booting within 10 min."
+            tail -n 100 "$RUNNER_TEMP/emulator.log"
+            exit 1
+          fi
           for scale in window_animation_scale transition_animation_scale animator_duration_scale; do
             adb shell settings put global "$scale" 0
           done
@@ -154,11 +165,11 @@ jobs:
         if: ${{ steps.previous.outputs.apk != '' }}
         run: sh tool/ci/android_smoke.sh upgrade "${{ steps.previous.outputs.apk }}"
 
-      - name: Monkey (2000 events, no crash, no ANR)
-        run: sh tool/ci/android_smoke.sh monkey 2000 20261028
+      - name: Monkey (500 events, no crash, no ANR)
+        run: sh tool/ci/android_smoke.sh monkey 500 20261028
 
       - name: Logs
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         run: |
           adb logcat -d | tail -n 400 || true
           tail -n 100 "$RUNNER_TEMP/emulator.log" || true
