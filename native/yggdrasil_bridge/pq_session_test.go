@@ -323,6 +323,38 @@ func TestPQFramesLostToARestartGoAgainWhenThePeerAsksForKeys(t *testing.T) {
 	}
 }
 
+// R5-F5: a friend's key request saying it holds no session of this node's,
+// from a friend this node had a session with (it restarted), has the mesh
+// writer let the way to it settle (mesh_io.go, echoes); a first contact
+// does not.
+func TestPQPeerThatRestartedHasItsWaySettle(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	var settled []string
+	a.settle = func(ip net.IP) { settled = append(settled, ip.String()) }
+	mustSend(t, a, bIP, "before")
+	network.pump()
+	mustSend(t, b, aIP, "answer")
+	network.pump()
+	network.take(aIP)
+	network.take(bIP)
+	if len(settled) != 0 {
+		t.Fatalf("a first contact settled %v", settled)
+	}
+
+	network.clock = network.clock.Add(time.Second)
+	restarted, _ := network.add(2)
+	mustSend(t, restarted, aIP, "hello after the start")
+	network.pump()
+	if got := network.take(aIP); len(got) != 1 || got[0] != "hello after the start" {
+		t.Fatalf("A got %q", got)
+	}
+	if len(settled) == 0 || settled[0] != bIP.String() {
+		t.Fatalf("settled %v, want %s", settled, bIP)
+	}
+}
+
 // R5-F5: a device that restarted and says nothing: a friend's frame to it
 // is dropped by its new core, which tells the mesh writer of a path it never
 // asked for; hailed by the device, the friend sends the frame again. Only

@@ -528,6 +528,9 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		}
 	}
 	door.mesh = newMeshIO(doorCore, nil)
+	if door.pq != nil {
+		door.pq.settle = door.mesh.settle
+	}
 	door.mesh.start()
 	// The host calls the door (the door dials nobody). This runs on the
 	// app's thread: a host core that does not answer within nodeActionWait
@@ -685,6 +688,10 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 	chunks := splitSignalWire(string(wire), size)
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
 	source := net.IP(append([]byte(nil), door.ip[:]...))
+	write := func(packet []byte) error { return door.mesh.send(packet, false) }
+	if isPQDataWire(wire) {
+		write = door.mesh.sendSealed
+	}
 	for index, chunk := range chunks {
 		envelope, err := json.Marshal(signalEnvelope{
 			ID:      packetID,
@@ -700,7 +707,7 @@ func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
 			door.stats.fail("write error", err)
 			return err
 		}
-		if err := door.mesh.send(packet, false); err != nil {
+		if err := write(packet); err != nil {
 			door.stats.fail("write error", err)
 			return err
 		}

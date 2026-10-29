@@ -413,6 +413,68 @@ func TestMeshSendsAgainWhatWentAlongAPathThatBroke(t *testing.T) {
 	}
 }
 
+// R5-F5: for a few seconds after a node said it holds no session of this
+// node's (it restarted), each sealed signal packet written to it goes twice
+// more, meshEchoAfter apart; other packets go once, as does everything to a
+// node that did not come back, and to it once its way settled.
+func TestMeshEchoesWhatGoesToANodeThatCameBack(t *testing.T) {
+	c := newFakeMeshCore(t)
+	m := newTestMeshIO(t, c)
+	back, backIP := meshPeer(t)
+	other, otherIP := meshPeer(t)
+	for _, key := range []ed25519.PublicKey{back, other} {
+		m.learn(*address.AddrForKey(key), key, false)
+		c.open(key)
+	}
+	settled := time.Now().Add(meshSettleFor)
+	m.settle(backIP)
+	send := func(to net.IP, payload string, sealed, media bool) {
+		t.Helper()
+		packet := meshPacketTo(t, m, to, payload)
+		var err error
+		if sealed {
+			err = m.sendSealed(packet)
+		} else {
+			err = m.send(packet, media)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(backIP, "sealed", true, false)
+	send(backIP, "control", false, false)
+	send(backIP, "media", false, true)
+	send(otherIP, "elsewhere", true, false)
+	count := func() map[string]int {
+		counts := make(map[string]int)
+		for _, write := range c.written() {
+			counts[payloadOf(t, write.data)]++
+		}
+		return counts
+	}
+	waitMeshIO(t, "the packets never went", func() bool { return len(c.written()) == 4 })
+	time.Sleep(meshEchoAfter / 2)
+	if n := count()["sealed"]; n != 1 {
+		t.Fatalf("the sealed packet went %d times before its time", n)
+	}
+	deadline := time.Now().Add(meshEchoes*meshEchoAfter + time.Second)
+	for count()["sealed"] < 1+meshEchoes && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(meshEchoAfter / 2)
+	counts := count()
+	if counts["sealed"] != 1+meshEchoes || counts["control"] != 1 || counts["media"] != 1 || counts["elsewhere"] != 1 {
+		t.Fatalf("writes: %v, want the sealed packet %d times and the others once", counts, 1+meshEchoes)
+	}
+	// Once the way settled, a sealed packet goes once.
+	time.Sleep(time.Until(settled.Add(100 * time.Millisecond)))
+	send(backIP, "settled", true, false)
+	time.Sleep(meshEchoAfter + 300*time.Millisecond)
+	if n := count()["settled"]; n != 1 {
+		t.Fatalf("a packet after the way settled went %d times", n)
+	}
+}
+
 // R5-F5: a node the core found a path to although this node never wrote to
 // it (a friend that still holds a session with this node's previous
 // process) is hailed once nothing of it came through within meshHailAfter,

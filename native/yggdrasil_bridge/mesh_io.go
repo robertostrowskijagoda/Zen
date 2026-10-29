@@ -53,6 +53,19 @@ import (
 // comes through within meshHailAfter, the session layer asks it for its
 // keys (pqEndpoint.hail), saying that it holds no session of its, and the
 // friend sends again what it sent lately.
+//
+// Echoes. For a few seconds after a node came back (it restarted) ironwood
+// loses packets to it without anyone noticing: the two cores' sessions go
+// out of step when both start one within the same second (ironwood counts
+// them in seconds and takes only the first; it heals on a later packet,
+// which is lost too), and the restarted node's place in the tree changes a
+// second or two after it came on, so packets along the old path die on the
+// way (ironwood looks the node up again only on the next packet). Nothing
+// above notices either: the session layers of both just set up their
+// sessions anew. So for meshSettleFor after the node said it holds no
+// session of this node's (pqEndpoint.settle), each signal packet written
+// to it goes twice more, meshEchoAfter apart; the receiver drops the copies
+// (sealed frames have counters).
 const (
 	// Bytes of packets waiting for the writer and held for ways that are
 	// still opening, all destinations together; a phone keeps less, under
@@ -110,6 +123,15 @@ const (
 	meshRecentFor    = 2 * time.Second
 	meshRecentPerWay = 8
 	meshRecentBytes  = 1 << 20
+	// How long a way settles (see echoes above), how long after a write its
+	// copies go and how many; packets and bytes kept for them at most, per
+	// destination and in all; nodes marked as coming back, kept at most.
+	meshSettleFor   = 4 * time.Second
+	meshEchoAfter   = 1200 * time.Millisecond
+	meshEchoes      = 2
+	meshEchoPerWay  = 64
+	meshEchoBytes   = 1 << 20
+	meshMaxSettling = 1024
 )
 
 var (
@@ -129,11 +151,14 @@ type meshCore interface {
 	MTU() uint64
 }
 
-// meshPacket is a packet queued for a destination.
+// meshPacket is a packet queued for a destination. echo marks a fragment
+// of a sealed signal frame, which may go again (see echoes at the top of
+// this file): the receiver drops a copy of it unopened.
 type meshPacket struct {
 	to    address.Address
 	data  []byte
 	media bool
+	echo  bool
 	at    time.Time
 }
 
@@ -157,6 +182,9 @@ type meshIO struct {
 	keys, oldKeys map[address.Address]*meshKnown
 	// Addresses the core found paths to since the writer last looked.
 	found []address.Address
+	// Nodes that came back since the writer last looked (see echoes at the
+	// top of this file), and until when their ways settle.
+	settling map[address.Address]time.Time
 	// Packets for the writer, oldest first, and what the writer holds
 	// for ways that are opening, together within budget.
 	queue      []meshPacket
@@ -220,6 +248,18 @@ func (m *meshIO) MTU() int {
 // node's address, for the writer and returns at once. The caller must not
 // change packet afterwards. media marks call media (held only briefly).
 func (m *meshIO) send(packet []byte, media bool) error {
+	return m.enqueue(packet, media, false)
+}
+
+// sendSealed is send for a fragment of a sealed signal frame (the session
+// layer's 'D' frames), which goes again while its way settles (see echoes
+// at the top of this file). Never a control frame of the session layer: a
+// copy of a key request would have the peer set up its session once more.
+func (m *meshIO) sendSealed(packet []byte) error {
+	return m.enqueue(packet, false, true)
+}
+
+func (m *meshIO) enqueue(packet []byte, media, echo bool) error {
 	to, err := m.check(packet)
 	if err != nil {
 		return err
@@ -234,7 +274,7 @@ func (m *meshIO) send(packet []byte, media bool) error {
 		m.dropped.Add(1)
 		return errMeshQueueFull
 	}
-	m.queue = append(m.queue, meshPacket{to: to, data: packet, media: media, at: time.Now()})
+	m.queue = append(m.queue, meshPacket{to: to, data: packet, media: media, echo: echo, at: time.Now()})
 	m.queueBytes += len(packet)
 	m.mu.Unlock()
 	m.signal()
@@ -368,16 +408,41 @@ func (m *meshIO) signal() {
 	}
 }
 
-// take hands the queue to the writer (its packets now count as held), and
-// the addresses the core found paths to meanwhile.
-func (m *meshIO) take() ([]meshPacket, []address.Address) {
+// settle marks the node at ip as coming back: the session layer heard from
+// it that it holds no session of this node's (it restarted). For
+// meshSettleFor what is written to it goes again (see echoes at the top of
+// this file). It never waits for the mesh.
+func (m *meshIO) settle(ip net.IP) {
+	ip16 := ip.To16()
+	if ip16 == nil || ip.To4() != nil {
+		return
+	}
+	var addr address.Address
+	copy(addr[:], ip16)
+	if !addr.IsValid() {
+		return
+	}
+	m.mu.Lock()
+	if m.settling == nil {
+		m.settling = make(map[address.Address]time.Time)
+	}
+	if _, ok := m.settling[addr]; ok || len(m.settling) < meshMaxSettling {
+		m.settling[addr] = time.Now().Add(meshSettleFor)
+	}
+	m.mu.Unlock()
+	m.signal()
+}
+
+// take hands the queue to the writer (its packets now count as held), the
+// addresses the core found paths to meanwhile and the nodes that came back.
+func (m *meshIO) take() ([]meshPacket, []address.Address, map[address.Address]time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	packets, found := m.queue, m.found
-	m.queue, m.found = nil, nil
+	packets, found, settling := m.queue, m.found, m.settling
+	m.queue, m.found, m.settling = nil, nil, nil
 	m.heldBytes += m.queueBytes
 	m.queueBytes = 0
-	return packets, found
+	return packets, found, settling
 }
 
 // release gives back the budget of packets the writer wrote or dropped.
@@ -413,12 +478,24 @@ type meshWay struct {
 	// (a round trip to the node).
 	found time.Time
 	rtt   time.Duration
+	// Until when the way settles, and the packets written meanwhile that go
+	// again (see echoes at the top of this file), oldest first.
+	settle time.Time
+	echo   []meshEcho
 }
 
 // meshSent is a packet written lately.
 type meshSent struct {
 	data []byte
 	at   time.Time
+}
+
+// meshEcho is a packet written while its way settled: when it goes again,
+// and how many more times.
+type meshEcho struct {
+	data []byte
+	due  time.Time
+	left int
 }
 
 // meshWriter is the writer goroutine's own state.
@@ -435,6 +512,10 @@ type meshWriter struct {
 	recentBytes int
 	events      uint64
 	swept       time.Time
+	// The ways with packets to go again, and their bytes (see echoes at the
+	// top of this file).
+	echoing   map[address.Address]*meshWay
+	echoBytes int
 }
 
 // run is the writer: it writes what is queued, holds what goes to a way
@@ -448,6 +529,7 @@ func (m *meshIO) run() {
 		hails:   make(map[address.Address]*meshHail),
 		hailed:  make(map[address.Address]time.Time),
 		swept:   time.Now(),
+		echoing: make(map[address.Address]*meshWay),
 	}
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
@@ -460,7 +542,10 @@ func (m *meshIO) run() {
 		case <-timer.C:
 		}
 		now := time.Now()
-		packets, found := m.take()
+		packets, found, settling := m.take()
+		for addr, until := range settling {
+			w.way(addr, now).settle = until
+		}
 		for _, packet := range packets {
 			w.route(packet, now)
 		}
@@ -468,6 +553,9 @@ func (m *meshIO) run() {
 		next := w.progress(time.Now())
 		if hail := w.hail(time.Now()); hail > 0 && (next == 0 || hail < next) {
 			next = hail
+		}
+		if echo := w.echoes(time.Now()); echo > 0 && (next == 0 || echo < next) {
+			next = echo
 		}
 		if next > 0 {
 			timer.Reset(next)
@@ -614,6 +702,7 @@ func (w *meshWriter) route(packet meshPacket, now time.Time) {
 	if way.key != nil && len(way.held) == 0 && !way.open.IsZero() && now.Sub(way.open) < meshOpenFor {
 		w.write(way.key, packet)
 		w.keep(way, packet, now)
+		w.remember(packet.to, way, packet, now)
 		w.m.release(len(packet.data))
 		return
 	}
@@ -772,8 +861,66 @@ func (w *meshWriter) flush(way *meshWay, now time.Time) {
 	for _, packet := range held {
 		w.write(way.key, packet)
 		w.keep(way, packet, now)
+		w.remember(packet.to, way, packet, now)
 		w.m.release(len(packet.data))
 	}
+}
+
+// remember keeps a signal packet just written to the way to addr to go
+// again, while the way settles (see echoes at the top of this file).
+func (w *meshWriter) remember(addr address.Address, way *meshWay, packet meshPacket, now time.Time) {
+	if !packet.echo || !now.Before(way.settle) {
+		return
+	}
+	if len(way.echo) >= meshEchoPerWay || w.echoBytes+len(packet.data) > meshEchoBytes {
+		return
+	}
+	way.echo = append(way.echo, meshEcho{data: packet.data, due: now.Add(meshEchoAfter), left: meshEchoes})
+	w.echoBytes += len(packet.data)
+	w.echoing[addr] = way
+}
+
+// echoes writes again what is due of the packets the settling ways keep,
+// and tells when the next is due (0: none). A way that is opening again
+// waits: the core keeps one packet for it meanwhile, which must be the
+// opening one.
+func (w *meshWriter) echoes(now time.Time) time.Duration {
+	next := time.Duration(0)
+	soonest := func(delay time.Duration) {
+		delay = max(delay, time.Millisecond)
+		if next == 0 || delay < next {
+			next = delay
+		}
+	}
+	for addr, way := range w.echoing {
+		if len(way.held) > 0 {
+			soonest(meshCheckMax)
+			continue
+		}
+		kept := way.echo[:0]
+		for _, echo := range way.echo {
+			if now.Before(echo.due) {
+				kept = append(kept, echo)
+				soonest(echo.due.Sub(now))
+				continue
+			}
+			w.write(way.key, meshPacket{to: addr, data: echo.data})
+			if echo.left--; echo.left > 0 {
+				echo.due = now.Add(meshEchoAfter)
+				kept = append(kept, echo)
+				soonest(meshEchoAfter)
+				continue
+			}
+			w.echoBytes -= len(echo.data)
+		}
+		clear(way.echo[len(kept):])
+		way.echo = kept
+		if len(way.echo) == 0 {
+			way.echo = nil
+			delete(w.echoing, addr)
+		}
+	}
+	return next
 }
 
 // expire drops packets held too long for way.
@@ -800,7 +947,7 @@ func (w *meshWriter) sweep(now time.Time, full bool) {
 	w.swept = now
 	for addr, way := range w.ways {
 		w.forget(way, now)
-		if len(way.held) > 0 {
+		if len(way.held) > 0 || len(way.echo) > 0 {
 			continue
 		}
 		if full || now.Sub(way.used) >= meshWayIdle {

@@ -27,6 +27,9 @@ func (node *bridgeNode) pqEndpointOf() (*pqEndpoint, error) {
 		}
 		local := net.ParseIP(node.core.Address().String())
 		node.pq, node.pqErr = newPQEndpoint(nodeKey, local, node.writeSignalWire)
+		if node.pq != nil && node.mesh != nil {
+			node.pq.settle = node.mesh.settle
+		}
 	})
 	return node.pq, node.pqErr
 }
@@ -117,6 +120,10 @@ func (node *bridgeNode) writeSignalWire(destination net.IP, wire []byte) error {
 	}
 	chunks := splitSignalWire(string(wire), signalSendChunkSize)
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
+	write := func(packet []byte) error { return node.writeMesh(packet, false) }
+	if isPQDataWire(wire) {
+		write = node.writeMeshSealed
+	}
 	for index, chunk := range chunks {
 		envelopeBytes, err := json.Marshal(signalEnvelope{
 			ID:      packetID,
@@ -131,7 +138,7 @@ func (node *bridgeNode) writeSignalWire(destination net.IP, wire []byte) error {
 		if err != nil {
 			return err
 		}
-		if err := node.writeMesh(packet, false); err != nil {
+		if err := write(packet); err != nil {
 			fmt.Printf("[ZEN-GO] sendSignal write error: %v\n", err)
 			return err
 		}
