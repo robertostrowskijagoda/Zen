@@ -218,11 +218,20 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                 child: ZenInfo(
                   key: const Key('pebble-published-info'),
                   icon: Icons.celebration_outlined,
-                  text: t(
-                    'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i zostaw '
-                    'ją w ciekawym miejscu. Znajomi, których poprosiłeś(-aś), '
-                    'przechowają go, gdy Twój telefon będzie poza siecią.',
-                  ),
+                  // Keepers are only spoken of once someone was asked.
+                  text:
+                      service != null &&
+                          service.store.keepersOf(card.id).isEmpty
+                      ? t(
+                          'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i '
+                          'zostaw ją w ciekawym miejscu.',
+                        )
+                      : t(
+                          'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i '
+                          'zostaw ją w ciekawym miejscu. Znajomi, których '
+                          'poprosiłeś(-aś), przechowają go, gdy Twój telefon '
+                          'będzie poza siecią.',
+                        ),
                 ),
               ),
             if (foundAt != null &&
@@ -321,6 +330,23 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
     }
 
     final int accepted = service.store.acceptedKeepers(card.id);
+    final bool open = entry.madeHere && !entry.retired;
+    // Whom "Losuj ponownie" could still ask, and whether it would change
+    // anything: with every keeper agreed and the target reached it hides.
+    final int fresh = open ? service.hosting.freshKeeperCandidates(card.id) : 0;
+    final bool waiting = keepers.any(
+      (PebbleKeeperStatus k) => k.state == PebbleKeeperState.asked,
+    );
+    final bool full = accepted >= service.hosting.keeperTarget;
+    final bool noFriends = open && !service.hosting.hasFriends;
+    final String? cannotDraw = !open || noFriends || full && !waiting
+        ? null
+        : fresh == 0
+        ? t(
+            'Nie ma kogo jeszcze poprosić: wszyscy Twoi znajomi już zostali '
+            'poproszeni. Gdy dodasz kolejnych, Zen poprosi ich sam.',
+          )
+        : null;
     return <Widget>[
       const SizedBox(height: 16),
       FilledButton.icon(
@@ -352,12 +378,20 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       ),
       ZenSection(
         t('Opiekunowie'),
-        action: entry.madeHere && !entry.retired ? t('Losuj ponownie') : null,
-        onAction: () => unawaited(service.hosting.redraw(card.id)),
+        action: open && !noFriends && !(full && !waiting)
+            ? t('Losuj ponownie')
+            : null,
+        onAction: fresh == 0 ? null : () => unawaited(_redraw(service, card)),
+        key: const Key('pebble-keepers-section'),
       ),
       Text(
         entry.retired
             ? t('Kamyczek wycofany: opiekunowie już go nie udostępniają.')
+            : noFriends && keepers.isEmpty
+            ? t(
+                'Nie masz jeszcze znajomych, którzy mogliby przechować '
+                'kamyczek. Gdy dodasz znajomych, Zen poprosi ich sam.',
+              )
             : tn(
                 accepted,
                 one: '{n} znajomy przechowuje ten kamyczek.',
@@ -367,6 +401,15 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
         key: const Key('pebble-keepers-count'),
         style: TextStyle(color: zen.textSecondary, fontSize: 14),
       ),
+      if (cannotDraw != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            cannotDraw,
+            key: const Key('pebble-keepers-nobody-new'),
+            style: TextStyle(color: zen.textMuted, fontSize: 13),
+          ),
+        ),
       for (final PebbleKeeperStatus k in keepers)
         ListTile(
           dense: true,
@@ -430,6 +473,32 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
         ),
       ],
     ];
+  }
+
+  /// "Losuj ponownie": says what came of it, so the press is never silent.
+  Future<void> _redraw(PebbleService service, PebbleCard card) async {
+    final int asked = await service.hosting.redraw(card.id);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          asked == 0
+              ? t(
+                  'Nie ma kogo jeszcze poprosić: wszyscy Twoi znajomi już '
+                  'zostali poproszeni. Gdy dodasz kolejnych, Zen poprosi ich '
+                  'sam.',
+                )
+              : tn(
+                  asked,
+                  one: 'Poproszono {n} znajomego o przechowanie kamyczka.',
+                  few: 'Poproszono {n} znajomych o przechowanie kamyczka.',
+                  many: 'Poproszono {n} znajomych o przechowanie kamyczka.',
+                ),
+        ),
+      ),
+    );
   }
 
   List<Widget> _keptPart(PebbleService service, PebbleEntry entry) => <Widget>[

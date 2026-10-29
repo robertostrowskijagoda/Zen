@@ -403,6 +403,63 @@ void main() {
     expect(net.store(w['F']).entry(card.id)!.keepers?.keepers, hasLength(2));
   });
 
+  test('a pebble published with no friends asks the first friends who '
+      'come, without a press of "Losuj ponownie"', () async {
+    final FriendsWorld w = await _world(<String>['A', 'B', 'C'], const []);
+    final _Net net = await _Net.of(w, keeperTarget: 2);
+    final PebbleCard card = await net.publish(w['A']);
+    final PebbleHosting a = net.hosts[w['A']]!;
+    expect(net.store(w['A']).keepersOf(card.id), isEmpty);
+    expect(a.hasFriends, isFalse);
+    expect(a.freshKeeperCandidates(card.id), 0);
+    // Nobody to ask: pressing it changes nothing and says so.
+    expect(await a.redraw(card.id), 0);
+    await w.befriend(w['A'], w['B']);
+    await w.befriend(w['A'], w['C']);
+    await w.settleMailboxes();
+    expect(a.freshKeeperCandidates(card.id), 2);
+    // The app calls this as friends come; the beat would do it as well.
+    await a.drawShort();
+    await net.settle();
+    await net.until(
+      () => net.acceptedKeepers(w['A'], card).length == 2,
+      reason: 'the new friends keeping the pebble',
+    );
+  });
+
+  test('the beat asks friends who came after publishing', () async {
+    final FriendsWorld w = await _world(<String>['A', 'B'], const []);
+    final _Net net = await _Net.of(w, keeperTarget: 2);
+    final PebbleCard card = await net.publish(w['A']);
+    await w.befriend(w['A'], w['B']);
+    await w.settleMailboxes();
+    await net.until(
+      () => net.acceptedKeepers(w['A'], card).length == 1,
+      reason: 'the new friend asked on the beat',
+    );
+  });
+
+  test('"Losuj ponownie" with nobody new keeps those still asked', () async {
+    final FriendsWorld w = await _world(
+      <String>['A', 'B', 'C'],
+      const <(String, String)>[('A', 'B'), ('A', 'C')],
+    );
+    final _Net net = await _Net.of(w, keeperTarget: 3);
+    net.agrees[w['B']] = null;
+    net.agrees[w['C']] = null;
+    final PebbleCard card = await net.publish(w['A']);
+    final PebbleHosting a = net.hosts[w['A']]!;
+    expect(a.freshKeeperCandidates(card.id), 0);
+    expect(await a.redraw(card.id), 0);
+    expect(
+      net
+          .store(w['A'])
+          .keepersOf(card.id)
+          .map((PebbleKeeperStatus k) => k.state),
+      everyElement(PebbleKeeperState.asked),
+    );
+  });
+
   test('a keeper the author removed as a friend still serves', () async {
     final FriendsWorld w = await _world(
       <String>['A', 'B', 'E', 'F'],
