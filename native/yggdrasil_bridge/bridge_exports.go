@@ -153,7 +153,14 @@ func (node *bridgeNode) shutdown(handle int32) error {
 		guard.close()
 	}
 	if node.multicast != nil {
-		if err := node.multicast.Stop(); err != nil {
+		// The multicast module's actor may be waiting for the core (it opens
+		// its listeners there).
+		var err error
+		if !within(nodeStopWait, func() { err = node.multicast.Stop() }) {
+			if node.logger != nil {
+				node.logger.Warnf("node %d: multicast did not stop within %v", handle, nodeStopWait)
+			}
+		} else if err != nil {
 			return err
 		}
 	}
