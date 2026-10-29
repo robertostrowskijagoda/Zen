@@ -13,6 +13,8 @@ import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/public_peers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -22,6 +24,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/update_notice.dart';
 
 import 'support/file_credentials_store.dart';
@@ -67,6 +70,10 @@ void main() {
     final _Device device = await _Device.start(pristine);
     await device.use();
     await device.stop();
+    // What the checks for lost data look for is there to begin with.
+    final _Device again = await _Device.start(pristine);
+    expect(await again.missing(), isEmpty);
+    await again.stop();
     files = <String>[
       for (final FileSystemEntity e in pristine.listSync(recursive: true))
         if (e is File && !_isLog(e.path))
@@ -109,10 +116,18 @@ void main() {
         final File target = File('${work.path}/$file');
         damage.apply(target, random);
         final File backup = File('${target.path}.bak');
-        if (backup.existsSync() && random.nextBool()) {
+        final bool hadBackup = backup.existsSync();
+        bool backupDamaged = false;
+        if (hadBackup && random.nextBool()) {
           // Both copies at once: nothing good is left of this file.
           damage.apply(backup, random);
+          backupDamaged = true;
         }
+        // With a good earlier copy nothing may be lost: the store reads it.
+        final bool mayLose =
+            !file.endsWith('.bak') &&
+            !file.endsWith('.bak2') &&
+            (!hadBackup || backupDamaged);
         final List<String> logged = <String>[];
         final String label = '$file (${damage.name})';
         // Errors nobody awaited (a service's start in the background) are
@@ -124,6 +139,13 @@ void main() {
             try {
               await _captureLog(logged, () async {
                 final _Device device = await _Device.start(work);
+                final List<String> lost = await device.missing();
+                if (lost.isNotEmpty && !mayLose) {
+                  problems.add(
+                    '$label: lost although an earlier copy was good: '
+                    '${lost.join(', ')}',
+                  );
+                }
                 await device.use();
                 await device.stop();
               }).timeout(const Duration(seconds: 30));
@@ -485,6 +507,38 @@ final class _Device {
     return _Device._(boot, container);
   }
 
+  static const String _friend = '200:1111:2222:3333:4444:5555:6666:7777';
+
+  /// What [use] left that is not there (read straight after the start):
+  /// the name, the theme, the friend, the group, the message.
+  Future<List<String>> missing() async {
+    final List<String> out = <String>[];
+    final UserProfile? profile = await _container
+        .read(userProfileStoreProvider)
+        .load();
+    if (profile?.displayName != 'Ala') {
+      out.add('the name');
+    }
+    if (_container.read(appSettingsControllerProvider).themeMode !=
+        AppThemeMode.dark) {
+      out.add('the theme');
+    }
+    final SocialHubState hub = _container.read(socialHubControllerProvider);
+    if (hub.friendByAddress(_friend) == null) {
+      out.add('the friend');
+    }
+    if (hub.groups.isEmpty) {
+      out.add('the group');
+    }
+    final List<ChatMessage> messages = await _container
+        .read(messageTimelineStoreProvider)
+        .load(_friend);
+    if (!messages.any((ChatMessage m) => m.text == 'cześć')) {
+      out.add('the message');
+    }
+    return out;
+  }
+
   /// What a person does in the first minutes; each step writes files.
   Future<void> use() async {
     await _container
@@ -496,7 +550,7 @@ final class _Device {
     final SocialHubController hub = _container.read(
       socialHubControllerProvider.notifier,
     );
-    const String friend = '200:1111:2222:3333:4444:5555:6666:7777';
+    const String friend = _friend;
     await hub.sendFriendRequest(peerAddress: friend, senderDisplayName: 'Ala');
     await hub.createGroup(
       name: 'Rodzina',
