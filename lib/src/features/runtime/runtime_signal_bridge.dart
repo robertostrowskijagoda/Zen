@@ -15,6 +15,13 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// It sits under the security gate, so it mounts only once the app is
 /// unlocked (and set up): until then no service starts and nothing is sent.
 /// Locking the app again unmounts it, which stops the core.
+///
+/// Leaving the screen reaches the core within the lifecycle event itself,
+/// not only through the social hub's lifecycle snapshot (which waits its
+/// turn behind queued work): Android ends the app's engine right after the
+/// last events when the app is closed with "back" or swiped away, and the
+/// node must have heard "off screen" by then, or the background service is
+/// kept off the identity while nothing receives (node_identity.go).
 class RuntimeSignalBridge extends ConsumerStatefulWidget {
   const RuntimeSignalBridge({required this.child, super.key});
 
@@ -25,9 +32,13 @@ class RuntimeSignalBridge extends ConsumerStatefulWidget {
       _RuntimeSignalBridgeState();
 }
 
-final class _RuntimeSignalBridgeState
-    extends ConsumerState<RuntimeSignalBridge> {
+final class _RuntimeSignalBridgeState extends ConsumerState<RuntimeSignalBridge>
+    with WidgetsBindingObserver {
   bool? _lastInteractive;
+
+  /// The last lifecycle event put the app off the screen (hidden, paused,
+  /// detached), whatever the lifecycle snapshot says yet.
+  bool _offScreen = false;
   late final ZenCore _core;
   late final AppSecurityService _security;
 
@@ -46,6 +57,7 @@ final class _RuntimeSignalBridgeState
       (bool? previous, bool next) => _sync(lifecycleInteractive: next),
     );
     _security.addListener(_onSecurityChanged);
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         unawaitedLogged(_core.start(), context: 'ZenCore startup failed');
@@ -55,6 +67,7 @@ final class _RuntimeSignalBridgeState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _security.removeListener(_onSecurityChanged);
     unawaitedLogged(_core.stop(), context: 'Stopping ZenCore failed');
     super.dispose();
@@ -72,10 +85,30 @@ final class _RuntimeSignalBridgeState
     );
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) {
+      return;
+    }
+    _offScreen = switch (state) {
+      AppLifecycleState.hidden ||
+      AppLifecycleState.paused ||
+      AppLifecycleState.detached => true,
+      AppLifecycleState.resumed || AppLifecycleState.inactive => false,
+    };
+    _sync(
+      lifecycleInteractive: ref
+          .read(socialHubControllerProvider)
+          .lifecycle
+          .isInteractive,
+    );
+  }
+
   /// Tells the core when the user starts or stops seeing the app.
   void _sync({required bool lifecycleInteractive}) {
     final bool isInteractive =
         lifecycleInteractive &&
+        !_offScreen &&
         !isSecurityBlockingUi(ref.read(appSecurityServiceProvider));
     if (_lastInteractive != isInteractive) {
       _lastInteractive = isInteractive;
