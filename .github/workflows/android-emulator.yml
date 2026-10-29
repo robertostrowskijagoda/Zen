@@ -6,11 +6,18 @@
 # (tool/ci/android_smoke.sh, integration_test/app_start_test.dart,
 # docs/TESTING.md, "Android emulator").
 #
-# On pull requests to main, for a release tag and by hand (Actions ->
-# Android emulator -> Run workflow), not on every push: it takes about
-# 25-35 minutes (two debug builds, the emulator's start, the checks). The
-# release checklist (docs/RELEASES.md) asks for a green run on the release
-# commit.
+# On pull requests to main, for a release tag, once a week on main and by
+# hand (Actions -> Android emulator -> Run workflow), not on every push: it
+# takes about 25-35 minutes (two debug builds, the emulator's start, the
+# checks). The release checklist (docs/RELEASES.md) asks for a green run on
+# the release commit.
+#
+# Caches: Gradle's downloads (setup-java), Flutter with its pub packages and
+# Go's modules and builds. A pull request reads only the caches of main
+# (GitHub keeps the ones it writes to itself), and only the weekly run
+# writes them on main; a newer one comes with the next weekly run. Never in
+# release.yml. The emulator's system image downloads in the background
+# while the apps build.
 #
 # The previous release is built from its tag, not downloaded: a release APK
 # is signed with the release key and this commit's debug build cannot be
@@ -27,6 +34,8 @@ on:
     branches: [main]
   push:
     tags: ['v*']
+  schedule:
+    - cron: '29 2 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -34,7 +43,7 @@ permissions:
 
 concurrency:
   group: android-emulator-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FLUTTER_VERSION: '3.47.1'
@@ -56,6 +65,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle*
+            android/app/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -75,14 +89,21 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # The emulator image downloads while the apps build.
-      - name: Emulator image
+      # The emulator image downloads in the background while the apps build
+      # (network, not processor); "Start the emulator" waits for it.
+      - name: Emulator image (in the background)
         run: |
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
-            create avd --force -n zen -k "$SYSTEM_IMAGE" -d pixel_6
+          (
+            sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            yes | "$sdkmanager" --licenses > /dev/null || true
+            if "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null \
+              && echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
+                create avd --force -n zen -k "$SYSTEM_IMAGE" -d pixel_6; then
+              echo 0 > "$RUNNER_TEMP/avd.status"
+            else
+              echo 1 > "$RUNNER_TEMP/avd.status"
+            fi
+          ) > "$RUNNER_TEMP/avd.log" 2>&1 &
 
       - name: The previous release (built from its tag)
         id: previous
@@ -110,6 +131,9 @@ jobs:
 
       - name: Start the emulator
         run: |
+          timeout 900 sh -c "until [ -f '$RUNNER_TEMP/avd.status' ]; do sleep 5; done"
+          cat "$RUNNER_TEMP/avd.log"
+          [ "$(cat "$RUNNER_TEMP/avd.status")" = 0 ]
           "$ANDROID_HOME/emulator/emulator" -avd zen -no-window -no-audio \
             -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
