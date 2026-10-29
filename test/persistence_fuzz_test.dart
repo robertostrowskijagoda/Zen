@@ -297,13 +297,10 @@ void main() {
 /// What this test found and the owner's regression list tracks
 /// (test/regressions): the app frame a problem goes through, and the
 /// regression it belongs to. Whoever fixes one removes its line here, so
-/// the test guards the fix; anything not listed fails the test.
-const Map<String, String> _knownFindings = <String, String>{
-  // A settings file cut short or emptied (a write killed halfway, no good
-  // backup) throws out of the first step of the start-up: the app never
-  // gets past the logo until its data is wiped.
-  'FileAppSettingsStore.load': 'R5-#22',
-};
+/// the test guards the fix; anything not listed fails the test. None open:
+/// the settings file that stopped the start (FileAppSettingsStore.load) is
+/// R5-#22, fixed.
+const Map<String, String> _knownFindings = <String, String>{};
 
 String? _knownFinding(String problem) {
   for (final MapEntry<String, String> e in _knownFindings.entries) {
