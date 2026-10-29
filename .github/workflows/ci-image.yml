@@ -18,7 +18,7 @@
 # without a login, as every job does, pull requests from forks included),
 # and check that "Manage Actions access" lists this repository with the Write
 # role (the first push from this workflow links the package to the
-# repository, which gives it that role). docs/TESTING.md, "CI".
+# repository, which gives it that role). docs/TESTING.md, section 6.
 #
 # Actions are pinned to commit SHAs; the image is built with the runner's
 # docker, no third-party action. The token: packages to push the image,

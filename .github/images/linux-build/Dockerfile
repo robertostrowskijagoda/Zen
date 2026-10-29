@@ -11,7 +11,7 @@
 # monthly for the system's updates); jobs run it by digest, from image.txt,
 # and only while image.txt was written for this very Dockerfile
 # (tool/ci/ci_plan.py): a change here runs the jobs on the runner until the
-# new image's pull request is merged. docs/TESTING.md, "CI".
+# new image's pull request is merged. docs/TESTING.md, section 6.
 #
 # Every download is pinned: the base image by digest (Dependabot updates
 # it), Flutter and Go by SHA-256. FLUTTER_VERSION must be ci.yml's and
