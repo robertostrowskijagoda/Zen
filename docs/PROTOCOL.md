@@ -973,6 +973,21 @@ A signed, append-only, per-device **log** for each **space**.
   author counts) and `film_pass` (a public film passed on to friends of
   friends: the signed film with its certificate, like a reshare); in
   `acts` also `post_ann` (notices of posts passed on beyond friends, below).
+- **Friends' copy** [V]: a `contacts` entry (sealed in `private`, for the
+  account's own devices) is {`v` 1, `friends` [{`a`, `n`?, `k`? nickname,
+  `b`? 1 when blocked}], `groups`, `r`? records}. `r` maps each normalized
+  address to `[mark, clock, device]`: mark `f` friend, `b` blocked, `x`
+  removed, `n` neither (unblocked); clock a hybrid logical clock
+  (`millis << 16 | counter`); device the writing device's address. Devices
+  merge `r` address by address, the later record winning (clock, then
+  device, then the stronger mark on an exact tie); a record dated more than
+  10 minutes ahead is refused. A friend record is only ever made by an
+  invitation answered (`FriendshipBook`, `friendship_book.dart`); a device
+  that holds a record the newest copy lacks or has older saves its own
+  copy. A copy without `r` (Zen 1.14.0) counts its friends as of unknown
+  time (older than any record) and its blocks as of the copy's time;
+  `contact_removed` {`a`} entries are taken once each as removals at their
+  ledger time.
 - **Post reach** [P]: a public post (`aud` `public`, not sealed) may be
   passed on up to 3 steps of friendship from its author; the post carries no
   reach of its own, and any other audience never goes past friends. Each

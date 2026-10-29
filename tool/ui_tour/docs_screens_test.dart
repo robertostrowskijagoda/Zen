@@ -54,6 +54,7 @@ import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -201,9 +202,11 @@ SocialHubState _people() {
     friend('Finn', 'Ha, good one.', 'Sun'),
   ];
   return SocialHubState.preview().copyWith(
-    friends: <String, FriendProfile>{
-      for (final FriendProfile f in friends) f.address: f,
-    },
+    book: FriendshipBook.restore(
+      profiles: <String, FriendProfile>{
+        for (final FriendProfile f in friends) f.address: f,
+      },
+    ),
     groups: <String, GroupProfile>{
       'docs-group-hikers': GroupProfile(
         id: 'docs-group-hikers',

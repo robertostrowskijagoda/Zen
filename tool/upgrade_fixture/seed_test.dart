@@ -39,6 +39,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/shell/composer_drafts.dart';
+import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 const String friendA = '201:1111:2222:3333:4444:5555:6666:7777';
@@ -153,16 +154,18 @@ void main() {
       );
       await stores.socialSnapshotStore.save(
         SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{
-            friendA: friend(friendA, 'Ada', 1),
-            friendB: friend(friendB, 'Bartek', 2),
-            pending: const FriendProfile(
-              address: pending,
-              displayName: 'Celina',
-              status: FriendRelationshipStatus.pendingIncoming,
-              requestMessage: 'Hej, to ja',
-            ),
-          },
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              friendA: friend(friendA, 'Ada', 1),
+              friendB: friend(friendB, 'Bartek', 2),
+              pending: const FriendProfile(
+                address: pending,
+                displayName: 'Celina',
+                status: FriendRelationshipStatus.pendingIncoming,
+                requestMessage: 'Hej, to ja',
+              ),
+            },
+          ),
           groups: <String, GroupProfile>{group.id: group},
           inbox: <InboxEntry>[
             const InboxEntry(
