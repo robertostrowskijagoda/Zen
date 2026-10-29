@@ -10,6 +10,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/features/qr_sticker/presentation/sticker_designer_screen.dart';
+import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 
 /// The install page on GitHub Pages (`tool/pages/install`): the steps for
@@ -355,6 +357,17 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                         onPressed: () => unawaited(_openPage()),
                         icon: const Icon(Icons.open_in_new_rounded),
                         label: Text(t('Otwórz stronę instalacji')),
+                      ),
+                    ),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: StickerButton(
+                        key: const Key('install-sticker'),
+                        subject: StickerSubject(
+                          kind: StickerKind.installPage,
+                          data: kInstallPageUrl,
+                          label: t('Strona instalacji'),
+                        ),
                       ),
                     ),
                   ],

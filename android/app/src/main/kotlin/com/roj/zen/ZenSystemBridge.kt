@@ -8,12 +8,21 @@ import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -22,12 +31,15 @@ import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 
 /**
@@ -53,7 +65,13 @@ import java.io.IOException
  * `openDownloads` and `openFolder` {tree} show them. The first part is
  * named [name], part n `<first>.n` (after any rename the system did).
  * `deleteDocument` {uri} deletes such a copy again (exported_files.dart,
- * the panic password): true when it went.
+ * the panic password): true when it went. Both exports take an optional
+ * `mime` (the printable stickers are pictures and PDFs, not backups).
+ *
+ * Printable QR stickers (sticker_files.dart): `shareFile` {path, mime}
+ * opens the share sheet for a file in the cache's `shared_sticker` folder
+ * (the only folder ZenFileProvider serves besides the installer's);
+ * `printPdf` {path, name} hands such a PDF to the system's printing.
  *
  * Files opened in Zen from another app (opened_files.dart):
  * `copyOpenedFile` {uri} copies the content address into the cache's
@@ -63,6 +81,13 @@ import java.io.IOException
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
     private const val CHANNEL = "zen/system"
+    private const val OCTET_STREAM = "application/octet-stream"
+
+    /** Cache subfolder of the sticker to share or print (res/xml/zen_share_paths.xml). */
+    private const val STICKER_DIR = "shared_sticker"
+
+    /** `${applicationId}.zenshare` in the manifest. */
+    private const val SHARE_AUTHORITY_SUFFIX = ".zenshare"
 
     /** [engine] is going away: its handler (it holds the Activity) goes with it. */
     fun unregister(engine: FlutterEngine) {
@@ -139,17 +164,19 @@ object ZenSystemBridge {
                         "exportToDownloads" -> {
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
                             val name = call.argument<String>("name") ?: ""
+                            val mime = call.argument<String>("mime") ?: OCTET_STREAM
                             // The work outlives the screen; the Activity stays out of it.
                             val context = activity.applicationContext
-                            inBackground(result) { exportToDownloads(context, paths, name) }
+                            inBackground(result) { exportToDownloads(context, paths, name, mime) }
                         }
                         "pickFolder" -> pickFolder(activity, result)
                         "exportToFolder" -> {
                             val tree = call.argument<String>("tree") ?: ""
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
                             val name = call.argument<String>("name") ?: ""
+                            val mime = call.argument<String>("mime") ?: OCTET_STREAM
                             val context = activity.applicationContext
-                            inBackground(result) { exportToFolder(context, tree, paths, name) }
+                            inBackground(result) { exportToFolder(context, tree, paths, name, mime) }
                         }
                         "deleteDocument" -> {
                             val uri = call.argument<String>("uri") ?: ""
@@ -175,6 +202,20 @@ object ZenSystemBridge {
                         }
                         "setDisguise" -> result.success(
                             setDisguise(activity, call.argument<Boolean>("enabled") ?: false),
+                        )
+                        "shareFile" -> result.success(
+                            shareFile(
+                                activity,
+                                call.argument<String>("path") ?: "",
+                                call.argument<String>("mime") ?: OCTET_STREAM,
+                            ),
+                        )
+                        "printPdf" -> result.success(
+                            printPdf(
+                                activity,
+                                call.argument<String>("path") ?: "",
+                                call.argument<String>("name") ?: "Zen",
+                            ),
                         )
                         "copyOpenedFile" -> {
                             val uri = call.argument<String>("uri") ?: ""
@@ -361,11 +402,12 @@ object ZenSystemBridge {
         context: Context,
         paths: List<String>,
         name: String,
+        mime: String,
     ): Map<String, Any>? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || paths.isEmpty()) {
             return null
         }
-        return exportToDownloadsQ(context, paths, name)
+        return exportToDownloadsQ(context, paths, name, mime)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -373,6 +415,7 @@ object ZenSystemBridge {
         context: Context,
         paths: List<String>,
         name: String,
+        mime: String,
     ): Map<String, Any> {
         val resolver = context.contentResolver
         val made = ArrayList<Uri>()
@@ -384,7 +427,7 @@ object ZenSystemBridge {
                         MediaStore.Downloads.DISPLAY_NAME,
                         partName(names.firstOrNull() ?: name, index),
                     )
-                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.Downloads.MIME_TYPE, mime)
                     put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
@@ -413,6 +456,7 @@ object ZenSystemBridge {
         tree: String,
         paths: List<String>,
         name: String,
+        mime: String,
     ): Map<String, Any> {
         val parent = treeDocument(Uri.parse(tree))
         val made = ArrayList<Uri>()
@@ -422,7 +466,7 @@ object ZenSystemBridge {
                 val uri = DocumentsContract.createDocument(
                     context.contentResolver,
                     parent,
-                    "application/octet-stream",
+                    mime,
                     partName(names.firstOrNull() ?: name, index),
                 ) ?: throw IOException("Cannot create the file in the folder")
                 made.add(uri)
@@ -436,6 +480,81 @@ object ZenSystemBridge {
             throw error
         }
         return mapOf("names" to names, "uris" to made.map { it.toString() })
+    }
+
+    /** The sticker file at [path], if it is in the folder the provider serves. */
+    private fun stickerFile(activity: FragmentActivity, path: String): File? {
+        val dir = File(activity.cacheDir, STICKER_DIR).canonicalFile
+        val file = File(path).canonicalFile
+        return if (file.isFile && file.parentFile == dir) file else null
+    }
+
+    /** The share sheet for the sticker at [path]; false when there is none. */
+    private fun shareFile(activity: FragmentActivity, path: String, mime: String): Boolean {
+        val file = stickerFile(activity, path) ?: return false
+        val uri = FileProvider.getUriForFile(
+            activity,
+            activity.packageName + SHARE_AUTHORITY_SUFFIX,
+            file,
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, file.name)
+            // The chooser passes the read grant on to the app picked.
+            clipData = ClipData.newRawUri(file.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        activity.startActivity(Intent.createChooser(send, null))
+        return true
+    }
+
+    /**
+     * The system's printing for the one-page PDF at [path] (the printer, the
+     * paper and "Save as PDF" are chosen there); false when there is none.
+     */
+    private fun printPdf(activity: FragmentActivity, path: String, name: String): Boolean {
+        val file = stickerFile(activity, path) ?: return false
+        val manager = activity.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+            ?: return false
+        val adapter = object : PrintDocumentAdapter() {
+            override fun onLayout(
+                oldAttributes: PrintAttributes?,
+                newAttributes: PrintAttributes,
+                cancellationSignal: CancellationSignal?,
+                callback: LayoutResultCallback,
+                extras: Bundle?,
+            ) {
+                if (cancellationSignal?.isCanceled == true) {
+                    callback.onLayoutCancelled()
+                    return
+                }
+                val info = PrintDocumentInfo.Builder(file.name)
+                    .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                    .setPageCount(1)
+                    .build()
+                callback.onLayoutFinished(info, oldAttributes != newAttributes)
+            }
+
+            override fun onWrite(
+                pages: Array<out PageRange>,
+                destination: ParcelFileDescriptor,
+                cancellationSignal: CancellationSignal?,
+                callback: WriteResultCallback,
+            ) {
+                try {
+                    FileInputStream(file).use { input ->
+                        FileOutputStream(destination.fileDescriptor).use { input.copyTo(it) }
+                    }
+                    callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                } catch (error: Exception) {
+                    Log.w(TAG, "Printing the sticker failed", error)
+                    callback.onWriteFailed(error.message)
+                }
+            }
+        }
+        manager.print(name, adapter, null)
+        return true
     }
 
     private fun alias(activity: FragmentActivity, name: String) =

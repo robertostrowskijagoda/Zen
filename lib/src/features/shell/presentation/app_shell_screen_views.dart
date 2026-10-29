@@ -3079,6 +3079,11 @@ class _LocalCodePanel extends StatelessWidget {
               },
               child: Text(t('Kopiuj sam kod')),
             ),
+            // The same code, printed: a sticker for the fridge, a poster.
+            StickerButton(
+              key: const Key('my-invite-sticker'),
+              subject: StickerSubject.invite(profile),
+            ),
           ],
         ),
       ),
