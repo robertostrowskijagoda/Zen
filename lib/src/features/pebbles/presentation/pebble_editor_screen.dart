@@ -610,6 +610,7 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
     final bool? leave = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Porzucić kamyczek?')),
         content: Text(t('Malowanie nie zostanie zapisane.')),
         actions: <Widget>[
@@ -826,7 +827,7 @@ class PebbleEditorState extends State<PebbleEditorScreen> {
     child: Row(
       children: <Widget>[
         for (final Widget c in children)
-          Padding(padding: const EdgeInsets.only(right: 6), child: c),
+          Padding(padding: const EdgeInsetsDirectional.only(end: 6), child: c),
       ],
     ),
   );

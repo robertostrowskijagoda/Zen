@@ -450,6 +450,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       final bool friendsAlready = before == FriendRelationshipStatus.accepted;
       if (!friendsAlready) {
         await _handleIncomingSignal(signal, receivedAtMillis: receivedAtMillis);
+        if (_controllerDisposed || !ref.mounted) {
+          return;
+        }
       }
       if ((askedThemToo || friendsAlready) &&
           state
@@ -555,7 +558,27 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     _bumpTimelineRevision();
   }
 
+  /// [_handleIncomingSignalOnce], quiet when the hub goes away meanwhile (a
+  /// device stopped while a frame was being taken in): nothing is left to
+  /// show the frame to, and its queue copy is taken in at the next start.
   Future<void> _handleIncomingSignal(
+    ZenSignal signal, {
+    int? receivedAtMillis,
+  }) async {
+    try {
+      await _handleIncomingSignalOnce(
+        signal,
+        receivedAtMillis: receivedAtMillis,
+      );
+    } on Object {
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _handleIncomingSignalOnce(
     ZenSignal signal, {
     int? receivedAtMillis,
   }) async {

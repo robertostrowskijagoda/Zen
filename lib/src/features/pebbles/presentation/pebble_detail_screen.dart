@@ -113,6 +113,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       await showDialog<bool>(
         context: context,
         builder: (BuildContext context) => AlertDialog(
+          scrollable: true,
           title: Text(title),
           content: Text(text),
           actions: <Widget>[
