@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -196,7 +197,7 @@ class _PebbleProfileSectionState extends ConsumerState<PebbleProfileSection> {
                 children: <Widget>[
                   Row(
                     children: <Widget>[
-                      PebbleView(design: null, card: r.card, size: 56),
+                      StoredPebbleView(card: r.card, size: 56),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -313,7 +314,7 @@ class _Grid extends StatelessWidget {
               width: 96,
               child: Column(
                 children: <Widget>[
-                  PebbleView(design: null, card: i.card, size: 88),
+                  StoredPebbleView(card: i.card, size: 88),
                   const SizedBox(height: 4),
                   Text(
                     i.card.name.isEmpty ? t('Kamyczek') : i.card.name,
@@ -390,4 +391,46 @@ class PebbleServeSwitch extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// A small pebble, drawn from its whole painting where this device keeps
+/// it (made here, or collected with its design), else from the card's
+/// 16 x 16 preview (all a QR code carries).
+class StoredPebbleView extends ConsumerStatefulWidget {
+  const StoredPebbleView({required this.card, required this.size, super.key});
+
+  final PebbleCard card;
+  final double size;
+
+  @override
+  ConsumerState<StoredPebbleView> createState() => _StoredPebbleViewState();
+}
+
+class _StoredPebbleViewState extends ConsumerState<StoredPebbleView> {
+  Uint8List? _design;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final PebbleStore? store = ref.read(pebbleServiceProvider)?.store;
+    if (store == null || !(store.entry(widget.card.id)?.hasDesign ?? false)) {
+      return;
+    }
+    final Uint8List? design = await store.design(widget.card.id);
+    if (mounted && design != null) {
+      setState(() => _design = design);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PebbleView(
+    key: ValueKey<bool>(_design != null),
+    design: _design,
+    card: widget.card,
+    size: widget.size,
+  );
 }
