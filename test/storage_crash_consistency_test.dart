@@ -190,6 +190,55 @@ void main() {
     );
   });
 
+  test('a lock nobody holds any more never holds a save up; another '
+      "isolate's lock is waited for", () async {
+    final FileBinaryStore store = _plainStore(root);
+    final File file = await store.write('relay/state', payload('one'));
+    final File lock = File('${file.path}.lock');
+    final File kept = File('${file.path}.kept');
+    // The folder put back from a copy taken while this isolate saved (a
+    // device killed then starts from it; a release Windows refused leaves
+    // the same): the lock in it is this isolate's own.
+    FileBinaryStore.debugWriteStep = (String step, File temporary) {
+      if (step == FileBinaryStore.writeSteps.first) {
+        lock.copySync(kept.path);
+      }
+    };
+    await store.write('relay/state', payload('two'));
+    FileBinaryStore.debugWriteStep = null;
+    kept.renameSync(lock.path);
+    Future<Duration> timedSave(String value) async {
+      final Stopwatch took = Stopwatch()..start();
+      await _plainStore(root).write('relay/state', payload(value));
+      return took.elapsed;
+    }
+
+    expect(await timedSave('three'), lessThan(const Duration(seconds: 2)));
+    // Of a process that is gone.
+    lock.writeAsStringSync('1 gone');
+    expect(await timedSave('four'), lessThan(const Duration(seconds: 2)));
+    // Made, but its owner died before it wrote its name.
+    lock.writeAsStringSync('');
+    lock.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(seconds: 5)),
+    );
+    expect(await timedSave('five'), lessThan(const Duration(seconds: 2)));
+    expect(lock.existsSync(), isFalse);
+
+    // Another isolate of this process saving now (the app and its
+    // service): the save waits until it is done.
+    lock.writeAsStringSync('$pid service');
+    bool saved = false;
+    final Future<void> save = _plainStore(
+      root,
+    ).write('relay/state', payload('six')).then((_) => saved = true);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(saved, isFalse);
+    lock.deleteSync();
+    await save;
+    expect(text(await _plainStore(root).read('relay/state')), 'six');
+  });
+
   test('plain files saved by two isolates at once are always one whole '
       'save (the update check, the language, the background kits)', () async {
     final String path = '${root.path}${Platform.pathSeparator}update.json';
