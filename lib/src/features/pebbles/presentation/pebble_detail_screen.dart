@@ -218,19 +218,28 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                 child: ZenInfo(
                   key: const Key('pebble-published-info'),
                   icon: Icons.celebration_outlined,
-                  // Keepers are only spoken of once someone was asked.
+                  // Where it lives: only here until a friend keeps it.
                   text:
                       service != null &&
                           service.store.keepersOf(card.id).isEmpty
                       ? t(
                           'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i '
-                          'zostaw ją w ciekawym miejscu.',
+                          'zostaw ją w ciekawym miejscu. Na razie jest tylko '
+                          'na Twoim telefonie: gdy telefon będzie wyłączony '
+                          'albo poza siecią, nikt go nie pobierze. Zen sam '
+                          'poprosi znajomych o przechowanie, gdy będą w '
+                          'sieci. Kto się zgodził, zobaczysz niżej w '
+                          '„Opiekunowie”, także później: Kamyczki → ten '
+                          'kamyczek.',
                         )
                       : t(
                           'Kamyczek gotowy! Wydrukuj naklejkę z kodem QR i '
-                          'zostaw ją w ciekawym miejscu. Znajomi, których '
-                          'poprosiłeś(-aś), przechowają go, gdy Twój telefon '
-                          'będzie poza siecią.',
+                          'zostaw ją w ciekawym miejscu. Zen poprosił '
+                          'znajomych o przechowanie: dopóki żaden się nie '
+                          'zgodzi, kamyczek jest dostępny tylko wtedy, gdy '
+                          'Twój telefon jest w sieci. Odpowiedzi widać niżej '
+                          'w „Opiekunowie”, także później: Kamyczki → ten '
+                          'kamyczek.',
                         ),
                 ),
               ),

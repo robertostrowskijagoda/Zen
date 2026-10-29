@@ -136,7 +136,7 @@ void main() {
             ),
           )
           .data!;
-      expect(info, isNot(contains('poprosiłeś')));
+      expect(info, isNot(contains('Zen poprosił znajomych')));
       final Finder count = find.byKey(const Key('pebble-keepers-count'));
       await scrollTo(tester, count);
       expect(
@@ -161,7 +161,7 @@ void main() {
       of: find.byKey(const Key('pebble-published-info')),
       matching: find.byType(Text),
     );
-    expect(tester.widget<Text>(info).data, contains('poprosiłeś'));
+    expect(tester.widget<Text>(info).data, contains('Zen poprosił znajomych'));
     final Finder why = find.byKey(const Key('pebble-keepers-nobody-new'));
     await scrollTo(tester, why);
     expect(why, findsOneWidget);
