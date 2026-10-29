@@ -104,6 +104,8 @@ jobs:
               echo 1 > "$RUNNER_TEMP/avd.status"
             fi
           ) > "$RUNNER_TEMP/avd.log" 2>&1 &
+          # adb from the platform-tools installed above, for every later step.
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
       - name: The previous release (built from its tag)
         id: previous
