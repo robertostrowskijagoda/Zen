@@ -14,13 +14,18 @@ import '../tool/screenshots/shots.dart';
 // download and the reasons to try Zen, most tempting first; the about page
 // tells the idea behind it; the promo page offers the poster, the film, a
 // text to share and the QR codes, all made by tool/ci/promo_materials.py.
+// The pebble page reads a signed pebble card from its address, checks the
+// author's signature in the browser and draws the stone; node runs its
+// reader on the test cards of tool/ci/pebble_cards.py.
 
 const String _site = 'tool/pages';
 
-/// The pages: the invitation, the door page, and one page per topic.
+/// The pages: the invitation, the door page, the pebble page, and one page
+/// per topic.
 const List<String> _pages = <String>[
   'index.html',
   'm/index.html',
+  'k/index.html',
   'about/index.html',
   'features/index.html',
   'guide/index.html',
@@ -402,6 +407,76 @@ List<List<bool>> _svgModules(String svg) {
   ];
   return (utf8.decode(bytes), level);
 }
+
+/// The first of [names] that runs here (`[name] --version`), or null.
+String? _tool(List<String> names) {
+  for (final String name in names) {
+    try {
+      if (Process.runSync(name, <String>['--version']).exitCode == 0) {
+        return name;
+      }
+    } on ProcessException {
+      // Not installed under this name.
+    }
+  }
+  return null;
+}
+
+/// What node reads from every test card with the pebble page's reader
+/// (tool/pages/k/pebble.js), and how each check of the signature ends: the
+/// browser's Ed25519 (Web Crypto), the page's own verifier, the two
+/// together as the page uses them, the same with Web Crypto's Ed25519
+/// missing, and node's own Ed25519 as a witness from outside the page.
+const String _pebbleHarness = r"""
+const reader = require(process.argv[1]);
+const cards = require(process.argv[2]);
+const nodeCrypto = require('crypto');
+const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
+const bytes = (h) => Uint8Array.from(Buffer.from(h, 'hex'));
+const colour = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+function outside(key, signature, message) {
+  const k = nodeCrypto.createPublicKey({ key: Buffer.concat([SPKI, Buffer.from(key)]), format: 'der', type: 'spki' });
+  return nodeCrypto.verify(null, Buffer.from(message), k, Buffer.from(signature));
+}
+(async () => {
+  const out = { rfc8032: [], cards: [] };
+  for (const v of cards.rfc8032) {
+    const sig = bytes(v.signature);
+    const changed = bytes(v.signature);
+    changed[7] ^= 1;
+    out.rfc8032.push([
+      await reader.verifyPure(bytes(v.key), sig, bytes(v.message)),
+      await reader.verifyNative(bytes(v.key), sig, bytes(v.message)),
+      await reader.verifyPure(bytes(v.key), changed, bytes(v.message)),
+    ]);
+  }
+  const decoded = [];
+  for (const v of cards.vectors) {
+    const c = reader.decode(v.card);
+    decoded.push(c);
+    if (!c) { out.cards.push({ name: v.name, card: null }); continue; }
+    out.cards.push({
+      name: v.name,
+      card: {
+        version: c.version, id: reader.hex(c.id), authorKey: reader.hex(c.authorKey), created: c.created,
+        shape: c.shape, seed: c.seed, material: c.material, main: colour(c.main), second: colour(c.second),
+        name: c.name, note: c.note, author: c.author,
+        thumbnail: c.thumbnail && { palette: c.thumbnail.palette.map(colour), pixels: Array.from(c.thumbnail.pixels) },
+      },
+      native: await reader.verifyNative(c.authorKey, c.signature, c.signed),
+      pure: await reader.verifyPure(c.authorKey, c.signature, c.signed),
+      page: await reader.verify(c),
+      outside: outside(c.authorKey, c.signature, c.signed),
+    });
+  }
+  // A browser without Ed25519 in Web Crypto: the page's own verifier.
+  crypto.subtle.importKey = () => Promise.reject(new Error('NotSupportedError'));
+  for (let i = 0; i < decoded.length; i++) {
+    if (decoded[i]) { out.cards[i].withoutNative = await reader.verify(decoded[i]); }
+  }
+  process.stdout.write(JSON.stringify(out));
+})().catch((e) => { console.error(e); process.exit(1); });
+""";
 
 /// The relative addresses (href, src, srcset, poster) of a page.
 List<String> _relativeLinks(String html) => <String>[
@@ -1317,6 +1392,242 @@ void main() {
         File('.github/workflows/ci.yml').readAsStringSync(),
         contains('dart run tool/screenshots.dart --check'),
       );
+    });
+  });
+
+  group('the pebble page', () {
+    test('it stays out of search engines and sends no address on, and the '
+        'card never leaves the phone', () {
+      final String html = _read('k/index.html');
+      final String head = _head('k/index.html');
+      expect(head, contains('<meta name="robots" content="noindex">'));
+      expect(head, contains('<meta name="referrer" content="no-referrer">'));
+      // Its own reader and drawing, no script from anywhere else.
+      expect(html, contains('<script src="pebble.js"></script>'));
+      expect(html, contains('<script src="stone.js"></script>'));
+      expect(
+        RegExp(r'<script src="https?:').hasMatch(html),
+        isFalse,
+        reason: 'no script from another site',
+      );
+      for (final String file in <String>[
+        'k/index.html',
+        'k/pebble.js',
+        'k/stone.js',
+      ]) {
+        final String text = _read(file);
+        for (final String call in <String>[
+          'fetch(',
+          'XMLHttpRequest',
+          'sendBeacon',
+          'WebSocket',
+        ]) {
+          expect(text, isNot(contains(call)), reason: '$file: $call');
+        }
+      }
+      // The author's words are text, never markup.
+      final String script = html.substring(html.lastIndexOf('<script>'));
+      expect(script, isNot(contains('innerHTML')));
+      expect(script, contains('textContent'));
+    });
+
+    test('"Collect in Zen" opens the app with the same card, on Android as '
+        'an intent that comes back to the downloads', () {
+      final String html = _read('k/index.html');
+      expect(html, contains('"zen://pebble#" + link'));
+      expect(
+        html,
+        contains(
+          '"intent://pebble#" + link + "#Intent;scheme=zen;'
+          'package=com.roj.zen;"',
+        ),
+      );
+      expect(html, contains('S.browser_fallback_url='));
+      expect(html, contains('page + "?noapp=1#" + link'));
+      // The downloads of the invitation and door pages, picked by system.
+      expect(html, contains('Zen.systemButtons()'));
+      for (final String id in <String>[
+        'android',
+        'windows',
+        'linux',
+        'iphone',
+        'macos',
+        'osPick',
+        'get',
+      ]) {
+        expect(html, contains('id="$id"'), reason: id);
+      }
+      expect(html, contains('href="#get"'));
+      // A pebble someone changed is not offered.
+      expect(html, contains('result === "invalid"'));
+    });
+
+    test('the owner\'s words, the empty state and every text in 21 '
+        'languages', () {
+      final Map<String, Map<String, String>> texts = _texts('k/index.html');
+      final Map<String, String> pl = texts['pl']!;
+      expect(pl['collect'], 'Zbierz w Zen');
+      expect(pl['getBtn'], 'Nie masz Zen? Pobierz');
+      expect(pl['by'], 'Stworzony przez {author}');
+      expect(
+        pl['whatText'],
+        'Kamyczki to wirtualne pomalowane kamienie, jak te zostawiane w '
+        'ciekawych miejscach. Zbierz go — nie zabierasz go innym.',
+      );
+      expect(pl['badTitle'], 'Ten kamyczek jest nieczytelny');
+      expect(pl['badLead'], startsWith('Zeskanuj kod jeszcze raz'));
+      expect(pl['sigApp'], contains('sprawdzi aplikacja'));
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        for (final MapEntry<String, String> text in lang.value.entries) {
+          expect(
+            text.value.trim(),
+            isNotEmpty,
+            reason: '${lang.key} ${text.key}',
+          );
+          if (lang.key != 'en') {
+            expect(
+              text.value,
+              isNot(texts['en']![text.key]),
+              reason: '${lang.key} ${text.key}: not translated',
+            );
+          }
+        }
+      }
+      // Every key the page shows is in its table or the shared one.
+      final String html = _read('k/index.html');
+      final Set<String> common = _texts('site.js')['en']!.keys.toSet();
+      for (final RegExpMatch m in RegExp(
+        r'data-i(?:a|al|t)?="(\w+)"',
+      ).allMatches(html)) {
+        expect(
+          texts['en']!.containsKey(m[1]) || common.contains(m[1]),
+          isTrue,
+          reason: m[1],
+        );
+      }
+      for (final RegExpMatch m in RegExp(r'Zen\.t\("(\w+)"').allMatches(html)) {
+        expect(texts['en']!.containsKey(m[1]), isTrue, reason: m[1]);
+      }
+    });
+
+    test('the stone is drawn on the phone, respects less motion and keeps '
+        'still while off screen', () {
+      final String stone = _read('k/stone.js');
+      expect(stone, contains('prefers-reduced-motion: reduce'));
+      expect(stone, contains('IntersectionObserver'));
+      expect(stone, contains('deviceorientation'));
+      expect(stone, contains('getContext("webgl"'));
+      // Without WebGL a drawing, not an empty box.
+      expect(stone, contains('getContext("2d")'));
+      final String html = _read('k/index.html');
+      // The page scrolls up and down over the stone.
+      expect(html, contains('touch-action: pan-y'));
+      expect(html, contains('role="img"'));
+    });
+
+    test('node reads every test card as tool/ci/pebble_cards.py wrote it and '
+        'checks each signature as RFC 8032 does', () async {
+      final String? node = _tool(<String>['node']);
+      if (node == null) {
+        markTestSkipped('node is not installed');
+        return;
+      }
+      final File vectors = File('tool/ci/pebble_card_vectors.json');
+      final Map<String, dynamic> cards =
+          jsonDecode(vectors.readAsStringSync()) as Map<String, dynamic>;
+      final ProcessResult run = await Process.run(node, <String>[
+        '-e',
+        _pebbleHarness,
+        File('$_site/k/pebble.js').absolute.path,
+        vectors.absolute.path,
+      ], stdoutEncoding: utf8);
+      expect(run.exitCode, 0, reason: '${run.stderr}');
+      final Map<String, dynamic> out =
+          jsonDecode(run.stdout as String) as Map<String, dynamic>;
+      // RFC 8032's examples: the right signature checks out, a changed one
+      // does not.
+      expect(out['rfc8032'], <List<bool>>[
+        for (int i = 0; i < 3; i++) <bool>[true, true, false],
+      ]);
+      final List<dynamic> results = out['cards'] as List<dynamic>;
+      final List<dynamic> wanted = cards['vectors'] as List<dynamic>;
+      expect(results, hasLength(wanted.length));
+      int valid = 0;
+      int invalid = 0;
+      int broken = 0;
+      for (int i = 0; i < wanted.length; i++) {
+        final Map<String, dynamic> want = wanted[i] as Map<String, dynamic>;
+        final Map<String, dynamic> got = results[i] as Map<String, dynamic>;
+        final String name = want['name'] as String;
+        expect(got['name'], name);
+        final Map<String, dynamic>? expected =
+            want['expect'] as Map<String, dynamic>?;
+        if (expected == null) {
+          expect(got['card'], isNull, reason: '$name is not a card');
+          broken++;
+          continue;
+        }
+        final String signature = expected['signature'] as String;
+        expect(
+          got['card'],
+          <String, dynamic>{...expected}..remove('signature'),
+          reason: name,
+        );
+        final bool ok = signature == 'valid';
+        expect(got['outside'], ok, reason: "$name: node's Ed25519");
+        expect(got['native'], ok, reason: '$name: Web Crypto');
+        expect(got['pure'], ok, reason: "$name: the page's verifier");
+        expect(got['page'], signature, reason: name);
+        expect(got['withoutNative'], signature, reason: name);
+        if (ok) {
+          valid++;
+        } else {
+          invalid++;
+        }
+      }
+      expect((valid, invalid), (4, 2));
+      expect(broken, greaterThanOrEqualTo(8));
+    });
+
+    test('the test cards are what tool/ci/pebble_cards.py writes, and its '
+        "signer gives RFC 8032's signatures", () async {
+      final String? python = _tool(
+        Platform.isWindows
+            ? <String>['python', 'python3']
+            : <String>['python3', 'python'],
+      );
+      if (python == null) {
+        markTestSkipped('Python is not installed');
+        return;
+      }
+      final ProcessResult run = await Process.run(python, <String>[
+        'tool/ci/pebble_cards.py',
+        '--check',
+      ]);
+      expect(run.exitCode, 0, reason: '${run.stdout}${run.stderr}');
+    });
+
+    test('the link fits a sticker: the usual test cards stay within the '
+        "format's 400 bytes", () {
+      final Map<String, dynamic> cards =
+          jsonDecode(
+                File('tool/ci/pebble_card_vectors.json').readAsStringSync(),
+              )
+              as Map<String, dynamic>;
+      expect(cards['link'], '${_base}k/#');
+      for (final dynamic v in cards['vectors'] as List<dynamic>) {
+        final Map<String, dynamic> vector = v as Map<String, dynamic>;
+        // "longest" has every text at its longest, in two-byte letters.
+        if (vector['expect'] == null || vector['name'] == 'longest') {
+          continue;
+        }
+        final String card = vector['card'] as String;
+        expect(
+          card.length * 3 ~/ 4,
+          lessThanOrEqualTo(400),
+          reason: vector['name'] as String,
+        );
+      }
     });
   });
 
