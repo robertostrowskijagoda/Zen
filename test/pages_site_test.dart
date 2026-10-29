@@ -10,7 +10,10 @@ import '../tool/screenshots/shots.dart';
 // is drawn in the shared look, has the app icon and the language picker; the
 // downloads are links that follow each release by themselves and the iPhone
 // page installs with SideStore, step by step with drawn pictures, the other
-// ways only as other ways.
+// ways only as other ways. The home page leads with the promise, one
+// download and the reasons to try Zen, most tempting first; the about page
+// tells the idea behind it; the promo page offers the poster, the film, a
+// text to share and the QR codes, all made by tool/ci/promo_materials.py.
 
 const String _site = 'tool/pages';
 
@@ -28,6 +31,7 @@ const List<String> _pages = <String>[
   'install/linux/index.html',
   'install/macos/index.html',
   'install/windows/index.html',
+  'promo/index.html',
 ];
 
 /// Where the site is published (release_source.PAGES).
@@ -166,6 +170,246 @@ List<String> _markup(String text) => <String>[
   ).allMatches(text))
     m.group(1) ?? m.group(0)!,
 ]..sort();
+
+/// The about page, where every printed QR code leads.
+const String _aboutUrl = '${_base}about/';
+
+/// The reasons on the home page, most tempting first: what nobody does with
+/// your conversations, who is in your network, the price, the encryption,
+/// what you can do, where, and last the pyramid.
+const List<String> _reasons = <String>[
+  'adv-private',
+  'adv-known',
+  'adv-free',
+  'adv-quantum',
+  'adv-together',
+  'adv-devices',
+  'adv-pyramid',
+];
+
+/// The files of the promo page made by tool/ci/promo_materials.py, with the
+/// largest size each may have.
+const Map<String, int> _promoFiles = <String, int>{
+  'promo/zen-poster-pl.png': 2560 * 1024,
+  'promo/zen-poster-en.png': 2560 * 1024,
+  'promo/zen-poster-pl.pdf': 3 * 1024 * 1024,
+  'promo/zen-poster-en.pdf': 3 * 1024 * 1024,
+  'promo/zen-poster-pl-preview.webp': 150 * 1024,
+  'promo/zen-poster-en-preview.webp': 150 * 1024,
+  'promo/zen-qr-about.png': 100 * 1024,
+  'promo/zen-qr-about.svg': 50 * 1024,
+  'promo/zen-qr-about-pl.pdf': 300 * 1024,
+  'promo/zen-qr-about-en.pdf': 300 * 1024,
+};
+
+/// The promo film, made apart from the site: checked once it is there.
+const Map<String, int> _filmFiles = <String, int>{
+  'promo/zen-promo.mp4': 20 * 1024 * 1024,
+  'promo/zen-promo.webm': 20 * 1024 * 1024,
+  'promo/zen-promo-poster.jpg': 600 * 1024,
+};
+
+/// The dark modules of a QR code drawn as an SVG path of runs
+/// (`M{x} {y}h{w}v1h-{w}z`, promo_materials.py), quiet zone included.
+List<List<bool>> _svgModules(String svg) {
+  final RegExpMatch box = RegExp(r'viewBox="0 0 (\d+) (\d+)"').firstMatch(svg)!;
+  final int n = int.parse(box[1]!);
+  expect(int.parse(box[2]!), n);
+  final List<List<bool>> m = <List<bool>>[
+    for (int y = 0; y < n; y++) List<bool>.filled(n, false),
+  ];
+  for (final RegExpMatch run in RegExp(
+    r'M(\d+) (\d+)h(\d+)v1h-\3z',
+  ).allMatches(svg)) {
+    final int x = int.parse(run[1]!), y = int.parse(run[2]!);
+    for (int i = 0; i < int.parse(run[3]!); i++) {
+      m[y][x + i] = true;
+    }
+  }
+  return m;
+}
+
+/// Reads a QR code (byte mode, versions 1 to 6) the way a scanner does:
+/// the finder and timing patterns, the format information (both copies,
+/// checked against their BCH code), the data under its mask, the blocks
+/// put back in order. Returns the text and the error correction level.
+(String, String) _readQr(List<List<bool>> withQuiet, int quiet) {
+  final int size = withQuiet.length - 2 * quiet;
+  bool at(int x, int y) => withQuiet[y + quiet][x + quiet];
+  final int version = (size - 17) ~/ 4;
+  expect(size, version * 4 + 17, reason: 'a QR code size');
+  expect(version, inInclusiveRange(1, 6));
+  // The quiet zone is light.
+  for (int i = 0; i < withQuiet.length; i++) {
+    for (int q = 0; q < quiet; q++) {
+      expect(withQuiet[i][q] || withQuiet[q][i], isFalse);
+    }
+  }
+  // Finder patterns in three corners, timing patterns between them.
+  for (final (int, int) c in <(int, int)>[
+    (3, 3),
+    (size - 4, 3),
+    (3, size - 4),
+  ]) {
+    for (int dy = -3; dy <= 3; dy++) {
+      for (int dx = -3; dx <= 3; dx++) {
+        final int d = dx.abs() > dy.abs() ? dx.abs() : dy.abs();
+        expect(at(c.$1 + dx, c.$2 + dy), d != 2, reason: 'finder $c');
+      }
+    }
+  }
+  for (int i = 8; i < size - 8; i++) {
+    expect(at(i, 6), i.isEven, reason: 'timing row');
+    expect(at(6, i), i.isEven, reason: 'timing column');
+  }
+  // Format information: both copies alike and a valid BCH(15, 5) word.
+  int bits(List<(int, int)> cells) {
+    int v = 0;
+    for (int i = 0; i < cells.length; i++) {
+      if (at(cells[i].$1, cells[i].$2)) {
+        v |= 1 << i;
+      }
+    }
+    return v;
+  }
+
+  final int first = bits(<(int, int)>[
+    for (int i = 0; i < 6; i++) (8, i),
+    (8, 7),
+    (8, 8),
+    (7, 8),
+    for (int i = 9; i < 15; i++) (14 - i, 8),
+  ]);
+  final int second = bits(<(int, int)>[
+    for (int i = 0; i < 8; i++) (size - 1 - i, 8),
+    for (int i = 8; i < 15; i++) (8, size - 15 + i),
+  ]);
+  expect(second, first, reason: 'the two copies of the format');
+  expect(at(8, size - 8), isTrue, reason: 'the dark module');
+  final int format = first ^ 0x5412;
+  int rem = format >> 10;
+  for (int i = 0; i < 10; i++) {
+    rem = (rem << 1) ^ ((rem >> 9) * 0x537);
+  }
+  expect(format & 0x3ff, rem, reason: 'the BCH code of the format');
+  final String level = const <int, String>{
+    1: 'L',
+    0: 'M',
+    3: 'Q',
+    2: 'H',
+  }[format >> 13]!;
+  final int mask = (format >> 10) & 7;
+  // The cells that carry data: all but the patterns and the format.
+  final List<List<bool>> fixed = <List<bool>>[
+    for (int y = 0; y < size; y++) List<bool>.filled(size, false),
+  ];
+  void block(int x0, int y0, int x1, int y1) {
+    for (int y = y0; y <= y1; y++) {
+      for (int x = x0; x <= x1; x++) {
+        if (x >= 0 && y >= 0 && x < size && y < size) {
+          fixed[y][x] = true;
+        }
+      }
+    }
+  }
+
+  block(0, 0, 8, 8);
+  block(size - 8, 0, size - 1, 8);
+  block(0, size - 8, 8, size - 1);
+  block(6, 0, 6, size - 1);
+  block(0, 6, size - 1, 6);
+  if (version > 1) {
+    final int a = size - 7;
+    block(a - 2, a - 2, a + 2, a + 2);
+  }
+  bool masked(int x, int y) => switch (mask) {
+    0 => (x + y) % 2 == 0,
+    1 => y % 2 == 0,
+    2 => x % 3 == 0,
+    3 => (x + y) % 3 == 0,
+    4 => (x ~/ 3 + y ~/ 2) % 2 == 0,
+    5 => x * y % 2 + x * y % 3 == 0,
+    6 => (x * y % 2 + x * y % 3) % 2 == 0,
+    _ => ((x + y) % 2 + x * y % 3) % 2 == 0,
+  };
+  final List<int> stream = <int>[];
+  for (int right = size - 1; right >= 1; right -= 2) {
+    if (right == 6) {
+      right = 5;
+    }
+    final bool upward = ((right + 1) & 2) == 0;
+    for (int vert = 0; vert < size; vert++) {
+      final int y = upward ? size - 1 - vert : vert;
+      for (int j = 0; j < 2; j++) {
+        final int x = right - j;
+        if (!fixed[y][x]) {
+          stream.add(at(x, y) != masked(x, y) ? 1 : 0);
+        }
+      }
+    }
+  }
+  final List<int> words = <int>[
+    for (int i = 0; i + 8 <= stream.length; i += 8)
+      stream.sublist(i, i + 8).fold(0, (int v, int b) => v << 1 | b),
+  ];
+  // The blocks of each version and level (ISO/IEC 18004, table 9).
+  const Map<String, List<int>> blocks = <String, List<int>>{
+    '1L': <int>[19],
+    '1M': <int>[16],
+    '1Q': <int>[13],
+    '1H': <int>[9],
+    '2L': <int>[34],
+    '2M': <int>[28],
+    '2Q': <int>[22],
+    '2H': <int>[16],
+    '3L': <int>[55],
+    '3M': <int>[44],
+    '3Q': <int>[17, 17],
+    '3H': <int>[13, 13],
+    '4L': <int>[80],
+    '4M': <int>[32, 32],
+    '4Q': <int>[24, 24],
+    '4H': <int>[9, 9, 9, 9],
+    '5L': <int>[108],
+    '5M': <int>[43, 43],
+    '5Q': <int>[15, 15, 16, 16],
+    '5H': <int>[11, 11, 12, 12],
+    '6L': <int>[68, 68],
+    '6M': <int>[27, 27, 27, 27],
+    '6Q': <int>[19, 19, 19, 19],
+    '6H': <int>[15, 15, 15, 15],
+  };
+  final List<int> sizes = blocks['$version$level']!;
+  final List<List<int>> data = <List<int>>[for (final int _ in sizes) <int>[]];
+  int k = 0;
+  for (int i = 0; i < sizes.reduce((int a, int b) => a > b ? a : b); i++) {
+    for (int b = 0; b < sizes.length; b++) {
+      if (i < sizes[b]) {
+        data[b].add(words[k++]);
+      }
+    }
+  }
+  final List<int> all = <int>[for (final List<int> b in data) ...b];
+  expect(all[0] >> 4, 4, reason: 'byte mode');
+  final int length = (all[0] & 15) << 4 | all[1] >> 4;
+  final List<int> bytes = <int>[
+    for (int i = 0; i < length; i++) (all[1 + i] & 15) << 4 | all[2 + i] >> 4,
+  ];
+  return (utf8.decode(bytes), level);
+}
+
+/// The relative addresses (href, src, srcset, poster) of a page.
+List<String> _relativeLinks(String html) => <String>[
+  for (final RegExpMatch m in RegExp(
+    r'''\s(?:href|src|srcset|poster)="([^"]+)"''',
+  ).allMatches(html))
+    if (!RegExp(r'^(?:[a-z][a-z0-9+.-]*:|#|/)').hasMatch(m[1]!)) m[1]!,
+];
+
+/// The ids of a page (the targets of `#fragment` links).
+Set<String> _ids(String html) => <String>{
+  for (final RegExpMatch m in RegExp(r'\sid="([^"]+)"').allMatches(html)) m[1]!,
+};
 
 void main() {
   group('the addresses stay', () {
@@ -813,7 +1057,8 @@ void main() {
       for (final FileSystemEntity f in Directory(
         _site,
       ).listSync(recursive: true)) {
-        if (f is! File || f.path.endsWith('.png') || f.path.endsWith('.webp')) {
+        if (f is! File ||
+            RegExp(r'\.(png|webp|jpg|pdf|mp4|webm)$').hasMatch(f.path)) {
           continue;
         }
         final String text = f.readAsStringSync().toLowerCase();
@@ -1084,6 +1329,433 @@ void main() {
       final String about = _read('about/index.html');
       expect(about, contains('tocLabel'));
       expect(about, contains('releases/latest'));
+    });
+  });
+
+  group('telling people about Zen', () {
+    test('the home page leads with the promise, one big download for the '
+        "visitor's system and how it works, then the reasons", () {
+      final String home = _read('index.html');
+      final Map<String, Map<String, String>> texts = _texts('index.html');
+      int at(String part) {
+        final int i = home.indexOf(part);
+        expect(i, greaterThan(0), reason: part);
+        return i;
+      }
+
+      // In this order: the promise, the download, the reasons, the
+      // screenshots, how it works, the idea, questions, the last call.
+      final List<int> order = <int>[
+        at('data-i="heroTitle"'),
+        at('data-i="lead"'),
+        at('id="android" class="btn primary big block"'),
+        at('href="#how"'),
+        at('<section class="sec" id="why"'),
+        at('<section class="sec" id="shots"'),
+        at('<section class="sec" id="how"'),
+        at('<section class="sec" id="idea"'),
+        at('<section class="sec" id="faq"'),
+        at('<section class="sec final" id="start"'),
+      ];
+      for (int i = 1; i < order.length; i++) {
+        expect(order[i], greaterThan(order[i - 1]), reason: 'part $i');
+      }
+      // Every system keeps its big button; the script shows the visitor's.
+      for (final String os in <String>[
+        'android',
+        'windows',
+        'linux',
+        'iphone',
+        'macos',
+      ]) {
+        expect(home, contains('id="$os" class="btn primary big block"'));
+      }
+      expect(home, contains('Zen.systemButtons()'));
+      // An invitation still opens the app first; the home page only offers
+      // it to those who have the app, and stays a page to read.
+      expect(home, contains('Zen.t(code ? "invTitle" : "heroTitle")'));
+      expect(home, contains('if (android && code && !noApp)'));
+      expect(home, contains('id="openApp"'));
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        expect(lang.value['heroTitle'], isNotEmpty, reason: lang.key);
+        expect(
+          lang.value['heroTitle'],
+          isNot(lang.value['invTitle']),
+          reason: lang.key,
+        );
+      }
+      expect(texts['en']!['heroTitle'], 'Your people. No company in between.');
+      expect(texts['pl']!['heroTitle'], 'Twoi ludzie. Bez firmy pośrodku.');
+    });
+
+    test('the reasons go from the most tempting, in a stable order, each '
+        'with an icon and a text in every language', () {
+      final String home = _read('index.html');
+      final String list = home.substring(
+        home.indexOf('<ol class="adv">'),
+        home.indexOf('</ol>', home.indexOf('<ol class="adv">')),
+      );
+      final List<String> ids = <String>[
+        for (final RegExpMatch m in RegExp(
+          r'<li id="(adv-[a-z]+)" class="feat"><div class="fi"><svg class="ico"',
+        ).allMatches(list))
+          m[1]!,
+      ];
+      expect(ids, _reasons);
+      for (int i = 0; i < _reasons.length; i++) {
+        final String item = list.substring(
+          list.indexOf('id="${_reasons[i]}"'),
+          i + 1 < _reasons.length
+              ? list.indexOf('id="${_reasons[i + 1]}"')
+              : list.length,
+        );
+        expect(item, contains('data-i="a${i + 1}t"'), reason: _reasons[i]);
+        expect(item, contains('data-i="a${i + 1}d"'), reason: _reasons[i]);
+      }
+      final Map<String, Map<String, String>> texts = _texts('index.html');
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        for (int i = 1; i <= _reasons.length; i++) {
+          expect(lang.value['a${i}t'], isNotEmpty, reason: '${lang.key} $i');
+          expect(
+            lang.value['a${i}d']!.length,
+            greaterThan(30),
+            reason: '${lang.key} $i',
+          );
+        }
+      }
+      // The first reason is privacy, the last the pyramid.
+      expect(texts['en']!['a1t'], 'Nobody reads your conversations');
+      expect(texts['pl']!['a1t'], 'Nikt nie czyta Twoich rozmów');
+      expect(texts['en']!['a7d'], contains('pyramid'));
+      expect(texts['pl']!['a7d'], contains('Piramida'));
+    });
+
+    test('what invites people never sells the offline links: not the '
+        'promise, the reasons, the poster nor the text to share', () {
+      final List<String> selling = <String>[
+        for (final String key in <String>['heroTitle', 'lead', 'desc'])
+          for (final String lang in <String>['en', 'pl'])
+            _texts('index.html')[lang]![key]!,
+        for (int i = 1; i <= _reasons.length; i++)
+          for (final String lang in <String>['en', 'pl'])
+            _texts('index.html')[lang]!['a${i}d']!,
+        for (final Map<String, String> t in _texts('promo/index.html').values)
+          ...t.values,
+        _read('promo/index.html'),
+        File('tool/ci/promo_materials.py').readAsStringSync(),
+      ];
+      for (final String text in selling) {
+        final String lower = text.toLowerCase();
+        for (final String word in <String>[
+          'internet',
+          'offline',
+          'bluetooth',
+          'wi-fi',
+          'wifi',
+        ]) {
+          expect(lower, isNot(contains(word)), reason: word);
+        }
+      }
+    });
+
+    test('the idea behind Zen is told on the about page in the author\'s '
+        'words, with a teaser on the home page', () {
+      final String about = _read('about/index.html');
+      final Map<String, Map<String, String>> texts = _texts('about/index.html');
+      final int toc = about.indexOf('href="#story"');
+      expect(toc, greaterThan(0));
+      expect(toc, lessThan(about.indexOf('href="#shots"')));
+      final int story = about.indexOf('<section id="story"');
+      expect(story, greaterThan(about.indexOf('<section id="what"')));
+      expect(story, lessThan(about.indexOf('<section id="shots"')));
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        for (int i = 1; i <= 6; i++) {
+          expect(
+            lang.value['story_$i']!.length,
+            greaterThan(40),
+            reason: '${lang.key} story_$i',
+          );
+        }
+        expect(
+          lang.value['storySig'],
+          contains('Robert Ostrowski-Jagoda'),
+          reason: lang.key,
+        );
+      }
+      // Openly about politics, and a social network first.
+      final String en = <String>[
+        for (int i = 1; i <= 6; i++) texts['en']!['story_$i']!,
+      ].join(' ');
+      final String pl = <String>[
+        for (int i = 1; i <= 6; i++) texts['pl']!['story_$i']!,
+      ].join(' ');
+      for (final String part in <String>[
+        'purely political app',
+        'social network first',
+        'pyramid',
+        'no headquarters',
+        'democracy',
+      ]) {
+        expect(en, contains(part), reason: part);
+      }
+      for (final String part in <String>[
+        'czysto politycznej aplikacji',
+        'najpierw zbudowałem sieć społecznościową',
+        'piramida',
+        'centrali',
+        'demokracja',
+      ]) {
+        expect(pl, contains(part), reason: part);
+      }
+      expect(texts['pl']!['story_t'], 'Co stoi za pomysłem');
+      // The home page's teaser leads there.
+      final String home = _read('index.html');
+      expect(home, contains('href="about/#story"'));
+      expect(_texts('index.html')['pl']!['story_t'], 'Co stoi za pomysłem');
+    });
+
+    test('the questions answer safety, the stores and a lost phone as the '
+        'guide does', () {
+      final String home = _read('index.html');
+      for (final String id in <String>[
+        'faq-safe',
+        'faq-store',
+        'faq-lost',
+        'faq-friends',
+      ]) {
+        expect(home, contains('<details class="acc" id="$id">'), reason: id);
+      }
+      final Map<String, Map<String, String>> texts = _texts('index.html');
+      for (final String way in <String>[
+        'another device',
+        'full account copy',
+        'key copy',
+        'recovery circle',
+        'forgot password',
+      ]) {
+        expect(texts['en']!['r3'], contains(way), reason: way);
+      }
+      for (final String way in <String>[
+        'drugiego urządzenia',
+        'kopii całego konta',
+        'kopii klucza',
+        'kręgu odzyskiwania',
+        'zapomniałem hasła',
+      ]) {
+        expect(texts['pl']!['r3'], contains(way), reason: way);
+      }
+      expect(texts['pl']!['q1'], 'Czy to bezpieczne?');
+      expect(texts['pl']!['q2'], 'Czemu nie ma go w sklepie?');
+      expect(texts['pl']!['q3'], 'Co jeśli zgubię telefon?');
+      for (final Map<String, String> t in texts.values) {
+        expect(t['r1'], contains('docs/SECURITY_MODEL.md]'));
+        expect(t['r2'], contains('|about/#stores]'));
+      }
+    });
+
+    test('the promo page offers the poster, the film, a text to share, the '
+        'QR codes and the app\'s own sticker, and is one tap away', () {
+      final String promo = _read('promo/index.html');
+      for (final String file in <String>[
+        ..._promoFiles.keys,
+        ..._filmFiles.keys,
+      ]) {
+        if (file.endsWith('-preview.webp')) {
+          expect(promo, contains('src="${file.substring(6)}"'), reason: file);
+        } else {
+          expect(promo, contains('"${file.substring(6)}"'), reason: file);
+        }
+      }
+      for (final String section in <String>[
+        'poster',
+        'film',
+        'share',
+        'qr',
+        'sticker',
+      ]) {
+        expect(promo, contains('<section class="sec" id="$section"'));
+      }
+      // The film never plays by itself and shows only once its files are
+      // published; until then a short note.
+      final String video = promo.substring(
+        promo.indexOf('<video'),
+        promo.indexOf('</video>'),
+      );
+      expect(video, contains('preload="none"'));
+      expect(video, contains('controls'));
+      expect(video, contains('poster="zen-promo-poster.jpg"'));
+      expect(video, isNot(contains('autoplay')));
+      expect(
+        promo,
+        contains('<figure id="promoFilm" class="promo-film hidden">'),
+      );
+      expect(promo, contains('method: "HEAD"'));
+      expect(promo, contains('data-i="filmSoon"'));
+      // Both texts to share name the about page, in their own language.
+      for (final String lang in <String>['pl', 'en']) {
+        final RegExpMatch share = RegExp(
+          '<div class="card share" lang="$lang">.*?<p id="share\\w+">([^<]+)</p>',
+          dotAll: true,
+        ).firstMatch(promo)!;
+        expect(share[1], endsWith(_aboutUrl), reason: lang);
+        expect(share[1], contains('Zen'), reason: lang);
+      }
+      expect(
+        _texts('promo/index.html')['en']!['sticker_d'],
+        allOf(contains('About'), contains('invitation')),
+      );
+      // In the footer of every page and on the about page.
+      final String js = _read('site.js');
+      expect(js, contains("ROOT + 'promo/\" data-i=\"footPromo\""));
+      for (final Map<String, String> t in _texts('site.js').values) {
+        expect(t['footPromo'], isNotEmpty);
+      }
+      expect(_read('about/index.html'), contains('href="../promo/"'));
+    });
+
+    test('the poster and the QR codes are there, in the A series\' '
+        'proportions and within their sizes; the film once it is there', () {
+      _promoFiles.forEach((String path, int limit) {
+        final File file = File('$_site/$path');
+        expect(
+          file.existsSync(),
+          isTrue,
+          reason: '$path: run `python tool/ci/promo_materials.py`',
+        );
+        expect(file.lengthSync(), lessThanOrEqualTo(limit), reason: path);
+        if (path.endsWith('.pdf')) {
+          final List<int> head = file.openSync().readSync(8);
+          expect(ascii.decode(head.sublist(0, 5)), '%PDF-', reason: path);
+          expect(
+            file.readAsStringSync(encoding: latin1),
+            contains('/MediaBox [0 0 595.28 841.89]'),
+          );
+        }
+      });
+      for (final String lang in <String>['pl', 'en']) {
+        // A4 at 300 dpi.
+        expect(_pngSize('$_site/promo/zen-poster-$lang.png'), (2480, 3508));
+        final (int w, int h) = _webpSize(
+          '$_site/promo/zen-poster-$lang-preview.webp',
+        );
+        expect((h / w * 1000).round(), (3508 / 2480 * 1000).round());
+      }
+      final (int qw, int qh) = _pngSize('$_site/promo/zen-qr-about.png');
+      expect(qw, qh);
+      expect(qw, greaterThanOrEqualTo(1000));
+      _filmFiles.forEach((String path, int limit) {
+        final File file = File('$_site/$path');
+        if (file.existsSync()) {
+          expect(file.lengthSync(), lessThanOrEqualTo(limit), reason: path);
+        }
+      });
+      for (final String file in <String>[
+        'tool/ci/promo_materials.py',
+        'tool/ci/qr.py',
+      ]) {
+        expect(File(file).existsSync(), isTrue, reason: file);
+      }
+    });
+
+    test('the QR code reads as the about page, at a level that survives '
+        'a worn print', () {
+      final String svg = _read('promo/zen-qr-about.svg');
+      final (String text, String level) = _readQr(_svgModules(svg), 4);
+      expect(text, _aboutUrl);
+      expect(level, 'Q');
+      expect(svg, contains('<title>QR: $_aboutUrl</title>'));
+      expect(
+        File('tool/ci/promo_materials.py').readAsStringSync(),
+        contains('ABOUT = "$_aboutUrl"'),
+      );
+    });
+
+    test('every relative link, picture and #fragment of the site leads to '
+        'something that is there', () {
+      final String js = _read('site.js');
+      final Set<String> icons = <String>{
+        for (final RegExpMatch m in RegExp(
+          r"^    (\w+): (?:'|\[)",
+          multiLine: true,
+        ).allMatches(js.substring(js.indexOf('var ICONS = {'))))
+          m[1]!,
+      };
+      expect(icons, containsAll(<String>['eyeoff', 'gift', 'printer']));
+      final List<String> missing = <String>[];
+      for (final String page in <String>[..._pages, '404.html']) {
+        // Comments are notes for whoever edits the page, not links.
+        final String html = _read(
+          page,
+        ).replaceAll(RegExp('<!--.*?-->', dotAll: true), '');
+        final String dir = page.contains('/')
+            ? page.substring(0, page.lastIndexOf('/') + 1)
+            : '';
+        final List<String> links = <String>[
+          ..._relativeLinks(html),
+          // Links inside the texts: [label|path].
+          for (final String text in _texts(page)['en']!.values)
+            for (final RegExpMatch m in RegExp(
+              r'\[[^|\]]+\|([^\]]+)\]',
+            ).allMatches(text))
+              if (m[1]!.contains('/') && !m[1]!.startsWith('http')) m[1]!,
+        ];
+        for (final String link in links) {
+          final String clean = link.split(' ').first;
+          final String fragment = clean.contains('#')
+              ? clean.substring(clean.indexOf('#') + 1)
+              : '';
+          String path = clean.replaceFirst(RegExp(r'[?#].*$'), '');
+          path = Uri.parse('x:/$dir').resolve(path).path.substring(1);
+          if (path.isEmpty || path.endsWith('/')) {
+            path = '${path}index.html';
+          }
+          if (_filmFiles.containsKey(path)) {
+            continue;
+          }
+          final File file = File('$_site/$path');
+          if (!file.existsSync()) {
+            missing.add('$page -> $link');
+          } else if (fragment.isNotEmpty &&
+              !_ids(file.readAsStringSync()).contains(fragment)) {
+            missing.add('$page -> $link (#$fragment)');
+          }
+        }
+        // "#id" on the page itself; "#i-name" is an icon of the shared
+        // script's sprite.
+        final Set<String> ids = _ids(html);
+        for (final RegExpMatch m in RegExp(
+          r'\shref="#([^"]+)"',
+        ).allMatches(html)) {
+          final String id = m[1]!;
+          final bool there = id.startsWith('i-')
+              ? icons.contains(id.substring(2))
+              : ids.contains(id);
+          if (!there) {
+            missing.add('$page -> #$id');
+          }
+        }
+      }
+      expect(missing, isEmpty);
+    });
+
+    test('only the rows meant to scroll sideways do, and no box is wider '
+        'than a phone', () {
+      final String css = _read('site.css');
+      final List<String> scrolling = <String>[];
+      for (final RegExpMatch m in RegExp(
+        r'([^{}]+)\{[^}]*overflow-x:\s*(auto|scroll)',
+      ).allMatches(css)) {
+        scrolling.add(m[1]!.trim().split('\n').last.trim());
+      }
+      expect(scrolling, <String>['pre', '.files-wrap', '.gallery-track']);
+      for (final RegExpMatch m in RegExp(
+        r'(?<![-\w])width:\s*(\d+)px',
+      ).allMatches(css)) {
+        expect(int.parse(m[1]!), lessThanOrEqualTo(340), reason: m[0]);
+      }
+      for (final String page in _pages) {
+        expect(_read(page), isNot(contains('100vw')), reason: page);
+      }
     });
   });
 }
