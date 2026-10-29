@@ -187,6 +187,52 @@ void main() {
   });
 
   test(
+    'a send after the node was stopped on purpose does not start it '
+    'again; one while it is not up yet or starting waits for the start',
+    () async {
+      int starts = 0;
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+        bootstrap: () async {
+          starts += 1;
+          return RuntimeNodeSession(
+            transport: MemorySignalTransport(),
+            snapshot: RuntimeTransportSnapshot.started(
+              localAddress: '200:1111:2222:3333:4444:5555:6666:7777',
+              peers: 1,
+            ),
+          );
+        },
+      );
+      addTearDown(runtime.dispose);
+      const String friend = '200:aaaa:bbbb:cccc:dddd:eeee:ffff:1111';
+      const Map<String, dynamic> ping = <String, dynamic>{'type': 'ping'};
+
+      // Not started yet: the first send starts the node.
+      await runtime.send(remoteAddress: friend, payload: ping);
+      expect(starts, 1);
+
+      // Closing the app, an account switch, a wipe: work still under way
+      // sends afterwards, and the node stays down.
+      await runtime.stop();
+      await expectLater(
+        runtime.send(remoteAddress: friend, payload: ping),
+        throwsStateError,
+      );
+      expect(await runtime.openRelay(callId: 'c', remoteAddress: friend), 0);
+      expect(starts, 1);
+      expect(runtime.snapshot.health, RuntimeTransportHealth.stopped);
+
+      // The owner starts it again: a send while that start runs waits for it.
+      final Future<void> starting = runtime.start();
+      await runtime.send(remoteAddress: friend, payload: ping);
+      await starting;
+      expect(starts, 2);
+      expect(runtime.snapshot.serviceRunning, isTrue);
+      await runtime.stop();
+    },
+  );
+
+  test(
     'the flat door runs with the node and comes back after a restart',
     () async {
       final List<String> doorCalls = <String>[];
