@@ -272,6 +272,7 @@ bool _fitsWithRealGlyphs(RenderParagraph paragraph) {
 Future<void> loadAppFonts() async {
   final Map<String, List<String>> families = <String, List<String>>{
     'Fredoka': <String>['assets/fonts/Fredoka-Variable.ttf'],
+    'Quicksand': <String>['assets/fonts/pebbles/Quicksand-Variable.ttf'],
     'Hanken Grotesk': <String>['assets/fonts/HankenGrotesk-Variable.ttf'],
     'JetBrains Mono': <String>['assets/fonts/JetBrainsMono-Variable.ttf'],
     'Space Mono': <String>[

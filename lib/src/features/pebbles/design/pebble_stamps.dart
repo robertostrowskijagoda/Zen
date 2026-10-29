@@ -1972,6 +1972,8 @@ StampPainter _glyphPainter(String g) => (Canvas c, StampInk k) {
       text: g,
       style: TextStyle(
         fontFamily: 'Fredoka',
+        // Fredoka has no ą, ć, ę, ń, ś, ź, ż: Quicksand draws those.
+        fontFamilyFallback: const <String>['Quicksand'],
         fontSize: 100,
         fontWeight: FontWeight.w700,
         color: k.main,
