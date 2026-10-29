@@ -34,7 +34,9 @@ import (
 //   - a newer app engine beats an older one (an old engine never wins back);
 //   - the app's claim beats the service (it asked the service to let go);
 //   - the service's claim beats an app that is not on screen (gone, locked,
-//     long in the background), never one on screen;
+//     long in the background), never one on screen; "on screen" is a word
+//     the app keeps saying (nodeOnScreenFor), and an engine the service
+//     names as gone is on no screen;
 //   - the same owner always takes its own node back;
 //   - a start that only restarts (no claim) never takes anyone's node over,
 //     except one nobody calls on any more.
@@ -46,6 +48,16 @@ import (
 // YggWaitSignal, at most a signal wait apart), so a node that heard from
 // nobody for nodeOrphanAfter is stopped, and the new start takes its key.
 const nodeOrphanAfter = 60 * time.Second
+
+// The app's word that it is on screen lasts this long unless it says it
+// again (it does every two seconds while on screen,
+// runtime_native_signal_transport.dart). An app engine that went away
+// without saying it left the screen keeps the service off its identity this
+// long at most: Android ends the engine of an app closed with "back" or
+// swiped away right after the last lifecycle events, and the Dart code that
+// would say "off screen" may never run. The service also names the engine
+// Android ended (nodeOwner.GoneApp), which frees the identity at once.
+const nodeOnScreenFor = 5 * time.Second
 
 // The key in the node config the app adds to name the owner of the node.
 const zenNodeOwnerKey = "ZenNodeOwner"
@@ -83,6 +95,10 @@ type nodeOwner struct {
 	// only takes a key that is free (or its own, or an orphan's).
 	Claim    bool `json:"claim"`
 	OnScreen bool `json:"onScreen"`
+	// The service's word that the app engine with this number is gone
+	// (Android ended it): that engine's node is not on screen, whatever it
+	// said last. 0 for none.
+	GoneApp uint64 `json:"goneApp,omitempty"`
 }
 
 // The next engine number (process-wide: the app's and the service's isolates
@@ -146,8 +162,9 @@ func outranks(contender, holder nodeOwner) (bool, error) {
 		}
 		return false, errNodeSuperseded
 	}
-	// The service against the app.
-	if holder.OnScreen {
+	// The service against the app (an engine the service knows is gone is
+	// on no screen).
+	if holder.OnScreen && (contender.GoneApp == 0 || contender.GoneApp != holder.Engine) {
 		return false, errNodeAppOnScreen
 	}
 	if contender.Claim {
@@ -163,6 +180,9 @@ type nodeIdentityClaim struct {
 	key string
 	// Who runs it (OnScreen changes; guarded by nodeIdentities).
 	owner nodeOwner
+	// Until when the app's word that it is on screen holds (on processClock;
+	// guarded by nodeIdentities): nodeOnScreenFor past its last word.
+	onScreenUntil time.Duration
 	// The node holding it once it runs (guarded by nodeIdentities).
 	node   *bridgeNode
 	handle int32
@@ -195,6 +215,11 @@ var processClock = time.Now()
 // touch notes a call on the node.
 func (node *bridgeNode) touch() {
 	node.lastCall.Store(int64(time.Since(processClock)))
+}
+
+// sinceProcessStart is the time on processClock.
+func sinceProcessStart() time.Duration {
+	return time.Since(processClock)
 }
 
 // idle is how long nobody called on the node.
@@ -230,7 +255,7 @@ func claimNodeIdentity(key string, owner nodeOwner) (*nodeIdentityClaim, error) 
 		}
 		if held.node.idle() >= nodeOrphanAfter {
 			reason = "nobody used it for " + held.node.idle().Round(time.Second).String()
-		} else if ok, err := outranks(owner, held.owner); ok {
+		} else if ok, err := outranks(owner, held.holder()); ok {
 			reason = "a newer owner (" + owner.Role + ") claimed it from the " + held.owner.Role
 		} else {
 			nodeIdentities.Unlock()
@@ -246,6 +271,9 @@ func claimNodeIdentity(key string, owner nodeOwner) (*nodeIdentityClaim, error) 
 		old, oldHandle = held.node, held.handle
 	}
 	claim := &nodeIdentityClaim{key: key, owner: owner}
+	if owner.OnScreen {
+		claim.onScreenUntil = sinceProcessStart() + nodeOnScreenFor
+	}
 	nodeIdentities.claims[key] = claim
 	nodeIdentities.Unlock()
 	if old != nil {
@@ -273,7 +301,8 @@ func (claim *nodeIdentityClaim) engine() uint64 {
 	return claim.owner.Engine
 }
 
-// setOnScreen notes whether the app that runs the node is on screen.
+// setOnScreen notes whether the app that runs the node is on screen; "on
+// screen" holds for nodeOnScreenFor unless the app says it again.
 func (claim *nodeIdentityClaim) setOnScreen(onScreen bool) {
 	if claim == nil {
 		return
@@ -281,6 +310,20 @@ func (claim *nodeIdentityClaim) setOnScreen(onScreen bool) {
 	nodeIdentities.Lock()
 	defer nodeIdentities.Unlock()
 	claim.owner.OnScreen = onScreen
+	claim.onScreenUntil = 0
+	if onScreen {
+		claim.onScreenUntil = sinceProcessStart() + nodeOnScreenFor
+	}
+}
+
+// holder is who runs the key now, as outranks weighs it: an app whose word
+// that it is on screen lapsed is off screen (guarded by nodeIdentities).
+func (claim *nodeIdentityClaim) holder() nodeOwner {
+	owner := claim.owner
+	if owner.OnScreen && sinceProcessStart() >= claim.onScreenUntil {
+		owner.OnScreen = false
+	}
+	return owner
 }
 
 // running tells the claim which node holds it now.
