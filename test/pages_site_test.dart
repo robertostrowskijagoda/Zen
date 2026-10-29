@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import '../tool/screenshots/shots.dart';
+
 // The website (tool/pages): what its pages must keep, read from the files.
 // The addresses people were given stay; every page can be read on a phone,
 // is drawn in the shared look, has the app icon and the language picker; the
@@ -109,6 +111,32 @@ List<Object?> _jsonLd(String page) => <Object?>[
       (bytes[at + 2] << 8) |
       bytes[at + 3];
   return (word(16), word(20));
+}
+
+/// Width and height of a WebP file: the canvas of an extended (animated)
+/// file, or the frame of a simple lossy or lossless one.
+(int, int) _webpSize(String path) {
+  final List<int> b = File(path).readAsBytesSync();
+  expect(ascii.decode(b.sublist(0, 4)), 'RIFF', reason: path);
+  expect(ascii.decode(b.sublist(8, 12)), 'WEBP', reason: path);
+  int le(int at, int n) {
+    int v = 0;
+    for (int i = n - 1; i >= 0; i--) {
+      v = (v << 8) | b[at + i];
+    }
+    return v;
+  }
+
+  switch (ascii.decode(b.sublist(12, 16))) {
+    case 'VP8X':
+      return (le(24, 3) + 1, le(27, 3) + 1);
+    case 'VP8 ':
+      return (le(26, 2) & 0x3fff, le(28, 2) & 0x3fff);
+    case 'VP8L':
+      final int bits = le(21, 4);
+      return ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1);
+  }
+  fail('$path: not a WebP picture');
 }
 
 /// The way up from [page] to the root of the site: "", "../", "../../".
@@ -785,7 +813,7 @@ void main() {
       for (final FileSystemEntity f in Directory(
         _site,
       ).listSync(recursive: true)) {
-        if (f is! File || f.path.endsWith('.png')) {
+        if (f is! File || f.path.endsWith('.png') || f.path.endsWith('.webp')) {
           continue;
         }
         final String text = f.readAsStringSync().toLowerCase();
@@ -831,6 +859,214 @@ void main() {
         expect(html, contains('class="btn'), reason: os);
         expect(html, contains('data-i='), reason: os);
       }
+    });
+  });
+
+  group('screenshots of the app', () {
+    test('every picture and film the pages show is in shots/, small enough, '
+        'and nothing else is there', () {
+      final Map<String, int> expected = expectedShotFiles();
+      expect(expected, isNotEmpty);
+      expected.forEach((String path, int limit) {
+        final File file = File('$_site/$path');
+        expect(
+          file.existsSync(),
+          isTrue,
+          reason: '$path is missing: run `dart run tool/screenshots.dart`',
+        );
+        expect(file.lengthSync(), lessThanOrEqualTo(limit), reason: path);
+      });
+      final List<String> kept = <String>[
+        for (final FileSystemEntity e in Directory(
+          kShotsDir,
+        ).listSync(recursive: true))
+          if (e is File)
+            e.path.replaceAll(r'\', '/').substring('$_site/'.length),
+      ];
+      expect(kept.toSet(), expected.keys.toSet());
+    });
+
+    test('the pictures are WebP of the phone and computer sizes, the films '
+        "at half the phone's", () {
+      final (int, int) filmSize = (
+        (ShotSize.phone.pixelWidth * kFilmScale).round(),
+        (ShotSize.phone.pixelHeight * kFilmScale).round(),
+      );
+      for (final String lang in kShotLanguages) {
+        for (final String theme in kShotThemes) {
+          for (final SiteShot shot in kSiteShots) {
+            expect(_webpSize('$_site/${shotPath(lang, shot.id, theme)}'), (
+              shot.size.pixelWidth,
+              shot.size.pixelHeight,
+            ), reason: '$lang ${shot.id} $theme');
+          }
+          for (final SiteFilm film in kSiteFilms) {
+            expect(
+              _webpSize('$_site/${filmPath(lang, film.id, theme)}'),
+              filmSize,
+            );
+            expect(
+              _webpSize('$_site/${posterPath(lang, film.id, theme)}'),
+              filmSize,
+            );
+          }
+        }
+      }
+    });
+
+    test('every screenshot loads lazily, keeps its size, has a dark variant '
+        'and an alt text in every language', () {
+      final Map<String, Map<String, String>> common = _texts('site.js');
+      int count = 0;
+      for (final String page in _pages) {
+        final String html = _read(page);
+        for (final RegExpMatch m in RegExp(
+          r'<picture>(.*?)</picture>',
+          dotAll: true,
+        ).allMatches(html)) {
+          final String picture = m[1]!;
+          if (!picture.contains('shots/')) {
+            continue;
+          }
+          count++;
+          final String img = RegExp(r'<img [^>]*>').firstMatch(picture)![0]!;
+          expect(img, contains('loading="lazy"'), reason: '$page $img');
+          expect(img, contains('decoding="async"'), reason: '$page $img');
+          expect(img, matches(RegExp(r'width="\d+" height="\d+"')));
+          final String src = RegExp(r'src="([^"]+)"').firstMatch(img)![1]!;
+          expect(src, startsWith('${_up(page)}shots/$kShotFallbackLanguage/'));
+          final String file = src.substring(_up(page).length);
+          expect(File('$_site/$file').existsSync(), isTrue, reason: file);
+          expect(
+            picture,
+            contains(
+              '<source media="(prefers-color-scheme: dark)" srcset="'
+              '${src.replaceFirst('-light.webp', '-dark.webp')}">',
+            ),
+            reason: '$page $src',
+          );
+          final String key = RegExp(r'data-ia="(\w+)"').firstMatch(img)![1]!;
+          final String alt = RegExp(r'alt="([^"]+)"').firstMatch(img)![1]!;
+          expect(_unescape(alt), common['en']![key], reason: '$page $key');
+          for (final MapEntry<String, Map<String, String>> lang
+              in common.entries) {
+            expect(
+              lang.value[key]?.length ?? 0,
+              greaterThan(8),
+              reason: '${lang.key} $key',
+            );
+          }
+        }
+      }
+      expect(count, greaterThanOrEqualTo(kSiteShots.length + 10));
+    });
+
+    test('the features page shows every screen and both films; the home and '
+        'about pages a gallery of their own', () {
+      final String features = _read('features/index.html');
+      for (final SiteShot shot in kSiteShots) {
+        final String path = shotPath(kShotFallbackLanguage, shot.id, 'light');
+        expect(features, contains('src="../$path"'), reason: shot.id);
+      }
+      for (final SiteFilm film in kSiteFilms) {
+        final String path = filmPath(kShotFallbackLanguage, film.id, 'light');
+        expect(features, contains('src="../$path"'), reason: film.id);
+      }
+      for (final String page in <String>[
+        'index.html',
+        'about/index.html',
+        'features/index.html',
+      ]) {
+        final String html = _read(page);
+        expect(html, contains('<div class="gallery">'), reason: page);
+        expect(
+          html,
+          contains(
+            '<div class="gallery-track" tabindex="0" role="region" '
+            'data-ial="galleryLabel"',
+          ),
+          reason: 'a keyboard reaches the row: $page',
+        );
+        for (final String button in <String>['Prev', 'Next']) {
+          expect(
+            html,
+            contains(
+              'class="gallery-${button.toLowerCase()}" type="button" '
+              'data-ial="gallery$button"',
+            ),
+            reason: '$page $button',
+          );
+        }
+        expect(html, contains('data-i="shotsTitle"'), reason: page);
+      }
+      // On the about page the section is in the table of contents too.
+      expect(_read('about/index.html'), contains('href="#shots"'));
+    });
+
+    test("a visitor who asked for less motion sees the films' still "
+        'posters', () {
+      final String features = _read('features/index.html');
+      final List<String> films = <String>[
+        for (final RegExpMatch m in RegExp(
+          r'<figure class="film">(.*?)</figure>',
+          dotAll: true,
+        ).allMatches(features))
+          m[1]!,
+      ];
+      expect(films, hasLength(kSiteFilms.length));
+      for (final String film in films) {
+        final int still = film.indexOf(
+          'media="(prefers-reduced-motion: reduce) and '
+          '(prefers-color-scheme: dark)"',
+        );
+        final int stillLight = film.indexOf(
+          'media="(prefers-reduced-motion: reduce)"',
+        );
+        final int moving = film.indexOf('media="(prefers-color-scheme: dark)"');
+        // The first source that fits wins: the posters come first.
+        expect(still, greaterThan(0));
+        expect(stillLight, greaterThan(still));
+        expect(moving, greaterThan(stillLight));
+        expect(film, contains('-poster.webp'));
+      }
+    });
+
+    test('the pictures follow the language shown (English where there are '
+        'none), and the row scrolls by itself, never the page', () {
+      final String js = _read('site.js');
+      final RegExpMatch langs = RegExp(
+        r'var SHOT_LANGS = \[([^\]]*)\];',
+      ).firstMatch(js)!;
+      expect(
+        RegExp(r'"(\w+)"').allMatches(langs[1]!).map((RegExpMatch m) => m[1]),
+        kShotLanguages,
+      );
+      expect(js, contains('function showShots()'));
+      expect(js, contains('function galleries()'));
+      expect(js, contains('prefers-reduced-motion: reduce'));
+      for (final String key in <String>['ArrowLeft', 'ArrowRight', 'Home']) {
+        expect(js, contains('"$key"'), reason: key);
+      }
+      final String css = _read('site.css');
+      final int at = css.indexOf('.gallery-track {');
+      final String track = css.substring(at, css.indexOf('}', at));
+      expect(track, contains('overflow-x: auto'));
+      expect(track, contains('scroll-snap-type: x mandatory'));
+    });
+
+    test('they are made by tool/screenshots.dart, which CI runs to check '
+        'that none is missing', () {
+      for (final String file in <String>[
+        'tool/screenshots.dart',
+        'tool/screenshots/site_screens_test.dart',
+        'tool/screenshots/encode.py',
+      ]) {
+        expect(File(file).existsSync(), isTrue, reason: file);
+      }
+      expect(
+        File('.github/workflows/ci.yml').readAsStringSync(),
+        contains('dart run tool/screenshots.dart --check'),
+      );
     });
   });
 
