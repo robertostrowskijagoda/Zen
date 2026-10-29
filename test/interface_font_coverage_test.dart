@@ -6,12 +6,12 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 
 import 'support/font_cmap.dart';
 
-// The title face of the app (Fredoka) stops at Latin-1: it has no ą, ć, ę,
-// ń, ś, ź, ż, č, ř, ů, ő, ű, ș, ț, ğ, ş or Vietnamese letters. Its
-// fallbacks (the bundled Quicksand and Hanken Grotesk) draw them, so a
-// title is never finished by the phone's own font in the middle of a word.
-// This checks, from the font files themselves, that every letter of every
-// Latin-script language Zen speaks has a glyph in the title face chain.
+// The title face of the app is Baloo 2. It has a glyph for every Latin
+// letter of every language Zen speaks (ą, ć, ę, ń, ś, ź, ż, č, ř, ů, ő, ű,
+// ș, ț, ğ, ş and the Vietnamese letters among them), so a title is never
+// finished by another font, or by the phone's own, in the middle of a word.
+// This checks, from the font file itself and with no fallback to lean on,
+// that every such letter has a glyph in Baloo 2.
 //
 // There is no pl.json: Polish is the language of the code, so its texts are
 // the keys of the translation files.
@@ -30,12 +30,6 @@ Set<int> _familyCharacters(String family) => <int>{
   for (final String path in _filesOf(family))
     ...fontCharacters(File(path).readAsBytesSync()),
 };
-
-/// The title face and its fallbacks, in the order the engine tries them.
-List<String> _titleChain() => <String>[
-  ZenTypefaces.zen.display,
-  ...ZenTypefaces.zen.displayFallback,
-];
 
 /// The letters of a text that a Latin-script font is expected to draw:
 /// Latin letters (basic, Latin-1 to Latin Extended-B, IPA-free, and the
@@ -69,21 +63,18 @@ String _show(Iterable<int> chars) => chars
     .join(', ');
 
 void main() {
-  final Set<int> chain = <int>{
-    for (final String family in _titleChain()) ..._familyCharacters(family),
-  };
+  final Set<int> title = _familyCharacters(ZenTypefaces.zen.display);
 
-  test('every font of the title face chain is bundled and registered', () {
-    for (final String family in _titleChain()) {
-      final List<String> files = _filesOf(family);
-      expect(files, isNotEmpty);
-      for (final String path in files) {
-        expect(File(path).existsSync(), isTrue, reason: path);
-      }
+  test('the title font is Baloo 2, bundled and registered', () {
+    expect(ZenTypefaces.zen.display, 'Baloo 2');
+    final List<String> files = _filesOf(ZenTypefaces.zen.display);
+    expect(files, isNotEmpty);
+    for (final String path in files) {
+      expect(File(path).existsSync(), isTrue, reason: path);
     }
   });
 
-  test('the title face chain draws every letter of the Polish texts', () {
+  test('Baloo 2 draws every letter of the Polish texts on its own', () {
     final Map<String, dynamic> en =
         jsonDecode(File('assets/i18n/en.json').readAsStringSync())
             as Map<String, dynamic>;
@@ -102,11 +93,11 @@ void main() {
     }
     polish.addAll('ąćęłńóśźżĄĆĘŁŃÓŚŹŻ'.runes);
     final List<int> missing =
-        polish.where((int c) => !chain.contains(c)).toList()..sort();
+        polish.where((int c) => !title.contains(c)).toList()..sort();
     expect(missing, isEmpty, reason: 'no glyph for ${_show(missing)}');
   });
 
-  test('the title face chain draws the Latin letters of every language', () {
+  test('Baloo 2 draws the Latin letters of every language on its own', () {
     final List<File> files =
         Directory('assets/i18n')
             .listSync()
@@ -119,7 +110,7 @@ void main() {
       final Set<int> letters = <int>{};
       _collect(jsonDecode(file.readAsStringSync()), letters);
       final List<int> missing =
-          letters.where((int c) => !chain.contains(c)).toList()..sort();
+          letters.where((int c) => !title.contains(c)).toList()..sort();
       expect(
         missing,
         isEmpty,
@@ -128,14 +119,11 @@ void main() {
     }
   });
 
-  test('Fredoka itself still lacks the Polish letters its fallback draws', () {
-    // The reason for the fallback: if a new Fredoka has them one day, this
-    // fails and the fallback can go.
-    final Set<int> fredoka = _familyCharacters(ZenText.displayFamily);
-    final Set<int> gap = _familyCharacters(ZenText.displayGapFamily);
-    for (final int c in 'ąćęńśźż'.runes) {
-      expect(fredoka, isNot(contains(c)), reason: String.fromCharCode(c));
-      expect(gap, contains(c), reason: String.fromCharCode(c));
-    }
+  test('no title font is left over from before Baloo 2', () {
+    expect(registeredFonts().keys, isNot(contains('Fredoka')));
+    expect(
+      File('assets/fonts/Fredoka-Variable.ttf').existsSync(),
+      isFalse,
+    );
   });
 }

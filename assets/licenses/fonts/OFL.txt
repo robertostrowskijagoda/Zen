@@ -1,4 +1,4 @@
-Copyright 2016 The Fredoka Project Authors (https://github.com/hafontia/Fredoka-One)
+Copyright 2019 The Baloo 2 Project Authors (https://github.com/EkType/Baloo2)
 Copyright 2021 The Hanken Grotesk Project Authors (https://github.com/marcologous/hanken-grotesk)
 Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)

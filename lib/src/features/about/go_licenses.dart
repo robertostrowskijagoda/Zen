@@ -136,7 +136,7 @@ Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
   final String? fonts = await _load(assets, kFontLicensePath);
   if (fonts != null) {
     yield LicenseEntryWithLineBreaks(const <String>[
-      'Fredoka',
+      'Baloo 2',
       'Hanken Grotesk',
       'JetBrains Mono',
       'Space Mono',

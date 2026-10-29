@@ -1971,13 +1971,14 @@ StampPainter _glyphPainter(String g) => (Canvas c, StampInk k) {
     text: TextSpan(
       text: g,
       style: TextStyle(
-        fontFamily: 'Fredoka',
-        // Fredoka has no ą, ć, ę, ń, ś, ź, ż: Quicksand draws those.
-        fontFamilyFallback: const <String>['Quicksand'],
+        fontFamily: 'Baloo 2',
+        fontFamilyFallback: const <String>['Hanken Grotesk'],
         fontSize: 100,
         fontWeight: FontWeight.w700,
         color: k.main,
-        height: 1,
+        // Baloo 2's capitals are 0.6 em tall in a 1.6 em line: a shorter
+        // line makes the letters as big as they were.
+        height: 0.9,
       ),
     ),
     textDirection: TextDirection.ltr,

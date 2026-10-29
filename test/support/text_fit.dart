@@ -271,7 +271,7 @@ bool _fitsWithRealGlyphs(RenderParagraph paragraph) {
 /// draws every letter a full square wide).
 Future<void> loadAppFonts() async {
   final Map<String, List<String>> families = <String, List<String>>{
-    'Fredoka': <String>['assets/fonts/Fredoka-Variable.ttf'],
+    'Baloo 2': <String>['assets/fonts/Baloo2-Variable.ttf'],
     'Quicksand': <String>['assets/fonts/pebbles/Quicksand-Variable.ttf'],
     'Hanken Grotesk': <String>['assets/fonts/HankenGrotesk-Variable.ttf'],
     'JetBrains Mono': <String>['assets/fonts/JetBrainsMono-Variable.ttf'],

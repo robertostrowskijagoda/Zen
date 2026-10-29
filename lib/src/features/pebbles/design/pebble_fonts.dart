@@ -8,7 +8,8 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 /// its licence), every one with the Polish letters. The index is stored in
 /// a design's text: add new ones at the end only. The first was the app's
 /// Fredoka in the first test builds; it has no ą, ć, ę, ń, ś, ź or ż, so
-/// Quicksand, as round, took its place.
+/// Quicksand, as round, took its place (the app's own title face is now
+/// Baloo 2, which has them).
 enum PebbleFont {
   rounded('Quicksand', FontWeight.w700),
   hankenGrotesk('Hanken Grotesk', FontWeight.w700),

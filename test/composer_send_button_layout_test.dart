@@ -39,7 +39,7 @@ const Map<String, ({double x, double cap})?> _faces =
     <String, ({double x, double cap})?>{
       // The app's own.
       'Hanken Grotesk': (x: 0.493, cap: 0.697),
-      'Fredoka': (x: 0.5, cap: 0.7),
+      'Baloo 2': (x: 0.46, cap: 0.602),
       'DM Sans': (x: 0.526, cap: 0.7),
       // A tall ascent (1.12 em), like some phones' own fonts.
       'Space Mono': (x: 0.496, cap: 0.7),
