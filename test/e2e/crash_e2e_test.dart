@@ -81,8 +81,32 @@ Future<void> replaceFolder(Directory folder, Directory copy) async {
     if (e is File &&
         !_isLog(e.path) &&
         !File('${copy.path}$relative').existsSync()) {
-      await e.delete();
+      await _deleteSoon(e);
     }
   }
   await copyFolder(copy, folder);
+}
+
+/// Deletes [file], waiting a moment for a write of the stopped device that
+/// is still under way: Windows refuses to delete a file that is open. The
+/// temporary file of a write that does not finish stays, as after a power
+/// cut (the app removes such leftovers itself, binary_store.dart).
+Future<void> _deleteSoon(File file) async {
+  for (int attempt = 0; ; attempt++) {
+    try {
+      await file.delete();
+      return;
+    } on FileSystemException {
+      if (!file.existsSync()) {
+        return;
+      }
+      if (attempt >= 20) {
+        if (file.path.endsWith('.tmp')) {
+          return;
+        }
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
 }
