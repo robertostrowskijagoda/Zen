@@ -89,6 +89,7 @@ List buildRelayTransportProviderOverrides({
           // Only an iPhone asks the settings.
           iosKeepAlive:
               defaultTargetPlatform == TargetPlatform.iOS &&
+              ref.mounted &&
               ref.read(appSettingsControllerProvider).keepReceivingInBackground,
         ),
       );
@@ -118,6 +119,9 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
     // social hub needs the transport — reading it now is a provider cycle
     // (the background service would fail to start).
     scheduleMicrotask(() {
+      if (!_ref.mounted) {
+        return;
+      }
       unawaited(
         _ref
             .read(socialHubControllerProvider.notifier)
@@ -127,18 +131,30 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
     });
   }
 
+  /// The engine's provider's: gone once the app closes or another account
+  /// opens, while an operation of the engine may still be under way (a
+  /// message queued while closing). The friends are then unknown, as
+  /// before they were read ([isReady]), instead of a read that throws.
   final Ref _ref;
   bool _ready = false;
+  String _localAddress = '';
 
   @override
-  bool get isReady => _ready;
+  bool get isReady => _ready && _ref.mounted;
 
   @override
-  String get localAddress =>
-      _ref.read(runtimeNodeSnapshotProvider).localAddress;
+  String get localAddress {
+    if (_ref.mounted) {
+      _localAddress = _ref.read(runtimeNodeSnapshotProvider).localAddress;
+    }
+    return _localAddress;
+  }
 
   @override
   List<RelayFriend> acceptedFriends() {
+    if (!_ref.mounted) {
+      return const <RelayFriend>[];
+    }
     final FriendLevelLookup levels = _ref.read(friendLevelLookupProvider);
     final AccountDeviceDirectory? devices = _ref
         .read(accountDirectoryHolderProvider)
@@ -181,6 +197,9 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
 
   @override
   List<RelayFriend> groupContacts() {
+    if (!_ref.mounted) {
+      return const <RelayFriend>[];
+    }
     final SocialHubState state = _ref.read(socialHubControllerProvider);
     final String self = PeerShareCodec.normalizeAddress(localAddress);
     final Set<String> seen = <String>{};

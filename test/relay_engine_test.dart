@@ -1,13 +1,16 @@
 import 'dart:collection';
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/locked_mailbox_writer.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -256,6 +259,35 @@ Future<_SimMesh> _meshWithRelays() async {
 }
 
 void main() {
+  test('a message queued while the app closes is kept, not lost to the '
+      "engine's providers being gone", () async {
+    final MemoryRelayStateStore store = MemoryRelayStateStore();
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async => throw StateError('no node in this test'),
+    );
+    addTearDown(runtime.dispose);
+    // Stopped with the app: the first try fails at once, the copy waits.
+    await runtime.stop();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        ...buildRelayTransportProviderOverrides(
+          runtime: runtime,
+          relayStateStore: store,
+        ),
+      ],
+    );
+    final RelayEngine engine = container.read(relayEngineProvider)!;
+    // The app closes (or another account opens) while a send is under way.
+    container.dispose();
+    await engine.submit(bob, _text('pa'));
+    expect(
+      (await store.load()).outbox.values.map(
+        (RelayOutboxEntry e) => e.recipient,
+      ),
+      <String>[bob],
+    );
+  });
+
   test(
     'online recipient gets the message exactly once, outbox clears',
     () async {

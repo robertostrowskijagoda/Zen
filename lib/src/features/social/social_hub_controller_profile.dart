@@ -70,7 +70,9 @@ mixin _SocialHubProfileMixin on _SocialHubControllerBase {
     String peerAddress,
     Map<String, dynamic> payload,
   ) async {
-    if (!isRoutablePeerAddress(peerAddress)) {
+    // After the payload was built (its photo read): the app may have closed
+    // meanwhile, its providers with it.
+    if (!isRoutablePeerAddress(peerAddress) || !ref.mounted) {
       return;
     }
     try {
