@@ -27,6 +27,9 @@
   job installs without it, and only ci-image.yml may write packages.
 - The emulator workflow caches Gradle, the release workflow nothing.
 - ci_summary.py adds up the reports of several test runs.
+- The printable QR stickers: their job writes them with the test that
+  makes them and reads them with zbar; decode_qr_stickers.py fails on a
+  missing picture or a wrong reading.
 
 Standard library only.
 """
@@ -48,6 +51,7 @@ sys.path.insert(0, os.path.join(ROOT, "tool", "ci"))
 import check_page_alignment  # noqa: E402
 import check_windows_bundle  # noqa: E402
 import ci_plan  # noqa: E402
+import decode_qr_stickers  # noqa: E402
 
 
 def elf(is64=True, aligns=(0x4000, 0x4000)):
@@ -689,6 +693,45 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(results["never_run"], [("test/a_test.dart", "bridge")])
         self.assertIsNone(ci_summary.test_results([missing]))
         self.assertIsNone(ci_summary.test_results([]))
+
+
+class QrStickersTest(unittest.TestCase):
+    """The printable QR stickers, read again by zbar in their own job."""
+
+    def test_their_job_writes_and_reads_them(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            job = WorkflowTest.jobs(f.read())["qr-stickers"]
+        self.assertIn("zbar-tools", job)
+        self.assertIn("ZEN_QR_STICKER_OUT: build/qr-stickers", job)
+        self.assertIn("python3 tool/ci/decode_qr_stickers.py build/qr-stickers", job)
+        name = re.search(r"--plain-name '([^']+)'", job).group(1)
+        with open(os.path.join(ROOT, "test/qr_sticker_test.dart"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("test('%s'" % name, text)
+        self.assertIn("Platform.environment['ZEN_QR_STICKER_OUT']", text)
+
+    def test_a_wrong_or_missing_picture_fails(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder)
+        expected = {"a.png": "https://a/", "b.png": "https://b/", "c.png": "https://c/"}
+        with open(os.path.join(folder, "expected.json"), "w", encoding="utf-8") as f:
+            json.dump(expected, f)
+        for name in ("a.png", "b.png"):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(b"png")
+        readings = {"a.png": "https://a/", "b.png": "https://x/"}
+        original = decode_qr_stickers.decode
+        decode_qr_stickers.decode = lambda path: readings[os.path.basename(path)]
+        self.addCleanup(setattr, decode_qr_stickers, "decode", original)
+        self.assertEqual(decode_qr_stickers.main(["x", folder]), 1)
+        readings["b.png"] = "https://b/"
+        with open(os.path.join(folder, "c.png"), "wb") as f:
+            f.write(b"png")
+        readings["c.png"] = "https://c/"
+        self.assertEqual(decode_qr_stickers.main(["x", folder]), 0)
+        with open(os.path.join(folder, "expected.json"), "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        self.assertEqual(decode_qr_stickers.main(["x", folder]), 1)
 
 
 class GoBridgeExportsTest(unittest.TestCase):
