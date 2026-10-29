@@ -369,7 +369,7 @@ void main() {
       );
       expect(
         bottom.controller!.text,
-        'Prywatny komunikator bez serwerów — zeskanuj',
+        'Prywatna sieć społecznościowa — zeskanuj',
       );
       if (me == null) {
         // No address yet: only the page about Zen.

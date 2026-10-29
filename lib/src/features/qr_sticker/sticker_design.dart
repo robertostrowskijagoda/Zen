@@ -339,7 +339,7 @@ List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
       StickerTexts(bottom: t('Zeskanuj, żeby dodać mnie do znajomych')),
       StickerTexts(
         top: t('Dołącz do mnie w Zen'),
-        bottom: t('Prywatny komunikator bez serwerów — zeskanuj'),
+        bottom: t('Prywatna sieć społecznościowa — zeskanuj'),
       ),
       StickerTexts(top: t('Dodaj mnie w Zen')),
     ],
@@ -361,7 +361,7 @@ List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
     ],
     StickerKind.installPage => <StickerTexts>[
       StickerTexts(top: 'Zen', bottom: t('Zeskanuj i zainstaluj Zen')),
-      StickerTexts(bottom: t('Prywatny komunikator bez serwerów — zeskanuj')),
+      StickerTexts(bottom: t('Prywatna sieć społecznościowa — zeskanuj')),
     ],
     StickerKind.donation => <StickerTexts>[
       StickerTexts(
@@ -376,7 +376,7 @@ List<StickerTexts> stickerPresets(StickerKind kind, {String name = ''}) {
       StickerTexts(
         top: 'Zen',
         caption: t('Bez serwerów · bez reklam · bez algorytmu'),
-        bottom: t('Prywatny komunikator bez serwerów — zeskanuj'),
+        bottom: t('Prywatna sieć społecznościowa — zeskanuj'),
       ),
       StickerTexts(
         top: t('Poznaj Zen'),

@@ -181,7 +181,7 @@ void main() {
         const StickerTexts(
           top: 'Bardzo długi napis na górze naklejki, który musi się zmieścić',
           bottom:
-              'Prywatny komunikator bez serwerów — zeskanuj i dołącz do nas '
+              'Prywatna sieć społecznościowa — zeskanuj i dołącz do nas '
               'jeszcze dziś, zapraszamy serdecznie',
         ),
       ]) {
@@ -571,7 +571,7 @@ void main() {
     );
     expect(
       stickerPresets(StickerKind.zenAbout).map((StickerTexts p) => p.bottom),
-      contains('Prywatny komunikator bez serwerów — zeskanuj'),
+      contains('Prywatna sieć społecznościowa — zeskanuj'),
     );
   });
 

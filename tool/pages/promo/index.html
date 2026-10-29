@@ -105,13 +105,15 @@
     <h2 id="filmTitle" data-i="film_t">Short film</h2>
     <p class="sub" data-i="film_d">A short film about Zen. It starts only when you press play; download it to share it anywhere.</p>
     <figure id="promoFilm" class="promo-film hidden">
-      <video controls playsinline preload="none" poster="zen-promo-poster.jpg" width="1080" height="1920" data-ial="filmLabel" aria-label="Zen promo film">
-        <source src="zen-promo.webm" type="video/webm">
-        <source src="zen-promo.mp4" type="video/mp4">
+      <video controls playsinline preload="none" poster="zen-promo-poster-en.jpg" width="1080" height="1920" data-ial="filmLabel" aria-label="Zen promo film">
+        <source data-film="webm" src="zen-promo-en.webm" type="video/webm">
+        <source data-film="mp4" src="zen-promo-en.mp4" type="video/mp4">
+        <track data-film="vtt" kind="captions" src="zen-promo-en.vtt" srclang="en" label="Captions" default>
       </video>
       <figcaption class="dl">
-        <a class="chip" href="zen-promo.mp4" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>MP4</a>
-        <a class="chip" href="zen-promo.webm" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>WebM</a>
+        <a class="chip" data-film="mp4" href="zen-promo-en.mp4" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>MP4 9:16</a>
+        <a class="chip" data-film="mp4wide" href="zen-promo-en-16x9.mp4" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>MP4 16:9</a>
+        <a class="chip" data-film="webm" href="zen-promo-en.webm" download><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>WebM</a>
       </figcaption>
     </figure>
     <p id="filmSoon" class="hint hidden" data-i="filmSoon">The film will be here soon.</p>
@@ -195,7 +197,36 @@
   var film = document.getElementById("promoFilm");
   var soon = document.getElementById("filmSoon");
   function show(ok) { (ok ? film : soon).classList.remove("hidden"); }
-  Promise.all(["zen-promo.mp4", "zen-promo.webm", "zen-promo-poster.jpg"].map(function (f) {
+  // The Polish film for Polish, the English one for every other language.
+  var video = film.querySelector("video");
+  var files = {
+    mp4: function (l) { return "zen-promo-" + l + ".mp4"; },
+    mp4wide: function (l) { return "zen-promo-" + l + "-16x9.mp4"; },
+    webm: function (l) { return "zen-promo-" + l + ".webm"; },
+    vtt: function (l) { return "zen-promo-" + l + ".vtt"; }
+  };
+  var shown = null;
+  function filmLang() {
+    return (document.documentElement.lang || "en").slice(0, 2) === "pl" ? "pl" : "en";
+  }
+  function useFilm() {
+    var l = filmLang();
+    if (l === shown) { return; }
+    shown = l;
+    Array.prototype.forEach.call(film.querySelectorAll("[data-film]"), function (el) {
+      var f = files[el.getAttribute("data-film")](l);
+      el.setAttribute(el.tagName === "A" ? "href" : "src", f);
+      if (el.tagName === "TRACK") { el.setAttribute("srclang", l); }
+    });
+    video.setAttribute("poster", "zen-promo-poster-" + l + ".jpg");
+    video.load();
+  }
+  useFilm();
+  new MutationObserver(useFilm).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  Promise.all([
+    "zen-promo-pl.mp4", "zen-promo-en.mp4", "zen-promo-pl-16x9.mp4", "zen-promo-en-16x9.mp4",
+    "zen-promo-pl.webm", "zen-promo-en.webm", "zen-promo-poster-pl.jpg", "zen-promo-poster-en.jpg"
+  ].map(function (f) {
     return fetch(f, { method: "HEAD", cache: "no-cache" }).then(function (r) { return r.ok; });
   })).then(function (ok) { show(ok.indexOf(false) < 0); }, function () { show(false); });
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (b) {

@@ -204,9 +204,14 @@ const Map<String, int> _promoFiles = <String, int>{
 
 /// The promo film, made apart from the site: checked once it is there.
 const Map<String, int> _filmFiles = <String, int>{
-  'promo/zen-promo.mp4': 20 * 1024 * 1024,
-  'promo/zen-promo.webm': 20 * 1024 * 1024,
-  'promo/zen-promo-poster.jpg': 600 * 1024,
+  'promo/zen-promo-pl.mp4': 20 * 1024 * 1024,
+  'promo/zen-promo-en.mp4': 20 * 1024 * 1024,
+  'promo/zen-promo-pl-16x9.mp4': 20 * 1024 * 1024,
+  'promo/zen-promo-en-16x9.mp4': 20 * 1024 * 1024,
+  'promo/zen-promo-pl.webm': 20 * 1024 * 1024,
+  'promo/zen-promo-en.webm': 20 * 1024 * 1024,
+  'promo/zen-promo-poster-pl.jpg': 600 * 1024,
+  'promo/zen-promo-poster-en.jpg': 600 * 1024,
 };
 
 /// The dark modules of a QR code drawn as an SVG path of runs
@@ -1583,7 +1588,8 @@ void main() {
       );
       expect(video, contains('preload="none"'));
       expect(video, contains('controls'));
-      expect(video, contains('poster="zen-promo-poster.jpg"'));
+      expect(video, contains('poster="zen-promo-poster-en.jpg"'));
+      expect(video, contains('kind="captions"'));
       expect(video, isNot(contains('autoplay')));
       expect(
         promo,
