@@ -9,8 +9,9 @@ import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 /// One identity in one process, settled the way node_identity.go in the
 /// bridge settles it (its own tests hold the full table): a newer app
 /// engine wins, the app's claim beats the service, the service's claim
-/// beats an app off screen and never one on screen, a restart without a
-/// claim takes nobody's node, and calls on a node taken over say so.
+/// beats an app off screen and never one on screen (but one that names the
+/// app's engine as gone), a restart without a claim takes nobody's node,
+/// and calls on a node taken over say so.
 final class _Process {
   int _engines = 0;
   _Node? running;
@@ -47,6 +48,7 @@ final class _Process {
       setOnScreen: (bool onScreen) {
         node.check();
         node.onScreen = onScreen;
+        node.words.add(onScreen);
       },
     );
   }
@@ -68,7 +70,8 @@ final class _Process {
           ? null
           : 'a newer owner runs this identity in this process';
     }
-    if (holder.onScreen) {
+    if (holder.onScreen &&
+        (contender.goneApp == 0 || contender.goneApp != holder.engine)) {
       return 'the app runs this identity on screen in this process';
     }
     return contender.claim
@@ -90,6 +93,9 @@ final class _Node {
 
   /// Calls on the node: since it ran, how many.
   int calls = 0;
+
+  /// What the owner said about the screen, word by word.
+  final List<bool> words = <bool>[];
 
   void check() {
     calls += 1;
@@ -147,12 +153,15 @@ RuntimeNodeRuntime _runtimeIn(
   _Process process,
   RuntimeNodeRole role, {
   Duration yieldRetry = kRuntimeYieldRetry,
+  Duration onScreenBeat = kRuntimeOnScreenBeat,
+  int goneApp = 0,
 }) {
-  final RuntimeNodeOwner owner = RuntimeNodeOwner(role);
+  final RuntimeNodeOwner owner = RuntimeNodeOwner(role)..goneApp = goneApp;
   final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
     owner: owner,
     bootstrap: () async => process.start(owner),
     yieldRetry: yieldRetry,
+    onScreenBeat: onScreenBeat,
   );
   addTearDown(runtime.dispose);
   return runtime;
@@ -200,6 +209,76 @@ void main() {
     expect(owner.engine, 12);
     owner.started(<String, dynamic>{'handle': 4});
     expect(owner.engine, 12, reason: 'a start that names none keeps it');
+    // The service names the app engine Android ended.
+    owner.goneApp = 7;
+    expect(
+      (jsonDecode(withNodeOwner(config, owner))
+          as Map<String, dynamic>)['ZenNodeOwner']['goneApp'],
+      7,
+    );
+  });
+
+  test('while on screen the app keeps saying so to the bridge; off screen, '
+      'or once its node stopped, it says nothing more', () async {
+    // The bridge's word lapses after five seconds without a new one.
+    expect(kRuntimeOnScreenBeat * 2, lessThan(const Duration(seconds: 5)));
+    final _Process process = _Process();
+    final RuntimeNodeRuntime app = _runtimeIn(
+      process,
+      RuntimeNodeRole.app,
+      onScreenBeat: const Duration(milliseconds: 40),
+    );
+    app.setOnScreen(true);
+    await app.start();
+    final _Node node = process.running!;
+    await _until(() => node.words.length >= 4);
+    expect(node.words, everyElement(isTrue));
+
+    app.setOnScreen(false);
+    expect(node.words.last, isFalse);
+    final int saidOffScreen = node.words.length;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(node.words.length, saidOffScreen, reason: 'no beat off screen');
+
+    app.setOnScreen(true);
+    await _until(() => node.words.length >= saidOffScreen + 3);
+    expect(node.words.last, isTrue);
+
+    await app.stop();
+    final int saidBeforeStop = node.words.length;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(node.words.length, saidBeforeStop, reason: 'no beat once stopped');
+  });
+
+  // The app closed with "back": Android ended its engine, whose last word
+  // was "on screen". The service names that engine and takes its node at
+  // once; another engine on screen (the app opened again) keeps its own.
+  test('the service that names the app engine Android ended takes its node '
+      'at once, and never the node of another engine on screen', () async {
+    final _Process process = _Process();
+    final RuntimeNodeRuntime app = _runtimeIn(process, RuntimeNodeRole.app);
+    app.setOnScreen(true);
+    await app.start();
+    final int gone = app.owner.engine;
+    expect(gone, greaterThan(0));
+
+    final RuntimeNodeRuntime other = _runtimeIn(
+      process,
+      RuntimeNodeRole.service,
+      goneApp: gone + 100,
+    );
+    await other.start();
+    expect(other.yieldedToOtherOwner, isTrue);
+    expect(process.running?.role, RuntimeNodeRole.app);
+
+    final RuntimeNodeRuntime service = _runtimeIn(
+      process,
+      RuntimeNodeRole.service,
+      goneApp: gone,
+    );
+    await service.start();
+    expect(process.running?.role, RuntimeNodeRole.service);
+    expect(service.snapshot.health, RuntimeTransportHealth.active);
   });
 
   test('the bridge words that mean another owner outranks this one', () {
