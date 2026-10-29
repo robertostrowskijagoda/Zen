@@ -368,6 +368,60 @@ void main() {
   });
 
   group('thumbnail', () {
+    test('rows from the top, the left pixel in the high nibble, 0 outside', () {
+      // A 64×64 picture: transparent top row of blocks, then red on the
+      // left half and blue on the right half.
+      const int px = 64;
+      final Uint8List rgba = Uint8List(px * px * 4);
+      for (int y = 4; y < px; y++) {
+        for (int x = 0; x < px; x++) {
+          final int o = (y * px + x) * 4;
+          if (x < 32) {
+            rgba[o] = 255;
+          } else {
+            rgba[o + 2] = 255;
+          }
+          rgba[o + 3] = 255;
+        }
+      }
+      final Uint8List t = thumbnailFromRgba(rgba, px);
+      expect(t.length, 176);
+      int index(int x, int y) {
+        final int b = t[48 + (y * 16 + x) ~/ 2];
+        return x.isEven ? b >> 4 : b & 15;
+      }
+
+      int rgb(int i) => (t[i * 3] << 16) | (t[i * 3 + 1] << 8) | t[i * 3 + 2];
+      expect(t.sublist(0, 3), <int>[0, 0, 0]);
+      for (int x = 0; x < 16; x++) {
+        expect(index(x, 0), 0, reason: 'the top row is outside the stone');
+      }
+      expect(rgb(index(0, 5)), 0xFF0000);
+      expect(rgb(index(15, 5)), 0x0000FF);
+      // Each byte holds an even pixel (high nibble) and the next one.
+      final int red = index(0, 5), blue = index(15, 5);
+      expect(t[48 + (5 * 16 + 6) ~/ 2], (red << 4) | red);
+      expect(t[48 + (5 * 16 + 8) ~/ 2], (blue << 4) | blue);
+      // Decoding gives the same picture back.
+      final Uint32List back = PebbleThumbnail.decode(t)!;
+      expect(back[5 * 16], 0xFFFF0000);
+      expect(back[5 * 16 + 15], 0xFF0000FF);
+      expect(back[3], 0);
+    });
+
+    test('a pixel pair with different colours puts the left one high', () {
+      final List<int> pixels = List<int>.filled(256, 0);
+      pixels[0] = 5;
+      pixels[1] = 10;
+      pixels[16 * 15 + 14] = 1;
+      final Uint8List t = PebbleThumbnail.encode(
+        List<int>.generate(15, (int i) => i + 1),
+        pixels,
+      );
+      expect(t[48], 0x5A);
+      expect(t[48 + (16 * 15 + 14) ~/ 2], 0x10);
+    });
+
     test(
       'is 176 bytes: the top view in 16 colours with a transparent edge',
       () async {

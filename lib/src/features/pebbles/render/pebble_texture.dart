@@ -84,7 +84,9 @@ abstract final class PebbleTextures {
       LinkedHashMap<String, ui.Image>();
   static final LinkedHashMap<String, ui.Image> _bases =
       LinkedHashMap<String, ui.Image>();
-  static const int _keep = 24;
+
+  /// Kept textures may take this many bytes together.
+  static const int _budget = 64 << 20;
 
   static ui.Image _remember(
     LinkedHashMap<String, ui.Image> cache,
@@ -98,8 +100,14 @@ abstract final class PebbleTextures {
     }
     final ui.Image image = make();
     cache[key] = image;
-    while (cache.length > _keep) {
-      cache.remove(cache.keys.first)!.dispose();
+    int bytes = 0;
+    for (final ui.Image i in cache.values) {
+      bytes += i.width * i.height * 4;
+    }
+    while (bytes > _budget ~/ 2 && cache.length > 1) {
+      final ui.Image old = cache.remove(cache.keys.first)!;
+      bytes -= old.width * old.height * 4;
+      old.dispose();
     }
     return image.clone();
   }
