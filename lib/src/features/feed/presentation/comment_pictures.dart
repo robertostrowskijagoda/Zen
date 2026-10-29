@@ -316,9 +316,10 @@ class _CommentPictureViewerState extends State<CommentPictureViewer> {
     return Scaffold(
       key: const Key('comment-picture-viewer'),
       backgroundColor: ZenFixed.photoBackdrop,
-      appBar: AppBar(
-        backgroundColor: ZenFixed.photoBackdrop,
-        foregroundColor: ZenFixed.onPhoto,
+      appBar: zenFixedAppBar(
+        context,
+        background: ZenFixed.photoBackdrop,
+        foreground: ZenFixed.onPhoto,
         title: widget.images.length > 1
             ? Text('${_index + 1} / ${widget.images.length}')
             : null,

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_hosting.dart';
 import 'package:zen/src/features/pebbles/pebble_service.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
+import 'package:zen/src/features/pebbles/presentation/pebble_code_screen.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_detail_screen.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -193,6 +195,76 @@ void main() {
     expect(
       find.text('Poproszono 1 znajomego o przechowanie kamyczka.'),
       findsOneWidget,
+    );
+  });
+
+  double contrast(Color a, Color b) {
+    final double la = a.computeLuminance();
+    final double lb = b.computeLuminance();
+    return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
+  }
+
+  for (final (String name, ThemeData theme) in <(String, ThemeData)>[
+    ('dark', ZenTheme.dark()),
+    ('light', ZenTheme.light()),
+  ]) {
+    testWidgets('"Pokaż kod": dark title and back arrow on the white page '
+        'in the $name theme', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () => PebbleCodeScreen.open(context, card),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      final RichText title = tester.widget<RichText>(
+        find.descendant(
+          of: find.byKey(const Key('pebble-code-title')),
+          matching: find.byType(RichText),
+        ),
+      );
+      final Color ink = title.text.style!.color!;
+      expect(contrast(ink, ZenFixed.qrPaper), greaterThanOrEqualTo(7));
+      final Color arrow = IconTheme.of(
+        tester.element(find.byType(BackButtonIcon)),
+      ).color!;
+      expect(contrast(arrow, ZenFixed.qrPaper), greaterThanOrEqualTo(4.5));
+    });
+  }
+
+  testWidgets('a photo page keeps white type on black in a light theme', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZenTheme.light(),
+        home: Builder(
+          builder: (BuildContext context) => Scaffold(
+            appBar: zenFixedAppBar(
+              context,
+              background: ZenFixed.photoBackdrop,
+              foreground: ZenFixed.onPhoto,
+              title: const Text('2 / 5', key: Key('photo-title')),
+            ),
+          ),
+        ),
+      ),
+    );
+    final RichText title = tester.widget<RichText>(
+      find.descendant(
+        of: find.byKey(const Key('photo-title')),
+        matching: find.byType(RichText),
+      ),
+    );
+    expect(
+      contrast(title.text.style!.color!, ZenFixed.photoBackdrop),
+      greaterThanOrEqualTo(7),
     );
   });
 }

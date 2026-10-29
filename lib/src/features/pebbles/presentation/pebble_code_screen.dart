@@ -29,12 +29,15 @@ class PebbleCodeScreen extends StatelessWidget {
     return Scaffold(
       key: const Key('pebble-code-screen'),
       backgroundColor: ZenFixed.qrPaper,
-      appBar: AppBar(
-        backgroundColor: ZenFixed.qrPaper,
-        foregroundColor: ZenFixed.qrInk,
-        surfaceTintColor: ZenFixed.qrPaper,
-        elevation: 0,
-        title: Text(card.name.isEmpty ? t('Kamyczek') : card.name),
+      // Dark type on the white page in every theme.
+      appBar: zenFixedAppBar(
+        context,
+        background: ZenFixed.qrPaper,
+        foreground: ZenFixed.qrInk,
+        title: Text(
+          card.name.isEmpty ? t('Kamyczek') : card.name,
+          key: const Key('pebble-code-title'),
+        ),
       ),
       body: SafeArea(
         child: LayoutBuilder(
