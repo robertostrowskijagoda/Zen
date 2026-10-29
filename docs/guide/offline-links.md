@@ -63,6 +63,6 @@ on. Their phones form a group and the chat just works.
 - Bluetooth is slow: calls may not work over it.
 - Apple Multipeer works only while Zen is on screen.
 - *Nearby* (people around you over Bluetooth) is a different feature: see
-  [Meeting people](meeting-people.md#nearby-bluetooth-android).
+  [Meeting people](meeting-people.md#nearby-bluetooth).
 
 [Back to the guide](README.md)
