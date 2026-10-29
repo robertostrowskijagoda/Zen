@@ -118,7 +118,8 @@ void registerGoLicenses({AssetBundle? bundle}) {
   LicenseRegistry.addLicense(() => goLicenseEntries(assets));
 }
 
-/// The bundled fonts (assets/fonts), all under the SIL Open Font License.
+/// The bundled fonts (assets/fonts, assets/fonts/pebbles), all under the
+/// SIL Open Font License.
 const String kFontLicensePath = 'assets/licenses/fonts/OFL.txt';
 
 /// NOTICE, one license entry per Go module listed in the index, the native
@@ -140,6 +141,19 @@ Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
       'JetBrains Mono',
       'Space Mono',
       'DM Sans',
+      'Abril Fatface',
+      'Alfa Slab One',
+      'Amatic SC',
+      'Bangers',
+      'Bungee',
+      'Comic Neue',
+      'Courgette',
+      'Indie Flower',
+      'Quicksand',
+      'Righteous',
+      'Saira Stencil One',
+      'Titan One',
+      'Yeseva One',
     ], fonts);
   }
 }

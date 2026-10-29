@@ -6,6 +6,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/pebbles/design/pebble_card_look.dart';
 import 'package:zen/src/features/pebbles/design/pebble_design.dart';
 import 'package:zen/src/features/pebbles/design/pebble_faces.dart';
+import 'package:zen/src/features/pebbles/design/pebble_fonts.dart';
 import 'package:zen/src/features/pebbles/design/pebble_ready_designs.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_editor_screen.dart';
 import 'package:zen/src/features/pebbles/render/pebble_renderer.dart';
@@ -169,11 +170,34 @@ void main() {
     await _tapKey(tester, 'pebble-tool-text');
     await tester.enterText(find.byKey(const Key('pebble-text')), 'Kasia');
     await tester.pumpAndSettle();
+    // Every typeface shows the words typed; the chosen one goes on the
+    // stone.
+    final Text preview = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('pebble-font-preview')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(preview.data, 'Kasia');
+    await _tapKey(tester, 'pebble-font-${PebbleFont.bangers.index}');
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('pebble-font-preview')),
+              matching: find.byType(Text),
+            ),
+          )
+          .style
+          ?.fontFamily,
+      'Bangers',
+    );
     await tester.tapAt(_stoneCentre(tester).translate(0, 30));
     await tester.pumpAndSettle();
     final PebbleTextOp text = state.design.ops.last as PebbleTextOp;
     expect(text.text, 'Kasia');
     expect(text.face, PebbleFace.top.index);
+    expect(text.font, PebbleFont.bangers.index);
 
     await _tapKey(tester, 'pebble-tool-pattern');
     await _tapKey(tester, 'pebble-face-sides');
