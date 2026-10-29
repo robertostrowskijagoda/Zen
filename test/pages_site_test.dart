@@ -1948,8 +1948,20 @@ void main() {
       expect(video, contains('preload="none"'));
       expect(video, contains('controls'));
       expect(video, contains('poster="zen-promo-poster-en.jpg"'));
-      expect(video, contains('kind="captions"'));
+      // Music only, its words are in the picture: no captions track for
+      // the browser to draw over it.
+      expect(video, isNot(contains('<track')));
       expect(video, isNot(contains('autoplay')));
+      expect(
+        Directory(
+          '$_site/promo',
+        ).listSync().where((FileSystemEntity f) => f.path.endsWith('.vtt')),
+        isEmpty,
+      );
+      // One poster: the Polish one on the Polish page only, the English one
+      // everywhere else, like the film.
+      expect(promo, contains('figure.poster'));
+      expect(promo, contains('p.hidden = p.lang !== l;'));
       expect(
         promo,
         contains('<figure id="promoFilm" class="promo-film hidden">'),
