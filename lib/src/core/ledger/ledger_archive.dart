@@ -77,6 +77,19 @@ Future<void> setAsideOn(LedgerDisk disk, String key) async {
   }
 }
 
+/// Whether something (readable or not) is stored under [key] on [disk],
+/// without opening it where the disk can tell ([FileBinaryStore.exists]).
+Future<bool> existsOn(LedgerDisk disk, String key) async {
+  if (disk is FileLedgerDisk) {
+    return disk.store.exists(key);
+  }
+  try {
+    return await disk.read(key) != null;
+  } on Object {
+    return true;
+  }
+}
+
 /// The bytes of [key] on [disk], or null when there are none, when a newer
 /// build wrote them (held, see [holdNewerOn]) or when the file is damaged
 /// ([isDamagedStoredFile]): it is then set aside ([setAsideOn]) and the

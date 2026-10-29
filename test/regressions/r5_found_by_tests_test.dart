@@ -27,6 +27,10 @@ ChatMessage _message(String id, int at) => ChatMessage(
   direction: ChatMessageDirection.incoming,
 );
 
+List<String> _idsOf(List<ChatMessage> messages) => <String>[
+  for (final ChatMessage m in messages) m.id,
+];
+
 void main() {
   late Directory root;
   late FileBinaryStore store;
@@ -91,34 +95,53 @@ void main() {
     });
   });
 
-  test('R5-F2: a damaged conversation file does not block that '
-      'conversation', () async {
+  group('R5-F2: a damaged conversation file does not block that '
+      'conversation', () {
     // Before: FileMessageTimelineStore._open rethrew the index's read error
     // (message_timeline_store.dart), so every append to and load of that
     // conversation failed for good.
     const String ada = '200:1111:2222:3333:4444:5555:6666:7777';
-    await FileMessageTimelineStore(
-      store: store,
-    ).append(ada, _message('old', 1));
-    await damageStored(store, 'threads/${_b64(ada)}/idx');
 
-    final FileMessageTimelineStore timelines = FileMessageTimelineStore(
-      store: store,
-    );
-    await timelines.append(
-      ada,
-      _message('new', DateTime.now().millisecondsSinceEpoch + 1),
-    );
-    final List<ChatMessage> shown = await timelines.load(ada);
+    test('the index damaged: rebuilt from the pieces, nothing lost', () async {
+      await FileMessageTimelineStore(
+        store: store,
+      ).append(ada, _message('old', 1));
+      await damageStored(store, 'threads/${_b64(ada)}/idx');
 
-    expect(shown.map((ChatMessage m) => m.id).last, 'new');
-    expect(shown.first.isSystem, isTrue, reason: 'a note on the old history');
-    expect(setAsideUnder(root), hasLength(1));
-    // After a restart too.
-    final List<ChatMessage> again = await FileMessageTimelineStore(
-      store: store,
-    ).load(ada);
-    expect(again.map((ChatMessage m) => m.id), shown.map((m) => m.id));
+      final FileMessageTimelineStore timelines = FileMessageTimelineStore(
+        store: store,
+      );
+      await timelines.append(ada, _message('new', 2));
+
+      expect(_idsOf(await timelines.load(ada)), <String>['old', 'new']);
+      expect(setAsideUnder(root), hasLength(1));
+      // After a restart too.
+      expect(
+        _idsOf(await FileMessageTimelineStore(store: store).load(ada)),
+        <String>['old', 'new'],
+      );
+    });
+
+    test('the index and its piece damaged: the conversation goes on with a '
+        'note on what was lost', () async {
+      await FileMessageTimelineStore(
+        store: store,
+      ).append(ada, _message('old', 1));
+      await damageStored(store, 'threads/${_b64(ada)}/idx');
+      await damageStored(store, 'threads/${_b64(ada)}/seg/0');
+
+      final FileMessageTimelineStore timelines = FileMessageTimelineStore(
+        store: store,
+      );
+      await timelines.append(
+        ada,
+        _message('new', DateTime.now().millisecondsSinceEpoch + 1),
+      );
+      final List<ChatMessage> shown = await timelines.load(ada);
+
+      expect(shown.last.id, 'new');
+      expect(shown.first.isSystem, isTrue, reason: 'a note on what was lost');
+    });
   });
 
   test('R5-F3: logging an error with a chained stack trace never throws', () {
