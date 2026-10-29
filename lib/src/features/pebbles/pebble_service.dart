@@ -517,6 +517,21 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
       const Duration(minutes: 15),
       hosting.tick,
     );
+    // A pebble published while there was nobody to ask: new friends are
+    // asked to keep it as soon as they come, not on the next beat.
+    ref.listen<int>(
+      socialHubControllerProvider.select(
+        (SocialHubState s) => acceptedFriendAddresses(s).length,
+      ),
+      (int? before, int now) {
+        if (now > (before ?? 0)) {
+          unawaitedLogged(
+            hosting.drawShort(),
+            context: 'Asking new friends to keep pebbles',
+          );
+        }
+      },
+    );
     ref.onDispose(() {
       beat.cancel();
       unawaitedLogged(service.stop(), context: 'Stopping the pebbles');

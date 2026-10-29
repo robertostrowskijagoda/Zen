@@ -360,15 +360,19 @@ class ZenSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final ZenLook look = ZenLook.of(context);
+    // Shares the row with the title: on a narrow phone with large text it
+    // wraps instead of pushing past the edge.
     final Widget? button = action == null
         ? null
-        : TextButton(
-            onPressed: onAction,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(0, 28),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+        : Flexible(
+            child: TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 28),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: Text(action!, textAlign: TextAlign.end),
             ),
-            child: Text(action!),
           );
     if (look.sections == ZenSectionStyle.titleBar) {
       return Padding(

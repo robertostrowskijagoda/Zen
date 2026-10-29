@@ -256,14 +256,60 @@ final class PebbleHosting {
       });
 
   /// Asks new keepers in place of those who have not agreed (the author's
-  /// "Losuj ponownie").
-  Future<void> redraw(PebbleId id) => _run(() async {
-    for (final PebbleKeeperStatus k in store.keepersOf(id)) {
-      if (k.state == PebbleKeeperState.asked) {
-        await store.setKeeper(id, k.address, PebbleKeeperState.silent);
+  /// "Losuj ponownie"): only as many of the waiting ones give way as there
+  /// are friends not asked yet, so with nobody new nothing changes. How many
+  /// were asked.
+  Future<int> redraw(PebbleId id) => _run(() async {
+    int fresh = freshKeeperCandidates(id);
+    if (fresh == 0) {
+      return 0;
+    }
+    final List<PebbleKeeperStatus> waiting =
+        store
+            .keepersOf(id)
+            .where((PebbleKeeperStatus k) => k.state == PebbleKeeperState.asked)
+            .toList()
+          ..sort(
+            (PebbleKeeperStatus a, PebbleKeeperStatus b) =>
+                a.atMillis.compareTo(b.atMillis),
+          );
+    for (final PebbleKeeperStatus k in waiting) {
+      if (fresh-- <= 0) {
+        break;
+      }
+      await store.setKeeper(id, k.address, PebbleKeeperState.silent);
+    }
+    return _draw(id);
+  });
+
+  /// Friends who could still be asked to keep [id]: not asked for it
+  /// before, not blocked.
+  int freshKeeperCandidates(PebbleId id) {
+    final Set<String> asked = <String>{
+      for (final PebbleKeeperStatus k in store.keepersOf(id)) k.address,
+    };
+    return peers
+        .keeperCandidates()
+        .where(
+          (PebbleKeeperCandidate c) =>
+              !asked.contains(PeerShareCodec.normalizeAddress(c.address)) &&
+              !peers.isBlocked(c.address),
+        )
+        .length;
+  }
+
+  /// Whether this person has any friends at all to ask.
+  bool get hasFriends => peers.friends().isNotEmpty;
+
+  /// Friends came (or came back): every pebble of this account still short
+  /// of keepers asks them now, not on the next beat.
+  Future<void> drawShort() => _run(() async {
+    await store.load();
+    for (final PebbleEntry e in store.created) {
+      if (e.madeHere) {
+        await _draw(e.id);
       }
     }
-    await _draw(id);
   });
 
   /// The author takes the pebble back: keepers stop offering it, collectors
@@ -294,8 +340,9 @@ final class PebbleHosting {
   });
 
   /// Keepers who have not answered are asked again, those who never did
-  /// are replaced, a blocked keeper is dropped; a keeper list that waited
-  /// for the key is signed.
+  /// are replaced, a blocked keeper is dropped, friends not asked yet are
+  /// drawn while keepers are short; a keeper list that waited for the key
+  /// is signed.
   Future<void> _keepUp(PebbleEntry e) async {
     if (e.retired) {
       return;
@@ -318,9 +365,8 @@ final class PebbleHosting {
         changed = true;
       }
     }
-    if (changed) {
-      await _draw(e.id);
-    } else if ((_now - (_askedAt[e.id] ?? 0)) >= askAgainAfter.inMilliseconds) {
+    if (!changed &&
+        (_now - (_askedAt[e.id] ?? 0)) >= askAgainAfter.inMilliseconds) {
       _askedAt[e.id] = _now;
       for (final PebbleKeeperStatus k in store.keepersOf(e.id)) {
         if (k.state == PebbleKeeperState.asked) {
@@ -328,6 +374,9 @@ final class PebbleHosting {
         }
       }
     }
+    // Still short of keepers (replacements, or friends who came after the
+    // pebble was published, when there was nobody to ask): drawn now.
+    await _draw(e.id);
     if (_listDirty.contains(e.id)) {
       await _publishList(e.id);
     }
@@ -335,11 +384,11 @@ final class PebbleHosting {
 
   /// Draws keepers until [keeperTarget] have agreed or are being asked:
   /// friends whose devices answer best, computers first, phones mixed in;
-  /// nobody asked before for this pebble.
-  Future<void> _draw(PebbleId id) async {
+  /// nobody asked before for this pebble. How many were asked.
+  Future<int> _draw(PebbleId id) async {
     final PebbleEntry? e = store.entry(id);
     if (e == null || !e.madeHere || e.retired) {
-      return;
+      return 0;
     }
     final List<PebbleKeeperStatus> known = store.keepersOf(id);
     final int active = known
@@ -351,7 +400,7 @@ final class PebbleHosting {
         .length;
     final int need = keeperTarget - active;
     if (need <= 0) {
-      return;
+      return 0;
     }
     final Set<String> asked = <String>{
       for (final PebbleKeeperStatus k in known) k.address,
@@ -367,11 +416,15 @@ final class PebbleHosting {
       need,
       random: _random,
     );
+    if (picked.isEmpty) {
+      return 0;
+    }
     _askedAt[id] = _now;
     for (final PebbleKeeperCandidate c in picked) {
       await store.setKeeper(id, c.address, PebbleKeeperState.asked);
       await _ask(e, PeerShareCodec.normalizeAddress(c.address));
     }
+    return picked.length;
   }
 
   Future<void> _ask(PebbleEntry e, String to) async {
