@@ -13,8 +13,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 ### What's new
 - [en] New versions arrive the moment they are released, invitation notices say who invites you and with what words, and you are told when someone accepts.
 - [en] A few pebbles are round again, a pebble turns with any drag and has no line across it, and an open gate shows your friends without asking.
+- [en] Friends' statuses are known as soon as Zen opens, and you can write to someone who invited you before you answer.
 - [pl] Nowe wersje przychodzą od razu po wydaniu, powiadomienie o zaproszeniu mówi, kto zaprasza i z jakimi słowami, a o przyjęciu zaproszenia też się dowiesz.
 - [pl] Kilka kamyczków znów jest okrągłych, kamyczek obraca się każdym ruchem palca i nie ma kreski przez środek, a otwarta brama pokazuje znajomych bez prośby.
+- [pl] Statusy znajomych są znane od razu po otwarciu Zen, a do osoby, która Cię zaprasza, możesz napisać, zanim odpowiesz.
 
 ### Fixes and changes
 - **Updates straight from the repository**: the newest version comes from GitHub's redirect from `releases/latest` (no request limit, at once when a release is published), its files from GitHub's API; the pages' `release.json` only when the API refuses and it already names that version (it was asked first and lagged minutes behind every release).
@@ -22,7 +24,15 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Gates**: "Pokazuj moje bramy dalej" is gone and gates are always passed on; letters through friends have no weekly limits and passed-on introductions no daily limit; a friend your gate is open to (free, no consent asked) sees your friend list without asking for it.
 - **Pebbles**: seven shapes keep their rounder height (egg, tall, lopsided, potato, rock, chubby, plump) and flat shapes are not made thinner; a stone turns with a drag that starts in any direction (a scrolling page took the vertical ones); river stones have no vein drawn around them; a pebble names its author by the chosen name only, never the placeholder "Ja".
 - **Website**: galleries drag with a mouse; the features list pebbles, dating, search and printable stickers, each feature has a fitting icon, and the invite steps point to the QR button in the top bar.
- — 30.10.2026
+- **Statuses known at once**: while Zen is locked or closed, the background service asks the friends who see your status how they are every 10 minutes and keeps their newest answers (and the pings of friends with Zen open) for the app, which shows them the moment it opens, aged as they would have been, instead of "status nieznany" until the first answers come.
+- **Chat before accepting**: "Napisz, zanim odpowiesz" under an invitation opens a conversation with its sender; an invitation either way lets both write before it is answered (to ask who they are), whatever the settings for first messages, with no reply limits.
+- **Pebbles kept for a friend**: a keeper whose design was still on its way asks the author's device for it again as soon as it hears from it (any message, any status), not at the next round up to hours later; the author's app may have been closed when it was asked.
+- **"Mijani"**: one row per person and day (from the first pass to the last, with how many times), not a row for every pass.
+- **Calls to a friend who is offline**: a fault in a call's relay ends the call, not the app, and a fatal error of the network library is written to a file the app puts in the diagnostics log at its next start (Android records such a crash only as "signal 11", with no stack).
+- **Friends graph**: lines in a stronger colour and none thinner than 1.1, so friends of friends are visibly joined; invitation buttons further apart.
+- **GitHub**: a code of conduct, and issue forms for bugs and ideas.
+
+## 1.15.2 — 30.10.2026
 
 ### What's new
 - [en] Your profile no longer looks reset after a restart, read messages always show their ticks, and pebble previews are sharp.
