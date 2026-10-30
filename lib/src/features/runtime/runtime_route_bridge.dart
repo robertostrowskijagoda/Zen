@@ -15,7 +15,6 @@ import 'package:zen/src/features/groups/presentation/group_conversation_screen.d
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
-import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_profile_section.dart';
@@ -237,9 +236,11 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.pebble:
         // A pebble's link: its card, and "Zbierz" (asked first: the link
         // can come from anywhere).
-        final PebbleCard? card = pebbleCardFromLink(intent.rawInput);
-        if (card != null) {
-          unawaited(PebbleCollectScreen.open(context, card));
+        final PebbleLink? link = pebbleFromLink(intent.rawInput);
+        if (link != null) {
+          unawaited(
+            PebbleCollectScreen.open(context, link.card, keepers: link.keepers),
+          );
         }
         break;
       case RuntimeRouteTarget.pebbles:

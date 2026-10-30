@@ -5967,5 +5967,9 @@
     "one": "{n} बार",
     "other": "{n} बार"
   },
-  "Napisz, zanim odpowiesz": "जवाब देने से पहले लिखें"
+  "Napisz, zanim odpowiesz": "जवाब देने से पहले लिखें",
+  "Przechowujący w kodzie QR": "QR कोड में रखवाले",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "जब दोस्त कंकड़ रखने को मान जाएँ, तो उन्हें यहाँ QR कोड में जोड़ें: आपका फ़ोन बंद होने पर पाने वाला उनसे पूरा रूप माँगेगा।",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "अधिकतम {n} लोग चुनें। आपका फ़ोन बंद होने पर पाने वाला उनसे कंकड़ का पूरा रूप माँगता है, भले ही वह आपको या उन्हें न जानता हो। उनके बिना वह सिर्फ़ साझा दोस्तों के ज़रिए पहुँचता है। यह अब से दिखाए जाने वाले स्टिकर और कोड पर लागू है: पहले छपे वैसे ही रहते हैं।",
+  "Najwyżej {n} osoby w kodzie.": "कोड में ज़्यादा से ज़्यादा {n} लोग।"
 }

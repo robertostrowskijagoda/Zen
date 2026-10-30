@@ -5855,5 +5855,9 @@
   "{n} razy": {
     "other": "{n} kali"
   },
-  "Napisz, zanim odpowiesz": "Tulis sebelum menjawab"
+  "Napisz, zanim odpowiesz": "Tulis sebelum menjawab",
+  "Przechowujący w kodzie QR": "Penyimpan di kode QR",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Saat teman setuju menyimpan kerikil ini, masukkan mereka ke kode QR di sini: penemu akan meminta tampilan lengkap kepada mereka saat ponselmu mati.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pilih hingga {n} orang. Saat ponselmu mati, penemu meminta tampilan lengkap kerikil kepada mereka, meski tidak mengenalmu atau mereka. Tanpa mereka, penemu hanya bisa mendapatkannya lewat teman bersama. Ini berlaku untuk stiker dan kode yang kamu tunjukkan mulai sekarang: yang sudah dicetak tetap sama.",
+  "Najwyżej {n} osoby w kodzie.": "Paling banyak {n} orang di kode."
 }

@@ -5967,5 +5967,9 @@
     "one": "{n} kez",
     "other": "{n} kez"
   },
-  "Napisz, zanim odpowiesz": "Yanıtlamadan önce yaz"
+  "Napisz, zanim odpowiesz": "Yanıtlamadan önce yaz",
+  "Przechowujący w kodzie QR": "QR kodundaki saklayıcılar",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Arkadaşların çakıl taşını saklamayı kabul edince onları buradan QR koduna ekle: bulan kişi telefonun kapalıyken tam görünümü onlardan ister.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "En fazla {n} kişi seç. Telefonun kapalıyken bulan kişi, seni ya da onları tanımasa bile çakıl taşının tam görünümünü onlardan ister. Onlar olmadan ona yalnızca ortak arkadaşlar üzerinden ulaşır. Bu, bundan sonra göstereceğin çıkartma ve kodlar için geçerlidir: önceden basılanlar değişmez.",
+  "Najwyżej {n} osoby w kodzie.": "Kodda en fazla {n} kişi."
 }

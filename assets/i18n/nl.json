@@ -5967,5 +5967,9 @@
     "one": "één keer",
     "other": "{n} keer"
   },
-  "Napisz, zanim odpowiesz": "Schrijf voordat je antwoordt"
+  "Napisz, zanim odpowiesz": "Schrijf voordat je antwoordt",
+  "Przechowujący w kodzie QR": "Bewaarders in de QR-code",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Als vrienden de kiezel willen bewaren, zet ze hier in de QR-code: een vinder vraagt hun dan om het volledige uiterlijk als je telefoon uit staat.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Kies maximaal {n} mensen. Staat je telefoon uit, dan vraagt een vinder hun om het volledige uiterlijk van de kiezel, ook zonder jou of hen te kennen. Zonder hen komt hij er alleen via gemeenschappelijke vrienden bij. Dit geldt voor stickers en codes die je vanaf nu laat zien: eerder geprinte blijven zoals ze zijn.",
+  "Najwyżej {n} osoby w kodzie.": "Hoogstens {n} mensen in de code."
 }

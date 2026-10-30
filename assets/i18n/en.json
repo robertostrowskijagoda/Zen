@@ -5967,5 +5967,9 @@
     "one": "once",
     "other": "{n} times"
   },
-  "Napisz, zanim odpowiesz": "Write before you answer"
+  "Napisz, zanim odpowiesz": "Write before you answer",
+  "Przechowujący w kodzie QR": "Keepers in the QR code",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "When friends agree to keep the pebble, put them in the QR code here: a finder will ask them for the full look while your phone is off.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pick up to {n} people. While your phone is off, a finder asks them for the pebble's full look, even without knowing you or them. Without them, the finder reaches it only through mutual friends. This applies to stickers and codes you show from now on: ones printed earlier stay as they are.",
+  "Najwyżej {n} osoby w kodzie.": "At most {n} people in the code."
 }

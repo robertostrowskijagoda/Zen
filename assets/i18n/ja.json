@@ -5855,5 +5855,9 @@
   "{n} razy": {
     "other": "{n}回"
   },
-  "Napisz, zanim odpowiesz": "返事の前にメッセージ"
+  "Napisz, zanim odpowiesz": "返事の前にメッセージ",
+  "Przechowujący w kodzie QR": "QRコードの保管者",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "友達が小石の保管に同意したら、ここでQRコードに入れましょう。あなたの電話がオフのとき、見つけた人がその人たちに完全な見た目を求めます。",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最大{n}人まで選べます。あなたの電話がオフのとき、見つけた人はあなたやその人たちを知らなくても、小石の完全な見た目をその人たちに求めます。いなければ、共通の友達を通じてしか届きません。これから表示するステッカーとコードに適用され、以前に印刷したものは変わりません。",
+  "Najwyżej {n} osoby w kodzie.": "コードには最大{n}人まで。"
 }

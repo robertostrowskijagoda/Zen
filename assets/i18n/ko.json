@@ -5855,5 +5855,9 @@
   "{n} razy": {
     "other": "{n}번"
   },
-  "Napisz, zanim odpowiesz": "답하기 전에 메시지 보내기"
+  "Napisz, zanim odpowiesz": "답하기 전에 메시지 보내기",
+  "Przechowujący w kodzie QR": "QR 코드 속 보관자",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "친구들이 조약돌 보관에 동의하면 여기서 QR 코드에 넣으세요. 휴대폰이 꺼져 있을 때 발견한 사람이 그들에게 전체 모습을 요청합니다.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "최대 {n}명까지 고르세요. 휴대폰이 꺼져 있으면 발견한 사람은 당신이나 그들을 몰라도 그들에게 조약돌의 전체 모습을 요청합니다. 그들이 없으면 공통 친구를 통해서만 닿습니다. 지금부터 보여 주는 스티커와 코드에 적용되며, 이미 인쇄한 것은 그대로입니다.",
+  "Najwyżej {n} osoby w kodzie.": "코드에는 최대 {n}명까지."
 }

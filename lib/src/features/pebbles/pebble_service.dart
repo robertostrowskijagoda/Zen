@@ -327,6 +327,7 @@ final class PebbleService {
   Future<PebbleCollectResult> collect(
     PebbleCard card, {
     String findNote = '',
+    List<String> keepers = const <String>[],
   }) async {
     if (card.isFull && !await card.verify()) {
       return PebbleCollectResult.invalid;
@@ -339,7 +340,11 @@ final class PebbleService {
     if (had != null && had.collected) {
       return PebbleCollectResult.already;
     }
-    final PebbleEntry? e = await store.addCollected(card, findNote: findNote);
+    final PebbleEntry? e = await store.addCollected(
+      card,
+      findNote: findNote,
+      hinted: keepers,
+    );
     if (e == null) {
       return PebbleCollectResult.full;
     }

@@ -298,6 +298,37 @@ void main() {
       expect(pebbleCardFromLink('zen://pebble#${card.text}'), card);
     });
 
+    test('a QR code names up to three keepers after the card', () async {
+      final PebbleCard card = await _card(kasia, thumbnail: _thumbnail());
+      const List<String> keepers = <String>[
+        '200:1111:2222:3333:4444:5555:6666:7777',
+        '201:ABCD::1',
+        '202::2',
+        '203::3',
+      ];
+      final String web = pebbleWebLink(card, keepers: keepers);
+      final PebbleLink link = pebbleFromLink(web)!;
+      expect(link.card, card.qrCard);
+      expect(link.keepers, keepers.take(kPebbleQrKeepersMax).toList());
+      // The app link carries them too; no keepers: the plain QR card.
+      expect(
+        pebbleFromLink(pebbleAppLink(card, keepers: keepers))!.keepers,
+        hasLength(kPebbleQrKeepersMax),
+      );
+      expect(pebbleFromLink(pebbleWebLink(card))!.keepers, isEmpty);
+      expect(
+        pebbleWebLink(card, keepers: const <String>['nonsense']),
+        pebbleWebLink(card),
+      );
+      // A count that does not match what follows: no pebble.
+      final Uint8List raw = Uint8List.fromList(<int>[
+        ...card.qrCard.bytes,
+        2,
+        ...List<int>.filled(16, 1),
+      ]);
+      expect(pebbleFromLink('zen://pebble#${pebbleDigits(raw)}'), isNull);
+    });
+
     test('the link to share carries the whole card with its preview', () async {
       final PebbleCard card = await _card(kasia, thumbnail: _thumbnail());
       final String share = pebbleShareLink(card);

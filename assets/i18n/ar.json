@@ -6415,5 +6415,9 @@
     "many": "{n} مرة",
     "other": "{n} مرة"
   },
-  "Napisz, zanim odpowiesz": "اكتب قبل أن تجيب"
+  "Napisz, zanim odpowiesz": "اكتب قبل أن تجيب",
+  "Przechowujący w kodzie QR": "الحُفّاظ في رمز QR",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "عندما يوافق أصدقاؤك على حفظ الحصاة، أضفهم هنا إلى رمز QR: سيطلب منهم من يجدها مظهرها الكامل عندما يكون هاتفك مطفأً.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "اختر حتى {n} أشخاص. عندما يكون هاتفك مطفأً، يطلب منهم من يجد الحصاة مظهرها الكامل، حتى لو لم يعرفك أو يعرفهم. ومن دونهم لا يصل إليها إلا عبر أصدقاء مشتركين. ينطبق هذا على الملصقات والرموز التي تعرضها من الآن: ما طُبع سابقًا يبقى كما هو.",
+  "Najwyżej {n} osoby w kodzie.": "{n} أشخاص على الأكثر في الرمز."
 }

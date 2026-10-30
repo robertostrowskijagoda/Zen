@@ -6191,5 +6191,9 @@
     "many": "{n} разів",
     "other": "{n} разу"
   },
-  "Napisz, zanim odpowiesz": "Напиши, перш ніж відповісти"
+  "Napisz, zanim odpowiesz": "Напиши, перш ніж відповісти",
+  "Przechowujący w kodzie QR": "Охоронці в QR-коді",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Коли друзі погодяться зберігати камінчик, додай їх сюди в QR-код: той, хто знайде, попросить у них повний вигляд, поки твій телефон вимкнено.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Обери до {n} людей. Поки твій телефон вимкнено, той, хто знайде камінчик, попросить у них повний вигляд, навіть не знаючи ні тебе, ні їх. Без них він дістанеться до нього лише через спільних друзів. Це стосується наліпок і кодів, які ти покажеш відтепер: надруковані раніше не змінюються.",
+  "Najwyżej {n} osoby w kodzie.": "Не більше {n} людей у коді."
 }

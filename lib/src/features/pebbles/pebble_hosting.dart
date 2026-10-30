@@ -717,8 +717,9 @@ final class PebbleHosting {
   });
 
   /// Whom to ask for [e]'s design, in order: the author's devices, the
-  /// author's device that asked this one to keep it, the keepers in the
-  /// newest list, then friends (who may pass the question on).
+  /// author's device that asked this one to keep it, the keepers the QR
+  /// code named, the keepers in the newest list, then friends (who may
+  /// pass the question on).
   List<(String, int)> _targetsFor(PebbleEntry e) {
     final Set<String> seen = <String>{};
     final List<(String, int)> out = <(String, int)>[];
@@ -735,6 +736,9 @@ final class PebbleHosting {
     final String? from = e.keptFrom;
     if (from != null) {
       add(from, 0);
+    }
+    for (final String k in e.hinted) {
+      add(k, 0);
     }
     for (final String k in e.keepers?.keepers ?? const <String>[]) {
       add(k, 0);
@@ -801,6 +805,7 @@ final class PebbleHosting {
       final bool direct =
           (account != null && account == e.card.authorAccount) ||
           e.keptFrom == from ||
+          e.hinted.contains(from) ||
           (e.keepers?.keepers.contains(from) ?? false);
       if (f == null || f.round == 0 || !direct) {
         continue;

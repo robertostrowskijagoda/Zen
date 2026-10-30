@@ -223,8 +223,12 @@ final class _Net {
   }
 
   /// [finder] scans the card: saved at once, the design looked for.
-  Future<void> collect(FriendsPhone finder, PebbleCard card) async {
-    await store(finder).addCollected(card, findNote: 'w parku');
+  Future<void> collect(
+    FriendsPhone finder,
+    PebbleCard card, {
+    List<String> hinted = const <String>[],
+  }) async {
+    await store(finder).addCollected(card, findNote: 'w parku', hinted: hinted);
     await hosts[finder]!.want(card.id);
     await settle();
   }
@@ -401,6 +405,25 @@ void main() {
     final Uint8List? design = await net.store(w['F']).design(card.id);
     expect(card.matchesDesign(design!), isTrue);
     expect(net.store(w['F']).entry(card.id)!.keepers?.keepers, hasLength(2));
+  });
+
+  test('a finder who knows nobody gets the design from a keeper the QR '
+      'code named, the author offline', () async {
+    final FriendsWorld w = await _world(
+      <String>['A', 'B', 'F'],
+      <(String, String)>[('A', 'B')],
+    );
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    net.peers[w['A']]!.candidates = <String>[w['B'].address];
+    final PebbleCard card = await net.publish(w['A']);
+    await net.until(() => net.hasDesign(w['B'], card));
+    await w.setOnline(w['A'], false);
+    await net.collect(w['F'], card.qrCard, hinted: <String>[w['B'].address]);
+    await net.until(
+      () => net.hasDesign(w['F'], card),
+      reason: 'the design reaching F from the keeper in the code',
+    );
+    expect(net.store(w['F']).entry(card.id)!.card, card);
   });
 
   test('the author back: the design is asked of them at their first word, '

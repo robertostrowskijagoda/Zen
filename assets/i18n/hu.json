@@ -5967,5 +5967,9 @@
     "one": "{n} alkalommal",
     "other": "{n} alkalommal"
   },
-  "Napisz, zanim odpowiesz": "Írj, mielőtt válaszolsz"
+  "Napisz, zanim odpowiesz": "Írj, mielőtt válaszolsz",
+  "Przechowujący w kodzie QR": "Őrzők a QR-kódban",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Ha barátaid vállalják a kavics őrzését, írd be őket ide a QR-kódba: a megtaláló tőlük kéri a teljes kinézetet, amikor a telefonod ki van kapcsolva.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Válassz legfeljebb {n} embert. Ha a telefonod ki van kapcsolva, a megtaláló tőlük kéri a kavics teljes kinézetét, akkor is, ha sem téged, sem őket nem ismeri. Nélkülük csak közös barátokon át jut el hozzá. Ez a mostantól mutatott matricákra és kódokra vonatkozik: a korábban nyomtatottak maradnak.",
+  "Najwyżej {n} osoby w kodzie.": "Legfeljebb {n} ember a kódban."
 }

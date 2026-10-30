@@ -5967,5 +5967,9 @@
     "one": "uma vez",
     "other": "{n} vezes"
   },
-  "Napisz, zanim odpowiesz": "Escreva antes de responder"
+  "Napisz, zanim odpowiesz": "Escreva antes de responder",
+  "Przechowujący w kodzie QR": "Guardiões no código QR",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quando amigos aceitarem guardar o seixo, coloque-os aqui no código QR: quem o encontrar pedirá a eles a aparência completa enquanto o seu telemóvel estiver desligado.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Escolha até {n} pessoas. Com o seu telemóvel desligado, quem encontrar o seixo pede-lhes a aparência completa, mesmo sem conhecer você ou elas. Sem elas, só chega a ele por amigos em comum. Vale para autocolantes e códigos que mostrar a partir de agora: os já impressos ficam como estão.",
+  "Najwyżej {n} osoby w kodzie.": "No máximo {n} pessoas no código."
 }

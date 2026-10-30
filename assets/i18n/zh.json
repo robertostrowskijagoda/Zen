@@ -5855,5 +5855,9 @@
   "{n} razy": {
     "other": "{n}次"
   },
-  "Napisz, zanim odpowiesz": "回复前先聊聊"
+  "Napisz, zanim odpowiesz": "回复前先聊聊",
+  "Przechowujący w kodzie QR": "二维码中的保管者",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "朋友同意保管这颗石子后，在这里把他们加入二维码：你的手机关机时，捡到的人会向他们索取完整外观。",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最多选择 {n} 人。你的手机关机时，捡到石子的人即使不认识你或他们，也会向他们索取完整外观。没有他们，只能通过共同好友找到。这适用于今后展示的贴纸和二维码：以前打印的保持不变。",
+  "Najwyżej {n} osoby w kodzie.": "二维码中最多 {n} 人。"
 }

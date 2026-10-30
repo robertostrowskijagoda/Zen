@@ -5855,5 +5855,9 @@
   "{n} razy": {
     "other": "{n} lần"
   },
-  "Napisz, zanim odpowiesz": "Nhắn tin trước khi trả lời"
+  "Napisz, zanim odpowiesz": "Nhắn tin trước khi trả lời",
+  "Przechowujący w kodzie QR": "Người giữ trong mã QR",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Khi bạn bè đồng ý giữ viên sỏi, hãy thêm họ vào mã QR ở đây: người tìm thấy sẽ hỏi họ hình dạng đầy đủ khi điện thoại của bạn tắt.",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Chọn tối đa {n} người. Khi điện thoại của bạn tắt, người tìm thấy sẽ hỏi họ hình dạng đầy đủ của viên sỏi, dù không quen bạn hay họ. Không có họ, người đó chỉ đến được qua bạn chung. Điều này áp dụng cho nhãn dán và mã bạn hiển thị từ giờ: những cái đã in vẫn giữ nguyên.",
+  "Najwyżej {n} osoby w kodzie.": "Tối đa {n} người trong mã."
 }
