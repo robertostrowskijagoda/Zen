@@ -1601,9 +1601,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }
 
   /// Zen came back to the screen after a while: a friend whose presence
-  /// would have expired by now shows what it is worth (offline), or "status
-  /// nieznany" ([PresenceDoubt.unchecked]) when it was confirmed longer than
-  /// [kPresenceRememberedFor] ago, until they answer the pings that go out
+  /// would have expired by now shows what it is worth (offline), however
+  /// long ago it was confirmed, until they answer the pings that go out
   /// now.
   Future<void> recheckStalePresence({
     required Duration offlineAfter,
