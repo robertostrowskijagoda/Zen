@@ -125,7 +125,16 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           sh native/yggdrasil_bridge/build_android.sh x86_64
           flutter pub get --enforce-lockfile
-          flutter build apk --debug --target-platform android-x64
+          # Gradle's plugin portal now and then fails to hand out what it
+          # holds (Kotlin's own artifacts, "Could not find
+          # org.jetbrains.kotlin:kotlin-stdlib"): tried again before the
+          # job fails for it.
+          for attempt in 1 2 3; do
+            flutter build apk --debug --target-platform android-x64 && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            echo "The build failed (attempt $attempt): again in 30 s."
+            sleep 30
+          done
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/previous.apk"
           echo "apk=$RUNNER_TEMP/previous.apk" >> "$GITHUB_OUTPUT"
 
