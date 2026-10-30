@@ -237,17 +237,21 @@ key, so every release must be signed with this key.
    description; older builds then show "update to X.Y.Z or newer".
 7. Publish the draft as a full release: not a pre-release, with "Set as
    the latest release" ticked (the app asks only for the latest release,
-   through the pages' `release.json` and `releases/latest`, which never
+   through `releases/latest` and the API, which never
    show a draft or a pre-release). This starts `pages.yml`,
    which refreshes the install page data and the SideStore / AltStore
    source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
-   finds the release within an hour, and at once when it starts or comes
-   back to the screen an hour or more after its last check; an Android
-   phone that receives in the background finds it within about 2 to 2.5
-   hours also while Zen is closed (Doze can put that off to its next
-   window). The app asks the pages' `release.json` first, so the release
-   reaches it once the Pages run after the release has finished (a few
-   minutes); builds up to 1.14.0 ask GitHub's API only. A phone whose friend already runs the new version asks GitHub
+   finds the release within a quarter of an hour, and at once when it
+   starts or comes back to the screen 15 minutes or more after its last
+   check; an Android phone that receives in the background finds it
+   within about an hour also while Zen is closed (Doze can put that off
+   to its next window). Since 1.15.3 the app learns the newest version
+   from the repository itself (GitHub's redirect from `releases/latest`,
+   no request limit) the moment the release is published, the files from
+   GitHub's API, and from the pages' `release.json` only when the API
+   refuses and the pages already name that version; 1.15.0 to 1.15.2 ask
+   the pages first and see a release once the Pages run after it has
+   finished; builds up to 1.14.0 ask GitHub's API only. A phone whose friend already runs the new version asks GitHub
    as soon as that friend's version reaches it (section 8.5).
 
 The checks behind it: `test/release_contract_test.dart` (the app's file

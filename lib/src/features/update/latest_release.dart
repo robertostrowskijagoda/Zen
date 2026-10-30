@@ -32,25 +32,27 @@ final class LatestReleaseAnswer {
 /// swapped out in tests.
 typedef GithubTagFetcher = Future<String?> Function(Uri uri);
 
-/// Looks up the newest published release, in this order, until one answers:
+/// Looks up the newest published release, from the repository first:
 ///
-/// 1. the project's `release.json` on GitHub Pages ([kZenReleaseInfoUri]):
-///    no rate limit, the release's files and sizes, `zen-min`;
-/// 2. GitHub's API ([kGithubLatestReleaseUri]), through [fetchJson] (with
-///    `If-None-Match`): 60 requests an hour per IP address, which a mobile
-///    operator's shared address often has used up (403 or 429);
-/// 3. only when the API answered with an error or did not answer (not for
-///    its 404, which says no release is published): GitHub's redirect from
-///    the newest release's page ([kGithubLatestReleasePageUri], [fetchTag]),
-///    which names the version alone ([GithubRelease.detailed] false).
+/// 1. GitHub's redirect from the newest release's page
+///    ([kGithubLatestReleasePageUri], [fetchTag]): no request limit, the
+///    newest version the moment it is published;
+/// 2. GitHub's API ([kGithubLatestReleaseUri]) through [fetchJson] (with
+///    `If-None-Match`), for the release's files and sizes: 60 requests an
+///    hour per IP address, which a mobile operator's shared address often
+///    has used up (403 or 429);
+/// 3. only when the API refused: the project's `release.json` on GitHub
+///    Pages ([kZenReleaseInfoUri]), if it already names that version (the
+///    pages are rebuilt minutes after a release);
+/// 4. otherwise the redirect's version alone ([GithubRelease.detailed]
+///    false).
 ///
 /// None of them is trusted for more than which version is the newest: what
 /// is installed is still checked against the release's `SHA256SUMS` (and
 /// its signature, and on Android the signing certificate), downloaded from
 /// github.com for that very tag. When nothing answers, the API's error is
-/// thrown (or the pages' error, without an API answer), so the caller can
-/// tell a rate limit, an error answer, "no release" (404) and "not
-/// reached" apart. [fetchTag] null: no third step.
+/// thrown, so the caller can tell a rate limit, an error answer, "no
+/// release" (404) and "not reached" apart. [fetchTag] null: no redirect.
 final class LatestReleaseFinder {
   LatestReleaseFinder({required GithubJsonFetcher fetchJson, this.fetchTag})
     : _fetchJson = fetchJson;
@@ -66,26 +68,35 @@ final class LatestReleaseFinder {
   final GithubTagFetcher? fetchTag;
 
   Future<LatestReleaseAnswer> call() async {
+    // Which version is the newest comes from the repository itself, at
+    // once: GitHub's redirect from the newest release's page has no
+    // request limit and knows a release the moment it is published (the
+    // pages are rebuilt after it, minutes later).
+    String? tag;
+    final GithubTagFetcher? tagOf = fetchTag;
+    if (tagOf != null) {
+      try {
+        tag = await tagOf(kGithubLatestReleasePageUri);
+      } on Object catch (error) {
+        logZenWarning('Update check: release page not read: $error');
+      }
+    }
+    final GithubRelease? tagged = tag == null
+        ? null
+        : GithubRelease.fromTag(tag);
+    // The release's files and sizes: GitHub's API (an unchanged answer is
+    // not counted against its limit, `If-None-Match`).
+    Object? apiError;
+    StackTrace? apiStack;
     try {
       final GithubRelease? release = GithubRelease.fromJson(
-        await _fetchJson(kZenReleaseInfoUri),
+        await _fetchJson(kGithubLatestReleaseUri),
       );
-      if (release != null) {
-        return LatestReleaseAnswer(release, LatestReleaseSource.pages);
+      if (tagged == null || release?.version == tagged.version) {
+        return LatestReleaseAnswer(release, LatestReleaseSource.api);
       }
-      // No release on the pages (before the first one): GitHub says.
-    } on Object catch (error) {
-      logZenWarning('Update check: release.json not read: $error');
-    }
-    final Object apiError;
-    final StackTrace apiStack;
-    try {
-      return LatestReleaseAnswer(
-        GithubRelease.fromJson(await _fetchJson(kGithubLatestReleaseUri)),
-        LatestReleaseSource.api,
-      );
     } on GithubStatusException catch (error, stack) {
-      if (error.statusCode == HttpStatus.notFound) {
+      if (error.statusCode == HttpStatus.notFound && tagged == null) {
         rethrow;
       }
       apiError = error;
@@ -94,24 +105,29 @@ final class LatestReleaseFinder {
       apiError = error;
       apiStack = stack;
     }
-    final GithubTagFetcher? tagOf = fetchTag;
-    if (tagOf != null) {
-      try {
-        final String? tag = await tagOf(kGithubLatestReleasePageUri);
-        final GithubRelease? release = tag == null
-            ? null
-            : GithubRelease.fromTag(tag);
-        if (release != null) {
-          logZenWarning(
-            'Update check: GitHub API answered $apiError; the version came '
-            'from the release page.',
-          );
-          return LatestReleaseAnswer(release, LatestReleaseSource.redirect);
-        }
-      } on Object catch (error) {
-        logZenWarning('Update check: release page not read: $error');
+    // The API refused (a mobile operator's shared address used its limit
+    // up): the pages' copy of the same release, when they have it already.
+    try {
+      final GithubRelease? release = GithubRelease.fromJson(
+        await _fetchJson(kZenReleaseInfoUri),
+      );
+      if (release != null &&
+          (tagged == null || release.version == tagged.version)) {
+        return LatestReleaseAnswer(release, LatestReleaseSource.pages);
       }
+    } on Object catch (error) {
+      logZenWarning('Update check: release.json not read: $error');
     }
-    Error.throwWithStackTrace(apiError, apiStack);
+    if (tagged != null) {
+      logZenWarning(
+        'Update check: GitHub API answered ${apiError ?? 'another version'}; '
+        'the version came from the release page.',
+      );
+      return LatestReleaseAnswer(tagged, LatestReleaseSource.redirect);
+    }
+    if (apiError != null) {
+      Error.throwWithStackTrace(apiError, apiStack!);
+    }
+    return const LatestReleaseAnswer(null, LatestReleaseSource.api);
   }
 }

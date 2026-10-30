@@ -25,7 +25,7 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// mailbox polls); with nothing else on the beat, its own wake comes every
 /// [beatEvery] at most, and Doze puts it off to its next window. Each run
 /// only reads a small file; it asks ([LatestReleaseFinder]: the project's
-/// pages first, which have no rate limit, then GitHub) when the last
+/// repository's redirect first, which has no rate limit) when the last
 /// answer is [every] old or older, whoever asked (the app keeps the same
 /// file, [UpdateNoticeStore], and asks every [kGithubCheckEvery] while it
 /// runs). A failed check is kept with its error (shown on the updates

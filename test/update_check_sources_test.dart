@@ -196,36 +196,43 @@ void main() {
       expect(partial.mayHave(_apk), isTrue);
     });
 
-    test(
-      'the pages first: GitHub\'s API is not asked when they answer',
-      () async {
-        final _Net net = _Net()..pages = () => _pagesJson('v1.14.0');
-        final LatestReleaseAnswer answer = await LatestReleaseFinder(
-          fetchJson: net.json,
-          fetchTag: net.redirect,
-        )();
-        expect(answer.release?.version, '1.14.0');
-        expect(answer.source, LatestReleaseSource.pages);
-        expect(net.asked, <Uri>[kZenReleaseInfoUri]);
-      },
-    );
+    test('the repository first: its redirect names the newest version and '
+        'the API brings its files; the pages are not asked then', () async {
+      final _Net net = _Net()
+        ..tag = (() => 'v1.14.0')
+        ..api = (() => _apiJson('v1.14.0'))
+        ..pages = (() => _pagesJson('v1.13.1'));
+      final LatestReleaseAnswer answer = await LatestReleaseFinder(
+        fetchJson: net.json,
+        fetchTag: net.redirect,
+      )();
+      expect(answer.release?.version, '1.14.0');
+      expect(answer.source, LatestReleaseSource.api);
+      expect(net.asked, <Uri>[
+        kGithubLatestReleasePageUri,
+        kGithubLatestReleaseUri,
+      ]);
+    });
 
-    test('the API only when the pages fail; the redirect only when the API '
-        'refuses too; a 404 of the API is "no release"', () async {
-      final _Net net = _Net()..api = () => _apiJson('v1.14.0');
+    test('the API refused: the pages bring the files only when they name '
+        "the same version, else the redirect's version alone; a 404 of the "
+        'API is "no release"', () async {
+      final _Net net = _Net()
+        ..tag = (() => 'v1.14.0')
+        ..api = (() => throw _rateLimited)
+        ..pages = (() => _pagesJson('v1.14.0'));
       LatestReleaseFinder find() =>
           LatestReleaseFinder(fetchJson: net.json, fetchTag: net.redirect);
-      expect((await find()()).source, LatestReleaseSource.api);
-      expect(net.count(kGithubLatestReleasePageUri), 0);
+      expect((await find()()).source, LatestReleaseSource.pages);
 
-      net
-        ..api = (() => throw _rateLimited)
-        ..tag = (() => 'v1.14.0');
+      // The pages not rebuilt yet after the release: the redirect wins.
+      net.pages = () => _pagesJson('v1.13.1');
       final LatestReleaseAnswer redirected = await find()();
       expect(redirected.source, LatestReleaseSource.redirect);
       expect(redirected.release?.version, '1.14.0');
       expect(redirected.release?.detailed, isFalse);
 
+      net.tag = null;
       net.asked.clear();
       net.api = () => throw const GithubStatusException(HttpStatus.notFound);
       await expectLater(
@@ -238,11 +245,13 @@ void main() {
           ),
         ),
       );
-      expect(net.count(kGithubLatestReleasePageUri), 0);
+      // The redirect named nothing: the pages are not asked either.
+      expect(net.count(kZenReleaseInfoUri), 0);
 
       // Nothing answers: the API's error, so a rate limit stays one.
       net
         ..api = (() => throw _rateLimited)
+        ..pages = (() => throw const SocketException('pages'))
         ..tag = null;
       await expectLater(find()(), throwsA(same(_rateLimited)));
     });
@@ -300,7 +309,8 @@ void main() {
       expect(s.newer?.version, '1.14.0');
       expect(s.canInstall, isTrue);
       expect(notices.shown.single.body, contains('1.14.0'));
-      expect(net.count(kGithubLatestReleaseUri), 0);
+      // The API was asked first and refused.
+      expect(net.count(kGithubLatestReleaseUri), 1);
     });
 
     test(
@@ -387,7 +397,8 @@ void main() {
       expect(net.asked, isEmpty, reason: 'the background just asked');
 
       await s.checkIfDue();
-      expect(net.asked, <Uri>[kZenReleaseInfoUri]);
+      // The API refused (the fake's default): the pages had the files.
+      expect(net.asked.last, kZenReleaseInfoUri);
       expect(s.newer?.detailed, isTrue);
     });
 
