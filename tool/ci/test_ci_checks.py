@@ -437,6 +437,11 @@ class AndroidEmulatorTest(unittest.TestCase):
             self.assertIn(step, self.workflow)
         self.assertIn("fetch-depth: 0", self.workflow)
         self.assertIn('KERNEL=="kvm"', self.workflow)
+        # A failure of Gradle's plugin portal is tried again, in the
+        # previous release's build and in every build of the smoke script.
+        self.assertIn("for attempt in 1 2 3; do", self.workflow)
+        with open(os.path.join(ROOT, "tool/ci/android_smoke.sh"), encoding="utf-8") as f:
+            self.assertIn("for attempt in 1 2 3; do", f.read())
         self.assertIn("permissions:\n  contents: read", self.workflow)
         self.assertNotIn("secrets.", self.workflow)
         with open(os.path.join(ROOT, "tool/ci/android_smoke.sh"), encoding="utf-8") as f:
