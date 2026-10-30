@@ -2124,7 +2124,13 @@ void main() {
       ).allMatches(css)) {
         scrolling.add(m[1]!.trim().split('\n').last.trim());
       }
-      expect(scrolling, <String>['pre', '.files-wrap', '.gallery-track']);
+      // The menu too, on a phone: one row that scrolls when it is long.
+      expect(scrolling, <String>[
+        'pre',
+        '.topnav',
+        '.files-wrap',
+        '.gallery-track',
+      ]);
       // Beside the table of contents the text keeps its column: a grid item
       // with auto margins would grow to the row of screenshots instead.
       final int layout = css.indexOf('.layout main {');
