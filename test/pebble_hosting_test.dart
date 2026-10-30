@@ -403,6 +403,35 @@ void main() {
     expect(net.store(w['F']).entry(card.id)!.keepers?.keepers, hasLength(2));
   });
 
+  test('the author back: the design is asked of them at their first word, '
+      'not at the next round hours later', () async {
+    final FriendsWorld w = await _world(
+      <String>['A', 'B'],
+      <(String, String)>[('A', 'B')],
+    );
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    net.peers[w['A']]!.candidates = <String>[];
+    final PebbleCard card = await net.publish(w['A']);
+    await w.setOnline(w['A'], false);
+    await net.collect(w['B'], card);
+    // Two rounds pass while the author's app is closed.
+    for (int i = 0; i < 8; i++) {
+      await w.advance(const Duration(minutes: 1));
+      await net.beat();
+    }
+    expect(net.hasDesign(w['B'], card), isFalse);
+    await w.setOnline(w['A'], true);
+    await w.settleMailboxes();
+    await net.settle();
+    // Any word from the author (here a status) brings the question.
+    await w['A'].appTransport.send(
+      remoteAddress: w['B'].address,
+      payload: <String, dynamic>{'type': 'presence'},
+    );
+    await net.settle();
+    expect(net.hasDesign(w['B'], card), isTrue);
+  });
+
   test('a pebble published with no friends asks the first friends who '
       'come, without a press of "Losuj ponownie"', () async {
     final FriendsWorld w = await _world(<String>['A', 'B', 'C'], const []);
