@@ -696,8 +696,20 @@ final class MediaE2eeChannel {
   /// Puts a transformer on every sender and receiver of [connection] that
   /// has none yet. Runs after each local/remote description, so tracks
   /// added later (camera, shared screen) are covered before they carry
-  /// anything. Nothing here is per frame.
-  Future<void> attachAll(RTCPeerConnection connection) async {
+  /// anything. Nothing here is per frame. One at a time, and [dispose]
+  /// waits for the one running: the call's connection is closed only after
+  /// [dispose], and a sender looked up on a connection already closed
+  /// reaches native code as null and crashes the app (a call to a friend
+  /// who is offline ends while its offer is still being made).
+  Future<void> attachAll(RTCPeerConnection connection) {
+    final Future<void> run = _attaching.then((_) => _attachAll(connection));
+    _attaching = run.catchError((Object _) {});
+    return run;
+  }
+
+  Future<void> _attaching = Future<void>.value();
+
+  Future<void> _attachAll(RTCPeerConnection connection) async {
     if (_disposed || _security == CallMediaSecurity.standard) {
       return;
     }
@@ -743,6 +755,9 @@ final class MediaE2eeChannel {
         }
       }
       final RTCRtpReceiver receiver = transceiver.receiver;
+      if (_disposed) {
+        return;
+      }
       if (receivers.contains(receiver.receiverId) &&
           _attachedReceivers.add(receiver.receiverId)) {
         try {
@@ -775,6 +790,8 @@ final class MediaE2eeChannel {
     }
     _disposed = true;
     onChanged = null;
+    // A transformer being put on now goes on before the connection closes.
+    await _attaching;
     await link.dispose();
     try {
       await _ring.dispose();

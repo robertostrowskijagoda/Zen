@@ -28,7 +28,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Chat before accepting**: "Napisz, zanim odpowiesz" under an invitation opens a conversation with its sender; an invitation either way lets both write before it is answered (to ask who they are), whatever the settings for first messages, with no reply limits.
 - **Pebbles kept for a friend**: a keeper whose design was still on its way asks the author's device for it again as soon as it hears from it (any message, any status), not at the next round up to hours later; the author's app may have been closed when it was asked.
 - **"Mijani"**: one row per person and day (from the first pass to the last, with how many times), not a row for every pass.
-- **Calls to a friend who is offline**: a fault in a call's relay ends the call, not the app, and a fatal error of the network library is written to a file the app puts in the diagnostics log at its next start (Android records such a crash only as "signal 11", with no stack).
+- **Calls to a friend who is offline**: the app crashed (natively, in WebRTC) when such a call ended while its media encryption was still being put on the senders: the connection was closed under it; the call now ends only after that is done. Besides, a fault in a call's relay ends the call, not the app, and a fatal error of the network library is written to a file the app puts in the diagnostics log at its next start (Android records such a crash only as "signal 11", with no stack).
 - **Friends graph**: lines in a stronger colour and none thinner than 1.1, so friends of friends are visibly joined; invitation buttons further apart.
 - **GitHub**: a code of conduct, and issue forms for bugs and ideas.
 
