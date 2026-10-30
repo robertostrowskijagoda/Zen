@@ -10,7 +10,19 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
-## 1.15.2 — 30.10.2026
+### What's new
+- [en] New versions arrive the moment they are released, invitation notices say who invites you and with what words, and you are told when someone accepts.
+- [en] A few pebbles are round again, a pebble turns with any drag and has no line across it, and an open gate shows your friends without asking.
+- [pl] Nowe wersje przychodzą od razu po wydaniu, powiadomienie o zaproszeniu mówi, kto zaprasza i z jakimi słowami, a o przyjęciu zaproszenia też się dowiesz.
+- [pl] Kilka kamyczków znów jest okrągłych, kamyczek obraca się każdym ruchem palca i nie ma kreski przez środek, a otwarta brama pokazuje znajomych bez prośby.
+
+### Fixes and changes
+- **Updates straight from the repository**: the newest version comes from GitHub's redirect from `releases/latest` (no request limit, at once when a release is published), its files from GitHub's API; the pages' `release.json` only when the API refuses and it already names that version (it was asked first and lagged minutes behind every release).
+- **Invitation notices** name who invites and show their words, as the notification level allows, also while the app is locked (it said only "Odblokuj Zen, żeby zobaczyć szczegóły"); an accepted invitation says who accepted.
+- **Gates**: "Pokazuj moje bramy dalej" is gone and gates are always passed on; letters through friends have no weekly limits and passed-on introductions no daily limit; a friend your gate is open to (free, no consent asked) sees your friend list without asking for it.
+- **Pebbles**: seven shapes keep their rounder height (egg, tall, lopsided, potato, rock, chubby, plump) and flat shapes are not made thinner; a stone turns with a drag that starts in any direction (a scrolling page took the vertical ones); river stones have no vein drawn around them; a pebble names its author by the chosen name only, never the placeholder "Ja".
+- **Website**: galleries drag with a mouse; the features list pebbles, dating, search and printable stickers, each feature has a fitting icon, and the invite steps point to the QR button in the top bar.
+ — 30.10.2026
 
 ### What's new
 - [en] Your profile no longer looks reset after a restart, read messages always show their ticks, and pebble previews are sharp.
