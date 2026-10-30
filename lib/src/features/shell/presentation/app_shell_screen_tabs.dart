@@ -57,6 +57,9 @@ class _ShellTab {
 Widget _pyramidGlyph(Color color, double size, bool selected) =>
     PyramidGlyph(color: color, size: size, filled: selected);
 
+Widget _pebbleGlyph(Color color, double size, bool selected) =>
+    PebbleGlyph(color: color, size: size, filled: selected);
+
 /// Every main place of Zen, one tap away, in four groups; the alarm at the
 /// bottom. Nothing is hidden under "more": a vertical rail has room for all
 /// of them on the smallest phone. Settings, the accounts, "Zaproś" and
@@ -107,6 +110,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     label: t('Kamyczki'),
     icon: Icons.landscape_outlined,
     selectedIcon: Icons.landscape_rounded,
+    glyph: _pebbleGlyph,
   ),
   _ShellTab(
     id: 'meet',

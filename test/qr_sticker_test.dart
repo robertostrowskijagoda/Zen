@@ -1038,8 +1038,8 @@ void main() {
           }
         }
         final StickerText label = mark.whereType<StickerText>().single;
-        expect(label.text, 'kamyczek Zen');
-        expect(label.lines.single.text, 'kamyczek Zen', reason: 'not cut');
+        expect(label.text, 'Kamyk Zen');
+        expect(label.lines.single.text, 'Kamyk Zen', reason: 'not cut');
         expect(label.size, greaterThanOrEqualTo(24), reason: what);
         // The label says "Zen": no signature in the corner.
         expect(design.signature, isTrue);
