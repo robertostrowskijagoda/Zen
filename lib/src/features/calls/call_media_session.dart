@@ -39,6 +39,10 @@ typedef CallMediaStatusListener =
     void Function(String callId, CallMediaSessionLifecycle status);
 typedef CallMediaErrorListener = void Function(String? callId, Object error);
 
+/// The most a call's camera sends, in bits per second: plenty for 640 x 360
+/// to 960 x 540 at 24 frames, and little enough to cross the mesh smoothly.
+const int kCallVideoMaxBitrate = 900000;
+
 abstract class CallMediaSessionController extends ChangeNotifier {
   RTCVideoRenderer? get localRenderer;
   RTCVideoRenderer? get remoteRenderer;
@@ -2293,9 +2297,42 @@ final class WebRtcCallMediaSessionController
     // description that lets media flow on it.
     await _e2ee?.attachAll(connection);
     await connection.setLocalDescription(desc);
+    await _tuneCameraSenders(connection);
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
     return desc;
+  }
+
+  /// The camera over the mesh: a steady picture rather than a sharp one
+  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
+  /// frames) and gives up sharpness before frames when the path is tight.
+  /// The shared screen keeps its own settings (sharp text matters there).
+  Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
+    try {
+      for (final RTCRtpSender sender in await connection.getSenders()) {
+        final MediaStreamTrack? track = sender.track;
+        if (track == null ||
+            track.kind != 'video' ||
+            track.id == _screenTrack?.id) {
+          continue;
+        }
+        final RTCRtpParameters parameters = sender.parameters;
+        final List<RTCRtpEncoding> encodings =
+            parameters.encodings ?? const <RTCRtpEncoding>[];
+        if (encodings.isEmpty) {
+          continue;
+        }
+        for (final RTCRtpEncoding encoding in encodings) {
+          encoding.maxBitrate = kCallVideoMaxBitrate;
+          encoding.maxFramerate = 24;
+        }
+        parameters.degradationPreference =
+            RTCDegradationPreference.MAINTAIN_FRAMERATE;
+        await sender.setParameters(parameters);
+      }
+    } on Object catch (error) {
+      logZenWarning('Tuning the call camera failed: $error');
+    }
   }
 
   Future<void> _setRemoteDescriptionPinned(
