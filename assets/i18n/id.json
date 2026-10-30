@@ -5851,5 +5851,9 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} butuh bantuan",
   "🟢 Dostępny(-a)": "🟢 Tersedia",
   "🤒 Choruję": "🤒 Sedang sakit",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Butuh waktu sendiri"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Butuh waktu sendiri",
+  "{n} razy": {
+    "other": "{n} kali"
+  },
+  "Napisz, zanim odpowiesz": "Tulis sebelum menjawab"
 }

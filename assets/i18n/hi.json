@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 अलार्म: {name} को मदद चाहिए",
   "🟢 Dostępny(-a)": "🟢 उपलब्ध हूँ",
   "🤒 Choruję": "🤒 बीमार हूँ",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए",
+  "{n} razy": {
+    "one": "{n} बार",
+    "other": "{n} बार"
+  },
+  "Napisz, zanim odpowiesz": "जवाब देने से पहले लिखें"
 }

@@ -107,6 +107,32 @@ Future<void> _settle() async {
 }
 
 void main() {
+  test('the list shows one row per person and day', () {
+    final List<(Encounter, int)> rows = encountersByDay(<Encounter>[
+      Encounter(friend: 'ania', start: _t0, end: _t0 + _minute),
+      Encounter(
+        friend: 'ania',
+        start: _t0 + 60 * _minute,
+        end: _t0 + 70 * _minute,
+        place: EncounterPlace.approximate(52.2, 21.0),
+      ),
+      Encounter(
+        friend: 'ania',
+        start: _t0 + 120 * _minute,
+        end: _t0 + 121 * _minute,
+      ),
+      Encounter(friend: 'ola', start: _t0, end: _t0),
+      Encounter(friend: 'ania', start: _t0 - _day, end: _t0 - _day),
+    ]);
+    expect(rows, hasLength(3));
+    final (Encounter, int) today = rows.firstWhere(
+      ((Encounter, int) r) => r.$1.friend == 'ania' && r.$1.start == _t0,
+    );
+    expect(today.$2, 3);
+    expect(today.$1.end, _t0 + 121 * _minute);
+    expect(today.$1.place, isNotNull);
+  });
+
   group('merging sightings', () {
     test('sightings close in time are one encounter', () {
       List<Encounter> list = <Encounter>[];

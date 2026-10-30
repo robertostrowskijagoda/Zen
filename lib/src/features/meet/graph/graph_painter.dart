@@ -445,7 +445,7 @@ class GraphPainter extends CustomPainter {
       final Paint link = Paint()
         ..color = look.link
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.9;
+        ..strokeWidth = 1.1;
       if (linkCount > 600) {
         final Float32List pts = Float32List(linkCount * 4);
         for (int i = 0; i < linkCount; i++) {

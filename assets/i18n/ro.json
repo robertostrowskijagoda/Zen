@@ -6073,5 +6073,11 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARMĂ: {name} are nevoie de ajutor",
   "🟢 Dostępny(-a)": "🟢 Disponibil(ă)",
   "🤒 Choruję": "🤒 Sunt bolnav(ă)",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Am nevoie de puțin timp pentru mine"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Am nevoie de puțin timp pentru mine",
+  "{n} razy": {
+    "one": "o dată",
+    "few": "de {n} ori",
+    "other": "de {n} ori"
+  },
+  "Napisz, zanim odpowiesz": "Scrie înainte să răspunzi"
 }

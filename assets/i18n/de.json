@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} braucht Hilfe",
   "🟢 Dostępny(-a)": "🟢 Verfügbar",
   "🤒 Choruję": "🤒 Ich bin krank",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Brauche einen Moment für mich"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Brauche einen Moment für mich",
+  "{n} razy": {
+    "one": "einmal",
+    "other": "{n}-mal"
+  },
+  "Napisz, zanim odpowiesz": "Schreib, bevor du antwortest"
 }

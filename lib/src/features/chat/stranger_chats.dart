@@ -231,6 +231,7 @@ final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
     this.isFriendOfFriend,
     this.ownMiniProfile,
     this.termsOf,
+    this.invited,
     this.onPriceChanged,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -248,6 +249,12 @@ final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
   /// What writing first to [address] takes, as this phone can tell (their
   /// published price, or closed). Null: never known.
   final DirectTerms Function(String address)? termsOf;
+
+  /// Whether a friend invitation waits between this person and [address],
+  /// either way: they may write to each other before it is answered (to
+  /// tell who they are), with no first-contact terms and no reply limits.
+  /// Null: never. Set by the social hub (it knows the invitations).
+  bool Function(String address)? invited;
 
   /// This person changed who may write first or the price (to publish it).
   final VoidCallback? onPriceChanged;
@@ -468,6 +475,9 @@ final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
         <String, Object?>{'n': kMaxStrangerMessageChars},
       );
     }
+    if (invited?.call(address) ?? false) {
+      return null;
+    }
     final StrangerChat? chat = chatWith(address);
     if (chat == null && passTo(address) == null) {
       // A first contact: their settings, as far as this phone knows them.
@@ -530,6 +540,9 @@ final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
 
   /// Whether a message from [address] (not a friend) may come in now.
   bool admits(String address) {
+    if (invited?.call(address) ?? false) {
+      return true;
+    }
     final StrangerChat? chat = chatWith(address);
     if (chat == null) {
       // Introduced through a friend's gate, or paid: in, whatever the
@@ -560,7 +573,7 @@ final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
     final String a = _n(address);
     final StrangerChat? chat = _chats[a];
     final int at = _now();
-    if (chat == null && passFrom(a) == null) {
+    if (chat == null && passFrom(a) == null && !(invited?.call(a) ?? false)) {
       _firstContacts.add(at);
     }
     _chats[a] = chat == null

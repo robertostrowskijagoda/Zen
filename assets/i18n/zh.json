@@ -5851,5 +5851,9 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 警报：{name} 需要帮助",
   "🟢 Dostępny(-a)": "🟢 有空",
   "🤒 Choruję": "🤒 生病了",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿",
+  "{n} razy": {
+    "other": "{n}次"
+  },
+  "Napisz, zanim odpowiesz": "回复前先聊聊"
 }

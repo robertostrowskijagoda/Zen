@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARME : {name} a besoin d’aide",
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Je suis malade",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi",
+  "{n} razy": {
+    "one": "une fois",
+    "other": "{n} fois"
+  },
+  "Napisz, zanim odpowiesz": "Écris avant de répondre"
 }

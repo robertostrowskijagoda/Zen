@@ -6184,5 +6184,12 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ТРЕВОГА: {name} нужна помощь",
   "🟢 Dostępny(-a)": "🟢 На связи",
   "🤒 Choruję": "🤒 Болею",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Нужна минутка для себя"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Нужна минутка для себя",
+  "{n} razy": {
+    "one": "{n} раз",
+    "few": "{n} раза",
+    "many": "{n} раз",
+    "other": "{n} раза"
+  },
+  "Napisz, zanim odpowiesz": "Напиши, прежде чем ответить"
 }

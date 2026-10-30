@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} heeft hulp nodig",
   "🟢 Dostępny(-a)": "🟢 Beschikbaar",
   "🤒 Choruję": "🤒 Ik ben ziek",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Ik heb even tijd voor mezelf nodig"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Ik heb even tijd voor mezelf nodig",
+  "{n} razy": {
+    "one": "één keer",
+    "other": "{n} keer"
+  },
+  "Napisz, zanim odpowiesz": "Schrijf voordat je antwoordt"
 }

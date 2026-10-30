@@ -6073,5 +6073,11 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 POPLACH: {name} potřebuje pomoc",
   "🟢 Dostępny(-a)": "🟢 Dostupný(á)",
   "🤒 Choruję": "🤒 Jsem nemocný(á)",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe",
+  "{n} razy": {
+    "one": "{n}krát",
+    "few": "{n}krát",
+    "other": "{n}krát"
+  },
+  "Napisz, zanim odpowiesz": "Napiš, než odpovíš"
 }

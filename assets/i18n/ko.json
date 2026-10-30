@@ -5851,5 +5851,9 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 알람: {name}님이 도움이 필요해요",
   "🟢 Dostępny(-a)": "🟢 연락 가능",
   "🤒 Choruję": "🤒 아파요",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요",
+  "{n} razy": {
+    "other": "{n}번"
+  },
+  "Napisz, zanim odpowiesz": "답하기 전에 메시지 보내기"
 }

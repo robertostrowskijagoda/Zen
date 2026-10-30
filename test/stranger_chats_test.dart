@@ -36,6 +36,26 @@ void main() {
       expect(book.admits(_zed), isTrue);
     });
 
+    test('an invitation either way lets both write before it is answered, '
+        'whatever the settings', () async {
+      bool invited = false;
+      final StrangerChatBook book = StrangerChatBook(
+        disk: MemoryLedgerDisk(),
+        invited: (String _) => invited,
+        termsOf: (String _) => const DirectTerms.closed(),
+      );
+      await book.load();
+      await book.setFrom(StrangerMessagesFrom.nobody);
+      expect(book.admits(_zed), isFalse);
+      expect(book.refusalToSend(_zed, 'kim jesteś?'), isNotNull);
+      invited = true;
+      expect(book.admits(_zed), isTrue);
+      for (int i = 0; i < kStrangerMessagesBeforeReply + 2; i++) {
+        expect(book.refusalToSend(_zed, 'kim jesteś?'), isNull);
+        await book.noteSent(_zed, 'kim jesteś? $i', name: 'Zed');
+      }
+    });
+
     test(
       'three messages before an answer, then the conversation opens',
       () async {

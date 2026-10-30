@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} needs help",
   "🟢 Dostępny(-a)": "🟢 Available",
   "🤒 Choruję": "🤒 Sick",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself",
+  "{n} razy": {
+    "one": "once",
+    "other": "{n} times"
+  },
+  "Napisz, zanim odpowiesz": "Write before you answer"
 }

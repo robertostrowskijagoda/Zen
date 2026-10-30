@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} yardıma ihtiyaç duyuyor",
   "🟢 Dostępny(-a)": "🟢 Müsaitim",
   "🤒 Choruję": "🤒 Hastayım",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum",
+  "{n} razy": {
+    "one": "{n} kez",
+    "other": "{n} kez"
+  },
+  "Napisz, zanim odpowiesz": "Yanıtlamadan önce yaz"
 }

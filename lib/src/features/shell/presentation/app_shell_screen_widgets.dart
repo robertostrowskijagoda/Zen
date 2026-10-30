@@ -1331,7 +1331,7 @@ class _InboxCard extends ConsumerWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 16),
                 Expanded(
                   child: FilledButton(
                     key: Key('inbox-accept-$peerAddress'),
@@ -1368,6 +1368,8 @@ class _InboxCard extends ConsumerWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            _WriteBeforeAccepting(peerAddress: peerAddress),
           ] else if (isGroupInvite) ...<Widget>[
             const SizedBox(height: 14),
             Row(

@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 RIASZTÁS: {name} segítségre szorul",
   "🟢 Dostępny(-a)": "🟢 Elérhető",
   "🤒 Choruję": "🤒 Beteg vagyok",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra",
+  "{n} razy": {
+    "one": "{n} alkalommal",
+    "other": "{n} alkalommal"
+  },
+  "Napisz, zanim odpowiesz": "Írj, mielőtt válaszolsz"
 }

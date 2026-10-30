@@ -6406,5 +6406,14 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 إنذار: {name} يحتاج مساعدة",
   "🟢 Dostępny(-a)": "🟢 متاح",
   "🤒 Choruję": "🤒 مريض",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي",
+  "{n} razy": {
+    "zero": "{n} مرة",
+    "one": "مرة واحدة",
+    "two": "مرتين",
+    "few": "{n} مرات",
+    "many": "{n} مرة",
+    "other": "{n} مرة"
+  },
+  "Napisz, zanim odpowiesz": "اكتب قبل أن تجيب"
 }

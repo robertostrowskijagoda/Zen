@@ -5851,5 +5851,9 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 緊急アラーム：{name}が助けを必要としています",
   "🟢 Dostępny(-a)": "🟢 対応可能",
   "🤒 Choruję": "🤒 体調不良",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい",
+  "{n} razy": {
+    "other": "{n}回"
+  },
+  "Napisz, zanim odpowiesz": "返事の前にメッセージ"
 }

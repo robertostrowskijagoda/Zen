@@ -5962,5 +5962,10 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARMA: {name} necesita ayuda",
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Enfermo/a",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Necesito un momento para mí"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Necesito un momento para mí",
+  "{n} razy": {
+    "one": "una vez",
+    "other": "{n} veces"
+  },
+  "Napisz, zanim odpowiesz": "Escribe antes de responder"
 }

@@ -5851,5 +5851,9 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 BÁO ĐỘNG: {name} cần giúp đỡ",
   "🟢 Dostępny(-a)": "🟢 Có mặt",
   "🤒 Choruję": "🤒 Đang ốm",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình",
+  "{n} razy": {
+    "other": "{n} lần"
+  },
+  "Napisz, zanim odpowiesz": "Nhắn tin trước khi trả lời"
 }
