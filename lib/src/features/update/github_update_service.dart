@@ -92,10 +92,10 @@ bool githubUpdatesEnabledFor({
 /// for a release without this device's file, it points to the release
 /// page.
 ///
-/// A check asks the project's pages first (`release.json`, no rate limit),
-/// GitHub's API only when they do not answer, and GitHub's redirect from
-/// the newest release's page (the version alone) when the API does not
-/// answer either or refuses ([LatestReleaseFinder]); with no header but the
+/// A check learns the newest version from the repository: GitHub's
+/// redirect from the newest release's page (no rate limit), the files from
+/// GitHub's API, the pages' copy only when the API refuses
+/// ([LatestReleaseFinder]); with no header but the
 /// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer).
 /// GitHub's API allows 60 requests an hour per IP address, which people
 /// behind one mobile operator's address share: it used to be the only

@@ -157,10 +157,11 @@ final class GateSettings {
   /// whatever their tier's price ("Otwórz za darmo").
   final Set<String> freeFor = <String>{};
 
-  /// Friends may pass the terms for [GateTier.far] and this person's friend
-  /// list on to their friends ([kGateRelayDepth] steps): longer ways go
-  /// through here.
-  bool relay = false;
+  /// Friends pass the terms for [GateTier.far] and this person's friend
+  /// list on to their friends ([kGateRelayDepth] steps), so longer ways go
+  /// through here: always (the owner's decision, 1.15.3; it was a switch,
+  /// off by default, and ways stayed short).
+  bool get relay => true;
 
   GateTerms of(GateTier tier) => tiers[tier] ?? GateTerms.standard;
 
@@ -211,7 +212,6 @@ final class GateSettings {
         }
       }
     }
-    s.relay = json['r'] == true;
     return s;
   }
 }

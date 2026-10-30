@@ -16,8 +16,6 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 
 String addr(String hex) => PeerShareCodec.normalizeAddress('200::$hex');
 
-const int _day = 24 * 3600 * 1000;
-
 final class _Net {
   final Map<String, _Phone> phones = <String, _Phone>{};
   int clock = 1000000;
@@ -352,7 +350,13 @@ void main() {
     expect(await bartek.intro.decline(bartek.intro.needsMe.single.id), isTrue);
     expect(ania.intro.caseOf(c!.id)!.status, IntroStatus.declined);
     expect(celina.intro.needsMe, isEmpty);
-    expect(celina.sent, isEmpty);
+    // Nothing about it: her gate cards (always shared) are all she sends.
+    expect(
+      celina.sent.where(
+        ((String, Map<String, dynamic>) f) => f.$2['type'] != IntroTypes.gate,
+      ),
+      isEmpty,
+    );
     expect(ania.requested, isEmpty);
   });
 
@@ -396,7 +400,7 @@ void main() {
     );
   });
 
-  test('letters: passed on within limits, the recipient can only invite '
+  test('letters: passed on without a limit, the recipient can only invite '
       'or ignore', () async {
     final (:net, :ania, :bartek, :celina, :darek, :ewa) = await _world();
     final List<IntroCase> letters = <IntroCase>[];
@@ -417,27 +421,15 @@ void main() {
     }
     expect(bartek.intro.needsMe, isEmpty, reason: 'letters pass by themselves');
     expect(bartek.intro.handled, hasLength(3));
-    expect(ania.intro.lettersLeft(bartek.address), 0);
-    expect(
-      await ania.intro.sendLetter(
-        middle: bartek.address,
-        target: celina.address,
-        targetName: 'Celina',
-        text: 'Jeszcze raz',
-      ),
-      isNull,
+    // No limit (the owner's decision, 1.15.3): a fourth letter goes too.
+    final IntroCase? fourth = await ania.intro.sendLetter(
+      middle: bartek.address,
+      target: celina.address,
+      targetName: 'Celina',
+      text: 'Jeszcze raz',
     );
-
-    // A modified app ignores its own limit: Bartek's phone stops it anyway.
-    await ania.send(bartek.address, <String, dynamic>{
-      'type': IntroTypes.ask,
-      'id': 'zzzzzzzzzz01',
-      'k': IntroKind.letter.name,
-      'a': celina.address,
-      't': 'Jeszcze raz',
-    });
-    expect(bartek.intro.caseOf('zzzzzzzzzz01'), isNull);
-    expect(bartek.sent.last.$2['s'], 'no');
+    expect(fourth, isNotNull);
+    expect(bartek.intro.handled, hasLength(4));
 
     // Darek invites Ania: they become friends.
     await darek.intro.accept(darek.intro.needsMe.single.id);
@@ -446,10 +438,6 @@ void main() {
     // Ewa ignores it: Ania is not told.
     await ewa.intro.refuse(ewa.intro.needsMe.single.id);
     expect(ania.intro.caseOf(letters[2].id)!.status, IntroStatus.forwarded);
-
-    // A week later there are letters again.
-    net.clock += 8 * _day;
-    expect(ania.intro.lettersLeft(bartek.address), kLettersPerWeek);
 
     // Bartek stops passing letters on.
     await bartek.intro.setRelayLetters(false);

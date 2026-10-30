@@ -12,20 +12,31 @@ import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 /// collecting) or with the phone's camera (the pebble's page). It carries
 /// the same link as the printed sticker ([pebbleWebLink]).
 class PebbleCodeScreen extends StatelessWidget {
-  const PebbleCodeScreen({required this.card, super.key});
+  const PebbleCodeScreen({
+    required this.card,
+    this.keepers = const <String>[],
+    super.key,
+  });
 
   final PebbleCard card;
 
-  static Future<void> open(BuildContext context, PebbleCard card) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) => PebbleCodeScreen(card: card),
-        ),
-      );
+  /// The keepers the code names (pebble_link.dart).
+  final List<String> keepers;
+
+  static Future<void> open(
+    BuildContext context,
+    PebbleCard card, {
+    List<String> keepers = const <String>[],
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) =>
+          PebbleCodeScreen(card: card, keepers: keepers),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final String link = pebbleWebLink(card);
+    final String link = pebbleWebLink(card, keepers: keepers);
     return Scaffold(
       key: const Key('pebble-code-screen'),
       backgroundColor: ZenFixed.qrPaper,

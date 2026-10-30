@@ -236,6 +236,25 @@ void main() {
           .toList();
       expect(exits, hasLength(1));
     });
+
+    test('a Go crash of an earlier run is written once and emptied', () async {
+      final File crash = File(ZenTechLog.goCrashPath!)
+        ..writeAsStringSync(
+          'panic: runtime error: invalid memory address\n\n'
+          'goroutine 7 [running]:\nmain.buildRelayPacket()\n',
+        );
+      await Future.wait(<Future<void>>[
+        ZenTechLog.noteGoCrash(),
+        ZenTechLog.noteGoCrash(),
+      ]);
+      await ZenTechLog.noteGoCrash();
+      final List<String> lines = (await logged())
+          .where((String e) => e.contains('GOCRASH  '))
+          .toList();
+      expect(lines, hasLength(3));
+      expect(lines.first, contains('invalid memory address'));
+      expect(crash.readAsStringSync(), isEmpty);
+    });
   });
 
   test('the saved file is UTF-8 with its byte order mark', () {

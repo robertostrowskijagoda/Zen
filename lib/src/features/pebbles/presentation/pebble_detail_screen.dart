@@ -69,6 +69,33 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
   late final TextEditingController _note = TextEditingController();
   bool _noteFilled = false;
 
+  /// The keepers the author picked for the QR code ("Przechowujący w kodzie
+  /// QR"); `null` until they change it: the first who agreed then.
+  Set<String>? _codeKeepers;
+
+  /// The keepers this pebble's QR code names (pebble_link.dart): on one's
+  /// own pebble those picked (else the first who agreed), on a collected
+  /// one the keepers it is known to have; [kPebbleQrKeepersMax] at most.
+  List<String> _keepersInCode(PebbleService? service, PebbleEntry? entry) {
+    if (service == null || entry == null) {
+      return const <String>[];
+    }
+    if (!entry.created) {
+      return <String>[
+        ...?entry.keepers?.keepers,
+        if (entry.keepers == null) ...entry.hinted,
+      ].take(kPebbleQrKeepersMax).toList();
+    }
+    final List<String> agreed = <String>[
+      for (final PebbleKeeperStatus k in service.store.keepersOf(entry.id))
+        if (k.state == PebbleKeeperState.accepted) k.address,
+    ];
+    final Set<String>? picked = _codeKeepers;
+    return (picked == null ? agreed : agreed.where(picked.contains))
+        .take(kPebbleQrKeepersMax)
+        .toList();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -157,7 +184,13 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
               key: const Key('pebble-show-code'),
               tooltip: t('Pokaż kod'),
               icon: const Icon(Icons.qr_code_2_rounded),
-              onPressed: () => unawaited(PebbleCodeScreen.open(context, card)),
+              onPressed: () => unawaited(
+                PebbleCodeScreen.open(
+                  context,
+                  card,
+                  keepers: _keepersInCode(service, entry),
+                ),
+              ),
             ),
         ],
       ),
@@ -205,8 +238,13 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                 child: Center(
                   child: OutlinedButton.icon(
                     key: const Key('pebble-show-code-button'),
-                    onPressed: () =>
-                        unawaited(PebbleCodeScreen.open(context, card)),
+                    onPressed: () => unawaited(
+                      PebbleCodeScreen.open(
+                        context,
+                        card,
+                        keepers: _keepersInCode(service, entry),
+                      ),
+                    ),
                     icon: const Icon(Icons.qr_code_2_rounded),
                     label: Text(t('Pokaż kod')),
                   ),
@@ -356,14 +394,77 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
             'poproszeni. Gdy dodasz kolejnych, Zen poprosi ich sam.',
           )
         : null;
+    final List<String> agreed = <String>[
+      for (final PebbleKeeperStatus k in keepers)
+        if (k.state == PebbleKeeperState.accepted) k.address,
+    ];
+    final List<String> inCode = _keepersInCode(service, entry);
     return <Widget>[
+      ZenSection(
+        t('Przechowujący w kodzie QR'),
+        key: const Key('pebble-code-keepers'),
+      ),
+      ZenInfo(
+        icon: Icons.qr_code_2_rounded,
+        text: agreed.isEmpty
+            ? t(
+                'Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do '
+                'kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój '
+                'telefon będzie wyłączony.',
+              )
+            : t(
+                'Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, '
+                'znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie '
+                'zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko '
+                'przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, '
+                'które pokażesz od teraz: wydrukowane wcześniej zostają bez '
+                'zmian.',
+                <String, Object?>{'n': kPebbleQrKeepersMax},
+              ),
+      ),
+      if (agreed.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final String a in agreed)
+                FilterChip(
+                  key: Key('pebble-code-keeper-$a'),
+                  label: Text(nameOf(a)),
+                  selected: inCode.contains(a),
+                  onSelected: (bool on) {
+                    if (on && inCode.length >= kPebbleQrKeepersMax) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            t('Najwyżej {n} osoby w kodzie.', <String, Object?>{
+                              'n': kPebbleQrKeepersMax,
+                            }),
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    setState(
+                      () => _codeKeepers = <String>{
+                        ...inCode.where((String k) => k != a),
+                        if (on) a,
+                      },
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
       const SizedBox(height: 16),
       FilledButton.icon(
         key: const Key('pebble-print-sticker'),
         onPressed: () => unawaited(
           openPebbleSticker(
             context,
-            link: pebbleWebLink(card),
+            link: pebbleWebLink(card, keepers: inCode),
             name: card.name,
             author: card.authorName,
           ),

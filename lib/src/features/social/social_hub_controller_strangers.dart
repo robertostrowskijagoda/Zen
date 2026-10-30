@@ -17,12 +17,24 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
 
   /// The mini-profile to send with a message to someone who is not a
   /// friend; also checks the limits. Throws [StrangerMessageRefused].
+  /// The book of conversations with people who are not friends, told
+  /// which of them an invitation waits with (either way): they may write
+  /// before it is answered, "kim jesteś?".
+  StrangerChatBook get _strangerBook =>
+      ref.read(strangerChatsProvider)
+        ..invited ??= (String address) =>
+            switch (state.friendByAddress(address)?.status) {
+              FriendRelationshipStatus.pendingIncoming ||
+              FriendRelationshipStatus.pendingOutgoing => true,
+              _ => false,
+            };
+
   @override
   Future<Map<String, dynamic>> _strangerMessageMini(
     String peerAddress,
     String text,
   ) async {
-    final StrangerChatBook book = ref.read(strangerChatsProvider);
+    final StrangerChatBook book = _strangerBook;
     await book.load();
     final String? refusal = book.refusalToSend(peerAddress, text);
     if (refusal != null) {
@@ -57,7 +69,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
     if (!_isStrangerChatPeer(signal.sender)) {
       return false;
     }
-    final StrangerChatBook book = ref.read(strangerChatsProvider);
+    final StrangerChatBook book = _strangerBook;
     switch (signal.type) {
       case ZenSignalType.ack:
       case ZenSignalType.messageRead:

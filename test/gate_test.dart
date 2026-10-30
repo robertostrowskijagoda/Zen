@@ -358,7 +358,6 @@ void main() {
         const GateTerms(price: 300),
       );
       await bartek.intro.setGateTier(GateTier.far, const GateTerms(price: 900));
-      await bartek.intro.setGateRelay(true);
       expect(bartek.intro.gateTierOf(ania.address), GateTier.close);
       expect(bartek.intro.gateTierOf(celina.address), GateTier.friend);
       expect(bartek.intro.gateTierOf(darek.address), GateTier.far);
@@ -804,7 +803,6 @@ void main() {
     setUpWay({bool celinaConsent = false}) async {
       final (:net, :ania, :bartek, :celina, :darek, ewa: _) = await _line();
       await _all(celina, GateTerms(price: 300, consent: celinaConsent));
-      await celina.intro.setGateRelay(true);
       await bartek.intro.setGateTier(
         GateTier.friend,
         const GateTerms(price: 500),
@@ -1025,7 +1023,6 @@ void main() {
       expect(both!.consent, isTrue);
       expect(both.label, '5 pkt · za zgodą');
       await _all(celina, _freeAtOnce);
-      await celina.intro.setGateRelay(true);
       expect(
         prices.gateOf(darek.address, via: celina.address),
         const GatePrice.free(),
@@ -1158,7 +1155,6 @@ void main() {
       }
       for (final _Phone p in line.reversed) {
         await _all(p, _freeAtOnce);
-        await p.intro.setGateRelay(true);
       }
       for (final _Phone p in line.reversed) {
         await p.intro.shareGates(force: true);
@@ -1210,7 +1206,6 @@ void main() {
       }
       for (final _Phone p in line.reversed) {
         await _all(p, _freeAtOnce);
-        await p.intro.setGateRelay(true);
       }
       for (final _Phone p in line.reversed) {
         await p.intro.shareGates(force: true);
@@ -1240,10 +1235,8 @@ void main() {
       );
       expect(run!.state, GateRunState.done);
       expect(target.intro.needsMe.single.asker, ania.address);
-      // A gatekeeper who keeps their terms to themselves answers nothing.
-      net.clock += kGateMoreEvery.inMilliseconds + 1;
-      await line[6].intro.setGateRelay(false);
-      expect(line[6].intro.gates.relay, isFalse);
+      // Every gatekeeper's terms travel: there is no switch any more.
+      expect(line[6].intro.gates.relay, isTrue);
     });
   });
 }

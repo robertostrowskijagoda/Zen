@@ -7,6 +7,8 @@ welcome. Security problems: please do not open a public issue, see
 Questions, ideas or want to talk a change over before you start? Join
 [Zen on Discord](https://discord.gg/g4vHvpKV37).
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Before you send a pull request
 
 - One change per pull request, with a short description of what it changes

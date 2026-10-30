@@ -44,6 +44,41 @@ String encounterSpan(int start, int end, {bool withDate = false}) {
   return withDate ? '${_date(start)}, $span' : span;
 }
 
+/// One row per person and local day: the [encounters] of one friend on
+/// one day joined (from the first start to the last end, the newest
+/// place), each with how many passes it holds. A friend who walks in and
+/// out of range is one person, not a row per pass.
+List<(Encounter, int)> encountersByDay(List<Encounter> encounters) {
+  final Map<(String, int, int, int), (Encounter, int)> joined =
+      <(String, int, int, int), (Encounter, int)>{};
+  for (final Encounter e in encounters) {
+    final DateTime day = DateTime.fromMillisecondsSinceEpoch(e.start);
+    final (String, int, int, int) key = (
+      e.friend,
+      day.year,
+      day.month,
+      day.day,
+    );
+    final (Encounter, int)? had = joined[key];
+    if (had == null) {
+      joined[key] = (e, 1);
+      continue;
+    }
+    final Encounter was = had.$1;
+    final bool newer = e.end >= was.end;
+    joined[key] = (
+      Encounter(
+        friend: e.friend,
+        start: e.start < was.start ? e.start : was.start,
+        end: newer ? e.end : was.end,
+        place: (newer ? e.place ?? was.place : was.place ?? e.place),
+      ),
+      had.$2 + 1,
+    );
+  }
+  return joined.values.toList();
+}
+
 /// "Mijani" in the "W pobliżu" screen: friends passed and how many
 /// others, kept only on this phone.
 class EncountersSection extends StatelessWidget {
@@ -139,20 +174,21 @@ class EncountersSection extends StatelessWidget {
     final List<EncounterCrowd> crowds = log.crowds;
     final bool empty = encounters.isEmpty && crowds.isEmpty;
     final DateTime today = (now ?? DateTime.now)();
-    // Friends and counts together, newest first.
-    final List<(int, Encounter?, EncounterCrowd?)> rows =
-        <(int, Encounter?, EncounterCrowd?)>[
-          for (final Encounter e in encounters) (e.end, e, null),
+    // Friends (one row a day each) and counts together, newest first.
+    final List<(int, (Encounter, int)?, EncounterCrowd?)> rows =
+        <(int, (Encounter, int)?, EncounterCrowd?)>[
+          for (final (Encounter, int) e in encountersByDay(encounters))
+            (e.$1.end, e, null),
           for (final EncounterCrowd c in crowds) (c.windowEnd - 1, null, c),
         ]..sort(
           (
-            (int, Encounter?, EncounterCrowd?) a,
-            (int, Encounter?, EncounterCrowd?) b,
+            (int, (Encounter, int)?, EncounterCrowd?) a,
+            (int, (Encounter, int)?, EncounterCrowd?) b,
           ) => b.$1.compareTo(a.$1),
         );
     final List<Widget> list = <Widget>[];
     EncounterDay? shown;
-    for (final (int at, Encounter? e, EncounterCrowd? c) in rows) {
+    for (final (int at, (Encounter, int)? e, EncounterCrowd? c) in rows) {
       final EncounterDay day = encounterDayOf(at, today);
       if (day != shown) {
         shown = day;
@@ -176,7 +212,7 @@ class EncountersSection extends StatelessWidget {
       }
       final bool older = day == EncounterDay.older;
       if (e != null) {
-        list.add(_encounterTile(e, zen, older));
+        list.add(_encounterTile(e.$1, zen, older, passes: e.$2));
       } else if (c != null) {
         list.add(_crowdTile(c, zen, older));
       }
@@ -240,7 +276,12 @@ class EncountersSection extends StatelessWidget {
     );
   }
 
-  Widget _encounterTile(Encounter e, ZenColors zen, bool older) {
+  Widget _encounterTile(
+    Encounter e,
+    ZenColors zen,
+    bool older, {
+    int passes = 1,
+  }) {
     final String friend = e.friend;
     final EncounterPlace? place = e.place;
     final bool met = hasMet(friend);
@@ -249,7 +290,10 @@ class EncountersSection extends StatelessWidget {
       e,
       (now ?? DateTime.now)().millisecondsSinceEpoch,
     );
-    final String when = encounterSpan(e.start, e.end, withDate: older);
+    final String span = encounterSpan(e.start, e.end, withDate: older);
+    final String when = passes < 2
+        ? span
+        : '$span · ${tn(passes, one: '{n} raz', few: '{n} razy', many: '{n} razy')}';
     return ZenTile(
       key: Key('encounter-$friend-${e.start}'),
       icon: Icons.directions_walk_rounded,

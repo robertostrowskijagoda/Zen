@@ -494,6 +494,25 @@ final class PebbleCard implements PebbleLookSource {
   int get hashCode => Object.hashAll(bytes);
 }
 
+/// How many of [bytes] the QR card at their start takes (the keepers a
+/// QR code names may follow, pebble_link.dart), or `null` when they start
+/// with no well-formed QR card.
+int? pebbleQrCardLength(Uint8List bytes) {
+  const int fixed = 1 + 16 + 32 + 12;
+  if (bytes.length < fixed + 2 || bytes.first != kPebbleQrCardVersion) {
+    return null;
+  }
+  final int name = bytes[fixed];
+  if (name > kPebbleQrNameMaxBytes || bytes.length < fixed + 1 + name + 1) {
+    return null;
+  }
+  final int author = bytes[fixed + 1 + name];
+  final int length = fixed + 1 + name + 1 + author;
+  return author > kPebbleQrAuthorMaxBytes || bytes.length < length
+      ? null
+      : length;
+}
+
 /// [bytes] as one big-endian number in decimal, padded with zeros to the
 /// digits of the largest number of that many bytes (so the length tells
 /// how many bytes there are: [pebbleBytesFromDigits]).

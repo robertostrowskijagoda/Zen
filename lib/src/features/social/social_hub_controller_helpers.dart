@@ -1184,6 +1184,12 @@ RuntimeSystemNotification _systemNotificationFromEntry({
       title = senderLabel;
       final String kind = _callKindLabel(signal.content);
       body = t('Przychodzące połączenie {kind}...', {'kind': kind});
+    case ZenSignalType.friendRequest:
+      // Who and their own words (the central redaction hides them as the
+      // notification level asks).
+      title = entry.title;
+      final String note = (signal.content ?? '').trim();
+      body = note.isNotEmpty ? note : entry.body;
     case ZenSignalType.groupCallInvite:
       final String groupName = _groupNameOf(signal, groups).trim();
       title = groupName.isNotEmpty ? groupName : t('Połączenie grupowe');
@@ -1625,12 +1631,11 @@ List<InboxEntry> _removeEntriesForPeer(
 /// [friend]'s presence as it stands at [nowMillis] when nothing was heard
 /// from them for a while (read back from the store, back on the network or
 /// on the screen), [confirmedAtMillis], [seenAtMillis] and [openedAtMillis]
-/// being what memory knows besides the friend: confirmed at most
-/// [kPresenceRememberedFor] ago, what that state is worth by now
-/// ([presenceAt]: offline when it would have expired); confirmed longer
-/// ago, not known ([PresenceDoubt.unchecked]) until they answer or the
-/// answers had time to come. [friend] itself when nothing changes, or they
-/// do not show it.
+/// being what memory knows besides the friend: what the last confirmed
+/// state is worth by now ([presenceAt]: offline when it would have
+/// expired), however long ago, so a start shows every status at once; not
+/// known ([PresenceDoubt.unchecked]) only for a friend never heard from.
+/// [friend] itself when nothing changes, or they do not show it.
 FriendProfile _rememberedPresence(
   FriendProfile friend, {
   required int nowMillis,
@@ -1648,16 +1653,16 @@ FriendProfile _rememberedPresence(
   final bool sameTimes =
       confirmed == friend.presenceAtMillis &&
       seen == friend.lastPresenceAtMillis;
-  if (!presenceRemembered(confirmedAtMillis: confirmed, nowMillis: nowMillis)) {
+  if (confirmed <= 0) {
+    // Never heard from: nothing to show but that it is not known.
     if (friend.presenceDoubt == PresenceDoubt.unchecked && sameTimes) {
       return friend;
     }
-    return friend.copyWith(
-      presenceDoubt: PresenceDoubt.unchecked,
-      presenceAtMillis: confirmed,
-      lastPresenceAtMillis: seen,
-    );
+    return friend.copyWith(presenceDoubt: PresenceDoubt.unchecked);
   }
+  // Confirmed longer ago than kPresenceRememberedFor too: what it is worth
+  // by now (offline, "ostatnio w sieci …") shows at once, not "status
+  // nieznany" until the first answers came; an answer puts it right.
   final PeerPresence presence = presenceAt(
     presence: friend.presence,
     presenceAtMillis: confirmed,

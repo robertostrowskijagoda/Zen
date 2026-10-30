@@ -31,6 +31,9 @@ final class _FakeRing implements MediaKeyRing {
   _FakeRing({this.senderFails = false});
 
   final bool senderFails;
+
+  /// While set, putting a transformer on a sender waits for it.
+  Completer<void>? holdSenders;
   final Map<String, Map<int, String>> keys = <String, Map<int, String>>{};
   bool disposed = false;
 
@@ -52,6 +55,7 @@ final class _FakeRing implements MediaKeyRing {
     if (senderFails) {
       throw StateError('no transformer');
     }
+    await holdSenders?.future;
     sealed.add(sender.senderId);
     return _FakeCryptor();
   }
@@ -642,7 +646,8 @@ void main() {
 
     test('only senders and receivers the connection has are sealed: a '
         'missing one crashed the app natively (flutter_webrtc hands it on '
-        'as null); a sender without a track yet is sealed too', () async {
+        'as null); a sender without a track (the camera of an audio call, which '
+        'crashed natively too) is sealed once it has one', () async {
       final _FakeBackend backend = _FakeBackend();
       final (MediaE2eeChannel offering, MediaE2eeChannel _) = await _handshake(
         callId: 'call-5',
@@ -666,7 +671,52 @@ void main() {
           receivers: <RTCRtpReceiver>[_Receiver('ra'), _Receiver('rv')],
         ),
       );
-      expect(ring.sealed, <String>['audio', 'ra', 'video', 'rv']);
+      expect(ring.sealed, <String>['audio', 'ra', 'rv']);
+      // The camera came on: the next pass seals its sender, once.
+      final _Sender camera = _Sender('video');
+      final _Connection withCamera = _Connection(
+        transceivers: <RTCRtpTransceiver>[
+          _Transceiver(audio, _Receiver('ra')),
+          _Transceiver(camera, _Receiver('rv')),
+        ],
+      );
+      await offering.attachAll(withCamera);
+      await offering.attachAll(withCamera);
+      expect(ring.sealed, <String>['audio', 'ra', 'rv', 'video']);
+    });
+
+    test('the call ends while its senders are being sealed (a friend who '
+        'is offline): the channel waits for it before the connection may '
+        'close, and seals nothing more', () async {
+      final _FakeBackend backend = _FakeBackend();
+      final (MediaE2eeChannel offering, MediaE2eeChannel _) = await _handshake(
+        callId: 'call-6',
+        offerer: kMediaOffererId,
+        answerer: kMediaAnswererId,
+        offererBackend: backend,
+      );
+      final _FakeRing ring = backend.rings.first;
+      final Completer<void> hold = ring.holdSenders = Completer<void>();
+      final Future<void> attaching = offering.attachAll(
+        _Connection(
+          transceivers: <RTCRtpTransceiver>[
+            _Transceiver(_Sender('audio'), _Receiver('ra')),
+            _Transceiver(_Sender('video'), _Receiver('rv')),
+          ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      bool disposed = false;
+      final Future<void> disposing = offering.dispose().then(
+        (_) => disposed = true,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(disposed, isFalse, reason: 'a sender is being sealed');
+      hold.complete();
+      await attaching;
+      await disposing;
+      expect(ring.sealed, <String>['audio']);
+      expect(ring.disposed, isTrue);
     });
 
     test('an offer without a block is answered without one', () async {

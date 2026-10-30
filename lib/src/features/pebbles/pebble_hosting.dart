@@ -155,6 +155,7 @@ final class PebbleHosting {
   final Map<PebbleId, int> _askedAt = <PebbleId, int>{};
   final Set<PebbleId> _listDirty = <PebbleId>{};
   final Map<String, int> _forwarded = <String, int>{};
+  final Map<String, int> _heardAt = <String, int>{};
   final _Budget _perSender = _Budget(30);
   final _Budget _served = _Budget(60);
   final _Budget _forwards = _Budget(10);
@@ -716,8 +717,9 @@ final class PebbleHosting {
   });
 
   /// Whom to ask for [e]'s design, in order: the author's devices, the
-  /// author's device that asked this one to keep it, the keepers in the
-  /// newest list, then friends (who may pass the question on).
+  /// author's device that asked this one to keep it, the keepers the QR
+  /// code named, the keepers in the newest list, then friends (who may
+  /// pass the question on).
   List<(String, int)> _targetsFor(PebbleEntry e) {
     final Set<String> seen = <String>{};
     final List<(String, int)> out = <(String, int)>[];
@@ -734,6 +736,9 @@ final class PebbleHosting {
     final String? from = e.keptFrom;
     if (from != null) {
       add(from, 0);
+    }
+    for (final String k in e.hinted) {
+      add(k, 0);
     }
     for (final String k in e.keepers?.keepers ?? const <String>[]) {
       add(k, 0);
@@ -774,6 +779,43 @@ final class PebbleHosting {
       f.round += 1;
     } else {
       f.nextAt = _now + batchWait.inMilliseconds;
+    }
+  }
+
+  /// [from] was heard from (any frame: a message, a status): a design
+  /// that waits for its next round and that [from] hands out itself (the
+  /// author's device, the one that asked to keep it, a keeper) is asked
+  /// of them now, not hours later. The author's app may have been closed
+  /// when it was asked (it keeps no question for later).
+  Future<void> _heard(String from) async {
+    final int? at = _heardAt[from];
+    if (from.isEmpty ||
+        peers.isBlocked(from) ||
+        (at != null && _now - at < const Duration(minutes: 1).inMilliseconds)) {
+      return;
+    }
+    _heardAt[from] = _now;
+    if (_heardAt.length > 500) {
+      _heardAt.remove(_heardAt.keys.first);
+    }
+    await store.load();
+    final String? account = peers.accountOf(from);
+    for (final PebbleEntry e in store.lackingDesign.take(20)) {
+      final _Fetch? f = _fetches[e.id];
+      final bool direct =
+          (account != null && account == e.card.authorAccount) ||
+          e.keptFrom == from ||
+          e.hinted.contains(from) ||
+          (e.keepers?.keepers.contains(from) ?? false);
+      if (f == null || f.round == 0 || !direct) {
+        continue;
+      }
+      await _send(from, <String, dynamic>{
+        'type': PebbleFrames.get,
+        'id': e.id.text,
+        'a': e.card.authorAccount,
+        'h': 0,
+      });
     }
   }
 
@@ -854,6 +896,9 @@ final class PebbleHosting {
 
   Future<void> _onFrame(SignalTransportFrame frame) async {
     final Object? type = frame.payload['type'];
+    if (_fetches.isNotEmpty) {
+      await _heard(PeerShareCodec.normalizeAddress(frame.from));
+    }
     if (type is! String || !PebbleFrames.all.contains(type)) {
       return;
     }

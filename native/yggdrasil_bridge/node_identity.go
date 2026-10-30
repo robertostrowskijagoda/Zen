@@ -99,6 +99,9 @@ type nodeOwner struct {
 	// (Android ended it): that engine's node is not on screen, whatever it
 	// said last. 0 for none.
 	GoneApp uint64 `json:"goneApp,omitempty"`
+	// The file a fatal Go error of this process is written to
+	// (crash_output.go); empty for none.
+	CrashFile string `json:"crashFile,omitempty"`
 }
 
 // The next engine number (process-wide: the app's and the service's isolates

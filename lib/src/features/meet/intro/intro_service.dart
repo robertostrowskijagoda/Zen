@@ -80,18 +80,8 @@ const int kIntroNoteMaxChars = 300;
 /// Longest letter to a stranger.
 const int kLetterMaxChars = 1000;
 
-/// Letters one person may send through one friend in a week (the sender's
-/// app counts, the friend's app checks again).
-const int kLettersPerWeek = 3;
-
-/// Letters one phone passes on in a week, from all senders together.
-const int kLettersRelayedPerWeek = 10;
-
 /// Requests (introductions, letters, lists) taken from one friend a day.
 const int kIntroAsksPerFriendPerDay = 10;
-
-/// Introductions and letters passed on to this phone by one friend a day.
-const int kIntroForwardsPerFriendPerDay = 10;
 
 /// Payments for a first message taken from one person a day.
 const int kIntroPaysPerDay = 5;
@@ -570,9 +560,6 @@ final class IntroService extends ChangeNotifier {
 
   final Map<String, IntroCase> _cases = <String, IntroCase>{};
 
-  /// Letters this phone passed on: who sent them and when.
-  final List<(String, int)> _relayed = <(String, int)>[];
-
   /// Friend requests this phone passed on: who sent them and when.
   final List<(String, int)> _friendRelayed = <(String, int)>[];
 
@@ -628,7 +615,6 @@ final class IntroService extends ChangeNotifier {
 
   /// Requests and passed-on cases taken per friend (flood guard, a day).
   final Map<String, List<int>> _asksFrom = <String, List<int>>{};
-  final Map<String, List<int>> _forwardsFrom = <String, List<int>>{};
   final Map<String, List<int>> _paysFrom = <String, List<int>>{};
 
   /// The store could not be read: nothing is written until it can.
@@ -705,22 +691,6 @@ final class IntroService extends ChangeNotifier {
     return null;
   }
 
-  /// Letters this person may still send through [middle] this week.
-  int lettersLeft(String middle) {
-    final String f = _n(middle);
-    final int ms = _now();
-    final int sent = _cases.values
-        .where(
-          (IntroCase c) =>
-              c.role == IntroRole.asker &&
-              c.kind == IntroKind.letter &&
-              c.middle == f &&
-              ms - c.at < _week,
-        )
-        .length;
-    return max(0, kLettersPerWeek - sent);
-  }
-
   // ---- store ----
 
   /// Reads the cases (again: the background service may have written).
@@ -741,7 +711,6 @@ final class IntroService extends ChangeNotifier {
         return;
       }
       _cases.clear();
-      _relayed.clear();
       _friendRelayed.clear();
       _relayLetters = true;
       _gates = GateSettings();
@@ -759,14 +728,6 @@ final class IntroService extends ChangeNotifier {
             final IntroCase? c = IntroCase.fromJson(item);
             if (c != null) {
               _cases[c.id] = c;
-            }
-          }
-        }
-        final Object? relayed = json['relayed'];
-        if (relayed is List) {
-          for (final Object? r in relayed.take(kLettersRelayedPerWeek * 4)) {
-            if (r is List && r.length == 2 && r[0] is String && r[1] is int) {
-              _relayed.add((r[0] as String, r[1] as int));
             }
           }
         }
@@ -860,7 +821,6 @@ final class IntroService extends ChangeNotifier {
     }
     final int ms = _now();
     _cases.removeWhere((String _, IntroCase c) => !c.aliveAt(ms));
-    _relayed.removeWhere(((String, int) r) => ms - r.$2 > _week);
     _friendRelayed.removeWhere(((String, int) r) => ms - r.$2 > _week);
     final int over = _cases.length - kIntroMaxCases;
     if (over > 0) {
@@ -884,9 +844,6 @@ final class IntroService extends ChangeNotifier {
           'v': 1,
           'cases': <Map<String, dynamic>>[
             for (final IntroCase c in _cases.values) c.toJson(),
-          ],
-          'relayed': <List<Object>>[
-            for (final (String, int) r in _relayed) <Object>[r.$1, r.$2],
           ],
           if (_friendRelayed.isNotEmpty)
             'frl': <List<Object>>[
@@ -1093,7 +1050,7 @@ final class IntroService extends ChangeNotifier {
   }) async {
     await _ready();
     final String body = introText(text, kLetterMaxChars);
-    if (body.isEmpty || lettersLeft(middle) <= 0) {
+    if (body.isEmpty) {
       return null;
     }
     return _askAbout(IntroKind.letter, middle, target, targetName, body);
@@ -1364,12 +1321,11 @@ final class IntroService extends ChangeNotifier {
   GateTerms gateTermsFor(String person) =>
       _gates.termsFor(person, gateTierOf(person));
 
-  /// Whether friends may pass this person's terms and friend list on.
-  Future<void> setGateRelay(bool on) async {
-    await _ready();
-    _gates.relay = on;
-    await _save();
-    await shareGates();
+  /// Whether this person's gate is open to [person]: free and without
+  /// asking for consent (then [person] sees the friend list unasked).
+  bool gateOpenTo(String person) {
+    final GateTerms terms = gateTermsFor(person);
+    return terms.free && !terms.consent;
   }
 
   /// What [friend] told this person about their gates.
@@ -2748,16 +2704,6 @@ final class IntroService extends ChangeNotifier {
     return true;
   }
 
-  bool _letterAllowed(String from) {
-    final int ms = _now();
-    final List<(String, int)> week = <(String, int)>[
-      for (final (String, int) r in _relayed)
-        if (ms - r.$2 < _week) r,
-    ];
-    return week.length < kLettersRelayedPerWeek &&
-        week.where(((String, int) r) => r.$1 == from).length < kLettersPerWeek;
-  }
-
   /// X (a friend, or someone a gate opened to) asks this person (F).
   Future<void> _onAsk(
     String from,
@@ -2815,11 +2761,10 @@ final class IntroService extends ChangeNotifier {
         // Passed on as it came: only the one it is for can check it.
         proof: proof,
       );
-      if (!_relayLetters || !_letterAllowed(from)) {
+      if (!_relayLetters) {
         await _result(from, id, 'no');
         return;
       }
-      _relayed.add((from, _now()));
       c.status = IntroStatus.forwarded;
       _cases[id] = c;
       await _save();
@@ -3018,8 +2963,7 @@ final class IntroService extends ChangeNotifier {
     );
     if ((kind == IntroKind.letter && text.isEmpty) ||
         waiting ||
-        needsMe.length >= kIntroMaxOpen ||
-        !_take(_forwardsFrom, from, kIntroForwardsPerFriendPerDay)) {
+        needsMe.length >= kIntroMaxOpen) {
       return;
     }
     // The asker's signature: the middle friend may not change the

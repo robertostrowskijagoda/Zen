@@ -1,0 +1,16 @@
+name: Idea
+description: Something Zen could do, or do better.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you would like
+      description: What you want to do with Zen, and why it matters to you.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it could work
+      description: Optional. A sketch, a screenshot of a similar app, or a few words.

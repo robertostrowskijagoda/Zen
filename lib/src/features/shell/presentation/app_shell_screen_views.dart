@@ -3413,6 +3413,38 @@ class _MyCodeScreen extends ConsumerWidget {
   }
 }
 
+/// "Napisz" under an invitation: a conversation with its sender before
+/// it is answered, to ask who they are (an invitation lets both write,
+/// stranger_chats.dart).
+class _WriteBeforeAccepting extends ConsumerWidget {
+  const _WriteBeforeAccepting({required this.peerAddress, this.name});
+
+  final String peerAddress;
+  final String? name;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Align(
+    child: TextButton.icon(
+      key: Key('invite-write-$peerAddress'),
+      icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+      label: Text(t('Napisz, zanim odpowiesz')),
+      onPressed: () => unawaited(
+        _openConversationScreen(
+          context,
+          peerAddress: peerAddress,
+          title:
+              name ??
+              ref
+                  .read(socialHubControllerProvider)
+                  .friendByAddress(peerAddress)
+                  ?.displayLabel ??
+              t('Kontakt Zen'),
+        ),
+      ),
+    ),
+  );
+}
+
 class _QrScreenFriendRequestCard extends ConsumerWidget {
   const _QrScreenFriendRequestCard({
     required this.request,
@@ -3528,7 +3560,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                   child: Text(t('Odrzuć'), textAlign: TextAlign.center),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 16),
               Expanded(
                 child: FilledButton(
                   key: Key('qr-accept-$peerAddress'),
@@ -3581,6 +3613,8 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          _WriteBeforeAccepting(peerAddress: peerAddress, name: title),
         ],
       ),
     );

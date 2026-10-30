@@ -78,4 +78,21 @@ void main() {
     expect(back.showsFriendListTo('200::d4'), isFalse);
     expect(FriendListAudience.byName('close'), FriendListAudience.close);
   });
+
+  test('a friend the gate is open to sees the friend list unasked, '
+      'whatever the audience', () async {
+    final _Host host = _Host();
+    final MeetService service = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+      now: () => 1000,
+    )..friendNames = () => <String, String>{mid: 'Marek', close: 'Celina'};
+    await service.setFriendListAudience(FriendListAudience.close);
+    expect(service.friendListVisibleTo(mid), isFalse);
+
+    service.gateOpenTo = (String friend) => friend == mid;
+    expect(service.friendListVisibleTo(mid), isTrue);
+    await service.shareFriendList(service.friendNames!(), force: true);
+    expect(host.last(mid, MeetTypes.friendList)!['l'], isNotEmpty);
+  });
 }

@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Zen does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. Security problems: please do not use a public issue, see SECURITY.md.
+        Never paste passwords, keys, recovery phrases or private messages here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. See …
+  - type: input
+    id: version
+    attributes:
+      label: Zen version
+      description: Shown in Zen's settings, under About.
+      placeholder: "1.15.3"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and system
+      placeholder: "Samsung Galaxy S23, Android 15 / Windows 11 / …"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics log
+      description: If you can, the diagnostics log saved from Zen's settings (it holds no message text, names or keys). Screenshots help too.

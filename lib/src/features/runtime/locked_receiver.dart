@@ -181,6 +181,16 @@ const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
 /// first minute to friends who did not answer come further apart.
 const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 
+/// How often a locked phone asks the friends who see its status how they
+/// are (a `ping`, on the mailbox polls' wake), so the app knows their
+/// statuses at once when it opens: their answers, and the pings of friends
+/// with Zen open, are handed to the app with the inbox (the newest of each
+/// friend, [kPresenceRememberedFor] old at most). Under
+/// kPresenceRememberedFor, so a status is never unknown for want of a
+/// round; a friend's locked phone answers at most every
+/// [kLockedPongEvery].
+const Duration kLockedPresenceRoundEvery = Duration(minutes: 10);
+
 /// A one-way presence announcement ("leaving the screen", "back", "closing"):
 /// sent to friends who have Zen open when this device's state changes
 /// (runtime_signal_module.dart). Nothing to keep for later.
@@ -548,6 +558,7 @@ final class LockedReceiver {
     this.pollAnswerGrace = const Duration(seconds: 3),
     this.pongEvery = kLockedPongEvery,
     this.freshPongEvery = kLockedFreshPongEvery,
+    this.presenceRoundEvery = kLockedPresenceRoundEvery,
     WakeBeat? beat,
     Future<bool> Function()? meshLinked,
     this.relinkWait = const Duration(seconds: 10),
@@ -595,6 +606,16 @@ final class LockedReceiver {
   /// What a pong may say about this phone (without a kit: only that it
   /// answers).
   final LockedPresenceKit _presence;
+
+  /// How often the friends who see this phone's status are pinged.
+  final Duration presenceRoundEvery;
+  int _presenceRoundAt = 0;
+
+  /// The newest ping, pong or `away` of each friend: handed to the app with
+  /// the inbox when this receiver stops ([stop]), so their statuses are
+  /// known the moment Zen opens.
+  final Map<String, SignalTransportFrame> _presenceHeard =
+      <String, SignalTransportFrame>{};
 
   /// [LockedMailboxKit.takenTag]s of what the app already took before it
   /// locked: a copy of one is confirmed, never kept or told about again.
@@ -703,6 +724,8 @@ final class LockedReceiver {
     // An alarm that was going on when the app locked carries on here.
     await _alarm?.start();
     _keptAtPoll = _keptCount;
+    // The app pinged everyone a moment ago: the first round comes later.
+    _presenceRoundAt = _now();
     await _pollMailboxes();
     if (mailboxPollInterval > Duration.zero &&
         _capability.mailboxes.isNotEmpty) {
@@ -735,6 +758,7 @@ final class LockedReceiver {
 
   Future<void> stop() async {
     _running = false;
+    await _handOverPresence();
     await _alarm?.stop();
     _pollTimer?.cancel();
     _pollTimer = null;
@@ -846,6 +870,10 @@ final class LockedReceiver {
 
   /// The polls on a wake, then a moment for the answers (mail that comes
   /// later wakes the phone itself, like any frame).
+  /// One wake of the mailbox polls (tests).
+  @visibleForTesting
+  Future<void> pollOnWakeForTest() => _pollOnWake();
+
   Future<void> _pollOnWake() async {
     final BeatTimer? poll = _pollTimer;
     if (poll != null) {
@@ -869,6 +897,7 @@ final class LockedReceiver {
     } on Object catch (error, stackTrace) {
       logZenError('Mailbox poll failed', error, stackTrace);
     }
+    await _presenceRound();
     if (_running) {
       await Future<void>.delayed(pollAnswerGrace);
     }
@@ -916,6 +945,69 @@ final class LockedReceiver {
   /// Asks every mailbox for what it holds now, outside the beat (an
   /// iPhone's background wake, which may be the only moment for it).
   Future<void> pollMailboxes() => _pollMailboxes();
+
+  /// Pings the friends who see this phone's status, at most every
+  /// [presenceRoundEvery] (the ping says "w tle", as a pong would).
+  Future<void> _presenceRound() async {
+    final int at = _now();
+    if (presenceRoundEvery <= Duration.zero ||
+        at - _presenceRoundAt < presenceRoundEvery.inMilliseconds) {
+      return;
+    }
+    _presenceRoundAt = at;
+    for (final String friend in _presence.shownTo) {
+      if (!_running) {
+        return;
+      }
+      if (_capability.kindOf(friend) != BackgroundContactKind.friend) {
+        continue;
+      }
+      await _sendQuietly(friend, <String, dynamic>{
+        'type': 'ping',
+        ..._presence.pongFields(friend, at),
+        ...versionHello(),
+      });
+    }
+  }
+
+  /// Notes the newest presence frame of a friend ([_presenceHeard]).
+  void _notePresenceHeard(String from, SignalTransportFrame frame) {
+    final SignalTransportFrame? had = _presenceHeard[from];
+    if (had != null && had.receivedAtMillis > frame.receivedAtMillis) {
+      return;
+    }
+    if (had == null && _presenceHeard.length >= LockedPresenceKit.maxEntries) {
+      return;
+    }
+    _presenceHeard[from] = frame;
+  }
+
+  /// Puts the newest presence frame of each friend, heard within
+  /// [kPresenceRememberedFor], into the inbox: the app takes them with the
+  /// rest (at the time they came, so a status is aged as it would have
+  /// been) and shows its friends' statuses at once instead of "nieznany".
+  Future<void> _handOverPresence() async {
+    final int at = _now();
+    final List<SignalTransportFrame> frames = _presenceHeard.values
+        .where(
+          (SignalTransportFrame f) =>
+              at - f.receivedAtMillis <= kPresenceRememberedFor.inMilliseconds,
+        )
+        .toList();
+    _presenceHeard.clear();
+    for (final SignalTransportFrame frame in frames) {
+      try {
+        await _inbox.append(
+          encodeInboxFrame(frame),
+          sender: PeerShareCodec.normalizeAddress(frame.from),
+          stranger: false,
+        );
+      } on Object catch (error) {
+        logZenWarning('A status of a friend was not kept: $error');
+        return;
+      }
+    }
+  }
 
   Future<void> _pollMailboxes() async {
     for (final String mailbox in _capability.mailboxes) {
@@ -979,6 +1071,10 @@ final class LockedReceiver {
     // Friends' confirmations and answers, and mailboxes (possibly strangers
     // here) taking their copy of the alarm.
     _alarm?.observe(frame);
+    if (kind == BackgroundContactKind.friend &&
+        (type == 'ping' || type == 'pong' || type == kPresenceAwayType)) {
+      _notePresenceHeard(from, frame);
+    }
     if (type == 'ping') {
       final int at = _now();
       if (contact && _answersPing(from, at, frame.payload)) {
@@ -1362,11 +1458,19 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
+      // Who invited (or accepted) and what they wrote, as the
+      // notification level allows; a group invitation stays plain.
+      final NoticeText? invite = _noticeKit.invitationNotice(
+        from: from,
+        type: type,
+        payload: payload,
+      );
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedSocialSlot-${_now()}',
-          title: PrivacyRedactingNotificationService.genericTitle,
-          body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
+          title:
+              invite?.title ?? PrivacyRedactingNotificationService.genericTitle,
+          body: invite?.body ?? t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           kind: _invitationTypes.contains(type) ? NoticeKind.invitation : null,

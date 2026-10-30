@@ -58,6 +58,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	cfg.AdminListen = "none"
 	configJSON, peerTarget := takeZenPeerTarget(configJSON)
 	configJSON, owner := takeZenNodeOwner(configJSON)
+	setCrashFile(owner.CrashFile)
 	if err := cfg.UnmarshalHJSON([]byte(configJSON)); err != nil {
 		return nil, err
 	}

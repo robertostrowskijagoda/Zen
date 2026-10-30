@@ -36,6 +36,7 @@ final class PebbleEntry {
     this.foundSent = false,
     this.keptFrom,
     this.madeHere = false,
+    this.hinted = const <String>[],
   });
 
   final PebbleCard card;
@@ -66,6 +67,10 @@ final class PebbleEntry {
   /// the keepers and signs their list.
   final bool madeHere;
 
+  /// The keepers the QR code it was collected from named (pebble_link.dart):
+  /// asked for the design right after the author's devices.
+  final List<String> hinted;
+
   PebbleId get id => card.id;
 
   bool get created => roles.contains(PebbleRole.created);
@@ -84,6 +89,7 @@ final class PebbleEntry {
     PebbleKeeperList? keepers,
     bool? foundSent,
     String? keptFrom,
+    List<String>? hinted,
   }) => PebbleEntry(
     card: card ?? this.card,
     roles: roles ?? this.roles,
@@ -95,6 +101,7 @@ final class PebbleEntry {
     foundSent: foundSent ?? this.foundSent,
     keptFrom: keptFrom ?? this.keptFrom,
     madeHere: madeHere,
+    hinted: hinted ?? this.hinted,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -108,6 +115,7 @@ final class PebbleEntry {
     if (foundSent) 'fs': true,
     'o': ?keptFrom,
     if (madeHere) 'm': true,
+    if (hinted.isNotEmpty) 'h': hinted,
   };
 
   static PebbleEntry? fromJson(Object? json) {
@@ -141,9 +149,18 @@ final class PebbleEntry {
       foundSent: json['fs'] == true,
       keptFrom: json['o'] is String ? json['o'] as String : null,
       madeHere: json['m'] == true,
+      hinted: json['h'] is List
+          ? <String>[
+              for (final Object? a in json['h'] as List)
+                if (a is String) a,
+            ].take(kPebbleQrKeepersHinted).toList()
+          : const <String>[],
     );
   }
 }
+
+/// The most keepers a collected pebble keeps from its QR code.
+const int kPebbleQrKeepersHinted = 3;
 
 /// [note] trimmed to [kPebbleFindNoteMaxChars] characters.
 String clipFindNote(String note) {
@@ -497,6 +514,7 @@ final class PebbleStore extends ChangeNotifier {
     PebbleCard card, {
     String findNote = '',
     int? foundAtMillis,
+    List<String> hinted = const <String>[],
   }) async {
     await load();
     final PebbleEntry? had = _entries[card.id];
@@ -517,6 +535,9 @@ final class PebbleStore extends ChangeNotifier {
               roles: <PebbleRole>{...?had?.roles, PebbleRole.collected},
               foundAtMillis: foundAtMillis ?? now,
               findNote: clipFindNote(findNote),
+              hinted: hinted.isEmpty
+                  ? null
+                  : hinted.take(kPebbleQrKeepersHinted).toList(),
             );
     _entries[card.id] = e;
     _removed.remove(card.id);

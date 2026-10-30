@@ -509,8 +509,8 @@ void main() {
       expect(read().shownPresence, PeerPresence.offline);
     });
 
-    test('back on the network after long, "status nieznany" until the '
-        'answers had time to come', () async {
+    test('back on the network after long, what the last state is worth '
+        'by now shows at once (offline), not "status nieznany"', () async {
       final ProviderContainer container = hub(
         ada: ada.copyWith(
           presence: PeerPresence.background,
@@ -533,23 +533,18 @@ void main() {
       await controller.notePresenceNetwork(reachable: false);
       final int back = _day + kPresenceRememberedFor.inMilliseconds + _minute;
       await controller.notePresenceNetwork(reachable: true, nowMillis: back);
-      expect(read().presenceDoubt, PresenceDoubt.unchecked);
-      expect(read().shownPresence, PeerPresence.unknown);
-      expect(
-        friendPresenceLine(read(), back),
-        'status nieznany · ostatnio w tle 31 min temu',
-      );
+      expect(read().presenceDoubt, isNull);
+      expect(read().shownPresence, PeerPresence.offline);
       await decayAt(back);
-      expect(read().shownPresence, PeerPresence.unknown);
-      expect(read().presence, PeerPresence.background);
+      expect(read().shownPresence, PeerPresence.offline);
       await decayAt(back, settle: true);
       expect(read().presenceDoubt, isNull);
       expect(read().shownPresence, PeerPresence.offline);
     });
 
     test('back on the screen, a presence that would have expired shows what '
-        'it is worth by now, or "status nieznany" when it is long ago; an '
-        'answer ends the doubt', () async {
+        'it is worth by now, also when it is long ago; an answer puts it '
+        'right', () async {
       final ProviderContainer container = hub(
         ada: ada.copyWith(
           presence: PeerPresence.online,
@@ -583,12 +578,8 @@ void main() {
       expect(read().shownPresence, PeerPresence.background);
       final int later = heard + 40 * _minute;
       await backAt(later);
-      expect(read().presenceDoubt, PresenceDoubt.unchecked);
-      expect(read().presence, PeerPresence.background);
-      expect(
-        friendPresenceLine(read(), later),
-        'status nieznany · ostatnio w tle 40 min temu',
-      );
+      expect(read().presenceDoubt, isNull);
+      expect(read().shownPresence, PeerPresence.offline);
 
       await controller.updatePeerPresence(
         peerAddress: _ada,
@@ -1119,9 +1110,8 @@ void main() {
     });
 
     testWidgets('what friends showed is remembered over a restart: confirmed '
-        'within 30 min it shows as it stands now until they answer; older, '
-        '"status nieznany" until they answer, or until the second round\'s '
-        'answers had time to come', (WidgetTester tester) async {
+        'it shows at once as it stands now, however long ago, until they '
+        'answer (not "status nieznany")', (WidgetTester tester) async {
       final int now = DateTime.now().millisecondsSinceEpoch;
       final MemorySocialSnapshotStore store = MemorySocialSnapshotStore(
         SocialHubState.empty().copyWith(
@@ -1163,17 +1153,9 @@ void main() {
         friendPresenceLine(friendIn(tester, _carol), now),
         'ostatnio otwierał(a) 12 min temu',
       );
-      // Bob, an hour ago: not known.
-      expect(friendIn(tester, _bob).presenceDoubt, PresenceDoubt.unchecked);
-      expect(friendIn(tester, _bob).shownPresence, PeerPresence.unknown);
-      expect(
-        friendPresenceLine(friendIn(tester, _bob), now),
-        'status nieznany · ostatnio w tle 1 godz. temu',
-      );
-      // Not offline after the first round's settle either.
-      await tester.pump(kPresenceSettleAfterResume);
-      await tester.pump();
-      expect(friendIn(tester, _bob).shownPresence, PeerPresence.unknown);
+      // Bob, "w tle" an hour ago: what that is worth by now, offline.
+      expect(friendIn(tester, _bob).presenceDoubt, isNull);
+      expect(friendIn(tester, _bob).shownPresence, PeerPresence.offline);
 
       // Ada's first word replaces what was remembered.
       await transport.injectIncoming(
@@ -1183,8 +1165,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
 
-      // Bob never answers: after the second round, what his last state is
-      // worth by now (an hour old "w tle" is offline).
+      // Bob never answers: still offline after the rounds.
       await tester.pump(kPresencePingInterval);
       await tester.pump(kPresenceSettleAfterResume);
       await tester.pump();
@@ -1231,7 +1212,7 @@ void main() {
     });
 
     testWidgets('after a start, a locked friend who answered just before it '
-        'shows "w tle" within seconds, not "status nieznany" for minutes', (
+        'shows "w tle" within seconds, not offline for minutes', (
       WidgetTester tester,
     ) async {
       final int start = DateTime.now().millisecondsSinceEpoch;
@@ -1274,7 +1255,8 @@ void main() {
           ),
         ),
       );
-      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
+      // "w tle" an hour ago: offline until her answer comes.
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.offline);
 
       // This phone's pings reach Ada's phone; her answers come back (not
       // the one from before the start: it went to the app that is gone).
@@ -1312,6 +1294,9 @@ void main() {
       expect(last(transport, 'ping'), containsPair(kPresenceFreshKey, true));
       expect(friendIn(tester, _ada).presenceDoubt, isNull);
       expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
+      // The statuses it heard go to a real file as it stops: outside the
+      // fake clock (stopping again in the tear-down writes nothing).
+      await tester.runAsync(adaPhone.stop);
     });
 
     testWidgets('after a start, friends who did not answer are pinged again '
@@ -1387,8 +1372,8 @@ void main() {
     });
 
     testWidgets('the core started again (the node back from the Android '
-        'service) is a start of its own: "status nieznany" is not settled '
-        'after its first round', (WidgetTester tester) async {
+        'service) is a start of its own: a status from long ago shows what '
+        'it is worth by now through it', (WidgetTester tester) async {
       final int now = DateTime.now().millisecondsSinceEpoch;
       await pumpApp(
         tester,
@@ -1410,7 +1395,7 @@ void main() {
           ),
         ),
       );
-      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.offline);
       final ZenCore core = ProviderScope.containerOf(
         tester.element(find.byType(ZenRewriteApp)),
       ).read(zenCoreProvider);
@@ -1420,8 +1405,8 @@ void main() {
       await tester.pump();
       await tester.pump(kPresenceSettleAfterResume);
       await tester.pump();
-      expect(friendIn(tester, _ada).shownPresence, PeerPresence.unknown);
-      // The second round of this run settles it.
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.offline);
+      // And after the second round of this run.
       await tester.pump(kPresencePingInterval);
       await tester.pump(kPresenceSettleAfterResume);
       await tester.pump();

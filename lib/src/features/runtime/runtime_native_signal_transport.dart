@@ -389,6 +389,8 @@ final class RuntimeNodeOwner {
     'claim': claim,
     'onScreen': onScreen,
     if (goneApp > 0) 'goneApp': goneApp,
+    // Where the bridge writes a fatal Go error (ZenTechLog.noteGoCrash).
+    if (ZenTechLog.goCrashPath case final String crash) 'crashFile': crash,
   };
 
   /// Notes the number a start's answer ([result]) gave this owner.

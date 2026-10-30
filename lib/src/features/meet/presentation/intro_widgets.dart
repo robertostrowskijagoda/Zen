@@ -624,7 +624,7 @@ class FriendListAudienceTile extends ConsumerWidget {
 }
 
 /// "Przekazuj listy od znajomych": this phone passes friends'
-/// letters on to its friends, within limits.
+/// letters on to its friends.
 class RelayLettersSwitch extends ConsumerWidget {
   const RelayLettersSwitch({super.key});
 
@@ -640,9 +640,7 @@ class RelayLettersSwitch extends ConsumerWidget {
         subtitle: Text(
           t(
             'Znajomy może wysłać przez Ciebie jeden list do kogoś z Twoich '
-            'znajomych. Limit: {perPerson} tygodniowo od jednej osoby, '
-            '{total} łącznie.',
-            {'perPerson': kLettersPerWeek, 'total': kLettersRelayedPerWeek},
+            'znajomych.',
           ),
         ),
         onChanged: (bool v) => unawaited(intro.setRelayLetters(v)),
@@ -717,7 +715,6 @@ Future<void> sendLetterTo(
     builder: (BuildContext context) => StatefulBuilder(
       builder: (BuildContext context, StateSetter set) {
         final String f = intro.host.nameOf(middle);
-        final int left = intro.lettersLeft(middle);
         return AlertDialog(
           key: const Key('letter-dialog'),
           title: Text(t('List do: {name}', {'name': targetName})),
@@ -736,7 +733,6 @@ Future<void> sendLetterTo(
                   TextField(
                     key: const Key('letter-text'),
                     controller: text,
-                    enabled: left > 0,
                     minLines: 4,
                     maxLines: 8,
                     maxLength: kLetterMaxChars,
@@ -749,20 +745,12 @@ Future<void> sendLetterTo(
                   ),
                   ZenInfo(
                     icon: Icons.mail_outline_rounded,
-                    text: left > 0
-                        ? t(
-                            'Jeden list, bez rozmowy: odbiorca może tylko '
-                            'zaprosić Cię do znajomych albo go zignorować. '
-                            'List przejdzie przez telefon: {name}. '
-                            'Zostało w tym tygodniu: {left} z {limit}.',
-                            {'name': f, 'left': left, 'limit': kLettersPerWeek},
-                          )
-                        : t(
-                            'Limit listów przez: {name} na ten tydzień już się '
-                            'skończył. Spróbuj przez kogoś innego albo za '
-                            'kilka dni.',
-                            {'name': f},
-                          ),
+                    text: t(
+                      'Jeden list, bez rozmowy: odbiorca może tylko '
+                      'zaprosić Cię do znajomych albo go zignorować. '
+                      'List przejdzie przez telefon: {name}.',
+                      {'name': f},
+                    ),
                   ),
                 ],
               ),
@@ -775,9 +763,7 @@ Future<void> sendLetterTo(
             ),
             FilledButton(
               key: const Key('letter-send'),
-              onPressed: left > 0
-                  ? () => Navigator.of(context).pop(true)
-                  : null,
+              onPressed: () => Navigator.of(context).pop(true),
               child: Text(t('Wyślij')),
             ),
           ],

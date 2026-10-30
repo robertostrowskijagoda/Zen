@@ -24,30 +24,41 @@ Future<void> scanPebble(BuildContext context, WidgetRef ref) async {
   if (text == null || !context.mounted) {
     return;
   }
-  final PebbleCard? card = pebbleCardFromLink(text);
-  if (card == null) {
+  final PebbleLink? link = pebbleFromLink(text);
+  if (link == null) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(t('To nie jest kod kamyczka.'))));
     return;
   }
-  await PebbleCollectScreen.open(context, card);
+  await PebbleCollectScreen.open(context, link.card, keepers: link.keepers);
 }
 
 /// A pebble found (its QR code scanned, its link opened): the stone from
 /// its card, its name, note, author and date, and "Zbierz", which saves it
 /// at once; the full design follows in the background.
 class PebbleCollectScreen extends ConsumerStatefulWidget {
-  const PebbleCollectScreen({required this.card, super.key});
+  const PebbleCollectScreen({
+    required this.card,
+    this.keepers = const <String>[],
+    super.key,
+  });
 
   final PebbleCard card;
 
-  static Future<void> open(BuildContext context, PebbleCard card) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) => PebbleCollectScreen(card: card),
-        ),
-      );
+  /// The keepers its QR code named (asked for the design).
+  final List<String> keepers;
+
+  static Future<void> open(
+    BuildContext context,
+    PebbleCard card, {
+    List<String> keepers = const <String>[],
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) =>
+          PebbleCollectScreen(card: card, keepers: keepers),
+    ),
+  );
 
   @override
   ConsumerState<PebbleCollectScreen> createState() =>
@@ -78,6 +89,7 @@ class _PebbleCollectScreenState extends ConsumerState<PebbleCollectScreen> {
     final PebbleCollectResult result = await service.collect(
       widget.card,
       findNote: _note.text,
+      keepers: widget.keepers,
     );
     if (!mounted) {
       return;

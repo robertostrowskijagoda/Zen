@@ -65,10 +65,12 @@ final class PebbleShapeParams {
   /// The bottom squashed flat.
   final double flatBottom;
 
-  /// The same shape, lower: its height ([ay]) at 62 % and at most [most].
+  /// The same shape, lower: a height ([ay]) above [most] at 62 %, between
+  /// 0.3 and [most]; a shape already that flat stays as it is (a disc must
+  /// not become a coin).
   PebbleShapeParams flatter(double most) => PebbleShapeParams(
     ax: ax,
-    ay: (ay * 0.62).clamp(0.0, most),
+    ay: ay <= most ? ay : (ay * 0.62).clamp(0.3, most),
     az: az,
     e1: e1,
     e2: e2,
@@ -194,12 +196,24 @@ enum PebbleShapePreset {
 
   final PebbleShapeParams _built;
 
-  /// The shape as drawn: painted pebbles are flat stones, so every shape
-  /// but [tall] is at most [kPebbleMaxHeight] high (designs keep their
-  /// index and simply come out flatter). The pebble page does the same
-  /// (tool/pages/k/stone.js).
+  /// The shape as drawn: painted pebbles are mostly flat stones, so every
+  /// shape but the [round] ones is at most [kPebbleMaxHeight] high (designs
+  /// keep their index and simply come out flatter). The pebble page does
+  /// the same (tool/pages/k/stone.js).
   PebbleShapeParams get params =>
-      this == tall ? _built : _built.flatter(kPebbleMaxHeight);
+      round.contains(this) ? _built : _built.flatter(kPebbleMaxHeight);
+
+  /// The shapes that keep their own, rounder height: a few stones that are
+  /// not flat, for those who like them (and the standing one).
+  static const Set<PebbleShapePreset> round = <PebbleShapePreset>{
+    egg,
+    tall,
+    lopsided,
+    potato,
+    rock,
+    chubby,
+    plump,
+  };
 
   static PebbleShapePreset byId(int id) =>
       id >= 0 && id < values.length ? values[id] : river;

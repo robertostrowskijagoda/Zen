@@ -339,12 +339,16 @@ GraphLook graphLook({
   }
 
   final List<EdgeLook> edges = <EdgeLook>[];
+  final Color line = zen.textMuted;
   for (int e = 0; e < scene.edgeCount; e++) {
     final int from = scene.edgeFrom[e];
     final GraphNode to = nodes[scene.edgeTo[e]];
     final bool spoke = from < 0;
-    final double width = spoke ? (4 - min(to.ring, 3)) * 0.8 : 0.6;
-    Color color = spoke ? zen.outline : zen.outline.withValues(alpha: 0.5);
+    // Lines in the muted text colour (the outline colour is meant for
+    // borders and hardly showed against the background), thicker towards
+    // "Ty", and none thinner than 1.1: friends of friends are joined too.
+    final double width = spoke ? 1.2 + (3 - min(to.ring, 3)) * 0.6 : 1.1;
+    Color color = line.withValues(alpha: spoke ? 0.8 : 0.55);
     bool dashed = false;
     String? tag;
     switch (mode) {
@@ -357,7 +361,7 @@ GraphLook graphLook({
       case GraphMode.met:
         if (spoke) {
           final bool met = facts.met(to.address);
-          color = met ? zen.success : zen.outline;
+          color = met ? zen.success : line;
           dashed = !met;
           edges.add(
             EdgeLook(
@@ -368,11 +372,11 @@ GraphLook graphLook({
           );
           continue;
         }
-        color = zen.outline.withValues(alpha: 0.3);
+        color = line.withValues(alpha: 0.3);
       case GraphMode.pyramid:
         final PyramidMark? m = pyramid[to.address];
         color = m == null
-            ? zen.outline.withValues(alpha: 0.18)
+            ? line.withValues(alpha: 0.18)
             : (m.line ? zen.accent : pyr.withValues(alpha: 0.7));
         // In a cell together, not yet confirmed as known: dashed.
         dashed = spoke && (m?.unmetCellmate ?? false);
@@ -388,7 +392,7 @@ GraphLook graphLook({
             GateKind.consent => zen.accentSecondary,
           };
         } else {
-          color = zen.outline.withValues(alpha: spoke ? 0.6 : 0.3);
+          color = line.withValues(alpha: spoke ? 0.6 : 0.3);
         }
       case GraphMode.route:
         if (routing) {
@@ -412,10 +416,10 @@ GraphLook graphLook({
     nodes: looks,
     edges: edges,
     link: switch (mode) {
-      GraphMode.friends || GraphMode.time => zen.outline.withValues(alpha: 0.6),
-      GraphMode.bridges => zen.outline.withValues(alpha: 0.5),
-      GraphMode.route when routing => zen.outline.withValues(alpha: 0.12),
-      _ => zen.outline.withValues(alpha: 0.3),
+      GraphMode.friends || GraphMode.time => line.withValues(alpha: 0.6),
+      GraphMode.bridges => line.withValues(alpha: 0.5),
+      GraphMode.route when routing => line.withValues(alpha: 0.12),
+      _ => line.withValues(alpha: 0.3),
     },
     route: <int>[
       if (routing || mode != GraphMode.route)
