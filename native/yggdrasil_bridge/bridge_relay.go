@@ -179,6 +179,8 @@ func (node *bridgeNode) closeAllRelays() {
 }
 
 func (node *bridgeNode) runRelayLoop(relay *relayState) {
+	// A fault in a call's relay ends the call, not the app.
+	defer survive("relay " + relay.callID)
 	buffer := make([]byte, 64*1024)
 	debugf("[ZEN-GO] relay %s: loop started, listening on %s\n", relay.callID, relay.conn.LocalAddr())
 	for {
@@ -241,6 +243,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 			// the receiver's replay window.
 			callID := relay.callID
 			go func() {
+				defer survive("relay " + callID + " warm resend")
 				for _, delay := range []time.Duration{
 					25 * time.Millisecond,
 					75 * time.Millisecond,
@@ -273,6 +276,9 @@ func sendRelay(node *bridgeNode, remoteIP net.IP, callID string, payload []byte)
 // repeats what matters (ICE checks, DTLS) and the session is there after
 // one round trip.
 func buildRelayPacket(node *bridgeNode, remoteIP net.IP, callID string, payload []byte) ([]byte, error) {
+	if node.core == nil {
+		return nil, errors.New("the node has no core")
+	}
 	localAddress := net.ParseIP(node.core.Address().String())
 	if localAddress == nil {
 		return nil, errors.New("could not resolve local yggdrasil address")

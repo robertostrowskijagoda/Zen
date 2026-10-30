@@ -384,6 +384,7 @@ final class ZenBootstrapper {
     );
     logZenMessage('App bootstrap running.');
     unawaited(ZenTechLog.noteExits());
+    unawaited(ZenTechLog.noteGoCrash());
     final AppSecurityService appSecurityService =
         await _runStep<AppSecurityService>(
           ZenStartStep('app-lock', label: t('blokada aplikacji')),

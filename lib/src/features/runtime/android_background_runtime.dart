@@ -2553,6 +2553,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     logZenMessage('Foreground service task started (${starter.name}).');
     ZenTechLog.event('service-start', <String, Object?>{'by': starter.name});
     unawaited(ZenTechLog.noteExits());
+    unawaited(ZenTechLog.noteGoCrash());
     _powerShortcut = const AlarmShortcutChannel().presses.listen(
       (_) => _onPowerShortcut(),
     );

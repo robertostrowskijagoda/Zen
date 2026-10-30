@@ -144,6 +144,69 @@ abstract final class ZenTechLog {
     }
   }
 
+  /// The file the bridge writes a fatal Go error of this process to
+  /// (native/yggdrasil_bridge/crash_output.go), next to the diagnostics
+  /// log; `null` before the log is attached. Android records such a crash
+  /// only as "signal 11", with no stack.
+  static String? get goCrashPath {
+    final File? log = ZenDiagnosticsLog.file;
+    if (log == null) {
+      return null;
+    }
+    return '${log.parent.path}${Platform.pathSeparator}'
+        '${ZenDiagnosticsLog.filePrefix}-go-crash';
+  }
+
+  /// The most lines of a Go crash written to the log.
+  static const int goCrashLines = 80;
+
+  /// Writes a Go crash of an earlier run ([goCrashPath]) to the log and
+  /// empties the file, once per isolate's start, after
+  /// [ZenDiagnosticsLog.attach]. The app and the service both ask: the one
+  /// that claims this crash first (a file made only if it is not there yet)
+  /// writes it, as [noteExits] does.
+  static Future<void> noteGoCrash() async {
+    final String? path = goCrashPath;
+    if (kIsWeb || path == null) {
+      return;
+    }
+    try {
+      final File crash = File(path);
+      if (!await crash.exists() || await crash.length() == 0) {
+        return;
+      }
+      final FileStat stat = await crash.stat();
+      final String mark =
+          '${stat.modified.millisecondsSinceEpoch}-${stat.size}';
+      try {
+        await File('$path-$mark').create(exclusive: true);
+      } on FileSystemException {
+        // The other isolate claimed this crash: it writes it.
+        return;
+      }
+      final List<String> lines = (await crash.readAsString())
+          .split('\n')
+          .where((String line) => line.trim().isNotEmpty)
+          .toList();
+      event('go-crash', <String, Object?>{'lines': lines.length});
+      for (final String line in lines.take(goCrashLines)) {
+        ZenDiagnosticsLog.write('GOCRASH  $line');
+      }
+      // The bridge only appends to it (a node of this run may hold it).
+      await crash.writeAsString('', flush: true);
+      await for (final FileSystemEntity entity in crash.parent.list()) {
+        final String name = entity.path.split(RegExp(r'[/\\]')).last;
+        if (entity is File &&
+            name.startsWith('${ZenDiagnosticsLog.filePrefix}-go-crash-') &&
+            !name.endsWith(mark)) {
+          await entity.delete();
+        }
+      }
+    } on Object catch (error) {
+      logZenWarning('Go crash not read: $error');
+    }
+  }
+
   @visibleForTesting
   static void resetForTest() {
     _mode = null;
