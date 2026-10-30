@@ -16,7 +16,7 @@ dependencies:
   intl: ^0.20.2
 
   ffi: ^2.1.4
-  file_picker: ^10.3.3
+  file_picker: ^12.0.0-beta.7
   flutter_riverpod: ^3.3.1
   crypto: ^3.0.6
   # BlueZ (Linux Bluetooth links, bluez_le.dart).
@@ -36,7 +36,7 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   flutter_foreground_task: ^9.2.1
   cryptography: ^2.9.0
-  flutter_secure_storage: ^10.3.4
+  flutter_secure_storage: ^11.2.0
   local_auth: ^3.0.2
   system_tray: ^2.0.3
   window_manager: ^0.5.2
