@@ -420,6 +420,40 @@
       track.addEventListener("scroll", ends, { passive: true });
       window.addEventListener("resize", ends);
       ends();
+      // A mouse drags the row as a finger does: snapping is off while it
+      // moves and on again after, landing on the nearest picture; a drag
+      // is not taken for a click on a picture.
+      var drag = null;
+      track.addEventListener("pointerdown", function (e) {
+        if (e.pointerType !== "mouse" || e.button !== 0) { return; }
+        drag = { x: e.clientX, left: track.scrollLeft, moved: false };
+        track.classList.add("dragging");
+        track.setPointerCapture(e.pointerId);
+      });
+      track.addEventListener("pointermove", function (e) {
+        if (!drag) { return; }
+        var dx = e.clientX - drag.x;
+        if (Math.abs(dx) > 4) { drag.moved = true; }
+        track.scrollLeft = drag.left - dx;
+      });
+      var dragged = false;
+      function release() {
+        if (!drag) { return; }
+        dragged = drag.moved;
+        drag = null;
+        track.classList.remove("dragging");
+        if (dragged) {
+          go(0);
+          // The click that ends a drag opens nothing.
+          setTimeout(function () { dragged = false; }, 0);
+        }
+      }
+      track.addEventListener("pointerup", release);
+      track.addEventListener("pointercancel", release);
+      track.addEventListener("click", function (e) {
+        if (dragged) { e.preventDefault(); e.stopPropagation(); }
+      }, true);
+      track.addEventListener("dragstart", function (e) { e.preventDefault(); });
     });
   }
 

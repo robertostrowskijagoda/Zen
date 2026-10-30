@@ -113,7 +113,8 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
         thumbnail: widget.thumbnail,
         name: _name.text,
         note: _note.text,
-        authorName: ref.read(userProfileControllerProvider).displayName,
+        // The chosen name, never the placeholder "Ja" (empty: no author line).
+        authorName: ref.read(userProfileControllerProvider).publicName,
       );
       if (!mounted) {
         return;
@@ -140,7 +141,7 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final String author = ref.watch(
-      userProfileControllerProvider.select((p) => p.displayName),
+      userProfileControllerProvider.select((p) => p.publicName),
     );
     final PebbleCardText fitted = fitPebbleCardText(
       name: _name.text,

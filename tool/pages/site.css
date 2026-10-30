@@ -582,6 +582,8 @@ main.prose { max-width: 780px; }
   padding: 6px 16px 16px; margin: 0 -16px; scrollbar-width: thin;
 }
 .gallery-track:focus-visible { outline-offset: -3px; }
+@media (pointer: fine) { .gallery-track { cursor: grab; } }
+.gallery-track.dragging { cursor: grabbing; scroll-snap-type: none; user-select: none; }
 .shot { flex: none; width: min(64vw, 232px); margin: 0; scroll-snap-align: center; text-align: center; }
 .shot.wide { width: min(86vw, 520px); }
 .shot img, .film img {
