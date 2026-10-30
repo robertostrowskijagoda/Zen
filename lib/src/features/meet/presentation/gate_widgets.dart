@@ -1047,21 +1047,6 @@ class GateSettingsTile extends ConsumerWidget {
                   label: Text(t('Otwórz za darmo dla…')),
                 ),
               ),
-              SwitchListTile(
-                key: const Key('gate-relay'),
-                contentPadding: EdgeInsets.zero,
-                value: gates.relay,
-                title: Text(t('Pokazuj moje bramy dalej')),
-                subtitle: Text(
-                  t(
-                    'Znajomi przekażą dalej — także dalszym osobom, które '
-                    'szukają drogi — na jakich warunkach otwierasz bramę i '
-                    'kogo znasz. Dzięki temu ktoś daleko znajdzie drogę '
-                    'przez Ciebie.',
-                  ),
-                ),
-                onChanged: (bool v) => unawaited(intro.setGateRelay(v)),
-              ),
               if (!member)
                 ZenInfo(
                   icon: Icons.info_outline_rounded,

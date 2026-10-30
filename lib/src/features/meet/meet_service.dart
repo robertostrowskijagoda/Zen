@@ -224,8 +224,17 @@ final class MeetService extends ChangeNotifier {
   /// no friend list and no statuses but "Nie przeszkadzać" by default.
   bool isWeak(String friend) => levelOf?.call(friend) == FriendLevel.weak;
 
-  /// Whether [friend] may see the friend list now.
-  bool friendListVisibleTo(String friend) => _book.showsFriendListTo(
+  /// Whether this person's gate is open to [friend] (free, no consent
+  /// asked): such a friend sees the friend list without asking for it.
+  /// Set by the introductions (intro_providers.dart, meet_providers.dart).
+  bool Function(String friend)? gateOpenTo;
+
+  /// Whether [friend] may see the friend list now: as "Kto widzi moich
+  /// znajomych" says, or always while this person's gate is open to them.
+  bool friendListVisibleTo(String friend) =>
+      (gateOpenTo?.call(friend) ?? false) || _shownByAudience(friend);
+
+  bool _shownByAudience(String friend) => _book.showsFriendListTo(
     friend,
     weak:
         _book.friendListAudience == FriendListAudience.friends &&

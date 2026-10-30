@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/desktop_nearby_radio.dart';
 import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
@@ -100,6 +101,10 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
   }
 
   service.friendNames = names;
+  // An open gate shows the friend list too (read when asked, so the
+  // statuses alone do not start the introductions).
+  service.gateOpenTo = (String friend) =>
+      ref.read(introServiceProvider).gateOpenTo(friend);
   // Weak acquaintances get no friend list and statuses; after a
   // level change [setFriendLevel] sends both again.
   service.levelOf = (String a) => ref.read(ledgerNodeProvider)?.levelOf(a);
