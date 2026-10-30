@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.3 — 30.10.2026
+
 ### What's new
 - [en] New versions arrive the moment they are released, invitation notices say who invites you and with what words, and you are told when someone accepts.
 - [en] A few pebbles are round again, a pebble turns with any drag and has no line across it, and an open gate shows your friends without asking.
