@@ -642,7 +642,12 @@ final class RuntimeSignalModule extends ZenModule {
       final bool seesPresence =
           isAcceptedFriend &&
           presenceVisibleTo(_ref.read(friendLevelLookupProvider).of(from));
-      if (!isAcceptedFriend || seesPresence || _answersWeak(from)) {
+      // A ping the locked receiver kept for its status (it answered it
+      // then): only noted, not answered again.
+      final bool kept =
+          DateTime.now().millisecondsSinceEpoch - frame.receivedAtMillis >
+          const Duration(minutes: 1).inMilliseconds;
+      if (!kept && (!isAcceptedFriend || seesPresence || _answersWeak(from))) {
         final Map<String, dynamic> presence = isAcceptedFriend
             ? _presenceFor(from)
             : const <String, dynamic>{};

@@ -1312,6 +1312,9 @@ void main() {
       expect(last(transport, 'ping'), containsPair(kPresenceFreshKey, true));
       expect(friendIn(tester, _ada).presenceDoubt, isNull);
       expect(friendIn(tester, _ada).shownPresence, PeerPresence.background);
+      // The statuses it heard go to a real file as it stops: outside the
+      // fake clock (stopping again in the tear-down writes nothing).
+      await tester.runAsync(adaPhone.stop);
     });
 
     testWidgets('after a start, friends who did not answer are pinged again '

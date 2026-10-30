@@ -1083,6 +1083,73 @@ void main() {
       },
     );
 
+    test('pings the friends who see its status every few minutes and hands '
+        'their newest statuses to the app', () async {
+      int clock = DateTime.now().millisecondsSinceEpoch;
+      final Uint8List masterKey = _masterKey();
+      final BackgroundCapability capability = await publishFor(masterKey);
+      transport = MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        presence: const LockedPresenceKit(shownTo: <String>{_ada}),
+        mailboxPollInterval: const Duration(minutes: 5),
+        pollAnswerGrace: Duration.zero,
+        now: () => clock,
+      );
+      await receiver.start();
+      transport.sentSignals.clear();
+      int pings() => transport.sentSignals
+          .where(
+            (sent) =>
+                sent.payload['type'] == 'ping' && sent.remoteAddress == _ada,
+          )
+          .length;
+      clock += const Duration(minutes: 5).inMilliseconds;
+      await receiver.pollOnWakeForTest();
+      expect(pings(), 0, reason: 'the app pinged everyone as it locked');
+      clock += kLockedPresenceRoundEvery.inMilliseconds;
+      await receiver.pollOnWakeForTest();
+      expect(pings(), 1);
+      expect(transport.sentSignals.last.payload['state'], 'background');
+      // Ada's answer, then an older one that came late, and Bob's from
+      // long ago.
+      Future<void> heard(String from, String state, int at) =>
+          receiver.handleFrame(
+            SignalTransportFrame(
+              from: from,
+              payload: <String, dynamic>{'type': 'pong', 'state': state},
+              receivedAtMillis: at,
+            ),
+          );
+      await heard(_ada, 'foreground', clock);
+      await heard(_ada, 'background', clock - 1000);
+      await heard(
+        _bob,
+        'foreground',
+        clock - const Duration(hours: 1).inMilliseconds,
+      );
+      expect(receiver.keptCount, 0);
+      await receiver.stop();
+      final List<SignalTransportFrame> delivered = <SignalTransportFrame>[];
+      await appVault.drain(
+        masterKey: masterKey,
+        settle: Duration.zero,
+        deliver: (Uint8List record) async {
+          delivered.add(decodeInboxFrame(record)!);
+        },
+      );
+      expect(delivered.single.from, _ada);
+      expect(delivered.single.payload['state'], 'foreground');
+      expect(delivered.single.receivedAtMillis, clock);
+    });
+
     test('without a presence kit a pong says nothing about presence', () async {
       await startReceiver(await publishFor(_masterKey()));
       transport.sentSignals.clear();
