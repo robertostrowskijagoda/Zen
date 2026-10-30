@@ -684,8 +684,9 @@ final class GithubUpdateService extends ChangeNotifier {
   }
 
   /// GitHub answered with an error: try again after [retryAfter] (what
-  /// GitHub asked for, at least a minute) or [retryFirst] doubled for each
-  /// error in a row, never later than the next regular check.
+  /// GitHub asked for, at least a minute, even past the next regular check:
+  /// asking sooner only meets the same refusal) or [retryFirst] doubled for
+  /// each error in a row, never later than the next regular check.
   void _failedAgain(bool rateLimited, Duration? retryAfter) {
     _failedInARow++;
     _rateLimited = rateLimited;
@@ -693,7 +694,7 @@ final class GithubUpdateService extends ChangeNotifier {
     Duration wait = retryAfter != null
         ? retryAfter + const Duration(minutes: 1)
         : retryFirst * (1 << doublings);
-    if (wait > checkEvery) {
+    if (retryAfter == null && wait > checkEvery) {
       wait = checkEvery;
     }
     _nextCheckAt = _now().add(wait);

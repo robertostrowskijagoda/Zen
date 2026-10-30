@@ -9,7 +9,10 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// more on the next start, filled in with the current values and with a note
 /// that it follows an update. This stands in for migrations — nothing is
 /// rewritten behind the person's back.
-const int kSetupRevision = 1;
+///
+/// 2 (1.15.2): "Nie blokuj od razu po zamknięciu aplikacji" (1.15.0) is in
+/// the lock step, which people set up before it came never saw.
+const int kSetupRevision = 2;
 
 /// Settings of this device rather than of the account: a copy of the
 /// account that does not bring the app's lock along (the recovery circle,
