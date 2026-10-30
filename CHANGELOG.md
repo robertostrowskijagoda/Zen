@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.2 — 30.10.2026
+
 ### What's new
 - [en] Your profile no longer looks reset after a restart, read messages always show their ticks, and pebble previews are sharp.
 - [en] After painting a pebble Zen says plainly where it is kept and how friends keep it for you.
