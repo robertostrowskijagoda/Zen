@@ -87,12 +87,12 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 ## The promo film's music
 
 The website's promo films (`tool/pages/promo`, made by
-`tool/promo/make_promo.py`; not part of the app) use **"Specular City" by
-vitalezzz**, from https://opengameart.org/content/specular-city, dedicated
+`tool/promo/make_promo.py`; not part of the app) use **"Ancient Memories" by
+HoliznaCC0**, from https://freemusicarchive.org/music/holiznacc0/forager/ancient-memories/, dedicated
 to the public domain under **CC0 1.0 Universal**
 (https://creativecommons.org/publicdomain/zero/1.0/). CC0 asks for no credit;
 we give it gladly. The excerpt the films use is
-`tool/promo/music/specular-city-excerpt.m4a`; where and when the track was
+`tool/promo/music/ancient-memories-excerpt.m4a`; where and when the track was
 retrieved and its checksum: `tool/promo/MUSIC_LICENSE.md`. The films' icons
 are Material Icons and their type Hanken Grotesk and Space Mono (above).
 

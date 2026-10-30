@@ -83,7 +83,18 @@ pre code { background: none; border: 0; padding: 0; word-break: normal; }
 .topnav a:hover { background: var(--soft); }
 .topnav a[aria-current="page"] { background: var(--soft); color: var(--link); }
 .topnav .ico { width: 18px; height: 18px; display: none; }
-@media (max-width: 559px) { .topnav { gap: 0 1px; } .topnav a { padding: 0 5px; font-size: 14px; } }
+/* A phone: one row, centred when it fits, scrolled sideways when it does
+   not (longer languages), never a stray second line. */
+@media (max-width: 559px) {
+  .topnav::-webkit-scrollbar { display: none; }
+  .topnav {
+    gap: 0 1px; flex-wrap: nowrap; justify-content: flex-start;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .topnav a { padding: 0 6px; font-size: 14px; flex: none; }
+  .topnav a:first-child { margin-inline-start: auto; }
+  .topnav a:last-child { margin-inline-end: auto; }
+}
 @media (min-width: 560px) { .topnav .ico { display: block; } .topnav a { padding: 0 13px; font-size: 15px; } }
 @media (min-width: 760px) {
   .top-in { flex-wrap: nowrap; }

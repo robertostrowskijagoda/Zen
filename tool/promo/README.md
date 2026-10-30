@@ -29,11 +29,10 @@ What it writes:
 
 | File | What |
 |---|---|
-| `tool/pages/promo/zen-promo-<lang>.mp4` | 1080 × 1920, H.264 High, yuv420p, faststart, AAC; under 8 MB |
+| `tool/pages/promo/zen-promo-<lang>.mp4` | 1080 × 1920, H.264 High, yuv420p, faststart, AAC; about 10 MB |
 | `tool/pages/promo/zen-promo-<lang>-16x9.mp4` | the same at 1920 × 1080 |
 | `tool/pages/promo/zen-promo-<lang>.webm` | the vertical film in VP9 and Opus, for browsers without H.264 |
 | `tool/pages/promo/zen-promo-poster-<lang>.jpg` | the end card, for a page to show before playing |
-| `tool/pages/promo/zen-promo-<lang>.vtt` | captions (every line of the film, and the music's credit) |
 | `build/promo/master/` | high quality masters (CRF 12, no sound), not committed |
 | `build/promo/contact-<lang>-<format>.png` | one frame every 2 seconds, to look the film over |
 | `build/promo/check/` | the end card as encoded, read back by `qr_test.dart` |
@@ -48,18 +47,18 @@ fails unless it gives the About page,
 
 ## How the film is built
 
-The music is 130 BPM; the film is 23 bars of it (42.5 s) and every cut,
+The music is 93.33 BPM; the film is 23 bars of it (59.1 s) and every cut,
 word and pop lands on a beat. `TIMELINE` in `make_promo.py` gives each card
 its bars, `TEXTS` every line in both languages:
 
 | Bars | Seconds | Card |
 |---|---|---|
-| 0–1 | 0.0–3.7 | Hook: "Your messages. Your photos. Not theirs." |
-| 2–5 | 3.7–11.1 | Big apps: ads, an algorithm picks what you see, a company reads what you write, "Enough." (grey, glitches on the beats) |
-| 6–7 | 11.1–14.8 | The drop: white flash, the logo, "A private social network for people who know each other." and a message being sent |
-| 8–13 | 14.8–25.8 | No ads, no algorithms · no company reads your messages · post-quantum encryption · no sign-up, no phone number · your data stays with you · free and open source |
-| 14–18 | 25.8–35.1 | Your circle (feed, groups, chats) · posts for the people you choose · the friend graph growing · meeting people through people · audio and video calls |
-| 19–22 | 35.1–42.5 | End card: logo, the line, "No servers of its own. No ads. No algorithms.", the QR code and the address |
+| 0–1 | 0.0–5.1 | Hook: "Your messages. Your photos. Not theirs." |
+| 2–5 | 5.1–15.4 | Big apps: ads, an algorithm picks what you see, a company reads what you write, "Enough." (grey, glitches on the beats) |
+| 6–7 | 15.4–20.6 | The drop: white flash, the logo, "A private social network for people who know each other." and a message being sent |
+| 8–13 | 20.6–36.0 | No ads, no algorithms · no company reads your messages · post-quantum encryption · no sign-up, no phone number · your data stays with you · free and open source |
+| 14–18 | 36.0–48.9 | Your circle (feed, groups, chats) · posts for the people you choose · the friend graph growing · meeting people through people · audio and video calls |
+| 19–22 | 48.9–59.1 | End card: logo, the line, "No servers of its own. No ads. No algorithms.", the QR code and the address |
 
 Every claim follows `README.md` and `docs/guide`; change a line there first
 if the app changes. Colours come from `tool/pages/site.css`, type from
@@ -69,7 +68,7 @@ laptop, the background and the end card are drawn in code.
 
 ## The music
 
-"Specular City" by vitalezzz, CC0 1.0 (public domain):
-[MUSIC_LICENSE.md](MUSIC_LICENSE.md). `music/specular-city-excerpt.m4a`
+"Ancient Memories" by HoliznaCC0, CC0 1.0 (public domain):
+[MUSIC_LICENSE.md](MUSIC_LICENSE.md). `music/ancient-memories-excerpt.m4a`
 is the part the film uses; `fetch_music.py` downloads the track again,
 checks its SHA-256 and cuts the same part, if it is ever needed.

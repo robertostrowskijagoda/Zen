@@ -2,20 +2,20 @@
 
 | | |
 |---|---|
-| Title | Specular City |
-| Author | vitalezzz (https://opengameart.org/users/vitalezzz) |
-| Where | https://opengameart.org/content/specular-city (submitted 11 October 2025) |
-| File | `specular_city.mp3` of that page, https://opengameart.org/sites/default/files/specular_city_1.mp3, 8,272,513 bytes, SHA-256 `c3865e5435ac38a1a7c5611a674f629b212a912421a95999845e0a4801004ce1` |
+| Title | Ancient Memories |
+| Author | HoliznaCC0 (https://freemusicarchive.org/music/holiznacc0/) |
+| Album | Forager |
+| Where | https://freemusicarchive.org/music/holiznacc0/forager/ancient-memories/ |
+| File | the track's download, https://files.freemusicarchive.org/storage-freemusicarchive-org/tracks/ryt7QGXtRyVCxGpToytgi0HYkoEjPG4tE3aer1sr.mp3, 6,034,765 bytes, SHA-256 `a4f1d0e515c8d800862812a125cf6979649acad3bb5c14e4e91113e32038c09f` |
 | Licence | **CC0 1.0 Universal (public domain dedication)**, https://creativecommons.org/publicdomain/zero/1.0/ |
-| Licence as shown on the track's page | "License(s): CC0", linking to http://creativecommons.org/publicdomain/zero/1.0/ |
-| Attribution notice on the page | "Vitalezzz - Specular City" |
-| Retrieved | 29 October 2026 |
+| Licence as shown on the track's page | "Ancient Memories by HoliznaCC0 is licensed under a CC0 1.0 Universal License." |
+| Retrieved | 30 October 2026 |
 
 CC0 needs no attribution and puts no conditions on copying, changing or
-publishing the work, commercially included. We credit the author anyway, in
-the films' captions files, in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)
-and here: thank you, vitalezzz.
+publishing the work, commercially included. We credit the author anyway, on
+the film's end card, in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)
+and here: thank you, HoliznaCC0.
 
-`music/specular-city-excerpt.m4a` is the part the film uses (45.5 seconds
-from 107.5355 s, AAC 256 kbit/s), cut by `fetch_music.py`, which can
-download the track again and checks it against the SHA-256 above.
+`music/ancient-memories-excerpt.m4a` is the part the film uses (62.5 seconds
+from 0.20 s, AAC 256 kbit/s), cut by `fetch_music.py`, which can download the
+track again and checks it against the SHA-256 above.
