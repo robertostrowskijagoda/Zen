@@ -761,6 +761,7 @@ final class WebRtcCallMediaSessionController
           streams: <MediaStream>[screen],
         ),
       );
+      await _e2ee?.attachAll(connection);
       return;
     }
     try {
@@ -770,6 +771,8 @@ final class WebRtcCallMediaSessionController
       logZenWarning('Setting the screen sender stream failed: $error');
     }
     await slot.sender.replaceTrack(track);
+    // Sealed now that it has a track (call_media_e2ee.dart, attachAll).
+    await _e2ee?.attachAll(connection);
     await slot.setDirection(TransceiverDirection.SendRecv);
   }
 
@@ -1475,6 +1478,9 @@ final class WebRtcCallMediaSessionController
     } else {
       await connection.addTrack(fresh, localStream);
     }
+    // The camera's sender has a track now: sealed before its frames go far
+    // (call_media_e2ee.dart, attachAll).
+    await _e2ee?.attachAll(connection);
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
   }

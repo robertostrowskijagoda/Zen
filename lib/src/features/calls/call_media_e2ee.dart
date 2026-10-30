@@ -718,16 +718,19 @@ final class MediaE2eeChannel {
     final Set<String> receivers;
     try {
       transceivers = await connection.getTransceivers();
-      // Only what the connection really has: flutter_webrtc looks a sender
-      // or receiver up by its id and hands a missing one to native code as
-      // null, which crashes the whole app (SIGSEGV in
-      // FrameCryptorFactory.nativeCreateFrameCryptorForRtpSender) — a
-      // stopped transceiver has none there. A sender without a track yet
-      // (the camera before its first frame) is there and is sealed now, so
-      // its frames are encrypted from the first one, as the other side
-      // expects.
+      // Only what the connection really has, and only senders with a
+      // track: flutter_webrtc looks a sender or receiver up by its id and
+      // hands a missing one to native code as null, and the native side
+      // reads a sender's track without asking whether there is one; either
+      // crashes the whole app (SIGSEGV in
+      // FrameCryptorFactory.nativeCreateFrameCryptorForRtpSender: a
+      // stopped transceiver has no sender there, the camera's sender of an
+      // audio call no track). A sender is sealed as soon as it gets one:
+      // the call runs this again right after (CallMediaSession), before
+      // the frames the other side would not open add up.
       senders = <String>{
-        for (final RTCRtpSender s in await connection.getSenders()) s.senderId,
+        for (final RTCRtpSender s in await connection.getSenders())
+          if (s.track != null) s.senderId,
       };
       receivers = <String>{
         for (final RTCRtpReceiver r in await connection.getReceivers())

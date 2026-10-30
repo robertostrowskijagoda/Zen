@@ -646,7 +646,8 @@ void main() {
 
     test('only senders and receivers the connection has are sealed: a '
         'missing one crashed the app natively (flutter_webrtc hands it on '
-        'as null); a sender without a track yet is sealed too', () async {
+        'as null); a sender without a track (the camera of an audio call, which '
+        'crashed natively too) is sealed once it has one', () async {
       final _FakeBackend backend = _FakeBackend();
       final (MediaE2eeChannel offering, MediaE2eeChannel _) = await _handshake(
         callId: 'call-5',
@@ -670,7 +671,18 @@ void main() {
           receivers: <RTCRtpReceiver>[_Receiver('ra'), _Receiver('rv')],
         ),
       );
-      expect(ring.sealed, <String>['audio', 'ra', 'video', 'rv']);
+      expect(ring.sealed, <String>['audio', 'ra', 'rv']);
+      // The camera came on: the next pass seals its sender, once.
+      final _Sender camera = _Sender('video');
+      final _Connection withCamera = _Connection(
+        transceivers: <RTCRtpTransceiver>[
+          _Transceiver(audio, _Receiver('ra')),
+          _Transceiver(camera, _Receiver('rv')),
+        ],
+      );
+      await offering.attachAll(withCamera);
+      await offering.attachAll(withCamera);
+      expect(ring.sealed, <String>['audio', 'ra', 'rv', 'video']);
     });
 
     test('the call ends while its senders are being sealed (a friend who '
