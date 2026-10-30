@@ -3,7 +3,7 @@ description: "Zen: a network of people who know each other, with no servers, ads
 publish_to: 'none'
 
 # The same number is in lib/src/app/app_version.dart (a test checks it).
-version: 1.15.1+18
+version: 1.15.2+19
 
 environment:
   sdk: ^3.11.4
