@@ -318,6 +318,50 @@ final class LockedNoticeKit {
 
   NotificationPrivacy levelOf(String key) => overrides[key] ?? privacy;
 
+  /// What the notice about an invitation from [from] ([type]
+  /// `friend_request`) or its acceptance (`friend_accept`) says while the
+  /// app is locked: who, and the invitation's own words, as far as the
+  /// notification level allows; `null` for another type. The name is the
+  /// one this person gave them, else the one they sent.
+  NoticeText? invitationNotice({
+    required String from,
+    required String type,
+    required Map<String, dynamic> payload,
+  }) {
+    final String key = PeerShareCodec.normalizeAddress(from);
+    final NotificationPrivacy level = levelOf(key);
+    final ZenSignal? signal = zenSignalFromTransportPayload(
+      sender: key,
+      payload: payload,
+    );
+    final String name = (names[key] ?? signal?.displayName ?? '').trim();
+    final bool request = type == 'friend_request';
+    if (!request && type != 'friend_accept') {
+      return null;
+    }
+    if (level == NotificationPrivacy.generic || name.isEmpty) {
+      return (
+        title: request
+            ? t('Nowe zaproszenie do znajomych')
+            : t('Ktoś przyjął Twoje zaproszenie'),
+        body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
+      );
+    }
+    if (!request) {
+      return (
+        title: t('{name} zaakceptował(a) zaproszenie', {'name': name}),
+        body: t('Możecie już pisać i dzwonić.'),
+      );
+    }
+    final String note = level == NotificationPrivacy.senderAndContent
+        ? (signal?.content ?? '').trim()
+        : '';
+    return (
+      title: t('Nowe zaproszenie od {name}', {'name': name}),
+      body: note.isNotEmpty ? note : t('Chce dodać Cię do znajomych.'),
+    );
+  }
+
   /// What the notice about the chat message [payload] from [from] says;
   /// [genericBody] is the body when it says only that something came.
   NoticeText messageNotice({

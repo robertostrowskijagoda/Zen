@@ -1184,6 +1184,12 @@ RuntimeSystemNotification _systemNotificationFromEntry({
       title = senderLabel;
       final String kind = _callKindLabel(signal.content);
       body = t('Przychodzące połączenie {kind}...', {'kind': kind});
+    case ZenSignalType.friendRequest:
+      // Who and their own words (the central redaction hides them as the
+      // notification level asks).
+      title = entry.title;
+      final String note = (signal.content ?? '').trim();
+      body = note.isNotEmpty ? note : entry.body;
     case ZenSignalType.groupCallInvite:
       final String groupName = _groupNameOf(signal, groups).trim();
       title = groupName.isNotEmpty ? groupName : t('Połączenie grupowe');

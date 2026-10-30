@@ -1362,11 +1362,19 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
+      // Who invited (or accepted) and what they wrote, as the
+      // notification level allows; a group invitation stays plain.
+      final NoticeText? invite = _noticeKit.invitationNotice(
+        from: from,
+        type: type,
+        payload: payload,
+      );
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedSocialSlot-${_now()}',
-          title: PrivacyRedactingNotificationService.genericTitle,
-          body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
+          title:
+              invite?.title ?? PrivacyRedactingNotificationService.genericTitle,
+          body: invite?.body ?? t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           kind: _invitationTypes.contains(type) ? NoticeKind.invitation : null,
