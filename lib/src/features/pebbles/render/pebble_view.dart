@@ -321,6 +321,29 @@ class PebbleStageState extends State<PebbleStage>
       if (!widget.interactive) {
         return paint;
       }
+      if (widget.mode == PebbleStageMode.rotate) {
+        // In a scrolling page the list would take a drag that starts
+        // up or down, and the stone turned only after a sideways start:
+        // the stone takes every drag that starts on it.
+        return RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          gestures: <Type, GestureRecognizerFactory>{
+            _EagerScaleGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  _EagerScaleGestureRecognizer
+                >(_EagerScaleGestureRecognizer.new, (
+                  _EagerScaleGestureRecognizer r,
+                ) {
+                  r
+                    ..dragStartBehavior = DragStartBehavior.down
+                    ..onStart = _scaleStart
+                    ..onUpdate = _scaleUpdate
+                    ..onEnd = _scaleEnd;
+                }),
+          },
+          child: paint,
+        );
+      }
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         dragStartBehavior: DragStartBehavior.down,
@@ -339,6 +362,16 @@ class PebbleStageState extends State<PebbleStage>
       );
     },
   );
+}
+
+/// A scale (turn, pinch) recognizer that wins at once, before a scrolling
+/// parent can claim the drag.
+class _EagerScaleGestureRecognizer extends ScaleGestureRecognizer {
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
 }
 
 class _StagePainter extends CustomPainter {

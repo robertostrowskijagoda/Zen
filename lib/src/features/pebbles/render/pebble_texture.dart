@@ -267,26 +267,16 @@ abstract final class PebbleTextures {
           });
         }
       case PebbleFinish.river:
+        // No vein around the stone any more: it read as a line across the
+        // painting. Its numbers are still drawn, so the speckles after
+        // them land where they always did.
         final int bands = 1 + rnd.nextInt(2);
         for (int k = 0; k < bands; k++) {
-          double nx = rnd.range(-1, 1), ny = rnd.range(-0.4, 0.4);
-          double nz = rnd.range(-1, 1);
-          final double len = math.sqrt(nx * nx + ny * ny + nz * nz);
-          nx /= len;
-          ny /= len;
-          nz /= len;
-          final ui.Paint p = ui.Paint()
-            ..color = second.withValues(alpha: 0.85)
-            ..style = ui.PaintingStyle.stroke
-            ..strokeWidth = rnd.range(0.035, 0.08);
-          for (int f = 0; f < 6; f++) {
-            final ui.Path? band = _greatCircle(f, nx, ny, nz);
-            if (band != null) {
-              place.onFace(canvas, f, false, false, (ui.Canvas c, Affine2 _) {
-                c.drawPath(band, p);
-              });
-            }
-          }
+          rnd
+            ..range(-1, 1)
+            ..range(-0.4, 0.4)
+            ..range(-1, 1)
+            ..range(0.035, 0.08);
         }
         _speckles(canvas, place, rnd, <(ui.Color, double, int)>[
           (ui.Color.lerp(main, const ui.Color(0xFF000000), 0.25)!, 0.01, 250),
@@ -319,48 +309,6 @@ abstract final class PebbleTextures {
         });
       }
     }
-  }
-
-  /// The great circle with normal (nx, ny, nz) on [face], in its drawing
-  /// space, or null when it misses the face.
-  static ui.Path? _greatCircle(int face, double nx, double ny, double nz) {
-    final List<double> c = PebbleFaces.centre(face);
-    final List<double> r = PebbleFaces.right(face);
-    final List<double> u = PebbleFaces.up(face);
-    final double cn = c[0] * nx + c[1] * ny + c[2] * nz;
-    final double rn = r[0] * nx + r[1] * ny + r[2] * nz;
-    final double un = u[0] * nx + u[1] * ny + u[2] * nz;
-    // On the cube's face plane the circle is the line cn + gs·rn + gt·un = 0.
-    final ui.Path path = ui.Path();
-    bool any = false;
-    bool pen = false;
-    const double lim = 1.7;
-    final bool alongS = un.abs() >= rn.abs();
-    for (int i = 0; i <= 80; i++) {
-      final double a = -lim + 2 * lim * i / 80;
-      final double gs, gt;
-      if (alongS) {
-        gs = a;
-        gt = -(cn + a * rn) / un;
-      } else {
-        gt = a;
-        gs = -(cn + a * un) / rn;
-      }
-      final double s = math.atan(gs) * 4 / math.pi;
-      final double t = math.atan(gt) * 4 / math.pi;
-      if (s.abs() > 1.3 || t.abs() > 1.3) {
-        pen = false;
-        continue;
-      }
-      if (pen) {
-        path.lineTo(s, -t);
-      } else {
-        path.moveTo(s, -t);
-        pen = true;
-      }
-      any = true;
-    }
-    return any ? path : null;
   }
 }
 

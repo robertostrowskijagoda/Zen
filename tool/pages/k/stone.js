@@ -39,8 +39,12 @@
       case 4: f = { sx: 1, sz: between(0.82, 0.94), sy: between(0.56, 0.68), e: between(0.66, 0.78), taper: 0 }; break; // chunky
       default: f = { sx: 1, sz: between(0.52, 0.62), sy: between(0.36, 0.46), e: between(0.82, 0.92), taper: between(0, 0.1) }; // long
     }
-    // Flat, as people paint pebbles (the app's kPebbleMaxHeight).
-    f.sy = Math.min(f.sy * 0.62, 0.4);
+    // Flat, as people paint pebbles (the app's kPebbleMaxHeight), but for
+    // the app's round shapes (PebbleShapePreset.round: egg, tall, lopsided,
+    // potato, rock, chubby, plump); a flat one stays as it is.
+    if ([2, 4, 12, 13, 14, 18, 27].indexOf(look.shape | 0) < 0 && f.sy > 0.4) {
+      f.sy = Math.min(Math.max(f.sy * 0.62, 0.3), 0.4);
+    }
     f.ey = between(0.62, 0.8);
     f.bumps = [];
     for (var i = 0; i < 4; i++) {
