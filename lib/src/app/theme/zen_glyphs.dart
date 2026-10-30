@@ -96,3 +96,71 @@ class _PyramidPainter extends CustomPainter {
   bool shouldRepaint(_PyramidPainter old) =>
       old.color != color || old.filled != filled;
 }
+
+/// A pebble: a flat, slightly lopsided stone with a sheen on its upper
+/// left edge (Kamyczki). [filled] draws the stone solid, its sheen cut out
+/// (the selected state of a tab).
+class PebbleGlyph extends StatelessWidget {
+  const PebbleGlyph({
+    required this.color,
+    this.size = 24,
+    this.filled = false,
+    super.key,
+  });
+
+  final Color color;
+  final double size;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(
+        painter: _PebblePainter(color: color, filled: filled),
+      ),
+    );
+  }
+}
+
+class _PebblePainter extends CustomPainter {
+  const _PebblePainter({required this.color, required this.filled});
+
+  final Color color;
+  final bool filled;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24;
+    final double stroke = 1.9 * u;
+    final Path stone = Path()
+      ..moveTo(3.4 * u, 13.6 * u)
+      ..cubicTo(3.2 * u, 9.6 * u, 7.6 * u, 6.9 * u, 12.6 * u, 7.1 * u)
+      ..cubicTo(17.6 * u, 7.3 * u, 21.0 * u, 9.7 * u, 20.6 * u, 13.3 * u)
+      ..cubicTo(20.2 * u, 16.9 * u, 16.4 * u, 18.7 * u, 11.7 * u, 18.5 * u)
+      ..cubicTo(6.9 * u, 18.3 * u, 3.6 * u, 16.9 * u, 3.4 * u, 13.6 * u)
+      ..close();
+    // The sheen of a smooth stone, along its upper left edge.
+    final Path paintStroke = Path()
+      ..moveTo(7.0 * u, 13.0 * u)
+      ..quadraticBezierTo(7.6 * u, 10.4 * u, 11.0 * u, 10.0 * u);
+    final Paint line = Paint()
+      ..color = color
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    if (!filled) {
+      canvas.drawPath(stone, line);
+      canvas.drawPath(paintStroke, line);
+      return;
+    }
+    canvas.saveLayer(Offset.zero & size, Paint());
+    canvas.drawPath(stone, Paint()..color = color);
+    canvas.drawPath(paintStroke, line..blendMode = BlendMode.clear);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_PebblePainter old) =>
+      old.color != color || old.filled != filled;
+}

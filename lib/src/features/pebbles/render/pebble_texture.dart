@@ -785,26 +785,58 @@ final class _OpPainter {
 
   /// A card's 16×16 top view laid over the top face.
   void thumbnail(ui.Canvas canvas, Uint32List pixels) {
+    // Smoothed, not as 16 x 16 squares: each pixel in 4 x 4 cells, coloured
+    // by blending its painted neighbours (bilinear); a cell more empty than
+    // painted stays empty, so the drawing keeps its outline.
     const double extent = 1.35;
-    const double px = extent * 2 / 16;
+    const int sub = 4;
+    const int cells = 16 * sub;
+    const double cell = extent * 2 / cells;
     final ui.Paint paint = ui.Paint();
+    int at(int i, int j) => pixels[j.clamp(0, 15) * 16 + i.clamp(0, 15)];
     place.onFace(canvas, PebbleFace.top.index, false, true, (
       ui.Canvas c,
       Affine2 _,
     ) {
-      for (int j = 0; j < 16; j++) {
-        for (int i = 0; i < 16; i++) {
-          final int argb = pixels[j * 16 + i];
-          if (argb == 0) {
+      for (int v = 0; v < cells; v++) {
+        final double y = (v + 0.5) / sub - 0.5;
+        final int j0 = y.floor();
+        final double fy = y - j0;
+        for (int u = 0; u < cells; u++) {
+          final double x = (u + 0.5) / sub - 0.5;
+          final int i0 = x.floor();
+          final double fx = x - i0;
+          double r = 0, g = 0, b = 0, painted = 0;
+          for (final (int di, int dj, double w) in <(int, int, double)>[
+            (0, 0, (1 - fx) * (1 - fy)),
+            (1, 0, fx * (1 - fy)),
+            (0, 1, (1 - fx) * fy),
+            (1, 1, fx * fy),
+          ]) {
+            final int argb = at(i0 + di, j0 + dj);
+            if (argb == 0 || w == 0) {
+              continue;
+            }
+            r += ((argb >> 16) & 0xFF) * w;
+            g += ((argb >> 8) & 0xFF) * w;
+            b += (argb & 0xFF) * w;
+            painted += w;
+          }
+          if (painted < 0.5) {
             continue;
           }
-          paint.color = ui.Color(argb);
+          paint.color = ui.Color.fromARGB(
+            0xFF,
+            (r / painted).round(),
+            (g / painted).round(),
+            (b / painted).round(),
+          );
           c.drawRect(
             ui.Rect.fromLTWH(
-              -extent + i * px,
-              -extent + j * px,
-              px + 0.002,
-              px + 0.002,
+              -extent + u * cell,
+              -extent + v * cell,
+              cell + 0.002,
+              cell + 0.002,
             ),
             paint,
           );

@@ -291,6 +291,25 @@ void main() {
             'importance=foreground-service status=0 pssKb=180000 rssKb=240000',
       ]);
     });
+
+    test('a native crash names where it happened, code names only', () {
+      final int at = DateTime(2026, 10, 29, 23, 21, 25).millisecondsSinceEpoch;
+      expect(
+        exitLines(<Object?>[
+          <Object?, Object?>{
+            'at': at,
+            'reason': 5,
+            'importance': 100,
+            'status': 11,
+            'where': 'libwebrtc.so<webrtc::PeerConnection::Close <libc.so',
+          },
+        ]).single,
+        endsWith(
+          'reason=crash-native importance=foreground status=11 pssKb=0 '
+          'rssKb=0 where=libwebrtc.so<webrtc::PeerConnection::Close<libc.so',
+        ),
+      );
+    });
   });
 
   group('privacy', () {

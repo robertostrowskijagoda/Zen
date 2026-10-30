@@ -1,6 +1,7 @@
 package com.roj.zen
 
 import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -195,7 +196,7 @@ object ZenPower {
         val activities = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
         return try {
             activities.getHistoricalProcessExitReasons(null, 0, 8).map {
-                mapOf(
+                val exit = mutableMapOf<String, Any>(
                     "at" to it.timestamp,
                     "reason" to it.reason,
                     "importance" to it.importance,
@@ -203,10 +204,61 @@ object ZenPower {
                     "pssKb" to it.pss,
                     "rssKb" to it.rss,
                 )
+                if (it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) {
+                    nativeCrashFrames(it)?.let { frames -> exit["where"] = frames }
+                }
+                exit
             }
         } catch (error: Exception) {
             Log.w(TAG, "Reading the exit reasons failed", error)
             emptyList()
+        }
+    }
+
+    /**
+     * Where a native crash happened: the first libraries and functions of
+     * the crashing thread's stack, from Android's record of it (Android 12+,
+     * a tombstone in protobuf, read as its readable strings). Only code
+     * names, nothing of the person's; `null` where there is no record.
+     */
+    private fun nativeCrashFrames(exit: ApplicationExitInfo): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return null
+        }
+        return try {
+            val bytes = exit.traceInputStream?.use { input ->
+                val buffer = ByteArray(256 * 1024)
+                var read = 0
+                while (read < buffer.size) {
+                    val n = input.read(buffer, read, buffer.size - read)
+                    if (n <= 0) break
+                    read += n
+                }
+                buffer.copyOf(read)
+            } ?: return null
+            val frames = mutableListOf<String>()
+            val run = StringBuilder()
+            fun take() {
+                val text = run.toString()
+                run.setLength(0)
+                if (text.length < 4) return
+                val name = when {
+                    text.endsWith(".so") -> text.substringAfterLast('/')
+                    text.contains("::") || text.startsWith("_Z") || text.startsWith("Java_") -> text
+                    else -> return
+                }
+                if (frames.lastOrNull() != name) frames.add(name.take(80))
+            }
+            for (b in bytes) {
+                val c = b.toInt() and 0xFF
+                if (c in 0x21..0x7E) run.append(c.toChar()) else take()
+                if (frames.size >= 12) break
+            }
+            take()
+            if (frames.isEmpty()) null else frames.joinToString("<")
+        } catch (error: Exception) {
+            Log.w(TAG, "Reading a native crash record failed", error)
+            null
         }
     }
 

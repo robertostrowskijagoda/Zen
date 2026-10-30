@@ -702,8 +702,25 @@ final class MediaE2eeChannel {
       return;
     }
     final List<RTCRtpTransceiver> transceivers;
+    final Set<String> senders;
+    final Set<String> receivers;
     try {
       transceivers = await connection.getTransceivers();
+      // Only what the connection really has: flutter_webrtc looks a sender
+      // or receiver up by its id and hands a missing one to native code as
+      // null, which crashes the whole app (SIGSEGV in
+      // FrameCryptorFactory.nativeCreateFrameCryptorForRtpSender) — a
+      // stopped transceiver has none there. A sender without a track yet
+      // (the camera before its first frame) is there and is sealed now, so
+      // its frames are encrypted from the first one, as the other side
+      // expects.
+      senders = <String>{
+        for (final RTCRtpSender s in await connection.getSenders()) s.senderId,
+      };
+      receivers = <String>{
+        for (final RTCRtpReceiver r in await connection.getReceivers())
+          r.receiverId,
+      };
     } on Object catch (error) {
       logZenWarning('Reading transceivers for media keys failed: $error');
       return;
@@ -713,7 +730,8 @@ final class MediaE2eeChannel {
         return;
       }
       final RTCRtpSender sender = transceiver.sender;
-      if (_attachedSenders.add(sender.senderId)) {
+      if (senders.contains(sender.senderId) &&
+          _attachedSenders.add(sender.senderId)) {
         try {
           await link.addSender(await _ring.attachSender(sender, localId));
         } on Object catch (error, stackTrace) {
@@ -725,7 +743,8 @@ final class MediaE2eeChannel {
         }
       }
       final RTCRtpReceiver receiver = transceiver.receiver;
-      if (_attachedReceivers.add(receiver.receiverId)) {
+      if (receivers.contains(receiver.receiverId) &&
+          _attachedReceivers.add(receiver.receiverId)) {
         try {
           await link.addReceiver(
             await _ring.attachReceiver(

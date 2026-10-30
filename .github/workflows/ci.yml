@@ -308,9 +308,11 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
+      # One `flutter test` run: two at once raced on build/unit_test_assets
+      # ("Flutter failed to open a file"); three files take no longer.
       - name: Test
         run: >-
-          dart run tool/test.dart --results test-results
+          dart run tool/test.dart --results test-results --groups 1
           test/start_upgrade_test.dart
           test/start_trace_test.dart
           test/start_watchdog_test.dart

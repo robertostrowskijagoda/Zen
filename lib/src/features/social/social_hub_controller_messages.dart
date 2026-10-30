@@ -1208,7 +1208,22 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
   }
 
+  /// After the conversation's other delivery changes, so neither writes
+  /// over the other ([_editDeliveryOf]).
   Future<void> _markMessageRead({
+    required String peerAddress,
+    required String messageId,
+    required int readAtMillis,
+  }) => _editDeliveryOf(
+    peerAddress,
+    () => _markMessageReadNow(
+      peerAddress: peerAddress,
+      messageId: messageId,
+      readAtMillis: readAtMillis,
+    ),
+  );
+
+  Future<void> _markMessageReadNow({
     required String peerAddress,
     required String messageId,
     required int readAtMillis,

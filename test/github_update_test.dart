@@ -574,6 +574,8 @@ void main() {
             : _releaseJson('v1.11.0'),
         now: () => now,
         currentVersion: '1.11.0',
+        // Room for the doubling to show (the default is 15 minutes).
+        checkEvery: const Duration(hours: 1),
       );
       addTearDown(s.dispose);
       await s.check();

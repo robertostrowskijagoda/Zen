@@ -205,15 +205,24 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     // conversation, and the one read first must not write over the other
     // (the first message of a conversation, slower to send, kept one tick
     // although its receipt had come).
-    final String key = PeerShareCodec.normalizeAddress(peerAddress);
-    final Future<void> before = _deliveryEdits[key] ?? Future<void>.value();
-    final Future<void> edit = before.then(
-      (_) => _updateMessageDeliveryStateNow(
+    return _editDeliveryOf(
+      peerAddress,
+      () => _updateMessageDeliveryStateNow(
         peerAddress: peerAddress,
         messageId: messageId,
         deliveryState: deliveryState,
       ),
     );
+  }
+
+  @override
+  Future<void> _editDeliveryOf(
+    String peerAddress,
+    Future<void> Function() change,
+  ) {
+    final String key = PeerShareCodec.normalizeAddress(peerAddress);
+    final Future<void> before = _deliveryEdits[key] ?? Future<void>.value();
+    final Future<void> edit = before.then((_) => change());
     final Future<void> settled = edit.catchError((Object _) {});
     _deliveryEdits[key] = settled;
     unawaited(

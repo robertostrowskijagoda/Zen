@@ -10,6 +10,25 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Your profile no longer looks reset after a restart, read messages always show their ticks, and pebble previews are sharp.
+- [en] After painting a pebble Zen says plainly where it is kept and how friends keep it for you.
+- [pl] Profil nie wygląda już na wyzerowany po ponownym uruchomieniu, odczytane wiadomości zawsze mają swoje fajki, a podglądy kamyczków są wyraźne.
+- [pl] Po pomalowaniu kamyczka Zen jasno mówi, gdzie jest przechowywany i jak znajomi przechowają go za Ciebie.
+
+### Fixes
+- **Profile reset after a restart**: the own profile was read once at start, and when that happened before the app was unlocked (the store refuses then), the default profile stayed for the whole session and a change made then could be saved over the real one. It is read again once the store opens, and no change is saved on top of the default profile.
+- **Ticks**: a read message always shows as read, and read receipts are recorded in the same queue as delivery changes, so neither writes over the other.
+- **New versions are seen sooner**: the app looks every 15 minutes while it runs and the Android background service every 30 minutes while it is closed (was every hour and every 2 hours), on wakes that come anyway; the project's pages answer first and have no request limit.
+- **Calls no longer crash the app**: a call's media keys were attached to every transceiver, and one the connection no longer had reached flutter_webrtc's native code as null (SIGSEGV in `FrameCryptorFactory.nativeCreateFrameCryptorForRtpSender`); after a few such crashes Samsung offered to clear the cache. Only senders and receivers the connection has are sealed now (found by calling a test phone and reading its crash record). The background service's engine no longer keeps flutter_webrtc, whose process-wide state it replaced and whose audio manager it stopped during a call.
+- **Smoother video calls**: the camera captures 640 × 360 at 24 frames (up to 960 × 540 at 30) instead of 720p at 30, which came through the mesh late and jerky; it sends at most 900 kbit/s and keeps its frames before its sharpness when the path is tight.
+- **The setup shows once more** after this update, filled in with the current settings, so everyone sees "Nie blokuj od razu po zamknięciu aplikacji" in its lock step (people who set Zen up before 1.15.0 never did).
+- **Update checks** honour GitHub's own wait after a request limit even when it is longer than the next regular check.
+- **Pebbles**: the pebble sticker's label says "Kamyk Zen" (in the app's language), the rail shows a stone instead of mountains, the profile's pebbles are drawn from their whole painting where the device keeps it, and "Kopiuj link" shares the whole signed card with its preview, so the pebble page shows the painted top.
+- **Pebble previews** are drawn smoothed instead of as 16 × 16 squares.
+- **Pebble keepers**: right after publishing, the pebble says that it lives only on your phone until a friend keeps it (unreachable while the phone is off), that Zen asks friends by itself, and where to see who agreed (Kamyczki → the pebble → "Opiekunowie").
+- **Calls**: the diagnostics log now names where a native crash happened (the first libraries and functions of its stack, Android 12+), to find the crash a friend's phone had when answering calls. Sounds that stayed off were the phone's quiet modes (silent, vibrate, "Do not disturb" or Samsung's bedtime mode), as designed.
+
 ## 1.15.1 — 29.10.2026
 
 ### What's new

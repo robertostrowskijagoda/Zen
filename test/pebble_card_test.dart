@@ -298,6 +298,21 @@ void main() {
       expect(pebbleCardFromLink('zen://pebble#${card.text}'), card);
     });
 
+    test('the link to share carries the whole card with its preview', () async {
+      final PebbleCard card = await _card(kasia, thumbnail: _thumbnail());
+      final String share = pebbleShareLink(card);
+      expect(
+        share,
+        startsWith('https://robertostrowskijagoda.github.io/Zen/k/#'),
+      );
+      final PebbleCard? read = pebbleCardFromLink(share);
+      expect(read, card);
+      expect(read!.thumbnail, isNotNull);
+      expect(await read.verify(), isTrue);
+      // ignore: avoid_print
+      if (const bool.fromEnvironment('PRINT_PEBBLE_LINK')) print(share);
+    });
+
     test('other links are not pebbles', () async {
       final PebbleCard card = await _card(kasia);
       expect(pebbleCardFromLink(null), isNull);

@@ -39,6 +39,10 @@ typedef CallMediaStatusListener =
     void Function(String callId, CallMediaSessionLifecycle status);
 typedef CallMediaErrorListener = void Function(String? callId, Object error);
 
+/// The most a call's camera sends, in bits per second: plenty for 640 x 360
+/// to 960 x 540 at 24 frames, and little enough to cross the mesh smoothly.
+const int kCallVideoMaxBitrate = 900000;
+
 abstract class CallMediaSessionController extends ChangeNotifier {
   RTCVideoRenderer? get localRenderer;
   RTCVideoRenderer? get remoteRenderer;
@@ -2293,9 +2297,42 @@ final class WebRtcCallMediaSessionController
     // description that lets media flow on it.
     await _e2ee?.attachAll(connection);
     await connection.setLocalDescription(desc);
+    await _tuneCameraSenders(connection);
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
     return desc;
+  }
+
+  /// The camera over the mesh: a steady picture rather than a sharp one
+  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
+  /// frames) and gives up sharpness before frames when the path is tight.
+  /// The shared screen keeps its own settings (sharp text matters there).
+  Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
+    try {
+      for (final RTCRtpSender sender in await connection.getSenders()) {
+        final MediaStreamTrack? track = sender.track;
+        if (track == null ||
+            track.kind != 'video' ||
+            track.id == _screenTrack?.id) {
+          continue;
+        }
+        final RTCRtpParameters parameters = sender.parameters;
+        final List<RTCRtpEncoding> encodings =
+            parameters.encodings ?? const <RTCRtpEncoding>[];
+        if (encodings.isEmpty) {
+          continue;
+        }
+        for (final RTCRtpEncoding encoding in encodings) {
+          encoding.maxBitrate = kCallVideoMaxBitrate;
+          encoding.maxFramerate = 24;
+        }
+        parameters.degradationPreference =
+            RTCDegradationPreference.MAINTAIN_FRAMERATE;
+        await sender.setParameters(parameters);
+      }
+    } on Object catch (error) {
+      logZenWarning('Tuning the call camera failed: $error');
+    }
   }
 
   Future<void> _setRemoteDescriptionPinned(
@@ -2896,6 +2933,9 @@ Map<String, dynamic> _buildAudioConstraints({String? deviceId}) {
   };
 }
 
+/// The camera for a call: 640 x 360 at 24 frames (up to 960 x 540 at 30).
+/// The picture crosses the mesh through a relay and every frame is
+/// encrypted on its way; 720p at 30 frames came through late and jerky.
 Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
   final bool isMobile = Platform.isAndroid || Platform.isIOS;
   if (isMobile) {
@@ -2904,9 +2944,9 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
         'deviceId': deviceId
       else
         'facingMode': 'user',
-      'width': <String, dynamic>{'ideal': 1280, 'max': 1280},
-      'height': <String, dynamic>{'ideal': 720, 'max': 720},
-      'frameRate': <String, dynamic>{'ideal': 30, 'max': 30},
+      'width': <String, dynamic>{'ideal': 640, 'max': 960},
+      'height': <String, dynamic>{'ideal': 360, 'max': 540},
+      'frameRate': <String, dynamic>{'ideal': 24, 'max': 30},
     };
   }
   return <String, dynamic>{
@@ -2915,9 +2955,9 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
       'optional': <Map<String, dynamic>>[
         <String, dynamic>{'sourceId': deviceId},
       ],
-    'width': 1280,
-    'height': 720,
-    'frameRate': 30,
+    'width': 960,
+    'height': 540,
+    'frameRate': 24,
   };
 }
 

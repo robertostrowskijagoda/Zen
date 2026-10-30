@@ -227,7 +227,7 @@ final class StickerScene {
       QrMatrix.encode(data, robust: design.logo);
 
   /// Lays out [design] around [matrix] (see [matrixFor]); a [kind] with
-  /// [StickerKind.pebbleMark] puts the code on a stone labelled "kamyczek
+  /// [StickerKind.pebbleMark] puts the code on a stone labelled "Kamyk
   /// Zen", which takes the place of the small signature.
   static StickerScene build(
     QrMatrix matrix,
@@ -366,7 +366,7 @@ final class StickerScene {
     );
   }
 
-  /// "kamyczek Zen" with a little painted stone before it, on the stone
+  /// "Kamyk Zen" with a little painted stone before it, on the stone
   /// under the code: between the quiet zone and the stone's rim.
   static List<StickerShape> _pebbleLabel(
     PebbleStone stone,
@@ -382,7 +382,7 @@ final class StickerScene {
     final Rect band = Rect.fromLTRB(left + 14, top, right - 14, bottom);
     final double iconWidth = band.height * 0.95;
     final double space = band.height * 0.22;
-    final String label = t('kamyczek Zen');
+    final String label = t('Kamyk Zen');
     StickerText fit(Rect box) => _fit(
       label,
       box,

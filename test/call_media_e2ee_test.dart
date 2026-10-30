@@ -34,6 +34,9 @@ final class _FakeRing implements MediaKeyRing {
   final Map<String, Map<int, String>> keys = <String, Map<int, String>>{};
   bool disposed = false;
 
+  /// The senders and receivers a transformer was asked for, by id.
+  final List<String> sealed = <String>[];
+
   String? key(String participantId, int index) => keys[participantId]?[index];
 
   @override
@@ -49,6 +52,7 @@ final class _FakeRing implements MediaKeyRing {
     if (senderFails) {
       throw StateError('no transformer');
     }
+    sealed.add(sender.senderId);
     return _FakeCryptor();
   }
 
@@ -57,7 +61,10 @@ final class _FakeRing implements MediaKeyRing {
     RTCRtpReceiver receiver,
     String participantId, {
     void Function()? onMissingKey,
-  }) async => _FakeCryptor();
+  }) async {
+    sealed.add(receiver.receiverId);
+    return _FakeCryptor();
+  }
 
   @override
   Future<void> dispose() async => disposed = true;
@@ -154,36 +161,75 @@ final class _FakeClock implements MediaKeyClock {
 }
 
 final class _Sender implements RTCRtpSender {
+  _Sender([this.senderId = 's1', this.hasTrack = true]);
+
   @override
-  String get senderId => 's1';
+  final String senderId;
+
+  final bool hasTrack;
+
+  @override
+  MediaStreamTrack? get track => hasTrack ? _Track() : null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-final class _Receiver implements RTCRtpReceiver {
+final class _Track implements MediaStreamTrack {
   @override
-  String get receiverId => 'r1';
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _Receiver implements RTCRtpReceiver {
+  _Receiver([this.receiverId = 'r1']);
+
+  @override
+  final String receiverId;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _Transceiver implements RTCRtpTransceiver {
-  @override
-  RTCRtpSender get sender => _Sender();
+  _Transceiver([RTCRtpSender? sender, RTCRtpReceiver? receiver])
+    : sender = sender ?? _Sender(),
+      receiver = receiver ?? _Receiver();
 
   @override
-  RTCRtpReceiver get receiver => _Receiver();
+  final RTCRtpSender sender;
+
+  @override
+  final RTCRtpReceiver receiver;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _Connection implements RTCPeerConnection {
+  _Connection({
+    List<RTCRtpTransceiver>? transceivers,
+    List<RTCRtpSender>? senders,
+    List<RTCRtpReceiver>? receivers,
+  }) : _transceivers = transceivers ?? <RTCRtpTransceiver>[_Transceiver()],
+       _senders = senders,
+       _receivers = receivers;
+
+  final List<RTCRtpTransceiver> _transceivers;
+
+  /// What getSenders / getReceivers answer (default: the transceivers').
+  final List<RTCRtpSender>? _senders;
+  final List<RTCRtpReceiver>? _receivers;
+
   @override
-  Future<List<RTCRtpTransceiver>> getTransceivers() async =>
-      <RTCRtpTransceiver>[_Transceiver()];
+  Future<List<RTCRtpTransceiver>> getTransceivers() async => _transceivers;
+
+  @override
+  Future<List<RTCRtpSender>> getSenders() async =>
+      _senders ?? <RTCRtpSender>[for (final t in _transceivers) t.sender];
+
+  @override
+  Future<List<RTCRtpReceiver>> getReceivers() async =>
+      _receivers ?? <RTCRtpReceiver>[for (final t in _transceivers) t.receiver];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -592,6 +638,35 @@ void main() {
       expect(offering.negotiated, CallMediaSecurity.postQuantum);
       expect(changes, 1);
       expect(offering.link.installed, isTrue);
+    });
+
+    test('only senders and receivers the connection has are sealed: a '
+        'missing one crashed the app natively (flutter_webrtc hands it on '
+        'as null); a sender without a track yet is sealed too', () async {
+      final _FakeBackend backend = _FakeBackend();
+      final (MediaE2eeChannel offering, MediaE2eeChannel _) = await _handshake(
+        callId: 'call-5',
+        offerer: kMediaOffererId,
+        answerer: kMediaAnswererId,
+        offererBackend: backend,
+      );
+      final _FakeRing ring = backend.rings.first;
+      final _Sender audio = _Sender('audio');
+      final _Sender video = _Sender('video', false);
+      final _Sender gone = _Sender('gone');
+      await offering.attachAll(
+        _Connection(
+          transceivers: <RTCRtpTransceiver>[
+            _Transceiver(audio, _Receiver('ra')),
+            _Transceiver(video, _Receiver('rv')),
+            // Stopped: no longer among the connection's senders/receivers.
+            _Transceiver(gone, _Receiver('rg')),
+          ],
+          senders: <RTCRtpSender>[audio, video],
+          receivers: <RTCRtpReceiver>[_Receiver('ra'), _Receiver('rv')],
+        ),
+      );
+      expect(ring.sealed, <String>['audio', 'ra', 'video', 'rv']);
     });
 
     test('an offer without a block is answered without one', () async {

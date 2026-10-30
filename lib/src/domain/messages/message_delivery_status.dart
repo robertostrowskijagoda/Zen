@@ -207,20 +207,20 @@ final class MessageDeliveryStatus {
         );
     // Read receipts exist for chats only; a group never says who read what.
     final bool read = !isGroup && message.isRead;
+    // Read is the furthest a message gets: whatever else was recorded
+    // (a late "sent", a "failed" before a retry got through), it shows read.
+    if (read) {
+      return make(MessageDeliveryStage.read);
+    }
     switch (message.deliveryState) {
       case ChatMessageDeliveryState.failed:
         return make(MessageDeliveryStage.failed);
       case ChatMessageDeliveryState.delivered:
-        return make(
-          read ? MessageDeliveryStage.read : MessageDeliveryStage.delivered,
-        );
+        return make(MessageDeliveryStage.delivered);
       case ChatMessageDeliveryState.sending:
       case ChatMessageDeliveryState.sent:
       case ChatMessageDeliveryState.none:
         break;
-    }
-    if (read) {
-      return make(MessageDeliveryStage.read);
     }
     if (p != null) {
       if (p.pending == 0) {

@@ -37,6 +37,9 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// app's language, when the release has one that holds up, in the place
 /// of the notification of an older one; the notification of a version
 /// that is installed now is taken away.
+/// The shortest round of [BackgroundUpdateCheck] on the service's beat.
+const Duration kUpdateBeatAtMost = Duration(minutes: 30);
+
 final class BackgroundUpdateCheck {
   BackgroundUpdateCheck({
     required Future<RuntimeSystemNotificationService?> Function() notices,
@@ -81,9 +84,14 @@ final class BackgroundUpdateCheck {
   Future<void>? _running;
 
   /// How often the work comes round on the beat: a quarter of [every], so
-  /// a check falls between [every] and [every] and a quarter after the last
-  /// answer. A run that is not due reads one small file and stops.
-  Duration get beatEvery => every ~/ 4;
+  /// a check falls soon after [every] has passed since the last answer, but
+  /// never more often than every [kUpdateBeatAtMost] — it rides wakes that
+  /// come anyway, and its own must not drain the battery. A run that is not
+  /// due reads one small file and stops.
+  Duration get beatEvery {
+    final Duration quarter = every ~/ 4;
+    return quarter < kUpdateBeatAtMost ? kUpdateBeatAtMost : quarter;
+  }
 
   void start() {
     if (_beat != null) {
