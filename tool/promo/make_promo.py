@@ -9,7 +9,7 @@
 libx264, libvpx-vp9 and libopus, and the app's screens in build/shots/,
 which `dart run tool/screenshots.dart` renders). Every frame is drawn here
 (kinetic type, phone and laptop frames, the background, the end card) on
-a grid of the music's beats: 130 BPM, 23 bars. The frames go
+a grid of the music's beats: 93.33 BPM, 23 bars. The frames go
 straight into ffmpeg as a high quality master (build/promo/master/), and
 from the masters come the files of the website, tool/pages/promo/:
 
@@ -17,10 +17,9 @@ from the masters come the files of the website, tool/pages/promo/:
   zen-promo-<lang>-16x9.mp4    1920x1080
   zen-promo-<lang>.webm        1080x1920, VP9 and Opus
   zen-promo-poster-<lang>.jpg  the end card, for the page before playing
-  zen-promo-<lang>.vtt         captions
 
 H.264 High, yuv420p, faststart, two passes at a bitrate that keeps each
-file under 8 MB; the sound is normalised to -14 LUFS. Contact sheets (one
+file near 10 MB; the sound is normalised to -14 LUFS. Contact sheets (one
 frame every 2 seconds) for checking the films by eye are left in
 build/promo/, and the end card frames in build/promo/check/, which
 `flutter test tool/promo/qr_test.dart` reads back (run at the end unless
@@ -44,14 +43,14 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SHOTS = os.path.join(ROOT, "build", "shots")
 BUILD = os.path.join(ROOT, "build", "promo")
 OUT = os.path.join(ROOT, "tool", "pages", "promo")
-MUSIC = os.path.join(ROOT, "tool", "promo", "music", "specular-city-excerpt.m4a")
+MUSIC = os.path.join(ROOT, "tool", "promo", "music", "ancient-memories-excerpt.m4a")
 QR_FILE = os.path.join(ROOT, "tool", "promo", "qr-about.txt")
 FONTS = os.path.join(ROOT, "assets", "fonts")
 LOGO = os.path.join(ROOT, "assets", "branding", "logo.jpg")
 
-# The music: "Specular City" (vitalezzz, CC0), 130 BPM; the excerpt starts
-# on a downbeat, the build-up before the drop, which comes on bar 6.
-BPM = 130.0
+# The music: "Ancient Memories" (HoliznaCC0, CC0), 93.33 BPM; the excerpt
+# starts on its first beat, and the beat comes in fully on bar 6, the drop.
+BPM = 93.33
 BEAT = 60.0 / BPM
 BAR = 4 * BEAT
 BARS = 23
@@ -114,7 +113,7 @@ TEXTS = {
         "end_get": "Pobierz:",
         "end_url": "robertostrowskijagoda.github.io/Zen",
         "qr_card": "Twój adres",
-        "music": "Muzyka: „Specular City”, vitalezzz (CC0)",
+        "music": "Muzyka: „Ancient Memories”, HoliznaCC0 (CC0)",
     },
     "en": {
         "hook": ["Your messages.", "Your photos.", "Not theirs."],
@@ -141,7 +140,7 @@ TEXTS = {
         "end_get": "Download:",
         "end_url": "robertostrowskijagoda.github.io/Zen",
         "qr_card": "Your address",
-        "music": "Music: “Specular City” by vitalezzz (CC0)",
+        "music": "Music: “Ancient Memories” by HoliznaCC0 (CC0)",
     },
 }
 
@@ -1325,7 +1324,6 @@ def main():
                 grab(args.ffmpeg, master, DURATION - 1.0, png)
                 Image.open(png).convert("RGB").save(poster, "JPEG", quality=86, optimize=True, progressive=True)
                 print(f"make_promo: {os.path.relpath(poster, ROOT)} {os.path.getsize(poster) // 1024} KB")
-        write_vtt(lang, os.path.join(OUT, f"zen-promo-{lang}.vtt"))
     for name in ("x264pass-0.log", "x264pass-0.log.mbtree", "vp9pass-0.log"):
         try:
             os.remove(os.path.join(BUILD, name))
