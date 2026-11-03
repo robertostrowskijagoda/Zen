@@ -3604,6 +3604,7 @@ final class RelayEngine {
       createdAtMillis: entry.createdAtMillis,
       expiresAtMillis: entry.expiresAtMillis,
       box: box,
+      notice: kRelayNoticeTypes.contains(entry.payload['type']),
     );
   }
 

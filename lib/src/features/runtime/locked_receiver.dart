@@ -1361,11 +1361,17 @@ final class LockedReceiver {
         }
       }
     }
-    if (fresh.isNotEmpty) {
-      await _announceMail(<String>{
-        for (final Map<String, dynamic> item in fresh)
+    // Only mail worth a notice (a message, a call, an invitation; a Zen
+    // before 1.15.4 does not say, so its mail still is): receipts and
+    // statuses came in silently before the app shows them, never as
+    // "Odblokuj Zen" with nothing behind it.
+    final Set<String> worth = <String>{
+      for (final Map<String, dynamic> item in fresh)
+        if (item['k'] != 0)
           PeerShareCodec.normalizeAddress(item['s'] as String),
-      });
+    };
+    if (worth.isNotEmpty) {
+      await _announceMail(worth);
     }
   }
 

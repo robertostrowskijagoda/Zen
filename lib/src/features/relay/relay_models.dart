@@ -6,6 +6,19 @@ import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
 
+/// The payload types worth a notice on the recipient's phone while Zen is
+/// locked there ([RelayEnvelope.notice]): what the app itself would show.
+const Set<String> kRelayNoticeTypes = <String>{
+  'message',
+  'group_message',
+  'message_placeholder',
+  'friend_request',
+  'friend_accept',
+  'group_invite',
+  'call_invite',
+  'group_call_invite',
+};
+
 /// One end-to-end sealed payload in transit through relays.
 @immutable
 final class RelayEnvelope {
@@ -16,7 +29,16 @@ final class RelayEnvelope {
     required this.createdAtMillis,
     required this.expiresAtMillis,
     required this.box,
+    this.notice,
   });
+
+  /// Whether what is inside deserves a notice ([kRelayNoticeTypes]): the
+  /// recipient's locked phone cannot open the box, and told "Odblokuj Zen"
+  /// for every receipt and status that came through a mailbox, after which
+  /// the app showed nothing. One bit beside the box, not bound into it
+  /// (flipping it changes only whether a locked phone says so); `null`
+  /// from a Zen before 1.15.4, which never said.
+  final bool? notice;
 
   /// Same as the reliable id (`_rid`) of the wrapped payload.
   final String id;
@@ -68,6 +90,7 @@ final class RelayEnvelope {
     'q': base64Url.encode(box.pqCiphertext),
     'n': base64Url.encode(box.nonce),
     'b': base64Url.encode(box.cipherText),
+    if (notice != null) 'k': notice! ? 1 : 0,
   };
 
   /// Parses an envelope from untrusted input; `null` when anything is off.
@@ -117,6 +140,11 @@ final class RelayEnvelope {
           nonce: nonce,
           cipherText: body,
         ),
+        notice: switch (json['k']) {
+          1 => true,
+          0 => false,
+          _ => null,
+        },
       );
     } catch (_) {
       return null;
