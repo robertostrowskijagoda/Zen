@@ -13,8 +13,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 ### What's new
 - [en] A call rings like a phone call, loudly and with vibration, shows as a call over the lock screen, and its sound goes to your car or headphones.
 - [en] Chats show the date of their last activity, nine new pebble shapes, and you can pick which friends keep your pebble.
+- [en] An account comes back with its password and two friends only, a pebble's code names nobody's address, and each account decides about its own notifications.
 - [pl] Połączenie dzwoni jak telefon, głośno i z wibracją, pokazuje się jak rozmowa na zablokowanym ekranie, a dźwięk idzie do auta albo słuchawek.
 - [pl] Czaty pokazują datę ostatniej aktywności, jest dziewięć nowych kształtów kamyczków i możesz sam wybrać, kto przechowuje Twój kamyczek.
+- [pl] Konto odzyskasz tylko z hasłem i dwiema osobami, kod kamyczka nie zawiera niczyich adresów, a każde konto samo decyduje o swoich powiadomieniach.
 
 ### Fixes and changes
 - **Ringing**: an incoming call rings with the phone's own ringtone, over and over at the ringer's volume, and a repeating vibration, as the ringer mode allows (ZenRinger.kt), also while Zen is locked; it played the notification's sound once, quietly, and the phone did not vibrate. The ringing notice itself is silent.
@@ -27,6 +29,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Start**: the window is black from the first moment, like the splash and the first frame, with no white flash between them.
 - **Graph**: the person and filter sheets stay above the system's navigation bar.
 - **Invitations**: the buttons under an invitation are further apart.
+- **Account recovery**: only with the account password and two people of the circle (2 to 6 trusted friends, at least two); the way without the password (four people, 7 days) is gone: new pieces hold no working passwordless half, and helpers never release one. The circle setup and the recovery screen warn that without the password there is no way back.
+- **Pebble doors**: a pebble's QR code names pebble doors (the author's and up to three picked keepers'), never anyone's own address: a door is a node of its own (door_node.go) that takes only a request for a design and sends only the design, so the code gives nobody a way to send its keepers a friend request or a message. A keeper tells the author its door when it agrees; keepers on an older Zen cannot go into the code.
+- **"Odblokuj Zen" with nothing behind it**: mail a mailbox hands over while Zen is locked carries one bit beside the sealed box, whether it deserves a notice (a message, a call, an invitation); receipts and statuses come in silently.
+- **Notifications per account**: an additional account that receives in the background can post its notifications or not ("Powiadomienia z tego konta", in Konta i odzyskiwanie and in the setup); tapping one opens that account (one on the list of accounts; a hidden one says where it came from).
 
 ## 1.15.3 — 30.10.2026
 
