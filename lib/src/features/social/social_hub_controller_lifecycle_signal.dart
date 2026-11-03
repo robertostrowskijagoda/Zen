@@ -176,6 +176,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       if (!ref.mounted) {
         return;
       }
+      // A video call answered while Zen was in the background may have
+      // gone on without the camera: it comes back now.
+      if (state.activeCall != null) {
+        final bool restart = _callAnsweredOffScreen;
+        _callAnsweredOffScreen = false;
+        unawaited(_callMedia.recoverCamera(restart: restart));
+      }
       await _resumeOutgoingAttachmentTransfers();
       return;
     }

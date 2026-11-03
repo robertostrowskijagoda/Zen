@@ -584,6 +584,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }
 
   Future<void> acceptIncomingCall({required String peerAddress}) {
+    // Answered off the screen (the card, the notification): the camera is
+    // opened again once Zen is on the screen (recoverCamera).
+    _callAnsweredOffScreen = !state.lifecycle.isInteractive;
     return _enqueueStateWork(
       () => _acceptIncomingCall(peerAddress: peerAddress),
     );

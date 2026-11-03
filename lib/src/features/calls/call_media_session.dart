@@ -98,6 +98,14 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   Future<void> setSpeakerOn(bool enabled);
   Future<void> setCameraEnabled(bool enabled);
 
+  /// Zen is back on the screen during a call: a camera that could not be
+  /// opened (Android gives none to an app still in the background, as when
+  /// a call is answered from its notification) is tried again; with
+  /// [restart] (the call was answered while Zen was not on the screen) a
+  /// camera that did open is opened again too, as Android may have given
+  /// it no frames.
+  Future<void> recoverCamera({bool restart = false}) async {}
+
   Future<List<CallMediaDevice>> listMediaDevices() async =>
       const <CallMediaDevice>[];
 
@@ -774,6 +782,7 @@ final class WebRtcCallMediaSessionController
     await slot.sender.replaceTrack(track);
     // Sealed now that it has a track (call_media_e2ee.dart, attachAll).
     await _e2ee?.attachAll(connection);
+    await _freshKeyFrames(connection);
     await slot.setDirection(TransceiverDirection.SendRecv);
   }
 
@@ -1191,6 +1200,36 @@ final class WebRtcCallMediaSessionController
   @override
   Future<void> setSpeakerOn(bool enabled) => routeCallAudio(speaker: enabled);
 
+  /// The camera of a video call could not be opened (the call went on
+  /// with sound only): tried again by [recoverCamera].
+  bool _cameraLost = false;
+
+  @override
+  Future<void> recoverCamera({bool restart = false}) async {
+    final RTCPeerConnection? connection = _peerConnection;
+    final MediaStream? localStream = _localStream;
+    if (connection == null || localStream == null) {
+      return;
+    }
+    try {
+      if (_cameraLost && !_localCameraWanted) {
+        _cameraLost = false;
+        await setCameraEnabled(true);
+        return;
+      }
+      if (restart &&
+          _localCameraWanted &&
+          localStream.getVideoTracks().isNotEmpty) {
+        await _detachLocalVideoTracks();
+        await _attachLocalVideoTrack(connection, localStream);
+        _safeSetRendererSrcObject(_localRenderer, localStream);
+        _notify();
+      }
+    } on Object catch (error) {
+      logZenWarning('The camera did not come back: $error');
+    }
+  }
+
   @override
   Future<void> setCameraEnabled(bool enabled) async {
     final RTCPeerConnection? connection = _peerConnection;
@@ -1199,6 +1238,9 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Brak aktywnej rozmowy do sterowania kamera.'));
     }
     _localCameraWanted = enabled;
+    if (enabled) {
+      _cameraLost = false;
+    }
     if (!enabled) {
       await _detachLocalVideoTracks();
       await _pinLocalVideoDirection(sending: false);
@@ -1471,8 +1513,9 @@ final class WebRtcCallMediaSessionController
       await connection.addTrack(fresh, localStream);
     }
     // The camera's sender has a track now: sealed before its frames go far
-    // (call_media_e2ee.dart, attachAll).
+    // (call_media_e2ee.dart, attachAll), and a fresh key frame after that.
     await _e2ee?.attachAll(connection);
+    await _freshKeyFrames(connection);
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
   }
@@ -2068,6 +2111,8 @@ final class WebRtcCallMediaSessionController
           'Fallback video capture failed: $fallbackError; falling back to audio only',
         );
         _localCameraWanted = false;
+        // Tried again once Zen is on the screen ([recoverCamera]).
+        _cameraLost = true;
         try {
           return await navigator.mediaDevices.getUserMedia(<String, dynamic>{
             'audio': _buildAudioConstraints(deviceId: audioDeviceId),
@@ -2310,6 +2355,40 @@ final class WebRtcCallMediaSessionController
   /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
   /// frames) and gives up sharpness before frames when the path is tight.
   /// The shared screen keeps its own settings (sharp text matters there).
+  /// Makes every video sender start again with a key frame (its encoding
+  /// switched off and on). A sender sealed only once it had a track sent
+  /// its first frames, the key frame among them, before it was sealed: the
+  /// other side cannot open them and shows black until a key frame comes,
+  /// which it asks for only after a few seconds of failing to decode.
+  Future<void> _freshKeyFrames(RTCPeerConnection connection) async {
+    if (_e2ee == null) {
+      return;
+    }
+    try {
+      for (final RTCRtpSender sender in await connection.getSenders()) {
+        if (sender.track?.kind != 'video') {
+          continue;
+        }
+        final RTCRtpParameters parameters = sender.parameters;
+        final List<RTCRtpEncoding> encodings =
+            parameters.encodings ?? const <RTCRtpEncoding>[];
+        if (encodings.isEmpty) {
+          continue;
+        }
+        for (final RTCRtpEncoding e in encodings) {
+          e.active = false;
+        }
+        await sender.setParameters(parameters);
+        for (final RTCRtpEncoding e in encodings) {
+          e.active = true;
+        }
+        await sender.setParameters(parameters);
+      }
+    } on Object catch (error) {
+      logZenWarning('Asking for a fresh key frame failed: $error');
+    }
+  }
+
   Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
     try {
       for (final RTCRtpSender sender in await connection.getSenders()) {

@@ -844,6 +844,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Zen open as they told it: in memory like [_presenceSeenAt] while the
   /// state shows the same.
   final Map<String, int> _presenceConfirmedAt = <String, int>{};
+
+  /// The active call was answered while Zen was not on the screen.
+  bool _callAnsweredOffScreen = false;
   final Map<String, int> _openedAt = <String, int>{};
 
   /// [hub] as saved: each friend's presence with its latest confirmation
