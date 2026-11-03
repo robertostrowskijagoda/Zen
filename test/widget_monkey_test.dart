@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -23,6 +24,12 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 /// with `--dart-define=ZEN_MONKEY_RUNS=60 --dart-define=ZEN_MONKEY_STEPS=300`.
 const int _steps = int.fromEnvironment('ZEN_MONKEY_STEPS', defaultValue: 120);
 const int _runs = int.fromEnvironment('ZEN_MONKEY_RUNS', defaultValue: 6);
+
+/// Prints every step as it is taken (`ZEN_MONKEY_TRACE=true`): where a
+/// walk that hangs stopped.
+const bool _trace = bool.fromEnvironment('ZEN_MONKEY_TRACE');
+
+const MethodChannel _recorder = MethodChannel('com.llfbandit.record/messages');
 
 /// Someone who closes every file picker without choosing.
 class _CancellingPicker extends FilePicker {
@@ -107,6 +114,14 @@ bool _avoided(Element e) {
 Future<void> _walk(WidgetTester tester, int seed) async {
   final Random random = Random(seed);
   final List<String> log = <String>[];
+  void note(String line) {
+    log.add(line);
+    if (_trace) {
+      // ignore: avoid_print
+      print('monkey $seed: $line');
+    }
+  }
+
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -128,8 +143,10 @@ Future<void> _walk(WidgetTester tester, int seed) async {
       find.byType(Navigator).first,
     );
     if (random.nextInt(8) == 0 && navigator.canPop()) {
-      log.add('$step back');
-      await navigator.maybePop();
+      note('$step back');
+      // Not awaited: a page may ask "discard?" first, and the answer is
+      // the monkey's next tap.
+      unawaited(navigator.maybePop());
     } else {
       final List<Element> targets = find
           .byWidgetPredicate(_tappable)
@@ -138,14 +155,14 @@ Future<void> _walk(WidgetTester tester, int seed) async {
           .where((Element e) => !_avoided(e))
           .toList(growable: false);
       if (targets.isEmpty) {
-        log.add('$step nothing to tap');
+        note('$step nothing to tap');
         if (navigator.canPop()) {
-          await navigator.maybePop();
+          unawaited(navigator.maybePop());
         }
       } else {
         final Element target = targets[random.nextInt(targets.length)];
         final Widget w = target.widget;
-        log.add(
+        note(
           '$step tap ${w.runtimeType}'
           '${w.key == null ? '' : ' ${w.key}'}',
         );
@@ -167,7 +184,9 @@ Future<void> _walk(WidgetTester tester, int seed) async {
   await tester.pump();
   // Something copied waits to be cleared from the clipboard: by design,
   // past the pages that copied it.
-  await ExpiringClipboard.instance.clearNow();
+  // In real time: it reads the clipboard through the platform channel,
+  // whose answer fake time never brings.
+  await tester.runAsync(() => ExpiringClipboard.instance.clearNow());
   await tester.runAsync(() => _settle());
 }
 
@@ -186,7 +205,19 @@ void main() {
           : const Size(400, 860);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
+      // The voice recorder of a test has no microphone: no permission.
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        _recorder,
+        (MethodCall call) async =>
+            call.method == 'hasPermission' ? false : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          _recorder,
+          null,
+        ),
+      );
       await _walk(tester, seed);
-    });
+    }, timeout: Timeout(Duration(seconds: 60 + _steps * 4)));
   }
 }
