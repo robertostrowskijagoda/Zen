@@ -163,6 +163,8 @@ Future<void> _walk(WidgetTester tester, int seed) async {
     }
   }
   await tester.pumpWidget(const SizedBox.shrink());
+  await tester.runAsync(() => _settle());
+  await tester.pump();
   // Something copied waits to be cleared from the clipboard: by design,
   // past the pages that copied it.
   await ExpiringClipboard.instance.clearNow();

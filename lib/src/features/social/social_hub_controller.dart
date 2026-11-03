@@ -942,6 +942,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       }
       final SocialHubState saving = state;
       await _snapshotStore.save(_withConfirmedPresence(saving));
+      // Closed meanwhile (a restart, the lock): what was saved stands.
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
       if (identical(state, saving)) {
         _unsavedState = false;
       }
