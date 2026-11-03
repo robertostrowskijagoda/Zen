@@ -13,6 +13,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
 
 // startPacketLoop starts the loop that reads the node's packets from the
@@ -30,13 +32,11 @@ func startPacketLoop(node *bridgeNode) {
 		// sendSignal / pollSignal / startSignaling call.
 		defer node.packetStarted.Store(false)
 
-		buffer := make([]byte, 64*1024)
+		buffer := make([]byte, 65535+1)
 		consecutiveErrors := 0
 		var limiter signalRateLimiter
 		for {
-			// Core.ReadFrom hands Yggdrasil's own queries (nodeinfo) to
-			// the core's actors without waiting for them.
-			count, from, err := node.core.ReadFrom(buffer)
+			count, from, err := readMeshTraffic(node.core, buffer)
 			if err == nil && !node.mesh.accept(buffer[:count], from) {
 				continue
 			}
@@ -278,4 +278,24 @@ func checksum16(data []byte) uint32 {
 		sum += uint32(data[len(data)-1]) << 8
 	}
 	return sum
+}
+
+// readMeshTraffic reads the next IPv6 packet that reached the node, below
+// Core.ReadFrom: that one answers the core's own protocol packets
+// (debug_remoteGetSelf/Peers/Tree and nodeinfo) for anyone on the mesh, and
+// the peers it would list include friends linked over Wi-Fi or Bluetooth,
+// whose addresses a stranger who knows this one should not learn. They are
+// dropped here unanswered, as the doors do.
+func readMeshTraffic(c *core.Core, buffer []byte) (int, net.Addr, error) {
+	for {
+		n, from, err := c.PacketConn.ReadFrom(buffer)
+		if err != nil {
+			return 0, from, err
+		}
+		if n < 1 || buffer[0] != doorSessionTraffic {
+			continue
+		}
+		copy(buffer, buffer[1:n])
+		return n - 1, from, nil
+	}
 }

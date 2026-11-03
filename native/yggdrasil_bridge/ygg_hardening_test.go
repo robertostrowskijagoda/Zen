@@ -115,6 +115,61 @@ func TestNodeInfoAnswersNothingAboutThisDevice(t *testing.T) {
 	}
 }
 
+// The node's packet loop reads below Core.ReadFrom (readMeshTraffic): a
+// stranger's debug_remoteGetPeers goes unanswered, so the friends linked to
+// this device over Wi-Fi or Bluetooth (its peers) stay unknown to them.
+func TestMeshTrafficReaderAnswersNoPeersQuery(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	hubConfig := config.GenerateConfig()
+	hub, err := core.New(hubConfig.Certificate, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hub.Stop)
+	listenURL, _ := url.Parse("tcp://127.0.0.1:0")
+	listener, err := hub.Listen(listenURL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubURI := fmt.Sprintf("tcp://127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port)
+	newCore := func(read func(*core.Core, []byte) error) *core.Core {
+		cfg := config.GenerateConfig()
+		c, err := core.New(cfg.Certificate, logger, core.Peer{URI: hubURI})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(c.Stop)
+		go func() {
+			buffer := make([]byte, 65535+1)
+			for read(c, buffer) == nil {
+			}
+		}()
+		return c
+	}
+	stockRead := func(c *core.Core, b []byte) error { _, _, err := c.ReadFrom(b); return err }
+	zenRead := func(c *core.Core, b []byte) error { _, _, err := readMeshTraffic(c, b); return err }
+	stock := newCore(stockRead)
+	zen := newCore(zenRead)
+	asker := newCore(stockRead)
+	handlers := adminHandlers{}
+	if err := asker.SetAdmin(handlers); err != nil {
+		t.Fatal(err)
+	}
+	warmPaths(t, asker, stock)
+	warmPaths(t, asker, zen)
+	ask := func(target *core.Core) error {
+		request, _ := json.Marshal(core.DebugGetPeersRequest{Key: hex.EncodeToString(target.PublicKey())})
+		_, err := handlers["debug_remoteGetPeers"](request)
+		return err
+	}
+	if err := ask(stock); err != nil {
+		t.Fatalf("a stock node lists its peers (the check works): %v", err)
+	}
+	if err := ask(zen); err == nil {
+		t.Fatal("a Zen node must not answer debug_remoteGetPeers")
+	}
+}
+
 // Yggdrasil leaves TLS's key exchange to Go, whose default since Go 1.24
 // is the hybrid X25519MLKEM768: tls://, quic:// and wss:// links between
 // current nodes are post-quantum on the line (the mesh's own end-to-end
