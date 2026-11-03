@@ -1602,6 +1602,17 @@ final class IntroService extends ChangeNotifier {
       if (!_gates.relay) {
         return;
       }
+      // As on a card ([_cardFor]): only to whom sees this person's friend
+      // list anyway, as the answer tells who they are.
+      MeetService? m;
+      try {
+        m = meet();
+      } on Object {
+        m = null;
+      }
+      if (m == null || !m.friendListVisibleTo(from)) {
+        return;
+      }
       await _send(from, <String, dynamic>{
         'type': IntroTypes.moreBack,
         'id': id,

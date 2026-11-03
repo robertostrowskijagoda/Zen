@@ -393,9 +393,9 @@ class PlanCard extends StatelessWidget {
               runSpacing: 6,
               children: <Widget>[
                 for (final PlanAnswer a in joined)
-                  _PersonChip(answer: a, isMe: a.address == me, tone: tone),
+                  _PersonChip(answer: a, isMe: p.answeredBy(a, me), tone: tone),
                 for (final PlanAnswer a in maybe)
-                  _PersonChip(answer: a, isMe: a.address == me, tone: tone),
+                  _PersonChip(answer: a, isMe: p.answeredBy(a, me), tone: tone),
               ],
             ),
           if (p.isCause) ...<Widget>[
@@ -481,13 +481,13 @@ class _NeedsList extends StatelessWidget {
             builder: (BuildContext context) {
               final int taken = plan.claimed(n.key);
               final int mine =
-                  plan.answers[me]?.claims[n.key] ??
+                  plan.answerOf(me)?.claims[n.key] ??
                   plans.myClaims(plan.id)[n.key] ??
                   0;
               final List<String> who = <String>[
                 for (final PlanAnswer a in plan.answers.values)
                   if ((a.claims[n.key] ?? 0) > 0)
-                    a.address == me ? t('Ty') : a.name,
+                    plan.answeredBy(a, me) ? t('Ty') : a.name,
               ];
               final bool full = taken >= n.wanted;
               return Padding(

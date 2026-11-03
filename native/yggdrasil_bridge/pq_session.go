@@ -148,6 +148,11 @@ const (
 	// and challenges, giving challenges), all peers together.
 	pqForeignKEMPerSecond = 200
 	pqForeignKEMBurst     = 400
+	// A phone does a fifth of that: each operation keeps it awake, so a
+	// stranger asking for sessions over and over would drain its battery.
+	// Friends opening sessions after a network change fit the burst.
+	pqPhoneForeignKEMPerSecond = 40
+	pqPhoneForeignKEMBurst     = 200
 	// Addresses whose device key is pinned. New pins come at most
 	// pqNewPinsPerMinute (strangers' addresses cost nothing to make); when
 	// the pins are full, the one seen longest ago makes room, so filling
@@ -431,6 +436,9 @@ func (e *pqEndpoint) evictPeerLocked() {
 }
 
 func (e *pqEndpoint) allowForeignKEMLocked(now time.Time) bool {
+	if isPhoneOS() {
+		return e.foreignKEM.allow(now, pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst)
+	}
 	return e.foreignKEM.allow(now, pqForeignKEMPerSecond, pqForeignKEMBurst)
 }
 

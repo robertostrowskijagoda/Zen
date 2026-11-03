@@ -492,7 +492,9 @@ void main() {
     );
     final Uint8List? design = await net.store(w['F']).design(card.id);
     expect(card.matchesDesign(design!), isTrue);
-    expect(net.store(w['F']).entry(card.id)!.keepers?.keepers, hasLength(2));
+    // Through E, who passed the question on: F learns nobody's address,
+    // not even the keepers' (the signed list names them).
+    expect(net.store(w['F']).entry(card.id)!.keepers, isNull);
   });
 
   test('a finder who knows nobody gets the design from a keeper the QR '

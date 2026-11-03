@@ -286,11 +286,12 @@ final class PebbleHosting {
     if (design == null) {
       return;
     }
+    // Never the keeper list: it names the keepers' own addresses, and
+    // anyone with the QR code may ask here.
     await send(from, <String, dynamic>{
       'type': PebbleFrames.design,
       'c': e.card.text,
       'd': b64(design),
-      if (e.keepers != null) 'k': e.keepers!.toJson(),
     });
   }
 
@@ -813,7 +814,11 @@ final class PebbleHosting {
           (e.kept && !e.retired) ||
           (e.collected && serveCollected()));
 
-  Future<void> _serve(String to, PebbleEntry e) async {
+  /// Sends [e]'s design to [to]; for [asker], a friend of [to] who asked
+  /// through them, it goes back the same way ([_onDesign] passes it on), so
+  /// neither learns the other's address. The keeper list goes to a keeper
+  /// only: it names the keepers' own addresses.
+  Future<void> _serve(String to, PebbleEntry e, {String? asker}) async {
     if (!_served.take('all', _now)) {
       return;
     }
@@ -821,11 +826,14 @@ final class PebbleHosting {
     if (design == null) {
       return;
     }
+    final PebbleKeeperList? keepers = e.keepers;
     await _send(to, <String, dynamic>{
       'type': PebbleFrames.design,
       'c': e.card.text,
       'd': b64(design),
-      if (e.keepers != null) 'k': e.keepers!.toJson(),
+      'o': ?asker,
+      if (asker == null && keepers != null && keepers.keepers.contains(to))
+        'k': keepers.toJson(),
     });
   }
 
@@ -844,7 +852,7 @@ final class PebbleHosting {
     }
     final PebbleEntry? e = store.entry(id);
     if (e != null && _serves(e)) {
-      await _serve(asker, e);
+      await _serve(from, e, asker: asker == from ? null : asker);
       return;
     }
     // A friend's own question may go one step further.
@@ -1002,6 +1010,27 @@ final class PebbleHosting {
       return;
     }
     final PebbleCard? card = PebbleCard.fromText(c);
+    // For a friend who asked through this device: passed on, once, while
+    // their question is fresh, and nothing else is done with it.
+    final Object? o = p['o'];
+    if (o is String && o.isNotEmpty) {
+      final String asker = PeerShareCodec.normalizeAddress(o);
+      final String key = '${card?.id.text}|$asker';
+      final int? at = _forwarded[key];
+      if (card != null &&
+          at != null &&
+          _now - at < const Duration(minutes: 2).inMilliseconds &&
+          peers.isFriend(asker) &&
+          !peers.isBlocked(asker)) {
+        _forwarded.remove(key);
+        await _send(asker, <String, dynamic>{
+          'type': PebbleFrames.design,
+          'c': c,
+          'd': d,
+        });
+      }
+      return;
+    }
     final PebbleEntry? e = card == null ? null : store.entry(card.id);
     // Only for a pebble this device wants: nobody fills its store.
     if (card == null || e == null || e.hasDesign || !card.isFull) {

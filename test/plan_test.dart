@@ -228,8 +228,16 @@ void main() {
     expect(olaIn.name, 'c3');
     expect(olaIn.via, kuba.address);
     expect(olaIn.viaName, 'b2');
-    // Ola sees herself on the list, through Kuba.
-    expect(ola.plans.plan(p.id)!.answers[ola.address]!.via, kuba.address);
+    // Ola sees herself on the list, through Kuba; her copy came through
+    // Kuba, so it names nobody by address (she knows her own and Kuba's).
+    final WeekendPlan olaCopy = ola.plans.plan(p.id)!;
+    final PlanAnswer olaSees = olaCopy.answerOf(ola.address)!;
+    expect(olaSees.address, startsWith('#'));
+    expect(olaSees.via, WeekendPlan.blindKey(p.id, kuba.address));
+    expect(
+      olaCopy.answers.keys.where((String a) => !a.startsWith('#')),
+      isEmpty,
+    );
     expect(ania.plans.plan(p.id)!.isEvent, isFalse);
 
     await kuba.plans.answer(p.id, PlanAnswerKind.join);

@@ -598,9 +598,11 @@ final class PlanService extends ChangeNotifier {
       await _save();
       for (final String f in host.friends()) {
         if (_n(f) != org) {
+          // Who answered stays among the organizer's friends: theirs see
+          // names, not where to find everyone.
           await _send(f, <String, dynamic>{
             'type': PlanTypes.plan,
-            'p': stored.toJson(),
+            'p': stored.toJson(blind: true),
             'hops': 0,
           });
         }
