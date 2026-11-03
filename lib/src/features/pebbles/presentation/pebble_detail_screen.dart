@@ -538,6 +538,16 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
             PebbleKeeperState.silent => t('nie odpowiedział(a)'),
           }),
         ),
+      if (open && !noFriends)
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            key: const Key('pebble-pick-keepers'),
+            onPressed: () => unawaited(_pickKeepers(service, card, nameOf)),
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            label: Text(t('Wybierz, kogo poprosić')),
+          ),
+        ),
       ZenSection(t('Znalazcy')),
       Text(
         tn(
@@ -583,6 +593,94 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
         ),
       ],
     ];
+  }
+
+  /// "Wybierz, kogo poprosić": the author picks friends to ask to keep the
+  /// pebble, instead of (or besides) those Zen drew.
+  Future<void> _pickKeepers(
+    PebbleService service,
+    PebbleCard card,
+    String Function(String address) nameOf,
+  ) async {
+    final List<String> askable = service.hosting.askableKeepers(card.id)
+      ..sort((String a, String b) => nameOf(a).compareTo(nameOf(b)));
+    if (askable.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t(
+              'Nie ma kogo jeszcze poprosić: wszyscy Twoi znajomi już '
+              'zostali poproszeni. Gdy dodasz kolejnych, Zen poprosi ich '
+              'sam.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    final Set<String>? chosen = await showDialog<Set<String>>(
+      context: context,
+      builder: (BuildContext context) {
+        final Set<String> picked = <String>{};
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialog) => AlertDialog(
+            scrollable: true,
+            title: Text(t('Kogo poprosić o przechowanie?')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (final String a in askable)
+                  CheckboxListTile(
+                    key: Key('pebble-pick-keeper-$a'),
+                    contentPadding: EdgeInsets.zero,
+                    value: picked.contains(a),
+                    title: Text(nameOf(a)),
+                    onChanged: (bool? on) => setDialog(() {
+                      if (on ?? false) {
+                        picked.add(a);
+                      } else {
+                        picked.remove(a);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(t('Anuluj')),
+              ),
+              FilledButton(
+                key: const Key('pebble-pick-keepers-ask'),
+                onPressed: picked.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(picked),
+                child: Text(t('Poproś')),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (chosen == null || chosen.isEmpty) {
+      return;
+    }
+    final int asked = await service.hosting.askKeepers(card.id, chosen);
+    if (!mounted || asked == 0) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          tn(
+            asked,
+            one: 'Poproszono {n} znajomego o przechowanie kamyczka.',
+            few: 'Poproszono {n} znajomych o przechowanie kamyczka.',
+            many: 'Poproszono {n} znajomych o przechowanie kamyczka.',
+          ),
+        ),
+      ),
+    );
   }
 
   /// "Losuj ponownie": says what came of it, so the press is never silent.

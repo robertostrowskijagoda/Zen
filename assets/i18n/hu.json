@@ -768,6 +768,7 @@
     "other": "Ha a többi háztag többsége egyetért ({n} szavazat kell), a lakás új kulcsot és új ajtókódot kap, ez a telefon pedig hozzáférés nélkül marad. A szomszédok értesítést kapnak. A régi matricát ki kell majd cserélni."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Amikor az ismerőseid közzétesznek valamit, itt látod — sorban, algoritmus nélkül.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Ha barátaid vállalják a kavics őrzését, írd be őket ide a QR-kódba: a megtaláló tőlük kéri a teljes kinézetet, amikor a telefonod ki van kapcsolva.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Amint az ismerősödnek újabb verziója lesz, magától megérkezik.",
   "Gdzie": "Hol",
   "Gdzie (adres, piętro)": "Hol (cím, emelet)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Országkódok, pl. PL, UA (legfeljebb 3). Megnyitja az országos szakaszt. Üresen is hagyhatod.",
   "Kogo chcesz przyprowadzić?": "Kit szeretnél hozni?",
   "Kogo poprosić o kilka słów?": "Kit kérjél meg néhány szóra?",
+  "Kogo poprosić o przechowanie?": "Kit kérsz meg az őrzésre?",
   "Kogo przyprowadzisz?": "Kit hozol?",
   "Kogo szukasz": "Kit keresel",
   "Kogo szukasz na randki": "Kit keresel randira",
@@ -1792,6 +1794,7 @@
     "one": "Legfeljebb {n} állampolgárság.",
     "other": "Legfeljebb {n} állampolgárság."
   },
+  "Najwyżej {n} osoby w kodzie.": "Legfeljebb {n} ember a kódban.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Legfeljebb {n} fotó vagy videó egy bejegyzésben.",
     "other": "Legfeljebb {n} fotó vagy videó egy bejegyzésben."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Írd meg, mit gondolsz róla — felkerül a randiprofiljára.",
   "Napisz, o co chodzi…": "Írd meg, miről van szó…",
   "Napisz, za co dziękujesz.": "Írd meg, miért mondasz köszönetet.",
+  "Napisz, zanim odpowiesz": "Írj, mielőtt válaszolsz",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Írjatok egymásnak valamit — bármelyik háztag válaszolhat.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Írjatok, ha valamit meg kell beszélni.",
   "Napisz…": "Írj…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Kulcsokat őrzöl ezeknek",
   "Przechowujesz kopie innych: {n}, razem {size}": "Mások mentéseit őrzöd: {n}, összesen {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Ezt a kavicsot a szerzőnek őrzöd: mások tőled kapják meg a kinézetét, amikor a szerző nincs hálózaton.",
+  "Przechowujący w kodzie QR": "Őrzők a QR-kódban",
   "Przeciągnij, żeby obrócić kamyczek": "Húzással forgathatod a kavicsot",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Húzással forgathatod a kavicsot, két ujjal nagyíthatsz. Válassz eszközt, és fess a tetejére, az aljára és az oldalaira.",
   "Przeczytano": "Elolvasva",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Ez a telefon más típusúnak tűnik: lehet, hogy a Zen nem települ rá. Ilyenkor töltsd le a telefonodhoz való Zent a Zen telepítési oldaláról, amikor lesz interneted.",
   "Ten węzeł już jest na liście.": "Ez a csomópont már a listán van.",
   "Terakota": "Terrakotta",
-  "Teraz": "Most",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Most nincs kit tovább kérdezni. Próbáld újra kicsit később.",
   "Terminal": "Terminál",
   "Też znajomi znajomych": "Az ismerősök ismerősei is",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Ti: {count}",
   "Wybieraj automatycznie": "Automatikus kiválasztás",
   "Wybierz GIF": "GIF kiválasztása",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Válassz legfeljebb {n} embert. Ha a telefonod ki van kapcsolva, a megtaláló tőlük kéri a kavics teljes kinézetét, akkor is, ha sem téged, sem őket nem ismeri. Nélkülük csak közös barátokon át jut el hozzá. Ez a mostantól mutatott matricákra és kódokra vonatkozik: a korábban nyomtatottak maradnak.",
   "Wybierz do {n} znajomych": {
     "one": "Válassz legfeljebb {n} ismerőst",
     "other": "Válassz legfeljebb {n} ismerőst"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Válassz fotót",
   "Wybierz zdjęcie w tle": "Válassz háttérképet",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Válaszd a „Futtatás azonnal” lehetőséget, és kapcsold ki az „Értesítés futtatáskor” opciót.",
+  "Wybierz, kogo poprosić": "Válaszd ki, kit kérsz meg",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Kiválasztod a napot, a Zen pedig meghív 5 vendéget úgy, hogy minél kevésbé ismerjék egymást.",
   "Wybrane osoby": "Kiválasztott személyek",
   "Wybrano plik — zmień": "Fájl kiválasztva — módosítás",
@@ -5774,6 +5780,10 @@
     "one": "{n} csúcsbejegyzés",
     "other": "{n} csúcsbejegyzés"
   },
+  "{n} razy": {
+    "one": "{n} alkalommal",
+    "other": "{n} alkalommal"
+  },
   "{n} s": "{n} mp",
   "{n} skrzynek": {
     "one": "{n} postaláda",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 RIASZTÁS: {name} segítségre szorul",
   "🟢 Dostępny(-a)": "🟢 Elérhető",
   "🤒 Choruję": "🤒 Beteg vagyok",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra",
-  "{n} razy": {
-    "one": "{n} alkalommal",
-    "other": "{n} alkalommal"
-  },
-  "Napisz, zanim odpowiesz": "Írj, mielőtt válaszolsz",
-  "Przechowujący w kodzie QR": "Őrzők a QR-kódban",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Ha barátaid vállalják a kavics őrzését, írd be őket ide a QR-kódba: a megtaláló tőlük kéri a teljes kinézetet, amikor a telefonod ki van kapcsolva.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Válassz legfeljebb {n} embert. Ha a telefonod ki van kapcsolva, a megtaláló tőlük kéri a kavics teljes kinézetét, akkor is, ha sem téged, sem őket nem ismeri. Nélkülük csak közös barátokon át jut el hozzá. Ez a mostantól mutatott matricákra és kódokra vonatkozik: a korábban nyomtatottak maradnak.",
-  "Najwyżej {n} osoby w kodzie.": "Legfeljebb {n} ember a kódban."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra"
 }

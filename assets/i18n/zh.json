@@ -760,6 +760,7 @@
     "other": "其余同住人中的多数同意后（需要 {n} 票），住所将获得新的密钥和新的门口码，这部手机将失去访问权限。邻居会收到通知。旧贴纸需要更换。"
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "好友发布内容后，你会在这里看到——按顺序排列，没有算法。",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "朋友同意保管这颗石子后，在这里把他们加入二维码：你的手机关机时，捡到的人会向他们索取完整外观。",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "当好友有了更新的版本，它会自动传来。",
   "Gdzie": "地点",
   "Gdzie (adres, piętro)": "地点（地址、楼层）",
@@ -1215,6 +1216,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "国家代码，例如 PL、UA（最多 3 个）。会打开对应的国家版块。可以留空。",
   "Kogo chcesz przyprowadzić?": "你想带谁来？",
   "Kogo poprosić o kilka słów?": "请谁写几句话？",
+  "Kogo poprosić o przechowanie?": "请谁保管？",
   "Kogo przyprowadzisz?": "你要带谁？",
   "Kogo szukasz": "你在找谁",
   "Kogo szukasz na randki": "你想通过约会认识谁",
@@ -1768,6 +1770,7 @@
   "Najwyżej {n} narodowości.": {
     "other": "最多 {n} 个国籍。"
   },
+  "Najwyżej {n} osoby w kodzie.": "二维码中最多 {n} 人。",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "other": "一篇帖子最多 {n} 张照片或视频。"
   },
@@ -1810,6 +1813,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "写下你对 TA 的看法——它会出现在 TA 的约会资料上。",
   "Napisz, o co chodzi…": "写下具体事项…",
   "Napisz, za co dziękujesz.": "写下你感谢的原因。",
+  "Napisz, zanim odpowiesz": "回复前先聊聊",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "互相写点什么吧——任何一位同住人都会回复。",
   "Napiszcie, jeśli trzeba coś ustalić.": "有需要商量的就写下来。",
   "Napisz…": "写点什么…",
@@ -2987,6 +2991,7 @@
   "Przechowujesz klucze dla": "你保管着这些人的密钥",
   "Przechowujesz kopie innych: {n}, razem {size}": "你为他人保存的备份：{n} 份，共 {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "你在为作者保管这颗小石子：作者离线时，别人会从你这里拿到它的外观。",
+  "Przechowujący w kodzie QR": "二维码中的保管者",
   "Przeciągnij, żeby obrócić kamyczek": "拖动来旋转小石子",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "拖动来旋转小石子，用两根手指可以放大。选一个工具，在顶面、底面和侧面上作画。",
   "Przeczytano": "已读",
@@ -3647,7 +3652,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "这部手机似乎是另一类型：Zen 可能无法在上面安装。这时请在有网络时从 Zen 安装页面下载适合你手机的 Zen。",
   "Ten węzeł już jest na liście.": "此节点已在列表中。",
   "Terakota": "赤陶",
-  "Teraz": "刚刚",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "目前没有人可以继续询问。请稍后再试。",
   "Terminal": "终端",
   "Też znajomi znajomych": "也包括好友的好友",
@@ -4230,6 +4234,7 @@
   "Wy: {count}": "你们：{count}",
   "Wybieraj automatycznie": "自动选择",
   "Wybierz GIF": "选择 GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最多选择 {n} 人。你的手机关机时，捡到石子的人即使不认识你或他们，也会向他们索取完整外观。没有他们，只能通过共同好友找到。这适用于今后展示的贴纸和二维码：以前打印的保持不变。",
   "Wybierz do {n} znajomych": {
     "other": "最多选择 {n} 位好友"
   },
@@ -4258,6 +4263,7 @@
   "Wybierz zdjęcie": "选择照片",
   "Wybierz zdjęcie w tle": "选择背景照片",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "选择“立即运行”，并关闭“运行时通知”。",
+  "Wybierz, kogo poprosić": "选择请谁保管",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "你选好日子，Zen 会邀请 5 位宾客，并尽量让他们彼此不认识。",
   "Wybrane osoby": "指定的人",
   "Wybrano plik — zmień": "已选择文件——更换",
@@ -5678,6 +5684,9 @@
   "{n} postów szczytu": {
     "other": "{n} 条塔尖帖子"
   },
+  "{n} razy": {
+    "other": "{n}次"
+  },
   "{n} s": "{n} 秒",
   "{n} skrzynek": {
     "other": "{n} 个收件箱"
@@ -5851,13 +5860,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 警报：{name} 需要帮助",
   "🟢 Dostępny(-a)": "🟢 有空",
   "🤒 Choruję": "🤒 生病了",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿",
-  "{n} razy": {
-    "other": "{n}次"
-  },
-  "Napisz, zanim odpowiesz": "回复前先聊聊",
-  "Przechowujący w kodzie QR": "二维码中的保管者",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "朋友同意保管这颗石子后，在这里把他们加入二维码：你的手机关机时，捡到的人会向他们索取完整外观。",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最多选择 {n} 人。你的手机关机时，捡到石子的人即使不认识你或他们，也会向他们索取完整外观。没有他们，只能通过共同好友找到。这适用于今后展示的贴纸和二维码：以前打印的保持不变。",
-  "Najwyżej {n} osoby w kodzie.": "二维码中最多 {n} 人。"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿"
 }

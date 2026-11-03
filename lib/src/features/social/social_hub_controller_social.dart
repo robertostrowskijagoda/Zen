@@ -84,7 +84,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               )
               .copyWith(
                 lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
-                lastActivityLabel: t('Teraz'),
+                lastActivityLabel: activityStamp(
+                  DateTime.now().millisecondsSinceEpoch,
+                ),
               ),
           _appSettings,
         ),
@@ -225,7 +227,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
                 lastMessagePreview: t(
                   'Połączenie gotowe. Możesz pisać od razu.',
                 ),
-                lastActivityLabel: t('Teraz'),
+                lastActivityLabel: activityStamp(
+                  DateTime.now().millisecondsSinceEpoch,
+                ),
               ),
           _appSettings,
         ),
@@ -1901,7 +1905,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           ...invitees,
         ]),
       ),
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       lastMessagePreview: t('Utworzono grupę.'),
       // Everyone stays on this list until their device confirms the invite;
       // see [syncGroupInvitesToPeer].
@@ -1968,7 +1972,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             createdById: prefix,
             createdAtMillis: DateTime.now().millisecondsSinceEpoch,
             memberAddresses: members,
-            lastActivityLabel: t('Teraz'),
+            lastActivityLabel: activityStamp(
+              DateTime.now().millisecondsSinceEpoch,
+            ),
             lastMessagePreview: t('Czat Twojej komórki w piramidzie.'),
           );
           changed = true;
@@ -2016,7 +2022,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         ...current.pendingInviteIds,
         member: _newInviteId(),
       },
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
     );
     final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
       state.groups,
@@ -2079,14 +2085,14 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           if (localAddr.isNotEmpty) localAddr,
           ...?memberAddresses,
         ]),
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
         lastMessagePreview: t('Dołączono do grupy.'),
       );
     } else if (existing.isInvitePending) {
       groups[groupId] = existing.copyWith(
         isInvitePending: false,
         lastMessagePreview: t('Dołączono do grupy.'),
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       );
     }
     bool isInviteFor(InboxEntry entry) =>
@@ -2280,7 +2286,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     groups[groupId] = group.copyWith(
       lastMessagePreview: said,
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
     );
     state = state.copyWith(groups: groups);
     await _persistState();

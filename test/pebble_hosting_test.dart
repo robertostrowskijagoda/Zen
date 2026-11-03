@@ -288,6 +288,30 @@ void main() {
     },
   );
 
+  test('the author asks friends of their own choice to keep it', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>[
+      'A',
+      'B',
+      'C',
+      'D',
+    ]);
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    net.peers[w['A']]!.candidates = <String>[w['B'].address];
+    final PebbleCard card = await net.publish(w['A']);
+    final PebbleHosting a = net.hosts[w['A']]!;
+    expect(a.askableKeepers(card.id), isNot(contains(w['B'].address)));
+    expect(
+      await a.askKeepers(card.id, <String>[w['C'].address, w['D'].address]),
+      2,
+    );
+    await net.until(
+      () => net.acceptedKeepers(w['A'], card).length == 3,
+      reason: 'the drawn keeper and both chosen ones agreeing',
+    );
+    expect(a.askableKeepers(card.id), isEmpty);
+    expect(await a.askKeepers(card.id, <String>[w['C'].address]), 0);
+  });
+
   test('a friend who says no is replaced by another', () async {
     final FriendsWorld w = await FriendsWorld.create(<String>[
       'A',

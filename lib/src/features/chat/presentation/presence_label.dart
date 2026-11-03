@@ -1,6 +1,26 @@
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
+
+/// What a chat's last activity ([FriendProfile.lastActivityLabel]) says
+/// at [nowMillis]: the hour and minute when it was today, else the date
+/// with them ("3.11 14:05", with the year when it was another year); an
+/// older text label as it is.
+String activityTimeLabel(String label, int nowMillis) {
+  final int? millis = activityStampMillis(label);
+  if (millis == null) {
+    return label;
+  }
+  final DateTime at = DateTime.fromMillisecondsSinceEpoch(millis);
+  final DateTime now = DateTime.fromMillisecondsSinceEpoch(nowMillis);
+  if (at.year == now.year && at.month == now.month && at.day == now.day) {
+    return ZenFormat.time(at);
+  }
+  return at.year == now.year
+      ? ZenFormat.dayMonthTime(at)
+      : ZenFormat.dateTime(at);
+}
 
 /// Quiet this long, a friend's chat header says since when.
 const Duration kQuietFriendAfter = Duration(days: 7);

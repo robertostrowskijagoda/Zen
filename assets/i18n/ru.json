@@ -784,6 +784,7 @@
     "other": "Когда согласится большинство остальных домочадцев (нужно голосов: {n}), у квартиры появится новый ключ и новый код на дверь, а этот телефон останется без доступа. Соседи получат уведомление. Старую наклейку придётся заменить."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Когда друзья что-нибудь опубликуют, ты увидишь это здесь — по порядку, без алгоритма.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Когда друзья согласятся хранить камешек, добавь их сюда в QR-код: нашедший спросит у них полный вид, пока твой телефон выключен.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Когда у друга будет более новая, она придёт сама.",
   "Gdzie": "Где",
   "Gdzie (adres, piętro)": "Где (адрес, этаж)",
@@ -1260,6 +1261,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Коды стран, напр. PL, UA (не больше 3). Открывает национальный раздел. Можно оставить пустым.",
   "Kogo chcesz przyprowadzić?": "Кого хочешь привести?",
   "Kogo poprosić o kilka słów?": "Кого попросить написать пару слов?",
+  "Kogo poprosić o przechowanie?": "Кого попросить сохранить?",
   "Kogo przyprowadzisz?": "Кого приведёшь?",
   "Kogo szukasz": "Кого ты ищешь",
   "Kogo szukasz na randki": "Кого ты ищешь для свиданий",
@@ -1840,6 +1842,7 @@
     "many": "Не больше {n} гражданств.",
     "other": "Не больше {n} гражданства."
   },
+  "Najwyżej {n} osoby w kodzie.": "Не больше {n} человек в коде.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Не больше {n} фото или видео в посте.",
     "few": "Не больше {n} фото и видео в посте.",
@@ -1891,6 +1894,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Напиши, что ты о ней / о нём думаешь — это попадёт в её / его профиль для свиданий.",
   "Napisz, o co chodzi…": "Напиши, в чём дело…",
   "Napisz, za co dziękujesz.": "Напиши, за что благодаришь.",
+  "Napisz, zanim odpowiesz": "Напиши, прежде чем ответить",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Напишите друг другу — ответит любой из домочадцев.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Напишите, если нужно что-то обсудить.",
   "Napisz…": "Напиши…",
@@ -3107,6 +3111,7 @@
   "Przechowujesz klucze dla": "Ты хранишь ключи для",
   "Przechowujesz kopie innych: {n}, razem {size}": "Ты хранишь копии других: {n}, всего {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Ты хранишь этот камешек для автора: другие получают от тебя его вид, когда автор не в сети.",
+  "Przechowujący w kodzie QR": "Хранители в QR-коде",
   "Przeciągnij, żeby obrócić kamyczek": "Перетащи, чтобы повернуть камешек",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Перетащи, чтобы повернуть камешек, двумя пальцами можно приблизить. Выбери инструмент и рисуй сверху, снизу и по бокам.",
   "Przeczytano": "Прочитано",
@@ -3776,7 +3781,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Похоже, этот телефон другого типа: Zen может на нём не установиться. Тогда скачай Zen для своего телефона со страницы установки Zen, когда будет интернет.",
   "Ten węzeł już jest na liście.": "Этот узел уже в списке.",
   "Terakota": "Терракота",
-  "Teraz": "Сейчас",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Сейчас дальше спрашивать некого. Попробуй чуть позже.",
   "Terminal": "Терминал",
   "Też znajomi znajomych": "Также друзья друзей",
@@ -4377,6 +4381,7 @@
   "Wy: {count}": "Вы: {count}",
   "Wybieraj automatycznie": "Выбирать автоматически",
   "Wybierz GIF": "Выбрать GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Выбери до {n} человек. Пока твой телефон выключен, нашедший спросит у них полный вид камешка, даже не зная ни тебя, ни их. Без них он доберётся до него только через общих друзей. Это касается наклеек и кодов, которые ты покажешь с этого момента: напечатанные раньше не меняются.",
   "Wybierz do {n} znajomych": {
     "one": "Выбери до {n} друга",
     "few": "Выбери до {n} друзей",
@@ -4408,6 +4413,7 @@
   "Wybierz zdjęcie": "Выбрать фото",
   "Wybierz zdjęcie w tle": "Выбрать фоновое фото",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Выбери «Запускать немедленно» и выключи «Уведомлять о запуске».",
+  "Wybierz, kogo poprosić": "Выбрать, кого попросить",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Ты выберешь день, а Zen пригласит 5 гостей так, чтобы они как можно меньше знали друг друга.",
   "Wybrane osoby": "Выбранные люди",
   "Wybrano plik — zmień": "Файл выбран — изменить",
@@ -5966,6 +5972,12 @@
     "many": "{n} постов вершины",
     "other": "{n} поста вершины"
   },
+  "{n} razy": {
+    "one": "{n} раз",
+    "few": "{n} раза",
+    "many": "{n} раз",
+    "other": "{n} раза"
+  },
   "{n} s": "{n} с",
   "{n} skrzynek": {
     "one": "{n} ящик",
@@ -6184,16 +6196,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ТРЕВОГА: {name} нужна помощь",
   "🟢 Dostępny(-a)": "🟢 На связи",
   "🤒 Choruję": "🤒 Болею",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Нужна минутка для себя",
-  "{n} razy": {
-    "one": "{n} раз",
-    "few": "{n} раза",
-    "many": "{n} раз",
-    "other": "{n} раза"
-  },
-  "Napisz, zanim odpowiesz": "Напиши, прежде чем ответить",
-  "Przechowujący w kodzie QR": "Хранители в QR-коде",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Когда друзья согласятся хранить камешек, добавь их сюда в QR-код: нашедший спросит у них полный вид, пока твой телефон выключен.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Выбери до {n} человек. Пока твой телефон выключен, нашедший спросит у них полный вид камешка, даже не зная ни тебя, ни их. Без них он доберётся до него только через общих друзей. Это касается наклеек и кодов, которые ты покажешь с этого момента: напечатанные раньше не меняются.",
-  "Najwyżej {n} osoby w kodzie.": "Не больше {n} человек в коде."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Нужна минутка для себя"
 }

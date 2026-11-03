@@ -768,6 +768,7 @@
     "other": "Sobald die Mehrheit der übrigen Mitbewohner zustimmt (es braucht {n} Stimmen), bekommt die Wohnung einen neuen Schlüssel und einen neuen Türcode, und dieses Handy verliert den Zugang. Die Nachbarn werden informiert. Der alte Aufkleber muss ausgetauscht werden."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Wenn Freunde etwas veröffentlichen, siehst du es hier – der Reihe nach, ohne Algorithmus.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Wenn Freunde zustimmen, den Kiesel aufzubewahren, trag sie hier in den QR-Code ein: Ein Finder fragt sie nach dem vollen Aussehen, wenn dein Handy aus ist.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Sobald ein Freund eine neuere hat, kommt sie von selbst.",
   "Gdzie": "Wo",
   "Gdzie (adres, piętro)": "Wo (Adresse, Stockwerk)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Ländercodes, z. B. PL, UA (höchstens 3). Öffnet den nationalen Bereich. Du kannst das Feld leer lassen.",
   "Kogo chcesz przyprowadzić?": "Wen möchtest du mitbringen?",
   "Kogo poprosić o kilka słów?": "Wen bittest du um ein paar Worte?",
+  "Kogo poprosić o przechowanie?": "Wen um Aufbewahrung bitten?",
   "Kogo przyprowadzisz?": "Wen bringst du mit?",
   "Kogo szukasz": "Wen suchst du",
   "Kogo szukasz na randki": "Wen du für Dates suchst",
@@ -1792,6 +1794,7 @@
     "one": "Höchstens {n} Nationalität.",
     "other": "Höchstens {n} Nationalitäten."
   },
+  "Najwyżej {n} osoby w kodzie.": "Höchstens {n} Personen im Code.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Höchstens {n} Foto oder Video im Beitrag.",
     "other": "Höchstens {n} Fotos und Videos im Beitrag."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Schreib, was du von der Person hältst – es erscheint in deren Dating-Profil.",
   "Napisz, o co chodzi…": "Schreib, worum es geht…",
   "Napisz, za co dziękujesz.": "Schreib, wofür du dankst.",
+  "Napisz, zanim odpowiesz": "Schreib, bevor du antwortest",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Schreibt euch etwas – irgendein Mitbewohner antwortet.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Schreibt, wenn etwas zu klären ist.",
   "Napisz…": "Schreiben…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Du verwahrst Schlüssel für",
   "Przechowujesz kopie innych: {n}, razem {size}": "Du bewahrst Backups anderer auf: {n}, zusammen {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Du bewahrst dieses Steinchen für den Autor auf: Andere bekommen von dir sein Aussehen, wenn der Autor offline ist.",
+  "Przechowujący w kodzie QR": "Bewahrer im QR-Code",
   "Przeciągnij, żeby obrócić kamyczek": "Ziehen, um das Steinchen zu drehen",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Ziehe, um das Steinchen zu drehen, und zoome mit zwei Fingern. Wähle ein Werkzeug und male auf Ober- und Unterseite sowie an den Seiten.",
   "Przeczytano": "Gelesen",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Dieses Handy scheint ein anderer Typ zu sein: Zen lässt sich darauf vielleicht nicht installieren. Lade dann Zen für dein Handy von der Zen-Installationsseite herunter, sobald du Internet hast.",
   "Ten węzeł już jest na liście.": "Dieser Knoten ist schon auf der Liste.",
   "Terakota": "Terrakotta",
-  "Teraz": "Jetzt",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Gerade gibt es niemanden, den man weiter fragen kann. Versuch es gleich noch mal.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Auch Freunde von Freunden",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Ihr: {count}",
   "Wybieraj automatycznie": "Automatisch wählen",
   "Wybierz GIF": "GIF auswählen",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Wähle bis zu {n} Personen. Ist dein Handy aus, fragt ein Finder sie nach dem vollen Aussehen des Kiesels, auch ohne dich oder sie zu kennen. Ohne sie erreicht er ihn nur über gemeinsame Freunde. Das gilt für Sticker und Codes, die du ab jetzt zeigst: früher gedruckte bleiben, wie sie sind.",
   "Wybierz do {n} znajomych": {
     "one": "Wähle bis zu {n} Freund",
     "other": "Wähle bis zu {n} Freunde"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Foto auswählen",
   "Wybierz zdjęcie w tle": "Hintergrundfoto auswählen",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Wähle „Sofort ausführen“ und schalte „Bei Ausführung benachrichtigen“ aus.",
+  "Wybierz, kogo poprosić": "Wählen, wen du fragst",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Du wählst den Tag, und Zen lädt 5 Gäste so ein, dass sie sich möglichst wenig kennen.",
   "Wybrane osoby": "Ausgewählte Personen",
   "Wybrano plik — zmień": "Datei gewählt — ändern",
@@ -5774,6 +5780,10 @@
     "one": "{n} Beitrag der Spitze",
     "other": "{n} Beiträge der Spitze"
   },
+  "{n} razy": {
+    "one": "einmal",
+    "other": "{n}-mal"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} Postfach",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} braucht Hilfe",
   "🟢 Dostępny(-a)": "🟢 Verfügbar",
   "🤒 Choruję": "🤒 Ich bin krank",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Brauche einen Moment für mich",
-  "{n} razy": {
-    "one": "einmal",
-    "other": "{n}-mal"
-  },
-  "Napisz, zanim odpowiesz": "Schreib, bevor du antwortest",
-  "Przechowujący w kodzie QR": "Bewahrer im QR-Code",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Wenn Freunde zustimmen, den Kiesel aufzubewahren, trag sie hier in den QR-Code ein: Ein Finder fragt sie nach dem vollen Aussehen, wenn dein Handy aus ist.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Wähle bis zu {n} Personen. Ist dein Handy aus, fragt ein Finder sie nach dem vollen Aussehen des Kiesels, auch ohne dich oder sie zu kennen. Ohne sie erreicht er ihn nur über gemeinsame Freunde. Das gilt für Sticker und Codes, die du ab jetzt zeigst: früher gedruckte bleiben, wie sie sind.",
-  "Najwyżej {n} osoby w kodzie.": "Höchstens {n} Personen im Code."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Brauche einen Moment für mich"
 }

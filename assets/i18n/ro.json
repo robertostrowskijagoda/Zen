@@ -776,6 +776,7 @@
     "other": "Când sunt de acord majoritatea celorlalți membri ai casei (sunt necesare {n} de voturi), apartamentul primește o cheie nouă și un cod nou pentru ușă, iar acest telefon rămâne fără acces. Vecinii vor fi anunțați. Autocolantul vechi va trebui înlocuit."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Când prietenii postează ceva, vei vedea aici — în ordine, fără algoritm.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Când prietenii acceptă să păstreze pietricica, trece-i aici în codul QR: cine o găsește le va cere aspectul complet când telefonul tău e oprit.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Când un prieten va avea una mai nouă, va veni singură.",
   "Gdzie": "Unde",
   "Gdzie (adres, piętro)": "Unde (adresă, etaj)",
@@ -1245,6 +1246,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Coduri de țară, de ex. PL, UA (cel mult 3). Deschide secțiunea națională. Poți lăsa gol.",
   "Kogo chcesz przyprowadzić?": "Pe cine vrei să aduci?",
   "Kogo poprosić o kilka słów?": "Pe cine rogi să scrie câteva cuvinte?",
+  "Kogo poprosić o przechowanie?": "Pe cine rogi să o păstreze?",
   "Kogo przyprowadzisz?": "Pe cine aduci?",
   "Kogo szukasz": "Pe cine cauți",
   "Kogo szukasz na randki": "Pe cine cauți pentru întâlniri",
@@ -1816,6 +1818,7 @@
     "few": "Cel mult {n} naționalități.",
     "other": "Cel mult {n} de naționalități."
   },
+  "Najwyżej {n} osoby w kodzie.": "Cel mult {n} persoane în cod.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Cel mult {n} fotografie sau videoclip într-o postare.",
     "few": "Cel mult {n} fotografii sau videoclipuri într-o postare.",
@@ -1864,6 +1867,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Scrie ce crezi despre ea / el — va ajunge pe profilul ei / lui de dating.",
   "Napisz, o co chodzi…": "Scrie despre ce este vorba…",
   "Napisz, za co dziękujesz.": "Scrie pentru ce mulțumești.",
+  "Napisz, zanim odpowiesz": "Scrie înainte să răspunzi",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Scrieți-vă ceva unii altora — răspunde oricine din casă.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Scrieți dacă e ceva de stabilit.",
   "Napisz…": "Scrie…",
@@ -3067,6 +3071,7 @@
   "Przechowujesz klucze dla": "Păstrezi chei pentru",
   "Przechowujesz kopie innych: {n}, razem {size}": "Păstrezi copiile altora: {n}, în total {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Păstrezi această pietricică pentru autor: ceilalți primesc de la tine aspectul ei când autorul este offline.",
+  "Przechowujący w kodzie QR": "Păstrători în codul QR",
   "Przeciągnij, żeby obrócić kamyczek": "Trage ca să rotești pietricica",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Trage ca să rotești pietricica, ciupește cu două degete ca să mărești. Alege o unealtă și pictează pe față, pe spate și pe laterale.",
   "Przeczytano": "Citit",
@@ -3733,7 +3738,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Acest telefon pare să fie de alt tip: este posibil ca Zen să nu se instaleze pe el. În acest caz, descarcă Zen pentru telefonul tău de pe pagina de instalare Zen când ai internet.",
   "Ten węzeł już jest na liście.": "Acest nod e deja în listă.",
   "Terakota": "Teracotă",
-  "Teraz": "Acum",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Acum nu mai e pe cine să întrebi. Încearcă puțin mai târziu.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Și prietenii prietenilor",
@@ -4328,6 +4332,7 @@
   "Wy: {count}": "Voi: {count}",
   "Wybieraj automatycznie": "Alege automat",
   "Wybierz GIF": "Alege un GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Alege până la {n} persoane. Cât telefonul tău e oprit, cine găsește pietricica le cere aspectul complet, chiar dacă nu vă cunoaște. Fără ele, ajunge la ea doar prin prieteni comuni. Se aplică autocolantelor și codurilor arătate de acum: cele tipărite înainte rămân la fel.",
   "Wybierz do {n} znajomych": {
     "one": "Alege până la {n} prieten",
     "few": "Alege până la {n} prieteni",
@@ -4358,6 +4363,7 @@
   "Wybierz zdjęcie": "Alege o fotografie",
   "Wybierz zdjęcie w tle": "Alege fotografia de fundal",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Alege „Rulează imediat” și dezactivează „Notifică la rulare”.",
+  "Wybierz, kogo poprosić": "Alege pe cine rogi",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Alegi ziua, iar Zen invită 5 oameni astfel încât să se cunoască între ei cât mai puțin.",
   "Wybrane osoby": "Persoane alese",
   "Wybrano plik — zmień": "Fișier ales — schimbă",
@@ -5870,6 +5876,11 @@
     "few": "{n} postări ale vârfului",
     "other": "{n} de postări ale vârfului"
   },
+  "{n} razy": {
+    "one": "o dată",
+    "few": "de {n} ori",
+    "other": "de {n} ori"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} căsuță",
@@ -6073,15 +6084,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARMĂ: {name} are nevoie de ajutor",
   "🟢 Dostępny(-a)": "🟢 Disponibil(ă)",
   "🤒 Choruję": "🤒 Sunt bolnav(ă)",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Am nevoie de puțin timp pentru mine",
-  "{n} razy": {
-    "one": "o dată",
-    "few": "de {n} ori",
-    "other": "de {n} ori"
-  },
-  "Napisz, zanim odpowiesz": "Scrie înainte să răspunzi",
-  "Przechowujący w kodzie QR": "Păstrători în codul QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Când prietenii acceptă să păstreze pietricica, trece-i aici în codul QR: cine o găsește le va cere aspectul complet când telefonul tău e oprit.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Alege până la {n} persoane. Cât telefonul tău e oprit, cine găsește pietricica le cere aspectul complet, chiar dacă nu vă cunoaște. Fără ele, ajunge la ea doar prin prieteni comuni. Se aplică autocolantelor și codurilor arătate de acum: cele tipărite înainte rămân la fel.",
-  "Najwyżej {n} osoby w kodzie.": "Cel mult {n} persoane în cod."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Am nevoie de puțin timp pentru mine"
 }

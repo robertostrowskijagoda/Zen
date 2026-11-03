@@ -768,6 +768,7 @@
     "other": "When most of the other household members agree ({n} votes needed), the apartment will get a new key and a new door code, and this phone will lose access. Your neighbors will be notified. You’ll need to replace the old sticker."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "When friends post something, you’ll see it here — in order, with no algorithm.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "When friends agree to keep the pebble, put them in the QR code here: a finder will ask them for the full look while your phone is off.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "When a friend has a newer one, it will come by itself.",
   "Gdzie": "Where",
   "Gdzie (adres, piętro)": "Where (address, floor)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Country codes, e.g. PL, UA (up to 3). Opens the national section. You can leave it empty.",
   "Kogo chcesz przyprowadzić?": "Who do you want to bring?",
   "Kogo poprosić o kilka słów?": "Who should you ask for a few words?",
+  "Kogo poprosić o przechowanie?": "Whom to ask to keep it?",
   "Kogo przyprowadzisz?": "Who are you bringing?",
   "Kogo szukasz": "Who you’re looking for",
   "Kogo szukasz na randki": "Who you’re looking for in dating",
@@ -1792,6 +1794,7 @@
     "one": "At most {n} nationality.",
     "other": "At most {n} nationalities."
   },
+  "Najwyżej {n} osoby w kodzie.": "At most {n} people in the code.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "At most {n} photo or video per post.",
     "other": "At most {n} photos and videos per post."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Write what you think of them — it will go on their dating profile.",
   "Napisz, o co chodzi…": "Write what it’s about…",
   "Napisz, za co dziękujesz.": "Write what you’re thanking them for.",
+  "Napisz, zanim odpowiesz": "Write before you answer",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Write to each other — anyone from the household can reply.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Write if anything needs sorting out.",
   "Napisz…": "Write…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "You hold keys for",
   "Przechowujesz kopie innych: {n}, razem {size}": "You keep others’ backups: {n}, {size} in total",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "You’re keeping this pebble for the author: others get its design from you when the author is offline.",
+  "Przechowujący w kodzie QR": "Keepers in the QR code",
   "Przeciągnij, żeby obrócić kamyczek": "Drag to rotate the pebble",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Drag to rotate the pebble, pinch with two fingers to zoom. Pick a tool and paint on the top, bottom and sides.",
   "Przeczytano": "Read",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "This phone looks like a different type: Zen may not install on it. In that case, download Zen for your phone from the Zen install page once you have internet.",
   "Ten węzeł już jest na liście.": "This peer is already on the list.",
   "Terakota": "Terracotta",
-  "Teraz": "Now",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "There’s no one further to ask right now. Try again in a moment.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Friends of friends too",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "You: {count}",
   "Wybieraj automatycznie": "Choose automatically",
   "Wybierz GIF": "Choose a GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pick up to {n} people. While your phone is off, a finder asks them for the pebble's full look, even without knowing you or them. Without them, the finder reaches it only through mutual friends. This applies to stickers and codes you show from now on: ones printed earlier stay as they are.",
   "Wybierz do {n} znajomych": {
     "one": "Choose up to {n} friend",
     "other": "Choose up to {n} friends"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Choose a photo",
   "Wybierz zdjęcie w tle": "Choose a background photo",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Select “Run Immediately” and turn off “Notify When Run”.",
+  "Wybierz, kogo poprosić": "Choose whom to ask",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "You pick a day, and Zen invites 5 guests so that they know each other as little as possible.",
   "Wybrane osoby": "Selected people",
   "Wybrano plik — zmień": "File chosen — change",
@@ -5774,6 +5780,10 @@
     "one": "{n} post from the top",
     "other": "{n} posts from the top"
   },
+  "{n} razy": {
+    "one": "once",
+    "other": "{n} times"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} mailbox",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} needs help",
   "🟢 Dostępny(-a)": "🟢 Available",
   "🤒 Choruję": "🤒 Sick",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself",
-  "{n} razy": {
-    "one": "once",
-    "other": "{n} times"
-  },
-  "Napisz, zanim odpowiesz": "Write before you answer",
-  "Przechowujący w kodzie QR": "Keepers in the QR code",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "When friends agree to keep the pebble, put them in the QR code here: a finder will ask them for the full look while your phone is off.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pick up to {n} people. While your phone is off, a finder asks them for the pebble's full look, even without knowing you or them. Without them, the finder reaches it only through mutual friends. This applies to stickers and codes you show from now on: ones printed earlier stay as they are.",
-  "Najwyżej {n} osoby w kodzie.": "At most {n} people in the code."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself"
 }

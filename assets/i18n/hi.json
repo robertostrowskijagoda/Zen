@@ -768,6 +768,7 @@
     "other": "जब बाकी घर के सदस्यों में से ज़्यादातर सहमत हो जाएँगे ({n} वोट चाहिए), तो फ़्लैट को नई कुंजी और दरवाज़े का नया कोड मिलेगा, और इस फ़ोन की पहुँच खत्म हो जाएगी। पड़ोसियों को बता दिया जाएगा। पुराना स्टिकर बदलना होगा।"
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "जब दोस्त कुछ पोस्ट करेंगे, आपको यहाँ दिखेगा — क्रम से, बिना एल्गोरिदम के।",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "जब दोस्त कंकड़ रखने को मान जाएँ, तो उन्हें यहाँ QR कोड में जोड़ें: आपका फ़ोन बंद होने पर पाने वाला उनसे पूरा रूप माँगेगा।",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "जब किसी दोस्त के पास नया वर्ज़न होगा, वह अपने आप आ जाएगा।",
   "Gdzie": "कहाँ",
   "Gdzie (adres, piętro)": "कहाँ (पता, मंज़िल)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "देश के कोड, जैसे PL, UA (अधिकतम 3)। यह देश का सेक्शन खोलता है। आप खाली छोड़ सकते हैं।",
   "Kogo chcesz przyprowadzić?": "आप किसे लाना चाहते हैं?",
   "Kogo poprosić o kilka słów?": "किससे कुछ शब्द माँगें?",
+  "Kogo poprosić o przechowanie?": "रखने के लिए किससे कहें?",
   "Kogo przyprowadzisz?": "आप किसे लाएँगे?",
   "Kogo szukasz": "आप किसे ढूँढ रहे हैं",
   "Kogo szukasz na randki": "डेटिंग के लिए आप किसे ढूँढ रहे हैं",
@@ -1792,6 +1794,7 @@
     "one": "अधिकतम {n} राष्ट्रीयता।",
     "other": "अधिकतम {n} राष्ट्रीयताएँ।"
   },
+  "Najwyżej {n} osoby w kodzie.": "कोड में ज़्यादा से ज़्यादा {n} लोग।",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "पोस्ट में ज़्यादा से ज़्यादा {n} फ़ोटो या वीडियो।",
     "other": "पोस्ट में ज़्यादा से ज़्यादा {n} फ़ोटो या वीडियो।"
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "लिखें कि आप उनके बारे में क्या सोचते हैं — यह उनके डेटिंग प्रोफ़ाइल पर जाएगा।",
   "Napisz, o co chodzi…": "लिखें कि बात क्या है…",
   "Napisz, za co dziękujesz.": "लिखें कि आप किसलिए धन्यवाद दे रहे हैं।",
+  "Napisz, zanim odpowiesz": "जवाब देने से पहले लिखें",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "एक-दूसरे को कुछ लिखें — घर का कोई भी सदस्य जवाब देगा।",
   "Napiszcie, jeśli trzeba coś ustalić.": "कुछ तय करना हो तो लिखें।",
   "Napisz…": "लिखें…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "आप इनकी कुंजियाँ रखते हैं",
   "Przechowujesz kopie innych: {n}, razem {size}": "आप दूसरों के बैकअप रखते हैं: {n}, कुल {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "आप यह कंकड़ रचनाकार के लिए सँभालकर रखते हैं: जब रचनाकार नेटवर्क से बाहर होता है, तब दूसरों को इसका रूप आपसे मिलता है।",
+  "Przechowujący w kodzie QR": "QR कोड में रखवाले",
   "Przeciągnij, żeby obrócić kamyczek": "कंकड़ को घुमाने के लिए खींचें",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "कंकड़ को घुमाने के लिए खींचें, दो उँगलियों से ज़ूम करें। कोई औज़ार चुनें और ऊपर, नीचे और किनारों पर रंगें।",
   "Przeczytano": "पढ़ लिया",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "यह फ़ोन दूसरे तरह का लगता है: इस पर Zen शायद इंस्टॉल न हो। तब इंटरनेट मिलने पर अपने फ़ोन के लिए Zen, Zen के इंस्टॉल पेज से डाउनलोड करें।",
   "Ten węzeł już jest na liście.": "यह नोड पहले से सूची में है।",
   "Terakota": "टेराकोटा",
-  "Teraz": "अभी",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "अभी आगे पूछने के लिए कोई नहीं है। थोड़ी देर में कोशिश करें।",
   "Terminal": "टर्मिनल",
   "Też znajomi znajomych": "दोस्तों के दोस्त भी",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "आप: {count}",
   "Wybieraj automatycznie": "अपने आप चुनें",
   "Wybierz GIF": "GIF चुनें",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "अधिकतम {n} लोग चुनें। आपका फ़ोन बंद होने पर पाने वाला उनसे कंकड़ का पूरा रूप माँगता है, भले ही वह आपको या उन्हें न जानता हो। उनके बिना वह सिर्फ़ साझा दोस्तों के ज़रिए पहुँचता है। यह अब से दिखाए जाने वाले स्टिकर और कोड पर लागू है: पहले छपे वैसे ही रहते हैं।",
   "Wybierz do {n} znajomych": {
     "one": "ज़्यादा से ज़्यादा {n} दोस्त चुनें",
     "other": "ज़्यादा से ज़्यादा {n} दोस्त चुनें"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "फ़ोटो चुनें",
   "Wybierz zdjęcie w tle": "बैकग्राउंड फ़ोटो चुनें",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "“तुरंत चलाएँ” चुनें और “चलने पर सूचित करें” बंद करें।",
+  "Wybierz, kogo poprosić": "चुनें किससे कहें",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "आप दिन चुनेंगे और Zen 5 मेहमानों को इस तरह बुलाएगा कि वे एक-दूसरे को जितना कम हो सके जानते हों।",
   "Wybrane osoby": "चुने हुए लोग",
   "Wybrano plik — zmień": "फ़ाइल चुनी गई — बदलें",
@@ -5774,6 +5780,10 @@
     "one": "शीर्ष की {n} पोस्ट",
     "other": "शीर्ष की {n} पोस्ट"
   },
+  "{n} razy": {
+    "one": "{n} बार",
+    "other": "{n} बार"
+  },
   "{n} s": "{n} सेकंड",
   "{n} skrzynek": {
     "one": "{n} इनबॉक्स",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 अलार्म: {name} को मदद चाहिए",
   "🟢 Dostępny(-a)": "🟢 उपलब्ध हूँ",
   "🤒 Choruję": "🤒 बीमार हूँ",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए",
-  "{n} razy": {
-    "one": "{n} बार",
-    "other": "{n} बार"
-  },
-  "Napisz, zanim odpowiesz": "जवाब देने से पहले लिखें",
-  "Przechowujący w kodzie QR": "QR कोड में रखवाले",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "जब दोस्त कंकड़ रखने को मान जाएँ, तो उन्हें यहाँ QR कोड में जोड़ें: आपका फ़ोन बंद होने पर पाने वाला उनसे पूरा रूप माँगेगा।",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "अधिकतम {n} लोग चुनें। आपका फ़ोन बंद होने पर पाने वाला उनसे कंकड़ का पूरा रूप माँगता है, भले ही वह आपको या उन्हें न जानता हो। उनके बिना वह सिर्फ़ साझा दोस्तों के ज़रिए पहुँचता है। यह अब से दिखाए जाने वाले स्टिकर और कोड पर लागू है: पहले छपे वैसे ही रहते हैं।",
-  "Najwyżej {n} osoby w kodzie.": "कोड में ज़्यादा से ज़्यादा {n} लोग।"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए"
 }

@@ -768,6 +768,7 @@
     "other": "Quand la majorité des autres membres du foyer sont d’accord ({n} voix sont nécessaires), le logement recevra une nouvelle clé et un nouveau code de porte, et ce téléphone n’y aura plus accès. Les voisins seront prévenus. Il faudra remplacer l’ancien autocollant."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Quand vos amis publieront quelque chose, vous le verrez ici — dans l’ordre, sans algorithme.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quand des amis acceptent de garder le galet, ajoute-les ici au code QR : celui qui le trouve leur demandera son apparence complète quand ton téléphone sera éteint.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Quand un ami en aura une plus récente, elle arrivera toute seule.",
   "Gdzie": "Où",
   "Gdzie (adres, piętro)": "Où (adresse, étage)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Codes de pays, par ex. PL, UA (3 au maximum). Ouvre la section nationale. Vous pouvez laisser vide.",
   "Kogo chcesz przyprowadzić?": "Qui voulez-vous amener ?",
   "Kogo poprosić o kilka słów?": "À qui demander quelques mots ?",
+  "Kogo poprosić o przechowanie?": "À qui demander de le garder ?",
   "Kogo przyprowadzisz?": "Qui amènerez-vous ?",
   "Kogo szukasz": "Qui vous cherchez",
   "Kogo szukasz na randki": "Qui vous cherchez pour des rencontres",
@@ -1792,6 +1794,7 @@
     "one": "{n} nationalité au maximum.",
     "other": "{n} nationalités au maximum."
   },
+  "Najwyżej {n} osoby w kodzie.": "Au plus {n} personnes dans le code.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "{n} photo ou vidéo maximum par publication.",
     "other": "{n} photos et vidéos maximum par publication."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Écrivez ce que vous pensez d’elle / de lui — cela apparaîtra sur son profil de rencontres.",
   "Napisz, o co chodzi…": "Dites de quoi il s’agit…",
   "Napisz, za co dziękujesz.": "Écrivez de quoi vous remerciez.",
+  "Napisz, zanim odpowiesz": "Écris avant de répondre",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Écrivez-vous un mot — n’importe quel membre du foyer pourra répondre.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Écrivez si quelque chose est à régler.",
   "Napisz…": "Écrire…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Vous conservez des clés pour",
   "Przechowujesz kopie innych: {n}, razem {size}": "Vous gardez des sauvegardes d’autres personnes : {n}, {size} au total",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Vous conservez ce galet pour l’auteur : les autres en obtiennent l’aspect auprès de vous quand l’auteur est hors ligne.",
+  "Przechowujący w kodzie QR": "Gardiens dans le code QR",
   "Przeciągnij, żeby obrócić kamyczek": "Faites glisser pour faire pivoter le galet",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Faites glisser pour faire pivoter le galet, pincez avec deux doigts pour zoomer. Choisissez un outil et peignez sur le dessus, le dessous et les côtés.",
   "Przeczytano": "Lu",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Ce téléphone semble d’un autre type : Zen risque de ne pas s’y installer. Dans ce cas, téléchargez Zen pour votre téléphone depuis la page d’installation de Zen dès que vous aurez internet.",
   "Ten węzeł już jest na liście.": "Ce nœud est déjà dans la liste.",
   "Terakota": "Terre cuite",
-  "Teraz": "Maintenant",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Personne d’autre à interroger pour l’instant. Réessayez dans un moment.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Aussi les amis d’amis",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Vous : {count}",
   "Wybieraj automatycznie": "Choisir automatiquement",
   "Wybierz GIF": "Choisir un GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Choisis jusqu’à {n} personnes. Quand ton téléphone est éteint, celui qui trouve le galet leur demande son apparence complète, même sans vous connaître. Sans elles, il n’y accède que par des amis communs. Cela vaut pour les autocollants et codes que tu montreras désormais : ceux déjà imprimés restent tels quels.",
   "Wybierz do {n} znajomych": {
     "one": "Choisir jusqu’à {n} ami",
     "other": "Choisir jusqu’à {n} amis"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Choisir une photo",
   "Wybierz zdjęcie w tle": "Choisir une photo de fond",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Choisissez « Exécuter immédiatement » et désactivez « Notifier à l’exécution ».",
+  "Wybierz, kogo poprosić": "Choisir qui demander",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Vous choisissez le jour, et Zen invite 5 convives de façon qu’ils se connaissent le moins possible.",
   "Wybrane osoby": "Personnes choisies",
   "Wybrano plik — zmień": "Fichier choisi — changer",
@@ -5774,6 +5780,10 @@
     "one": "{n} publication du sommet",
     "other": "{n} publications du sommet"
   },
+  "{n} razy": {
+    "one": "une fois",
+    "other": "{n} fois"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} boîte aux lettres",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARME : {name} a besoin d’aide",
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Je suis malade",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi",
-  "{n} razy": {
-    "one": "une fois",
-    "other": "{n} fois"
-  },
-  "Napisz, zanim odpowiesz": "Écris avant de répondre",
-  "Przechowujący w kodzie QR": "Gardiens dans le code QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quand des amis acceptent de garder le galet, ajoute-les ici au code QR : celui qui le trouve leur demandera son apparence complète quand ton téléphone sera éteint.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Choisis jusqu’à {n} personnes. Quand ton téléphone est éteint, celui qui trouve le galet leur demande son apparence complète, même sans vous connaître. Sans elles, il n’y accède que par des amis communs. Cela vaut pour les autocollants et codes que tu montreras désormais : ceux déjà imprimés restent tels quels.",
-  "Najwyżej {n} osoby w kodzie.": "Au plus {n} personnes dans le code."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi"
 }

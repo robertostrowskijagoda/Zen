@@ -504,7 +504,8 @@ class _RelayFriendTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            friendPresenceLine(friend, now) ?? friend.lastActivityLabel,
+            friendPresenceLine(friend, now) ??
+                activityTimeLabel(friend.lastActivityLabel, now),
             style: TextStyle(
               color: switch (friend.shownPresence) {
                 PeerPresence.online => zen.success,

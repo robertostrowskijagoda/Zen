@@ -760,6 +760,7 @@
     "other": "Jika sebagian besar penghuni lain setuju (dibutuhkan {n} suara), rumah akan mendapat kunci baru dan kode pintu baru, dan ponsel ini tidak lagi punya akses. Tetangga akan diberi tahu. Stiker lama harus diganti."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Saat teman memposting sesuatu, Anda akan melihatnya di sini — berurutan, tanpa algoritma.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Saat teman setuju menyimpan kerikil ini, masukkan mereka ke kode QR di sini: penemu akan meminta tampilan lengkap kepada mereka saat ponselmu mati.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Saat teman punya yang lebih baru, versinya akan datang sendiri.",
   "Gdzie": "Di mana",
   "Gdzie (adres, piętro)": "Di mana (alamat, lantai)",
@@ -1215,6 +1216,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Kode negara, mis. PL, UA (maksimal 3). Membuka bagian nasional. Boleh dikosongkan.",
   "Kogo chcesz przyprowadzić?": "Siapa yang ingin Anda bawa?",
   "Kogo poprosić o kilka słów?": "Siapa yang diminta menulis beberapa kata?",
+  "Kogo poprosić o przechowanie?": "Minta siapa untuk menyimpannya?",
   "Kogo przyprowadzisz?": "Siapa yang akan Anda bawa?",
   "Kogo szukasz": "Siapa yang Anda cari",
   "Kogo szukasz na randki": "Siapa yang Anda cari untuk berkencan",
@@ -1768,6 +1770,7 @@
   "Najwyżej {n} narodowości.": {
     "other": "Maksimal {n} kewarganegaraan."
   },
+  "Najwyżej {n} osoby w kodzie.": "Paling banyak {n} orang di kode.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "other": "Maksimal {n} foto atau video per postingan."
   },
@@ -1810,6 +1813,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Tulis pendapat Anda tentang dia — akan muncul di profil kencannya.",
   "Napisz, o co chodzi…": "Tulis tentang apa…",
   "Napisz, za co dziękujesz.": "Tulis untuk apa Anda berterima kasih.",
+  "Napisz, zanim odpowiesz": "Tulis sebelum menjawab",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Tulislah sesuatu — salah satu penghuni akan membalas.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Tulis jika ada yang perlu diatur.",
   "Napisz…": "Tulis…",
@@ -2987,6 +2991,7 @@
   "Przechowujesz klucze dla": "Anda menyimpan kunci untuk",
   "Przechowujesz kopie innych: {n}, razem {size}": "Anda menyimpan cadangan orang lain: {n}, total {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Anda menyimpan batu kecil ini untuk pembuatnya: orang lain menerima tampilannya dari Anda saat pembuat tidak terhubung.",
+  "Przechowujący w kodzie QR": "Penyimpan di kode QR",
   "Przeciągnij, żeby obrócić kamyczek": "Seret untuk memutar batu kecil",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Seret untuk memutar batu kecil, cubit dengan dua jari untuk memperbesar. Pilih alat dan lukis di atas, bawah, dan sisi.",
   "Przeczytano": "Dibaca",
@@ -3647,7 +3652,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Ponsel ini tampaknya jenis lain: Zen mungkin tidak bisa terpasang di sini. Kalau begitu, unduh Zen untuk ponsel Anda dari halaman instalasi Zen saat Anda ada internet.",
   "Ten węzeł już jest na liście.": "Node ini sudah ada di daftar.",
   "Terakota": "Terakota",
-  "Teraz": "Sekarang",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Saat ini tidak ada yang bisa ditanya lebih jauh. Coba sebentar lagi.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Juga teman dari teman",
@@ -4230,6 +4234,7 @@
   "Wy: {count}": "Anda: {count}",
   "Wybieraj automatycznie": "Pilih otomatis",
   "Wybierz GIF": "Pilih GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pilih hingga {n} orang. Saat ponselmu mati, penemu meminta tampilan lengkap kerikil kepada mereka, meski tidak mengenalmu atau mereka. Tanpa mereka, penemu hanya bisa mendapatkannya lewat teman bersama. Ini berlaku untuk stiker dan kode yang kamu tunjukkan mulai sekarang: yang sudah dicetak tetap sama.",
   "Wybierz do {n} znajomych": {
     "other": "Pilih hingga {n} teman"
   },
@@ -4258,6 +4263,7 @@
   "Wybierz zdjęcie": "Pilih foto",
   "Wybierz zdjęcie w tle": "Pilih foto latar",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Pilih «Jalankan Segera» dan matikan «Beri Tahu Saat Dijalankan».",
+  "Wybierz, kogo poprosić": "Pilih siapa yang diminta",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Anda memilih hari, dan Zen mengundang 5 tamu sedemikian rupa agar mereka sesedikit mungkin saling kenal.",
   "Wybrane osoby": "Orang pilihan",
   "Wybrano plik — zmień": "File dipilih — ubah",
@@ -5678,6 +5684,9 @@
   "{n} postów szczytu": {
     "other": "{n} kiriman puncak"
   },
+  "{n} razy": {
+    "other": "{n} kali"
+  },
   "{n} s": "{n} dtk",
   "{n} skrzynek": {
     "other": "{n} kotak masuk"
@@ -5851,13 +5860,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} butuh bantuan",
   "🟢 Dostępny(-a)": "🟢 Tersedia",
   "🤒 Choruję": "🤒 Sedang sakit",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Butuh waktu sendiri",
-  "{n} razy": {
-    "other": "{n} kali"
-  },
-  "Napisz, zanim odpowiesz": "Tulis sebelum menjawab",
-  "Przechowujący w kodzie QR": "Penyimpan di kode QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Saat teman setuju menyimpan kerikil ini, masukkan mereka ke kode QR di sini: penemu akan meminta tampilan lengkap kepada mereka saat ponselmu mati.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Pilih hingga {n} orang. Saat ponselmu mati, penemu meminta tampilan lengkap kerikil kepada mereka, meski tidak mengenalmu atau mereka. Tanpa mereka, penemu hanya bisa mendapatkannya lewat teman bersama. Ini berlaku untuk stiker dan kode yang kamu tunjukkan mulai sekarang: yang sudah dicetak tetap sama.",
-  "Najwyżej {n} osoby w kodzie.": "Paling banyak {n} orang di kode."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Butuh waktu sendiri"
 }

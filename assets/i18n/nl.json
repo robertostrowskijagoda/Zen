@@ -768,6 +768,7 @@
     "other": "Zodra de meerderheid van de overige huisgenoten akkoord gaat (er zijn {n} stemmen nodig), krijgt de woning een nieuwe sleutel en een nieuwe deurcode en heeft deze telefoon geen toegang meer. De buren worden op de hoogte gebracht. De oude sticker moet vervangen worden."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Zodra vrienden iets plaatsen, zie je het hier — op volgorde, zonder algoritme.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Als vrienden de kiezel willen bewaren, zet ze hier in de QR-code: een vinder vraagt hun dan om het volledige uiterlijk als je telefoon uit staat.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Als een vriend een nieuwere heeft, komt die vanzelf.",
   "Gdzie": "Waar",
   "Gdzie (adres, piętro)": "Waar (adres, verdieping)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Landcodes, bijv. PL, UA (maximaal 3). Opent de landelijke sectie. Je mag het leeg laten.",
   "Kogo chcesz przyprowadzić?": "Wie wil je meenemen?",
   "Kogo poprosić o kilka słów?": "Aan wie vraag je een paar woorden?",
+  "Kogo poprosić o przechowanie?": "Wie vragen om hem te bewaren?",
   "Kogo przyprowadzisz?": "Wie neem je mee?",
   "Kogo szukasz": "Wie zoek je",
   "Kogo szukasz na randki": "Wie zoek je voor dates",
@@ -1792,6 +1794,7 @@
     "one": "Maximaal {n} nationaliteit.",
     "other": "Maximaal {n} nationaliteiten."
   },
+  "Najwyżej {n} osoby w kodzie.": "Hoogstens {n} mensen in de code.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Maximaal {n} foto of video per post.",
     "other": "Maximaal {n} foto's of video's per post."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Schrijf wat je van hem of haar vindt — het komt op zijn of haar datingprofiel.",
   "Napisz, o co chodzi…": "Schrijf waar het om gaat…",
   "Napisz, za co dziękujesz.": "Schrijf waarvoor je bedankt.",
+  "Napisz, zanim odpowiesz": "Schrijf voordat je antwoordt",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Schrijf elkaar iets — elke huisgenoot kan antwoorden.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Schrijf als er iets af te spreken is.",
   "Napisz…": "Schrijf…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Je bewaart sleutels voor",
   "Przechowujesz kopie innych: {n}, razem {size}": "Je bewaart back-ups van anderen: {n}, samen {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Je bewaart dit steentje voor de maker: anderen krijgen het uiterlijk van jou als de maker offline is.",
+  "Przechowujący w kodzie QR": "Bewaarders in de QR-code",
   "Przeciągnij, żeby obrócić kamyczek": "Sleep om het steentje te draaien",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Sleep om het steentje te draaien, knijp met twee vingers om in te zoomen. Kies een hulpmiddel en schilder op de boven-, onder- en zijkanten.",
   "Przeczytano": "Gelezen",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Deze telefoon lijkt van een ander type: Zen installeert er misschien niet op. Download dan Zen voor je telefoon via de installatiepagina van Zen zodra je internet hebt.",
   "Ten węzeł już jest na liście.": "Dit knooppunt staat al in de lijst.",
   "Terakota": "Terracotta",
-  "Teraz": "Nu",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Er is nu niemand om verder te vragen. Probeer het zo nog eens.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Ook vrienden van vrienden",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Jullie: {count}",
   "Wybieraj automatycznie": "Automatisch kiezen",
   "Wybierz GIF": "Kies een GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Kies maximaal {n} mensen. Staat je telefoon uit, dan vraagt een vinder hun om het volledige uiterlijk van de kiezel, ook zonder jou of hen te kennen. Zonder hen komt hij er alleen via gemeenschappelijke vrienden bij. Dit geldt voor stickers en codes die je vanaf nu laat zien: eerder geprinte blijven zoals ze zijn.",
   "Wybierz do {n} znajomych": {
     "one": "Kies tot {n} vriend",
     "other": "Kies tot {n} vrienden"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Foto kiezen",
   "Wybierz zdjęcie w tle": "Achtergrondfoto kiezen",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Kies „Direct uitvoeren” en zet „Melden bij uitvoeren” uit.",
+  "Wybierz, kogo poprosić": "Kies wie je vraagt",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Jij kiest de dag en Zen nodigt 5 gasten uit die elkaar zo min mogelijk kennen.",
   "Wybrane osoby": "Gekozen personen",
   "Wybrano plik — zmień": "Bestand gekozen — wijzig",
@@ -5774,6 +5780,10 @@
     "one": "{n} post van de top",
     "other": "{n} posts van de top"
   },
+  "{n} razy": {
+    "one": "één keer",
+    "other": "{n} keer"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} postvak",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} heeft hulp nodig",
   "🟢 Dostępny(-a)": "🟢 Beschikbaar",
   "🤒 Choruję": "🤒 Ik ben ziek",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Ik heb even tijd voor mezelf nodig",
-  "{n} razy": {
-    "one": "één keer",
-    "other": "{n} keer"
-  },
-  "Napisz, zanim odpowiesz": "Schrijf voordat je antwoordt",
-  "Przechowujący w kodzie QR": "Bewaarders in de QR-code",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Als vrienden de kiezel willen bewaren, zet ze hier in de QR-code: een vinder vraagt hun dan om het volledige uiterlijk als je telefoon uit staat.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Kies maximaal {n} mensen. Staat je telefoon uit, dan vraagt een vinder hun om het volledige uiterlijk van de kiezel, ook zonder jou of hen te kennen. Zonder hen komt hij er alleen via gemeenschappelijke vrienden bij. Dit geldt voor stickers en codes die je vanaf nu laat zien: eerder geprinte blijven zoals ze zijn.",
-  "Najwyżej {n} osoby w kodzie.": "Hoogstens {n} mensen in de code."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Ik heb even tijd voor mezelf nodig"
 }

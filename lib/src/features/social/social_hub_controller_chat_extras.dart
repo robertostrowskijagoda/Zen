@@ -381,7 +381,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     );
     groups[groupId] = group.copyWith(
       lastMessagePreview: label,
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
     );
     state = state.copyWith(groups: groups);
     await _persistState();

@@ -29,7 +29,9 @@ SocialHubState _applySignal(
           isOnline: true,
           lastPresenceAtMillis: receivedAtMillis,
           lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-          lastActivityLabel: t('Teraz'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
         ),
     appSettings,
   );
@@ -191,7 +193,9 @@ SocialHubState _applySignal(
               ),
               kMaxStoredPreviewChars,
             ),
-            lastActivityLabel: t('Teraz'),
+            lastActivityLabel: activityStamp(
+              DateTime.now().millisecondsSinceEpoch,
+            ),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
         ),
@@ -265,7 +269,7 @@ SocialHubState _applySignal(
         createdById: signal.sender,
         createdAtMillis: receivedAtMillis,
         memberAddresses: inviteMembers,
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
         lastMessagePreview: t('Zaproszono Cię do grupy.'),
         isInvitePending: true,
         receivedInviteIds: <String>[?signal.inviteId],
@@ -312,7 +316,9 @@ SocialHubState _applySignal(
             ),
             kMaxStoredPreviewChars,
           ),
-          lastActivityLabel: t('Teraz'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
           unreadCount: isGroupOpen ? 0 : existing.unreadCount + 1,
           memberNames: senderName == null || senderName.isEmpty
               ? null
@@ -1587,28 +1593,6 @@ int _messageStorageBytes(ChatMessage message) {
       (message.durationMs != null ? 8 : 0) +
       (message.readAtMillis != null ? 8 : 0) +
       64;
-}
-
-String _activityLabelForMillis(int sentAtMillis) {
-  final DateTime now = DateTime.now();
-  final DateTime sentAt = DateTime.fromMillisecondsSinceEpoch(sentAtMillis);
-  final Duration delta = now.difference(sentAt);
-  if (delta < const Duration(minutes: 1)) {
-    return t('Teraz');
-  }
-  if (delta < const Duration(days: 1) &&
-      now.day == sentAt.day &&
-      now.month == sentAt.month &&
-      now.year == sentAt.year) {
-    return ZenFormat.time(sentAt);
-  }
-  final DateTime yesterday = now.subtract(const Duration(days: 1));
-  if (yesterday.day == sentAt.day &&
-      yesterday.month == sentAt.month &&
-      yesterday.year == sentAt.year) {
-    return t('Wczoraj');
-  }
-  return ZenFormat.dayMonth(sentAt);
 }
 
 List<InboxEntry> _removeEntriesForPeer(

@@ -760,6 +760,7 @@
     "other": "나머지 세대원 과반이 동의하면(필요한 표 {n}표) 집에 새 키와 새 문 코드가 생기고, 이 휴대폰은 접근할 수 없게 돼요. 이웃에게 알려지고, 이전 스티커는 교체해야 해요."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "친구가 무언가를 올리면 여기에 순서대로 보여요 — 알고리즘 없이요.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "친구들이 조약돌 보관에 동의하면 여기서 QR 코드에 넣으세요. 휴대폰이 꺼져 있을 때 발견한 사람이 그들에게 전체 모습을 요청합니다.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "친구에게 더 최신 버전이 생기면 저절로 도착해요.",
   "Gdzie": "장소",
   "Gdzie (adres, piętro)": "장소 (주소, 층)",
@@ -1215,6 +1216,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "국가 코드, 예: PL, UA (최대 3개). 국가 섹션이 열려요. 비워 둬도 돼요.",
   "Kogo chcesz przyprowadzić?": "누구를 데려오고 싶나요?",
   "Kogo poprosić o kilka słów?": "누구에게 몇 마디를 부탁할까요?",
+  "Kogo poprosić o przechowanie?": "누구에게 보관을 부탁할까요?",
   "Kogo przyprowadzisz?": "누구를 데려올래요?",
   "Kogo szukasz": "찾는 사람",
   "Kogo szukasz na randki": "소개팅으로 만나고 싶은 사람",
@@ -1768,6 +1770,7 @@
   "Najwyżej {n} narodowości.": {
     "other": "국적은 최대 {n}개까지예요."
   },
+  "Najwyżej {n} osoby w kodzie.": "코드에는 최대 {n}명까지.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "other": "게시물에는 사진이나 동영상을 최대 {n}개까지 넣을 수 있어요."
   },
@@ -1810,6 +1813,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "이 사람에 대해 어떻게 생각하는지 적어 주세요 — 이 사람의 소개팅 프로필에 올라가요.",
   "Napisz, o co chodzi…": "무슨 일인지 적어 주세요…",
   "Napisz, za co dziękujesz.": "무엇에 대해 감사하는지 적어 주세요.",
+  "Napisz, zanim odpowiesz": "답하기 전에 메시지 보내기",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "서로 한마디 써 보세요 — 세대원 누구든 답장해요.",
   "Napiszcie, jeśli trzeba coś ustalić.": "정할 게 있으면 글을 남기세요.",
   "Napisz…": "쓰기…",
@@ -2987,6 +2991,7 @@
   "Przechowujesz klucze dla": "키를 보관 중인 사람",
   "Przechowujesz kopie innych: {n}, razem {size}": "다른 사람의 백업 보관 중: {n}개, 총 {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "이 조약돌을 만든 사람을 위해 보관하고 있어요. 만든 사람이 오프라인일 때 다른 사람이 나에게서 그 모습을 받아요.",
+  "Przechowujący w kodzie QR": "QR 코드 속 보관자",
   "Przeciągnij, żeby obrócić kamyczek": "드래그해서 조약돌 돌리기",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "드래그해서 조약돌을 돌리고, 두 손가락으로 확대하세요. 도구를 고르고 윗면, 아랫면, 옆면에 그려 보세요.",
   "Przeczytano": "읽음",
@@ -3647,7 +3652,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "이 휴대폰은 다른 유형으로 보여요. Zen이 설치되지 않을 수 있어요. 그럴 땐 인터넷이 될 때 Zen 설치 페이지에서 내 휴대폰에 맞는 Zen을 다운로드하세요.",
   "Ten węzeł już jest na liście.": "이 노드는 이미 목록에 있어요.",
   "Terakota": "테라코타",
-  "Teraz": "지금",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "지금은 더 물어볼 사람이 없어요. 잠시 후 다시 시도하세요.",
   "Terminal": "터미널",
   "Też znajomi znajomych": "친구의 친구도",
@@ -4230,6 +4234,7 @@
   "Wy: {count}": "우리: {count}",
   "Wybieraj automatycznie": "자동으로 고르기",
   "Wybierz GIF": "GIF 선택",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "최대 {n}명까지 고르세요. 휴대폰이 꺼져 있으면 발견한 사람은 당신이나 그들을 몰라도 그들에게 조약돌의 전체 모습을 요청합니다. 그들이 없으면 공통 친구를 통해서만 닿습니다. 지금부터 보여 주는 스티커와 코드에 적용되며, 이미 인쇄한 것은 그대로입니다.",
   "Wybierz do {n} znajomych": {
     "other": "친구를 최대 {n}명 고르세요"
   },
@@ -4258,6 +4263,7 @@
   "Wybierz zdjęcie": "사진 선택",
   "Wybierz zdjęcie w tle": "배경 사진 선택",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "“즉시 실행”을 선택하고 “실행 시 알림”을 끄세요.",
+  "Wybierz, kogo poprosić": "부탁할 사람 고르기",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "날짜를 고르면 Zen이 서로 가능한 한 덜 아는 사람들로 게스트 5명을 초대해요.",
   "Wybrane osoby": "선택한 사람들",
   "Wybrano plik — zmień": "파일 선택됨 — 변경",
@@ -5678,6 +5684,9 @@
   "{n} postów szczytu": {
     "other": "꼭대기의 글 {n}개"
   },
+  "{n} razy": {
+    "other": "{n}번"
+  },
   "{n} s": "{n}초",
   "{n} skrzynek": {
     "other": "우편함 {n}개"
@@ -5851,13 +5860,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 알람: {name}님이 도움이 필요해요",
   "🟢 Dostępny(-a)": "🟢 연락 가능",
   "🤒 Choruję": "🤒 아파요",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요",
-  "{n} razy": {
-    "other": "{n}번"
-  },
-  "Napisz, zanim odpowiesz": "답하기 전에 메시지 보내기",
-  "Przechowujący w kodzie QR": "QR 코드 속 보관자",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "친구들이 조약돌 보관에 동의하면 여기서 QR 코드에 넣으세요. 휴대폰이 꺼져 있을 때 발견한 사람이 그들에게 전체 모습을 요청합니다.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "최대 {n}명까지 고르세요. 휴대폰이 꺼져 있으면 발견한 사람은 당신이나 그들을 몰라도 그들에게 조약돌의 전체 모습을 요청합니다. 그들이 없으면 공통 친구를 통해서만 닿습니다. 지금부터 보여 주는 스티커와 코드에 적용되며, 이미 인쇄한 것은 그대로입니다.",
-  "Najwyżej {n} osoby w kodzie.": "코드에는 최대 {n}명까지."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요"
 }

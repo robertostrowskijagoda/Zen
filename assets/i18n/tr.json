@@ -768,6 +768,7 @@
     "other": "Diğer ev üyelerinin çoğunluğu kabul ettiğinde ({n} oy gerekir) daireye yeni bir anahtar ve yeni bir kapı kodu verilir, bu telefonun da erişimi kalmaz. Komşulara haber gider. Eski çıkartmayı değiştirmek gerekecek."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Arkadaşların bir şey paylaşınca burada görürsün — sırayla, algoritmasız.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Arkadaşların çakıl taşını saklamayı kabul edince onları buradan QR koduna ekle: bulan kişi telefonun kapalıyken tam görünümü onlardan ister.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Arkadaşında daha yenisi olunca kendiliğinden gelir.",
   "Gdzie": "Nerede",
   "Gdzie (adres, piętro)": "Nerede (adres, kat)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Ülke kodları, ör. PL, UA (en fazla 3). Ülke bölümünü açar. Boş bırakabilirsin.",
   "Kogo chcesz przyprowadzić?": "Kimi getirmek istiyorsun?",
   "Kogo poprosić o kilka słów?": "Kimden birkaç söz istersin?",
+  "Kogo poprosić o przechowanie?": "Saklamasını kimden isteyelim?",
   "Kogo przyprowadzisz?": "Kimi getireceksin?",
   "Kogo szukasz": "Kimi arıyorsun",
   "Kogo szukasz na randki": "Flört için kimi arıyorsun",
@@ -1792,6 +1794,7 @@
     "one": "En fazla {n} uyruk.",
     "other": "En fazla {n} uyruk."
   },
+  "Najwyżej {n} osoby w kodzie.": "Kodda en fazla {n} kişi.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Bir gönderide en fazla {n} fotoğraf ya da video olabilir.",
     "other": "Bir gönderide en fazla {n} fotoğraf ya da video olabilir."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Ona dair ne düşündüğünü yaz — flört profiline düşecek.",
   "Napisz, o co chodzi…": "Ne olduğunu yaz…",
   "Napisz, za co dziękujesz.": "Neden teşekkür ettiğini yaz.",
+  "Napisz, zanim odpowiesz": "Yanıtlamadan önce yaz",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Birbirinize bir şeyler yazın — ev halkından herhangi biri yanıt verir.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Bir şey kararlaştırmak gerekirse yazın.",
   "Napisz…": "Yaz…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Şu kişiler için anahtar saklıyorsun",
   "Przechowujesz kopie innych: {n}, razem {size}": "Başkalarının yedeklerini saklıyorsun: {n}, toplam {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Bu taşçığı yazar için saklıyorsun: yazar çevrimdışıyken başkaları onun görünümünü senden alır.",
+  "Przechowujący w kodzie QR": "QR kodundaki saklayıcılar",
   "Przeciągnij, żeby obrócić kamyczek": "Taşçığı döndürmek için sürükle",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Taşçığı döndürmek için sürükle, iki parmakla yakınlaştır. Bir araç seç ve üste, alta ve yanlara boya.",
   "Przeczytano": "Okundu",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Bu telefon başka bir türde görünüyor: Zen bunun üzerine kurulmayabilir. O zaman internetin olduğunda telefonun için Zen'i Zen kurulum sayfasından indir.",
   "Ten węzeł już jest na liście.": "Bu düğüm zaten listede.",
   "Terakota": "Terakota",
-  "Teraz": "Şimdi",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Şu an daha öteye sorulacak kimse yok. Biraz sonra tekrar dene.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Arkadaşların arkadaşları da",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Siz: {count}",
   "Wybieraj automatycznie": "Otomatik seç",
   "Wybierz GIF": "GIF seç",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "En fazla {n} kişi seç. Telefonun kapalıyken bulan kişi, seni ya da onları tanımasa bile çakıl taşının tam görünümünü onlardan ister. Onlar olmadan ona yalnızca ortak arkadaşlar üzerinden ulaşır. Bu, bundan sonra göstereceğin çıkartma ve kodlar için geçerlidir: önceden basılanlar değişmez.",
   "Wybierz do {n} znajomych": {
     "one": "En fazla {n} arkadaş seç",
     "other": "En fazla {n} arkadaş seç"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Fotoğraf seç",
   "Wybierz zdjęcie w tle": "Arka plan fotoğrafı seç",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "“Hemen Çalıştır”ı seç ve “Çalıştırıldığında Bildir”i kapat.",
+  "Wybierz, kogo poprosić": "Kimden isteyeceğini seç",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Günü sen seçersin, Zen de 5 misafiri birbirini en az tanıyacak şekilde davet eder.",
   "Wybrane osoby": "Seçili kişiler",
   "Wybrano plik — zmień": "Dosya seçildi — değiştir",
@@ -5774,6 +5780,10 @@
     "one": "tepeden {n} gönderi",
     "other": "tepeden {n} gönderi"
   },
+  "{n} razy": {
+    "one": "{n} kez",
+    "other": "{n} kez"
+  },
   "{n} s": "{n} sn",
   "{n} skrzynek": {
     "one": "{n} posta kutusu",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} yardıma ihtiyaç duyuyor",
   "🟢 Dostępny(-a)": "🟢 Müsaitim",
   "🤒 Choruję": "🤒 Hastayım",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum",
-  "{n} razy": {
-    "one": "{n} kez",
-    "other": "{n} kez"
-  },
-  "Napisz, zanim odpowiesz": "Yanıtlamadan önce yaz",
-  "Przechowujący w kodzie QR": "QR kodundaki saklayıcılar",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Arkadaşların çakıl taşını saklamayı kabul edince onları buradan QR koduna ekle: bulan kişi telefonun kapalıyken tam görünümü onlardan ister.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "En fazla {n} kişi seç. Telefonun kapalıyken bulan kişi, seni ya da onları tanımasa bile çakıl taşının tam görünümünü onlardan ister. Onlar olmadan ona yalnızca ortak arkadaşlar üzerinden ulaşır. Bu, bundan sonra göstereceğin çıkartma ve kodlar için geçerlidir: önceden basılanlar değişmez.",
-  "Najwyżej {n} osoby w kodzie.": "Kodda en fazla {n} kişi."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum"
 }

@@ -283,6 +283,49 @@ final class PebbleHosting {
     return _draw(id);
   });
 
+  /// Friends the author may ask to keep [id] by hand ("Wybierz, kogo
+  /// poprosić"): not blocked, not keeping it or being asked now (one who
+  /// said no or went quiet may be asked again).
+  List<String> askableKeepers(PebbleId id) {
+    final Set<String> busy = <String>{
+      for (final PebbleKeeperStatus k in store.keepersOf(id))
+        if (k.state == PebbleKeeperState.accepted ||
+            k.state == PebbleKeeperState.asked)
+          k.address,
+    };
+    return <String>[
+      for (final String f in peers.friends())
+        if (!busy.contains(PeerShareCodec.normalizeAddress(f)) &&
+            !peers.isBlocked(f))
+          PeerShareCodec.normalizeAddress(f),
+    ];
+  }
+
+  /// The author asks [friends] to keep [id] (chosen by hand, also beyond
+  /// [keeperTarget]); how many were asked.
+  Future<int> askKeepers(PebbleId id, Iterable<String> friends) =>
+      _run(() async {
+        final PebbleEntry? e = store.entry(id);
+        if (e == null || !e.madeHere || e.retired) {
+          return 0;
+        }
+        final Set<String> allowed = askableKeepers(id).toSet();
+        int asked = 0;
+        for (final String f in friends) {
+          final String a = PeerShareCodec.normalizeAddress(f);
+          if (!allowed.remove(a)) {
+            continue;
+          }
+          await store.setKeeper(id, a, PebbleKeeperState.asked);
+          await _ask(e, a);
+          asked++;
+        }
+        if (asked > 0) {
+          _askedAt[id] = _now;
+        }
+        return asked;
+      });
+
   /// Friends who could still be asked to keep [id]: not asked for it
   /// before, not blocked.
   int freshKeeperCandidates(PebbleId id) {

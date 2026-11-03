@@ -800,6 +800,7 @@
     "other": "عندما يوافق معظم سكان الشقة الآخرين (يلزم {n} صوت)، ستحصل الشقة على مفتاح جديد ورمز جديد للباب، وسيفقد هذا الهاتف الوصول. سيُبلَّغ الجيران. وسيلزم استبدال الملصق القديم."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "عندما ينشر أصدقاؤك شيئًا، ستراه هنا — بالترتيب، بلا خوارزمية.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "عندما يوافق أصدقاؤك على حفظ الحصاة، أضفهم هنا إلى رمز QR: سيطلب منهم من يجدها مظهرها الكامل عندما يكون هاتفك مطفأً.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "عندما يمتلك صديق نسخة أحدث، ستصلك من تلقاء نفسها.",
   "Gdzie": "أين",
   "Gdzie (adres, piętro)": "أين (العنوان، الطابق)",
@@ -1290,6 +1291,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "رموز الدول، مثل PL وUA (3 كحد أقصى). تفتح القسم الوطني. يمكنك تركه فارغًا.",
   "Kogo chcesz przyprowadzić?": "من تريد أن تحضر؟",
   "Kogo poprosić o kilka słów?": "من تطلب منه بضع كلمات؟",
+  "Kogo poprosić o przechowanie?": "ممن تطلب حفظها؟",
   "Kogo przyprowadzisz?": "من ستحضر؟",
   "Kogo szukasz": "عمّن تبحث",
   "Kogo szukasz na randki": "من تبحث عنه للمواعدة",
@@ -1888,6 +1890,7 @@
     "many": "بحد أقصى {n} جنسية.",
     "other": "بحد أقصى {n} جنسية."
   },
+  "Najwyżej {n} osoby w kodzie.": "{n} أشخاص على الأكثر في الرمز.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "zero": "الحد الأقصى {n} صورة أو فيديو في المنشور.",
     "one": "الحد الأقصى {n} صورة أو فيديو في المنشور.",
@@ -1945,6 +1948,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "اكتب رأيك فيه أو فيها — سيظهر في ملفه أو ملفها للمواعدة.",
   "Napisz, o co chodzi…": "اكتب ما الأمر…",
   "Napisz, za co dziękujesz.": "اكتب على ماذا تشكر.",
+  "Napisz, zanim odpowiesz": "اكتب قبل أن تجيب",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "راسلوا بعضكم — سيردّ أي ساكن من الشقة.",
   "Napiszcie, jeśli trzeba coś ustalić.": "اكتبوا إن لزم الاتفاق على شيء.",
   "Napisz…": "اكتب…",
@@ -3187,6 +3191,7 @@
   "Przechowujesz klucze dla": "تحتفظ بمفاتيح لـ",
   "Przechowujesz kopie innych: {n}, razem {size}": "تحتفظ بنسخ للآخرين: {n}، المجموع {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "أنت تحفظ هذه الحصاة للمؤلف: يحصل الآخرون منك على مظهرها عندما يكون المؤلف خارج الشبكة.",
+  "Przechowujący w kodzie QR": "الحُفّاظ في رمز QR",
   "Przeciągnij, żeby obrócić kamyczek": "اسحب لتدوير الحصاة",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "اسحب لتدوير الحصاة، وبإصبعين تكبّر. اختر أداة وارسم على الأعلى والأسفل والجوانب.",
   "Przeczytano": "قُرئت",
@@ -3862,7 +3867,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "يبدو أن هذا الهاتف من نوع آخر: قد لا يُثبَّت Zen عليه. في هذه الحالة نزّل Zen لهاتفك من صفحة تثبيت Zen عندما يتوفر لديك الإنترنت.",
   "Ten węzeł już jest na liście.": "هذه العقدة موجودة في القائمة.",
   "Terakota": "تيراكوتا",
-  "Teraz": "الآن",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "لا أحد يمكن سؤاله أبعد الآن. حاول بعد قليل.",
   "Terminal": "الطرفية",
   "Też znajomi znajomych": "وأصدقاء الأصدقاء أيضًا",
@@ -4475,6 +4479,7 @@
   "Wy: {count}": "أنتم: {count}",
   "Wybieraj automatycznie": "اختر تلقائيًا",
   "Wybierz GIF": "اختر GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "اختر حتى {n} أشخاص. عندما يكون هاتفك مطفأً، يطلب منهم من يجد الحصاة مظهرها الكامل، حتى لو لم يعرفك أو يعرفهم. ومن دونهم لا يصل إليها إلا عبر أصدقاء مشتركين. ينطبق هذا على الملصقات والرموز التي تعرضها من الآن: ما طُبع سابقًا يبقى كما هو.",
   "Wybierz do {n} znajomych": {
     "zero": "اختر حتى {n} صديق",
     "one": "اختر حتى {n} صديق",
@@ -4508,6 +4513,7 @@
   "Wybierz zdjęcie": "اختر صورة",
   "Wybierz zdjęcie w tle": "اختر صورة الخلفية",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "اختر «شغّل فورًا» وأوقف «أشعرني عند التشغيل».",
+  "Wybierz, kogo poprosić": "اختر من تطلب منه",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "تختار اليوم، ويدعو Zen 5 ضيوف بحيث تكون معرفتهم ببعضهم أقل ما يمكن.",
   "Wybrane osoby": "أشخاص مختارون",
   "Wybrano plik — zmień": "تم اختيار ملف — غيّره",
@@ -6158,6 +6164,14 @@
     "many": "{n} منشورًا من القمة",
     "other": "{n} منشور من القمة"
   },
+  "{n} razy": {
+    "zero": "{n} مرة",
+    "one": "مرة واحدة",
+    "two": "مرتين",
+    "few": "{n} مرات",
+    "many": "{n} مرة",
+    "other": "{n} مرة"
+  },
   "{n} s": "{n} ث",
   "{n} skrzynek": {
     "zero": "{n} صندوق بريد",
@@ -6406,18 +6420,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 إنذار: {name} يحتاج مساعدة",
   "🟢 Dostępny(-a)": "🟢 متاح",
   "🤒 Choruję": "🤒 مريض",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي",
-  "{n} razy": {
-    "zero": "{n} مرة",
-    "one": "مرة واحدة",
-    "two": "مرتين",
-    "few": "{n} مرات",
-    "many": "{n} مرة",
-    "other": "{n} مرة"
-  },
-  "Napisz, zanim odpowiesz": "اكتب قبل أن تجيب",
-  "Przechowujący w kodzie QR": "الحُفّاظ في رمز QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "عندما يوافق أصدقاؤك على حفظ الحصاة، أضفهم هنا إلى رمز QR: سيطلب منهم من يجدها مظهرها الكامل عندما يكون هاتفك مطفأً.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "اختر حتى {n} أشخاص. عندما يكون هاتفك مطفأً، يطلب منهم من يجد الحصاة مظهرها الكامل، حتى لو لم يعرفك أو يعرفهم. ومن دونهم لا يصل إليها إلا عبر أصدقاء مشتركين. ينطبق هذا على الملصقات والرموز التي تعرضها من الآن: ما طُبع سابقًا يبقى كما هو.",
-  "Najwyżej {n} osoby w kodzie.": "{n} أشخاص على الأكثر في الرمز."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي"
 }

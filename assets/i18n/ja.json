@@ -760,6 +760,7 @@
     "other": "他の同居人の過半数が同意すると（{n}票必要です）、部屋に新しい鍵と新しいドア用コードができ、このスマートフォンはアクセスできなくなります。ご近所さんには通知されます。古いステッカーは貼り替える必要があります。"
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "友だちが何か投稿すると、ここに順番に表示されます。アルゴリズムはありません。",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "友達が小石の保管に同意したら、ここでQRコードに入れましょう。あなたの電話がオフのとき、見つけた人がその人たちに完全な見た目を求めます。",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "友だちがより新しいバージョンを持てば、自動で届きます。",
   "Gdzie": "場所",
   "Gdzie (adres, piętro)": "場所（住所、階）",
@@ -1215,6 +1216,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "国コード（例：PL、UA、最大3つ）。その国のセクションが開きます。空欄でも構いません。",
   "Kogo chcesz przyprowadzić?": "誰を連れてきますか？",
   "Kogo poprosić o kilka słów?": "ひとことを誰にお願いしますか？",
+  "Kogo poprosić o przechowanie?": "誰に保管を頼みますか？",
   "Kogo przyprowadzisz?": "誰を連れてきますか？",
   "Kogo szukasz": "探している相手",
   "Kogo szukasz na randki": "デートの相手として探している人",
@@ -1768,6 +1770,7 @@
   "Najwyżej {n} narodowości.": {
     "other": "国籍は最大{n}つまで。"
   },
+  "Najwyżej {n} osoby w kodzie.": "コードには最大{n}人まで。",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "other": "1つの投稿に入れられる写真や動画は、最大{n}件までです。"
   },
@@ -1810,6 +1813,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "その人についてどう思うか書いてください。その人のデートプロフィールに載ります。",
   "Napisz, o co chodzi…": "内容を書いてください…",
   "Napisz, za co dziękujesz.": "何に対するお礼か書いてください。",
+  "Napisz, zanim odpowiesz": "返事の前にメッセージ",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "何か書いてみましょう — 同居人の誰かが返信します。",
   "Napiszcie, jeśli trzeba coś ustalić.": "決めることがあれば書き込んでください。",
   "Napisz…": "メッセージ…",
@@ -2987,6 +2991,7 @@
   "Przechowujesz klucze dla": "鍵を預かっている相手",
   "Przechowujesz kopie innych: {n}, razem {size}": "ほかの人のバックアップを保管中：{n}件、合計 {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "あなたはこの小石を作者のために預かっています。作者がオフラインのとき、ほかの人にその見た目があなたから届きます。",
+  "Przechowujący w kodzie QR": "QRコードの保管者",
   "Przeciągnij, żeby obrócić kamyczek": "ドラッグして小石を回転",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "ドラッグして小石を回転し、2本の指で拡大できます。道具を選んで、上面・底面・側面に描きましょう。",
   "Przeczytano": "既読",
@@ -3647,7 +3652,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "この端末は別のタイプのようです。Zenをインストールできないことがあります。その場合は、インターネットにつながったときにZenのインストールページからお使いの端末用のZenをダウンロードしてください。",
   "Ten węzeł już jest na liście.": "このノードはすでにリストにあります。",
   "Terakota": "テラコッタ",
-  "Teraz": "今",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "今はこれ以上尋ねられる人がいません。少ししてからお試しください。",
   "Terminal": "ターミナル",
   "Też znajomi znajomych": "友だちの友だちも",
@@ -4230,6 +4234,7 @@
   "Wy: {count}": "こちら：{count}人",
   "Wybieraj automatycznie": "自動で選ぶ",
   "Wybierz GIF": "GIFを選ぶ",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最大{n}人まで選べます。あなたの電話がオフのとき、見つけた人はあなたやその人たちを知らなくても、小石の完全な見た目をその人たちに求めます。いなければ、共通の友達を通じてしか届きません。これから表示するステッカーとコードに適用され、以前に印刷したものは変わりません。",
   "Wybierz do {n} znajomych": {
     "other": "最大{n}人の友だちを選んでください"
   },
@@ -4258,6 +4263,7 @@
   "Wybierz zdjęcie": "写真を選ぶ",
   "Wybierz zdjęcie w tle": "背景の写真を選ぶ",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "「すぐに実行」を選び、「実行時に通知」をオフにしてください。",
+  "Wybierz, kogo poprosić": "頼む人を選ぶ",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "日を選ぶと、Zenができるだけお互いを知らない5人のゲストを招待します。",
   "Wybrane osoby": "選んだ人",
   "Wybrano plik — zmień": "ファイルを選択しました — 変更",
@@ -5678,6 +5684,9 @@
   "{n} postów szczytu": {
     "other": "頂点の投稿{n}件"
   },
+  "{n} razy": {
+    "other": "{n}回"
+  },
   "{n} s": "{n}秒",
   "{n} skrzynek": {
     "other": "受信箱{n}個"
@@ -5851,13 +5860,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 緊急アラーム：{name}が助けを必要としています",
   "🟢 Dostępny(-a)": "🟢 対応可能",
   "🤒 Choruję": "🤒 体調不良",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい",
-  "{n} razy": {
-    "other": "{n}回"
-  },
-  "Napisz, zanim odpowiesz": "返事の前にメッセージ",
-  "Przechowujący w kodzie QR": "QRコードの保管者",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "友達が小石の保管に同意したら、ここでQRコードに入れましょう。あなたの電話がオフのとき、見つけた人がその人たちに完全な見た目を求めます。",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "最大{n}人まで選べます。あなたの電話がオフのとき、見つけた人はあなたやその人たちを知らなくても、小石の完全な見た目をその人たちに求めます。いなければ、共通の友達を通じてしか届きません。これから表示するステッカーとコードに適用され、以前に印刷したものは変わりません。",
-  "Najwyżej {n} osoby w kodzie.": "コードには最大{n}人まで。"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい"
 }

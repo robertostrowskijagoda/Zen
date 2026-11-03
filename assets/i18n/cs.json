@@ -776,6 +776,7 @@
     "other": "Když souhlasí většina ostatních členů domácnosti (je potřeba {n} hlasů), byt dostane nový klíč a nový kód na dveře a tento telefon zůstane bez přístupu. Sousedé dostanou zprávu. Starou nálepku bude třeba vyměnit."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Až známí něco zveřejní, uvidíš to tady — popořadě, bez algoritmu.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Až přátelé souhlasí, že oblázek uchovají, zapiš je sem do QR kódu: nálezce se jich zeptá na úplný vzhled, když bude tvůj telefon vypnutý.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Až bude mít známý novější, přijde sama.",
   "Gdzie": "Kde",
   "Gdzie (adres, piętro)": "Kde (adresa, patro)",
@@ -1245,6 +1246,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Kódy zemí, např. PL, UA (nejvýš 3). Otevře národní sekci. Můžeš nechat prázdné.",
   "Kogo chcesz przyprowadzić?": "Koho chceš přivést?",
   "Kogo poprosić o kilka słów?": "Koho požádat o pár slov?",
+  "Kogo poprosić o przechowanie?": "Koho požádat o uchování?",
   "Kogo przyprowadzisz?": "Koho přivedeš?",
   "Kogo szukasz": "Koho hledáš",
   "Kogo szukasz na randki": "Koho hledáš na rande",
@@ -1816,6 +1818,7 @@
     "few": "Nejvýš {n} státní příslušnosti.",
     "other": "Nejvýš {n} státních příslušností."
   },
+  "Najwyżej {n} osoby w kodzie.": "Nejvýš {n} lidé v kódu.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Nejvýše {n} fotka nebo video v příspěvku.",
     "few": "Nejvýše {n} fotky a videa v příspěvku.",
@@ -1864,6 +1867,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Napiš, co si o ní / o něm myslíš — objeví se na jejím / jeho profilu na seznamce.",
   "Napisz, o co chodzi…": "Napiš, o co jde…",
   "Napisz, za co dziękujesz.": "Napiš, za co děkuješ.",
+  "Napisz, zanim odpowiesz": "Napiš, než odpovíš",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Napište si něco — odpoví kdokoli z členů domácnosti.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Napište si, pokud je potřeba něco domluvit.",
   "Napisz…": "Napiš…",
@@ -3067,6 +3071,7 @@
   "Przechowujesz klucze dla": "Uchováváš klíče pro",
   "Przechowujesz kopie innych: {n}, razem {size}": "Uchováváš zálohy ostatních: {n}, celkem {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Uchováváš tento kamínek pro autora: ostatní od tebe dostanou jeho vzhled, když je autor offline.",
+  "Przechowujący w kodzie QR": "Opatrovníci v QR kódu",
   "Przeciągnij, żeby obrócić kamyczek": "Přetažením kamínek otočíš",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Přetažením kamínek otočíš, dvěma prsty ho přiblížíš. Vyber nástroj a maluj na horní i spodní straně a na bocích.",
   "Przeczytano": "Přečteno",
@@ -3733,7 +3738,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Tento telefon vypadá jako jiný typ: Zen se na něj možná nenainstaluje. Pak si stáhni Zen pro svůj telefon ze stránky instalace Zenu, až budeš mít internet.",
   "Ten węzeł już jest na liście.": "Tento uzel už v seznamu je.",
   "Terakota": "Terakota",
-  "Teraz": "Teď",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Teď není koho se ptát dál. Zkus to za chvíli.",
   "Terminal": "Terminál",
   "Też znajomi znajomych": "I známí známých",
@@ -4328,6 +4332,7 @@
   "Wy: {count}": "Vy: {count}",
   "Wybieraj automatycznie": "Vybírat automaticky",
   "Wybierz GIF": "Vybrat GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Vyber až {n} lidi. Když je tvůj telefon vypnutý, nálezce se jich zeptá na úplný vzhled oblázku, i když nezná tebe ani je. Bez nich se k němu dostane jen přes společné přátele. Platí to pro samolepky a kódy, které ukážeš od teď: dříve vytištěné zůstanou beze změny.",
   "Wybierz do {n} znajomych": {
     "one": "Vyber až {n} známého",
     "few": "Vyber až {n} známé",
@@ -4358,6 +4363,7 @@
   "Wybierz zdjęcie": "Vybrat fotku",
   "Wybierz zdjęcie w tle": "Vybrat fotku na pozadí",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Vyber „Spustit okamžitě“ a vypni „Oznámit při spuštění“.",
+  "Wybierz, kogo poprosić": "Vybrat, koho požádat",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Vybereš den a Zen pozve 5 hostů tak, aby se navzájem znali co nejméně.",
   "Wybrane osoby": "Vybraní lidé",
   "Wybrano plik — zmień": "Soubor vybrán — změnit",
@@ -5870,6 +5876,11 @@
     "few": "{n} příspěvky vrcholu",
     "other": "{n} příspěvků vrcholu"
   },
+  "{n} razy": {
+    "one": "{n}krát",
+    "few": "{n}krát",
+    "other": "{n}krát"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} schránka",
@@ -6073,15 +6084,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 POPLACH: {name} potřebuje pomoc",
   "🟢 Dostępny(-a)": "🟢 Dostupný(á)",
   "🤒 Choruję": "🤒 Jsem nemocný(á)",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe",
-  "{n} razy": {
-    "one": "{n}krát",
-    "few": "{n}krát",
-    "other": "{n}krát"
-  },
-  "Napisz, zanim odpowiesz": "Napiš, než odpovíš",
-  "Przechowujący w kodzie QR": "Opatrovníci v QR kódu",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Až přátelé souhlasí, že oblázek uchovají, zapiš je sem do QR kódu: nálezce se jich zeptá na úplný vzhled, když bude tvůj telefon vypnutý.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Vyber až {n} lidi. Když je tvůj telefon vypnutý, nálezce se jich zeptá na úplný vzhled oblázku, i když nezná tebe ani je. Bez nich se k němu dostane jen přes společné přátele. Platí to pro samolepky a kódy, které ukážeš od teď: dříve vytištěné zůstanou beze změny.",
-  "Najwyżej {n} osoby w kodzie.": "Nejvýš {n} lidé v kódu."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe"
 }

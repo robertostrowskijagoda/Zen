@@ -2584,7 +2584,14 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           final GraphFilters f = _filters;
           return SingleChildScrollView(
             key: const Key('graph-filters-sheet'),
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            // Clear of the system's navigation bar (edge to edge, the
+            // sheet reaches under it): its last options stay reachable.
+            padding: EdgeInsets.fromLTRB(
+              16,
+              0,
+              16,
+              24 + MediaQuery.viewPaddingOf(context).bottom,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
@@ -3005,7 +3012,14 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           // The person's card: names, notes and texts can be copied.
           child: SingleChildScrollView(
             key: const Key('graph-person-sheet'),
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            // Clear of the system's navigation bar (edge to edge, the
+            // sheet reaches under it): its last options stay reachable.
+            padding: EdgeInsets.fromLTRB(
+              16,
+              0,
+              16,
+              24 + MediaQuery.viewPaddingOf(context).bottom,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,

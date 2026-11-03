@@ -760,6 +760,7 @@
     "other": "Khi đa số những người trong nhà còn lại đồng ý (cần {n} phiếu), căn hộ sẽ có khóa mới và mã cửa mới, còn điện thoại này sẽ mất quyền truy cập. Hàng xóm sẽ được thông báo. Nhãn dán cũ sẽ phải thay."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Khi bạn bè đăng gì đó, bạn sẽ thấy ở đây — lần lượt, không thuật toán.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Khi bạn bè đồng ý giữ viên sỏi, hãy thêm họ vào mã QR ở đây: người tìm thấy sẽ hỏi họ hình dạng đầy đủ khi điện thoại của bạn tắt.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Khi bạn bè có bản mới hơn, nó sẽ tự đến.",
   "Gdzie": "Ở đâu",
   "Gdzie (adres, piętro)": "Ở đâu (địa chỉ, tầng)",
@@ -1215,6 +1216,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Mã quốc gia, ví dụ PL, UA (tối đa 3). Mở mục quốc gia. Có thể để trống.",
   "Kogo chcesz przyprowadzić?": "Bạn muốn dẫn ai theo?",
   "Kogo poprosić o kilka słów?": "Nhờ ai viết vài lời?",
+  "Kogo poprosić o przechowanie?": "Nhờ ai giữ hộ?",
   "Kogo przyprowadzisz?": "Bạn sẽ dẫn theo ai?",
   "Kogo szukasz": "Bạn tìm ai",
   "Kogo szukasz na randki": "Bạn tìm ai để hẹn hò",
@@ -1768,6 +1770,7 @@
   "Najwyżej {n} narodowości.": {
     "other": "Tối đa {n} quốc tịch."
   },
+  "Najwyżej {n} osoby w kodzie.": "Tối đa {n} người trong mã.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "other": "Tối đa {n} ảnh hoặc video trong một bài đăng."
   },
@@ -1810,6 +1813,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Hãy viết bạn nghĩ gì về người ấy — nội dung sẽ lên hồ sơ hẹn hò của họ.",
   "Napisz, o co chodzi…": "Cho biết chuyện gì…",
   "Napisz, za co dziękujesz.": "Hãy viết bạn cảm ơn vì điều gì.",
+  "Napisz, zanim odpowiesz": "Nhắn tin trước khi trả lời",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Hãy nhắn gì đó cho nhau — bất kỳ ai trong nhà cũng có thể trả lời.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Nhắn nếu cần thống nhất điều gì.",
   "Napisz…": "Viết…",
@@ -2987,6 +2991,7 @@
   "Przechowujesz klucze dla": "Bạn đang giữ khóa cho",
   "Przechowujesz kopie innych: {n}, razem {size}": "Bạn đang giữ bản sao của người khác: {n}, tổng {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Bạn đang giữ viên sỏi này cho tác giả: người khác nhận vẻ ngoài của nó từ bạn khi tác giả không có mạng.",
+  "Przechowujący w kodzie QR": "Người giữ trong mã QR",
   "Przeciągnij, żeby obrócić kamyczek": "Kéo để xoay viên sỏi",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Kéo để xoay viên sỏi, dùng hai ngón để phóng to. Chọn công cụ và vẽ lên mặt trên, mặt dưới và hai bên.",
   "Przeczytano": "Đã đọc",
@@ -3647,7 +3652,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Điện thoại này có vẻ thuộc loại khác: Zen có thể không cài được trên máy. Khi đó, hãy tải Zen cho điện thoại của bạn từ trang cài đặt Zen khi có internet.",
   "Ten węzeł już jest na liście.": "Nút này đã có trong danh sách.",
   "Terakota": "Đất nung",
-  "Teraz": "Bây giờ",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Hiện không còn ai để hỏi tiếp. Thử lại sau chút nữa.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Cả bạn của bạn bè",
@@ -4230,6 +4234,7 @@
   "Wy: {count}": "Các bạn: {count}",
   "Wybieraj automatycznie": "Chọn tự động",
   "Wybierz GIF": "Chọn GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Chọn tối đa {n} người. Khi điện thoại của bạn tắt, người tìm thấy sẽ hỏi họ hình dạng đầy đủ của viên sỏi, dù không quen bạn hay họ. Không có họ, người đó chỉ đến được qua bạn chung. Điều này áp dụng cho nhãn dán và mã bạn hiển thị từ giờ: những cái đã in vẫn giữ nguyên.",
   "Wybierz do {n} znajomych": {
     "other": "Chọn tối đa {n} người bạn"
   },
@@ -4258,6 +4263,7 @@
   "Wybierz zdjęcie": "Chọn ảnh",
   "Wybierz zdjęcie w tle": "Chọn ảnh nền",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Chọn “Chạy ngay” và tắt “Thông báo khi chạy”.",
+  "Wybierz, kogo poprosić": "Chọn người để nhờ",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Bạn chọn ngày, còn Zen mời 5 khách sao cho họ ít quen nhau nhất có thể.",
   "Wybrane osoby": "Người được chọn",
   "Wybrano plik — zmień": "Đã chọn tệp — đổi",
@@ -5678,6 +5684,9 @@
   "{n} postów szczytu": {
     "other": "{n} bài của đỉnh"
   },
+  "{n} razy": {
+    "other": "{n} lần"
+  },
   "{n} s": "{n} giây",
   "{n} skrzynek": {
     "other": "{n} hộp thư"
@@ -5851,13 +5860,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 BÁO ĐỘNG: {name} cần giúp đỡ",
   "🟢 Dostępny(-a)": "🟢 Có mặt",
   "🤒 Choruję": "🤒 Đang ốm",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình",
-  "{n} razy": {
-    "other": "{n} lần"
-  },
-  "Napisz, zanim odpowiesz": "Nhắn tin trước khi trả lời",
-  "Przechowujący w kodzie QR": "Người giữ trong mã QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Khi bạn bè đồng ý giữ viên sỏi, hãy thêm họ vào mã QR ở đây: người tìm thấy sẽ hỏi họ hình dạng đầy đủ khi điện thoại của bạn tắt.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Chọn tối đa {n} người. Khi điện thoại của bạn tắt, người tìm thấy sẽ hỏi họ hình dạng đầy đủ của viên sỏi, dù không quen bạn hay họ. Không có họ, người đó chỉ đến được qua bạn chung. Điều này áp dụng cho nhãn dán và mã bạn hiển thị từ giờ: những cái đã in vẫn giữ nguyên.",
-  "Najwyżej {n} osoby w kodzie.": "Tối đa {n} người trong mã."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình"
 }

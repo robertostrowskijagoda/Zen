@@ -768,6 +768,7 @@
     "other": "Quando a maioria dos demais moradores concordar (são necessários {n} votos), o apartamento receberá uma nova chave e um novo código da porta, e este telefone ficará sem acesso. Os vizinhos serão avisados. Será preciso trocar o adesivo antigo."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Quando os amigos publicarem algo, você verá aqui — em ordem, sem algoritmo.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quando amigos aceitarem guardar o seixo, coloque-os aqui no código QR: quem o encontrar pedirá a eles a aparência completa enquanto o seu telemóvel estiver desligado.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Quando um amigo tiver uma versão mais nova, ela chegará sozinha.",
   "Gdzie": "Onde",
   "Gdzie (adres, piętro)": "Onde (endereço, andar)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Códigos de países, p. ex. PL, UA (no máximo 3). Abre a seção do país. Pode deixar em branco.",
   "Kogo chcesz przyprowadzić?": "Quem você quer levar?",
   "Kogo poprosić o kilka słów?": "A quem pedir algumas palavras?",
+  "Kogo poprosić o przechowanie?": "A quem pedir para o guardar?",
   "Kogo przyprowadzisz?": "Quem você vai levar?",
   "Kogo szukasz": "Quem você procura",
   "Kogo szukasz na randki": "Quem você procura para namoro",
@@ -1792,6 +1794,7 @@
     "one": "No máximo {n} nacionalidade.",
     "other": "No máximo {n} nacionalidades."
   },
+  "Najwyżej {n} osoby w kodzie.": "No máximo {n} pessoas no código.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "No máximo {n} foto ou vídeo por post.",
     "other": "No máximo {n} fotos e vídeos por post."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Escreva o que você pensa dessa pessoa — vai aparecer no perfil de namoro dela.",
   "Napisz, o co chodzi…": "Escreva do que se trata…",
   "Napisz, za co dziękujesz.": "Escreva pelo que você está agradecendo.",
+  "Napisz, zanim odpowiesz": "Escreva antes de responder",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Escrevam algo um ao outro — qualquer morador pode responder.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Escrevam se precisarem combinar algo.",
   "Napisz…": "Escreva…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Você guarda chaves de",
   "Przechowujesz kopie innych: {n}, razem {size}": "Você guarda backups de outras pessoas: {n}, no total {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Você está guardando esta pedrinha para o autor: outras pessoas recebem de você o visual dela quando o autor está off-line.",
+  "Przechowujący w kodzie QR": "Guardiões no código QR",
   "Przeciągnij, żeby obrócić kamyczek": "Arraste para girar a pedrinha",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Arraste para girar a pedrinha e use dois dedos para ampliar. Escolha uma ferramenta e pinte em cima, embaixo e nas laterais.",
   "Przeczytano": "Lida",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Este telefone parece ser de outro tipo: o Zen pode não ser instalado nele. Nesse caso, baixe o Zen para o seu telefone na página de instalação do Zen quando tiver internet.",
   "Ten węzeł już jest na liście.": "Este nó já está na lista.",
   "Terakota": "Terracota",
-  "Teraz": "Agora",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Agora não há mais a quem perguntar. Tente daqui a pouco.",
   "Terminal": "Terminal",
   "Też znajomi znajomych": "Também amigos de amigos",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Vocês: {count}",
   "Wybieraj automatycznie": "Escolher automaticamente",
   "Wybierz GIF": "Escolher GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Escolha até {n} pessoas. Com o seu telemóvel desligado, quem encontrar o seixo pede-lhes a aparência completa, mesmo sem conhecer você ou elas. Sem elas, só chega a ele por amigos em comum. Vale para autocolantes e códigos que mostrar a partir de agora: os já impressos ficam como estão.",
   "Wybierz do {n} znajomych": {
     "one": "Escolha até {n} amigo",
     "other": "Escolha até {n} amigos"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Escolher foto",
   "Wybierz zdjęcie w tle": "Escolher foto de fundo",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Escolha «Executar imediatamente» e desative «Notificar ao executar».",
+  "Wybierz, kogo poprosić": "Escolher a quem pedir",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Você escolhe o dia, e o Zen convida 5 convidados de modo que se conheçam o menos possível.",
   "Wybrane osoby": "Pessoas escolhidas",
   "Wybrano plik — zmień": "Arquivo escolhido — alterar",
@@ -5774,6 +5780,10 @@
     "one": "{n} post do topo",
     "other": "{n} posts do topo"
   },
+  "{n} razy": {
+    "one": "uma vez",
+    "other": "{n} vezes"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} caixa",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARME: {name} precisa de ajuda",
   "🟢 Dostępny(-a)": "🟢 Disponível",
   "🤒 Choruję": "🤒 Estou doente",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Preciso de um tempo para mim",
-  "{n} razy": {
-    "one": "uma vez",
-    "other": "{n} vezes"
-  },
-  "Napisz, zanim odpowiesz": "Escreva antes de responder",
-  "Przechowujący w kodzie QR": "Guardiões no código QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quando amigos aceitarem guardar o seixo, coloque-os aqui no código QR: quem o encontrar pedirá a eles a aparência completa enquanto o seu telemóvel estiver desligado.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Escolha até {n} pessoas. Com o seu telemóvel desligado, quem encontrar o seixo pede-lhes a aparência completa, mesmo sem conhecer você ou elas. Sem elas, só chega a ele por amigos em comum. Vale para autocolantes e códigos que mostrar a partir de agora: os já impressos ficam como estão.",
-  "Najwyżej {n} osoby w kodzie.": "No máximo {n} pessoas no código."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Preciso de um tempo para mim"
 }

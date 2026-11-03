@@ -3560,7 +3560,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                   child: Text(t('Odrzuć'), textAlign: TextAlign.center),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 24),
               Expanded(
                 child: FilledButton(
                   key: Key('qr-accept-$peerAddress'),
@@ -3613,7 +3613,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
           _WriteBeforeAccepting(peerAddress: peerAddress, name: title),
         ],
       ),

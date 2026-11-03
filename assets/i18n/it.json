@@ -768,6 +768,7 @@
     "other": "Quando la maggioranza degli altri conviventi è d'accordo (servono {n} voti), l'appartamento avrà una nuova chiave e un nuovo codice per la porta, e questo telefono resterà senza accesso. I vicini saranno avvisati. Il vecchio adesivo andrà sostituito."
   },
   "Gdy znajomi coś opublikują, zobaczysz to tutaj — po kolei, bez algorytmu.": "Quando gli amici pubblicano qualcosa, lo vedrai qui — in ordine, senza algoritmo.",
+  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quando gli amici accettano di custodire il sassolino, inseriscili qui nel codice QR: chi lo trova chiederà loro l’aspetto completo quando il tuo telefono è spento.",
   "Gdy znajomy będzie miał nowszą, przyjdzie sama.": "Quando un amico avrà una versione più recente, arriverà da sola.",
   "Gdzie": "Dove",
   "Gdzie (adres, piętro)": "Dove (indirizzo, piano)",
@@ -1230,6 +1231,7 @@
   "Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję krajową. Możesz zostawić puste.": "Codici dei paesi, ad es. PL, UA (al massimo 3). Apre la sezione nazionale. Puoi lasciare vuoto.",
   "Kogo chcesz przyprowadzić?": "Chi vuoi portare?",
   "Kogo poprosić o kilka słów?": "A chi chiedere due parole?",
+  "Kogo poprosić o przechowanie?": "A chi chiedere di custodirlo?",
   "Kogo przyprowadzisz?": "Chi porterai?",
   "Kogo szukasz": "Chi cerchi",
   "Kogo szukasz na randki": "Chi cerchi per gli appuntamenti",
@@ -1792,6 +1794,7 @@
     "one": "Al massimo {n} nazionalità.",
     "other": "Al massimo {n} nazionalità."
   },
+  "Najwyżej {n} osoby w kodzie.": "Al massimo {n} persone nel codice.",
   "Najwyżej {n} zdjęć i filmów w poście.": {
     "one": "Al massimo {n} foto o video nel post.",
     "other": "Al massimo {n} foto e video nel post."
@@ -1837,6 +1840,7 @@
   "Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.": "Scrivi cosa pensi di questa persona — finirà sul suo profilo dating.",
   "Napisz, o co chodzi…": "Scrivi di cosa si tratta…",
   "Napisz, za co dziękujesz.": "Scrivi per cosa ringrazi.",
+  "Napisz, zanim odpowiesz": "Scrivi prima di rispondere",
   "Napiszcie coś do siebie — odpisze ktokolwiek z domowników.": "Scrivetevi qualcosa — risponderà uno qualsiasi dei conviventi.",
   "Napiszcie, jeśli trzeba coś ustalić.": "Scrivete se c'è qualcosa da decidere.",
   "Napisz…": "Scrivi…",
@@ -3027,6 +3031,7 @@
   "Przechowujesz klucze dla": "Custodisci le chiavi di",
   "Przechowujesz kopie innych: {n}, razem {size}": "Conservi backup di altri: {n}, in tutto {size}",
   "Przechowujesz ten kamyczek dla autora: inni dostają od Ciebie jego wygląd, gdy autor jest poza siecią.": "Conservi questo sassolino per l'autore: gli altri ne ricevono l'aspetto da te quando l'autore è offline.",
+  "Przechowujący w kodzie QR": "Custodi nel codice QR",
   "Przeciągnij, żeby obrócić kamyczek": "Trascina per ruotare il sassolino",
   "Przeciągnij, żeby obrócić kamyczek, dwoma palcami przybliżysz. Wybierz narzędzie i maluj na górze, dole i bokach.": "Trascina per ruotare il sassolino, pizzica con due dita per ingrandire. Scegli uno strumento e dipingi sopra, sotto e sui lati.",
   "Przeczytano": "Letto",
@@ -3690,7 +3695,6 @@
   "Ten telefon wygląda na inny typ: Zen może się na nim nie zainstalować. Wtedy pobierz Zen dla swojego telefonu ze strony instalacji Zen, gdy będziesz mieć internet.": "Questo telefono sembra di un altro tipo: Zen potrebbe non installarsi. In quel caso scarica Zen per il tuo telefono dalla pagina di installazione di Zen quando avrai internet.",
   "Ten węzeł już jest na liście.": "Questo nodo è già nell'elenco.",
   "Terakota": "Terracotta",
-  "Teraz": "Adesso",
   "Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.": "Ora non c’è nessun altro a cui chiedere. Riprova tra poco.",
   "Terminal": "Terminale",
   "Też znajomi znajomych": "Anche amici di amici",
@@ -4279,6 +4283,7 @@
   "Wy: {count}": "Voi: {count}",
   "Wybieraj automatycznie": "Scegli automaticamente",
   "Wybierz GIF": "Scegli una GIF",
+  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Scegli fino a {n} persone. Quando il tuo telefono è spento, chi trova il sassolino chiede loro l’aspetto completo, anche senza conoscere te o loro. Senza di loro ci arriva solo tramite amici in comune. Vale per gli adesivi e i codici che mostrerai da ora: quelli già stampati restano come sono.",
   "Wybierz do {n} znajomych": {
     "one": "Scegli fino a {n} amico",
     "other": "Scegli fino a {n} amici"
@@ -4308,6 +4313,7 @@
   "Wybierz zdjęcie": "Scegli una foto",
   "Wybierz zdjęcie w tle": "Scegli una foto di sfondo",
   "Wybierz „Uruchom natychmiast” i wyłącz „Powiadamiaj o uruchomieniu”.": "Scegli «Esegui immediatamente» e disattiva «Notifica all’esecuzione».",
+  "Wybierz, kogo poprosić": "Scegli a chi chiedere",
   "Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak najmniej się znali.": "Scegli il giorno e Zen inviterà 5 ospiti in modo che si conoscano il meno possibile.",
   "Wybrane osoby": "Persone scelte",
   "Wybrano plik — zmień": "File scelto — cambia",
@@ -5774,6 +5780,10 @@
     "one": "{n} post della vetta",
     "other": "{n} post della vetta"
   },
+  "{n} razy": {
+    "one": "una volta",
+    "other": "{n} volte"
+  },
   "{n} s": "{n} s",
   "{n} skrzynek": {
     "one": "{n} casella",
@@ -5962,14 +5972,5 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALLARME: {name} ha bisogno di aiuto",
   "🟢 Dostępny(-a)": "🟢 Disponibile",
   "🤒 Choruję": "🤒 Non sto bene",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Ho bisogno di un momento per me",
-  "{n} razy": {
-    "one": "una volta",
-    "other": "{n} volte"
-  },
-  "Napisz, zanim odpowiesz": "Scrivi prima di rispondere",
-  "Przechowujący w kodzie QR": "Custodi nel codice QR",
-  "Gdy znajomi zgodzą się przechować kamyczek, wpisz ich tu do kodu QR: znalazca zapyta ich o pełny wygląd, kiedy Twój telefon będzie wyłączony.": "Quando gli amici accettano di custodire il sassolino, inseriscili qui nel codice QR: chi lo trova chiederà loro l’aspetto completo quando il tuo telefono è spento.",
-  "Wybierz do {n} osób. Gdy Twój telefon będzie wyłączony, znalazca zapyta je o pełny wygląd kamyczka, nawet jeśli nie zna ani Ciebie, ani ich. Bez nich dotrze do niego tylko przez wspólnych znajomych. Wybór dotyczy naklejek i kodów, które pokażesz od teraz: wydrukowane wcześniej zostają bez zmian.": "Scegli fino a {n} persone. Quando il tuo telefono è spento, chi trova il sassolino chiede loro l’aspetto completo, anche senza conoscere te o loro. Senza di loro ci arriva solo tramite amici in comune. Vale per gli adesivi e i codici che mostrerai da ora: quelli già stampati restano come sono.",
-  "Najwyżej {n} osoby w kodzie.": "Al massimo {n} persone nel codice."
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Ho bisogno di un momento per me"
 }
