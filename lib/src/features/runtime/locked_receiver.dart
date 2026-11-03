@@ -13,6 +13,7 @@ import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
@@ -658,6 +659,10 @@ final class LockedReceiver {
   /// one at once, and a pong every other ping keeps this phone reachable,
   /// "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
+
+  /// Rings for a call as a phone call rings, or stops (setCallRinging,
+  /// call_platform_channel.dart; replaced in tests).
+  Future<void> Function(bool on) ringForCall = setCallRinging;
   final Map<String, int> _pongedAt = <String, int>{};
 
   /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
@@ -1504,6 +1509,7 @@ final class LockedReceiver {
         unawaitedLogged(_ringEnded(), context: 'Locked ring end');
       });
       if (fresh) {
+        await ringForCall(true);
         await _post(
           RuntimeSystemNotification(
             id: '$kLockedCallSlot-${_now()}',
@@ -1531,6 +1537,7 @@ final class LockedReceiver {
       return;
     }
     _ringingFrom = null;
+    await ringForCall(false);
     try {
       await _notices.dismissSlot(kLockedCallSlot);
       await _post(

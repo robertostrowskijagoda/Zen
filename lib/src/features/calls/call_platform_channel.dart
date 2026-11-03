@@ -82,6 +82,20 @@ Future<void> setRingingCallWindowActive(bool active) async {
   }
 }
 
+/// Rings for an incoming call ([on]) as a phone call rings (Android: the
+/// phone's ringtone over and over at the ringer's volume and a repeating
+/// vibration, as the ringer mode allows, ZenRinger.kt), or stops it.
+Future<void> setCallRinging(bool on) async {
+  if (!Platform.isAndroid) {
+    return;
+  }
+  try {
+    await zenCallPlatformChannel.invokeMethod<void>('setCallRinging', on);
+  } catch (error, stackTrace) {
+    logZenError('Ringing for a call failed', error, stackTrace);
+  }
+}
+
 /// Brings the main activity / app window to the front.
 Future<void> bringAppToFront() async {
   if (!Platform.isAndroid) {

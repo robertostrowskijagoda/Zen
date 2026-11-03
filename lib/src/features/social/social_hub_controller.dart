@@ -609,6 +609,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         session.isIncoming &&
         session.status == CallSessionStatus.ringing;
     final bool flutterUiVisible = state.lifecycle.isInteractive;
+    // The ring itself, on screen or not, unless calls are switched off.
+    await setCallRinging(
+      ringingIncoming && !_appSettings.mutes(NoticeKind.call),
+    );
     if (ringingIncoming && flutterUiVisible) {
       // App is already on screen: the Flutter overlay is the UI. Show it
       // over the keyguard if the user locks the phone, but never dismiss

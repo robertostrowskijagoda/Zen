@@ -98,6 +98,14 @@ object ZenCallBridge {
                     hideIncomingCallPopup()
                     result.success(null)
                 }
+                "setCallRinging" -> {
+                    if (call.arguments as? Boolean == true) {
+                        ZenRinger.start(context)
+                    } else {
+                        ZenRinger.stop()
+                    }
+                    result.success(null)
+                }
                 "unlockForCall" -> {
                     unlockForCall(context)
                     result.success(null)
@@ -194,6 +202,9 @@ object ZenCallBridge {
     }
 
     fun dispatchIncomingCallAction(action: String, peerAddress: String) {
+        // Answered or declined on the card: the ring stops at once, not
+        // when the app has caught up.
+        ZenRinger.stop()
         val args = hashMapOf(
             "action" to action,
             "peerAddress" to peerAddress,
@@ -514,6 +525,7 @@ object ZenCallBridge {
     }
 
     fun hideIncomingCallPopup() {
+        ZenRinger.stop()
         pendingDisplayName = ""
         pendingIsVideo = false
         pendingPeerAddress = ""

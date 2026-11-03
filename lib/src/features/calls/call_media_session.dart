@@ -7,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
 import 'package:zen/src/features/calls/call_media_e2ee.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
@@ -1188,16 +1189,7 @@ final class WebRtcCallMediaSessionController
   }
 
   @override
-  Future<void> setSpeakerOn(bool enabled) async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      return;
-    }
-    try {
-      await Helper.setSpeakerphoneOn(enabled);
-    } catch (error, stackTrace) {
-      logZenError('Updating speakerphone state failed', error, stackTrace);
-    }
-  }
+  Future<void> setSpeakerOn(bool enabled) => routeCallAudio(speaker: enabled);
 
   @override
   Future<void> setCameraEnabled(bool enabled) async {
@@ -2028,7 +2020,12 @@ final class WebRtcCallMediaSessionController
       }
     }
     if (Platform.isAndroid || Platform.isIOS) {
-      await setSpeakerOn(kind == CallInviteKind.video);
+      // A connected headset (a car's Bluetooth) first; else the
+      // loudspeaker for video, the earpiece for audio.
+      await routeCallAudio(
+        speaker: kind == CallInviteKind.video,
+        preferHeadset: true,
+      );
     }
   }
 

@@ -545,7 +545,10 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       _localRenderer?.srcObject = stream;
     }
     if (Platform.isAndroid || Platform.isIOS) {
-      await setSpeakerOn(kind == CallInviteKind.video);
+      await routeCallAudio(
+        speaker: kind == CallInviteKind.video,
+        preferHeadset: true,
+      );
     }
     _notify();
   }
@@ -1248,16 +1251,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   }
 
   @override
-  Future<void> setSpeakerOn(bool enabled) async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      return;
-    }
-    try {
-      await Helper.setSpeakerphoneOn(enabled);
-    } catch (error, stackTrace) {
-      logZenError('Switching the group call speaker failed', error, stackTrace);
-    }
-  }
+  Future<void> setSpeakerOn(bool enabled) => routeCallAudio(speaker: enabled);
 
   @override
   Future<void> setCameraEnabled(bool enabled) async {
