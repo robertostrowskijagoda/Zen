@@ -190,7 +190,56 @@ enum PebbleShapePreset {
     ),
   ),
   worn(PebbleShapeParams(ay: 0.48, az: 0.82, e1: 1.05, noise: 0.02)),
-  sea(PebbleShapeParams(ay: 0.4, az: 0.75, egg: 0.1, bend: 0.06, noise: 0.035));
+  sea(PebbleShapeParams(ay: 0.4, az: 0.75, egg: 0.1, bend: 0.06, noise: 0.035)),
+  // Added in 1.15.4, after every older one (a design keeps its index):
+  // still natural stones, only a hint of a figure in each.
+  triangle(
+    PebbleShapeParams(
+      ay: 0.34,
+      e1: 0.85,
+      lobes: 0.06,
+      lobeCount: 3,
+      noise: 0.03,
+    ),
+  ),
+  square(
+    PebbleShapeParams(
+      ay: 0.3,
+      e1: 0.8,
+      e2: 0.55,
+      lobes: 0.04,
+      lobeCount: 4,
+      noise: 0.025,
+    ),
+  ),
+  hexagon(
+    PebbleShapeParams(
+      ay: 0.32,
+      e1: 0.75,
+      lobes: 0.05,
+      lobeCount: 6,
+      noise: 0.02,
+    ),
+  ),
+  teardrop(
+    PebbleShapeParams(ay: 0.4, az: 0.72, egg: 0.3, taper: 0.1, noise: 0.025),
+  ),
+  kidney(
+    PebbleShapeParams(ay: 0.42, az: 0.6, bend: 0.38, dent: 0.1, noise: 0.03),
+  ),
+  seed(PebbleShapeParams(ay: 0.38, az: 0.55, egg: 0.25, noise: 0.025)),
+  tile(PebbleShapeParams(ay: 0.18, az: 0.85, e1: 0.6, e2: 0.7, noise: 0.02)),
+  sliver(PebbleShapeParams(ay: 0.24, az: 0.38, e1: 0.8, noise: 0.03)),
+  boulder(
+    PebbleShapeParams(
+      ax: 0.95,
+      ay: 0.85,
+      az: 0.9,
+      noise: 0.09,
+      noiseFreq: 1.6,
+      rough: 0.02,
+    ),
+  );
 
   const PebbleShapePreset(this._built);
 
@@ -213,6 +262,7 @@ enum PebbleShapePreset {
     rock,
     chubby,
     plump,
+    boulder,
   };
 
   static PebbleShapePreset byId(int id) =>
@@ -250,5 +300,14 @@ enum PebbleShapePreset {
     slate => t('Łupek'),
     worn => t('Wygładzony'),
     sea => t('Morski otoczak'),
+    triangle => t('Trójkątny'),
+    square => t('Kwadratowy'),
+    hexagon => t('Sześciokątny'),
+    teardrop => t('Łezka'),
+    kidney => t('Nerka'),
+    seed => t('Ziarno'),
+    tile => t('Płytka'),
+    sliver => t('Wąski płaski'),
+    boulder => t('Głaz'),
   };
 }

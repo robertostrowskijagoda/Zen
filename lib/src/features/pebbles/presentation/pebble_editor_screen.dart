@@ -67,7 +67,7 @@ enum PebbleTool {
     stamp => Icons.emoji_emotions_rounded,
     text => Icons.text_fields_rounded,
     pattern => Icons.texture_rounded,
-    stone => Icons.landscape_rounded,
+    stone => Icons.egg_outlined,
     ready => Icons.auto_awesome_rounded,
   };
 

@@ -29,7 +29,9 @@ object ZenCallBridge {
     const val EXTRA_UNLOCK_FOR_CALL = "zen_unlock_for_call"
     const val EXTRA_SHOW_OVER_LOCK = "zen_show_over_lock"
     private const val TAG = "ZenIncomingCall"
-    private const val INCOMING_CALL_CHANNEL_ID = "zen_incoming_call_ui_v3"
+    // v4: silent (ZenRinger rings and vibrates; a channel keeps its sound
+    // for good once created).
+    private const val INCOMING_CALL_CHANNEL_ID = "zen_incoming_call_ui_v4"
     private const val INCOMING_CALL_NOTIFICATION_ID = 9102
 
     @Volatile
@@ -308,6 +310,18 @@ object ZenCallBridge {
             acceptRouteKey = acceptRouteKey,
         )
         launchIncomingCallActivity(appContext, launch)
+        // Android may refuse to start an activity from the background (a
+        // locked phone, Android 10 on): the call notification with its
+        // full-screen intent is the way it allows, and the call shows as a
+        // call (CallStyle), not as one more notification.
+        postIncomingCallLaunchNotification(
+            appContext,
+            displayName = displayName,
+            isVideo = isVideo,
+            peerAddress = peerAddress,
+            acceptRouteKey = acceptRouteKey,
+            fullScreenLaunch = launch,
+        )
         Log.i(TAG, "Launched lock-screen popup lockedOrOff=$lockedOrOff")
     }
 
@@ -456,6 +470,17 @@ object ZenCallBridge {
             @Suppress("DEPRECATION")
             Notification.Builder(context)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                val caller = android.app.Person.Builder()
+                    .setName(displayName.ifBlank { context.getString(R.string.call_channel_name) })
+                    .setImportant(true)
+                    .build()
+                builder.setStyle(Notification.CallStyle.forIncomingCall(caller, decline, accept))
+            } catch (error: Exception) {
+                Log.w(TAG, "CallStyle unavailable", error)
+            }
+        }
         builder
             .setSmallIcon(R.drawable.ic_stat_call)
             .setContentTitle(displayName)
@@ -470,8 +495,11 @@ object ZenCallBridge {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setContentIntent(fullScreen)
             .setFullScreenIntent(fullScreen, true)
-            .addAction(0, context.getString(R.string.call_decline), decline)
-            .addAction(0, context.getString(R.string.call_accept), accept)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            builder
+                .addAction(0, context.getString(R.string.call_decline), decline)
+                .addAction(0, context.getString(R.string.call_accept), accept)
+        }
         try {
             manager.notify(INCOMING_CALL_NOTIFICATION_ID, builder.build())
         } catch (error: Exception) {
@@ -492,14 +520,10 @@ object ZenCallBridge {
             context.getString(R.string.call_channel_name),
             NotificationManager.IMPORTANCE_MAX,
         )
-        val ringtone = android.provider.Settings.System.DEFAULT_RINGTONE_URI
-        val attrs = android.media.AudioAttributes.Builder()
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
-        channel.setSound(ringtone, attrs)
-        channel.enableVibration(true)
-        channel.vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 800)
+        // Silent: ZenRinger plays the ringtone and the vibration over and
+        // over; the channel's would sound once on top of it.
+        channel.setSound(null, null)
+        channel.enableVibration(false)
         channel.setBypassDnd(true)
         channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         channel.setShowBadge(false)

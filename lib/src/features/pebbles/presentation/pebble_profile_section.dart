@@ -111,7 +111,7 @@ class _PebbleProfileSectionState extends ConsumerState<PebbleProfileSection> {
         if (p == null || p.isEmpty) {
           return ZenEmpty(
             key: const Key('pebbles-friend-empty'),
-            icon: Icons.landscape_outlined,
+            icon: Icons.egg_outlined,
             title: t('Brak kamyczków.'),
             text: t(
               'Ta osoba nie pokazała jeszcze kamyczków albo nie jesteście '

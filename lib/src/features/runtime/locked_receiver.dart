@@ -663,6 +663,26 @@ final class LockedReceiver {
   /// Rings for a call as a phone call rings, or stops (setCallRinging,
   /// call_platform_channel.dart; replaced in tests).
   Future<void> Function(bool on) ringForCall = setCallRinging;
+
+  /// Who calls, as the card over the lock screen may say it: the name the
+  /// notice kit knows, unless the notification level keeps names off it.
+  String _callCardName(String from) {
+    final String name = (_noticeKit.names[from] ?? '').trim();
+    return name.isEmpty ||
+            _noticeKit.levelOf(from) == NotificationPrivacy.generic
+        ? t('Połączenie przychodzące')
+        : name;
+  }
+
+  /// Shows the native call card for a call from [from] (replaced in
+  /// tests): the name as the notice kit knows it.
+  late Future<void> Function(String from) showCallCard = (String from) =>
+      showIncomingCallPopup(
+        displayName: _callCardName(from),
+        isVideo: false,
+        peerAddress: from,
+        acceptRouteKey: '',
+      );
   final Map<String, int> _pongedAt = <String, int>{};
 
   /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
@@ -1510,6 +1530,9 @@ final class LockedReceiver {
       });
       if (fresh) {
         await ringForCall(true);
+        // The call card over the lock screen, as a call shows: "Odbierz"
+        // opens Zen to unlock it, and the call rings on there.
+        await showCallCard(from);
         await _post(
           RuntimeSystemNotification(
             id: '$kLockedCallSlot-${_now()}',
@@ -1538,6 +1561,7 @@ final class LockedReceiver {
     }
     _ringingFrom = null;
     await ringForCall(false);
+    await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
       await _post(
