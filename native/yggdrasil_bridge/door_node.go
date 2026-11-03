@@ -70,6 +70,21 @@ import (
 // session's device key comes from the door's key, so it is nobody's
 // identity either. A mailbox door sends only the session layer's own
 // control frames (its key record, challenges), never a flat frame.
+// Pebble doors: the same kind of node, run by a phone that keeps pebbles
+// for friends, so a pebble's QR code can name its keepers by their pebble
+// doors, never their phones: a finder who reads the code cannot send them a
+// friend request or anything else. A pebble door takes only a request for a
+// pebble's design (pebbleRequestType) and sends only the design back
+// (pebbleAnswerType); its key is the keeper's own, a seed with the
+// pebbleDoorPrefix among the mailbox doors' (setMailboxDoors).
+const (
+	pebbleDoorPrefix  = "pb:"
+	pebbleRequestType = "pbl_get"
+	pebbleAnswerType  = "pbl_design"
+	// A request names a pebble: small.
+	maxPebbleRequestBytes = 4 * 1024
+)
+
 const (
 	// The only frame a mailbox door takes ("flat_seal").
 	doorSealType = "flat_seal"
@@ -163,6 +178,9 @@ type doorNode struct {
 	done chan struct{}
 	// A mailbox door run for a friend: it takes sealed knocks only.
 	mailbox bool
+	// A pebble door (run among the mailbox doors): it takes pebble design
+	// requests only and sends only designs.
+	pebble bool
 }
 
 // doorStats counts what a door did with signals, for diagnostics (tests,
@@ -656,14 +674,18 @@ func (door *doorNode) open(source net.IP, wire string) (string, bool) {
 // fragments as sendSignal does: to another flat's door, or a sealed knock to
 // a mailbox door.
 func (door *doorNode) send(remoteAddress, payload string) error {
-	if door.mailbox {
+	if door.pebble {
+		if !isPebbleFrame(payload, pebbleAnswerType, maxDoorFrameBytes) {
+			return errors.New("a pebble door sends pebble designs only")
+		}
+	} else if door.mailbox {
 		return errors.New("a mailbox door sends nothing")
 	}
 	destination := net.ParseIP(strings.TrimSpace(remoteAddress))
 	if destination == nil || destination.To4() != nil {
 		return fmt.Errorf("invalid remote yggdrasil address: %s", remoteAddress)
 	}
-	if !isDoorSendable(payload) {
+	if !door.pebble && !isDoorSendable(payload) {
 		return errors.New("the door sends flat frames only")
 	}
 	wirePayload := buildSignalWirePayload(payload)
@@ -746,6 +768,9 @@ func (door *doorNode) linked() bool {
 // sticker lists it among the mailbox doors), only a sealed knock naming
 // this door at a mailbox door.
 func (door *doorNode) takes(message string) bool {
+	if door.pebble {
+		return isPebbleFrame(message, pebbleRequestType, maxPebbleRequestBytes)
+	}
 	if door.mailbox {
 		return isSealedKnockFor(message, door.ip)
 	}
@@ -765,6 +790,18 @@ func isDoorTraffic(message string) bool {
 	}
 	kind, ok := doorString(body, "type")
 	return ok && doorTrafficTypes[kind]
+}
+
+// isPebbleFrame reports whether a signal text is a pebble frame of kind
+// (pebbleRequestType, pebbleAnswerType) within limit, read as the app reads
+// it (doorFrame).
+func isPebbleFrame(message, kind string, limit int) bool {
+	body, ok := doorFrame(message, limit)
+	if !ok {
+		return false
+	}
+	got, ok := doorString(body, "type")
+	return ok && got == kind
 }
 
 // isDoorSendable reports whether the flat's door may send a signal text:
@@ -971,6 +1008,16 @@ func (node *bridgeNode) doorState() map[string]any {
 func (node *bridgeNode) doorSend(remoteAddress, payload string) error {
 	node.doorMu.Lock()
 	door := node.door
+	if isPebbleFrame(payload, pebbleAnswerType, maxDoorFrameBytes) {
+		// A pebble design goes from the pebble door, never the flat's.
+		door = nil
+		for _, d := range node.mailboxDoors {
+			if d.pebble {
+				door = d
+				break
+			}
+		}
+	}
 	node.doorMu.Unlock()
 	if door == nil {
 		return errors.New("no door runs")
@@ -987,10 +1034,11 @@ func (node *bridgeNode) setMailboxDoors(seeds []string) (map[string]string, erro
 	wanted := make(map[string]bool)
 	for _, seed := range seeds {
 		seed = strings.ToLower(strings.TrimSpace(seed))
-		if _, err := doorSeed(seed); err != nil {
+		key := strings.TrimPrefix(seed, pebbleDoorPrefix)
+		if _, err := doorSeed(key); err != nil {
 			return nil, err
 		}
-		if node.door != nil && node.door.seed == seed {
+		if node.door != nil && node.door.seed == key {
 			return nil, errors.New("a mailbox door cannot share the flat door's key")
 		}
 		wanted[seed] = true
@@ -1014,11 +1062,12 @@ func (node *bridgeNode) setMailboxDoors(seeds []string) (map[string]string, erro
 			failed = err
 			break
 		}
-		door, err := newDoorNode(node, host, seed, true)
+		door, err := newDoorNode(node, host, strings.TrimPrefix(seed, pebbleDoorPrefix), true)
 		if err != nil {
 			failed = err
 			continue
 		}
+		door.pebble = strings.HasPrefix(seed, pebbleDoorPrefix)
 		if node.mailboxDoors == nil {
 			node.mailboxDoors = make(map[string]*doorNode)
 		}

@@ -5866,5 +5866,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 알람: {name}님이 도움이 필요해요",
   "🟢 Dostępny(-a)": "🟢 연락 가능",
   "🤒 Choruję": "🤒 아파요",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "코드에는 누구의 주소도 없고 조약돌을 받아 올 ‘문’만 있습니다. 이 코드로는 누구에게도 초대나 메시지를 보낼 수 없습니다."
 }

@@ -5866,5 +5866,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 警报：{name} 需要帮助",
   "🟢 Dostępny(-a)": "🟢 有空",
   "🤒 Choruję": "🤒 生病了",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "二维码里没有任何人的地址，只有用于获取石子的“门”：无法借此向任何人发送邀请或消息。"
 }

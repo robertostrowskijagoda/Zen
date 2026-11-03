@@ -73,27 +73,40 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
   /// QR"); `null` until they change it: the first who agreed then.
   Set<String>? _codeKeepers;
 
-  /// The keepers this pebble's QR code names (pebble_link.dart): on one's
-  /// own pebble those picked (else the first who agreed), on a collected
-  /// one the keepers it is known to have; [kPebbleQrKeepersMax] at most.
+  /// The keepers picked for this pebble's QR code (their own addresses,
+  /// only those whose pebble door is known): those the author picked, else
+  /// the first who agreed; [kPebbleQrKeepersMax] at most.
   List<String> _keepersInCode(PebbleService? service, PebbleEntry? entry) {
-    if (service == null || entry == null) {
+    if (service == null || entry == null || !entry.created) {
       return const <String>[];
-    }
-    if (!entry.created) {
-      return <String>[
-        ...?entry.keepers?.keepers,
-        if (entry.keepers == null) ...entry.hinted,
-      ].take(kPebbleQrKeepersMax).toList();
     }
     final List<String> agreed = <String>[
       for (final PebbleKeeperStatus k in service.store.keepersOf(entry.id))
-        if (k.state == PebbleKeeperState.accepted) k.address,
+        if (k.state == PebbleKeeperState.accepted &&
+            service.store.keeperDoor(k.address) != null)
+          k.address,
     ];
     final Set<String>? picked = _codeKeepers;
     return (picked == null ? agreed : agreed.where(picked.contains))
         .take(kPebbleQrKeepersMax)
         .toList();
+  }
+
+  /// The pebble doors this pebble's QR code names (pebble_link.dart), never
+  /// anyone's own address: on one's own pebble this device's door and the
+  /// picked keepers' doors; on a collected one the doors its code named.
+  List<String> _doorsInCode(PebbleService? service, PebbleEntry? entry) {
+    if (service == null || entry == null) {
+      return const <String>[];
+    }
+    if (!entry.created) {
+      return entry.hinted.take(kPebbleQrDoorsMax).toList();
+    }
+    return <String>[
+      ?service.hosting.doorAddress,
+      for (final String k in _keepersInCode(service, entry))
+        ?service.store.keeperDoor(k),
+    ].take(kPebbleQrDoorsMax).toList();
   }
 
   @override
@@ -188,7 +201,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                 PebbleCodeScreen.open(
                   context,
                   card,
-                  keepers: _keepersInCode(service, entry),
+                  keepers: _doorsInCode(service, entry),
                 ),
               ),
             ),
@@ -242,7 +255,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                       PebbleCodeScreen.open(
                         context,
                         card,
-                        keepers: _keepersInCode(service, entry),
+                        keepers: _doorsInCode(service, entry),
                       ),
                     ),
                     icon: const Icon(Icons.qr_code_2_rounded),
@@ -399,6 +412,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
         if (k.state == PebbleKeeperState.accepted) k.address,
     ];
     final List<String> inCode = _keepersInCode(service, entry);
+    final List<String> doors = _doorsInCode(service, entry);
     return <Widget>[
       ZenSection(
         t('Przechowujący w kodzie QR'),
@@ -434,28 +448,46 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
                   key: Key('pebble-code-keeper-$a'),
                   label: Text(nameOf(a)),
                   selected: inCode.contains(a),
-                  onSelected: (bool on) {
-                    if (on && inCode.length >= kPebbleQrKeepersMax) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            t('Najwyżej {n} osoby w kodzie.', <String, Object?>{
-                              'n': kPebbleQrKeepersMax,
-                            }),
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    setState(
-                      () => _codeKeepers = <String>{
-                        ...inCode.where((String k) => k != a),
-                        if (on) a,
-                      },
-                    );
-                  },
+                  // A keeper on a Zen before 1.15.4 runs no pebble door
+                  // yet: it cannot go into the code.
+                  onSelected: service.store.keeperDoor(a) == null
+                      ? null
+                      : (bool on) {
+                          if (on && inCode.length >= kPebbleQrKeepersMax) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  t(
+                                    'Najwyżej {n} osoby w kodzie.',
+                                    <String, Object?>{'n': kPebbleQrKeepersMax},
+                                  ),
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          setState(
+                            () => _codeKeepers = <String>{
+                              ...inCode.where((String k) => k != a),
+                              if (on) a,
+                            },
+                          );
+                        },
                 ),
             ],
+          ),
+        ),
+      if (agreed.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            t(
+              'W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania '
+              'kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani '
+              'wiadomości.',
+            ),
+            key: const Key('pebble-code-doors'),
+            style: TextStyle(color: zen.textMuted, fontSize: 13),
           ),
         ),
       const SizedBox(height: 16),
@@ -464,7 +496,7 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
         onPressed: () => unawaited(
           openPebbleSticker(
             context,
-            link: pebbleWebLink(card, keepers: inCode),
+            link: pebbleWebLink(card, keepers: doors),
             name: card.name,
             author: card.authorName,
           ),

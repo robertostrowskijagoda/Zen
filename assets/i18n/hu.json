@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 RIASZTÁS: {name} segítségre szorul",
   "🟢 Dostępny(-a)": "🟢 Elérhető",
   "🤒 Choruję": "🤒 Beteg vagyok",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "A kód senkinek a címét nem tartalmazza, csak „ajtókat” a kavics letöltéséhez: belőle senkinek sem lehet meghívót vagy üzenetet küldeni."
 }

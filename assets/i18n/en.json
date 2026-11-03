@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} needs help",
   "🟢 Dostępny(-a)": "🟢 Available",
   "🤒 Choruję": "🤒 Sick",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "The code holds nobody's address, only “doors” for fetching the pebble: nobody can be sent an invitation or a message from it."
 }

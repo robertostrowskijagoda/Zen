@@ -6202,5 +6202,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ТРИВОГА: {name} потребує допомоги",
   "🟢 Dostępny(-a)": "🟢 На зв’язку",
   "🤒 Choruję": "🤒 Хворію",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Мені потрібна хвилина для себе"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Мені потрібна хвилина для себе",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "У коді немає нічиїх адрес, лише «двері» для завантаження камінчика: з нього нікому не можна надіслати запрошення чи повідомлення."
 }

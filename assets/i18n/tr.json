@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARM: {name} yardıma ihtiyaç duyuyor",
   "🟢 Dostępny(-a)": "🟢 Müsaitim",
   "🤒 Choruję": "🤒 Hastayım",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kodda kimsenin adresi yok, yalnızca çakıl taşını almak için “kapılar” var: ondan kimseye davet ya da mesaj gönderilemez."
 }

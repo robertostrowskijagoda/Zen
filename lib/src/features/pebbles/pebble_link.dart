@@ -9,14 +9,20 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// (tool/pages/k/).
 const String kPebblePagePath = 'k';
 
-/// The most keepers a pebble's QR code names (16 bytes each; three keep
-/// the printed code easy to scan).
+/// The most keepers the author picks for a pebble's QR code.
 const int kPebbleQrKeepersMax = 3;
 
-/// What a pebble link carries: the card and, on a QR code, the keepers
-/// the author put in it ([kPebbleQrKeepersMax] at most): whom a finder
-/// asks for the full design even when nobody they know knows the author.
-/// Not signed: only whom to ask; what comes back must match the card.
+/// The most doors a pebble's QR code names (16 bytes each): the author's
+/// pebble door and the picked keepers' ([kPebbleQrKeepersMax]).
+const int kPebbleQrDoorsMax = 1 + kPebbleQrKeepersMax;
+
+/// What a pebble link carries: the card and, on a QR code, the pebble
+/// doors of the author and the keepers ([kPebbleQrDoorsMax] at most,
+/// door_node.go): whom a finder asks for the full design even when nobody
+/// they know knows the author. Doors, never anyone's own address: a door
+/// takes a request for a design and nothing else (no friend request, no
+/// message). Not signed: only whom to ask; what comes back must match the
+/// card. (The field keeps its name, `keepers`.)
 typedef PebbleLink = ({PebbleCard card, List<String> keepers});
 
 /// The link a pebble's QR code carries: `https://…/Zen/k/#<digits>`, the
@@ -44,14 +50,14 @@ String pebbleAppLink(
 
 /// The digits after `#` in a QR code's link: the QR card's bytes, then,
 /// when there are [keepers], u8 count and the 16 bytes of each address
-/// (the first [kPebbleQrKeepersMax] that are network addresses), as one
+/// (the first [kPebbleQrDoorsMax] that are network addresses), as one
 /// number in decimal ([pebbleDigits]). A Zen before 1.15.3 reads no code
 /// with keepers.
 String pebbleLinkDigits(PebbleCard card, List<String> keepers) {
   final List<Uint8List> raw = <Uint8List>[
     for (final String k in keepers)
       if (_addressBytes(k) case final Uint8List b) b,
-  ].take(kPebbleQrKeepersMax).toList();
+  ].take(kPebbleQrDoorsMax).toList();
   final BytesBuilder b = BytesBuilder(copy: false)..add(card.qrCard.bytes);
   if (raw.isNotEmpty) {
     b.addByte(raw.length);
@@ -118,7 +124,7 @@ List<String>? _keepers(Uint8List rest) {
     return const <String>[];
   }
   final int n = rest.first;
-  if (n < 1 || n > kPebbleQrKeepersMax || rest.length != 1 + 16 * n) {
+  if (n < 1 || n > kPebbleQrDoorsMax || rest.length != 1 + 16 * n) {
     return null;
   }
   return <String>[

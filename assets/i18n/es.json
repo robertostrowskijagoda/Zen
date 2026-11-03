@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARMA: {name} necesita ayuda",
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Enfermo/a",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Necesito un momento para mí"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Necesito un momento para mí",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "El código no lleva la dirección de nadie, solo «puertas» para descargar el guijarro: desde él no se puede enviar a nadie una invitación ni un mensaje."
 }

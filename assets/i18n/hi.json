@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 अलार्म: {name} को मदद चाहिए",
   "🟢 Dostępny(-a)": "🟢 उपलब्ध हूँ",
   "🤒 Choruję": "🤒 बीमार हूँ",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "कोड में किसी का पता नहीं है, बस कंकड़ लाने के लिए “दरवाज़े” हैं: इससे किसी को न्योता या संदेश नहीं भेजा जा सकता।"
 }

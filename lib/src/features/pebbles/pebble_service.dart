@@ -20,6 +20,7 @@ import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -474,6 +475,7 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
       return null;
     }
     final PebbleStore store = PebbleStore(ref.read(ledgerDiskProvider));
+    final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
     final PebbleHosting hosting = PebbleHosting(
       transport: ref.read(meshTransportProvider),
       store: store,
@@ -481,6 +483,10 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
       accountKey: () => node.isReady ? node.identity.accountKey : null,
       serveCollected: () =>
           ref.read(appSettingsControllerProvider).servePebbles,
+      // The pebble door: a QR code names it, never this phone.
+      doorRequests: runtime.pebbleDoorFrames,
+      sendFromDoor: runtime.sendFromPebbleDoor,
+      runDoor: runtime.setPebbleDoorKey,
     );
     hosting.onKeepRequest = (PebbleKeepRequest request) {
       final FriendProfile? friend = ref

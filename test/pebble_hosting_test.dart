@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_hosting.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 import 'support/friends_world.dart';
@@ -287,6 +289,68 @@ void main() {
       }
     },
   );
+
+  test('a keeper runs a pebble door, tells the author its address, and '
+      'answers a request at the door from the door only', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    // B's own hosting with a door, in place of the plain one.
+    await net.hosts[w['B']]!.stop();
+    final StreamController<SignalTransportFrame> requests =
+        StreamController<SignalTransportFrame>.broadcast();
+    addTearDown(requests.close);
+    final List<(String, Map<String, dynamic>)> fromDoor =
+        <(String, Map<String, dynamic>)>[];
+    String? running;
+    final PebbleHosting b = PebbleHosting(
+      transport: w['B'].appTransport,
+      store: net.store(w['B']),
+      peers: net.peers[w['B']]!,
+      accountKey: () => net.keys[w['B']],
+      serveCollected: () => true,
+      clock: () => w.now,
+      keeperTarget: 1,
+      doorRequests: requests.stream,
+      sendFromDoor: (String to, Map<String, dynamic> payload) async {
+        fromDoor.add((to, payload));
+        return true;
+      },
+      runDoor: (String? seed) => running = seed,
+    );
+    b.onKeepRequest = (PebbleKeepRequest r) =>
+        Future<void>.microtask(() => b.acceptKeep(r.card.id));
+    net.hosts[w['B']] = b;
+    await b.start();
+    expect(running, isNull, reason: 'nothing kept yet: no door');
+
+    final PebbleCard card = await net.publish(w['A']);
+    await net.until(() => net.hasDesign(w['B'], card));
+    await b.tick();
+    expect(running, isNotNull, reason: 'a kept pebble: the door runs');
+    final String door = b.doorAddress!;
+    expect(door, isNot(w['B'].address));
+    await net.until(
+      () => net.store(w['A']).keeperDoor(w['B'].address) == door,
+      reason: "the author knowing the keeper's door",
+    );
+
+    // A finder's request at the door: the design, from the door.
+    const String finder = '205::f';
+    requests.add(
+      SignalTransportFrame(
+        from: finder,
+        payload: <String, dynamic>{'type': 'pbl_get', 'id': card.id.text},
+        receivedAtMillis: w.now,
+        door: true,
+      ),
+    );
+    // The stream hands the frame over a moment later.
+    await Future<void>.delayed(Duration.zero);
+    await b.idle;
+    expect(fromDoor.single.$1, PeerShareCodec.normalizeAddress(finder));
+    expect(fromDoor.single.$2['type'], 'pbl_design');
+    expect(fromDoor.single.$2['c'], card.text);
+  });
 
   test('the author asks friends of their own choice to keep it', () async {
     final FriendsWorld w = await FriendsWorld.create(<String>[

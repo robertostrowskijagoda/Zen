@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALLARME: {name} ha bisogno di aiuto",
   "🟢 Dostępny(-a)": "🟢 Disponibile",
   "🤒 Choruję": "🤒 Non sto bene",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Ho bisogno di un momento per me"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Ho bisogno di un momento per me",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Il codice non contiene l’indirizzo di nessuno, solo «porte» per scaricare il sassolino: da esso non si può mandare a nessuno un invito né un messaggio."
 }

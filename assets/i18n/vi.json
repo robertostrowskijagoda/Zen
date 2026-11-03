@@ -5866,5 +5866,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 BÁO ĐỘNG: {name} cần giúp đỡ",
   "🟢 Dostępny(-a)": "🟢 Có mặt",
   "🤒 Choruję": "🤒 Đang ốm",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Mã không chứa địa chỉ của ai, chỉ có “cửa” để tải viên sỏi: từ mã này không thể gửi lời mời hay tin nhắn cho ai."
 }

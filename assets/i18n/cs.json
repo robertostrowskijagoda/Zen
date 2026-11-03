@@ -6090,5 +6090,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 POPLACH: {name} potřebuje pomoc",
   "🟢 Dostępny(-a)": "🟢 Dostupný(á)",
   "🤒 Choruję": "🤒 Jsem nemocný(á)",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kód neobsahuje ničí adresu, jen „dveře“ ke stažení oblázku: z něj nejde nikomu poslat pozvánku ani zprávu."
 }

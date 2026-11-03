@@ -657,6 +657,65 @@ func TestMailboxDoorsTakeOnlySealedKnocksForThemselves(t *testing.T) {
 	}
 }
 
+func TestPebbleDoorTakesOnlyDesignRequestsAndSendsOnlyDesigns(t *testing.T) {
+	mesh := newTestMesh(t)
+	node := mesh.node
+	startPacketLoop(node)
+	seed := strings.Repeat("61", 32)
+	addresses, err := node.setMailboxDoors([]string{pebbleDoorPrefix + seed})
+	if err != nil {
+		t.Fatalf("pebble door: %v", err)
+	}
+	door := node.mailboxDoors[pebbleDoorPrefix+seed]
+	if door == nil || !door.pebble || addresses[pebbleDoorPrefix+seed] != door.address {
+		t.Fatalf("pebble door: %v", addresses)
+	}
+	if door.address == node.core.Address().String() {
+		t.Fatal("a pebble door has its own address")
+	}
+	waitMesh(t, "the pebble door never got onto the mesh", door.linked)
+	warmPaths(t, node.core, door.core)
+
+	request := `{"type":"pbl_get","id":"abc"}`
+	waitMesh(t, "no design request came through the pebble door", func() bool {
+		if err := sendSignal(node, door.address, request); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		message, ok := node.signalInbox.wait(500 * time.Millisecond)
+		if !ok {
+			return false
+		}
+		if message.Payload != request || !message.Door {
+			t.Fatalf("unexpected pebble door signal: %+v", message)
+		}
+		return true
+	})
+	drainInbox(node)
+	// A friend request, a message or a flat frame stay outside.
+	for _, other := range []string{
+		`{"type":"friend_request","content":"hej"}`,
+		`{"type":"message","content":"hej"}`,
+		`{"type":"flat_hello","b":{}}`,
+	} {
+		if err := sendSignal(node, door.address, other); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	if extra, ok := node.signalInbox.wait(800 * time.Millisecond); ok {
+		t.Fatalf("the pebble door let another frame in: %+v", extra)
+	}
+	// It sends designs only, and the flat door sends no design.
+	if err := door.send(node.core.Address().String(), `{"type":"message"}`); err == nil {
+		t.Fatal("a pebble door sends designs only")
+	}
+	if err := door.send(node.core.Address().String(), `{"type":"pbl_design","c":"x","d":"y"}`); err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	if err := node.doorSend(node.core.Address().String(), `{"type":"pbl_design","c":"x","d":"y"}`); err != nil {
+		t.Fatalf("design through doorSend: %v", err)
+	}
+}
+
 // doorPairState is one line of what two doors know of each other: their
 // own counters, their session layers' view of the other, and ironwood's
 // sessions and paths between them.

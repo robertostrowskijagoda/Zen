@@ -5866,5 +5866,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 緊急アラーム：{name}が助けを必要としています",
   "🟢 Dostępny(-a)": "🟢 対応可能",
   "🤒 Choruję": "🤒 体調不良",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "コードには誰のアドレスも含まれず、小石を取得するための「扉」だけです。ここから誰かに招待やメッセージを送ることはできません。"
 }

@@ -6426,5 +6426,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 إنذار: {name} يحتاج مساعدة",
   "🟢 Dostępny(-a)": "🟢 متاح",
   "🤒 Choruję": "🤒 مريض",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 أحتاج لحظة لنفسي",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "لا يحمل الرمز عنوان أحد، بل «أبوابًا» لجلب الحصاة فقط: لا يمكن منه إرسال دعوة أو رسالة لأي أحد."
 }

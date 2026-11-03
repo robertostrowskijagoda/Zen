@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/neighbors/flat_door_mail.dart'
+    show yggAddressForKey;
 import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -109,6 +112,9 @@ final class PebbleHosting {
     this.askAgainAfter = const Duration(minutes: 30),
     this.askTimeout = const Duration(days: 2),
     this.batchWait = const Duration(seconds: 20),
+    this.doorRequests,
+    this.sendFromDoor,
+    this.runDoor,
     Random? random,
   }) : _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch),
        _random = random ?? Random.secure();
@@ -141,6 +147,25 @@ final class PebbleHosting {
 
   /// How long the asked devices get before the next ones are asked.
   final Duration batchWait;
+
+  /// What came to this device's pebble door (requests for a design from
+  /// whoever read a QR code); `null`: no door (tests, older bridges).
+  final Stream<SignalTransportFrame>? doorRequests;
+
+  /// Sends a design from the pebble door, so the asker never learns this
+  /// device's own address; false when no door runs.
+  final Future<bool> Function(String to, Map<String, dynamic> payload)?
+  sendFromDoor;
+
+  /// Runs the pebble door with the key (hex seed), or stops it (`null`).
+  final void Function(String? seedHex)? runDoor;
+
+  /// This device's pebble door while it runs: what the keepers tell the
+  /// author, and the author's QR codes name.
+  String? get doorAddress => _doorAddress;
+  String? _doorAddress;
+  bool _doorAddressing = false;
+  StreamSubscription<SignalTransportFrame>? _doorFrames;
 
   /// A friend asked to keep a pebble (the app posts a notification).
   void Function(PebbleKeepRequest request)? onKeepRequest;
@@ -177,11 +202,103 @@ final class PebbleHosting {
     _frames ??= transport.frames.listen(
       (SignalTransportFrame f) => _enqueue(() => _onFrame(f)),
     );
+    _doorFrames ??= doorRequests?.listen(
+      (SignalTransportFrame f) => _enqueue(() => _onDoorRequest(f)),
+    );
+    unawaited(_run(_syncDoor));
+  }
+
+  /// Runs the pebble door while this device made or keeps a pebble (one a
+  /// finder may ask for), stops it otherwise.
+  Future<void> _syncDoor() async {
+    final void Function(String?)? run = runDoor;
+    if (run == null) {
+      return;
+    }
+    final bool wanted =
+        store.created.any((PebbleEntry e) => !e.retired) ||
+        store.kept.any((PebbleEntry e) => !e.retired);
+    if (!wanted) {
+      run(null);
+      _doorAddress = null;
+      return;
+    }
+    final String seed = await store.doorSeed();
+    run(seed);
+    final String? door = _doorAddress;
+    if (door == null) {
+      // Worked out aside (a key derivation), never holding up the queue;
+      // the authors are told once it is known.
+      if (!_doorAddressing) {
+        _doorAddressing = true;
+        unawaited(
+          pebbleDoorAddress(seed)
+              .then((String a) {
+                _doorAddress = a;
+                _enqueue(_syncDoor);
+              }, onError: (Object _) {})
+              .whenComplete(() => _doorAddressing = false),
+        );
+      }
+      return;
+    }
+    if (store.toldDoor == door) {
+      return;
+    }
+    // The authors of what this device keeps learn its door (it came after
+    // they were told yes, or changed): once.
+    for (final PebbleEntry e in store.kept) {
+      final String? author = e.keptFrom;
+      if (author != null && !e.retired) {
+        await _send(author, <String, dynamic>{
+          'type': PebbleFrames.keepYes,
+          'id': e.id.text,
+          'pd': door,
+        });
+      }
+    }
+    await store.setToldDoor(door);
+  }
+
+  /// A request that came to the pebble door: the design, from the door,
+  /// when this device hands it out; nothing else is ever answered there,
+  /// and nothing is passed on to friends (that would tell whose door it
+  /// is).
+  Future<void> _onDoorRequest(SignalTransportFrame frame) async {
+    final Future<bool> Function(String, Map<String, dynamic>)? send =
+        sendFromDoor;
+    final PebbleId? id = PebbleId.parse(frame.payload['id']);
+    final String from = PeerShareCodec.normalizeAddress(frame.from);
+    if (send == null ||
+        id == null ||
+        frame.payload['type'] != PebbleFrames.get ||
+        peers.isBlocked(from) ||
+        !_perSender.take(from, _now) ||
+        !_served.take('all', _now)) {
+      return;
+    }
+    await store.load();
+    final PebbleEntry? e = store.entry(id);
+    if (e == null || !_serves(e)) {
+      return;
+    }
+    final Uint8List? design = await store.design(e.id);
+    if (design == null) {
+      return;
+    }
+    await send(from, <String, dynamic>{
+      'type': PebbleFrames.design,
+      'c': e.card.text,
+      'd': b64(design),
+      if (e.keepers != null) 'k': e.keepers!.toJson(),
+    });
   }
 
   Future<void> stop() async {
     await _frames?.cancel();
     _frames = null;
+    await _doorFrames?.cancel();
+    _doorFrames = null;
   }
 
   /// Waits for the work queued so far (tests).
@@ -230,6 +347,7 @@ final class PebbleHosting {
 
   Future<void> _tick() async {
     await store.load();
+    await _syncDoor();
     for (final PebbleEntry e in store.created) {
       if (e.madeHere) {
         await _keepUp(e);
@@ -252,6 +370,7 @@ final class PebbleHosting {
   Future<PebbleEntry> publish(PebbleCard card, Uint8List design) =>
       _run(() async {
         final PebbleEntry e = await store.addCreated(card, design);
+        await _syncDoor();
         await _draw(e.id);
         return store.entry(e.id) ?? e;
       });
@@ -532,9 +651,20 @@ final class PebbleHosting {
     }
     switch (type) {
       case PebbleFrames.keepYes:
-        if (status.state != PebbleKeeperState.accepted) {
+        // Their pebble door, for the QR codes (never their own address).
+        final Object? door = p['pd'];
+        final bool doorNews = door is String && isPebbleDoorAddress(door);
+        if (doorNews) {
+          await store.setKeeperDoor(from, door);
+        }
+        final bool known = status.state == PebbleKeeperState.accepted;
+        if (!known) {
           await store.setKeeper(id, from, PebbleKeeperState.accepted);
           _listDirty.add(id);
+        }
+        if (known && doorNews) {
+          // Only their door's news: the design is there already.
+          return;
         }
         await _serve(from, e);
         await _publishList(id);
@@ -591,6 +721,7 @@ final class PebbleHosting {
       await _send(from, <String, dynamic>{
         'type': PebbleFrames.keepYes,
         'id': card.id.text,
+        'pd': ?_doorAddress,
       });
       return;
     }
@@ -617,9 +748,11 @@ final class PebbleHosting {
     if (!await store.addKept(request.card, from: request.from)) {
       return false;
     }
+    await _syncDoor();
     await _send(request.from, <String, dynamic>{
       'type': PebbleFrames.keepYes,
       'id': id.text,
+      'pd': ?_doorAddress,
     });
     _fetches.remove(id);
     return true;
@@ -968,6 +1101,22 @@ final class PebbleHosting {
         await _onFound(from, p);
     }
   }
+}
+
+/// The Yggdrasil address of the pebble door with the key [seedHex].
+Future<String> pebbleDoorAddress(String seedHex) async {
+  final List<int> seed = <int>[
+    for (int i = 0; i < 64; i += 2)
+      int.parse(seedHex.substring(i, i + 2), radix: 16),
+  ];
+  final SimpleKeyPair pair = await Ed25519().newKeyPairFromSeed(seed);
+  return yggAddressForKey((await pair.extractPublicKey()).bytes);
+}
+
+/// Whether [address] looks like a door's (a Yggdrasil node address).
+bool isPebbleDoorAddress(String address) {
+  final String a = PeerShareCodec.normalizeAddress(address);
+  return a.startsWith('2') && Uri.tryParse('http://[$a]/') != null;
 }
 
 /// [need] keepers from [pool]: the devices that answer best first, about

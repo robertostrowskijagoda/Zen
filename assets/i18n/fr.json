@@ -5978,5 +5978,6 @@
   "🚨 ALARM: {name} potrzebuje pomocy": "🚨 ALARME : {name} a besoin d’aide",
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Je suis malade",
-  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi"
+  "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi",
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Le code ne contient l’adresse de personne, seulement des « portes » pour récupérer le galet : on ne peut envoyer à personne une invitation ni un message à partir de lui."
 }

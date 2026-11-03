@@ -298,22 +298,23 @@ void main() {
       expect(pebbleCardFromLink('zen://pebble#${card.text}'), card);
     });
 
-    test('a QR code names up to three keepers after the card', () async {
+    test('a QR code names up to four pebble doors after the card', () async {
       final PebbleCard card = await _card(kasia, thumbnail: _thumbnail());
       const List<String> keepers = <String>[
         '200:1111:2222:3333:4444:5555:6666:7777',
         '201:ABCD::1',
         '202::2',
         '203::3',
+        '204::4',
       ];
       final String web = pebbleWebLink(card, keepers: keepers);
       final PebbleLink link = pebbleFromLink(web)!;
       expect(link.card, card.qrCard);
-      expect(link.keepers, keepers.take(kPebbleQrKeepersMax).toList());
+      expect(link.keepers, keepers.take(kPebbleQrDoorsMax).toList());
       // The app link carries them too; no keepers: the plain QR card.
       expect(
         pebbleFromLink(pebbleAppLink(card, keepers: keepers))!.keepers,
-        hasLength(kPebbleQrKeepersMax),
+        hasLength(kPebbleQrDoorsMax),
       );
       expect(pebbleFromLink(pebbleWebLink(card))!.keepers, isEmpty);
       expect(
