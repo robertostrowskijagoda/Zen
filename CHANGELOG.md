@@ -33,6 +33,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Pebble doors**: a pebble's QR code names pebble doors (the author's and up to three picked keepers'), never anyone's own address: a door is a node of its own (door_node.go) that takes only a request for a design and sends only the design, so the code gives nobody a way to send its keepers a friend request or a message. A keeper tells the author its door when it agrees; keepers on an older Zen cannot go into the code.
 - **"Odblokuj Zen" with nothing behind it**: mail a mailbox hands over while Zen is locked carries one bit beside the sealed box, whether it deserves a notice (a message, a call, an invitation); receipts and statuses come in silently.
 - **Notifications per account**: an additional account that receives in the background can post its notifications or not ("Powiadomienia z tego konta", in Konta i odzyskiwanie and in the setup); tapping one opens that account (one on the list of accounts; a hidden one says where it came from).
+- **"Zmień kod"**: under Mój kod a new invitation code and QR; friends and the network address stay. The code is the address with a 5-character token after it (30 characters), and a friend request sent from it carries the token: once the code was changed, a request without the current token (the old code, an address learned from someone else's friend list, Nearby, the Circle) still waits among the invitations but posts no notification, in the app and on a locked phone. The invitation page takes both lengths.
 
 ## 1.15.3 — 30.10.2026
 

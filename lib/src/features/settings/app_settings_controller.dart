@@ -209,6 +209,12 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(bridgeEnabled: value));
   }
 
+  /// "Zmień kod": a new invitation code, the old one stops bringing
+  /// notified invitations.
+  Future<void> changeInviteCode() async {
+    await _save(state.copyWith(inviteToken: PeerShareCodec.newInviteToken()));
+  }
+
   /// "Udostępniaj zebrane kamyczki".
   Future<void> setServePebbles(bool value) async {
     await _save(state.copyWith(servePebbles: value));

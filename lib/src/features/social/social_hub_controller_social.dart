@@ -46,6 +46,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     String nickname = '',
     String? senderDisplayName,
     String? message,
+    String inviteToken = '',
   }) async {
     final String normalizedAddress = PeerShareCodec.normalizeAddress(
       peerAddress,
@@ -65,6 +66,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       payload: <String, dynamic>{
         'type': 'friend_request',
         'senderName': ?senderName,
+        // The token of the code they gave: their current code, or not.
+        if (inviteToken.isNotEmpty) 'it': inviteToken,
         if (message != null && message.trim().isNotEmpty)
           'message': message.trim(),
       },

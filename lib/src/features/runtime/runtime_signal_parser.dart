@@ -4,6 +4,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// Longest name a peer may give itself in a signal (a profile name is at
 /// most 60 characters).
@@ -42,6 +43,11 @@ ZenSignal? zenSignalFromTransportPayload({
         type: ZenSignalType.friendRequest,
         sender: sender,
         displayName: _readName(payload['senderName']),
+        // The token of the invitation code it came from, if any.
+        inviteId: switch (payload['it']) {
+          final String token when PeerShareCodec.isInviteToken(token) => token,
+          _ => null,
+        },
         content: _readClipped(
           payload['message'],
           kMaxFriendRequestMessageChars,

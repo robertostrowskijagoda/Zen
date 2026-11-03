@@ -324,7 +324,7 @@
   var raw = decodeURIComponent((location.hash || "").replace(/^#/, ""));
   // Only an invitation code (Crockford base32, dashes optional) is taken.
   var code = raw.toUpperCase().replace(/[^0-9A-Z]/g, "");
-  if (!/^[0-9A-HJKMNP-TV-Z]{25}$/.test(code)) { code = ""; }
+  if (!/^[0-9A-HJKMNP-TV-Z]{25}([0-9A-HJKMNP-TV-Z]{5})?$/.test(code)) { code = ""; }
   var noApp = /(^|[?&])noapp=1(&|$)/.test(location.search);
   var page = location.origin + location.pathname;
 

@@ -177,6 +177,76 @@ void main() {
   );
 
   test(
+    'after "Zmień kod" only a request from the new code is told about',
+    () async {
+      final MemoryRuntimeSystemNotificationService notificationService =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(const AppSettings(inviteToken: 'ABCDE')),
+          ),
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notificationService,
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.background,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(appSettingsControllerProvider);
+      await Future<void>.delayed(Duration.zero);
+      final SocialHubController hub = container.read(
+        socialHubControllerProvider.notifier,
+      );
+
+      // The old code (or an address learned elsewhere): no token.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: 'obcy.ygg',
+          displayName: 'Obcy',
+        ),
+        receivedAtMillis: 10,
+      );
+      expect(
+        container.read(socialHubControllerProvider).friends['obcy.ygg']?.status,
+        FriendRelationshipStatus.pendingIncoming,
+      );
+      expect(notificationService.activeNotifications, isEmpty);
+
+      // The new code.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: 'kuba.ygg',
+          displayName: 'Kuba',
+          inviteId: 'ABCDE',
+        ),
+        receivedAtMillis: 11,
+      );
+      expect(
+        notificationService.activeNotifications.single.title,
+        contains('Kuba'),
+      );
+    },
+  );
+
+  test(
     'global settings seed retention defaults into new accepted relation',
     () async {
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(

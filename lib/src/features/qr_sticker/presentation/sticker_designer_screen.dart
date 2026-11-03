@@ -17,6 +17,8 @@ import 'package:zen/src/features/qr_sticker/sticker_export.dart';
 import 'package:zen/src/features/qr_sticker/sticker_files.dart';
 import 'package:zen/src/features/qr_sticker/sticker_scene.dart';
 import 'package:zen/src/features/qr_sticker/sticker_store.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -95,6 +97,9 @@ myShareProfileProvider = Provider<PeerShareProfile?>(
     ),
     displayName: ref.watch(
       userProfileControllerProvider.select((UserProfile p) => p.displayName),
+    ),
+    inviteToken: ref.watch(
+      appSettingsControllerProvider.select((AppSettings s) => s.inviteToken),
     ),
   ),
 );

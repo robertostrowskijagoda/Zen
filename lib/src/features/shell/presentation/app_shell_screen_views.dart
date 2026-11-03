@@ -3315,6 +3315,9 @@ class _MyCodeScreen extends ConsumerWidget {
       displayName: ref.watch(
         userProfileControllerProvider.select((UserProfile p) => p.displayName),
       ),
+      inviteToken: ref.watch(
+        appSettingsControllerProvider.select((AppSettings s) => s.inviteToken),
+      ),
     );
     final SocialHubState hubState = watchSocialPeople(ref);
     // The friend list is the source of truth: an inbox entry can already be
@@ -3357,6 +3360,18 @@ class _MyCodeScreen extends ConsumerWidget {
             ),
             if (profile != null) _LocalCodePanel(profile: profile),
             const SizedBox(height: 12),
+            if (profile != null)
+              _WrapTile(
+                key: const Key('invite-change-code'),
+                icon: Icons.autorenew_rounded,
+                tone: zen.tone(ZenTone.network),
+                title: t('Zmień kod'),
+                subtitle: t(
+                  'Gdy kod trafił, gdzie nie powinien: nowy kod i QR, a '
+                  'zaproszenia ze starego przyjdą bez powiadomienia',
+                ),
+                onTap: () => unawaited(_changeInviteCode(context, ref)),
+              ),
             _WrapTile(
               key: const Key('invite-add-friend'),
               icon: Icons.person_add_alt_1_rounded,
@@ -3410,6 +3425,49 @@ class _MyCodeScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// "Zmień kod": after a confirmation, a new invitation code. Friends stay,
+/// and so does the address in the network: the code only gains a new
+/// token, and an invitation that does not carry it (the old code, an
+/// address learned elsewhere) waits among the invitations unannounced.
+Future<void> _changeInviteCode(BuildContext context, WidgetRef ref) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      scrollable: true,
+      icon: const Icon(Icons.autorenew_rounded, size: 30),
+      title: Text(t('Zmienić kod?')),
+      content: Text(
+        t(
+          'Dostaniesz nowy kod i QR. Znajomi zostają. Zaproszenia wysłane '
+          'ze starego kodu (i z Okolicy, Kręgu czy wydarzeń) nadal '
+          'trafią do zaproszeń, ale bez powiadomienia — zajrzyj tam '
+          'czasem. Nowy kod działa tylko w Zen 1.15.4 i nowszym.',
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(t('Anuluj')),
+        ),
+        FilledButton(
+          key: const Key('invite-change-code-confirm'),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(t('Zmień kod')),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) {
+    return;
+  }
+  await ref.read(appSettingsControllerProvider.notifier).changeInviteCode();
+  if (context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(t('Masz nowy kod'))));
   }
 }
 
@@ -4963,6 +5021,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
             nickname: nickname,
             senderDisplayName: senderDisplayName,
             message: _messageController.text,
+            inviteToken: target.inviteToken,
           );
       if (!mounted) {
         return;

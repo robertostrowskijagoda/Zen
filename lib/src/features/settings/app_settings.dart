@@ -466,6 +466,7 @@ final class AppSettings {
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
     this.servePebbles = true,
+    this.inviteToken = '',
     this.setupRevision = 0,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
@@ -611,6 +612,11 @@ final class AppSettings {
   /// them (Ustawienia → Sieć i usługa). On by default: popular pebbles
   /// become easier to get, not harder.
   final bool servePebbles;
+
+  /// The token of this person's invitation code ('' until "Zmień kod" was
+  /// used): an invitation without it (an old code, an address that leaked)
+  /// comes in without a notification.
+  final String inviteToken;
 
   /// The [kSetupRevision] of the setup (the lock, notifications, gates,
   /// animations) this person last went through or skipped; 0: never. The
@@ -764,6 +770,7 @@ final class AppSettings {
     bool? disguiseIcon,
     bool? bridgeEnabled,
     bool? servePebbles,
+    String? inviteToken,
     int? setupRevision,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
@@ -811,6 +818,7 @@ final class AppSettings {
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
       servePebbles: servePebbles ?? this.servePebbles,
+      inviteToken: inviteToken ?? this.inviteToken,
       setupRevision: setupRevision ?? this.setupRevision,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
@@ -906,6 +914,7 @@ final class AppSettings {
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
     'servePebbles': servePebbles,
+    if (inviteToken.isNotEmpty) 'inviteToken': inviteToken,
     'setupRevision': setupRevision,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
@@ -982,6 +991,7 @@ final class AppSettings {
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
       servePebbles: pick<bool>('servePebbles'),
+      inviteToken: pick<String>('inviteToken'),
       setupRevision: pick<int>('setupRevision'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),

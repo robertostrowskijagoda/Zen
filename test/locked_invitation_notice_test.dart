@@ -69,4 +69,23 @@ void main() {
         );
     expect(n?.title, 'Ania z pracy zaakceptował(a) zaproszenie');
   });
+
+  test('the kit keeps the invitation token for the locked phone', () {
+    final LockedNoticeKit kit = LockedNoticeKit.fromJson(
+      const LockedNoticeKit(inviteToken: 'ABCDE').toJson(),
+    )!;
+    expect(kit.inviteToken, 'ABCDE');
+    expect(
+      LockedNoticeKit.fromJson(const LockedNoticeKit().toJson())!.inviteToken,
+      '',
+    );
+    // A malformed token is no token.
+    expect(
+      LockedNoticeKit.fromJson(<String, dynamic>{
+        'v': 1,
+        'it': 'x',
+      })!.inviteToken,
+      '',
+    );
+  });
 }

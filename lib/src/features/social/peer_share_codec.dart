@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -45,6 +46,7 @@ final class PeerDialTarget {
     required this.address,
     required this.rawInput,
     required this.isToken,
+    this.inviteToken = '',
   });
 
   final String shareId;
@@ -52,6 +54,11 @@ final class PeerDialTarget {
   final String address;
   final String rawInput;
   final bool isToken;
+
+  /// The token of the invitation code it came from ('' for a code without
+  /// one): the friend request carries it, so the invited person knows it
+  /// came from their current code ([PeerShareCodec.inviteTokenFromCode]).
+  final String inviteToken;
 }
 
 final class PeerShareCodec {
@@ -167,12 +174,13 @@ final class PeerShareCodec {
   static PeerShareProfile? buildLocalProfile({
     required String address,
     String? displayName,
+    String inviteToken = '',
   }) {
     final String normalized = normalizeAddress(address);
     if (!_looksLikeYggAddress(normalized)) {
       return null;
     }
-    final String? code = inviteCodeForAddress(normalized);
+    final String? code = inviteCodeForAddress(normalized, token: inviteToken);
     if (code == null) {
       return null;
     }
@@ -193,13 +201,55 @@ final class PeerShareCodec {
   static const String _inviteAlphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
   static const int _inviteBodyLength = 24;
 
+  /// Characters of an invitation code's token ("Zmień kod", 25 random
+  /// bits): the code is the address and, once changed, the token after it.
+  static const int inviteTokenLength = 5;
+
+  /// A fresh token for "Zmień kod".
+  static String newInviteToken([Random? random]) {
+    final Random r = random ?? Random.secure();
+    return <String>[
+      for (int i = 0; i < inviteTokenLength; i++)
+        _inviteAlphabet[r.nextInt(_inviteAlphabet.length)],
+    ].join();
+  }
+
+  /// Whether [token] is a well-formed invitation token.
+  static bool isInviteToken(String token) =>
+      RegExp('^[$_inviteAlphabet]{$inviteTokenLength}\$').hasMatch(token);
+
+  /// Whether a friend request carrying [carried] comes in without a
+  /// notification for someone whose code has the token [current]: once
+  /// the code was changed, only a request from the current code is told
+  /// about (an old code, or an address learned elsewhere, still lands in
+  /// the invitations, quietly).
+  static bool invitationQuiet(String current, String? carried) =>
+      current.isNotEmpty && carried != current;
+
+  /// The token of an invitation code ('' for a code without one, or for
+  /// something that is no code).
+  static String inviteTokenFromCode(String input) {
+    final String cleaned = _cleanInviteCode(input);
+    if (cleaned.length != _inviteBodyLength + 1 + inviteTokenLength ||
+        addressFromInviteCode(input) == null) {
+      return '';
+    }
+    return cleaned.substring(_inviteBodyLength + 1);
+  }
+
+  static String _cleanInviteCode(String input) => input
+      .toUpperCase()
+      .replaceAll(RegExp(r'[\s-]'), '')
+      .replaceAll('O', '0')
+      .replaceAll(RegExp('[IL]'), '1');
+
   /// A short invite code for a node address: `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.
   ///
   /// Node addresses always start with the byte 0x02; the other 15 bytes go
   /// into 24 base32 characters, plus one checksum character that catches a
   /// typo. Unlike [shareIdForAddress] (a hash) the code carries the whole
   /// address, so it is enough to send an invitation.
-  static String? inviteCodeForAddress(String address) {
+  static String? inviteCodeForAddress(String address, {String token = ''}) {
     final Uint8List? bytes = _tryIpv6ToBytes(normalizeAddress(address));
     if (bytes == null || bytes[0] != 0x02) {
       return null;
@@ -219,6 +269,10 @@ final class PeerShareCodec {
     }
     // 120 bits are exactly 24 characters.
     out.write(_inviteAlphabet[_inviteChecksum(body)]);
+    // A changed code ("Zmień kod"): its token after the address.
+    if (isInviteToken(token)) {
+      out.write(token);
+    }
     final String raw = out.toString();
     return <String>[
       for (int i = 0; i < raw.length; i += 5) raw.substring(i, i + 5),
@@ -232,14 +286,16 @@ final class PeerShareCodec {
   /// The address an invite code stands for, or `null` when [input] is not a
   /// (valid) invite code.
   static String? addressFromInviteCode(String input) {
-    final String cleaned = input
-        .toUpperCase()
-        .replaceAll(RegExp(r'[\s-]'), '')
-        .replaceAll('O', '0')
-        .replaceAll(RegExp('[IL]'), '1');
-    if (cleaned.length != _inviteBodyLength + 1) {
+    final String full = _cleanInviteCode(input);
+    if (full.length != _inviteBodyLength + 1 &&
+        full.length != _inviteBodyLength + 1 + inviteTokenLength) {
       return null;
     }
+    if (full.length > _inviteBodyLength + 1 &&
+        !isInviteToken(full.substring(_inviteBodyLength + 1))) {
+      return null;
+    }
+    final String cleaned = full.substring(0, _inviteBodyLength + 1);
     final Uint8List body = Uint8List(15);
     int buffer = 0;
     int bits = 0;
@@ -278,11 +334,17 @@ final class PeerShareCodec {
         inviteCodeFromLink(trimmed) ??
         (trimmed.contains(RegExp(r'\s')) ? inviteCodeInText(trimmed) : null);
     if (linkCode != null) {
-      return inviteCodeForAddress(addressFromInviteCode(linkCode)!)!;
+      return inviteCodeForAddress(
+        addressFromInviteCode(linkCode)!,
+        token: inviteTokenFromCode(linkCode),
+      )!;
     }
     final String? invited = addressFromInviteCode(trimmed);
     if (invited != null) {
-      return inviteCodeForAddress(invited)!;
+      return inviteCodeForAddress(
+        invited,
+        token: inviteTokenFromCode(trimmed),
+      )!;
     }
     if (_looksLikePotentialShareId(trimmed)) {
       return _formatShareId(trimmed);
@@ -310,6 +372,7 @@ final class PeerShareCodec {
         address: invited,
         rawInput: trimmed,
         isToken: true,
+        inviteToken: inviteTokenFromCode(trimmed),
       );
     }
     if (_looksLikeShareId(trimmed)) {
@@ -345,6 +408,7 @@ final class PeerShareCodec {
       address: invited,
       rawInput: rawInput,
       isToken: true,
+      inviteToken: inviteTokenFromCode(rawInput.substring('zen://c/'.length)),
     );
   }
 

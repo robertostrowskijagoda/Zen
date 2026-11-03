@@ -569,6 +569,15 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     RuntimeSystemNotification notification, {
     ZenSignal? about,
   }) async {
+    if (about?.type == ZenSignalType.friendRequest &&
+        PeerShareCodec.invitationQuiet(
+          _appSettings.inviteToken,
+          about!.inviteId,
+        )) {
+      // Not from the current invitation code ("Zmień kod"): it waits among
+      // the invitations without a notification.
+      return false;
+    }
     if (about != null) {
       final FriendProfile? friend = state.friendByAddress(about.sender);
       final bool chat =

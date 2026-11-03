@@ -74,6 +74,7 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
           settings.notificationSounds,
           settings.mutedNotices,
           settings.postNotifications,
+          settings.inviteToken,
         ),
       ),
     );
@@ -107,6 +108,7 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
           if (settings.mutes(kind)) kind,
       },
       sounds: settings.notificationSounds,
+      inviteToken: settings.inviteToken,
     );
     final Map<String, dynamic> json = kit.toJson();
     final String signature = jsonEncode(json);

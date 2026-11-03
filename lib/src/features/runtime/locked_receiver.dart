@@ -1489,6 +1489,17 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
+      if (type == 'friend_request' &&
+          PeerShareCodec.invitationQuiet(
+            _noticeKit.inviteToken,
+            switch (payload['it']) {
+              final String token => token,
+              _ => null,
+            },
+          )) {
+        // Not from the current invitation code: kept, without a notice.
+        return;
+      }
       // Who invited (or accepted) and what they wrote, as the
       // notification level allows; a group invitation stays plain.
       final NoticeText? invite = _noticeKit.invitationNotice(
