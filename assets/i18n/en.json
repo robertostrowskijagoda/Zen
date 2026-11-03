@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Available",
   "🤒 Choruję": "🤒 Sick",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Need a moment to myself",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "The code holds nobody's address, only “doors” for fetching the pebble: nobody can be sent an invitation or a message from it."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "The code holds nobody's address, only “doors” for fetching the pebble: nobody can be sent an invitation or a message from it.",
+  "Powiadomienia z tego konta": "Notifications from this account",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "While this account receives in the background. A notification does not say from whom or what came, and tapping it opens this account. Off: nothing gives away that something came.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "This notification is from another account on this device. Open it in Accounts and recovery.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "First turn on “Receive in the background” in Accounts and recovery: without it a closed account receives nothing."
 }

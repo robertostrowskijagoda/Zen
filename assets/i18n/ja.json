@@ -5867,5 +5867,9 @@
   "🟢 Dostępny(-a)": "🟢 対応可能",
   "🤒 Choruję": "🤒 体調不良",
   "🫶 Potrzebuję chwili dla siebie": "🫶 ひとりの時間がほしい",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "コードには誰のアドレスも含まれず、小石を取得するための「扉」だけです。ここから誰かに招待やメッセージを送ることはできません。"
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "コードには誰のアドレスも含まれず、小石を取得するための「扉」だけです。ここから誰かに招待やメッセージを送ることはできません。",
+  "Powiadomienia z tego konta": "このアカウントからの通知",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "このアカウントがバックグラウンドで受信しているとき。通知には誰から何が届いたかは表示されず、タップするとこのアカウントが開きます。オフ：何かが届いたことは分かりません。",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "この通知はこの端末の別のアカウントからです。「アカウントと復元」で開いてください。",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "まず「アカウントと復元」で「バックグラウンドで受信」をオンにしてください。これがないと、閉じたアカウントは何も受信しません。"
 }

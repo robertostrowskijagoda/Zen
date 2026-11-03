@@ -6091,5 +6091,9 @@
   "🟢 Dostępny(-a)": "🟢 Disponibil(ă)",
   "🤒 Choruję": "🤒 Sunt bolnav(ă)",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Am nevoie de puțin timp pentru mine",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Codul nu conține adresa nimănui, doar „uși” pentru a descărca pietricica: din el nu se poate trimite nimănui o invitație sau un mesaj."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Codul nu conține adresa nimănui, doar „uși” pentru a descărca pietricica: din el nu se poate trimite nimănui o invitație sau un mesaj.",
+  "Powiadomienia z tego konta": "Notificări de la acest cont",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Când acest cont primește în fundal. Notificarea nu spune de la cine sau ce a venit, iar o atingere deschide acest cont. Dezactivat: nimic nu trădează că a venit ceva.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Această notificare vine de la alt cont de pe acest dispozitiv. Deschide-l în Conturi și recuperare.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Activează mai întâi „Primește în fundal” în Conturi și recuperare: fără asta, un cont închis nu primește nimic."
 }

@@ -6091,5 +6091,9 @@
   "🟢 Dostępny(-a)": "🟢 Dostupný(á)",
   "🤒 Choruję": "🤒 Jsem nemocný(á)",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Potřebuji chvilku pro sebe",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kód neobsahuje ničí adresu, jen „dveře“ ke stažení oblázku: z něj nejde nikomu poslat pozvánku ani zprávu."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kód neobsahuje ničí adresu, jen „dveře“ ke stažení oblázku: z něj nejde nikomu poslat pozvánku ani zprávu.",
+  "Powiadomienia z tego konta": "Oznámení z tohoto účtu",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Když tento účet přijímá na pozadí. Oznámení neřekne od koho ani co přišlo a klepnutí otevře tento účet. Vypnuto: nic neprozradí, že něco přišlo.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Toto oznámení je z jiného účtu na tomto zařízení. Otevři ho v Účty a obnovení.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Nejdřív zapni „Přijímat na pozadí“ v Účty a obnovení: bez toho zavřený účet nic nepřijímá."
 }

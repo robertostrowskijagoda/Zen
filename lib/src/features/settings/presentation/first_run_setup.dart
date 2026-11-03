@@ -7,6 +7,8 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/presentation/account_notify_switch.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
@@ -396,6 +398,9 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
         ),
       ),
       const ZenCard(child: NotificationPrivacySettingChoice()),
+      // An additional account: whether it tells anything while closed.
+      if (!ref.read(zenAccountProvider).isDefault)
+        const ZenCard(child: AccountNotifySwitch()),
     ],
     _SetupStep.iphone => <Widget>[
       ZenHero(

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/background_accounts.dart';
+import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
@@ -78,7 +79,7 @@ void main() {
     expect(entries, hasLength(ZenBackgroundAccounts.slots));
     for (final Object? e in entries) {
       final Map<dynamic, dynamic> m = e! as Map<dynamic, dynamic>;
-      expect(m.keys.toSet(), <String>{'f', 's'});
+      expect(m.keys.toSet(), <String>{'f', 's', 'n'});
       expect(m['f'], matches(RegExp(r'^[0-9a-f]{32}$')));
       expect(m['s'], matches(RegExp(r'^[0-9a-f]{64}$')));
     }
@@ -153,6 +154,56 @@ void main() {
     expect(nodes, isEmpty);
   });
 
+  test("an account's notifications can be turned off, and its notices "
+      'open that account', () async {
+    await registry.prepare();
+    final ZenAccountScope a = await registry.create();
+    final ZenAccountScope b = await registry.create();
+    await opened(a);
+    await opened(b);
+    await background.setOn(a, true);
+    await background.setOn(b, true);
+    expect(await background.notifies(a), isTrue, reason: 'on by default');
+    await background.setNotify(a, false);
+    expect(await background.notifies(a), isFalse);
+    expect(await background.notifies(b), isTrue);
+    expect(await background.isOn(a), isTrue, reason: 'still receives');
+    // The list keeps its length whatever the bits say.
+    expect(
+      (await background.load()).additional,
+      hasLength(ZenBackgroundAccounts.slots),
+    );
+
+    final MemoryRuntimeSystemNotificationService shade =
+        MemoryRuntimeSystemNotificationService();
+    await shade.initialize(onOpenRoute: (String _) async {});
+    const RuntimeSystemNotification message = RuntimeSystemNotification(
+      id: 'msg-ada',
+      title: 'Ada',
+      body: 'Hej',
+      createdAtMillis: 1,
+      category: RuntimeSystemNotificationCategory.message,
+    );
+    await GenericAccountNotices(
+      shade,
+      slot: 1,
+      folder: a.folder,
+      notify: false,
+    ).show(message);
+    expect(shade.activeNotifications, isEmpty);
+    await GenericAccountNotices(shade, slot: 2, folder: b.folder).show(message);
+    expect(
+      shade.activeNotifications.single.routeKey,
+      buildAccountRouteKey(b.folder!),
+    );
+    final RuntimeRouteIntent? intent = runtimeRouteIntentFromRouteKey(
+      id: 'n',
+      routeKey: buildAccountRouteKey(b.folder!),
+    );
+    expect(intent?.target, RuntimeRouteTarget.account);
+    expect(intent?.rawInput, b.folder);
+  });
+
   test("another account's notifications are generic", () async {
     final MemoryRuntimeSystemNotificationService shade =
         MemoryRuntimeSystemNotificationService();
@@ -177,6 +228,7 @@ void main() {
         RuntimeSystemNotificationCategory.message,
       ),
     );
+    // Without the account's folder it leads nowhere in particular.
     expect(shown.routeKey, isNull);
     expect(shown.id, isNot(contains('msg-ada')));
     expect(shown.slotKey, isNot(contains('chat-ada')));

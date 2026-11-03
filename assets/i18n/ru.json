@@ -6203,5 +6203,9 @@
   "🟢 Dostępny(-a)": "🟢 На связи",
   "🤒 Choruję": "🤒 Болею",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Нужна минутка для себя",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "В коде нет ничьих адресов, только «двери» для загрузки камешка: по нему никому нельзя отправить приглашение или сообщение."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "В коде нет ничьих адресов, только «двери» для загрузки камешка: по нему никому нельзя отправить приглашение или сообщение.",
+  "Powiadomienia z tego konta": "Уведомления этого аккаунта",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Когда этот аккаунт принимает в фоне. Уведомление не говорит, от кого и что пришло, а нажатие открывает этот аккаунт. Выключено: ничто не выдаёт, что что-то пришло.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Это уведомление от другого аккаунта на этом устройстве. Открой его в разделе «Аккаунты и восстановление».",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Сначала включи «Принимать в фоне» в разделе «Аккаунты и восстановление»: без этого закрытый аккаунт ничего не принимает."
 }

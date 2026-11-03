@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Disponibile",
   "🤒 Choruję": "🤒 Non sto bene",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Ho bisogno di un momento per me",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Il codice non contiene l’indirizzo di nessuno, solo «porte» per scaricare il sassolino: da esso non si può mandare a nessuno un invito né un messaggio."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Il codice non contiene l’indirizzo di nessuno, solo «porte» per scaricare il sassolino: da esso non si può mandare a nessuno un invito né un messaggio.",
+  "Powiadomienia z tego konta": "Notifiche da questo account",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Quando questo account riceve in background. Una notifica non dice da chi né cosa è arrivato, e toccarla apre questo account. Disattivato: nulla rivela che è arrivato qualcosa.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Questa notifica viene da un altro account di questo dispositivo. Aprilo in Account e recupero.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Prima attiva «Ricevi in background» in Account e recupero: senza, un account chiuso non riceve nulla."
 }

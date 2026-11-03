@@ -13,6 +13,7 @@ import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -24,14 +25,27 @@ import 'package:zen/src/features/security/sealed_inbox.dart';
 /// ID.
 @immutable
 final class ZenBackgroundAccount {
-  const ZenBackgroundAccount({required this.folder, required this.secret});
+  const ZenBackgroundAccount({
+    required this.folder,
+    required this.secret,
+    this.notify = true,
+  });
 
   final String folder;
   final Uint8List secret;
 
+  /// Whether the account posts notifications while it receives in the
+  /// background ("Powiadomienia z tego konta"); tapping one opens that
+  /// account. Padding gets a random bit, so the list tells nothing.
+  final bool notify;
+
+  ZenBackgroundAccount withNotify(bool on) =>
+      ZenBackgroundAccount(folder: folder, secret: secret, notify: on);
+
   Map<String, String> toJson() => <String, String>{
     'f': folder,
     's': _hex(secret),
+    'n': notify ? '1' : '0',
   };
 
   static ZenBackgroundAccount? fromJson(Object? json) {
@@ -52,6 +66,8 @@ final class ZenBackgroundAccount {
         for (int i = 0; i < 64; i += 2)
           int.parse(secret.substring(i, i + 2), radix: 16),
       ]),
+      // Lists written before 1.15.4 say nothing: notices on, as then.
+      notify: json['n'] != '0',
     );
   }
 
@@ -127,6 +143,38 @@ final class ZenBackgroundAccounts {
       (ZenBackgroundAccount a) =>
           a.matches(scope) && listEquals(a.secret, scope.secret),
     );
+  }
+
+  /// Whether [scope] posts notifications while it receives in the
+  /// background (an additional account; the default one always does).
+  Future<bool> notifies(ZenAccountScope scope) async {
+    if (scope.isDefault) {
+      return true;
+    }
+    final _Stored stored = await _read();
+    for (final ZenBackgroundAccount a in stored.entries) {
+      if (a.matches(scope) && listEquals(a.secret, scope.secret)) {
+        return a.notify;
+      }
+    }
+    return true;
+  }
+
+  /// "Powiadomienia z tego konta" for [scope] (an additional account that
+  /// receives in the background); nothing for the default account.
+  Future<void> setNotify(ZenAccountScope scope, bool on) async {
+    if (scope.isDefault) {
+      return;
+    }
+    final _Stored stored = await _read();
+    final List<ZenBackgroundAccount> real = <ZenBackgroundAccount>[
+      for (final ZenBackgroundAccount a in stored.entries)
+        if (await _isReal(a))
+          a.matches(scope) && listEquals(a.secret, scope.secret)
+              ? a.withNotify(on)
+              : a,
+    ];
+    await _write(stored.defaultOn, real);
   }
 
   /// Turns "Odbieraj w tle" on or off for [scope]. Returns false when no
@@ -237,6 +285,7 @@ final class ZenBackgroundAccounts {
               ? _hex(_bytes(16))
               : folders[_random.nextInt(folders.length)],
           secret: _bytes(32),
+          notify: _random.nextBool(),
         ),
     ];
   }
@@ -264,13 +313,25 @@ final Provider<ZenBackgroundAccounts> zenBackgroundAccountsProvider =
     );
 
 /// What an additional account's notifications look like while it receives
-/// in the background: no name, no content, no account — the same generic
-/// line whatever account it is ("Nowe powiadomienie" / "Nowa wiadomość").
-/// Tapping one opens Zen at the lock screen.
+/// in the background: no name, no content — the same generic line whatever
+/// account it is ("Nowe powiadomienie" / "Nowa wiadomość"). Tapping one
+/// opens that account ([folder], buildAccountRouteKey). None at all when
+/// the account's notifications are off ([notify]).
 final class GenericAccountNotices implements RuntimeSystemNotificationService {
-  GenericAccountNotices(this.delegate, {required this.slot});
+  GenericAccountNotices(
+    this.delegate, {
+    required this.slot,
+    this.folder,
+    this.notify = true,
+  });
 
   final RuntimeSystemNotificationService delegate;
+
+  /// The account's folder: the notification opens it.
+  final String? folder;
+
+  /// "Powiadomienia z tego konta".
+  final bool notify;
 
   /// Keeps one account's notifications apart from another's (never
   /// shown).
@@ -286,9 +347,14 @@ final class GenericAccountNotices implements RuntimeSystemNotificationService {
 
   @override
   Future<bool> show(RuntimeSystemNotification notification) {
+    if (!notify) {
+      return Future<bool>.value(false);
+    }
+    final String? folder = this.folder;
     return delegate.show(
       RuntimeSystemNotification(
         id: _id(notification.id),
+        routeKey: folder == null ? null : buildAccountRouteKey(folder),
         title: PrivacyRedactingNotificationService.genericTitle,
         body: PrivacyRedactingNotificationService.genericBodyFor(
           notification.category == RuntimeSystemNotificationCategory.message
@@ -464,7 +530,12 @@ final class BackgroundAccountNode {
         final BackgroundAccountNode? node = await open(
           accounts: accounts,
           account: account,
-          notices: GenericAccountNotices(notices, slot: slot),
+          notices: GenericAccountNotices(
+            notices,
+            slot: slot,
+            folder: account.folder,
+            notify: account.notify,
+          ),
           waitTimeout: waitTimeout,
           secrets: secrets,
           goneApp: goneApp,

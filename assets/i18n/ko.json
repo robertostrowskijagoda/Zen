@@ -5867,5 +5867,9 @@
   "🟢 Dostępny(-a)": "🟢 연락 가능",
   "🤒 Choruję": "🤒 아파요",
   "🫶 Potrzebuję chwili dla siebie": "🫶 잠시 혼자 있고 싶어요",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "코드에는 누구의 주소도 없고 조약돌을 받아 올 ‘문’만 있습니다. 이 코드로는 누구에게도 초대나 메시지를 보낼 수 없습니다."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "코드에는 누구의 주소도 없고 조약돌을 받아 올 ‘문’만 있습니다. 이 코드로는 누구에게도 초대나 메시지를 보낼 수 없습니다.",
+  "Powiadomienia z tego konta": "이 계정의 알림",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "이 계정이 백그라운드에서 받을 때. 알림은 누구에게서 무엇이 왔는지 알려 주지 않으며, 누르면 이 계정이 열립니다. 끄면: 무언가 왔다는 사실이 드러나지 않습니다.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "이 알림은 이 기기의 다른 계정에서 왔습니다. 계정 및 복구에서 여세요.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "먼저 계정 및 복구에서 ‘백그라운드에서 받기’를 켜세요. 그래야 닫힌 계정도 받을 수 있습니다."
 }

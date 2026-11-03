@@ -2569,7 +2569,7 @@
   "Otwórz folder": "फ़ोल्डर खोलें",
   "Otwórz grupę": "ग्रुप खोलें",
   "Otwórz i odpowiedz.": "खोलें और जवाब दें।",
-  "Otwórz konto": "अकाउंट खोलें",
+  "Otwórz konto": "खाता खोलें",
   "Otwórz na GitHubie": "GitHub पर खोलें",
   "Otwórz na Tablicy →": "फ़ीड में खोलें →",
   "Otwórz nasłuch": "लिसनिंग पोर्ट खोलें",
@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 उपलब्ध हूँ",
   "🤒 Choruję": "🤒 बीमार हूँ",
   "🫶 Potrzebuję chwili dla siebie": "🫶 अपने लिए थोड़ा वक़्त चाहिए",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "कोड में किसी का पता नहीं है, बस कंकड़ लाने के लिए “दरवाज़े” हैं: इससे किसी को न्योता या संदेश नहीं भेजा जा सकता।"
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "कोड में किसी का पता नहीं है, बस कंकड़ लाने के लिए “दरवाज़े” हैं: इससे किसी को न्योता या संदेश नहीं भेजा जा सकता।",
+  "Powiadomienia z tego konta": "इस खाते से सूचनाएँ",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "जब यह खाता पृष्ठभूमि में प्राप्त करता है। सूचना नहीं बताती कि किससे या क्या आया, और छूने पर यही खाता खुलता है। बंद: कुछ भी नहीं बताता कि कुछ आया।",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "यह सूचना इस डिवाइस के किसी दूसरे खाते से है। इसे खाते और वापसी में खोलें।",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "पहले खाते और वापसी में “पृष्ठभूमि में प्राप्त करें” चालू करें: इसके बिना बंद खाता कुछ नहीं पाता।"
 }

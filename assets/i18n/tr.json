@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Müsaitim",
   "🤒 Choruję": "🤒 Hastayım",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Biraz yalnız kalmak istiyorum",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kodda kimsenin adresi yok, yalnızca çakıl taşını almak için “kapılar” var: ondan kimseye davet ya da mesaj gönderilemez."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kodda kimsenin adresi yok, yalnızca çakıl taşını almak için “kapılar” var: ondan kimseye davet ya da mesaj gönderilemez.",
+  "Powiadomienia z tego konta": "Bu hesaptan bildirimler",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Bu hesap arka planda alırken. Bildirim kimden ya da ne geldiğini söylemez, dokunmak bu hesabı açar. Kapalı: bir şey geldiğini hiçbir şey ele vermez.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Bu bildirim bu cihazdaki başka bir hesaptan. Hesaplar ve kurtarma bölümünden aç.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Önce Hesaplar ve kurtarma bölümünde “Arka planda al”ı aç: o olmadan kapalı bir hesap hiçbir şey almaz."
 }

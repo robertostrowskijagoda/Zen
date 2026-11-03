@@ -5867,5 +5867,9 @@
   "🟢 Dostępny(-a)": "🟢 有空",
   "🤒 Choruję": "🤒 生病了",
   "🫶 Potrzebuję chwili dla siebie": "🫶 想独处一会儿",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "二维码里没有任何人的地址，只有用于获取石子的“门”：无法借此向任何人发送邀请或消息。"
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "二维码里没有任何人的地址，只有用于获取石子的“门”：无法借此向任何人发送邀请或消息。",
+  "Powiadomienia z tego konta": "来自此账户的通知",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "当此账户在后台接收时。通知不会说明来自谁或收到了什么，点按会打开此账户。关闭：不会透露收到了任何东西。",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "此通知来自本设备上的另一个账户。请在“账户与恢复”中打开它。",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "请先在“账户与恢复”中打开“在后台接收”：否则关闭的账户收不到任何东西。"
 }

@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Disponible",
   "🤒 Choruję": "🤒 Je suis malade",
   "🫶 Potrzebuję chwili dla siebie": "🫶 J’ai besoin de temps pour moi",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Le code ne contient l’adresse de personne, seulement des « portes » pour récupérer le galet : on ne peut envoyer à personne une invitation ni un message à partir de lui."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Le code ne contient l’adresse de personne, seulement des « portes » pour récupérer le galet : on ne peut envoyer à personne une invitation ni un message à partir de lui.",
+  "Powiadomienia z tego konta": "Notifications de ce compte",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Quand ce compte reçoit en arrière-plan. Une notification ne dit ni de qui ni ce qui est arrivé, et la toucher ouvre ce compte. Désactivé : rien ne trahit qu’il est arrivé quelque chose.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Cette notification vient d’un autre compte de cet appareil. Ouvre-le dans Comptes et récupération.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Active d’abord « Recevoir en arrière-plan » dans Comptes et récupération : sans cela, un compte fermé ne reçoit rien."
 }

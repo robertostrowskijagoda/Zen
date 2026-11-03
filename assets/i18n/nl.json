@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Beschikbaar",
   "🤒 Choruję": "🤒 Ik ben ziek",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Ik heb even tijd voor mezelf nodig",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "De code bevat niemands adres, alleen ‘deuren’ om de kiezel op te halen: niemand kan er een uitnodiging of bericht mee krijgen."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "De code bevat niemands adres, alleen ‘deuren’ om de kiezel op te halen: niemand kan er een uitnodiging of bericht mee krijgen.",
+  "Powiadomienia z tego konta": "Meldingen van dit account",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Als dit account op de achtergrond ontvangt. Een melding zegt niet van wie of wat er kwam, en erop tikken opent dit account. Uit: niets verraadt dat er iets kwam.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Deze melding komt van een ander account op dit apparaat. Open het via Accounts en herstel.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Zet eerst ‘Op de achtergrond ontvangen’ aan via Accounts en herstel: zonder dat ontvangt een gesloten account niets."
 }

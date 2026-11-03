@@ -2631,7 +2631,7 @@
   "Otwórz folder": "Відкрити теку",
   "Otwórz grupę": "Відкрити групу",
   "Otwórz i odpowiedz.": "Відкрий і дай відповідь.",
-  "Otwórz konto": "Відкрити акаунт",
+  "Otwórz konto": "Відкрити обліковий запис",
   "Otwórz na GitHubie": "Відкрити на GitHub",
   "Otwórz na Tablicy →": "Відкрити на Стрічці →",
   "Otwórz nasłuch": "Відкрий прослуховування",
@@ -6203,5 +6203,9 @@
   "🟢 Dostępny(-a)": "🟢 На зв’язку",
   "🤒 Choruję": "🤒 Хворію",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Мені потрібна хвилина для себе",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "У коді немає нічиїх адрес, лише «двері» для завантаження камінчика: з нього нікому не можна надіслати запрошення чи повідомлення."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "У коді немає нічиїх адрес, лише «двері» для завантаження камінчика: з нього нікому не можна надіслати запрошення чи повідомлення.",
+  "Powiadomienia z tego konta": "Сповіщення з цього облікового запису",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Коли цей обліковий запис отримує у фоні. Сповіщення не каже, від кого й що прийшло, а дотик відкриває цей обліковий запис. Вимкнено: ніщо не видає, що щось прийшло.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Це сповіщення з іншого облікового запису на цьому пристрої. Відкрий його в розділі «Облікові записи та відновлення».",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Спершу увімкни «Отримувати у фоні» в розділі «Облікові записи та відновлення»: без цього закритий обліковий запис нічого не отримує."
 }

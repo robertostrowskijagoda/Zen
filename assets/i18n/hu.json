@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Elérhető",
   "🤒 Choruję": "🤒 Beteg vagyok",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Kell egy kis időm magamra",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "A kód senkinek a címét nem tartalmazza, csak „ajtókat” a kavics letöltéséhez: belőle senkinek sem lehet meghívót vagy üzenetet küldeni."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "A kód senkinek a címét nem tartalmazza, csak „ajtókat” a kavics letöltéséhez: belőle senkinek sem lehet meghívót vagy üzenetet küldeni.",
+  "Powiadomienia z tego konta": "Értesítések ebből a fiókból",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Amikor ez a fiók a háttérben fogad. Az értesítés nem mondja meg, kitől vagy mi jött, és koppintásra ez a fiók nyílik meg. Kikapcsolva: semmi sem árulja el, hogy jött valami.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Ez az értesítés egy másik fiókból jött ezen az eszközön. Nyisd meg a Fiókok és visszaállítás részben.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Előbb kapcsold be a „Fogadás a háttérben” lehetőséget a Fiókok és visszaállítás részben: enélkül a bezárt fiók semmit sem fogad."
 }

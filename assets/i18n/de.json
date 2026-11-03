@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Verfügbar",
   "🤒 Choruję": "🤒 Ich bin krank",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Brauche einen Moment für mich",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Der Code enthält keine Adresse, nur „Türen“ zum Abholen des Kiesels: Niemandem lässt sich daraus eine Einladung oder Nachricht schicken."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Der Code enthält keine Adresse, nur „Türen“ zum Abholen des Kiesels: Niemandem lässt sich daraus eine Einladung oder Nachricht schicken.",
+  "Powiadomienia z tego konta": "Benachrichtigungen von diesem Konto",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Wenn dieses Konto im Hintergrund empfängt. Eine Benachrichtigung sagt nicht, von wem oder was kam, und ein Tippen öffnet dieses Konto. Aus: Nichts verrät, dass etwas kam.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Diese Benachrichtigung stammt von einem anderen Konto auf diesem Gerät. Öffne es unter Konten und Wiederherstellung.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Schalte zuerst „Im Hintergrund empfangen“ unter Konten und Wiederherstellung ein: Ohne das empfängt ein geschlossenes Konto nichts."
 }

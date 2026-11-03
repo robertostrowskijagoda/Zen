@@ -5867,5 +5867,9 @@
   "🟢 Dostępny(-a)": "🟢 Tersedia",
   "🤒 Choruję": "🤒 Sedang sakit",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Butuh waktu sendiri",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kode ini tidak memuat alamat siapa pun, hanya “pintu” untuk mengambil kerikil: dari kode ini tak seorang pun bisa dikirimi undangan atau pesan."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Kode ini tidak memuat alamat siapa pun, hanya “pintu” untuk mengambil kerikil: dari kode ini tak seorang pun bisa dikirimi undangan atau pesan.",
+  "Powiadomienia z tego konta": "Notifikasi dari akun ini",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Saat akun ini menerima di latar belakang. Notifikasi tidak menyebut dari siapa atau apa yang datang, dan mengetuknya membuka akun ini. Mati: tidak ada yang menandakan sesuatu datang.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Notifikasi ini dari akun lain di perangkat ini. Buka di Akun dan pemulihan.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Aktifkan dulu “Terima di latar belakang” di Akun dan pemulihan: tanpa itu akun yang tertutup tidak menerima apa pun."
 }

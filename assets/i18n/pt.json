@@ -5979,5 +5979,9 @@
   "🟢 Dostępny(-a)": "🟢 Disponível",
   "🤒 Choruję": "🤒 Estou doente",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Preciso de um tempo para mim",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "O código não tem o endereço de ninguém, só «portas» para obter o seixo: a partir dele não se pode enviar a ninguém um convite nem uma mensagem."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "O código não tem o endereço de ninguém, só «portas» para obter o seixo: a partir dele não se pode enviar a ninguém um convite nem uma mensagem.",
+  "Powiadomienia z tego konta": "Notificações desta conta",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Quando esta conta recebe em segundo plano. A notificação não diz de quem nem o que chegou, e tocar nela abre esta conta. Desligado: nada denuncia que chegou algo.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Esta notificação é de outra conta neste dispositivo. Abra-a em Contas e recuperação.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Primeiro ative «Receber em segundo plano» em Contas e recuperação: sem isso, uma conta fechada não recebe nada."
 }

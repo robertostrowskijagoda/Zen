@@ -5867,5 +5867,9 @@
   "🟢 Dostępny(-a)": "🟢 Có mặt",
   "🤒 Choruję": "🤒 Đang ốm",
   "🫶 Potrzebuję chwili dla siebie": "🫶 Cần chút thời gian cho riêng mình",
-  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Mã không chứa địa chỉ của ai, chỉ có “cửa” để tải viên sỏi: từ mã này không thể gửi lời mời hay tin nhắn cho ai."
+  "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "Mã không chứa địa chỉ của ai, chỉ có “cửa” để tải viên sỏi: từ mã này không thể gửi lời mời hay tin nhắn cho ai.",
+  "Powiadomienia z tego konta": "Thông báo từ tài khoản này",
+  "Gdy to konto odbiera w tle. Powiadomienie nie mówi, od kogo ani co przyszło, a stuknięcie otwiera to konto. Wyłączone: nic nie zdradza, że coś przyszło.": "Khi tài khoản này nhận ở chế độ nền. Thông báo không nói từ ai hay điều gì đến, chạm vào sẽ mở tài khoản này. Tắt: không gì để lộ là có thứ gì đến.",
+  "To powiadomienie jest z innego konta na tym urządzeniu. Otwórz je w Konta i odzyskiwanie.": "Thông báo này từ tài khoản khác trên thiết bị này. Mở nó trong Tài khoản và khôi phục.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Trước tiên hãy bật “Nhận ở chế độ nền” trong Tài khoản và khôi phục: không có nó, tài khoản đã đóng không nhận gì."
 }
