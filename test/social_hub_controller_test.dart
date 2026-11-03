@@ -4556,61 +4556,80 @@ void main() {
     });
   });
 
-  test(
-    'message read signal marks the matching outgoing message as read',
-    () async {
-      final MemoryMessageTimelineStore timelineStore =
-          MemoryMessageTimelineStore(<String, List<ChatMessage>>{
-            'ada.ygg': const <ChatMessage>[
-              ChatMessage(
-                id: 'm-1',
-                sender: 'self',
-                text: 'Hej',
-                sentAtMillis: 1,
-                direction: ChatMessageDirection.outgoing,
-                deliveryState: ChatMessageDeliveryState.delivered,
-              ),
-            ],
-          });
-      final ProviderContainer container = ProviderContainer(
-        overrides: [
-          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-          socialSnapshotStoreProvider.overrideWithValue(
-            MemorySocialSnapshotStore(),
+  test('message read signal marks the matching outgoing message, and every '
+      'earlier one, as read', () async {
+    final MemoryMessageTimelineStore timelineStore = MemoryMessageTimelineStore(
+      <String, List<ChatMessage>>{
+        'ada.ygg': const <ChatMessage>[
+          ChatMessage(
+            id: 'm-0',
+            sender: 'self',
+            text: 'Cześć',
+            sentAtMillis: 0,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
           ),
-          messageTimelineStoreProvider.overrideWithValue(timelineStore),
-          socialHubSeedProvider.overrideWithValue(
-            SocialHubState.empty().copyWith(
-              book: FriendshipBook.restore(
-                profiles: const <String, FriendProfile>{
-                  'ada.ygg': FriendProfile(
-                    address: 'ada.ygg',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
-              ),
-            ),
+          ChatMessage(
+            id: 'm-1',
+            sender: 'self',
+            text: 'Hej',
+            sentAtMillis: 1,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
+          ),
+          ChatMessage(
+            id: 'm-2',
+            sender: 'self',
+            text: 'Jesteś?',
+            sentAtMillis: 9,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
           ),
         ],
-      );
-      addTearDown(container.dispose);
-
-      await container
-          .read(socialHubControllerProvider.notifier)
-          .receiveSignal(
-            const ZenSignal(
-              type: ZenSignalType.messageRead,
-              sender: 'ada.ygg',
-              messageId: 'm-1',
+      },
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(timelineStore),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                'ada.ygg': FriendProfile(
+                  address: 'ada.ygg',
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
             ),
-            receivedAtMillis: 5,
-          );
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
 
-      final List<ChatMessage> messages = await timelineStore.load('ada.ygg');
-      expect(messages.single.readAtMillis, 5);
-    },
-  );
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .receiveSignal(
+          const ZenSignal(
+            type: ZenSignalType.messageRead,
+            sender: 'ada.ygg',
+            messageId: 'm-1',
+          ),
+          receivedAtMillis: 5,
+        );
+
+    final List<ChatMessage> messages = await timelineStore.load('ada.ygg');
+    // The one named and every one sent before it; not a later one.
+    expect(
+      <int?>[for (final m in messages) m.readAtMillis],
+      <int?>[5, 5, null],
+    );
+  });
 
   test('opening a conversation can clear unread state persistently', () async {
     final MemorySocialSnapshotStore snapshotStore = MemorySocialSnapshotStore();
