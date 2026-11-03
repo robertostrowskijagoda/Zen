@@ -100,6 +100,10 @@ function Get-ZenSourceHash([string]$Salt) {
   $files += @(Get-ChildItem -Path (Join-Path $root 'internal') -Filter '*.go' -File -Recurse |
       Where-Object { $_.Name -notlike '*_test.go' } |
       Sort-Object FullName)
+  # The patched modules it builds with (third_party/, replaced in go.mod).
+  $files += @(Get-ChildItem -Path (Join-Path $root 'third_party') -Filter '*.go' -File -Recurse |
+      Where-Object { $_.Name -notlike '*_test.go' } |
+      Sort-Object FullName)
   $files += @(Get-Item -LiteralPath (Join-Path $root 'go.mod'), (Join-Path $root 'go.sum'), $buildScript)
   $lines = @(foreach ($file in $files) {
       "$($file.Name) $(Get-ZenFileSha256 $file.FullName)"

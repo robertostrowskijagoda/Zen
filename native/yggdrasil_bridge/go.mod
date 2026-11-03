@@ -24,3 +24,7 @@ require (
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
+
+// ironwood with one change of Zen's (third_party/ironwood/ZEN.md): a
+// session init not acked within a second is sent anew, not repeated.
+replace github.com/Arceliar/ironwood => ./third_party/ironwood

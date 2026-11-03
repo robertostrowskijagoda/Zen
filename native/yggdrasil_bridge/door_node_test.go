@@ -212,9 +212,10 @@ func waitMesh(t *testing.T, what string, ok func() bool) {
 }
 
 // warmPaths waits until a and b have mesh paths to each other. A session
-// begun before a new node's bloom filters have reached the far side stalls
-// for a minute: ironwood answers a repeated session init only once, and
-// that answer had no path yet.
+// begun before a new node's bloom filters have reached the far side waits
+// for them: ironwood answers a session init only once, and that answer had
+// no path yet (upstream stalled for a minute; the patched copy sends a new
+// init a second later, third_party/ironwood/ZEN.md).
 func warmPaths(t *testing.T, a, b *core.Core) {
 	t.Helper()
 	hasPath := func(from *core.Core, to ed25519.PublicKey) bool {

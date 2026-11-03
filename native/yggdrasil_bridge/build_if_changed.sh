@@ -40,7 +40,9 @@ sha() {
 
 sources=$(
   cd "$root"
-  for file in $(ls *.go internal/*/*.go | grep -v '_test\.go$' | sort) go.mod go.sum build_android.sh; do
+  # The bridge's own packages and the patched modules it builds with
+  # (third_party/, replaced in go.mod) count as its sources.
+  for file in $( (ls *.go internal/*/*.go; find third_party -name '*.go') | grep -v '_test\.go$' | sort) go.mod go.sum build_android.sh; do
     printf '%s %s\n' "$file" "$(sha < "$file")"
   done
 )
