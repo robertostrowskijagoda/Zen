@@ -10,6 +10,24 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] A call rings like a phone call, loudly and with vibration, shows as a call over the lock screen, and its sound goes to your car or headphones.
+- [en] Chats show the date of their last activity, nine new pebble shapes, and you can pick which friends keep your pebble.
+- [pl] Połączenie dzwoni jak telefon, głośno i z wibracją, pokazuje się jak rozmowa na zablokowanym ekranie, a dźwięk idzie do auta albo słuchawek.
+- [pl] Czaty pokazują datę ostatniej aktywności, jest dziewięć nowych kształtów kamyczków i możesz sam wybrać, kto przechowuje Twój kamyczek.
+
+### Fixes and changes
+- **Ringing**: an incoming call rings with the phone's own ringtone, over and over at the ringer's volume, and a repeating vibration, as the ringer mode allows (ZenRinger.kt), also while Zen is locked; it played the notification's sound once, quietly, and the phone did not vibrate. The ringing notice itself is silent.
+- **A call shows as a call**: on a locked phone the call card comes with a full-screen call notification (CallStyle, Android 12 on) that Android lets open over the lock screen; Android often refused to start the card from the background, which left a plain notification. While Zen is locked, the call card shows too ("Odbierz" opens Zen to unlock it).
+- **Call sound in the car**: with the loudspeaker off, flutter_webrtc took the first of Bluetooth, wired headset and earpiece in the order Android lists them, often the earpiece while a car's Bluetooth was connected; a connected headset is now chosen by name, and at the start of a call it wins over the loudspeaker too.
+- **Last activity in chats**: the time of the last message is worked out when shown (the date and time, or the time alone for today), not kept as words made when it came ("Teraz" stayed "Teraz").
+- **Read ticks**: a read receipt marks every earlier message read too, not only the one it names.
+- **"Czeka w skrzynkach u znajomych odbiorcy"**: a copy held only by this device, as the recipient's one mailbox, shows as waiting here.
+- **Pebbles**: nine new natural shapes (triangular, square, hexagonal, teardrop, kidney, seed, tile, narrow flat, boulder), older designs unchanged; the editor's stone tab shows a stone; "Wybierz, kogo poprosić" lets the author ask friends of their own choice to keep a pebble.
+- **Start**: the window is black from the first moment, like the splash and the first frame, with no white flash between them.
+- **Graph**: the person and filter sheets stay above the system's navigation bar.
+- **Invitations**: the buttons under an invitation are further apart.
+
 ## 1.15.3 — 30.10.2026
 
 ### What's new
