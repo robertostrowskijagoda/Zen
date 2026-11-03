@@ -191,15 +191,15 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       return t('Konto ma już inne hasło. Najpierw podaj obecne.');
     }
     final List<String> helpers = _helpers();
-    if (checkRecoveryCircle(helpers, minimum: kEmergencyThreshold) ==
+    if (checkRecoveryCircle(helpers, minimum: kRecoveryCircleMinimum) ==
         RecoveryCircleProblem.tooMany) {
       return t('Wybierz najwyżej {n} osób.', <String, Object?>{
         'n': kMaxRecoveryHelpers,
       });
     }
-    if (helpers.length < kEmergencyThreshold) {
+    if (helpers.length < kRecoveryCircleMinimum) {
       return tn(
-        kEmergencyThreshold,
+        kRecoveryCircleMinimum,
         one:
             'Potrzeba co najmniej {n} znajomego, który '
             'przechowa klucze odzyskiwania.',
@@ -317,23 +317,19 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
 
   /// Finds the accounts the received pieces open; nothing is taken until
   /// the person confirms one ([_adopt]).
-  Future<String> _recover({required bool emergency}) async {
+  Future<String> _recover() async {
     final RecoveryService? service = _service;
     if (service == null || _node == null) {
       return t('Konto nie jest jeszcze gotowe.');
     }
-    final List<RecoveredAccount> found = emergency
-        ? await recoverWithoutPassword(service.received(RecoveryKind.emergency))
-        : await recoverWithPassword(
-            service.received(RecoveryKind.normal),
-            _recoverPassword.text,
-            acceptedCosts: service.acceptedCosts,
-          );
+    final List<RecoveredAccount> found = await recoverWithPassword(
+      service.received(RecoveryKind.normal),
+      _recoverPassword.text,
+      acceptedCosts: service.acceptedCosts,
+    );
     _candidates = found.isEmpty ? null : found;
     if (found.isEmpty) {
-      return emergency
-          ? t('Klucze nie pasują do siebie. Poczekaj na więcej.')
-          : t('Złe hasło albo za mało pasujących kluczy.');
+      return t('Złe hasło albo za mało pasujących kluczy.');
     }
     return t('Klucze pasują. Sprawdź odcisk konta, zanim je przejmiesz.');
   }
@@ -434,7 +430,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       text: to == null ? '' : PeerShareCodec.inviteCodeForAddress(to) ?? to,
     );
     String? error;
-    RecoveryKind kind = RecoveryKind.normal;
+    const RecoveryKind kind = RecoveryKind.normal;
     final PeerQrScanner scanner = ref.read(peerQrScannerProvider);
     String? check(String text) {
       if (text.trim().isEmpty) {
@@ -526,28 +522,6 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    ChoiceChip(
-                      showCheckmark: false,
-                      avatar: const Icon(Icons.password_rounded, size: 18),
-                      label: Text(t('Pamięta hasło (24 h)')),
-                      selected: kind == RecoveryKind.normal,
-                      onSelected: (_) =>
-                          setDialog(() => kind = RecoveryKind.normal),
-                    ),
-                    ChoiceChip(
-                      showCheckmark: false,
-                      avatar: const Icon(Icons.timer_outlined, size: 18),
-                      label: Text(t('Bez hasła (7 dni)')),
-                      selected: kind == RecoveryKind.emergency,
-                      onSelected: (_) =>
-                          setDialog(() => kind = RecoveryKind.emergency),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
@@ -860,10 +834,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
 
   /// "Kto przechowa klucze": the person's choice of the circle, the closest
   /// friends ticked by default (no weak acquaintances), at least
-  /// [kEmergencyThreshold] and at most [kMaxRecoveryHelpers].
+  /// [kRecoveryCircleMinimum] and at most [kMaxRecoveryHelpers].
   Widget _circlePicker(ZenColors zen, SocialHubState social) {
     final List<String> pickable = _pickable(social);
-    if (pickable.length < kEmergencyThreshold) {
+    if (pickable.length < kRecoveryCircleMinimum) {
       return ZenInfo(
         key: const Key('recovery-circle-too-few'),
         icon: Icons.group_add_outlined,
@@ -879,14 +853,14 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           many:
               'Krąg potrzebuje co najmniej {min} znajomych. Masz {n} — '
               'dodaj znajomych, a Zen przypomni o kręgu.',
-          args: <String, Object?>{'min': kEmergencyThreshold},
+          args: <String, Object?>{'min': kRecoveryCircleMinimum},
         ),
       );
     }
     final Set<String> picked = _picked ?? _defaultHelpers(social).toSet();
     final RecoveryCircleProblem? problem = checkRecoveryCircle(
       picked,
-      minimum: kEmergencyThreshold,
+      minimum: kRecoveryCircleMinimum,
     );
     return Column(
       key: const Key('recovery-circle-picker'),
@@ -901,7 +875,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             'do których zadzwonisz. Każda dostanie kawałek klucza — sama nic '
             'z nim nie zrobi.',
             <String, Object?>{
-              'min': kEmergencyThreshold,
+              'min': kRecoveryCircleMinimum,
               'max': kMaxRecoveryHelpers,
             },
           ),
@@ -941,7 +915,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           switch (problem) {
             RecoveryCircleProblem.tooFew => t(
               'Wybrano {n} — potrzeba co najmniej {min}.',
-              <String, Object?>{'n': picked.length, 'min': kEmergencyThreshold},
+              <String, Object?>{
+                'n': picked.length,
+                'min': kRecoveryCircleMinimum,
+              },
             ),
             RecoveryCircleProblem.tooMany => t(
               'Wybrano {n} — najwyżej {max}.',
@@ -1305,6 +1282,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
+                        ZenInfo(
+                          key: const Key('recovery-password-warning'),
+                          icon: Icons.warning_amber_rounded,
+                          text: t(
+                            'Zapamiętaj hasło konta: bez niego konta nie da '
+                            'się odzyskać, nawet ze wszystkimi znajomymi z '
+                            'kręgu. Zen go nie zna i nie przypomni.',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         FilledButton(
                           key: const Key('recovery-set-password'),
                           style: FilledButton.styleFrom(
@@ -1313,7 +1300,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           onPressed:
                               _busy ||
                                   social.acceptedFriends.length <
-                                      kEmergencyThreshold
+                                      kRecoveryCircleMinimum
                               ? null
                               : () => unawaited(_run(_setPassword)),
                           child: Text(
@@ -1446,8 +1433,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             'Poproś dwie osoby z kręgu, żeby pomogły odzyskać '
                             'Twoje konto (ich lista jest przy kopii klucza albo '
                             'na starym telefonie). Wpisz tu ich kody — dostaną '
-                            'prośbę o pomoc. Po 24 h wpisz hasło konta. Bez '
-                            'hasła potrzeba czterech osób i 7 dni.',
+                            'prośbę o pomoc. Po 24 h wpisz hasło konta: bez '
+                            'niego konta nie da się odzyskać.',
                           ),
                         ),
                         _recoverScope(zen, const Key('recovery-scope-before')),
@@ -1560,27 +1547,15 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             service.receivedCount(RecoveryKind.normal),
                             kNormalThreshold,
                           ),
-                          _progress(
-                            zen,
-                            t('Klucze bez hasła'),
-                            service.receivedCount(RecoveryKind.emergency),
-                            kEmergencyThreshold,
-                          ),
                           const SizedBox(height: 8),
                           Text(
                             t(
-                              'Otrzymane klucze: {normal}/{normalNeeded} '
-                              '(z hasłem), {emergency}/{emergencyNeeded} '
-                              '(bez hasła)',
+                              'Otrzymane klucze: {normal}/{normalNeeded}',
                               <String, Object?>{
                                 'normal': service.receivedCount(
                                   RecoveryKind.normal,
                                 ),
                                 'normalNeeded': kNormalThreshold,
-                                'emergency': service.receivedCount(
-                                  RecoveryKind.emergency,
-                                ),
-                                'emergencyNeeded': kEmergencyThreshold,
                               },
                             ),
                             key: const Key('recovery-received'),
@@ -1613,29 +1588,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                                     service.receivedCount(RecoveryKind.normal) <
                                         kNormalThreshold
                                 ? null
-                                : () => unawaited(
-                                    _run(() => _recover(emergency: false)),
-                                  ),
+                                : () => unawaited(_run(_recover)),
                             icon: const Icon(Icons.restore_rounded),
                             label: Text(t('Odzyskaj z hasłem')),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            key: const Key('recovery-recover-emergency'),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(48),
-                            ),
-                            onPressed:
-                                _busy ||
-                                    service.receivedCount(
-                                          RecoveryKind.emergency,
-                                        ) <
-                                        kEmergencyThreshold
-                                ? null
-                                : () => unawaited(
-                                    _run(() => _recover(emergency: true)),
-                                  ),
-                            child: Text(t('Odzyskaj bez hasła')),
                           ),
                           const SizedBox(height: 4),
                           TextButton(

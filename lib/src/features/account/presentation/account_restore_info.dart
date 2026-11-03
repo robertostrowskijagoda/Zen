@@ -243,9 +243,10 @@ class AccountRestoreInfoScreen extends StatelessWidget {
                 icon: Icons.groups_2_outlined,
                 title: t('Krąg odzyskiwania'),
                 text: t(
-                  'Osoby z kręgu oddają kawałki klucza: z hasłem konta po '
-                  '24 h, bez hasła po 7 dniach. Potem z ich kopii wracają '
-                  'znajomi, grupy, profil, ustawienia i reszta z tabeli.',
+                  'Dwie osoby z kręgu oddają kawałki klucza po 24 h, a Ty '
+                  'wpisujesz hasło konta (bez niego się nie da). Potem z '
+                  'ich kopii wracają znajomi, grupy, profil, ustawienia i '
+                  'reszta z tabeli.',
                 ),
               ),
               _Way(

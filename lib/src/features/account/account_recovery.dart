@@ -11,12 +11,11 @@ import 'package:zen/src/core/ledger/shamir.dart';
 
 /// Account password and recovery through the circle.
 ///
-/// The account key (its 32-byte seed) can be got back in two ways:
-///
-/// * **normal**: 2 people from the circle + the account password, released
-///   by them 24 h after they agree to help (the old devices get an alarm
-///   and can stop it);
-/// * **emergency** (password forgotten): 4 people from the circle, 7 days.
+/// The account key (its 32-byte seed) is got back with 2 people from the
+/// circle + the account password, released by them 24 h after they agree
+/// to help (the old devices get an alarm and can stop it). There is no way
+/// back without the password (since 1.15.4: the "emergency" path of 4
+/// people without it is gone, a piece's `emergency` half opens nothing).
 ///
 /// Each person holds one [RecoveryPiece]: a share of each of two random
 /// secrets plus the two encrypted copies of the seed. One piece alone
@@ -31,10 +30,13 @@ import 'package:zen/src/core/ledger/shamir.dart';
 ///   password, which they can then guess offline at their own pace. Every
 ///   guess costs one Argon2id run ([kRecoveryPasswordCost], heavier than
 ///   the device's own); a long passphrase is what really protects it.
-/// * Four colluding helpers recover the account without any password (the
-///   emergency half), which is the point of that path.
+/// * Pieces handed out before 1.15.4 still hold a working `emergency` half
+///   (four helpers together, no password); helpers on 1.15.4 never release
+///   it, and handing the pieces out again replaces them.
 const int kNormalThreshold = 2;
-const int kEmergencyThreshold = 4;
+
+/// The fewest people a circle may have: as many as a recovery needs.
+const int kRecoveryCircleMinimum = kNormalThreshold;
 const Duration kNormalDelay = Duration(hours: 24);
 const Duration kEmergencyDelay = Duration(days: 7);
 
@@ -308,10 +310,10 @@ Future<List<RecoveryPiece>> createRecoveryPieces({
   PasswordCost cost = kRecoveryPasswordCost,
 }) async {
   checkAccountPassword(password);
-  if (helpers < kEmergencyThreshold) {
+  if (helpers < kRecoveryCircleMinimum) {
     throw ArgumentError(
       tn(
-        kEmergencyThreshold,
+        kRecoveryCircleMinimum,
         one: 'Do odzyskiwania potrzeba co najmniej {n} osoby w kręgu.',
         few: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
         many: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
@@ -330,7 +332,13 @@ Future<List<RecoveryPiece>> createRecoveryPieces({
     _mix(passwordKey, circleSecret),
     seed,
   );
-  final Map<String, dynamic> emergencyBox = await _seal(emergencyKey, seed);
+  // No way back without the password: the `emergency` half keeps its form
+  // (helpers on an older Zen still take the piece) but its box holds
+  // random bytes, never the seed.
+  final Map<String, dynamic> emergencyBox = await _seal(
+    emergencyKey,
+    randomBytes(32),
+  );
   final List<Uint8List> normalShares = shamirSplit(
     circleSecret,
     kNormalThreshold,
@@ -338,7 +346,7 @@ Future<List<RecoveryPiece>> createRecoveryPieces({
   );
   final List<Uint8List> emergencyShares = shamirSplit(
     emergencyKey,
-    kEmergencyThreshold,
+    helpers,
     helpers,
   );
   return <RecoveryPiece>[
@@ -631,17 +639,3 @@ Future<List<RecoveredAccount>> recoverWithPassword(
     },
   );
 }
-
-/// The accounts that at least four `emergency` halves of one set open;
-/// empty if none. As with [recoverWithPassword], the person confirms the
-/// account before taking it.
-Future<List<RecoveredAccount>> recoverWithoutPassword(
-  List<Map<String, dynamic>> emergencies,
-) => _recoverAccounts(
-  emergencies,
-  threshold: kEmergencyThreshold,
-  setKey: (Map<String, dynamic> h) => jsonEncode(h['box']),
-  opener: (_) async => _open,
-  // Trying a set is cheap: every 4 of 24 halves (one per sender) fit.
-  limit: 12000,
-);

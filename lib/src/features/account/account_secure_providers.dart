@@ -38,7 +38,7 @@ bool accountHasCircle(T Function<T>(ProviderListenable<T> provider) watch) {
 const String kCircleReminderTip = 'circle-reminder';
 
 /// Whether the person should be told, once, that the circle can be set
-/// up now: enough friends ([kEmergencyThreshold]) and no circle yet — also
+/// up now: enough friends ([kRecoveryCircleMinimum]) and no circle yet — also
 /// when a key copy was made, since the key alone does not bring friends
 /// and conversations back. Gone after "Nie teraz" or once the circle is
 /// there.
@@ -50,7 +50,7 @@ bool circleReminderDue({
 }) =>
     ledgerOn &&
     !hasCircle &&
-    friends >= kEmergencyThreshold &&
+    friends >= kRecoveryCircleMinimum &&
     !settings.seenTips.contains(kCircleReminderTip);
 
 /// [circleReminderDue] for this account. Invalidate it after the circle

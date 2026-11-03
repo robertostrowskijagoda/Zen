@@ -77,8 +77,8 @@ String recoveryCircleListText({
     ..writeln(
       t(
         'Nowy telefon: Konto i odzyskiwanie → Zacznij odzyskiwanie. Wpisz '
-        'tam kody tych osób i poproś dwie z nich o pomoc (z hasłem konta), '
-        'albo cztery (bez hasła, 7 dni).',
+        'tam kody tych osób i poproś dwie z nich o pomoc. Potrzebne będzie '
+        'hasło konta: bez niego konta nie da się odzyskać.',
       ),
     );
   return out.toString();
