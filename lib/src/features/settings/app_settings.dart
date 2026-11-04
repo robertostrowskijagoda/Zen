@@ -25,6 +25,11 @@ const int kLocalLinksRevision = 1;
 /// such a copy, they are on (switched off again, they stay off).
 const int kNoticesRevision = 1;
 
+/// Settings saved before this revision had Apple's Multipeer links off from
+/// when they were off by default: read from such a copy, they are on
+/// (switched off again, they stay off).
+const int kAppleLinksRevision = 1;
+
 /// Settings of this device rather than of the account: a copy of the
 /// account that does not bring the app's lock along (the recovery circle,
 /// another device, a backup file without it) never replaces them
@@ -490,7 +495,7 @@ final class AppSettings {
     this.lanDiscovery,
     this.wifiDirect = true,
     this.bluetoothLinks = true,
-    this.multipeerLinks = false,
+    this.multipeerLinks = true,
     this.keepReceivingInBackground = false,
     this.showLastOpened = true,
     this.seenTips = const <String>{},
@@ -700,7 +705,8 @@ final class AppSettings {
   final bool bluetoothLinks;
 
   /// "Apple Wi-Fi/Bluetooth" (iPhone, iPad, Mac): Apple's Multipeer
-  /// Connectivity between nearby Apple devices. Off by default.
+  /// Connectivity between nearby Apple devices. On by default (since
+  /// 1.15.5, [kAppleLinksRevision]), like the other links.
   final bool multipeerLinks;
 
   /// iPhone: "Odbieraj w tle cały czas" — a silent sound keeps Zen running
@@ -962,6 +968,7 @@ final class AppSettings {
     'bluetoothLinks': bluetoothLinks,
     'linksRev': kLocalLinksRevision,
     'noticesRev': kNoticesRevision,
+    'appleLinksRev': kAppleLinksRevision,
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
     'showLastOpened': showLastOpened,
@@ -1058,7 +1065,10 @@ final class AppSettings {
       lanDiscovery: oldLinks ? null : pick<bool>('lanDiscovery'),
       wifiDirect: oldLinks ? null : pick<bool>('wifiDirect'),
       bluetoothLinks: oldLinks ? null : pick<bool>('bluetoothLinks'),
-      multipeerLinks: pick<bool>('multipeerLinks'),
+      multipeerLinks:
+          (pick<int>('appleLinksRev') ?? 0) < kAppleLinksRevision
+          ? null
+          : pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       showLastOpened: pick<bool>('showLastOpened'),
       seenTips: switch (json['seenTips']) {
