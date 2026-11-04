@@ -556,6 +556,23 @@ jobs:
           CGO_ENABLED: '1'
         run: go test -count=1 -v ./... 2>&1 | tee go-test.log
 
+      # Random input for every parser of what comes from the network or a
+      # nearby device (wire_fuzz_test.go): each target a few seconds on
+      # every run, beyond the seeds `go test` runs above. A finding is
+      # written to testdata/fuzz/<target>/ and printed; it becomes a seed
+      # once committed.
+      - name: Fuzz the wire parsers
+        id: fuzz
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          for target in $(grep -oE '^func (Fuzz[A-Za-z0-9]+)' wire_fuzz_test.go | cut -d' ' -f2); do
+            echo "::group::$target"
+            go test -run '^$' -fuzz "^$target\$" -fuzztime 8s . 2>&1 | tee -a go-test.log
+            echo "::endgroup::"
+          done
+
       - name: Summary
         if: ${{ !cancelled() }}
         shell: bash
