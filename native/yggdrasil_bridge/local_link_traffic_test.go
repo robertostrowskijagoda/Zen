@@ -169,6 +169,9 @@ func linkedPhone(t *testing.T) (node *bridgeNode, friend *core.Core, publicURI s
 // friend's own traffic, not strangers': no hold, and the friend keeps its
 // way out.
 func TestAFriendsTrafficThroughThePhoneStartsNoHold(t *testing.T) {
+	if raceEnabled {
+		t.Skip("3 MB in 30 s: a measure of speed, which the race detector slows")
+	}
 	node, friend, publicURI := linkedPhone(t)
 	public := func() ed25519.PublicKey {
 		for _, peer := range node.core.GetPeers() {

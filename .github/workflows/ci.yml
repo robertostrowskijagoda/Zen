@@ -552,7 +552,7 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.code == 'true' }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: native/yggdrasil_bridge
@@ -579,6 +579,17 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: go test -count=1 -v ./... 2>&1 | tee go-test.log
+
+      # The same tests under the race detector: two goroutines touching
+      # one variable without a lock or an actor between them fail here
+      # (ironwood's counters did, third_party/ironwood/ZEN.md). The few
+      # tests that measure speed skip themselves (race_on_test.go).
+      - name: Race detector
+        id: race
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race -count=1 ./... 2>&1 | tee -a go-test.log
 
       # Random input for every parser of what comes from the network or a
       # nearby device (wire_fuzz_test.go): each target a few seconds on
