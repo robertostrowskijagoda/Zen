@@ -23,6 +23,8 @@ final class GroupProfile {
     this.memberNames = const <String, String>{},
     this.pendingInviteIds = const <String, String>{},
     this.receivedInviteIds = const <String>[],
+    this.inviteMemberNames = const <String>[],
+    this.awaitingMembersFrom = '',
   });
 
   factory GroupProfile.fromJson(Map<String, dynamic> json) {
@@ -66,6 +68,12 @@ final class GroupProfile {
               ?.map((dynamic e) => e.toString())
               .toList() ??
           const <String>[],
+      inviteMemberNames:
+          (json['inviteMemberNames'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
+          const <String>[],
+      awaitingMembersFrom: (json['awaitingMembersFrom'] as String?) ?? '',
     );
   }
 
@@ -104,7 +112,24 @@ final class GroupProfile {
   /// or leaving remembers them, so only a *new* invitation brings it back.
   final List<String> receivedInviteIds;
 
-  int get memberCount => memberAddresses.length;
+  /// Invitee side, until joining: the names of the group's other members
+  /// (neither the inviter nor this person) as the inviter knows them. An
+  /// invitation carries no member's address but the inviter's; the others'
+  /// come once this device joined.
+  final List<String> inviteMemberNames;
+
+  /// Invitee side, after joining: the inviter whose list of the members'
+  /// addresses has not come yet ('' once it came, or for an invitation that
+  /// carried them). The "joined" answer goes to them again whenever they
+  /// show up, until the list comes: one lost datagram would otherwise
+  /// leave this device in a group of two.
+  final String awaitingMembersFrom;
+
+  /// While an invitation is pending: the named members, the inviter and
+  /// this person.
+  int get memberCount => isInvitePending && inviteMemberNames.isNotEmpty
+      ? inviteMemberNames.length + 2
+      : memberAddresses.length;
 
   bool hasMember(String address) => memberAddresses.contains(address);
 
@@ -124,6 +149,8 @@ final class GroupProfile {
     Map<String, String>? memberNames,
     Map<String, String>? pendingInviteIds,
     List<String>? receivedInviteIds,
+    List<String>? inviteMemberNames,
+    String? awaitingMembersFrom,
   }) {
     return GroupProfile(
       id: id ?? this.id,
@@ -142,6 +169,8 @@ final class GroupProfile {
       memberNames: memberNames ?? this.memberNames,
       pendingInviteIds: pendingInviteIds ?? this.pendingInviteIds,
       receivedInviteIds: receivedInviteIds ?? this.receivedInviteIds,
+      inviteMemberNames: inviteMemberNames ?? this.inviteMemberNames,
+      awaitingMembersFrom: awaitingMembersFrom ?? this.awaitingMembersFrom,
     );
   }
 
@@ -162,5 +191,8 @@ final class GroupProfile {
     if (memberNames.isNotEmpty) 'memberNames': memberNames,
     if (pendingInviteIds.isNotEmpty) 'pendingInviteIds': pendingInviteIds,
     if (receivedInviteIds.isNotEmpty) 'receivedInviteIds': receivedInviteIds,
+    if (inviteMemberNames.isNotEmpty) 'inviteMemberNames': inviteMemberNames,
+    if (awaitingMembersFrom.isNotEmpty)
+      'awaitingMembersFrom': awaitingMembersFrom,
   };
 }

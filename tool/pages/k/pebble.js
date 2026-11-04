@@ -96,11 +96,11 @@
   }
 
   // The QR card in [b] (format v2), or null. Since Zen 1.15.3 a sticker
-  // may name up to 3 keepers after it (u8 count, 16 bytes of each network
-  // address): whom the app asks for the full design. The page shows none
-  // of them; the link it opens in the app keeps them.
+  // may name up to 4 pebble doors after it (u8 count, 16 bytes of each
+  // network address): whom the app asks for the full design. The page
+  // shows none of them; the link it opens in the app keeps them.
   function decodeQr(b) {
-    if (b.length < 1 + 16 + 32 + 12 + 2 || b.length > 1 + 16 + 32 + 12 + 1 + 24 + 1 + 16 + 1 + 3 * 16) { return null; }
+    if (b.length < 1 + 16 + 32 + 12 + 2 || b.length > 1 + 16 + 32 + 12 + 1 + 24 + 1 + 16 + 1 + 4 * 16) { return null; }
     var at = 1;
     function take(n) {
       if (at + n > b.length) { throw new Error("short"); }
@@ -129,7 +129,7 @@
       card.keepers = 0;
       if (at < b.length) {
         var n = u8();
-        if (n < 1 || n > 3 || at + 16 * n !== b.length) { return null; }
+        if (n < 1 || n > 4 || at + 16 * n !== b.length) { return null; }
         card.keepers = n;
         at += 16 * n;
       }

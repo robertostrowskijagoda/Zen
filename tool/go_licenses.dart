@@ -63,7 +63,11 @@ Future<void> main() async {
       _Module(
         path: req.$1,
         version: req.$2,
-        directory: '$modCache/${_escapeModulePath(req.$1)}@${req.$2}',
+        // A module replaced by a folder of the bridge (a patched copy,
+        // with its licence) is read there.
+        directory:
+            _localReplacements(goMod)[req.$1] ??
+            '$modCache/${_escapeModulePath(req.$1)}@${req.$2}',
         assetName: '${req.$1.replaceAll('/', '_')}.txt',
         source: _sourceUrl(req.$1),
       ),
@@ -195,6 +199,16 @@ List<(String, String)> _requirements(String goMod) {
   }
   return out;
 }
+
+/// Modules replaced by a folder (`replace path => ./folder`), as the
+/// folder's path from the repository's root.
+Map<String, String> _localReplacements(String goMod) => <String, String>{
+  for (final RegExpMatch m in RegExp(
+    r'^replace\s+(\S+)\s+=>\s+(\.{1,2}/\S+)\s*$',
+    multiLine: true,
+  ).allMatches(goMod))
+    m.group(1)!: '$_bridgeDir/${m.group(2)!.replaceFirst(RegExp(r'^\./'), '')}',
+};
 
 /// The module cache spells capital letters as `!` + lower case.
 String _escapeModulePath(String path) {

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/quic-go/quic-go"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
@@ -148,7 +147,7 @@ func TestSetPublicPeersJSON(t *testing.T) {
 
 func TestApplyPublicPeersSwapsOnlyThePublicOnes(t *testing.T) {
 	cfg := config.GenerateConfig()
-	yggCore, err := core.New(cfg.Certificate, log.New(io.Discard, "", 0))
+	yggCore, err := core.New(cfg.Certificate, newBridgeLogger(io.Discard))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +159,7 @@ func TestApplyPublicPeersSwapsOnlyThePublicOnes(t *testing.T) {
 	node := &bridgeNode{
 		core:        yggCore,
 		config:      cfg,
-		logger:      log.New(io.Discard, "", 0),
+		logger:      newBridgeLogger(io.Discard),
 		publicPeers: publicPeersOf(cfg.Peers),
 	}
 	// A bridge learnt from friends later, through YggAddPeer.

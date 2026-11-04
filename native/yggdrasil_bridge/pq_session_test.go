@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -647,7 +646,7 @@ func TestPQReplayWindow(t *testing.T) {
 // out of the other's signal inbox as the app sent it, and the mesh carried
 // only sealed frames.
 func TestPQSignalsBetweenTwoMeshNodes(t *testing.T) {
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	// The hub is the mesh's root (the lowest key), as in newTestMesh.
 	var hubKey ed25519.PrivateKey
 	for hubKey == nil || hubKey.Public().(ed25519.PublicKey)[0] != 0 ||

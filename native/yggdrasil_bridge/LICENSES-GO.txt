@@ -61,7 +61,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 
 ========================================================================
-github.com/Arceliar/ironwood v0.0.0-20260613025018-d50055b11f5e
+github.com/Arceliar/ironwood v0.0.0-20261023231900-0712eccbb962
 Kod źródłowy: https://github.com/Arceliar/ironwood
 ========================================================================
 
@@ -478,7 +478,7 @@ IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
 OF SUCH DAMAGE.
 
 ========================================================================
-github.com/klauspost/compress v1.18.7
+github.com/klauspost/compress v1.20.3
 Kod źródłowy: https://github.com/klauspost/compress
 ========================================================================
 
@@ -843,7 +843,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/quic-go/quic-go v0.64.1
+github.com/quic-go/quic-go v0.65.0
 Kod źródłowy: https://github.com/quic-go/quic-go
 ========================================================================
 
@@ -904,7 +904,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/yggdrasil-network/yggdrasil-go v0.5.14
+github.com/yggdrasil-network/yggdrasil-go v0.5.15
 Kod źródłowy: https://github.com/yggdrasil-network/yggdrasil-go
 ========================================================================
 
@@ -1208,6 +1208,39 @@ implementation of Go constitutes direct or contributory patent
 infringement, or inducement of patent infringement, then any patent
 rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
+
+========================================================================
+filippo.io/edwards25519 v1.2.0
+Kod źródłowy: https://filippo.io/edwards25519
+========================================================================
+
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
 github.com/Arceliar/phony v0.0.0-20220903101357-530938a4b13d
@@ -1589,7 +1622,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ========================================================================
-github.com/bits-and-blooms/bitset v1.24.5
+github.com/bits-and-blooms/bitset v1.29.0
 Kod źródłowy: https://github.com/bits-and-blooms/bitset
 ========================================================================
 
@@ -1671,7 +1704,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ========================================================================
-github.com/hjson/hjson-go/v4 v4.6.0
+github.com/hjson/hjson-go/v4 v4.7.1
 Kod źródłowy: https://github.com/hjson/hjson-go
 ========================================================================
 
@@ -1698,7 +1731,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================
-golang.org/x/net v0.60.0
+golang.org/x/net v0.62.0
 Kod źródłowy: https://go.googlesource.com/net
 ========================================================================
 

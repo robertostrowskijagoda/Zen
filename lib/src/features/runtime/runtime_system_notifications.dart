@@ -1278,8 +1278,11 @@ final class FlutterLocalRuntimeSystemNotificationService
         // dismissible or they pile up as notifications the user cannot swipe.
         ongoing: isRinging,
         autoCancel: !isRinging,
-        // Quiet: no sound and no vibration, whatever the channel says.
-        silent: notification.silent,
+        // Quiet: no sound and no vibration, whatever the channel says. A
+        // ringing call too: the phone rings for it itself, over and over at
+        // the ringer's volume (ZenRinger.kt); the channel's sound would play
+        // once on top of it.
+        silent: notification.silent || (isRinging && !isAlarm),
         playSound: sound != null,
         sound: sound == null
             ? null

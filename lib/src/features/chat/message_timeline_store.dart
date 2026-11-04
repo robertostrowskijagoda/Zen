@@ -1063,45 +1063,6 @@ final class MemoryMessageTimelineStore implements MessageTimelineStore {
   }
 }
 
-Map<String, List<ChatMessage>> buildPreviewMessageThreads() {
-  return <String, List<ChatMessage>>{
-    'ada.ygg': const <ChatMessage>[
-      ChatMessage(
-        id: 'ada-system-1',
-        sender: 'system',
-        text: 'Połączenie z Ada jest gotowe.',
-        sentAtMillis: 1775807880000,
-        direction: ChatMessageDirection.system,
-      ),
-      ChatMessage(
-        id: 'ada-incoming-1',
-        sender: 'ada.ygg',
-        text: 'Jestem online, mogę wejść na rozmowę za 5 minut.',
-        sentAtMillis: 1775808000000,
-        direction: ChatMessageDirection.incoming,
-      ),
-    ],
-    'maks.ygg': const <ChatMessage>[
-      ChatMessage(
-        id: 'maks-incoming-1',
-        sender: 'maks.ygg',
-        text: 'Wrzucilem build i logi do naszej skrzynki odbiorczej.',
-        sentAtMillis: 1775806860000,
-        direction: ChatMessageDirection.incoming,
-      ),
-    ],
-    'nina.ygg': const <ChatMessage>[
-      ChatMessage(
-        id: 'nina-system-1',
-        sender: 'system',
-        text: 'Transfer zakończył się bez zrywania połączenia.',
-        sentAtMillis: 1775721600000,
-        direction: ChatMessageDirection.system,
-      ),
-    ],
-  };
-}
-
 /// [thread] with [message] placed by its send time.
 ///
 /// Nearly always an append. A message that was held by relays while this

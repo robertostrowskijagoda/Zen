@@ -1989,6 +1989,21 @@ void main() {
       expect(mesh.nodes[bob]!.receivedTexts, <String>['tylko u mnie']);
     });
 
+    test("a copy only the sender holds, as the recipient's one mailbox, "
+        "waits here, not in friends' mailboxes", () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[alice]);
+      await mesh.settle();
+      await mesh.goOffline(bob);
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await sender.submit(bob, _text('tylko u siebie'));
+      await mesh.advance(const Duration(seconds: 5));
+      final MessageDeliveryProgress? progress =
+          sender.progress.value.messages['m-tylko u siebie'];
+      expect(progress?.inMailboxes, 0);
+      expect(progress?.waitingHere, 1);
+    });
+
     test('a sender that is one of the recipient\'s trusted friends keeps a '
         'copy in its own mailbox for it as well', () async {
       final _SimMesh mesh = await _meshWithRelays();
@@ -2017,7 +2032,8 @@ void main() {
       final MessageDeliveryProgress? progress =
           sender.progress.value.messages['m-u mnie też'];
       expect(progress?.inMailboxes, 1);
-      expect(progress?.mailboxCopies, 2);
+      // The friend's mailbox; the sender's own copy is not counted there.
+      expect(progress?.mailboxCopies, 1);
       expect(progress?.heldBySelf, isTrue);
 
       // The other mailbox is away: bob collects the sender's own copy.

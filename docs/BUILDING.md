@@ -1,7 +1,7 @@
 # Building from source
 
 You always need [Flutter](https://docs.flutter.dev/get-started/install)
-3.47.1 and [Go](https://go.dev/dl/) in the version from `native/yggdrasil_bridge/go.mod`
+3.47.9 and [Go](https://go.dev/dl/) in the version from `native/yggdrasil_bridge/go.mod`
 (its `toolchain` line; any Go from 1.21 on downloads that version by itself).
 The Go network bridge builds itself on `flutter build` and `flutter run` — only
 when its sources changed (details: [RELEASES.md](RELEASES.md), point 3.1).

@@ -10,6 +10,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/shamir.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
+import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -76,7 +77,8 @@ void main() {
     );
   });
 
-  test('the seed comes back with 2 pieces + password, or 4 without', () async {
+  test('the seed comes back with 2 pieces + password, never without the '
+      'password', () async {
     final LedgerKeyPair key = await LedgerKeyPair.generate();
     final Uint8List seed = key.seed;
     final List<RecoveryPiece> pieces = await createRecoveryPieces(
@@ -112,11 +114,35 @@ void main() {
     expect(await withPassword(normals(<int>[1, 4]), _password), seed);
     expect(await withPassword(normals(<int>[1, 4]), 'zle-haslo-9'), isNull);
     expect(await withPassword(normals(<int>[2]), _password), isNull);
+    // The `emergency` halves (kept for older helpers) open no seed, all
+    // of them together neither.
+    expect(emergencies(<int>[0, 1, 2, 3, 4, 5]), hasLength(6));
+    for (final RecoveryPiece piece in pieces) {
+      expect(piece.emergency['share'], isNotNull);
+    }
+    // Two people are enough for a circle; one is not.
     expect(
-      _seedOf(await recoverWithoutPassword(emergencies(<int>[0, 2, 3, 5]))),
-      seed,
+      await createRecoveryPieces(
+        account: key.id,
+        seed: seed,
+        password: _password,
+        helpers: 2,
+        now: 1,
+        cost: _light,
+      ),
+      hasLength(2),
     );
-    expect(await recoverWithoutPassword(emergencies(<int>[0, 2, 3])), isEmpty);
+    expect(
+      () => createRecoveryPieces(
+        account: key.id,
+        seed: seed,
+        password: _password,
+        helpers: 1,
+        now: 1,
+        cost: _light,
+      ),
+      throwsArgumentError,
+    );
     // A cost the app does not write is never run.
     expect(await recoverWithPassword(normals(<int>[1, 4]), _password), isEmpty);
 
@@ -164,47 +190,43 @@ void main() {
     }) => <Map<String, dynamic>>[
       for (int i = 0; i < from.length; i++)
         <String, dynamic>{
-          ...from[i].emergency,
+          ...from[i].normal,
           'account': ?account,
           'from': '$prefix$i',
         },
     ];
+    Future<List<RecoveredAccount>> open(List<Map<String, dynamic>> h) =>
+        recoverWithPassword(h, _password, acceptedCosts: _lightCosts);
 
     // Named and checked.
-    final RecoveredAccount got = (await recoverWithoutPassword(
-      halves(pieces.take(4).toList(), account: mine.id),
+    final RecoveredAccount got = (await open(
+      halves(pieces.take(2).toList(), account: mine.id),
     )).single;
     expect(got.account, mine.id);
     expect(got.seed, mine.seed);
-    expect(got.helpers, <String>{'h0', 'h1', 'h2', 'h3'});
+    expect(got.helpers, <String>{'h0', 'h1'});
     expect(got.fingerprint, accountFingerprint(mine.id));
 
     // Halves that say they are another account's key are not taken.
     expect(
-      await recoverWithoutPassword(
-        halves(pieces.take(4).toList(), account: other.id),
-      ),
+      await open(halves(pieces.take(2).toList(), account: other.id)),
       isEmpty,
     );
 
     // Halves that name no account are not used.
-    expect(
-      await recoverWithoutPassword(halves(pieces.take(4).toList())),
-      isEmpty,
-    );
+    expect(await open(halves(pieces.take(2).toList())), isEmpty);
 
     // A fake half naming the account does not count as a helper.
     final List<Map<String, dynamic>> mixed = <Map<String, dynamic>>[
       ...halves(pieces.take(5).toList(), account: mine.id),
       <String, dynamic>{
-        ...pieces[0].emergency,
+        ...pieces[0].normal,
         'share': b64(randomBytes(33)),
         'account': mine.id,
         'from': 'fake',
       },
     ];
-    final RecoveredAccount both = (await recoverWithoutPassword(mixed)).single;
-    expect(both.helpers, hasLength(5));
+    final RecoveredAccount both = (await open(mixed)).single;
     expect(both.helpers.contains('fake'), isFalse);
 
     // A full set for another account shows up as a second account.
@@ -212,18 +234,16 @@ void main() {
       account: other.id,
       seed: other.seed,
       password: _password,
-      helpers: 4,
+      helpers: 2,
       now: 1,
       cost: _light,
     );
     final List<Map<String, dynamic>> all = <Map<String, dynamic>>[
-      ...halves(pieces.take(4).toList(), account: mine.id),
+      ...halves(pieces.take(2).toList(), account: mine.id),
       ...halves(foreign, account: other.id, prefix: 'x'),
     ];
     expect(
-      (await recoverWithoutPassword(
-        all,
-      )).map((RecoveredAccount a) => a.account),
+      (await open(all)).map((RecoveredAccount a) => a.account),
       unorderedEquals(<String>[mine.id, other.id]),
     );
     expect(claimedRecoveryAccounts(all), <String>{mine.id, other.id});
@@ -668,6 +688,7 @@ void main() {
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
           ledgerNodeEnabledProvider.overrideWithValue(true),
           ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          recoveryAcceptedCostsProvider.overrideWithValue(_lightCosts),
         ],
         child: const MaterialApp(home: AccountRecoveryScreen()),
       ),
@@ -684,10 +705,12 @@ void main() {
     }
     expect(find.text('Nikt jeszcze nie powierzył Ci klucza.'), findsOneWidget);
 
-    // Without four friends the circle is not offered: the button waits,
+    // Without two friends the circle is not offered: the button waits,
     // and the screen says why.
     expect(find.byKey(const Key('recovery-circle-too-few')), findsOneWidget);
-    expect(find.textContaining('co najmniej 4 znajomych'), findsOneWidget);
+    expect(find.textContaining('co najmniej 2 znajomych'), findsOneWidget);
+    // Without the password there is no way back, and the screen says so.
+    expect(find.byKey(const Key('recovery-password-warning')), findsOneWidget);
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('recovery-set-password')))
@@ -718,12 +741,13 @@ void main() {
           signalTransportProvider.overrideWithValue(transport),
           ledgerNodeEnabledProvider.overrideWithValue(true),
           ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          recoveryAcceptedCostsProvider.overrideWithValue(_lightCosts),
         ],
         child: const MaterialApp(home: AccountRecoveryScreen()),
       ),
     );
-    Future<void> waitFor(bool Function() done) async {
-      for (int i = 0; i < 40 && !done(); i++) {
+    Future<void> waitFor(bool Function() done, {int rounds = 40}) async {
+      for (int i = 0; i < rounds && !done(); i++) {
         await tester.runAsync(() => _settle());
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -779,32 +803,33 @@ void main() {
         cost: _light,
       );
       await transport.start();
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 2; i++) {
         await transport.injectIncoming(
           from: '200::b${i + 1}',
           payload: <String, dynamic>{
             'type': RecoveryMessages.piece,
-            'kind': RecoveryKind.emergency.name,
-            'half': pieces[i].emergency,
+            'kind': RecoveryKind.normal.name,
+            'half': pieces[i].normal,
             'account': key.id,
           },
         );
       }
       await _settle();
     });
-    final Finder recover = find.byKey(const Key('recovery-recover-emergency'));
-    await waitFor(
-      () => tester.widget<OutlinedButton>(recover).onPressed != null,
-    );
-    await tapKey('recovery-recover-emergency');
+    final Finder recover = find.byKey(const Key('recovery-recover'));
+    await waitFor(() => tester.widget<FilledButton>(recover).onPressed != null);
+    final Finder password = find.byKey(const Key('recovery-old-password'));
+    await tester.ensureVisible(password);
+    await tester.enterText(password, _password);
+    await tapKey('recovery-recover');
     final Finder fingerprint = find.byKey(const Key('recovery-fingerprint-0'));
-    await waitFor(() => fingerprint.evaluate().isNotEmpty);
+    await waitFor(() => fingerprint.evaluate().isNotEmpty, rounds: 200);
 
     expect(
       tester.widget<SelectableText>(fingerprint).data,
       accountFingerprint(key.id),
     );
-    expect(find.text('Klucze od 4 różnych osób'), findsOneWidget);
+    expect(find.text('Klucze od 2 różnych osób'), findsOneWidget);
     expect(find.byKey(const Key('recovery-adopt-0')), findsOneWidget);
     expect(find.byKey(const Key('recovery-mixed-accounts')), findsNothing);
     expect(find.byKey(const Key('recovery-scope-after')), findsOneWidget);

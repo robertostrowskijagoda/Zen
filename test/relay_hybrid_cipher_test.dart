@@ -88,6 +88,23 @@ void main() {
     // The envelope as relays hold it: the KEM ciphertext travels as `q`.
     final Map<String, dynamic> wire = _envelope(box).toJson();
     expect(wire.containsKey('e'), isFalse);
+    // Whether it deserves a notice travels beside the box, and an older
+    // envelope that does not say stays unsaid.
+    for (final bool? notice in <bool?>[true, false, null]) {
+      final RelayEnvelope e = RelayEnvelope(
+        id: 'rid-1',
+        sender: '200::a',
+        recipient: '200::b',
+        createdAtMillis: 1000,
+        expiresAtMillis: 2000,
+        box: box,
+        notice: notice,
+      );
+      expect(
+        RelayEnvelope.tryParse(jsonDecode(jsonEncode(e.toJson())))!.notice,
+        notice,
+      );
+    }
     final RelayEnvelope parsed = RelayEnvelope.tryParse(
       jsonDecode(jsonEncode(wire)),
     )!;

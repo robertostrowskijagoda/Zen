@@ -193,11 +193,13 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                   const SizedBox(height: 4),
                   Text(
                     t(
-                      'Od 4 do 6 wybranych znajomych dostaje po kawałku '
-                      'klucza i razem pomogą Ci wrócić na nowym telefonie — '
-                      'ze znajomymi i rozmowami. Dostępny od {n} znajomych: '
-                      'gdy ich dodasz, Zen Ci o nim przypomni.',
-                      <String, Object?>{'n': kEmergencyThreshold},
+                      'Od 2 do 6 zaufanych znajomych dostaje po kawałku '
+                      'klucza. Na nowym telefonie wystarczy dwóch z nich i '
+                      'Twoje hasło konta, a wrócisz ze znajomymi i '
+                      'rozmowami. Bez hasła konta nie da się odzyskać: '
+                      'zapisz je w bezpiecznym miejscu. Dostępny od {n} '
+                      'znajomych: gdy ich dodasz, Zen Ci o nim przypomni.',
+                      <String, Object?>{'n': kRecoveryCircleMinimum},
                     ),
                     style: TextStyle(
                       color: zen.textSecondary,
@@ -215,7 +217,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                     icon: const Icon(Icons.groups_2_outlined),
                     label: Text(
                       t('Dostępny od {n} znajomych', <String, Object?>{
-                        'n': kEmergencyThreshold,
+                        'n': kRecoveryCircleMinimum,
                       }),
                     ),
                   ),

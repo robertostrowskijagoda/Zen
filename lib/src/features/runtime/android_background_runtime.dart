@@ -907,8 +907,12 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// system refused, so a rebuild storm cannot turn into a retry storm.
   static const Duration _standbyRetryBackoff = Duration(seconds: 30);
 
-  /// How long to wait before draining again when the node was not up yet.
-  static const Duration _drainRetryDelay = Duration(seconds: 10);
+  /// How long to wait before draining again when the node was not up yet
+  /// (it is drained at once when the node comes up, [_drainWhenNodeUp]; this
+  /// is only in case that is missed). A call that rang while the app was
+  /// locked waits in the inbox: 10 s here kept its "Odbierz" off the screen
+  /// after the unlock.
+  static const Duration _drainRetryDelay = Duration(seconds: 3);
 
   bool _initialized = false;
   bool _syncScheduled = false;
@@ -973,6 +977,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// This widget emptied the inbox since the service last ran the node.
   bool _inboxDrained = false;
   Timer? _drainRetry;
+
+  /// Waits for the node to come up, to drain the inbox at that moment.
+  VoidCallback? _drainWhenNodeUp;
+  RuntimeNodeRuntime? _drainRuntime;
 
   /// Keeps the nearby kit in step; made once the app is unlocked and its
   /// core runs, like the alarm kit's keeper.
@@ -1090,6 +1098,11 @@ final class _AndroidBackgroundRuntimeBridgeState
     _nodeYields = null;
     _standbyRetry?.cancel();
     _standbyRetry = null;
+    if (_drainWhenNodeUp case final VoidCallback up) {
+      _drainRuntime?.removeListener(up);
+    }
+    _drainWhenNodeUp = null;
+    _drainRetry?.cancel();
     _cancelReceiveOnlyWake();
     _drainRetry?.cancel();
     _drainRetry = null;
@@ -1976,6 +1989,22 @@ final class _AndroidBackgroundRuntimeBridgeState
             _scheduleSync();
           }
         });
+        if (_drainWhenNodeUp == null) {
+          void up() {
+            if (!runtime.snapshot.serviceRunning) {
+              return;
+            }
+            runtime.removeListener(up);
+            _drainWhenNodeUp = null;
+            if (mounted) {
+              _scheduleSync();
+            }
+          }
+
+          _drainWhenNodeUp = up;
+          _drainRuntime = runtime;
+          runtime.addListener(up);
+        }
         return;
       }
       // "Mijani" seen by the locked service goes to the log, not to the

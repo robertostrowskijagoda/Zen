@@ -29,7 +29,9 @@ SocialHubState _applySignal(
           isOnline: true,
           lastPresenceAtMillis: receivedAtMillis,
           lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
-          lastActivityLabel: t('Teraz'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
         ),
     appSettings,
   );
@@ -191,7 +193,9 @@ SocialHubState _applySignal(
               ),
               kMaxStoredPreviewChars,
             ),
-            lastActivityLabel: t('Teraz'),
+            lastActivityLabel: activityStamp(
+              DateTime.now().millisecondsSinceEpoch,
+            ),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
         ),
@@ -215,8 +219,18 @@ SocialHubState _applySignal(
           existingGroup,
           signal,
         );
+        // The inviter's list of the members, asked for after joining.
+        final bool membersCame =
+            updatedMembers != null &&
+            signal.inviteId == null &&
+            existingGroup.awaitingMembersFrom.isNotEmpty &&
+            PeerShareCodec.addressesEqual(
+              existingGroup.awaitingMembersFrom,
+              signal.sender,
+            );
         if (updatedMembers == null ||
-            updatedMembers.length == existingGroup.memberAddresses.length) {
+            (updatedMembers.length == existingGroup.memberAddresses.length &&
+                !membersCame)) {
           return current;
         }
         final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
@@ -224,6 +238,7 @@ SocialHubState _applySignal(
         );
         groups[groupId] = existingGroup.copyWith(
           memberAddresses: updatedMembers,
+          awaitingMembersFrom: membersCame ? '' : null,
         );
         return current.copyWith(groups: groups);
       }
@@ -265,10 +280,11 @@ SocialHubState _applySignal(
         createdById: signal.sender,
         createdAtMillis: receivedAtMillis,
         memberAddresses: inviteMembers,
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
         lastMessagePreview: t('Zaproszono Cię do grupy.'),
         isInvitePending: true,
         receivedInviteIds: <String>[?signal.inviteId],
+        inviteMemberNames: signal.memberNames ?? const <String>[],
         memberNames: <String, String>{
           if (signal.displayName?.trim().isNotEmpty ?? false)
             signal.sender: signal.displayName!.trim(),
@@ -312,7 +328,9 @@ SocialHubState _applySignal(
             ),
             kMaxStoredPreviewChars,
           ),
-          lastActivityLabel: t('Teraz'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
           unreadCount: isGroupOpen ? 0 : existing.unreadCount + 1,
           memberNames: senderName == null || senderName.isEmpty
               ? null
@@ -413,6 +431,12 @@ SocialHubState _applySignal(
       }
       if (_currentCallMatchesSignal(current.activeCall, signal) &&
           current.activeCall != null) {
+        if (current.activeCall!.status == CallSessionStatus.active) {
+          // A renegotiation (a camera or a screen on or off): its kind is
+          // set where the offer is applied, which also counts our own
+          // camera and shared screen; the offer alone says only theirs.
+          return current;
+        }
         return current.copyWith(
           activeCall: current.activeCall!.copyWith(
             kind: _callKind(signal.content),
@@ -1587,28 +1611,6 @@ int _messageStorageBytes(ChatMessage message) {
       (message.durationMs != null ? 8 : 0) +
       (message.readAtMillis != null ? 8 : 0) +
       64;
-}
-
-String _activityLabelForMillis(int sentAtMillis) {
-  final DateTime now = DateTime.now();
-  final DateTime sentAt = DateTime.fromMillisecondsSinceEpoch(sentAtMillis);
-  final Duration delta = now.difference(sentAt);
-  if (delta < const Duration(minutes: 1)) {
-    return t('Teraz');
-  }
-  if (delta < const Duration(days: 1) &&
-      now.day == sentAt.day &&
-      now.month == sentAt.month &&
-      now.year == sentAt.year) {
-    return ZenFormat.time(sentAt);
-  }
-  final DateTime yesterday = now.subtract(const Duration(days: 1));
-  if (yesterday.day == sentAt.day &&
-      yesterday.month == sentAt.month &&
-      yesterday.year == sentAt.year) {
-    return t('Wczoraj');
-  }
-  return ZenFormat.dayMonth(sentAt);
 }
 
 List<InboxEntry> _removeEntriesForPeer(

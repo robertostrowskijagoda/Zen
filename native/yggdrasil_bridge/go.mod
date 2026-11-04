@@ -2,25 +2,30 @@ module zen/native/yggdrasil_bridge
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.27.3
 
 require (
-	github.com/Arceliar/ironwood v0.0.0-20260613025018-d50055b11f5e
+	github.com/Arceliar/ironwood v0.0.0-20261023231900-0712eccbb962
 	github.com/gologme/log v1.3.0
-	github.com/klauspost/compress v1.18.7
-	github.com/quic-go/quic-go v0.64.1
+	github.com/klauspost/compress v1.20.3
+	github.com/quic-go/quic-go v0.65.0
 	github.com/wlynxg/anet v0.0.5
-	github.com/yggdrasil-network/yggdrasil-go v0.5.14
+	github.com/yggdrasil-network/yggdrasil-go v0.5.15
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Arceliar/phony v0.0.0-20220903101357-530938a4b13d // indirect
-	github.com/bits-and-blooms/bitset v1.24.5 // indirect
+	github.com/bits-and-blooms/bitset v1.29.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.7.1 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
-	github.com/hjson/hjson-go/v4 v4.6.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
+	github.com/hjson/hjson-go/v4 v4.7.1 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
+
+// ironwood with one change of Zen's (third_party/ironwood/ZEN.md): a
+// session init not acked within a second is sent anew, not repeated.
+replace github.com/Arceliar/ironwood => ./third_party/ironwood

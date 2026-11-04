@@ -102,7 +102,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: '3.47.1'
+  FLUTTER_VERSION: '3.47.9'
 
 jobs:
   # Before anything is signed: the signing keys are where they belong and

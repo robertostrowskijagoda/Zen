@@ -5,7 +5,6 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
@@ -55,6 +54,8 @@ import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
+    show kGroupJoinedAck;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -70,18 +71,18 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
+part 'social_hub_controller_chat_extras.dart';
+part 'social_hub_controller_devices.dart';
+part 'social_hub_controller_disappearing.dart';
+part 'social_hub_controller_group_call.dart';
 part 'social_hub_controller_helpers.dart';
 part 'social_hub_controller_lifecycle_signal.dart';
 part 'social_hub_controller_messages.dart';
-part 'social_hub_controller_transfers.dart';
-part 'social_hub_controller_social.dart';
-part 'social_hub_controller_retention.dart';
-part 'social_hub_controller_group_call.dart';
 part 'social_hub_controller_profile.dart';
-part 'social_hub_controller_devices.dart';
-part 'social_hub_controller_disappearing.dart';
+part 'social_hub_controller_retention.dart';
+part 'social_hub_controller_social.dart';
 part 'social_hub_controller_strangers.dart';
-part 'social_hub_controller_chat_extras.dart';
+part 'social_hub_controller_transfers.dart';
 
 final Provider<SignalQueueStore> signalQueueStoreProvider =
     Provider<SignalQueueStore>((Ref ref) {
@@ -134,6 +135,11 @@ final Provider<Duration> callOfferWaitTimeoutProvider = Provider<Duration>((
 ) {
   return const Duration(seconds: 12);
 });
+
+/// Whether the phone is locked or its screen off ([isDeviceLocked]);
+/// replaced in tests.
+final Provider<Future<bool> Function()> deviceLockedProbeProvider =
+    Provider<Future<bool> Function()>((Ref ref) => isDeviceLocked);
 
 final Provider<Duration> callRingingWaitTimeoutProvider = Provider<Duration>((
   Ref ref,
@@ -562,6 +568,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     return (snapshot ?? state.lifecycle).isFocused && !_isSecurityBlockingUi;
   }
 
+  /// Off screen, or on a locked phone: a call ringing over the keyguard
+  /// draws the app there and keeps it "focused", but nobody sees what it
+  /// writes in the conversation, so a missed call needs its notification.
+  Future<bool> _nobodySeesTheApp() async =>
+      !_isUiFocused() || await ref.read(deviceLockedProbeProvider)();
+
   /// Posts a system notification. Ringing-call window flags and the native
   /// popup are owned by [_syncRingingCallWindow], not by the shade entry.
   /// Posts [notification]; [about]: the signal it tells of, for the line
@@ -570,6 +582,15 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     RuntimeSystemNotification notification, {
     ZenSignal? about,
   }) async {
+    if (about?.type == ZenSignalType.friendRequest &&
+        PeerShareCodec.invitationQuiet(
+          _appSettings.inviteToken,
+          about!.inviteId,
+        )) {
+      // Not from the current invitation code ("Zmień kod"): it waits among
+      // the invitations without a notification.
+      return false;
+    }
     if (about != null) {
       final FriendProfile? friend = state.friendByAddress(about.sender);
       final bool chat =
@@ -610,6 +631,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         session.isIncoming &&
         session.status == CallSessionStatus.ringing;
     final bool flutterUiVisible = state.lifecycle.isInteractive;
+    // The ring itself, on screen or not, unless calls are switched off.
+    await setCallRinging(
+      ringingIncoming && !_appSettings.mutes(NoticeKind.call),
+    );
     if (ringingIncoming && flutterUiVisible) {
       // App is already on screen: the Flutter overlay is the UI. Show it
       // over the keyguard if the user locks the phone, but never dismiss
@@ -841,6 +866,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Zen open as they told it: in memory like [_presenceSeenAt] while the
   /// state shows the same.
   final Map<String, int> _presenceConfirmedAt = <String, int>{};
+
+  /// The active call was answered while Zen was not on the screen.
+  bool _callAnsweredOffScreen = false;
   final Map<String, int> _openedAt = <String, int>{};
 
   /// [hub] as saved: each friend's presence with its latest confirmation
@@ -927,6 +955,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       }
       final SocialHubState saving = state;
       await _snapshotStore.save(_withConfirmedPresence(saving));
+      // Closed meanwhile (a restart, the lock): what was saved stands.
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
       if (identical(state, saving)) {
         _unsavedState = false;
       }
@@ -1173,23 +1205,31 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   ///
   /// Deliberately a single datagram: the other side re-sends the invite
   /// until it gets an answer, so a lost reply only costs one more round.
+  /// [joined]: a `group_invite_ack` that says the invitation was accepted
+  /// (the plain one only says it arrived); the inviter answers it with the
+  /// members' addresses.
   void _replyToGroupSignal({
     required String peerAddress,
     required String type,
     required String groupId,
+    bool joined = false,
   }) {
     final String target = PeerShareCodec.normalizeAddress(peerAddress);
     if (!isRoutablePeerAddress(target)) {
       return;
     }
+    // Taken now: the controller may be gone by the time the send runs.
+    final SignalTransport transport = ref.read(signalTransportProvider);
     unawaitedLogged(
       Future<void>(() async {
-        await ref
-            .read(signalTransportProvider)
-            .send(
-              remoteAddress: target,
-              payload: <String, dynamic>{'type': type, 'groupId': groupId},
-            );
+        await transport.send(
+          remoteAddress: target,
+          payload: <String, dynamic>{
+            'type': type,
+            'groupId': groupId,
+            if (joined) 'joined': true,
+          },
+        );
       }),
       context: 'Replying "$type" for group $groupId failed',
     );
@@ -1231,7 +1271,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       ZenSignalType.groupLeave ||
       ZenSignalType.groupUpdate ||
       ZenSignalType.groupInviteAck =>
-        '$sender|group:${signal.groupId}|${signal.type.name}',
+        '$sender|group:${signal.groupId}|${signal.type.name}'
+            // "Joined" right after "arrived" is no repeat.
+            '${signal.content == kGroupJoinedAck ? '|joined' : ''}',
       _ => null,
     };
   }
@@ -1248,23 +1290,51 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Payload of a group invite; also used to sync the member list. Only a
   /// real invitation carries [inviteId]; member-list syncs never do, so they
   /// cannot bring back a group the recipient declined or left.
+  ///
+  /// An invitation names the members (as this side knows them) but gives
+  /// no address except this device's: someone who has not joined learns
+  /// nobody's address; the full list follows the `group_invite_ack`.
+  /// [to]: the invited person, left out of the names they are shown.
   Map<String, dynamic> _groupInvitePayload(
     GroupProfile group, {
     String? inviteId,
+    String? to,
   }) {
     final String senderName = ref
         .read(userProfileControllerProvider)
         .publicName;
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     return <String, dynamic>{
       'type': 'group_invite',
       'groupId': group.id,
       'groupName': group.name,
       'description': group.description,
       'avatarPreset': group.avatarPreset,
-      'memberAddresses': _groupMembersWithSelf(group),
+      if (inviteId == null)
+        'memberAddresses': _groupMembersWithSelf(group)
+      else ...<String, dynamic>{
+        'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr],
+        'memberNames': <String>[
+          for (final String member in group.memberAddresses)
+            if ((localAddr.isEmpty ||
+                    !PeerShareCodec.addressesEqual(member, localAddr)) &&
+                (to == null || !PeerShareCodec.addressesEqual(member, to)))
+              _memberNameForInvite(group, member),
+        ],
+      },
       if (senderName.trim().isNotEmpty) 'senderName': senderName.trim(),
       'inviteId': ?inviteId,
     };
+  }
+
+  /// [member] of [group] as this side calls them: a friend's name, the
+  /// name they gave in the group, or nothing known.
+  String _memberNameForInvite(GroupProfile group, String member) {
+    final FriendProfile? friend = state.friendByAddress(member);
+    if (friend != null && friend.status == FriendRelationshipStatus.accepted) {
+      return state.nameFor(friend);
+    }
+    return group.memberNames[member]?.trim() ?? '';
   }
 
   /// The group's members plus this node, as every peer should see the group.
@@ -1291,6 +1361,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     final int now = DateTime.now().millisecondsSinceEpoch;
     for (final GroupProfile group in state.groups.values) {
+      if (group.awaitingMembersFrom.isNotEmpty &&
+          PeerShareCodec.addressesEqual(group.awaitingMembersFrom, peer)) {
+        // Joined, but their list of the members never came: "joined" again.
+        final String key = '${group.id}|$peer|joined';
+        final int? lastSent = _groupInviteResentAtMillis[key];
+        if (lastSent == null ||
+            now - lastSent >= _groupInviteResendCooldown.inMilliseconds) {
+          _groupInviteResentAtMillis[key] = now;
+          _replyToGroupSignal(
+            peerAddress: peer,
+            type: 'group_invite_ack',
+            groupId: group.id,
+            joined: true,
+          );
+        }
+        continue;
+      }
       if (!group.pendingInviteAddresses.any(
         (String member) => PeerShareCodec.addressesEqual(member, peer),
       )) {
@@ -1311,6 +1398,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
               payload: _groupInvitePayload(
                 group,
                 inviteId: _pendingInviteIdFor(group, peer),
+                to: peer,
               ),
             );
       } catch (error, stackTrace) {

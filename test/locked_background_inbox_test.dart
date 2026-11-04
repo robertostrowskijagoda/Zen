@@ -53,6 +53,7 @@ Map<String, dynamic> _envelope(
   required String from,
   String to = 'me.ygg',
   int now = 1000000,
+  int? notice,
 }) => <String, dynamic>{
   'id': id,
   's': from,
@@ -62,6 +63,7 @@ Map<String, dynamic> _envelope(
   'q': base64Url.encode(List<int>.filled(kHybridCiphertextBytes, 1)),
   'n': base64Url.encode(List<int>.filled(12, 1)),
   'b': base64Url.encode(List<int>.filled(40, 1)),
+  'k': ?notice,
 };
 
 void main() {
@@ -1609,6 +1611,22 @@ void main() {
       expect(notices.activeNotifications, hasLength(1));
       expect(notices.audibleAlertCount, 1);
       expect(sent('rly_mail_ack', to: _bob).single['ids'], <String>['r1']);
+    });
+
+    test('mail its sender marked as nothing to tell (a receipt, a status) '
+        'is kept without a notice; a message is told', () async {
+      await startReceiver();
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[_envelope('q1', from: _ada, notice: 0)],
+      });
+      expect(receiver.keptCount, 1);
+      expect(notices.activeNotifications, isEmpty);
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[_envelope('q2', from: _ada, notice: 1)],
+      });
+      expect(notices.activeNotifications, hasLength(1));
     });
 
     test('a mailbox handing the same mail over at every poll: kept and told '

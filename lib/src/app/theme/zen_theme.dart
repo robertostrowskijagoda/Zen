@@ -245,11 +245,6 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     accentTertiary,
   ];
 
-  Color accentFor(Object key) {
-    final int hash = key.hashCode & 0x7FFFFFFF;
-    return accentTrio[hash % 3];
-  }
-
   LinearGradient panelGradient({Color? tone, double alpha = 0.05}) {
     final Color hue = tone ?? accent;
     return LinearGradient(
@@ -272,56 +267,6 @@ final class ZenColors extends ThemeExtension<ZenColors> {
       ],
       stops: const <double>[0, 0.65, 1],
     );
-  }
-
-  Color tintOf(Color tone, {double alpha = 0.14}) =>
-      Color.alphaBlend(tone.withValues(alpha: alpha), surface);
-
-  LinearGradient toneGradient(
-    Color tone, {
-    double from = 0.22,
-    double to = 0.06,
-  }) {
-    // Flatter palettes pull both stops towards their middle.
-    final double mid = (from + to) / 2;
-    final double a = gradient >= 1 ? from : mid + (from - mid) * gradient;
-    final double b = gradient >= 1 ? to : mid + (to - mid) * gradient;
-    return LinearGradient(
-      colors: <Color>[
-        tone.withValues(alpha: a),
-        tone.withValues(alpha: b),
-      ],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
-  }
-
-  List<BoxShadow> accentGlow({double radius = 14, double alpha = 0.3}) {
-    return <BoxShadow>[
-      BoxShadow(
-        color: accent.withValues(alpha: alpha * 0.6),
-        blurRadius: radius,
-        spreadRadius: -4,
-      ),
-    ];
-  }
-
-  List<BoxShadow> elevationShadow({
-    double elevation = 8,
-    Color? ambientColor,
-    double ambientAlpha = 0.05,
-  }) {
-    return <BoxShadow>[
-      BoxShadow(
-        color: const Color(0x66000000),
-        blurRadius: elevation * 1.4,
-        offset: Offset(0, elevation * 0.35),
-      ),
-    ];
-  }
-
-  Border topHighlightBorder({Color? highlightColor, double alpha = 0.2}) {
-    return Border.all(color: outlineSoft);
   }
 
   LinearGradient get accentGradient => LinearGradient(

@@ -1621,8 +1621,11 @@ From 1.12.0 on, older formats are kept readable (the rules are in
   address (denial of service) but neither read it nor speak for the
   address to anyone who pinned its device key; first contact with no pin
   and no vouching friend is trust on first use.
-- Yggdrasil answers `debug_remoteGetPeers/Self/Tree` to any node (not
-  configurable): the keys of a node's direct peers are public.
+- Yggdrasil answers `debug_remoteGetPeers/Self/Tree` and NodeInfo to any
+  node from `Core.ReadFrom`; Zen's packet loop reads below it
+  (`readMeshTraffic`) and drops them unanswered, as the doors do, so a
+  node's direct peers (friends linked over Wi-Fi or Bluetooth among them)
+  are not listed to strangers.
 - Hostile input bounds: 2 MiB per signal, 64:1 inflate limit, fragment and inbox
   caps, per-/64 rate limits, JSON key and string caps in the parser, strict
   validation of ledger entries, pyramid records and blobs, media re-encoding.

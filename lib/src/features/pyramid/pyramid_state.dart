@@ -968,13 +968,6 @@ final class PyramidState {
   int branchSize(String path) =>
       position.values.where((String p) => PyrPath.within(p, path)).length;
 
-  int branchNat(String path, String nat) => position.entries
-      .where(
-        (MapEntry<String, String> e) =>
-            PyrPath.within(e.value, path) && members[e.key]?.nat == nat,
-      )
-      .length;
-
   /// Keys of the line from [key] up to the top (without [key]).
   List<String> lineUp(String key) {
     final String? p = position[key];

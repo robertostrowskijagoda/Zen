@@ -17,6 +17,7 @@ import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -71,8 +72,8 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
-part 'conversation_screen_widgets.dart';
 part 'conversation_screen_media.dart';
+part 'conversation_screen_widgets.dart';
 
 final conversationMessagesProvider = FutureProvider.autoDispose
     .family<List<ChatMessage>, String>((ref, String peerAddress) async {
@@ -1152,54 +1153,42 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _pickAndSendAttachment() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    final PlatformFile? picked = result == null || result.files.isEmpty
-        ? null
-        : result.files.first;
+    final PlatformFile? picked = await FilePicker.pickFile();
     if (picked == null) {
       return;
     }
 
-    final Uint8List? bytes = picked.bytes;
+    // The picker hands a path over, never the bytes.
     final String? attachmentPath = picked.path?.trim().isNotEmpty == true
         ? picked.path!.trim()
         : null;
-    if (((bytes == null || bytes.isEmpty) && attachmentPath == null) ||
-        !mounted) {
+    if (attachmentPath == null || !mounted) {
       return;
     }
 
     final String fileName = picked.name.trim().isNotEmpty
         ? picked.name.trim()
         : 'zalacznik-${DateTime.now().millisecondsSinceEpoch}';
-    final Uint8List? headerBytes = bytes != null && bytes.isNotEmpty
-        ? Uint8List.sublistView(bytes, 0, bytes.length > 16 ? 16 : bytes.length)
-        : await _readAttachmentHeader(attachmentPath);
+    final Uint8List? headerBytes = await _readAttachmentHeader(attachmentPath);
     // A GIF file goes as an animated picture, like one from the gallery (a
     // too large one as a file, if the person agrees).
     if (headerBytes != null && looksLikeGif(headerBytes)) {
-      final int size = bytes?.length ?? picked.size;
+      final int size = await pickedLength(picked);
       if (size > kMaxSentGifBytes) {
         if (await _confirmGifAsFile(PickedGifStatus.tooLarge) && mounted) {
           await _sendGifAttachment(
             gifFileName(fileName),
             ChatMessageType.file,
-            bytes: bytes,
-            path: bytes == null ? attachmentPath : null,
+            path: attachmentPath,
           );
         }
         return;
       }
-      Uint8List? whole = bytes;
-      if (whole == null || whole.isEmpty) {
-        try {
-          whole = await File(attachmentPath!).readAsBytes();
-        } on FileSystemException {
-          whole = null;
-        }
+      Uint8List? whole;
+      try {
+        whole = await File(attachmentPath).readAsBytes();
+      } on FileSystemException {
+        whole = null;
       }
       if (!mounted) {
         return;
@@ -1223,7 +1212,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       await _socialHubController.sendLocalAttachment(
         peerAddress: widget.peerAddress,
         displayName: displayName,
-        bytes: bytes,
         attachmentPath: attachmentPath,
         fileName: fileName,
         mimeType: mimeType,

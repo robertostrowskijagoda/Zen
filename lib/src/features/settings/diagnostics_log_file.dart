@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
@@ -70,10 +70,8 @@ Future<AccountBackupSaved?> saveDiagnosticsLog({
   }
 }
 
-Future<String?> _askOnDesktop(String name) => FilePicker.platform.saveFile(
-  dialogTitle: t('Zapisz dziennik techniczny'),
-  fileName: name,
-);
+Future<String?> _askOnDesktop(String name) =>
+    pickSavePath(dialogTitle: t('Zapisz dziennik techniczny'), fileName: name);
 
 Future<void> _write(String path) async {
   await ZenDiagnosticsLog.settled;

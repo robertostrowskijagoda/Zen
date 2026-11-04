@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 
 const MethodChannel _system = MethodChannel('zen/system');
@@ -66,11 +67,11 @@ Future<bool> openMap(double lat, double lon, {String label = ''}) async {
     }
     final String url = mapUrl(lat, lon);
     if (Platform.isWindows) {
-      await Process.run(windowsExplorerPath(), <String>[url]);
+      await runDesktopOpener(windowsExplorerPath(), <String>[url]);
     } else if (Platform.isMacOS) {
-      await Process.run('open', <String>[url]);
+      await runDesktopOpener('open', <String>[url]);
     } else {
-      await Process.run('xdg-open', <String>[url]);
+      await runDesktopOpener('xdg-open', <String>[url]);
     }
     return true;
   } on Object catch (error) {
@@ -100,11 +101,11 @@ Future<bool> openWebLink(String url, {bool allowHttp = false}) async {
           false;
     }
     if (Platform.isWindows) {
-      await Process.run(windowsExplorerPath(), <String>[link]);
+      await runDesktopOpener(windowsExplorerPath(), <String>[link]);
     } else if (Platform.isMacOS) {
-      await Process.run('open', <String>[link]);
+      await runDesktopOpener('open', <String>[link]);
     } else if (Platform.isLinux) {
-      await Process.run('xdg-open', <String>[link]);
+      await runDesktopOpener('xdg-open', <String>[link]);
     } else {
       return false;
     }

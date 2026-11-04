@@ -51,6 +51,11 @@ enum RuntimeRouteTarget {
   /// How to install Zen (the install pages, `…/install/` and
   /// `…/install/<system>/`); [rawInput] holds the system's name, if any.
   installGuide,
+
+  /// Another account of this device (`zen://account/<folder>`, a
+  /// notification of an account that receives in the background);
+  /// [rawInput] holds its folder.
+  account,
 }
 
 @immutable
@@ -175,6 +180,18 @@ final class RuntimeRouteIntent {
     );
   }
 
+  /// Another account of this device (its notification).
+  factory RuntimeRouteIntent.account({
+    required String id,
+    required String folder,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.account,
+      rawInput: folder,
+    );
+  }
+
   /// "Kamyczki" (a request to keep a pebble).
   factory RuntimeRouteIntent.pebbles({required String id}) {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.pebbles);
@@ -288,6 +305,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.pebbles => t('Otwórz Kamyczki'),
     RuntimeRouteTarget.about => t('O Zen'),
     RuntimeRouteTarget.installGuide => t('Jak zainstalować Zen'),
+    RuntimeRouteTarget.account => t('Otwórz konto'),
   };
 }
 
@@ -304,6 +322,10 @@ String buildStorageRouteKey() => 'zen://storage';
 
 /// "Kamyczki" (a friend asks to keep a pebble).
 String buildPebblesRouteKey() => 'zen://pebbles';
+
+/// Another account of this device by its [folder] (a random name, never
+/// its ID): what its notifications open.
+String buildAccountRouteKey(String folder) => 'zen://account/$folder';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
@@ -447,6 +469,14 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'pebbles') {
     return RuntimeRouteIntent.pebbles(id: id);
+  }
+  if (uri.host == 'account') {
+    final String folder = uri.pathSegments.isEmpty
+        ? ''
+        : uri.pathSegments.first;
+    return RegExp(r'^[0-9a-f]{32}$').hasMatch(folder)
+        ? RuntimeRouteIntent.account(id: id, folder: folder)
+        : null;
   }
   // `zen://pebble#<card>`: the pebble page's "Zbierz w Zen".
   if (uri.host == 'pebble') {

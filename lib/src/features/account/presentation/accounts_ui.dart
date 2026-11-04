@@ -806,6 +806,7 @@ class AccountsScreen extends ConsumerStatefulWidget {
 class _AccountsScreenState extends ConsumerState<AccountsScreen> {
   bool? _listed;
   bool? _background;
+  bool? _notify;
   bool _wiping = false;
 
   /// The Android background service, or a computer's tray, receives for
@@ -824,11 +825,16 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     final ZenAccountScope account = ref.read(zenAccountProvider);
     if (_backgroundSupported) {
       try {
-        final bool on = await ref
-            .read(zenBackgroundAccountsProvider)
-            .isOn(account);
+        final ZenBackgroundAccounts settings = ref.read(
+          zenBackgroundAccountsProvider,
+        );
+        final bool on = await settings.isOn(account);
+        final bool notify = await settings.notifies(account);
         if (mounted) {
-          setState(() => _background = on);
+          setState(() {
+            _background = on;
+            _notify = notify;
+          });
         }
       } on Object {
         // Not readable: the switch stays off.
@@ -856,6 +862,15 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
           name: ref.read(userProfileControllerProvider).displayName,
         );
     ref.invalidate(zenListedAccountsProvider);
+  }
+
+  /// "Powiadomienia z tego konta" (an additional account in the
+  /// background).
+  Future<void> _setNotify(bool value) async {
+    setState(() => _notify = value);
+    await ref
+        .read(zenBackgroundAccountsProvider)
+        .setNotify(ref.read(zenAccountProvider), value);
   }
 
   /// "Odbieraj w tle": on only after the warning (the battery, and for an
@@ -1089,6 +1104,25 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
                   }),
                 ),
               ],
+              if (_backgroundSupported &&
+                  !account.isDefault &&
+                  (_background ?? false))
+                SwitchListTile(
+                  key: const Key('accounts-notify-switch'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _notify ?? true,
+                  onChanged: _notify == null
+                      ? null
+                      : (bool value) => unawaited(_setNotify(value)),
+                  title: Text(t('Powiadomienia z tego konta')),
+                  subtitle: Text(
+                    t(
+                      'Gdy to konto odbiera w tle. Powiadomienie nie mówi, od '
+                      'kogo ani co przyszło, a stuknięcie otwiera to konto. '
+                      'Wyłączone: nic nie zdradza, że coś przyszło.',
+                    ),
+                  ),
+                ),
               const SizedBox(height: 12),
               ZenTile(
                 key: const Key('accounts-add'),

@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/films/presentation/film_camera.dart';
 import 'package:zen/src/features/films/presentation/film_camera_channel.dart';
 import 'package:zen/src/features/social/qr_frame_decoder.dart';
@@ -180,9 +181,5 @@ final class PluginFilmCamera implements FilmCamera {
 
 /// A film from the gallery (phones) or a file (computers).
 Future<String?> pickFilmFile() async {
-  final FilePickerResult? result = await FilePicker.platform.pickFiles(
-    type: FileType.video,
-    dialogTitle: t('Wybierz film'),
-  );
-  return result?.files.firstOrNull?.path;
+  return pickOnePath(type: FileType.video, dialogTitle: t('Wybierz film'));
 }

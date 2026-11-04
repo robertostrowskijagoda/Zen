@@ -1298,7 +1298,7 @@ class _InboxCard extends ConsumerWidget {
             ],
           ),
           if (canRespondToRequest) ...<Widget>[
-            const SizedBox(height: 14),
+            const SizedBox(height: 18),
             Row(
               children: <Widget>[
                 Expanded(
@@ -1331,7 +1331,7 @@ class _InboxCard extends ConsumerWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 24),
                 Expanded(
                   child: FilledButton(
                     key: Key('inbox-accept-$peerAddress'),
@@ -1368,7 +1368,7 @@ class _InboxCard extends ConsumerWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             _WriteBeforeAccepting(peerAddress: peerAddress),
           ] else if (isGroupInvite) ...<Widget>[
             const SizedBox(height: 14),
@@ -1480,9 +1480,10 @@ ConversationPreview _conversationFromFriend(
     avatarPath: peer?.avatarPath,
     status: friend.status,
     lastMessage: preview,
-    timeLabel: friend.lastActivityLabel.isEmpty
-        ? t('Teraz')
-        : friend.lastActivityLabel,
+    timeLabel: activityTimeLabel(
+      friend.lastActivityLabel,
+      DateTime.now().millisecondsSinceEpoch,
+    ),
     unreadCount: friend.unreadCount,
     presence: accepted ? friend.shownPresence : PeerPresence.hidden,
     presenceLine: accepted

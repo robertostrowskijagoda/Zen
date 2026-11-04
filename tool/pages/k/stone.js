@@ -41,8 +41,8 @@
     }
     // Flat, as people paint pebbles (the app's kPebbleMaxHeight), but for
     // the app's round shapes (PebbleShapePreset.round: egg, tall, lopsided,
-    // potato, rock, chubby, plump); a flat one stays as it is.
-    if ([2, 4, 12, 13, 14, 18, 27].indexOf(look.shape | 0) < 0 && f.sy > 0.4) {
+    // potato, rock, chubby, plump, boulder); a flat one stays as it is.
+    if ([2, 4, 12, 13, 14, 18, 27, 39].indexOf(look.shape | 0) < 0 && f.sy > 0.4) {
       f.sy = Math.min(Math.max(f.sy * 0.62, 0.3), 0.4);
     }
     f.ey = between(0.62, 0.8);

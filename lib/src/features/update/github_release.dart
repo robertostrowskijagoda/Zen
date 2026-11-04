@@ -527,11 +527,6 @@ Future<GithubJsonAnswer> fetchGithubJsonAnswer(Uri uri, {String? etag}) async {
   }
 }
 
-/// GETs [uri] and decodes its JSON ([fetchGithubJsonAnswer] without a
-/// cache).
-Future<Object?> fetchGithubJson(Uri uri) async =>
-    (await fetchGithubJsonAnswer(uri)).json;
-
 /// A [GithubJsonFetcher] that remembers the last answer and its `ETag`
 /// for each address and asks with `If-None-Match`: an unchanged release
 /// costs GitHub's rate limit nothing and comes back from here.

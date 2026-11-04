@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -151,20 +154,31 @@ final class PlanAnswer {
   final String? via;
   final String viaName;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'a': address,
-    'n': name,
-    'k': kind.name,
-    'at': at,
-    if (via != null) 'via': via,
-    if (viaName.isNotEmpty) 'vn': viaName,
-    if (claims.isNotEmpty) 'cl': claims,
-  };
+  /// With [blindFor] (the plan's id) the addresses are hashes bound to
+  /// the plan ([WeekendPlan.blindKey]): what friends of friends get.
+  Map<String, dynamic> toJson({String? blindFor}) {
+    String hide(String address) => blindFor == null || address.startsWith('#')
+        ? address
+        : WeekendPlan.blindKey(blindFor, address);
+    final String? by = via;
+    return <String, dynamic>{
+      'a': hide(address),
+      'n': name,
+      'k': kind.name,
+      'at': at,
+      if (by != null) 'via': hide(by),
+      if (viaName.isNotEmpty) 'vn': viaName,
+      if (claims.isNotEmpty) 'cl': claims,
+    };
+  }
 
   static PlanAnswer? fromJson(Object? json) {
     if (json is! Map || json['a'] is! String || json['at'] is! int) {
       return null;
     }
+    String take(String a) => a.startsWith('#') && a.length <= 40
+        ? a
+        : PeerShareCodec.normalizeAddress(a);
     final PlanAnswerKind? kind = PlanAnswerKind.byName(json['k']);
     if (kind == null) {
       return null;
@@ -180,13 +194,11 @@ final class PlanAnswer {
             if (e.key is String && e.value is int && (e.value as int) > 0)
               e.key as String: (e.value as int).clamp(1, kPlanMaxNeedQty),
       },
-      address: PeerShareCodec.normalizeAddress(json['a'] as String),
+      address: take(json['a'] as String),
       name: _clip(json['n'], 60),
       kind: kind,
       at: json['at'] as int,
-      via: via is String && via.isNotEmpty
-          ? PeerShareCodec.normalizeAddress(via)
-          : null,
+      via: via is String && via.isNotEmpty ? take(via) : null,
       viaName: _clip(json['vn'], 60),
     );
   }
@@ -283,7 +295,26 @@ final class WeekendPlan {
     needs: needs,
   );
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
+  /// What stands for [address] in a copy for friends of friends: a hash
+  /// bound to this plan, so it says nothing elsewhere; only who already
+  /// knows the address can tell it is there (their own answer, say).
+  static String blindKey(String planId, String address) =>
+      '#${crypto.sha256.convert(utf8.encode('zen-plan-answer|$planId|${PeerShareCodec.normalizeAddress(address)}')).toString().substring(0, 32)}';
+
+  /// Whether the answer [a] is [address]'s (by address, or by its hash in
+  /// a copy for friends of friends).
+  bool answeredBy(PlanAnswer a, String address) =>
+      a.address == PeerShareCodec.normalizeAddress(address) ||
+      a.address == blindKey(id, address);
+
+  /// [address]'s answer, as [answeredBy] finds it.
+  PlanAnswer? answerOf(String address) =>
+      answers[PeerShareCodec.normalizeAddress(address)] ??
+      answers[blindKey(id, address)];
+
+  /// With [blind] the answers carry no addresses ([blindKey]): the copy a
+  /// friend passes on to their friends, who are not the organizer's.
+  Map<String, dynamic> toJson({bool blind = false}) => <String, dynamic>{
     'id': id,
     'org': organizer,
     'orgName': organizerName,
@@ -293,7 +324,8 @@ final class WeekendPlan {
     'reach': reach.name,
     'min': threshold,
     'ans': <Map<String, dynamic>>[
-      for (final PlanAnswer a in answers.values) a.toJson(),
+      for (final PlanAnswer a in answers.values)
+        a.toJson(blindFor: blind ? id : null),
     ],
     if (eventId != null) 'ev': eventId,
     if (needs.isNotEmpty)

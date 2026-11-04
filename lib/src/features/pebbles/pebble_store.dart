@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -67,8 +68,9 @@ final class PebbleEntry {
   /// the keepers and signs their list.
   final bool madeHere;
 
-  /// The keepers the QR code it was collected from named (pebble_link.dart):
-  /// asked for the design right after the author's devices.
+  /// The pebble doors the QR code it was collected from named (the
+  /// author's and the keepers', pebble_link.dart): asked for the design
+  /// right after the author's devices.
   final List<String> hinted;
 
   PebbleId get id => card.id;
@@ -160,7 +162,7 @@ final class PebbleEntry {
 }
 
 /// The most keepers a collected pebble keeps from its QR code.
-const int kPebbleQrKeepersHinted = 3;
+const int kPebbleQrKeepersHinted = 4;
 
 /// [note] trimmed to [kPebbleFindNoteMaxChars] characters.
 String clipFindNote(String note) {
@@ -298,12 +300,68 @@ final class PebbleStore extends ChangeNotifier {
   /// Pebbles removed here (the account's other devices drop them too).
   final Map<PebbleId, int> _removed = <PebbleId, int>{};
 
+  /// Each keeper's pebble door (their device address → the door's), as
+  /// they told it when they agreed: what a pebble's QR code names.
+  final Map<String, String> _doors = <String, String>{};
+
+  static const String _doorSeedKey = 'pebbles/door';
+
+  /// The pebble door address the authors of the kept pebbles were last
+  /// told (so a door that comes later is told once, not at every start).
+  String? get toldDoor => _toldDoor;
+  String? _toldDoor;
+
+  Future<void> setToldDoor(String door) async {
+    await load();
+    if (_toldDoor == door) {
+      return;
+    }
+    _toldDoor = door;
+    await _save();
+  }
+
   Future<void>? _loaded;
   Future<void> _writing = Future<void>.value();
 
   int get now => _clock();
 
   Future<void> load() => _loaded ??= _load();
+
+  /// The pebble door [keeper] (a device address) told, or `null`.
+  String? keeperDoor(String keeper) =>
+      _doors[PeerShareCodec.normalizeAddress(keeper)];
+
+  /// Notes the pebble door [door] of [keeper].
+  Future<void> setKeeperDoor(String keeper, String door) async {
+    await load();
+    final String k = PeerShareCodec.normalizeAddress(keeper);
+    final String d = PeerShareCodec.normalizeAddress(door);
+    if (_doors[k] == d) {
+      return;
+    }
+    _doors[k] = d;
+    if (_doors.length > 2000) {
+      _doors.remove(_doors.keys.first);
+    }
+    await _save();
+  }
+
+  /// The key (hex seed) of this device's pebble door, made once (kept
+  /// apart from the index: it is this device's, not the account's).
+  Future<String> doorSeed() async {
+    final Uint8List? raw = await disk.read(_doorSeedKey);
+    final String? had = raw == null ? null : utf8.decode(raw);
+    if (had != null && RegExp(r'^[0-9a-f]{64}$').hasMatch(had)) {
+      return had;
+    }
+    final Random r = Random.secure();
+    final String seed = <String>[
+      for (int i = 0; i < 32; i++)
+        r.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ].join();
+    await disk.write(_doorSeedKey, Uint8List.fromList(utf8.encode(seed)));
+    return seed;
+  }
 
   Future<void> _load() async {
     final Uint8List? raw = await disk.read(_indexKey);
@@ -355,6 +413,17 @@ final class PebbleStore extends ChangeNotifier {
         _requests[request.card.id] = request;
       }
     }
+    if (json['td'] is String) {
+      _toldDoor = json['td'] as String;
+    }
+    final Object? doors = json['dr'];
+    if (doors is Map) {
+      for (final MapEntry<Object?, Object?> e in doors.entries) {
+        if (e.key is String && e.value is String) {
+          _doors[e.key! as String] = e.value! as String;
+        }
+      }
+    }
     final Object? removed = json['x'];
     if (removed is Map) {
       for (final MapEntry<Object?, Object?> e in removed.entries) {
@@ -393,6 +462,8 @@ final class PebbleStore extends ChangeNotifier {
             for (final MapEntry<PebbleId, int> e in _removed.entries)
               e.key.text: e.value,
           },
+          if (_doors.isNotEmpty) 'dr': _doors,
+          'td': ?_toldDoor,
         }),
       ),
     );

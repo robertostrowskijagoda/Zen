@@ -960,7 +960,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           ),
           inbox: _removeCallAlertsForPeer(state.inbox, signal.sender),
         );
-        if (missedIncomingCall && !_isUiFocused()) {
+        if (missedIncomingCall && await _nobodySeesTheApp()) {
           // The caller hung up before anyone answered: a dismissible
           // missed-call note, posted into the per-peer slot. Only while the
           // app is off screen - with the app open the conversation already
@@ -1236,14 +1236,31 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final int index = thread.indexWhere(
       (ChatMessage message) => message.id == messageId,
     );
-    if (index < 0 || thread[index].readAtMillis != null) {
+    if (index < 0) {
       return;
     }
+    // The receipt names the newest message they read: every one this person
+    // sent before it is read too (it used to stay "delivered" under a read
+    // one).
+    final int upTo = thread[index].sentAtMillis;
     final List<ChatMessage> next = List<ChatMessage>.from(
       thread,
       growable: false,
     );
-    next[index] = next[index].copyWith(readAtMillis: readAtMillis);
+    bool changed = false;
+    for (int i = 0; i < next.length; i++) {
+      final ChatMessage m = next[i];
+      final bool covered =
+          i == index ||
+          (m.isOutgoing && !m.isSystem && i < index && m.sentAtMillis <= upTo);
+      if (covered && m.readAtMillis == null) {
+        next[i] = m.copyWith(readAtMillis: readAtMillis);
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return;
+    }
     await timelineStore.save(peerAddress, next);
     _bumpTimelineRevision();
   }

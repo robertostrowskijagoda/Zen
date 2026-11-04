@@ -13,7 +13,9 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- Black like the splash and Flutter's first frame (zen_bootstrap_app.dart):
+             the light theme's white flashed between them at every start. -->
+        <item name="android:windowBackground">@android:color/black</item>
     </style>
     <!-- Floating card only: no full-screen black fill, no dim, no PIN. -->
     <style name="IncomingCallTheme" parent="@android:style/Theme.DeviceDefault.Dialog.NoActionBar">

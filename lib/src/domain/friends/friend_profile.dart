@@ -83,6 +83,11 @@ final class FriendProfile {
   /// 0 when not known or they keep it to themselves.
   final int lastOpenedAtMillis;
   final String lastMessagePreview;
+
+  /// When the conversation was last active: [activityStamp] of the
+  /// moment (shown by `activityTimeLabel`, presence_label.dart, as of the
+  /// time it is shown); older stores kept a text made when it happened
+  /// ("Teraz", "14:05"), shown as it is until the next message.
   final String lastActivityLabel;
   final int unreadCount;
   final bool isTyping;
@@ -168,3 +173,12 @@ bool isRealPeerName(String address, String? name) {
   final String shareId = PeerShareCodec.shareIdForAddress(address);
   return trimmed != shareId && trimmed != 'Zen $shareId';
 }
+
+/// The [FriendProfile.lastActivityLabel] of the moment [millis]: `@` and
+/// the milliseconds, made into words only when shown, so "14:05" from
+/// yesterday never stays "14:05" (nor "Teraz").
+String activityStamp(int millis) => '@$millis';
+
+/// The moment an [activityStamp] names, or `null` for an older text label.
+int? activityStampMillis(String label) =>
+    label.startsWith('@') ? int.tryParse(label.substring(1)) : null;

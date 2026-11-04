@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -10,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
@@ -230,40 +230,33 @@ Future<PickedChatAttachment?> _fromGallery() async {
 }
 
 Future<PickedChatAttachment?> _fromFiles() async {
-  final FilePickerResult? result = await FilePicker.platform.pickFiles(
-    allowMultiple: false,
-    withData: false,
-  );
-  final PlatformFile? picked = result == null || result.files.isEmpty
-      ? null
-      : result.files.first;
+  final PlatformFile? picked = await FilePicker.pickFile();
   if (picked == null) {
     return null;
   }
   final String? path = picked.path?.trim().isNotEmpty == true
       ? picked.path!.trim()
       : null;
-  final Uint8List? bytes = picked.bytes;
-  if ((bytes == null || bytes.isEmpty) && path == null) {
+  // The picker hands a path over, never the bytes.
+  if (path == null) {
     return null;
   }
   final String name = picked.name.trim().isNotEmpty
       ? picked.name.trim()
       : 'zalacznik-${DateTime.now().millisecondsSinceEpoch}';
-  final Uint8List? head = bytes != null && bytes.isNotEmpty
-      ? Uint8List.sublistView(bytes, 0, min(16, bytes.length))
-      : await _header(path);
-  if (head != null && looksLikeGif(head) && picked.size <= kMaxSentGifBytes) {
+  final Uint8List? head = await _header(path);
+  if (head != null &&
+      looksLikeGif(head) &&
+      await pickedLength(picked) <= kMaxSentGifBytes) {
     // A GIF file goes as an animated picture.
-    final Uint8List whole = bytes ?? await File(path!).readAsBytes();
+    final Uint8List whole = await File(path).readAsBytes();
     final PickedChatAttachment? gif = _gif(whole, name);
     if (gif != null) {
       return gif;
     }
   }
   return PickedChatAttachment(
-    bytes: bytes,
-    path: bytes == null ? path : null,
+    path: path,
     fileName: name,
     mimeType: lookupMimeType(name, headerBytes: head),
   );

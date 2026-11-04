@@ -13,6 +13,7 @@ import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
@@ -658,6 +659,30 @@ final class LockedReceiver {
   /// one at once, and a pong every other ping keeps this phone reachable,
   /// "w tle", for them (kPresenceOfflineAfter).
   final Duration pongEvery;
+
+  /// Rings for a call as a phone call rings, or stops (setCallRinging,
+  /// call_platform_channel.dart; replaced in tests).
+  Future<void> Function(bool on) ringForCall = setCallRinging;
+
+  /// Who calls, as the card over the lock screen may say it: the name the
+  /// notice kit knows, unless the notification level keeps names off it.
+  String _callCardName(String from) {
+    final String name = (_noticeKit.names[from] ?? '').trim();
+    return name.isEmpty ||
+            _noticeKit.levelOf(from) == NotificationPrivacy.generic
+        ? t('Połączenie przychodzące')
+        : name;
+  }
+
+  /// Shows the native call card for a call from [from] (replaced in
+  /// tests): the name as the notice kit knows it.
+  late Future<void> Function(String from) showCallCard = (String from) =>
+      showIncomingCallPopup(
+        displayName: _callCardName(from),
+        isVideo: false,
+        peerAddress: from,
+        acceptRouteKey: '',
+      );
   final Map<String, int> _pongedAt = <String, int>{};
 
   /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
@@ -1336,11 +1361,17 @@ final class LockedReceiver {
         }
       }
     }
-    if (fresh.isNotEmpty) {
-      await _announceMail(<String>{
-        for (final Map<String, dynamic> item in fresh)
+    // Only mail worth a notice (a message, a call, an invitation; a Zen
+    // before 1.15.4 does not say, so its mail still is): receipts and
+    // statuses came in silently before the app shows them, never as
+    // "Odblokuj Zen" with nothing behind it.
+    final Set<String> worth = <String>{
+      for (final Map<String, dynamic> item in fresh)
+        if (item['k'] != 0)
           PeerShareCodec.normalizeAddress(item['s'] as String),
-      });
+    };
+    if (worth.isNotEmpty) {
+      await _announceMail(worth);
     }
   }
 
@@ -1458,6 +1489,17 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
+      if (type == 'friend_request' &&
+          PeerShareCodec.invitationQuiet(
+            _noticeKit.inviteToken,
+            switch (payload['it']) {
+              final String token => token,
+              _ => null,
+            },
+          )) {
+        // Not from the current invitation code: kept, without a notice.
+        return;
+      }
       // Who invited (or accepted) and what they wrote, as the
       // notification level allows; a group invitation stays plain.
       final NoticeText? invite = _noticeKit.invitationNotice(
@@ -1504,6 +1546,10 @@ final class LockedReceiver {
         unawaitedLogged(_ringEnded(), context: 'Locked ring end');
       });
       if (fresh) {
+        await ringForCall(true);
+        // The call card over the lock screen, as a call shows: "Odbierz"
+        // opens Zen to unlock it, and the call rings on there.
+        await showCallCard(from);
         await _post(
           RuntimeSystemNotification(
             id: '$kLockedCallSlot-${_now()}',
@@ -1531,6 +1577,8 @@ final class LockedReceiver {
       return;
     }
     _ringingFrom = null;
+    await ringForCall(false);
+    await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
       await _post(

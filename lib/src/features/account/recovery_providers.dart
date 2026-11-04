@@ -7,6 +7,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
@@ -36,6 +37,10 @@ Set<String> _acceptedFriends(SocialHubState state) => <String>{
       PeerShareCodec.normalizeAddress(f.address),
 };
 
+/// The Argon2 costs a received half may ask for (lighter ones in tests).
+final Provider<List<PasswordCost>> recoveryAcceptedCostsProvider =
+    Provider<List<PasswordCost>>((Ref ref) => kAcceptedRecoveryCosts);
+
 /// The recovery service, running with the ledger; `null` while the
 /// ledger is off (tests, previews).
 final Provider<RecoveryService?> recoveryServiceProvider =
@@ -46,6 +51,7 @@ final Provider<RecoveryService?> recoveryServiceProvider =
       final RecoveryService service = RecoveryService(
         transport: ref.read(meshTransportProvider),
         disk: ref.read(ledgerDiskProvider),
+        acceptedCosts: ref.read(recoveryAcceptedCostsProvider),
         isFriend: (String address) => _acceptedFriends(
           ref.read(socialHubControllerProvider),
         ).contains(PeerShareCodec.normalizeAddress(address)),

@@ -46,6 +46,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     String nickname = '',
     String? senderDisplayName,
     String? message,
+    String inviteToken = '',
   }) async {
     final String normalizedAddress = PeerShareCodec.normalizeAddress(
       peerAddress,
@@ -65,6 +66,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       payload: <String, dynamic>{
         'type': 'friend_request',
         'senderName': ?senderName,
+        // The token of the code they gave: their current code, or not.
+        if (inviteToken.isNotEmpty) 'it': inviteToken,
         if (message != null && message.trim().isNotEmpty)
           'message': message.trim(),
       },
@@ -84,7 +87,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               )
               .copyWith(
                 lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
-                lastActivityLabel: t('Teraz'),
+                lastActivityLabel: activityStamp(
+                  DateTime.now().millisecondsSinceEpoch,
+                ),
               ),
           _appSettings,
         ),
@@ -225,7 +230,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
                 lastMessagePreview: t(
                   'Połączenie gotowe. Możesz pisać od razu.',
                 ),
-                lastActivityLabel: t('Teraz'),
+                lastActivityLabel: activityStamp(
+                  DateTime.now().millisecondsSinceEpoch,
+                ),
               ),
           _appSettings,
         ),
@@ -580,6 +587,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }
 
   Future<void> acceptIncomingCall({required String peerAddress}) {
+    // Answered off the screen (the card, the notification): the camera is
+    // opened again once Zen is on the screen (recoverCamera).
+    _callAnsweredOffScreen = !state.lifecycle.isInteractive;
     return _enqueueStateWork(
       () => _acceptIncomingCall(peerAddress: peerAddress),
     );
@@ -808,7 +818,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     // Only this call's own notification: clearing everything here used to
     // wipe unrelated message notifications whenever a call rang out.
     await _dismissCallNotificationsFor(session);
-    if (session.isIncoming && !_isUiFocused()) {
+    if (session.isIncoming && await _nobodySeesTheApp()) {
       // The ringing deadline expired with no answer: leave a missed-call
       // notification behind, or the call is invisible once the ring stops.
       // Only while the app is off screen - on screen the conversation's own
@@ -1061,7 +1071,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _callMedia.setMuted(nextMuted);
     }
-    state = state.copyWith(activeCall: session.copyWith(isMuted: nextMuted));
+    // The call as it is now: one that ended during the await stays ended.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
+    state = state.copyWith(activeCall: now.copyWith(isMuted: nextMuted));
     await _persistState();
   }
 
@@ -1079,8 +1094,13 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _callMedia.setSpeakerOn(nextSpeakerOn);
     }
+    // The call as it is now: one that ended during the await stays ended.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
     state = state.copyWith(
-      activeCall: session.copyWith(isSpeakerOn: nextSpeakerOn),
+      activeCall: now.copyWith(isSpeakerOn: nextSpeakerOn),
     );
     await _persistState();
   }
@@ -1095,11 +1115,22 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final bool nextCameraEnabled = !session.isCameraEnabled;
     await _callMedia.setCameraEnabled(nextCameraEnabled);
+    // The call as it is now: it may have changed during the await.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
     state = state.copyWith(
-      activeCall: session.copyWith(
-        kind: nextCameraEnabled && session.kind == CallInviteKind.audio
+      activeCall: now.copyWith(
+        // A video call while anyone shows a picture; with every camera
+        // off it is a voice call again.
+        kind:
+            nextCameraEnabled ||
+                _callMedia.hasRemoteVideo ||
+                _callMedia.isScreenSharing ||
+                _callMedia.remoteScreenSharing
             ? CallInviteKind.video
-            : session.kind,
+            : CallInviteKind.audio,
         isCameraEnabled: nextCameraEnabled,
       ),
     );
@@ -1242,10 +1273,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         kind: _callKind(signal.content),
         remoteDescription: description,
       );
-      state = state.copyWith(
-        activeCall: nextCurrentCall!.copyWith(kind: _callKind(signal.content)),
-      );
-      await _persistState();
+      // The call as it is now, not as it was before the await.
+      final CallSession? now = state.activeCall;
+      if (now != null && _currentCallMatchesSignal(now, signal)) {
+        state = state.copyWith(
+          activeCall: now.copyWith(
+            // Their camera says what they send; our camera and our shared
+            // screen still count.
+            kind: now.isCameraEnabled || _callMedia.isScreenSharing
+                ? CallInviteKind.video
+                : _callKind(signal.content),
+          ),
+        );
+        await _persistState();
+      }
       return;
     }
 
@@ -1297,11 +1338,17 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     _stopCallReRing();
     await _callMedia.applyRemoteAnswer(description);
-    final CallInviteKind kind = _callKind(signal.content);
-    if (session != null) {
+    logZenMessage('Call answer applied');
+    // Read again: the media may have connected while the answer was being
+    // applied, and the call it made active must not go back to
+    // "Łączenie…" (no second "active" comes to undo that).
+    final CallSession? now = state.activeCall;
+    if (now != null &&
+        _currentCallMatchesSignal(now, signal) &&
+        now.status != CallSessionStatus.active) {
       state = state.copyWith(
-        activeCall: session.copyWith(
-          kind: kind,
+        activeCall: now.copyWith(
+          kind: _callKind(signal.content),
           status: CallSessionStatus.connecting,
         ),
       );
@@ -1901,7 +1948,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           ...invitees,
         ]),
       ),
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       lastMessagePreview: t('Utworzono grupę.'),
       // Everyone stays on this list until their device confirms the invite;
       // see [syncGroupInvitesToPeer].
@@ -1925,6 +1972,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           payload: _groupInvitePayload(
             group,
             inviteId: group.pendingInviteIds[member],
+            to: member,
           ),
         ),
         context: 'broadcast group invite to $member',
@@ -1968,7 +2016,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             createdById: prefix,
             createdAtMillis: DateTime.now().millisecondsSinceEpoch,
             memberAddresses: members,
-            lastActivityLabel: t('Teraz'),
+            lastActivityLabel: activityStamp(
+              DateTime.now().millisecondsSinceEpoch,
+            ),
             lastMessagePreview: t('Czat Twojej komórki w piramidzie.'),
           );
           changed = true;
@@ -2016,7 +2066,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         ...current.pendingInviteIds,
         member: _newInviteId(),
       },
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
     );
     final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
       state.groups,
@@ -2045,6 +2095,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               ? _groupInvitePayload(
                   updated,
                   inviteId: updated.pendingInviteIds[member],
+                  to: member,
                 )
               : sync,
         ),
@@ -2079,14 +2130,27 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           if (localAddr.isNotEmpty) localAddr,
           ...?memberAddresses,
         ]),
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
         lastMessagePreview: t('Dołączono do grupy.'),
       );
     } else if (existing.isInvitePending) {
+      final String inviter = PeerShareCodec.normalizeAddress(
+        senderAddress ?? existing.createdById,
+      );
       groups[groupId] = existing.copyWith(
         isInvitePending: false,
+        // The members' addresses come with the inviter's answer to the
+        // `group_invite_ack` below; until they do, it is asked again
+        // ([syncGroupInvitesToPeer]). An invitation without names (from
+        // an older version) carried the addresses already.
+        inviteMemberNames: const <String>[],
+        awaitingMembersFrom:
+            existing.inviteMemberNames.isNotEmpty &&
+                isRoutablePeerAddress(inviter)
+            ? inviter
+            : '',
         lastMessagePreview: t('Dołączono do grupy.'),
-        lastActivityLabel: t('Teraz'),
+        lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       );
     }
     bool isInviteFor(InboxEntry entry) =>
@@ -2119,6 +2183,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         peerAddress: inviter,
         type: 'group_invite_ack',
         groupId: groupId,
+        joined: true,
       );
     }
   }
@@ -2280,7 +2345,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     groups[groupId] = group.copyWith(
       lastMessagePreview: said,
-      lastActivityLabel: t('Teraz'),
+      lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
     );
     state = state.copyWith(groups: groups);
     await _persistState();

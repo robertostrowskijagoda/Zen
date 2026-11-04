@@ -113,9 +113,12 @@ const (
 	// While frames wait for a peer's record, it is asked again this many
 	// times, without waiting for the app's next send: every
 	// pqKeyRequestInterval for the first pqKeyReasksSteady, then twice as
-	// long each time (within pqPendingTTL).
-	pqKeyReasks            = 6
-	pqKeyReasksSteady      = 3
+	// long each time (within pqPendingTTL): 1, 2, 3, 4, 5, 7, 11 and 19 s
+	// after the first ask. A friend's node that just restarted is often
+	// out of reach for its first seconds; asking every second through them
+	// gets the frames there as soon as it is, not at the next doubling.
+	pqKeyReasks            = 8
+	pqKeyReasksSteady      = 5
 	pqKeyReplyInterval     = time.Second
 	pqUnknownReplyInterval = time.Second
 	pqAckInterval          = 250 * time.Millisecond
@@ -148,6 +151,11 @@ const (
 	// and challenges, giving challenges), all peers together.
 	pqForeignKEMPerSecond = 200
 	pqForeignKEMBurst     = 400
+	// A phone does a fifth of that: each operation keeps it awake, so a
+	// stranger asking for sessions over and over would drain its battery.
+	// Friends opening sessions after a network change fit the burst.
+	pqPhoneForeignKEMPerSecond = 40
+	pqPhoneForeignKEMBurst     = 200
 	// Addresses whose device key is pinned. New pins come at most
 	// pqNewPinsPerMinute (strangers' addresses cost nothing to make); when
 	// the pins are full, the one seen longest ago makes room, so filling
@@ -431,6 +439,9 @@ func (e *pqEndpoint) evictPeerLocked() {
 }
 
 func (e *pqEndpoint) allowForeignKEMLocked(now time.Time) bool {
+	if isPhoneOS() {
+		return e.foreignKEM.allow(now, pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst)
+	}
 	return e.foreignKEM.allow(now, pqForeignKEMPerSecond, pqForeignKEMBurst)
 }
 

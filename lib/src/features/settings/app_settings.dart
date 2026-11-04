@@ -14,6 +14,12 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// the lock step, which people set up before it came never saw.
 const int kSetupRevision = 2;
 
+/// Settings saved before this revision had "Znajomi w tej samej sieci
+/// Wi-Fi", Wi-Fi Direct and Bluetooth off from when they were off by
+/// default: read from such a copy, they are on (the person can turn them
+/// off again; saved from now on with this revision, that choice stays).
+const int kLocalLinksRevision = 1;
+
 /// Settings of this device rather than of the account: a copy of the
 /// account that does not bring the app's lock along (the recovery circle,
 /// another device, a backup file without it) never replaces them
@@ -38,6 +44,7 @@ const Set<String> kDeviceSettingKeys = <String>{
   'lanDiscovery',
   'wifiDirect',
   'bluetoothLinks',
+  'linksRev',
   'multipeerLinks',
   'keepReceivingInBackground',
 };
@@ -466,6 +473,7 @@ final class AppSettings {
     this.disguiseIcon = false,
     this.bridgeEnabled = true,
     this.servePebbles = true,
+    this.inviteToken = '',
     this.setupRevision = 0,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
@@ -611,6 +619,11 @@ final class AppSettings {
   /// them (Ustawienia → Sieć i usługa). On by default: popular pebbles
   /// become easier to get, not harder.
   final bool servePebbles;
+
+  /// The token of this person's invitation code ('' until "Zmień kod" was
+  /// used): an invitation without it (an old code, an address that leaked)
+  /// comes in without a notification.
+  final String inviteToken;
 
   /// The [kSetupRevision] of the setup (the lock, notifications, gates,
   /// animations) this person last went through or skipped; 0: never. The
@@ -764,6 +777,7 @@ final class AppSettings {
     bool? disguiseIcon,
     bool? bridgeEnabled,
     bool? servePebbles,
+    String? inviteToken,
     int? setupRevision,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
@@ -811,6 +825,7 @@ final class AppSettings {
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
       servePebbles: servePebbles ?? this.servePebbles,
+      inviteToken: inviteToken ?? this.inviteToken,
       setupRevision: setupRevision ?? this.setupRevision,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
@@ -906,6 +921,7 @@ final class AppSettings {
     'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
     'servePebbles': servePebbles,
+    if (inviteToken.isNotEmpty) 'inviteToken': inviteToken,
     'setupRevision': setupRevision,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
@@ -916,6 +932,7 @@ final class AppSettings {
     'lanDiscovery': ?lanDiscovery,
     'wifiDirect': wifiDirect,
     'bluetoothLinks': bluetoothLinks,
+    'linksRev': kLocalLinksRevision,
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
     'showLastOpened': showLastOpened,
@@ -929,6 +946,8 @@ final class AppSettings {
       final Object? value = json[key];
       return value is T ? value : null;
     }
+
+    final bool oldLinks = (pick<int>('linksRev') ?? 0) < kLocalLinksRevision;
 
     E? byName<E extends Enum>(List<E> values, String key) {
       final Object? name = json[key];
@@ -982,6 +1001,7 @@ final class AppSettings {
       disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
       servePebbles: pick<bool>('servePebbles'),
+      inviteToken: pick<String>('inviteToken'),
       setupRevision: pick<int>('setupRevision'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
@@ -989,9 +1009,11 @@ final class AppSettings {
       legalAcceptedVersion: pick<String>('legalAcceptedVersion'),
       legalAcceptedAtMillis: pick<int>('legalAcceptedAtMillis'),
       groupInviteFrom: byName(GroupInviteFrom.values, 'groupInviteFrom'),
-      lanDiscovery: pick<bool>('lanDiscovery'),
-      wifiDirect: pick<bool>('wifiDirect'),
-      bluetoothLinks: pick<bool>('bluetoothLinks'),
+      // From before kLocalLinksRevision: the links on, as they are now
+      // by default (null keeps the default).
+      lanDiscovery: oldLinks ? null : pick<bool>('lanDiscovery'),
+      wifiDirect: oldLinks ? null : pick<bool>('wifiDirect'),
+      bluetoothLinks: oldLinks ? null : pick<bool>('bluetoothLinks'),
       multipeerLinks: pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       showLastOpened: pick<bool>('showLastOpened'),

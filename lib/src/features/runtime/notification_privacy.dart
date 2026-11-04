@@ -253,7 +253,13 @@ final class LockedNoticeKit {
     this.sounds = true,
     this.versions = const <String, String>{},
     this.removed = const <String>{},
+    this.inviteToken = '',
   });
+
+  /// The token of this person's invitation code (`AppSettings.inviteToken`):
+  /// a friend request without it is not told about while locked
+  /// ([PeerShareCodec.invitationQuiet]).
+  final String inviteToken;
 
   /// Friends this person removed (normalized addresses): an acceptance
   /// from them answers nothing and is not told about.
@@ -429,6 +435,7 @@ final class LockedNoticeKit {
     if (!sounds) 's': false,
     if (versions.isNotEmpty) 'ver': versions,
     if (removed.isNotEmpty) 'x': removed.toList(growable: false),
+    if (inviteToken.isNotEmpty) 'it': inviteToken,
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -508,6 +515,10 @@ final class LockedNoticeKit {
           for (final Object? address in x.take(maxEntries))
             if (fits(address)) address as String,
       },
+      inviteToken: switch (json['it']) {
+        final String token when PeerShareCodec.isInviteToken(token) => token,
+        _ => '',
+      },
     );
   }
 }
@@ -524,6 +535,7 @@ LockedNoticeKit lockedNoticeKitOf(
   AccountDeviceDirectory? directory,
   Set<NoticeKind> muted = const <NoticeKind>{},
   bool sounds = true,
+  String inviteToken = '',
 }) {
   String normal(String address) => PeerShareCodec.normalizeAddress(address);
   final Map<String, NotificationPrivacy> overrides =
@@ -612,6 +624,7 @@ LockedNoticeKit lockedNoticeKitOf(
           normal(e.key): e.value,
     },
     sounds: sounds,
+    inviteToken: inviteToken,
   );
 }
 

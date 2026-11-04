@@ -442,9 +442,10 @@ void main() {
     await mesh.advance(const Duration(seconds: 5));
     final MessageDeliveryStatus held = a.statusOf(mine)!;
     expect(held.stage, MessageDeliveryStage.inMailboxes);
-    // Bob's mailboxes are his other friends; alice is one of them herself.
+    // Bob's mailboxes are his other friends; alice is one of them herself
+    // (her own copy is not counted among the friends' mailboxes).
     expect(held.heldBySelf, isTrue);
-    expect(held.mailboxCopies, 3);
+    expect(held.mailboxCopies, 2);
 
     await b.goOnline();
     await mesh.settle();

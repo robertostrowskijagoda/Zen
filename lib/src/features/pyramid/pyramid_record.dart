@@ -355,10 +355,6 @@ final class PyramidRecord {
     return (await validSigs()).length == sigs.length;
   }
 
-  /// Valid treasurer signatures (checked one by one).
-  Future<Set<String>> validTreasurerSigs() async =>
-      (await validTreasurerSigMap()).keys.toSet();
-
   /// Valid treasurer signatures with the signatures themselves.
   Future<Map<String, String>> validTreasurerSigMap() async {
     final Map<String, String> ok = <String, String>{};

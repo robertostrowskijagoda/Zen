@@ -321,18 +321,6 @@ final class GraphNotesService extends ChangeNotifier {
     }
   }
 
-  /// The last conversation with [friend] was at [at] (a message either
-  /// way).
-  Future<void> noteTalk(String friend, int at) async {
-    await load();
-    final String a = _n(friend);
-    if (at <= (_notes.lastTalk[a] ?? 0)) {
-      return;
-    }
-    _notes.lastTalk[a] = at;
-    await _save();
-  }
-
   /// Reads the dates out of the conversations already on this phone, one
   /// friend at a time: the first message (the friendship's start, when it
   /// was before the dates were kept) and the last one that was a real

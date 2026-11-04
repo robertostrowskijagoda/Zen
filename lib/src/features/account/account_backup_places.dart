@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
@@ -194,7 +196,7 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
        _temporary = temporary ?? getTemporaryDirectory,
        _directoryPicker =
            directoryPicker ??
-           (() => FilePicker.platform.getDirectoryPath(
+           (() => FilePicker.getDirectoryPath(
              dialogTitle: t('Wybierz folder na kopię'),
            )),
        _reveal = reveal ?? _revealOnDesktop,
@@ -387,21 +389,17 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
   /// Linux: the file manager on the folder.
   static Future<void> _revealOnDesktop(String path) async {
     if (Platform.isWindows) {
-      await Process.run(windowsExplorerPath(), <String>['/select,', path]);
+      await runDesktopOpener(windowsExplorerPath(), <String>['/select,', path]);
     } else if (Platform.isMacOS) {
-      await Process.run('/usr/bin/open', <String>['-R', path]);
+      await runDesktopOpener('/usr/bin/open', <String>['-R', path]);
     } else {
-      await Process.run('xdg-open', <String>[File(path).parent.path]);
+      await runDesktopOpener('xdg-open', <String>[File(path).parent.path]);
     }
   }
 
   @override
   Future<String?> pick() async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    return picked?.files.firstOrNull?.path;
+    return pickOnePath();
   }
 }
 

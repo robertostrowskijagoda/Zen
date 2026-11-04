@@ -1444,40 +1444,44 @@ class _ProfileInfo extends StatelessWidget {
         borderRadius: context.zenRadius(20),
         border: Border.all(color: zen.outlineSoft),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          row(
-            Icons.mood_rounded,
-            ProfileField.status,
-            status.isEmpty ? '—' : status,
-          ),
-          row(
-            Icons.flag_outlined,
-            ProfileField.nationality,
-            nationalities.isEmpty
-                ? (me == null ? hidden : t('Nie podano'))
-                : nationalities.map(nationalityLabel).join(', '),
-          ),
-          row(
-            Icons.people_alt_outlined,
-            ProfileField.friendCount,
-            friends == null ? hidden : friendCountLabel(friends!),
-          ),
-          row(
-            Icons.visibility_outlined,
-            ProfileField.followerCount,
-            followers == null ? hidden : followerCountLabel(followers!),
-          ),
-          if (me != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-              child: Text(
-                t('Kto widzi każde pole, zmienisz w „Edytuj profil”.'),
-                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-              ),
+      // The tiles paint on a Material of their own, above the card's color.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            row(
+              Icons.mood_rounded,
+              ProfileField.status,
+              status.isEmpty ? '—' : status,
             ),
-        ],
+            row(
+              Icons.flag_outlined,
+              ProfileField.nationality,
+              nationalities.isEmpty
+                  ? (me == null ? hidden : t('Nie podano'))
+                  : nationalities.map(nationalityLabel).join(', '),
+            ),
+            row(
+              Icons.people_alt_outlined,
+              ProfileField.friendCount,
+              friends == null ? hidden : friendCountLabel(friends!),
+            ),
+            row(
+              Icons.visibility_outlined,
+              ProfileField.followerCount,
+              followers == null ? hidden : followerCountLabel(followers!),
+            ),
+            if (me != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+                child: Text(
+                  t('Kto widzi każde pole, zmienisz w „Edytuj profil”.'),
+                  style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

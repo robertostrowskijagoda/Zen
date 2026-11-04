@@ -7,8 +7,8 @@ import 'package:zen/src/features/settings/app_settings.dart';
 
 void main() {
   group('the circle reminder', () {
-    test('waits for four friends', () {
-      for (int n = 0; n < 4; n++) {
+    test('waits for two friends (as many as a recovery needs)', () {
+      for (int n = 0; n < 2; n++) {
         expect(
           circleReminderDue(
             ledgerOn: true,
@@ -24,7 +24,7 @@ void main() {
         circleReminderDue(
           ledgerOn: true,
           hasCircle: false,
-          friends: 4,
+          friends: 2,
           settings: const AppSettings(),
         ),
         isTrue,

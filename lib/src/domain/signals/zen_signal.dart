@@ -94,6 +94,7 @@ final class ZenSignal {
     this.groupId,
     this.groupName,
     this.memberAddresses,
+    this.memberNames,
     this.avatarPreset,
     this.bio,
     this.isTyping = false,
@@ -128,6 +129,10 @@ final class ZenSignal {
   final String? groupId;
   final String? groupName;
   final List<String>? memberAddresses;
+
+  /// A group invitation: the members' names as the inviter knows them
+  /// (their addresses come once the invitee joined).
+  final List<String>? memberNames;
   final String? avatarPreset;
   final String? bio;
   final bool isTyping;
@@ -194,6 +199,7 @@ final class ZenSignal {
       groupId: groupId,
       groupName: groupName,
       memberAddresses: memberAddresses,
+      memberNames: memberNames,
       avatarPreset: avatarPreset,
       bio: bio,
       isTyping: isTyping,

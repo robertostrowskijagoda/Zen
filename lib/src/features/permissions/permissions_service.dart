@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/nearby.dart';
@@ -300,7 +301,7 @@ final class WindowsPermissionsPlatform implements PermissionsPlatform {
       _ => 'ms-settings:',
     };
     try {
-      await Process.run('explorer', <String>[page]);
+      await runDesktopOpener('explorer', <String>[page]);
     } on Object catch (error) {
       logZenWarning('Windows settings: $error');
     }

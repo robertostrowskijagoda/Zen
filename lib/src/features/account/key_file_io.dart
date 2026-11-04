@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
 /// Where the backup file is saved and read from (replaced in tests).
@@ -26,7 +26,7 @@ final class PlatformKeyFileIo implements KeyFileIo {
   Future<String?> save(String name, Uint8List bytes) async {
     String? target;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      target = await FilePicker.platform.saveFile(
+      target = await pickSavePath(
         dialogTitle: t('Zapisz plik kopii klucza'),
         fileName: name,
       );
@@ -51,11 +51,7 @@ final class PlatformKeyFileIo implements KeyFileIo {
 
   @override
   Future<Uint8List?> pick() async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    final String? path = picked?.files.firstOrNull?.path;
+    final String? path = await pickOnePath();
     if (path == null) {
       return null;
     }

@@ -186,10 +186,6 @@ final class AppSettingsController extends Notifier<AppSettings> {
     );
   }
 
-  Future<void> setSecureScreens(bool value) async {
-    await _save(state.copyWith(secureScreens: value));
-  }
-
   /// Android: switches the launcher icon and name and remembers the
   /// choice. Returns `false`, changing nothing, when the phone did not take
   /// the switch.
@@ -207,6 +203,12 @@ final class AppSettingsController extends Notifier<AppSettings> {
 
   Future<void> setBridgeEnabled(bool value) async {
     await _save(state.copyWith(bridgeEnabled: value));
+  }
+
+  /// "Zmień kod": a new invitation code, the old one stops bringing
+  /// notified invitations.
+  Future<void> changeInviteCode() async {
+    await _save(state.copyWith(inviteToken: PeerShareCodec.newInviteToken()));
   }
 
   /// "Udostępniaj zebrane kamyczki".

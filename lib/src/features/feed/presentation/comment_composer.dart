@@ -341,15 +341,16 @@ class _CommentComposerState extends ConsumerState<CommentComposer> {
   }
 
   Future<void> _fromFiles() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+    final List<PlatformFile> picked = await FilePicker.pickFiles(
       type: FileType.image,
-      allowMultiple: true,
-      withData: true,
     );
     await _addItems(<TransferItem>[
-      for (final PlatformFile f in result?.files ?? const <PlatformFile>[])
-        if (f.bytes != null || f.path != null)
-          TransferItem(name: f.name, bytes: f.bytes, path: f.path),
+      for (final PlatformFile f in picked)
+        TransferItem(
+          name: f.name,
+          bytes: f.path == null ? await f.readAsBytes() : null,
+          path: f.path,
+        ),
     ]);
   }
 

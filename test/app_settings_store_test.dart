@@ -124,6 +124,26 @@ void main() {
       'good_key-1.2',
     );
   });
+
+  test('offline links saved off by an older version are on again', () {
+    final AppSettings old = AppSettings.fromJson(<String, dynamic>{
+      'lanDiscovery': false,
+      'wifiDirect': false,
+      'bluetoothLinks': false,
+    });
+    expect(old.lanDiscoveryOn, isTrue);
+    expect(old.wifiDirect, isTrue);
+    expect(old.bluetoothLinks, isTrue);
+
+    // Turned off since: that stays.
+    final Map<String, dynamic> saved = old
+        .copyWith(lanDiscovery: false, wifiDirect: false, bluetoothLinks: false)
+        .toJson();
+    final AppSettings again = AppSettings.fromJson(saved);
+    expect(again.lanDiscoveryOn, isFalse);
+    expect(again.wifiDirect, isFalse);
+    expect(again.bluetoothLinks, isFalse);
+  });
 }
 
 final class _PassThroughCompressor implements BinaryCompressor {

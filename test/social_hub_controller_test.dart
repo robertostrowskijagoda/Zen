@@ -177,6 +177,76 @@ void main() {
   );
 
   test(
+    'after "Zmień kod" only a request from the new code is told about',
+    () async {
+      final MemoryRuntimeSystemNotificationService notificationService =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(const AppSettings(inviteToken: 'ABCDE')),
+          ),
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notificationService,
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.background,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(appSettingsControllerProvider);
+      await Future<void>.delayed(Duration.zero);
+      final SocialHubController hub = container.read(
+        socialHubControllerProvider.notifier,
+      );
+
+      // The old code (or an address learned elsewhere): no token.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: 'obcy.ygg',
+          displayName: 'Obcy',
+        ),
+        receivedAtMillis: 10,
+      );
+      expect(
+        container.read(socialHubControllerProvider).friends['obcy.ygg']?.status,
+        FriendRelationshipStatus.pendingIncoming,
+      );
+      expect(notificationService.activeNotifications, isEmpty);
+
+      // The new code.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: 'kuba.ygg',
+          displayName: 'Kuba',
+          inviteId: 'ABCDE',
+        ),
+        receivedAtMillis: 11,
+      );
+      expect(
+        notificationService.activeNotifications.single.title,
+        contains('Kuba'),
+      );
+    },
+  );
+
+  test(
     'global settings seed retention defaults into new accepted relation',
     () async {
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
@@ -4026,8 +4096,56 @@ void main() {
       expect(state.activeCall, isNotNull);
       expect(state.activeCall!.kind, CallInviteKind.video);
       expect(state.activeCall!.isIncoming, isFalse);
+      // The media connected while the answer was applied: the call stays
+      // connected, not "Łączenie…" (which also turned away the camera the
+      // other side added, as a new call).
+      expect(state.activeCall!.status, CallSessionStatus.active);
     },
   );
+
+  test('a call that ends while the speaker is switched stays ended', () async {
+    final _FakeCallMediaSessionController callMedia =
+        _FakeCallMediaSessionController()
+          ..activeCallIdValue = 'call-speaker'
+          ..activeKindValue = CallInviteKind.audio;
+    callMedia.duringSetSpeaker = () => callMedia.onStatusChanged?.call(
+      'call-speaker',
+      CallMediaSessionLifecycle.ended,
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        callMediaSessionControllerProvider.overrideWithValue(callMedia),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            activeCall: const CallSession(
+              id: 'call-speaker',
+              peerAddress: 'ada.ygg',
+              displayName: 'Ada',
+              kind: CallInviteKind.audio,
+              status: CallSessionStatus.active,
+              startedAtMillis: 7,
+            ),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    // Built, so the media's status callback is wired.
+    container.read(socialHubControllerProvider);
+
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .toggleActiveCallSpeaker();
+
+    expect(container.read(socialHubControllerProvider).activeCall, isNull);
+  });
 
   test(
     'busy signal closes the current media session and clears the active call',
@@ -4139,6 +4257,75 @@ void main() {
     expect(persisted.isSpeakerOn, isTrue);
     expect(persisted.isCameraEnabled, isFalse);
   });
+
+  test(
+    'a renegotiation to voice keeps the call a video call while we share our screen',
+    () async {
+      final _FakeCallMediaSessionController callMedia =
+          _FakeCallMediaSessionController()
+            ..activeKindValue = CallInviteKind.video
+            ..activeCallIdValue = 'call-screen'
+            ..cameraEnabledValue = false
+            ..screenSharingValue = true;
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(callMedia),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              activeCall: const CallSession(
+                id: 'call-screen',
+                peerAddress: 'ada.ygg',
+                displayName: 'Ada',
+                kind: CallInviteKind.video,
+                status: CallSessionStatus.active,
+                startedAtMillis: 9,
+              ),
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Ada turned her camera off: her offer says "audio".
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: 'ada.ygg',
+              callId: 'call-screen',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+          );
+
+      expect(callMedia.remoteOfferDescription, isNotNull);
+      expect(
+        container.read(socialHubControllerProvider).activeCall!.kind,
+        CallInviteKind.video,
+        reason: 'our shared screen is still a picture',
+      );
+    },
+  );
 
   test(
     'remote decline and end signals close the matching active call',
@@ -4556,61 +4743,80 @@ void main() {
     });
   });
 
-  test(
-    'message read signal marks the matching outgoing message as read',
-    () async {
-      final MemoryMessageTimelineStore timelineStore =
-          MemoryMessageTimelineStore(<String, List<ChatMessage>>{
-            'ada.ygg': const <ChatMessage>[
-              ChatMessage(
-                id: 'm-1',
-                sender: 'self',
-                text: 'Hej',
-                sentAtMillis: 1,
-                direction: ChatMessageDirection.outgoing,
-                deliveryState: ChatMessageDeliveryState.delivered,
-              ),
-            ],
-          });
-      final ProviderContainer container = ProviderContainer(
-        overrides: [
-          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-          socialSnapshotStoreProvider.overrideWithValue(
-            MemorySocialSnapshotStore(),
+  test('message read signal marks the matching outgoing message, and every '
+      'earlier one, as read', () async {
+    final MemoryMessageTimelineStore timelineStore = MemoryMessageTimelineStore(
+      <String, List<ChatMessage>>{
+        'ada.ygg': const <ChatMessage>[
+          ChatMessage(
+            id: 'm-0',
+            sender: 'self',
+            text: 'Cześć',
+            sentAtMillis: 0,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
           ),
-          messageTimelineStoreProvider.overrideWithValue(timelineStore),
-          socialHubSeedProvider.overrideWithValue(
-            SocialHubState.empty().copyWith(
-              book: FriendshipBook.restore(
-                profiles: const <String, FriendProfile>{
-                  'ada.ygg': FriendProfile(
-                    address: 'ada.ygg',
-                    displayName: 'Ada',
-                    status: FriendRelationshipStatus.accepted,
-                  ),
-                },
-              ),
-            ),
+          ChatMessage(
+            id: 'm-1',
+            sender: 'self',
+            text: 'Hej',
+            sentAtMillis: 1,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
+          ),
+          ChatMessage(
+            id: 'm-2',
+            sender: 'self',
+            text: 'Jesteś?',
+            sentAtMillis: 9,
+            direction: ChatMessageDirection.outgoing,
+            deliveryState: ChatMessageDeliveryState.delivered,
           ),
         ],
-      );
-      addTearDown(container.dispose);
-
-      await container
-          .read(socialHubControllerProvider.notifier)
-          .receiveSignal(
-            const ZenSignal(
-              type: ZenSignalType.messageRead,
-              sender: 'ada.ygg',
-              messageId: 'm-1',
+      },
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(timelineStore),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                'ada.ygg': FriendProfile(
+                  address: 'ada.ygg',
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
             ),
-            receivedAtMillis: 5,
-          );
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
 
-      final List<ChatMessage> messages = await timelineStore.load('ada.ygg');
-      expect(messages.single.readAtMillis, 5);
-    },
-  );
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .receiveSignal(
+          const ZenSignal(
+            type: ZenSignalType.messageRead,
+            sender: 'ada.ygg',
+            messageId: 'm-1',
+          ),
+          receivedAtMillis: 5,
+        );
+
+    final List<ChatMessage> messages = await timelineStore.load('ada.ygg');
+    // The one named and every one sent before it; not a later one.
+    expect(
+      <int?>[for (final m in messages) m.readAtMillis],
+      <int?>[5, 5, null],
+    );
+  });
 
   test('opening a conversation can clear unread state persistently', () async {
     final MemorySocialSnapshotStore snapshotStore = MemorySocialSnapshotStore();
@@ -5173,6 +5379,180 @@ void main() {
   );
 
   test(
+    'a call that rings out over the lock screen leaves a missed-call notification',
+    () async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+      final MemoryRuntimeSystemNotificationService notifications =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notifications,
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(
+            _FakeCallMediaSessionController(),
+          ),
+          deviceLockedProbeProvider.overrideWithValue(() async => true),
+          callRingingWaitTimeoutProvider.overrideWithValue(
+            const Duration(milliseconds: 40),
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.foregroundFocused,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ).copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _peer: FriendProfile(
+                    address: _peer,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await transport.start();
+
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: _peer,
+              callId: 'call-missed',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+            receivedAtMillis: 11,
+          );
+
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+
+      expect(
+        container.read(socialHubControllerProvider).activeCall,
+        isNull,
+        reason: 'nobody answered, so the ringing session expires',
+      );
+      // The ringing call drew the app over the keyguard ("focused"), but
+      // the phone was locked: nobody saw the conversation.
+      final List<RuntimeSystemNotification> callNotifications = notifications
+          .activeNotifications
+          .where(
+            (RuntimeSystemNotification entry) =>
+                entry.category == RuntimeSystemNotificationCategory.call,
+          )
+          .toList(growable: false);
+      expect(callNotifications, hasLength(1));
+      expect(callNotifications.single.title, contains('Nieodebrane'));
+      expect(callNotifications.single.isRingingCall, isFalse);
+      expect(callNotifications.single.slotKey, callNotificationSlotKey(_peer));
+    },
+  );
+
+  test(
+    'a call that rings out on an open, unlocked app leaves no notification',
+    () async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+      final MemoryRuntimeSystemNotificationService notifications =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notifications,
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(
+            _FakeCallMediaSessionController(),
+          ),
+          deviceLockedProbeProvider.overrideWithValue(() async => false),
+          callRingingWaitTimeoutProvider.overrideWithValue(
+            const Duration(milliseconds: 40),
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.foregroundFocused,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ).copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _peer: FriendProfile(
+                    address: _peer,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await transport.start();
+
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: _peer,
+              callId: 'call-missed',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+            receivedAtMillis: 11,
+          );
+
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+
+      expect(
+        container.read(socialHubControllerProvider).activeCall,
+        isNull,
+        reason: 'nobody answered, so the ringing session expires',
+      );
+      final List<RuntimeSystemNotification> callNotifications = notifications
+          .activeNotifications
+          .where(
+            (RuntimeSystemNotification entry) =>
+                entry.category == RuntimeSystemNotificationCategory.call,
+          )
+          .toList(growable: false);
+      // On screen, unlocked: the conversation says it, no shade entry.
+      expect(callNotifications, isEmpty);
+    },
+  );
+
+  test(
     'a call end without a ringing call leaves no missed-call notification',
     () async {
       final MemoryRuntimeSystemNotificationService notifications =
@@ -5369,7 +5749,12 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
   bool resendOfferResult = true;
   bool mutedValue = false;
   bool speakerOnValue = false;
+
+  /// Runs while the speaker is being switched (the other side hanging up
+  /// meanwhile, say).
+  void Function()? duringSetSpeaker;
   bool cameraEnabledValue = true;
+  bool screenSharingValue = false;
   bool closed = false;
   String? activeCallIdValue;
   String? remoteAddressValue;
@@ -5388,6 +5773,9 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
 
   @override
   bool get hasLocalVideo => cameraEnabledValue;
+
+  @override
+  bool get isScreenSharing => screenSharingValue;
 
   @override
   bool get hasRemoteStream => activeCallIdValue != null;
@@ -5493,6 +5881,8 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
 
   @override
   Future<void> setSpeakerOn(bool enabled) async {
+    duringSetSpeaker?.call();
+    await Future<void>.delayed(Duration.zero);
     speakerOnValue = enabled;
     notifyListeners();
   }

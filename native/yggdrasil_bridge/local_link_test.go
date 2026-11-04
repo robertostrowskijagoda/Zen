@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -382,7 +381,7 @@ func TestLocalHandshakeRefusesABrokenKemKey(t *testing.T) {
 func testCore(t *testing.T) *core.Core {
 	t.Helper()
 	cfg := config.GenerateConfig()
-	logger := log.New(os.Stderr, "", 0)
+	logger := newBridgeLogger(os.Stderr)
 	c, err := core.New(cfg.Certificate, logger, core.NodeInfoPrivacy(true))
 	if err != nil {
 		t.Fatal(err)

@@ -367,10 +367,11 @@ final class RecoveryService {
     if (!_held.containsKey(o)) {
       throw StateError(t('Nie przechowujesz klucza tej osoby.'));
     }
-    final int due =
-        _clock() +
-        (kind == RecoveryKind.normal ? kNormalDelay : kEmergencyDelay)
-            .inMilliseconds;
+    if (kind != RecoveryKind.normal) {
+      // No recovery without the password any more (1.15.4).
+      throw StateError(t('Konto odzyskuje się tylko z hasłem.'));
+    }
+    final int due = _clock() + kNormalDelay.inMilliseconds;
     final PendingRelease release = PendingRelease(
       owner: o,
       to: parseRecoveryDevice(to),
@@ -419,7 +420,10 @@ final class RecoveryService {
     }
     for (final PendingRelease p in due) {
       final Map<String, dynamic>? piece = _held[p.owner];
-      final Object? half = piece?[p.kind.name];
+      // A passwordless release agreed to before 1.15.4 never goes out.
+      final Object? half = p.kind == RecoveryKind.normal
+          ? (piece?[p.kind.name])
+          : null;
       final Object? account = piece?['account'];
       if (half != null) {
         await transport.send(

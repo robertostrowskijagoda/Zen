@@ -200,4 +200,40 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  test('a changed code carries its token and still names the address', () {
+    final String token = PeerShareCodec.newInviteToken();
+    expect(PeerShareCodec.isInviteToken(token), isTrue);
+    final PeerShareProfile profile = PeerShareCodec.buildLocalProfile(
+      address: address,
+      inviteToken: token,
+    )!;
+    final String code = profile.inviteCode;
+    expect(code.replaceAll('-', '').length, 30);
+    expect(code.split('-').length, 6);
+    expect(PeerShareCodec.addressFromInviteCode(code), address);
+    expect(PeerShareCodec.inviteTokenFromCode(code), token);
+    final PeerDialTarget typed = PeerShareCodec.parseTarget(code);
+    expect(typed.address, address);
+    expect(typed.inviteToken, token);
+    final PeerDialTarget scanned = PeerShareCodec.parseTarget(
+      PeerShareCodec.inviteLinkForCode(code),
+    );
+    expect(scanned.inviteToken, token);
+    // The old code still names the address, without a token.
+    final String old = PeerShareCodec.inviteCodeForAddress(address)!;
+    expect(PeerShareCodec.parseTarget(old).inviteToken, '');
+    expect(PeerShareCodec.inviteTokenFromCode(old), '');
+    // A mistyped address part is caught with a token too.
+    final String broken = 'Z${code.substring(1)}';
+    expect(PeerShareCodec.addressFromInviteCode(broken), isNot(address));
+  });
+
+  test('only a request from the current code is told about', () {
+    expect(PeerShareCodec.invitationQuiet('', null), isFalse);
+    expect(PeerShareCodec.invitationQuiet('', 'ABCDE'), isFalse);
+    expect(PeerShareCodec.invitationQuiet('ABCDE', 'ABCDE'), isFalse);
+    expect(PeerShareCodec.invitationQuiet('ABCDE', null), isTrue);
+    expect(PeerShareCodec.invitationQuiet('ABCDE', 'FGHJK'), isTrue);
+  });
 }

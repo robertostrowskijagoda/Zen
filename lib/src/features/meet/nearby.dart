@@ -815,7 +815,7 @@ final class NearbyService extends ChangeNotifier {
   }
 
   void _syncTimer() {
-    if (!visible && !looking) {
+    if (_closed || (!visible && !looking)) {
       _tick?.cancel();
       _tick = null;
       return;
@@ -1557,8 +1557,29 @@ final class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> close() async {
+  /// Closed ([close]): what still finishes afterwards (a scan the
+  /// screen stopped as it went) tells nobody and starts no timer.
+  bool _closed = false;
+
+  @override
+  void notifyListeners() {
+    if (!_closed) {
+      super.notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _closed = true;
     _tick?.cancel();
+    _tick = null;
+    super.dispose();
+  }
+
+  Future<void> close() async {
+    _closed = true;
+    _tick?.cancel();
+    _tick = null;
     _networkTimer?.cancel();
     _networkTimer = null;
     _networkLook = false;

@@ -8,6 +8,9 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
+import 'package:zen/src/features/account/multi/account_registry.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
@@ -246,6 +249,37 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.pebbles:
         // "Prośba o przechowanie kamyczka": the requests wait there.
         unawaited(PebblesScreen.open(context));
+        break;
+      case RuntimeRouteTarget.account:
+        // A notification of another account of this device: that account
+        // opens (locked, as it starts), when it is on the list of accounts;
+        // a hidden one only says where its notification came from.
+        final String folder = intent.rawInput ?? '';
+        if (ref.read(zenAccountProvider).folder == folder) {
+          break;
+        }
+        final ZenAccountRegistry registry = ref.read(
+          zenAccountRegistryProvider,
+        );
+        for (final ZenListedAccount listed in await registry.listed()) {
+          final ZenAccountScope scope = await registry.scopeOf(listed);
+          if (scope.folder == folder) {
+            await switchZenAccount(ref, ZenAccountOpening(scope: scope));
+            return;
+          }
+        }
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              content: Text(
+                t(
+                  'To powiadomienie jest z innego konta na tym urządzeniu. '
+                  'Otwórz je w Konta i odzyskiwanie.',
+                ),
+              ),
+            ),
+          );
+        }
         break;
       case RuntimeRouteTarget.about:
         // One of Zen's pages, scanned or opened in Zen: its own screen.

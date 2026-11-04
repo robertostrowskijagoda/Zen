@@ -1437,10 +1437,16 @@ final class RelayEngine {
           stage = 2;
         } else {
           final Set<String> holders = _holdersOf(state, entry);
-          if (holders.isNotEmpty) {
+          // This device as one of the recipient's mailboxes holds a copy
+          // here: that is "waiting here", not in friends' mailboxes (a
+          // recipient whose only friend is the sender has no other).
+          final int elsewhere = holders.where((String h) => h != _self).length;
+          if (elsewhere > 0) {
             stage = 3;
-            copies = holders.length;
+            copies = elsewhere;
             self = holders.contains(_self);
+          } else if (holders.isNotEmpty) {
+            stage = 1;
           } else if (entry.directAttempts <= 1 &&
               now - entry.createdAtMillis <
                   config.depositAfter.inMilliseconds * 2) {
@@ -3598,6 +3604,7 @@ final class RelayEngine {
       createdAtMillis: entry.createdAtMillis,
       expiresAtMillis: entry.expiresAtMillis,
       box: box,
+      notice: kRelayNoticeTypes.contains(entry.payload['type']),
     );
   }
 

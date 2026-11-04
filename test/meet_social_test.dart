@@ -52,8 +52,12 @@ final class _Host implements EventHost {
   int clock = 1000;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
 
+  /// Everything this host sent, as it went.
+  final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
+
   @override
   Future<void> send(String to, Map<String, dynamic> payload) async {
+    sent.add(jsonDecode(jsonEncode(payload)) as Map<String, dynamic>);
     final _Host? other = net[to];
     if (other == null) {
       return;
@@ -492,6 +496,23 @@ void main() {
       expect(got, hasLength(2));
       expect(got.first.path, <String>['c3', 'b2']);
       expect(got.first.pyramidKey, 'kk');
+      // Kasia is not Celina's friend: what reached her names Celina by a
+      // hash bound to the question, never by her address.
+      final Map<String, dynamic> toKasia = bartek.sent.firstWhere(
+        (Map<String, dynamic> p) =>
+            p['type'] == AskTypes.answer && p['t'] == 'dr Nowak',
+      );
+      expect(jsonEncode(toKasia), isNot(contains(celina.address)));
+      expect(
+        (toKasia['sg'] as Map<String, dynamic>)['a'],
+        askBlindAnswerer(q.id, celina.address),
+      );
+      // Bartek's own answer to his friend is signed with his address.
+      final Map<String, dynamic> bartekOwn = bartek.sent.firstWhere(
+        (Map<String, dynamic> p) =>
+            p['type'] == AskTypes.answer && p['t'] == 'Kowalska',
+      );
+      expect((bartekOwn['sg'] as Map<String, dynamic>)['a'], bartek.address);
 
       // It survives a restart and a tip.
       final AskAnswer back = AskAnswer.fromJson(

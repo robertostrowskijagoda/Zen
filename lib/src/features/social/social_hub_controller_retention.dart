@@ -175,7 +175,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
           );
     final String nextLabel = lastMessage == null
         ? ''
-        : _activityLabelForMillis(lastMessage.sentAtMillis);
+        : activityStamp(lastMessage.sentAtMillis);
     final int nextUnreadCount = resetUnread ? 0 : friend.unreadCount;
     if (friend.lastMessagePreview == nextPreview &&
         friend.lastActivityLabel == nextLabel &&
@@ -282,7 +282,9 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
           isOnline: true,
           lastPresenceAtMillis: timestamp,
           lastMessagePreview: preview,
-          lastActivityLabel: t('Teraz'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
           unreadCount: 0,
         ),
       ),

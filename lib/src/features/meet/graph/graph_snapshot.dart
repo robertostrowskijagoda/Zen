@@ -3,13 +3,13 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/meet/graph/graph_insights.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
 import 'package:zen/src/features/meet/graph/graph_painter.dart';
@@ -147,7 +147,7 @@ final class PlatformGraphImageSaver implements GraphImageSaver {
   Future<String?> save(String name, Uint8List bytes) async {
     String? target;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      target = await FilePicker.platform.saveFile(
+      target = await pickSavePath(
         dialogTitle: t('Zapisz obrazek grafu'),
         fileName: name,
       );

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -15,7 +14,7 @@ import (
 func testNode(t *testing.T, peers []string) *bridgeNode {
 	t.Helper()
 	cfg := config.GenerateConfig()
-	yggCore, err := core.New(cfg.Certificate, log.New(io.Discard, "", 0))
+	yggCore, err := core.New(cfg.Certificate, newBridgeLogger(io.Discard))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +23,7 @@ func testNode(t *testing.T, peers []string) *bridgeNode {
 	return &bridgeNode{
 		core:        yggCore,
 		config:      cfg,
-		logger:      log.New(io.Discard, "", 0),
+		logger:      newBridgeLogger(io.Discard),
 		publicPeers: publicPeersOf(cfg.Peers),
 	}
 }
@@ -135,7 +134,7 @@ func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	coreC, uriC := listeningCore(t)
 	keeper := newPhonePeerKeeper([]string{uriA, uriB, deadPeerURI(t), uriC}, phoneExtraAccountPeerCount)
 	cfg := config.GenerateConfig()
-	yggCore, err := core.New(cfg.Certificate, withPeerEvents(log.New(io.Discard, "", 0), keeper))
+	yggCore, err := core.New(cfg.Certificate, withPeerEvents(newBridgeLogger(io.Discard), keeper))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +142,7 @@ func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	node := &bridgeNode{
 		core:        yggCore,
 		config:      cfg,
-		logger:      log.New(io.Discard, "", 0),
+		logger:      newBridgeLogger(io.Discard),
 		publicPeers: map[string]bool{},
 		phonePeers:  keeper,
 	}

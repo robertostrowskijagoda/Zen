@@ -7,6 +7,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
 import 'package:zen/src/features/calls/call_media_e2ee.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
@@ -96,6 +97,14 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   Future<void> setMuted(bool muted);
   Future<void> setSpeakerOn(bool enabled);
   Future<void> setCameraEnabled(bool enabled);
+
+  /// Zen is back on the screen during a call: a camera that could not be
+  /// opened (Android gives none to an app still in the background, as when
+  /// a call is answered from its notification) is tried again; with
+  /// [restart] (the call was answered while Zen was not on the screen) a
+  /// camera that did open is opened again too, as Android may have given
+  /// it no frames.
+  Future<void> recoverCamera({bool restart = false}) async {}
 
   Future<List<CallMediaDevice>> listMediaDevices() async =>
       const <CallMediaDevice>[];
@@ -205,12 +214,6 @@ final Provider<CallMediaSessionController> callMediaSessionControllerProvider =
       ref.onDispose(controller.dispose);
       return controller;
     });
-
-List buildCallMediaSessionProviderOverrides({
-  required CallMediaSessionController controller,
-}) {
-  return [callMediaSessionControllerProvider.overrideWithValue(controller)];
-}
 
 final class WebRtcCallMediaSessionController
     extends CallMediaSessionController {
@@ -773,6 +776,7 @@ final class WebRtcCallMediaSessionController
     await slot.sender.replaceTrack(track);
     // Sealed now that it has a track (call_media_e2ee.dart, attachAll).
     await _e2ee?.attachAll(connection);
+    await _freshKeyFrames(connection);
     await slot.setDirection(TransceiverDirection.SendRecv);
   }
 
@@ -823,7 +827,11 @@ final class WebRtcCallMediaSessionController
   CallInviteKind? _activeKind;
   bool _renderersInitialized = false;
   bool _remoteDescriptionSet = false;
-  bool _relayCandidateAdded = false;
+
+  /// Hosts the relay candidate was added with (loopback, then the LAN
+  /// address once the first host candidate tells it): one added before
+  /// that address was known must not keep it from being added later.
+  final Set<String> _relayHostsAdded = <String>{};
   final List<({String mid, int mLineIndex})> _relayMids =
       <({String mid, int mLineIndex})>[];
   String? _relaySdpMid;
@@ -1188,14 +1196,35 @@ final class WebRtcCallMediaSessionController
   }
 
   @override
-  Future<void> setSpeakerOn(bool enabled) async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
+  Future<void> setSpeakerOn(bool enabled) => routeCallAudio(speaker: enabled);
+
+  /// The camera of a video call could not be opened (the call went on
+  /// with sound only): tried again by [recoverCamera].
+  bool _cameraLost = false;
+
+  @override
+  Future<void> recoverCamera({bool restart = false}) async {
+    final RTCPeerConnection? connection = _peerConnection;
+    final MediaStream? localStream = _localStream;
+    if (connection == null || localStream == null) {
       return;
     }
     try {
-      await Helper.setSpeakerphoneOn(enabled);
-    } catch (error, stackTrace) {
-      logZenError('Updating speakerphone state failed', error, stackTrace);
+      if (_cameraLost && !_localCameraWanted) {
+        _cameraLost = false;
+        await setCameraEnabled(true);
+        return;
+      }
+      if (restart &&
+          _localCameraWanted &&
+          localStream.getVideoTracks().isNotEmpty) {
+        await _detachLocalVideoTracks();
+        await _attachLocalVideoTrack(connection, localStream);
+        _safeSetRendererSrcObject(_localRenderer, localStream);
+        _notify();
+      }
+    } on Object catch (error) {
+      logZenWarning('The camera did not come back: $error');
     }
   }
 
@@ -1207,9 +1236,17 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Brak aktywnej rozmowy do sterowania kamera.'));
     }
     _localCameraWanted = enabled;
+    if (enabled) {
+      _cameraLost = false;
+    }
     if (!enabled) {
       await _detachLocalVideoTracks();
       await _pinLocalVideoDirection(sending: false);
+      // Nobody shows a picture any more: a voice call again, on both sides
+      // (the other side takes the kind from the offer that follows).
+      if (!hasRemoteVideo && !isScreenSharing && !remoteScreenSharing) {
+        _activeKind = CallInviteKind.audio;
+      }
       _notify();
       await _renegotiateWhenStable(_activeKind ?? CallInviteKind.audio);
       return;
@@ -1479,8 +1516,9 @@ final class WebRtcCallMediaSessionController
       await connection.addTrack(fresh, localStream);
     }
     // The camera's sender has a track now: sealed before its frames go far
-    // (call_media_e2ee.dart, attachAll).
+    // (call_media_e2ee.dart, attachAll), and a fresh key frame after that.
     await _e2ee?.attachAll(connection);
+    await _freshKeyFrames(connection);
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
   }
@@ -1693,7 +1731,7 @@ final class WebRtcCallMediaSessionController
     _localCameraWanted = captureVideo;
     _remoteDescriptionSet = false;
     _awaitingRemoteAnswer = false;
-    _relayCandidateAdded = false;
+    _relayHostsAdded.clear();
     _relayMids.clear();
     _relaySdpMid = null;
     _localCandidateIp = null;
@@ -1929,6 +1967,9 @@ final class WebRtcCallMediaSessionController
         return;
       }
       _lastConnectionState = state;
+      // Into the diagnostics log: a call stuck on "Łączenie…" says there
+      // how far the media got.
+      logZenMessage('Call media: ${state.name}');
       final String? activeCallId = _activeCallId;
       if (activeCallId == null) {
         return;
@@ -2028,7 +2069,12 @@ final class WebRtcCallMediaSessionController
       }
     }
     if (Platform.isAndroid || Platform.isIOS) {
-      await setSpeakerOn(kind == CallInviteKind.video);
+      // A connected headset (a car's Bluetooth) first; else the
+      // loudspeaker for video, the earpiece for audio.
+      await routeCallAudio(
+        speaker: kind == CallInviteKind.video,
+        preferHeadset: true,
+      );
     }
   }
 
@@ -2071,6 +2117,8 @@ final class WebRtcCallMediaSessionController
           'Fallback video capture failed: $fallbackError; falling back to audio only',
         );
         _localCameraWanted = false;
+        // Tried again once Zen is on the screen ([recoverCamera]).
+        _cameraLost = true;
         try {
           return await navigator.mediaDevices.getUserMedia(<String, dynamic>{
             'audio': _buildAudioConstraints(deviceId: audioDeviceId),
@@ -2185,7 +2233,6 @@ final class WebRtcCallMediaSessionController
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null ||
         !_remoteDescriptionSet ||
-        _relayCandidateAdded ||
         _relayPort == null ||
         _relayMids.isEmpty) {
       return;
@@ -2194,7 +2241,17 @@ final class WebRtcCallMediaSessionController
       '127.0.0.1',
       if (_localCandidateIp != null && _localCandidateIp!.isNotEmpty)
         _localCandidateIp!,
-    };
+    }.difference(_relayHostsAdded);
+    if (hosts.isEmpty) {
+      return;
+    }
+    // Taken before the awaits: a second run meanwhile adds only the rest.
+    _relayHostsAdded.addAll(hosts);
+    // Which kind, never the address itself.
+    logZenMessage(
+      'Call relay candidate: '
+      '${hosts.map((String h) => h == '127.0.0.1' ? 'loopback' : 'LAN').join(', ')}',
+    );
     for (final ({int mLineIndex, String mid}) entry in _relayMids) {
       for (final String host in hosts) {
         // Hanging up mid-negotiation drops the connection between two awaits.
@@ -2218,7 +2275,6 @@ final class WebRtcCallMediaSessionController
         }
       }
     }
-    _relayCandidateAdded = true;
   }
 
   Future<void> _sendRenegotiationOffer(CallInviteKind kind) async {
@@ -2307,6 +2363,40 @@ final class WebRtcCallMediaSessionController
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
     return desc;
+  }
+
+  /// Makes every video sender start again with a key frame (its encoding
+  /// switched off and on). A sender sealed only once it had a track sent
+  /// its first frames, the key frame among them, before it was sealed: the
+  /// other side cannot open them and shows black until a key frame comes,
+  /// which it asks for only after a few seconds of failing to decode.
+  Future<void> _freshKeyFrames(RTCPeerConnection connection) async {
+    if (_e2ee == null) {
+      return;
+    }
+    try {
+      for (final RTCRtpSender sender in await connection.getSenders()) {
+        if (sender.track?.kind != 'video') {
+          continue;
+        }
+        final RTCRtpParameters parameters = sender.parameters;
+        final List<RTCRtpEncoding> encodings =
+            parameters.encodings ?? const <RTCRtpEncoding>[];
+        if (encodings.isEmpty) {
+          continue;
+        }
+        for (final RTCRtpEncoding e in encodings) {
+          e.active = false;
+        }
+        await sender.setParameters(parameters);
+        for (final RTCRtpEncoding e in encodings) {
+          e.active = true;
+        }
+        await sender.setParameters(parameters);
+      }
+    } on Object catch (error) {
+      logZenWarning('Asking for a fresh key frame failed: $error');
+    }
   }
 
   /// The camera over the mesh: a steady picture rather than a sharp one
@@ -2453,7 +2543,7 @@ final class WebRtcCallMediaSessionController
     _activeCallId = null;
     _remoteAddress = null;
     _remoteDescriptionSet = false;
-    _relayCandidateAdded = false;
+    _relayHostsAdded.clear();
     _relayMids.clear();
     _relaySdpMid = null;
     _localCandidateIp = null;

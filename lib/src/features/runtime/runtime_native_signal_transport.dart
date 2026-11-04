@@ -288,6 +288,11 @@ final class RuntimeTransportSnapshot {
   }
 }
 
+/// What the bridge lets through a pebble door, and the mark of its key
+/// among the mailbox doors' (door_node.go).
+const String kPebbleDoorRequestType = 'pbl_get';
+const String kPebbleDoorPrefix = 'pb:';
+
 @immutable
 final class RuntimeNodeSession {
   const RuntimeNodeSession({
@@ -489,19 +494,6 @@ RuntimeNodeRuntime buildDefaultRuntimeNodeRuntime({
     owner: owner,
     bootstrap: () =>
         _bootstrapDefaultRuntimeSession(config: resolvedConfig, owner: owner),
-  );
-}
-
-SignalTransport buildDefaultSignalTransport({
-  RuntimeSignalBootstrapConfig? config,
-}) {
-  if (!_hasNativeBridge) {
-    return const NoopSignalTransport();
-  }
-  final RuntimeSignalBootstrapConfig resolvedConfig =
-      config ?? RuntimeSignalBootstrapConfig();
-  return LazySignalTransport(
-    bootstrap: () => _bootstrapDefaultSignalTransport(config: resolvedConfig),
   );
 }
 
@@ -721,6 +713,13 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       StreamController<SignalTransportFrame>.broadcast();
   final StreamController<SignalTransportFrame> _doorFrames =
       StreamController<SignalTransportFrame>.broadcast();
+  final StreamController<SignalTransportFrame> _pebbleDoorFrames =
+      StreamController<SignalTransportFrame>.broadcast();
+
+  /// What came to the pebble door (requests for a pebble's design from a
+  /// QR code), for the pebbles only (pebble_hosting.dart): like the other
+  /// doors, nothing else in the app sees or answers it.
+  Stream<SignalTransportFrame> get pebbleDoorFrames => _pebbleDoorFrames.stream;
 
   /// What came to the flat's door and the mailbox doors, for the
   /// neighbours section only. It never reaches [frames]: nothing else in the
@@ -732,6 +731,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     final Object? type = frame.payload['type'];
     if (!frame.door) {
       _frames.add(frame);
+    } else if (type == kPebbleDoorRequestType) {
+      // Only the pebble door lets these in (door_node.go).
+      _pebbleDoorFrames.add(frame);
     } else if (kFlatDoorTypes.contains(type)) {
       // The bridge lets only flat frames through the doors; anything else
       // that claims to come from one is dropped here too.
@@ -918,6 +920,40 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// kept so they come back after the node restarts.
   List<String> _mailboxSeeds = const <String>[];
 
+  /// The key (hex seed) of the pebble door, run among the mailbox doors
+  /// (door_node.go, pebbleDoorPrefix); `null`: none.
+  String? _pebbleDoorSeed;
+
+  /// Runs the pebble door with the key [seedHex], or stops it (`null`).
+  /// Safe to call before the node is up.
+  void setPebbleDoorKey(String? seedHex) {
+    if (seedHex == _pebbleDoorSeed) {
+      return;
+    }
+    _pebbleDoorSeed = seedHex;
+    _applyMailboxDoorsNow();
+  }
+
+  /// Sends a pebble's design from the pebble door (the bridge picks that
+  /// door for a design), never from this node. False without a session.
+  Future<bool> sendFromPebbleDoor(
+    String remoteAddress,
+    Map<String, dynamic> payload,
+  ) async {
+    final Future<void> Function(String, Map<String, dynamic>)? send =
+        _session?.sendFromDoor;
+    if (send == null || _pebbleDoorSeed == null) {
+      return false;
+    }
+    try {
+      await send(remoteAddress, payload);
+      return true;
+    } on Object catch (error) {
+      logZenWarning('Pebble door did not send: $error');
+      return false;
+    }
+  }
+
   /// Runs exactly the mailbox doors with the keys [seedsHex] (an empty list
   /// stops them). Safe to call before the node is up.
   void setMailboxDoorKeys(List<String> seedsHex) {
@@ -934,7 +970,10 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       return;
     }
     try {
-      session.setMailboxDoors?.call(_mailboxSeeds);
+      session.setMailboxDoors?.call(<String>[
+        ..._mailboxSeeds,
+        if (_pebbleDoorSeed case final String seed) '$kPebbleDoorPrefix$seed',
+      ]);
     } on Object catch (error) {
       logZenWarning('Friend doors did not start: $error');
     }
@@ -1714,15 +1753,6 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     _doorFrames.close();
     super.dispose();
   }
-}
-
-Future<SignalTransport> _bootstrapDefaultSignalTransport({
-  required RuntimeSignalBootstrapConfig config,
-}) async {
-  final RuntimeNodeSession session = await _bootstrapDefaultRuntimeSession(
-    config: config,
-  );
-  return session.transport;
 }
 
 Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({

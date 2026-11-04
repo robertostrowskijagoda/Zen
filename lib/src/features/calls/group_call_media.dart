@@ -238,13 +238,6 @@ final class FakeGroupCallMedia extends GroupCallMedia {
           .toList()
         ..sort();
 
-  /// Marks a leg as failed, the way a dead network path would.
-  void failLeg(String peer) {
-    if (_legs.containsKey(peer)) {
-      _setLeg(peer, GroupCallLegState.failed);
-    }
-  }
-
   @override
   Future<void> start({
     required String callId,

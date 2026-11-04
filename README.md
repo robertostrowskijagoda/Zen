@@ -19,7 +19,7 @@
   <br>
   <a href="docs/SECURITY_MODEL.md"><img src="https://img.shields.io/badge/post--quantum-ML--KEM--768%20%2B%20ML--DSA--65-6d28d9" alt="Post-quantum: ML-KEM-768 and ML-DSA-65"></a>
   <a href="#install"><img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20iOS%20%C2%B7%20Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-0f766e" alt="Platforms: Android, iOS, Windows, macOS, Linux"></a>
-  <a href="docs/BUILDING.md"><img src="https://img.shields.io/badge/Flutter-3.47.1-02569B?logo=flutter&logoColor=white" alt="Flutter 3.47.1"></a>
+  <a href="docs/BUILDING.md"><img src="https://img.shields.io/badge/Flutter-3.47.9-02569B?logo=flutter&logoColor=white" alt="Flutter 3.47.9"></a>
   <a href="native/yggdrasil_bridge/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/robertostrowskijagoda/Zen?filename=native%2Fyggdrasil_bridge%2Fgo.mod&logo=go&logoColor=white&label=Go" alt="Go version"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
 </p>
