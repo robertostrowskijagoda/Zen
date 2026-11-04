@@ -6,7 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -39,18 +39,24 @@ class ZenFileProviderTest {
         }
     }
 
+    /** [give] must refuse (JUnit 4.12, which the app's plugins bring, has no assertThrows). */
+    private fun refused(give: () -> Any) {
+        try {
+            give()
+        } catch (expected: IllegalArgumentException) {
+            return
+        }
+        fail("a file outside the shared folders got a content address")
+    }
+
     @Test
     fun nothingElseGetsAnAddress() {
         val secret = File(context.filesDir, "probe-secret.bin").apply { writeText("x") }
         try {
-            assertThrows(IllegalArgumentException::class.java) {
-                FileProvider.getUriForFile(context, authority, secret)
-            }
+            refused { FileProvider.getUriForFile(context, authority, secret) }
             val elsewhere = File(context.cacheDir, "probe-elsewhere.bin").apply { writeText("x") }
             try {
-                assertThrows(IllegalArgumentException::class.java) {
-                    FileProvider.getUriForFile(context, authority, elsewhere)
-                }
+                refused { FileProvider.getUriForFile(context, authority, elsewhere) }
             } finally {
                 elsewhere.delete()
             }
