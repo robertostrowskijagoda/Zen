@@ -960,7 +960,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           ),
           inbox: _removeCallAlertsForPeer(state.inbox, signal.sender),
         );
-        if (missedIncomingCall && !_isUiFocused()) {
+        if (missedIncomingCall && await _nobodySeesTheApp()) {
           // The caller hung up before anyone answered: a dismissible
           // missed-call note, posted into the per-peer slot. Only while the
           // app is off screen - with the app open the conversation already

@@ -833,7 +833,11 @@ final class WebRtcCallMediaSessionController
   CallInviteKind? _activeKind;
   bool _renderersInitialized = false;
   bool _remoteDescriptionSet = false;
-  bool _relayCandidateAdded = false;
+
+  /// Hosts the relay candidate was added with (loopback, then the LAN
+  /// address once the first host candidate tells it): one added before
+  /// that address was known must not keep it from being added later.
+  final Set<String> _relayHostsAdded = <String>{};
   final List<({String mid, int mLineIndex})> _relayMids =
       <({String mid, int mLineIndex})>[];
   String? _relaySdpMid;
@@ -1728,7 +1732,7 @@ final class WebRtcCallMediaSessionController
     _localCameraWanted = captureVideo;
     _remoteDescriptionSet = false;
     _awaitingRemoteAnswer = false;
-    _relayCandidateAdded = false;
+    _relayHostsAdded.clear();
     _relayMids.clear();
     _relaySdpMid = null;
     _localCandidateIp = null;
@@ -1964,6 +1968,9 @@ final class WebRtcCallMediaSessionController
         return;
       }
       _lastConnectionState = state;
+      // Into the diagnostics log: a call stuck on "Łączenie…" says there
+      // how far the media got.
+      logZenMessage('Call media: ${state.name}');
       final String? activeCallId = _activeCallId;
       if (activeCallId == null) {
         return;
@@ -2227,7 +2234,6 @@ final class WebRtcCallMediaSessionController
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null ||
         !_remoteDescriptionSet ||
-        _relayCandidateAdded ||
         _relayPort == null ||
         _relayMids.isEmpty) {
       return;
@@ -2236,7 +2242,17 @@ final class WebRtcCallMediaSessionController
       '127.0.0.1',
       if (_localCandidateIp != null && _localCandidateIp!.isNotEmpty)
         _localCandidateIp!,
-    };
+    }.difference(_relayHostsAdded);
+    if (hosts.isEmpty) {
+      return;
+    }
+    // Taken before the awaits: a second run meanwhile adds only the rest.
+    _relayHostsAdded.addAll(hosts);
+    // Which kind, never the address itself.
+    logZenMessage(
+      'Call relay candidate: '
+      '${hosts.map((String h) => h == '127.0.0.1' ? 'loopback' : 'LAN').join(', ')}',
+    );
     for (final ({int mLineIndex, String mid}) entry in _relayMids) {
       for (final String host in hosts) {
         // Hanging up mid-negotiation drops the connection between two awaits.
@@ -2260,7 +2276,6 @@ final class WebRtcCallMediaSessionController
         }
       }
     }
-    _relayCandidateAdded = true;
   }
 
   Future<void> _sendRenegotiationOffer(CallInviteKind kind) async {
@@ -2529,7 +2544,7 @@ final class WebRtcCallMediaSessionController
     _activeCallId = null;
     _remoteAddress = null;
     _remoteDescriptionSet = false;
-    _relayCandidateAdded = false;
+    _relayHostsAdded.clear();
     _relayMids.clear();
     _relaySdpMid = null;
     _localCandidateIp = null;

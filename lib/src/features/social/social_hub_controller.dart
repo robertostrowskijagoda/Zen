@@ -134,6 +134,11 @@ final Provider<Duration> callOfferWaitTimeoutProvider = Provider<Duration>((
   return const Duration(seconds: 12);
 });
 
+/// Whether the phone is locked or its screen off ([isDeviceLocked]);
+/// replaced in tests.
+final Provider<Future<bool> Function()> deviceLockedProbeProvider =
+    Provider<Future<bool> Function()>((Ref ref) => isDeviceLocked);
+
 final Provider<Duration> callRingingWaitTimeoutProvider = Provider<Duration>((
   Ref ref,
 ) {
@@ -560,6 +565,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   bool _isUiFocused([LifecycleSnapshot? snapshot]) {
     return (snapshot ?? state.lifecycle).isFocused && !_isSecurityBlockingUi;
   }
+
+  /// Off screen, or on a locked phone: a call ringing over the keyguard
+  /// draws the app there and keeps it "focused", but nobody sees what it
+  /// writes in the conversation, so a missed call needs its notification.
+  Future<bool> _nobodySeesTheApp() async =>
+      !_isUiFocused() || await ref.read(deviceLockedProbeProvider)();
 
   /// Posts a system notification. Ringing-call window flags and the native
   /// popup are owned by [_syncRingingCallWindow], not by the shade entry.

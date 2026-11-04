@@ -818,7 +818,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     // Only this call's own notification: clearing everything here used to
     // wipe unrelated message notifications whenever a call rang out.
     await _dismissCallNotificationsFor(session);
-    if (session.isIncoming && !_isUiFocused()) {
+    if (session.isIncoming && await _nobodySeesTheApp()) {
       // The ringing deadline expired with no answer: leave a missed-call
       // notification behind, or the call is invisible once the ring stops.
       // Only while the app is off screen - on screen the conversation's own
@@ -1252,10 +1252,14 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         kind: _callKind(signal.content),
         remoteDescription: description,
       );
-      state = state.copyWith(
-        activeCall: nextCurrentCall!.copyWith(kind: _callKind(signal.content)),
-      );
-      await _persistState();
+      // The call as it is now, not as it was before the await.
+      final CallSession? now = state.activeCall;
+      if (now != null && _currentCallMatchesSignal(now, signal)) {
+        state = state.copyWith(
+          activeCall: now.copyWith(kind: _callKind(signal.content)),
+        );
+        await _persistState();
+      }
       return;
     }
 
@@ -1307,11 +1311,17 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     _stopCallReRing();
     await _callMedia.applyRemoteAnswer(description);
-    final CallInviteKind kind = _callKind(signal.content);
-    if (session != null) {
+    logZenMessage('Call answer applied');
+    // Read again: the media may have connected while the answer was being
+    // applied, and the call it made active must not go back to
+    // "Łączenie…" (no second "active" comes to undo that).
+    final CallSession? now = state.activeCall;
+    if (now != null &&
+        _currentCallMatchesSignal(now, signal) &&
+        now.status != CallSessionStatus.active) {
       state = state.copyWith(
-        activeCall: session.copyWith(
-          kind: kind,
+        activeCall: now.copyWith(
+          kind: _callKind(signal.content),
           status: CallSessionStatus.connecting,
         ),
       );

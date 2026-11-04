@@ -96,6 +96,22 @@ Future<void> setCallRinging(bool on) async {
   }
 }
 
+/// Whether the phone is locked or its screen is off: nobody sees the app
+/// then, even while a ringing call drew it over the keyguard (a missed call
+/// still needs its notification). False off Android.
+Future<bool> isDeviceLocked() async {
+  if (!Platform.isAndroid) {
+    return false;
+  }
+  try {
+    return await zenCallPlatformChannel.invokeMethod<bool>('isDeviceLocked') ??
+        false;
+  } catch (error, stackTrace) {
+    logZenError('Asking whether the phone is locked failed', error, stackTrace);
+    return false;
+  }
+}
+
 /// Brings the main activity / app window to the front.
 Future<void> bringAppToFront() async {
   if (!Platform.isAndroid) {

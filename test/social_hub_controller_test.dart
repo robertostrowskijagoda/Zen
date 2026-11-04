@@ -4096,6 +4096,10 @@ void main() {
       expect(state.activeCall, isNotNull);
       expect(state.activeCall!.kind, CallInviteKind.video);
       expect(state.activeCall!.isIncoming, isFalse);
+      // The media connected while the answer was applied: the call stays
+      // connected, not "Łączenie…" (which also turned away the camera the
+      // other side added, as a new call).
+      expect(state.activeCall!.status, CallSessionStatus.active);
     },
   );
 
@@ -5258,6 +5262,180 @@ void main() {
       expect(callNotifications.single.title, contains('Nieodebrane'));
       expect(callNotifications.single.isRingingCall, isFalse);
       expect(callNotifications.single.slotKey, callNotificationSlotKey(_peer));
+    },
+  );
+
+  test(
+    'a call that rings out over the lock screen leaves a missed-call notification',
+    () async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+      final MemoryRuntimeSystemNotificationService notifications =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notifications,
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(
+            _FakeCallMediaSessionController(),
+          ),
+          deviceLockedProbeProvider.overrideWithValue(() async => true),
+          callRingingWaitTimeoutProvider.overrideWithValue(
+            const Duration(milliseconds: 40),
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.foregroundFocused,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ).copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _peer: FriendProfile(
+                    address: _peer,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await transport.start();
+
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: _peer,
+              callId: 'call-missed',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+            receivedAtMillis: 11,
+          );
+
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+
+      expect(
+        container.read(socialHubControllerProvider).activeCall,
+        isNull,
+        reason: 'nobody answered, so the ringing session expires',
+      );
+      // The ringing call drew the app over the keyguard ("focused"), but
+      // the phone was locked: nobody saw the conversation.
+      final List<RuntimeSystemNotification> callNotifications = notifications
+          .activeNotifications
+          .where(
+            (RuntimeSystemNotification entry) =>
+                entry.category == RuntimeSystemNotificationCategory.call,
+          )
+          .toList(growable: false);
+      expect(callNotifications, hasLength(1));
+      expect(callNotifications.single.title, contains('Nieodebrane'));
+      expect(callNotifications.single.isRingingCall, isFalse);
+      expect(callNotifications.single.slotKey, callNotificationSlotKey(_peer));
+    },
+  );
+
+  test(
+    'a call that rings out on an open, unlocked app leaves no notification',
+    () async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+      final MemoryRuntimeSystemNotificationService notifications =
+          MemoryRuntimeSystemNotificationService();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          runtimeSystemNotificationServiceProvider.overrideWithValue(
+            notifications,
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(
+            _FakeCallMediaSessionController(),
+          ),
+          deviceLockedProbeProvider.overrideWithValue(() async => false),
+          callRingingWaitTimeoutProvider.overrideWithValue(
+            const Duration(milliseconds: 40),
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty(
+              lifecycle: const LifecycleSnapshot(
+                visibility: AppVisibilityState.foregroundFocused,
+                generation: 1,
+                capturedAtMillis: 0,
+              ),
+            ).copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _peer: FriendProfile(
+                    address: _peer,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await transport.start();
+
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: _peer,
+              callId: 'call-missed',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+            receivedAtMillis: 11,
+          );
+
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+
+      expect(
+        container.read(socialHubControllerProvider).activeCall,
+        isNull,
+        reason: 'nobody answered, so the ringing session expires',
+      );
+      final List<RuntimeSystemNotification> callNotifications = notifications
+          .activeNotifications
+          .where(
+            (RuntimeSystemNotification entry) =>
+                entry.category == RuntimeSystemNotificationCategory.call,
+          )
+          .toList(growable: false);
+      // On screen, unlocked: the conversation says it, no shade entry.
+      expect(callNotifications, isEmpty);
     },
   );
 

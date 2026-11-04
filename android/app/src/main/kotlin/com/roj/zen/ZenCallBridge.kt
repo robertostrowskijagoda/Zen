@@ -112,6 +112,11 @@ object ZenCallBridge {
                     unlockForCall(context)
                     result.success(null)
                 }
+                "isDeviceLocked" -> {
+                    // Locked or with the screen off: nobody sees the app,
+                    // even when a ringing call drew it over the keyguard.
+                    result.success(isKeyguardLocked(context) || !isScreenInteractive(context))
+                }
                 "canDrawOverlays" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         result.success(Settings.canDrawOverlays(context))
