@@ -639,6 +639,45 @@ jobs:
           go version
           go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" -show verbose ./...
 
+  # The Kotlin code's JVM unit tests (android/app/src/test): what has no
+  # Android in it (the power-button alarm's counting, where a link goes),
+  # in every run. The Go bridge is not built for them (ZEN_SKIP_GO_BRIDGE).
+  kotlin:
+    name: Kotlin unit tests
+    needs: plan
+    if: ${{ needs.plan.outputs.code == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle*
+            android/app/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Test
+        working-directory: android
+        env:
+          ZEN_SKIP_GO_BRIDGE: '1'
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
   android-bridge:
     name: Go bridge for Android (3 ABIs)
     # The release has one APK each for arm64-v8a, armeabi-v7a (32-bit) and

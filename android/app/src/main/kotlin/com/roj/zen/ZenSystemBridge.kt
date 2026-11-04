@@ -735,12 +735,7 @@ object ZenSystemBridge {
         }
     }
 
-    /**
-     * For a link Zen itself claims ([handlers] lists who can open it): the
-     * app made for the link's site if there is one (an app that opens it but
-     * is not a browser, such as GitHub's), else the default browser; null
-     * when neither is known (a picker without Zen then).
-     */
+    /** [linkTargetWithoutZen] with what the package manager says. */
     private fun linkTargetWithoutZen(
         pm: PackageManager,
         own: String,
@@ -751,9 +746,8 @@ object ZenSystemBridge {
         val browsers = pm.queryIntentActivities(anyPage, 0)
             .map { it.activityInfo.packageName }
             .toSet()
-        handlers.firstOrNull { it != own && it !in browsers }?.let { return it }
         val default = pm.resolveActivity(anyPage, PackageManager.MATCH_DEFAULT_ONLY)
             ?.activityInfo?.packageName
-        return default?.takeIf { it != own && it in browsers }
+        return com.roj.zen.linkTargetWithoutZen(own, handlers, browsers, default)
     }
 }
