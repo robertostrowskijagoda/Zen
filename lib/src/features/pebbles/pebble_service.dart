@@ -545,7 +545,10 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
     );
     ref.onDispose(() {
       beat.cancel();
-      unawaitedLogged(service.stop(), context: 'Stopping the pebbles');
+      unawaitedLogged(
+        service.stop().whenComplete(store.dispose),
+        context: 'Stopping the pebbles',
+      );
     });
     return service;
   },
