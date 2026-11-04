@@ -4,5 +4,5 @@
 # job "What to run" of ci.yml (tool/ci/ci_plan.py), which runs the Linux
 # build in this image only while both lines are set and the Dockerfile is
 # unchanged. Empty: the job sets up its tools on the runner.
-image=ghcr.io/robertostrowskijagoda/zen-ci@sha256:fa35f1fba6e97cfd733f5ef2e32f280f6b987019ca2ab196f8b2e1d7a0c5fc3d
-dockerfile-sha256=6ef82020fab4983fc6dd4eb45a69735189c8c44036946b84a772842b4c7dbaf2
+image=ghcr.io/robertostrowskijagoda/zen-ci@sha256:da473cfec8cbb263ea7ff7b4267927b88a7f868ab59d40e623ef6baa1a02cdee
+dockerfile-sha256=96c2851568173239eded94ab588f81bdb7c69367114279636a1732dd59defa2b
