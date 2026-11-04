@@ -962,6 +962,19 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                     subtitle: t('Twój kod QR i dodawanie znajomych'),
                     onTap: () => _openInviteTab(context, ref),
                   ),
+                  // The fundraiser in sight, not three pages down.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-support'),
+                    icon: Icons.volunteer_activism_rounded,
+                    tone: ZenTone.money,
+                    title: t('Wesprzyj Zen'),
+                    subtitle: t(
+                      'Zen jest za darmo i bez reklam — utrzymują go wpłaty',
+                    ),
+                    onTap: () => unawaited(
+                      AboutScreen.openSection(context, AboutSection.support),
+                    ),
+                  ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-about'),
                     icon: Icons.info_outline_rounded,
