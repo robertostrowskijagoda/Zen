@@ -952,10 +952,23 @@ final class LockedReceiver {
   }
 
   /// Waits up to [relinkWait] for a link to the mesh, then polls again.
+  ///
+  /// The wait goes by the receiver's clock ([_now]: the wall clock, or a
+  /// test's virtual one), not by a stopwatch: under a busy test runner a
+  /// few looks took longer than a simulated wait in real time, and the poll
+  /// was given up. The looks themselves are counted too, so a clock that
+  /// stands still cannot keep it waiting.
   Future<void> _pollAgainOnceLinked() async {
-    final Stopwatch waited = Stopwatch()..start();
+    final int start = _now();
+    final int maxLooks = relinkStep > Duration.zero
+        ? relinkWait.inMicroseconds ~/ relinkStep.inMicroseconds
+        : 1;
+    int looks = 0;
     while (!await _meshLinkedNow()) {
-      if (!_running || waited.elapsed >= relinkWait) {
+      looks += 1;
+      if (!_running ||
+          _now() - start >= relinkWait.inMilliseconds ||
+          looks >= maxLooks) {
         return;
       }
       await Future<void>.delayed(relinkStep);
