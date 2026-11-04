@@ -180,6 +180,18 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
       setState(() => _message = t('Hasła się różnią.'));
       return;
     }
+    // The person always says where the copy goes: the system's folder
+    // chooser now, unless a folder was chosen on this screen already.
+    if (_chosen == null) {
+      await _chooseFolder();
+      if (!mounted) {
+        return;
+      }
+      if (_chosen == null) {
+        setState(() => _message = t('Nie wybrano miejsca na kopię.'));
+        return;
+      }
+    }
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     final AccountArchiveCollector? collect = ref.read(
       accountArchiveCollectorProvider,
@@ -325,13 +337,12 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      folder == null
-                          ? t('Szukam folderu…')
-                          : _chosen == null
-                          ? t('{folder} (domyślnie)', <String, Object?>{
-                              'folder': folder.label,
-                            })
-                          : folder.label,
+                      _chosen == null
+                          ? t(
+                              'Zapytam o miejsce przy zapisie. Możesz też '
+                              'wybrać folder teraz.',
+                            )
+                          : folder!.label,
                       key: const Key('account-backup-folder'),
                       style: const TextStyle(height: 1.4),
                     ),
@@ -353,7 +364,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                         onPressed: _busy
                             ? null
                             : () => setState(() => _chosen = null),
-                        child: Text(t('Użyj domyślnego folderu')),
+                        child: Text(t('Zapytaj przy zapisie')),
                       ),
                   ],
                 ),

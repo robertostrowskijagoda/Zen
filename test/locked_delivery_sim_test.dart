@@ -326,8 +326,10 @@ final class _BackgroundWorld {
             : kLockedMailboxPollInterval,
         beat: d.beat,
         meshLinked: () => meshLinked(d),
-        // The wait goes by the virtual clock (meshLinked), not real time.
-        relinkWait: const Duration(milliseconds: 50),
+        // The wait goes by the virtual clock (each look of meshLinked
+        // takes half a second of it), not real time; the steps between
+        // looks are short in real time.
+        relinkWait: const Duration(seconds: 10),
         relinkStep: const Duration(milliseconds: 1),
       );
       d.sim.attach((SignalTransportFrame frame) async {
@@ -430,12 +432,15 @@ final class _BackgroundWorld {
     d.linkedAt.add(net.now);
   }
 
-  /// Whether [d]'s node has a link; each look while it redials takes half
-  /// a second of the virtual clock (what arrives meanwhile is delivered).
+  /// Whether [d]'s node has a link; each look while it has none takes
+  /// half a second of the virtual clock, also while there is no network
+  /// (what arrives meanwhile is delivered).
   Future<bool> meshLinked(_Device d) async {
-    if (!d.sim.online && d.linkUpAt != null) {
+    if (!d.sim.online) {
       await net.run(forAtMost: const Duration(milliseconds: 500));
-      _linkUp(d);
+      if (d.linkUpAt != null) {
+        _linkUp(d);
+      }
     }
     return d.sim.online;
   }

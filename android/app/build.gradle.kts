@@ -260,6 +260,9 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    // JVM unit tests of the Kotlin code with no Android in it
+    // (android/app/src/test, CI's "Kotlin unit tests").
+    testImplementation("junit:junit:4.13.2")
     // System biometric prompt with a Keystore key.
     implementation("androidx.biometric:biometric:1.1.0")
 }

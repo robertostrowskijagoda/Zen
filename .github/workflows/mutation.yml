@@ -1,0 +1,53 @@
+# Mutation testing (tool/mutation.dart): the app's core files changed in
+# one small place at a time (== and !=, < and >=, && and ||, true and false,
+# a ! dropped), each change run against its tests (tool/mutation_targets.json).
+# A change no test notices is listed in the run's summary: a line to pin
+# down with a test. It informs and never blocks: its job is to say how much
+# the tests would notice, not to gate a pull request.
+#
+# On every pull request to main (beside CI, about 20 minutes on its own
+# runner), once a week on main and by hand (Actions -> Mutation testing ->
+# Run workflow). Each run picks other changes (the seed is the run's
+# number), so over time all of them are tried. Read-only token, no secret.
+name: Mutation testing
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '41 3 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLUTTER_VERSION: '3.47.9'
+
+jobs:
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Mutants
+        run: >-
+          dart run tool/mutation.dart --max 15 --seed ${{ github.run_number }}
+          --summary "$GITHUB_STEP_SUMMARY"

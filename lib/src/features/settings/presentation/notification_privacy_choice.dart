@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -148,6 +149,44 @@ Future<void> showConversationNotificationPrivacyDialog(
       actions: <Widget>[
         TextButton(
           key: const Key('conversation-notification-privacy-close'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(t('Gotowe')),
+        ),
+      ],
+    ),
+  );
+}
+
+/// What a notification of [kind] says (Ustawienia → Powiadomienia i
+/// dźwięki → "Treść" under the kind), asked in a dialog and saved at once:
+/// a level of its own, or the general one.
+Future<void> showNoticeKindPrivacyDialog(
+  BuildContext context, {
+  required NoticeKind kind,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      key: Key('notice-privacy-dialog-${kind.name}'),
+      title: Text(t('Treść powiadomień: {kind}', {'kind': kind.label})),
+      scrollable: true,
+      content: Consumer(
+        builder: (BuildContext context, WidgetRef ref, Widget? child) {
+          final AppSettings settings = ref.watch(appSettingsControllerProvider);
+          return NotificationPrivacyChoice(
+            value: settings.noticePrivacy[kind],
+            global: settings.notificationPrivacy,
+            onChanged: (NotificationPrivacy? value) => unawaited(
+              ref
+                  .read(appSettingsControllerProvider.notifier)
+                  .setNoticePrivacy(kind, value),
+            ),
+          );
+        },
+      ),
+      actions: <Widget>[
+        TextButton(
+          key: const Key('notice-privacy-dialog-close'),
           onPressed: () => Navigator.of(context).pop(),
           child: Text(t('Gotowe')),
         ),

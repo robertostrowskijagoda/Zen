@@ -919,6 +919,10 @@ final class RelayEngine {
         '${state.mailbox.length} peers held for, '
         '${state.peers.length} known peers.',
       );
+      // What waits and what is held, by kind and age, never an address:
+      // "Czeka na doręczenie" and "Przechowujesz dla znajomych" read
+      // from the log when they do not drain.
+      logZenMessage(relayBacklogSummary(state, _now()));
       final int now = _now();
       // Fresh ownership of the node: ask the relays for anything that piled
       // up, and make sure every friend knows where to leave mail.
@@ -2742,6 +2746,15 @@ final class RelayEngine {
       if (state.seen.containsKey(seenKey) ||
           (_strangerSeen[seenKey] ?? 0) > now) {
         handled.add(envelope.id);
+        // Taken in before (from another mailbox, or directly), but the
+        // sender may never have heard: its acknowledgement goes straight
+        // to the sender, who is often away when mail is picked up, and it
+        // kept the message "waiting" until its two weeks were over.
+        // Each copy picked up tells it again.
+        await _sendQuietly(sender, <String, dynamic>{
+          'type': 'rly_ack',
+          'rid': envelope.id,
+        });
         continue;
       }
       if (!_isFresh(state, envelope, sender, now)) {
@@ -4046,4 +4059,67 @@ final class RelayEngine {
     final Iterable<Object?> items = limit == null ? value : value.take(limit);
     return items.whereType<String>().toList(growable: false);
   }
+}
+
+/// One line for the diagnostics log about what waits in [state]'s outbox
+/// and what this device holds for others: counts by payload type, by how
+/// old, how many recipients (and how many of them announced themselves,
+/// so are known to the relay), and the held mail by age. No address, no
+/// content.
+String relayBacklogSummary(RelayState state, int now) {
+  String age(int createdAt) {
+    final int hours = (now - createdAt) ~/ (3600 * 1000);
+    return hours < 1
+        ? '<1h'
+        : hours < 24
+        ? '<1d'
+        : hours < 72
+        ? '<3d'
+        : '>=3d';
+  }
+
+  final Map<String, int> types = <String, int>{};
+  final Map<String, int> ages = <String, int>{};
+  final Set<String> recipients = <String>{};
+  int unannounced = 0;
+  int parts = 0;
+  for (final RelayOutboxEntry e in state.outbox.values) {
+    final String type = '${e.payload['type'] ?? '?'}';
+    types[type] = (types[type] ?? 0) + 1;
+    final String a = age(e.createdAtMillis);
+    ages[a] = (ages[a] ?? 0) + 1;
+    if (recipients.add(e.recipient) && !state.peers.containsKey(e.recipient)) {
+      unannounced++;
+    }
+    if (e.payload['type'] == kRelayPartType) {
+      parts++;
+    }
+  }
+  final Map<String, int> heldAges = <String, int>{};
+  int held = 0;
+  for (final Map<String, Map<String, dynamic>> mail in state.mailbox.values) {
+    for (final Map<String, dynamic> envelope in mail.values) {
+      held++;
+      final int? at = (envelope['c'] as num?)?.toInt();
+      final String a = at == null ? '?' : age(at);
+      heldAges[a] = (heldAges[a] ?? 0) + 1;
+    }
+  }
+  String counts(Map<String, int> m) {
+    final List<MapEntry<String, int>> list = m.entries.toList()
+      ..sort(
+        (MapEntry<String, int> x, MapEntry<String, int> y) =>
+            y.value.compareTo(x.value),
+      );
+    return list
+        .take(12)
+        .map((MapEntry<String, int> e) => '${e.key}=${e.value}')
+        .join(' ');
+  }
+
+  return 'Relay backlog: ${state.outbox.length} waiting '
+      '(${recipients.length} recipients, $unannounced not announced, '
+      '$parts parts; types ${counts(types)}; ages ${counts(ages)}), '
+      '$held held for ${state.mailbox.length} '
+      '(ages ${counts(heldAges)}).';
 }

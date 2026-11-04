@@ -2417,46 +2417,28 @@ Future<void> _saveAttachmentCopy(
       return;
     }
   }
-  String? targetPath;
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    targetPath = await pickSavePath(
-      dialogTitle: t('Zapisz zalacznik'),
-      fileName: suggestedName,
-    );
-  } else if (Platform.isAndroid) {
-    final Directory? directory = await getExternalStorageDirectory();
-    if (directory != null) {
-      final Directory targetDirectory = Directory(
-        '${directory.path}${Platform.pathSeparator}Zen',
-      );
-      await targetDirectory.create(recursive: true);
-      targetPath =
-          '${targetDirectory.path}${Platform.pathSeparator}$suggestedName';
-    }
-  } else {
-    final Directory directory = await getApplicationDocumentsDirectory();
-    final Directory targetDirectory = Directory(
-      '${directory.path}${Platform.pathSeparator}Zen',
-    );
-    await targetDirectory.create(recursive: true);
-    targetPath =
-        '${targetDirectory.path}${Platform.pathSeparator}$suggestedName';
-  }
+  // "Zapisz jako", open at Downloads, on every system; a plain file
+  // outside Zen on purpose: the panic password finds it.
+  final Uint8List? content = plain;
+  final String? targetPath = await saveAsWritten(
+    fileName: suggestedName,
+    dialogTitle: t('Zapisz zalacznik'),
+    write: (File target) async {
+      if (content != null) {
+        await target.writeAsBytes(content, flush: true);
+      } else {
+        await File(sourcePath!).copy(target.path);
+      }
+      // From someone else (or from another device of the account, which
+      // the stored message cannot tell apart from this one): Windows
+      // should treat the copy like any download (Mark of the Web). Best
+      // effort, Windows only.
+      await markFileFromInternet(target.path);
+    },
+  );
   if (targetPath == null || targetPath.isEmpty) {
     return;
   }
-  final Uint8List? content = plain;
-  if (content != null) {
-    await File(targetPath).writeAsBytes(content, flush: true);
-  } else {
-    await File(sourcePath!).copy(targetPath);
-  }
-  // From someone else (or from another device of the account, which the
-  // stored message cannot tell apart from this one): Windows should treat
-  // the copy like any download (Mark of the Web). Best effort, Windows only.
-  await markFileFromInternet(targetPath);
-  // A plain file outside Zen on purpose: the panic password finds it.
-  await rememberExportedFile(targetPath);
   if (!context.mounted) {
     return;
   }

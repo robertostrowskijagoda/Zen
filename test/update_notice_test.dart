@@ -374,14 +374,14 @@ void main() {
       expect(updateCheckDue(null, nowMillis: 0), isTrue);
       // Often (a new version is seen soon), on the wakes that come anyway.
       expect(kGithubCheckEvery, const Duration(minutes: 15));
-      expect(kBackgroundGithubCheckEvery, const Duration(minutes: 30));
+      expect(kBackgroundGithubCheckEvery, const Duration(minutes: 15));
       const int quarter = _hour ~/ 4;
       expect(updateCheckDue(0, nowMillis: quarter - 1), isFalse);
       expect(updateCheckDue(0, nowMillis: quarter), isTrue);
       expect(
         updateCheckDue(
           0,
-          nowMillis: 2 * quarter - 1,
+          nowMillis: quarter - 1,
           every: kBackgroundGithubCheckEvery,
         ),
         isFalse,

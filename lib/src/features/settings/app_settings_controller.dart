@@ -186,6 +186,24 @@ final class AppSettingsController extends Notifier<AppSettings> {
     );
   }
 
+  /// What a notification of [kind] says; `null` follows the general level.
+  Future<void> setNoticePrivacy(
+    NoticeKind kind,
+    NotificationPrivacy? level,
+  ) async {
+    if (!kind.hasPrivacy || state.noticePrivacy[kind] == level) {
+      return;
+    }
+    final Map<NoticeKind, NotificationPrivacy> levels =
+        Map<NoticeKind, NotificationPrivacy>.of(state.noticePrivacy);
+    if (level == null) {
+      levels.remove(kind);
+    } else {
+      levels[kind] = level;
+    }
+    await _save(state.copyWith(noticePrivacy: levels));
+  }
+
   /// Android: switches the launcher icon and name and remembers the
   /// choice. Returns `false`, changing nothing, when the phone did not take
   /// the switch.

@@ -801,8 +801,17 @@ final class FriendsPhone implements RelayPeerSource {
 /// which account is what each phone's ledger learnt from proven hellos (as
 /// in the app), not the world's truth.
 final class FriendsWorld {
-  FriendsWorld({int seed = 1, double dropRate = 0, this.ledgers = false})
-    : net = SimNetwork(seed: seed, dropRate: dropRate, holdForOffline: false);
+  FriendsWorld({
+    int seed = 1,
+    double dropRate = 0,
+    double duplicateRate = 0,
+    this.ledgers = false,
+  }) : net = SimNetwork(
+         seed: seed,
+         dropRate: dropRate,
+         duplicateRate: duplicateRate,
+         holdForOffline: false,
+       );
 
   /// The network; its virtual clock is [now].
   final SimNetwork net;
@@ -911,11 +920,13 @@ final class FriendsWorld {
     bool allFriends = true,
     int seed = 1,
     double dropRate = 0,
+    double duplicateRate = 0,
     bool ledgers = false,
   }) async {
     final FriendsWorld w = FriendsWorld(
       seed: seed,
       dropRate: dropRate,
+      duplicateRate: duplicateRate,
       ledgers: ledgers,
     );
     addTearDown(w.dispose);

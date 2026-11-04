@@ -321,6 +321,14 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
         </intent>
+        <!-- Who opens a web link (ZenSystemBridge.openInBrowser): the app a
+             link belongs to (Discord, GitHub) and the browsers, so a link
+             Zen itself claims goes to them, not back to Zen. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

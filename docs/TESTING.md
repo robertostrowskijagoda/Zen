@@ -732,13 +732,68 @@ is fixed, so nothing is forgotten and nothing comes back:
 
 `tool/ci/test_ci_checks.py` checks that every file there names its report.
 
+## 11. Chaos, fuzzing, coverage and mutations
+
+### 11.1 Protocols on a bad network (`test/protocol_chaos_test.dart`)
+
+The protocols of several steps on the simulated friends of section 1.1,
+with a network that loses a quarter of the datagrams, duplicates a fifth
+and reorders them by its random delays, on many seeds: an invitation and
+its answer make the same friendship on both sides; every member of a group
+ends with the same members and gets its messages once; messages through the
+mailboxes arrive once, in order, and nothing stays "waiting" in the
+sender's outbox once the recipient has everything. The world is built on a
+quiet network and made lossy afterwards (its helpers make friends in one
+settle). Six seeds in every run (seconds); `ZEN_CHAOS_SEEDS=50` tries more.
+
+### 11.2 Random frames (`test/signal_fuzz_test.dart`, `wire_fuzz_test.go`)
+
+The Dart side: random and broken frames of every signal type go into the
+parser (it must never throw) and, from a stranger, into the social
+controller (they must never make a friend, change who is one, join a group
+or change its members). Seeded (`ZEN_FUZZ_SEED`), `ZEN_FUZZ_FRAMES=20000`
+tries more. The Go side: `native/yggdrasil_bridge/wire_fuzz_test.go` has a
+fuzz target for every parser of what comes from the network or a nearby
+device (relay frames, IPv6 packets, LAN beacons, the local link's hello and
+frames, the door's JSON, DNS questions, signal reassembly), with round trips
+where there is a builder. `go test` runs their seeds; the CI job *Go
+bridge* also fuzzes each target for 8 seconds in every run. A finding is
+written to `testdata/fuzz/<target>/`; committed, it becomes a seed.
+
+### 11.3 Coverage
+
+`dart run tool/test.dart --coverage <folder>` writes each run's line
+coverage; `python tool/ci/coverage_report.py <folder>` adds the runs up and
+names the files of `lib/` no test loads and the least covered of the bigger
+ones. Every CI run does it (the six test jobs, summed up in the summary of
+*Analyze and test*); it informs and never fails (`--min` would make it).
+
+### 11.4 Mutations (`tool/mutation.dart`, `.github/workflows/mutation.yml`)
+
+The core files of `tool/mutation_targets.json` changed in one small place
+at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
+`true`/`false`, a `!` dropped, `+ 1`/`- 1`), each change run against the
+file's tests; a change no test notices is named in the summary, a line to
+pin down. On every pull request to `main` (its own runner, about 20
+minutes), weekly and by hand; each run tries other changes (the seed is the
+run's number). Locally: `dart run tool/mutation.dart [file] --max 40`.
+
+### 11.5 Kotlin unit tests (`android/app/src/test`)
+
+JVM tests (JUnit) of the Kotlin code with no Android in it: the
+power-button alarm's counting (`PowerPressCounter`) and where a link Zen
+claims goes instead of back to Zen (`linkTargetWithoutZen`). The CI job
+*Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
+./gradlew :app:testDebugUnitTest` in `android/`).
+
 ## What this does not check
 
 - The simulator does not test Bluetooth, Wi-Fi Direct, Multipeer or real
   Yggdrasil delays; offline links are tested with fake transports and in Go,
   the radios themselves (Kotlin, Swift, C++ runners) only by hand.
-- The Android background service has few tests, the Kotlin code (BLE, calls)
-  none.
+- The Android background service has few tests; of the Kotlin code only
+  what has no Android in it has JVM unit tests (section 11.5), BLE and
+  calls none.
 - App tests run in CI on Windows, and on Linux only those the Windows jobs
   skip; on macOS and Windows on ARM CI only builds and (Linux, macOS) runs
   the app for 20 s. There is no APK build
@@ -751,8 +806,8 @@ is fixed, so nothing is forgotten and nothing comes back:
   phone networks are not in them.
 - The Linux GStreamer player (`zen_media_player.cc`) is not tested beyond
   linking and starting; playback is checked by hand.
-- The Go bridge has no random-input tests (`go test -fuzz`), and the app no
-  "corrupted data sends no frame" test (damaged files: section 8).
+- The app has no "corrupted data sends no frame" test (damaged files:
+  section 8); random frames from the network are section 11.2.
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

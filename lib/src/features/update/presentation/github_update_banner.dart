@@ -150,17 +150,45 @@ class _BannerTile extends StatelessWidget {
 }
 
 /// The release's short note ("what's new"), a line each: plain text, no
-/// links, each line cut after two rows. Nothing without one.
-class _WhatsNewLines extends StatelessWidget {
+/// links. On the updates screen ([title]) whole; in the banner each line is
+/// cut after two rows until "Pokaż całość" opens it. Nothing without one.
+class _WhatsNewLines extends StatefulWidget {
   const _WhatsNewLines({required this.lines, this.title = false});
 
   final List<String> lines;
 
-  /// On the updates screen: under a "Co nowego" heading.
+  /// On the updates screen: under a "Co nowego" heading, never cut.
   final bool title;
 
   @override
+  State<_WhatsNewLines> createState() => _WhatsNewLinesState();
+}
+
+class _WhatsNewLinesState extends State<_WhatsNewLines> {
+  bool _whole = false;
+
+  /// Whether a line of [lines] needs more than two rows at [width].
+  bool _cut(List<String> lines, TextStyle style, double width) {
+    for (final String line in lines) {
+      final TextPainter painter = TextPainter(
+        text: TextSpan(text: '• $line', style: style),
+        maxLines: 2,
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout(maxWidth: width);
+      final bool over = painter.didExceedMaxLines;
+      painter.dispose();
+      if (over) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final List<String> lines = widget.lines;
+    final bool title = widget.title;
     if (lines.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -187,13 +215,37 @@ class _WhatsNewLines extends StatelessWidget {
                 ),
               ),
             ),
-          for (final String line in lines)
-            Text(
-              '• $line',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: style,
-            ),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints box) {
+              final bool whole = title || _whole;
+              final bool cut = !whole && _cut(lines, style, box.maxWidth);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  for (final String line in lines)
+                    Text(
+                      '• $line',
+                      maxLines: whole ? null : 2,
+                      overflow: whole ? null : TextOverflow.ellipsis,
+                      style: style,
+                    ),
+                  if (!title && (cut || _whole))
+                    TextButton(
+                      key: const Key('github-whats-new-whole'),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.padded,
+                      ),
+                      onPressed: () => setState(() => _whole = !_whole),
+                      child: Text(
+                        _whole ? t('Pokaż mniej') : t('Pokaż całość'),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );
@@ -429,12 +481,9 @@ class GithubUpdateCard extends ConsumerWidget {
         final ZenColors zen = ZenColors.of(context);
         final GithubRelease? newer = service.newer;
         final DateTime? at = service.checkedAt;
-        final DateTime? retryAt = service.nextCheckAt;
-        // The last successful check and the last error, here or in the
-        // Android background service (whose checks the card would not
-        // show otherwise).
-        final DateTime? errorAt = service.lastErrorAt;
-        final String? lastError = service.lastError;
+        // The last successful check, here or in the Android background
+        // service (whose checks the card would not show otherwise). Errors
+        // and when the next try comes go to the diagnostics log only.
         final List<String> history = <String>[
           if (at != null &&
               (newer != null || service.state != GithubCheckState.upToDate))
@@ -442,19 +491,7 @@ class GithubUpdateCard extends ConsumerWidget {
               'date': ZenFormat.date(at),
               'time': ZenFormat.time(at),
             }),
-          if (errorAt != null && lastError != null)
-            t('Ostatni błąd {date} o {time}: {error}', {
-              'date': ZenFormat.date(errorAt),
-              'time': ZenFormat.time(errorAt),
-              'error': lastError,
-            }),
         ];
-        final String? retryText = retryAt == null
-            ? null
-            : t('Spróbuję ponownie {date} o {time}.', {
-                'date': ZenFormat.date(retryAt),
-                'time': ZenFormat.time(retryAt),
-              });
         final (
           IconData icon,
           Color tone,
@@ -498,17 +535,8 @@ class GithubUpdateCard extends ConsumerWidget {
                 GithubCheckState.failed => (
                   Icons.error_outline_rounded,
                   zen.warning,
-                  service.rateLimited
-                      ? t(
-                          'Nie udało się sprawdzić aktualizacji: GitHub '
-                          'chwilowo ogranicza liczbę zapytań.',
-                        )
-                      : t(
-                          'Nie udało się sprawdzić aktualizacji (GitHub: '
-                          '{error}).',
-                          {'error': service.error ?? '—'},
-                        ),
-                  retryText,
+                  t('Nie udało się teraz sprawdzić aktualizacji'),
+                  t('Zen spróbuje ponownie sam.'),
                 ),
                 GithubCheckState.missing => (
                   Icons.help_outline_rounded,

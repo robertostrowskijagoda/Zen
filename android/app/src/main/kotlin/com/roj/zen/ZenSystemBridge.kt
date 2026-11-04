@@ -170,6 +170,13 @@ object ZenSystemBridge {
                             inBackground(result) { exportToDownloads(context, paths, name, mime) }
                         }
                         "pickFolder" -> pickFolder(activity, result)
+                        "saveAs" -> saveAs(
+                            activity,
+                            call.argument<String>("path") ?: "",
+                            call.argument<String>("name") ?: "",
+                            call.argument<String>("mime") ?: OCTET_STREAM,
+                            result,
+                        )
                         "exportToFolder" -> {
                             val tree = call.argument<String>("tree") ?: ""
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
@@ -317,6 +324,89 @@ object ZenSystemBridge {
         observer = watcher
         activity.lifecycle.addObserver(watcher)
         registered.launch(null)
+    }
+
+    /**
+     * "Zapisz jako": the system's file browser, open at Downloads, asks
+     * where [name] goes; the file at [path] is copied there. Answers
+     * {uri, name}, or null when the person closed it (or the Activity went
+     * away while it was open).
+     */
+    private fun saveAs(
+        activity: FragmentActivity,
+        path: String,
+        name: String,
+        mime: String,
+        result: MethodChannel.Result,
+    ) {
+        if (!File(path).isFile) {
+            result.success(null)
+            return
+        }
+        var launcher: ActivityResultLauncher<String>? = null
+        var observer: LifecycleEventObserver? = null
+        var answered = false
+        fun answer(value: Map<String, Any>?) {
+            if (answered) {
+                return
+            }
+            answered = true
+            observer?.let { activity.lifecycle.removeObserver(it) }
+            launcher?.unregister()
+            result.success(value)
+        }
+        val context = activity.applicationContext
+        val registered = activity.activityResultRegistry.register(
+            "zen_save_as_${folderPickSerial++}",
+            object : ActivityResultContracts.CreateDocument(mime) {
+                override fun createIntent(context: Context, input: String): Intent {
+                    val intent = super.createIntent(context, input)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        // Opens at Downloads; the person may go anywhere.
+                        intent.putExtra(
+                            DocumentsContract.EXTRA_INITIAL_URI,
+                            DocumentsContract.buildDocumentUri(
+                                "com.android.externalstorage.documents",
+                                "primary:" + Environment.DIRECTORY_DOWNLOADS,
+                            ),
+                        )
+                    }
+                    return intent
+                }
+            },
+        ) { uri ->
+            if (uri == null) {
+                answer(null)
+                return@register
+            }
+            Thread {
+                val saved = try {
+                    copyInto(context, path, uri)
+                    mapOf(
+                        "uri" to uri.toString(),
+                        "name" to (displayName(context, uri) ?: name),
+                    )
+                } catch (error: Exception) {
+                    Log.w(TAG, "Saving a file failed", error)
+                    runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                    null
+                }
+                Handler(Looper.getMainLooper()).post { answer(saved) }
+            }.start()
+        }
+        launcher = registered
+        val watcher = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                answer(null)
+            }
+        }
+        observer = watcher
+        activity.lifecycle.addObserver(watcher)
+        try {
+            registered.launch(name)
+        } catch (_: ActivityNotFoundException) {
+            answer(null)
+        }
     }
 
     /** Deletes a backup copy at the content address [uri]; true when it went. */
@@ -603,25 +693,61 @@ object ZenSystemBridge {
             notifications.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL
     }
 
+    /**
+     * Opens an https link where it belongs: the app the link is for (Discord,
+     * GitHub, ...) when one claims it, else the default browser. Never in
+     * Zen itself: Zen claims its own invitation pages and its repository's
+     * page, and a tap on "Zen na GitHubie" must not come back here. Until
+     * 1.15.5 every link went to a browser picked by Android's browser
+     * selector, which on some phones lists every app that calls itself a
+     * browser and never the app the link was for.
+     */
     private fun openInBrowser(activity: FragmentActivity, url: String?): Boolean {
         val uri = Uri.parse(url ?: return false)
         if (uri.scheme != "https" || uri.host.isNullOrEmpty()) {
             return false
         }
         val view = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+        val pm = activity.packageManager
+        val own = activity.packageName
+        val handlers = pm.queryIntentActivities(view, 0).map { it.activityInfo.packageName }
         return try {
-            activity.startActivity(
-                Intent(view).apply {
-                    selector = Intent.makeMainSelectorActivity(
-                        Intent.ACTION_MAIN,
-                        Intent.CATEGORY_APP_BROWSER,
-                    )
-                },
-            )
+            if (own !in handlers) {
+                // Not one of Zen's links: Android's own choice (the app the
+                // link is verified for, the default browser, or its picker).
+                activity.startActivity(view)
+                return true
+            }
+            val target = linkTargetWithoutZen(pm, own, handlers)
+            if (target != null) {
+                activity.startActivity(Intent(view).setPackage(target))
+            } else {
+                activity.startActivity(
+                    Intent.createChooser(view, null).putExtra(
+                        Intent.EXTRA_EXCLUDE_COMPONENTS,
+                        arrayOf(ComponentName(activity, MainActivity::class.java)),
+                    ),
+                )
+            }
             true
-        } catch (_: android.content.ActivityNotFoundException) {
-            activity.startActivity(view)
-            true
+        } catch (_: ActivityNotFoundException) {
+            false
         }
+    }
+
+    /** [linkTargetWithoutZen] with what the package manager says. */
+    private fun linkTargetWithoutZen(
+        pm: PackageManager,
+        own: String,
+        handlers: List<String>,
+    ): String? {
+        val anyPage = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.org/"))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        val browsers = pm.queryIntentActivities(anyPage, 0)
+            .map { it.activityInfo.packageName }
+            .toSet()
+        val default = pm.resolveActivity(anyPage, PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName
+        return com.roj.zen.linkTargetWithoutZen(own, handlers, browsers, default)
     }
 }

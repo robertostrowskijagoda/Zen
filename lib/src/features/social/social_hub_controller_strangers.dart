@@ -135,10 +135,10 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
       // Not a friend: never a level of their own, always the setting's.
       final NoticeText notice = messageNoticeText(
         level: screenShareHidesNotifications.value
-            ? _appSettings.notificationPrivacy.atLeast(
-                NotificationPrivacy.senderOnly,
-              )
-            : _appSettings.notificationPrivacy,
+            ? _appSettings
+                  .privacyFor(NoticeKind.strangerMessage)
+                  .atLeast(NotificationPrivacy.senderOnly)
+            : _appSettings.privacyFor(NoticeKind.strangerMessage),
         sender: t('{name} (spoza znajomych)', <String, Object?>{'name': name}),
         preview: text,
       );
@@ -149,7 +149,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
           body: notice.body,
           createdAtMillis: timestamp,
           category: RuntimeSystemNotificationCategory.message,
-          kind: NoticeKind.message,
+          kind: NoticeKind.strangerMessage,
           routeKey: buildConversationRouteKey(
             peerAddress: signal.sender,
             title: name,

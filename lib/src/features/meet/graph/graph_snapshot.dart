@@ -5,11 +5,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/meet/graph/graph_insights.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
 import 'package:zen/src/features/meet/graph/graph_painter.dart';
@@ -145,29 +143,15 @@ final class PlatformGraphImageSaver implements GraphImageSaver {
 
   @override
   Future<String?> save(String name, Uint8List bytes) async {
-    String? target;
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      target = await pickSavePath(
-        dialogTitle: t('Zapisz obrazek grafu'),
-        fileName: name,
-      );
-    } else {
-      final Directory? dir = Platform.isAndroid
-          ? await getExternalStorageDirectory()
-          : await getApplicationDocumentsDirectory();
-      if (dir != null) {
-        final Directory zen = Directory('${dir.path}/Zen');
-        await zen.create(recursive: true);
-        target = '${zen.path}/$name';
-      }
-    }
-    if (target == null || target.isEmpty) {
-      return null;
-    }
-    await File(target).writeAsBytes(bytes, flush: true);
-    // A plain file on purpose: the panic password deletes it too.
-    await rememberExportedFile(target);
-    return target;
+    // "Zapisz jako", open at Downloads, on every system; a plain file on
+    // purpose: the panic password deletes it too.
+    final String? target = await saveAsWritten(
+      fileName: name,
+      dialogTitle: t('Zapisz obrazek grafu'),
+      mime: 'image/png',
+      write: (File file) => file.writeAsBytes(bytes, flush: true),
+    );
+    return target == null || target.isEmpty ? null : target;
   }
 }
 

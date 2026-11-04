@@ -478,7 +478,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   NotificationPrivacy _noticePrivacyFor(ZenSignal signal) {
     final NotificationPrivacy level = state.notificationPrivacyFor(
       conversationKeyOfSignal(signal),
-      global: _appSettings.notificationPrivacy,
+      global: _appSettings.privacyFor(
+        signal.type == ZenSignalType.groupMessage
+            ? NoticeKind.groupMessage
+            : NoticeKind.message,
+      ),
     );
     return screenShareHidesNotifications.value
         ? level.atLeast(NotificationPrivacy.senderOnly)
@@ -613,7 +617,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
                       notification.category ==
                           RuntimeSystemNotificationCategory.alarm
                   ? null
-                  : _appSettings.notificationPrivacy),
+                  : _appSettings.privacyFor(noticeKindOf(notification))),
         known:
             friend != null &&
             friend.status == FriendRelationshipStatus.accepted &&

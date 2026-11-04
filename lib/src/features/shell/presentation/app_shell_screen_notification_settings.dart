@@ -2,19 +2,28 @@ part of 'app_shell_screen.dart';
 
 // Ustawienia → Powiadomienia i dźwięki: everything about notifications in
 // one place. What a notification says (the level of its preview), the
-// sounds (in the app, and of the system notifications), one switch per kind
-// of news ([NoticeKind]), the people whose posts are muted, and whether
-// notifications reach the phone in the background.
+// sounds (in the app, and of the system notifications), one switch and one
+// level of what it says per kind of news ([NoticeKind]), the people whose
+// posts are muted, and whether notifications reach the phone in the
+// background.
 
 IconData _noticeKindIcon(NoticeKind kind) => switch (kind) {
   NoticeKind.message => Icons.chat_bubble_outline_rounded,
   NoticeKind.groupMessage => Icons.groups_2_outlined,
+  NoticeKind.strangerMessage => Icons.mark_chat_unread_outlined,
   NoticeKind.call => Icons.call_outlined,
   NoticeKind.mention => Icons.alternate_email_rounded,
   NoticeKind.reaction => Icons.favorite_border_rounded,
   NoticeKind.friendPost => Icons.article_outlined,
   NoticeKind.farPost => Icons.public_rounded,
   NoticeKind.invitation => Icons.person_add_alt_outlined,
+  NoticeKind.introduction => Icons.handshake_outlined,
+  NoticeKind.meetup => Icons.event_outlined,
+  NoticeKind.neighbours => Icons.apartment_outlined,
+  NoticeKind.dating => Icons.favorite_outline_rounded,
+  NoticeKind.question => Icons.help_outline_rounded,
+  NoticeKind.pebble => Icons.landscape_outlined,
+  NoticeKind.pyramid => Icons.change_history_rounded,
   NoticeKind.update => Icons.system_update_outlined,
 };
 
@@ -97,13 +106,10 @@ class _NotificationSettingsSection extends ConsumerWidget {
           title: t('Powiadamiaj o'),
           tiles: <Widget>[
             for (final NoticeKind kind in NoticeKind.values)
-              _SettingsSwitchTile(
-                key: _noticeKindKey(kind),
-                icon: _noticeKindIcon(kind),
-                tone: ZenTone.communication,
-                title: kind.label,
-                subtitle: kind.description,
-                value: !settings.mutes(kind),
+              _NoticeKindTile(
+                switchKey: _noticeKindKey(kind),
+                kind: kind,
+                settings: settings,
                 onChanged: (bool value) =>
                     unawaited(controller.setNoticeMuted(kind, muted: !value)),
               ),
@@ -130,7 +136,11 @@ class _NotificationSettingsSection extends ConsumerWidget {
           text: t(
             'Wyłączony rodzaj nie pokazuje powiadomienia i nie gra dźwięku. '
             'Wiadomości, połączenia, zaproszenia, wzmianki i reakcje nadal '
-            'są na liście powiadomień w aplikacji (dzwonek na górze).',
+            'są na liście powiadomień w aplikacji (dzwonek na górze). '
+            '„Treść” pod rodzajem mówi, co pokazuje jego powiadomienie; '
+            'rozmowa może mieć jeszcze własny poziom. Alarm przyjaciela, '
+            'prośba o pomoc w odzyskaniu konta i pytania o bezpieczeństwo '
+            'na randce przychodzą zawsze.',
           ),
         ),
         _SettingsGroup(
@@ -184,6 +194,71 @@ class _NotificationSettingsSection extends ConsumerWidget {
               ),
           ],
         ),
+      ],
+    );
+  }
+}
+
+/// One kind of news: its switch, and under it what its notification says
+/// ("Treść: …", a dialog). A new version of Zen is always told: its switch
+/// stays on.
+class _NoticeKindTile extends StatelessWidget {
+  const _NoticeKindTile({
+    required this.switchKey,
+    required this.kind,
+    required this.settings,
+    required this.onChanged,
+  });
+
+  /// The key of the row with the switch (the tests tap it).
+  final Key switchKey;
+  final NoticeKind kind;
+  final AppSettings settings;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final bool on = !settings.mutes(kind);
+    final NotificationPrivacy? own = settings.noticePrivacy[kind];
+    final String level = own == null
+        ? t('Treść: jak w ustawieniach ({level})', <String, Object?>{
+            'level': settings.notificationPrivacy.label,
+          })
+        : t('Treść: {level}', <String, Object?>{'level': own.label});
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        MergeSemantics(
+          key: switchKey,
+          child: InkWell(
+            onTap: kind.canMute ? () => onChanged(!on) : null,
+            child: _SettingsRowBody(
+              icon: _noticeKindIcon(kind),
+              tone: zen.tone(ZenTone.communication),
+              title: kind.label,
+              subtitle: kind.description,
+              trailing: Switch.adaptive(
+                value: on,
+                onChanged: kind.canMute ? onChanged : null,
+              ),
+            ),
+          ),
+        ),
+        if (kind.hasPrivacy && on)
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 64, bottom: 6),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                key: Key('settings-notice-privacy-${kind.name}'),
+                icon: const Icon(Icons.visibility_outlined, size: 18),
+                label: Text(level),
+                onPressed: () =>
+                    unawaited(showNoticeKindPrivacyDialog(context, kind: kind)),
+              ),
+            ),
+          ),
       ],
     );
   }

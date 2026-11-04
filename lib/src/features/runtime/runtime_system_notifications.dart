@@ -53,6 +53,16 @@ List buildRuntimeSystemNotificationProviderOverrides({
               ? level.atLeast(NotificationPrivacy.senderOnly)
               : level;
         },
+        // A kind's own level (Powiadomienia i dźwięki → the kind), held to
+        // the same limit while the screen is shared.
+        privacyOfKind: (NoticeKind kind) {
+          final NotificationPrivacy? level = ref
+              .read(appSettingsControllerProvider)
+              .noticePrivacy[kind];
+          return level == null || !screenShareHidesNotifications.value
+              ? level
+              : level.atLeast(NotificationPrivacy.senderOnly);
+        },
       ),
     ),
   ];
@@ -95,13 +105,16 @@ ZenSound? zenSoundFor(RuntimeSystemNotification notification) {
   };
 }
 
-/// The kind of news [notification] is, for the switches in the settings
-/// ([NoticeKind]); `null` for what is never switched off (an alarm, the
-/// neighbours, dating, the meet-ups, the app's own duties). Whoever posts
-/// a notification of a kind names it in [RuntimeSystemNotification.kind];
-/// calls and updates are known by their category.
+/// The kind of news [notification] is, for the switches and the levels in
+/// the settings ([NoticeKind]); `null` for what is always told (an alarm,
+/// help with a recovery, a date's safety check-in, the app's own duties).
+/// Whoever posts a notification of a kind names it in
+/// [RuntimeSystemNotification.kind]; the features' notices are known by
+/// their ids ([NoticeKind.ofNotificationId]), calls and updates by their
+/// category.
 NoticeKind? noticeKindOf(RuntimeSystemNotification notification) {
   return notification.kind ??
+      NoticeKind.ofNotificationId(notification.id) ??
       switch (notification.category) {
         RuntimeSystemNotificationCategory.call => NoticeKind.call,
         RuntimeSystemNotificationCategory.update => NoticeKind.update,
@@ -324,10 +337,15 @@ final class PrivacyRedactingNotificationService
   PrivacyRedactingNotificationService(
     this.delegate, {
     required NotificationPrivacy Function() privacy,
-  }) : _privacy = privacy;
+    NotificationPrivacy? Function(NoticeKind kind)? privacyOfKind,
+  }) : _privacy = privacy,
+       _privacyOfKind = privacyOfKind;
 
   final RuntimeSystemNotificationService delegate;
   final NotificationPrivacy Function() _privacy;
+
+  /// A kind's own level, when it has one ([AppSettings.noticePrivacy]).
+  final NotificationPrivacy? Function(NoticeKind kind)? _privacyOfKind;
 
   /// Ids (see the features' `notify` calls) of the posts whose title alone
   /// gives away what they are about: dating (`date-`), questions (`ask-`),
@@ -375,7 +393,7 @@ final class PrivacyRedactingNotificationService
         notification.category == RuntimeSystemNotificationCategory.alarm) {
       return notification;
     }
-    final NotificationPrivacy level = _level();
+    final NotificationPrivacy level = _level(notification);
     if (level == NotificationPrivacy.senderAndContent) {
       return notification;
     }
@@ -391,9 +409,16 @@ final class PrivacyRedactingNotificationService
     );
   }
 
-  NotificationPrivacy _level() {
+  /// The level for [notification]: its kind's own, or the general one.
+  NotificationPrivacy _level([RuntimeSystemNotification? notification]) {
     try {
-      return _privacy();
+      final NoticeKind? kind = notification == null
+          ? null
+          : noticeKindOf(notification);
+      final NotificationPrivacy? own = kind == null || !kind.hasPrivacy
+          ? null
+          : _privacyOfKind?.call(kind);
+      return own ?? _privacy();
     } catch (_) {
       // Settings not readable (yet): err on the private side.
       return NotificationPrivacy.generic;
@@ -423,7 +448,7 @@ final class PrivacyRedactingNotificationService
         noticeLogs[notification] ??
             (
               kind: noticeLogKindOf(notification),
-              level: ringsOrAlarms ? null : _level(),
+              level: ringsOrAlarms ? null : _level(notification),
               known: false,
               version: null,
             ),

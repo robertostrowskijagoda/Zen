@@ -20,6 +20,16 @@ const int kSetupRevision = 2;
 /// off again; saved from now on with this revision, that choice stays).
 const int kLocalLinksRevision = 1;
 
+/// Settings saved before this revision had the far friends' posts
+/// ([NoticeKind.farPost]) off from when they were off by default: read from
+/// such a copy, they are on (switched off again, they stay off).
+const int kNoticesRevision = 1;
+
+/// Settings saved before this revision had Apple's Multipeer links off from
+/// when they were off by default: read from such a copy, they are on
+/// (switched off again, they stay off).
+const int kAppleLinksRevision = 1;
+
 /// Settings of this device rather than of the account: a copy of the
 /// account that does not bring the app's lock along (the recovery circle,
 /// another device, a backup file without it) never replaces them
@@ -468,6 +478,7 @@ final class AppSettings {
     this.inAppSounds = true,
     this.notificationSounds = true,
     this.mutedNotices = NoticeKind.defaultMuted,
+    this.noticePrivacy = const <NoticeKind, NotificationPrivacy>{},
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
@@ -484,7 +495,7 @@ final class AppSettings {
     this.lanDiscovery,
     this.wifiDirect = true,
     this.bluetoothLinks = true,
-    this.multipeerLinks = false,
+    this.multipeerLinks = true,
     this.keepReceivingInBackground = false,
     this.showLastOpened = true,
     this.seenTips = const <String>{},
@@ -587,15 +598,29 @@ final class AppSettings {
   final bool notificationSounds;
 
   /// The kinds of news switched off ([NoticeKind]), except the friends'
-  /// posts, which [postNotifications] switches. Far friends' posts are off
-  /// until the person switches them on.
+  /// posts, which [postNotifications] switches. Every kind is on until the
+  /// person switches it off (far friends' posts too, since 1.15.5).
   final Set<NoticeKind> mutedNotices;
 
   /// Whether the news of [kind] is switched off: no system notification and
   /// no notification sound (the in-app list still has it).
-  bool mutes(NoticeKind kind) => kind == NoticeKind.friendPost
-      ? !postNotifications
-      : mutedNotices.contains(kind);
+  bool mutes(NoticeKind kind) => switch (kind) {
+    NoticeKind.friendPost => !postNotifications,
+    _ when !kind.canMute => false,
+    _ => mutedNotices.contains(kind),
+  };
+
+  /// What a notification of a kind says, when it says less or more than
+  /// [notificationPrivacy] (Ustawienia → Powiadomienia i dźwięki → the
+  /// kind). A kind not here follows [notificationPrivacy].
+  final Map<NoticeKind, NotificationPrivacy> noticePrivacy;
+
+  /// What a notification of [kind] says: its own level, or the general
+  /// one. A conversation's own level still comes first where there is one
+  /// (`SocialHubState.notificationPrivacy`).
+  NotificationPrivacy privacyFor(NoticeKind? kind) =>
+      (kind == null || !kind.hasPrivacy ? null : noticePrivacy[kind]) ??
+      notificationPrivacy;
 
   /// Screenshots and screen recording are blocked on conversations and
   /// account screens, and their content is hidden in the recent-apps view.
@@ -680,7 +705,8 @@ final class AppSettings {
   final bool bluetoothLinks;
 
   /// "Apple Wi-Fi/Bluetooth" (iPhone, iPad, Mac): Apple's Multipeer
-  /// Connectivity between nearby Apple devices. Off by default.
+  /// Connectivity between nearby Apple devices. On by default (since
+  /// 1.15.5, [kAppleLinksRevision]), like the other links.
   final bool multipeerLinks;
 
   /// iPhone: "Odbieraj w tle cały czas" — a silent sound keeps Zen running
@@ -772,6 +798,7 @@ final class AppSettings {
     bool? inAppSounds,
     bool? notificationSounds,
     Set<NoticeKind>? mutedNotices,
+    Map<NoticeKind, NotificationPrivacy>? noticePrivacy,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
@@ -820,6 +847,7 @@ final class AppSettings {
       inAppSounds: inAppSounds ?? this.inAppSounds,
       notificationSounds: notificationSounds ?? this.notificationSounds,
       mutedNotices: mutedNotices ?? this.mutedNotices,
+      noticePrivacy: noticePrivacy ?? this.noticePrivacy,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
@@ -916,6 +944,12 @@ final class AppSettings {
     'inAppSounds': inAppSounds,
     'notificationSounds': notificationSounds,
     'mutedNotices': <String>[for (final NoticeKind k in mutedNotices) k.name],
+    if (noticePrivacy.isNotEmpty)
+      'noticePrivacy': <String, String>{
+        for (final MapEntry<NoticeKind, NotificationPrivacy> e
+            in noticePrivacy.entries)
+          e.key.name: e.value.name,
+      },
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
@@ -933,6 +967,8 @@ final class AppSettings {
     'wifiDirect': wifiDirect,
     'bluetoothLinks': bluetoothLinks,
     'linksRev': kLocalLinksRevision,
+    'noticesRev': kNoticesRevision,
+    'appleLinksRev': kAppleLinksRevision,
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
     'showLastOpened': showLastOpened,
@@ -948,6 +984,7 @@ final class AppSettings {
     }
 
     final bool oldLinks = (pick<int>('linksRev') ?? 0) < kLocalLinksRevision;
+    final bool oldNotices = (pick<int>('noticesRev') ?? 0) < kNoticesRevision;
 
     E? byName<E extends Enum>(List<E> values, String key) {
       final Object? name = json[key];
@@ -992,7 +1029,21 @@ final class AppSettings {
       mutedNotices: switch (json['mutedNotices']) {
         final List<dynamic> names => <NoticeKind>{
           for (final Object? name in names)
-            if (NoticeKind.byName(name) case final NoticeKind kind) kind,
+            if (NoticeKind.byName(name) case final NoticeKind kind)
+              // From before kNoticesRevision the far posts were off by
+              // default: on now, as they are by default.
+              if (!(oldNotices && kind == NoticeKind.farPost)) kind,
+        },
+        _ => null,
+      },
+      noticePrivacy: switch (json['noticePrivacy']) {
+        final Map<dynamic, dynamic> levels => <NoticeKind, NotificationPrivacy>{
+          for (final MapEntry<dynamic, dynamic> e in levels.entries)
+            if ((NoticeKind.byName(e.key), _privacyByName(e.value)) case (
+              final NoticeKind kind,
+              final NotificationPrivacy level,
+            ))
+              kind: level,
         },
         _ => null,
       },
@@ -1014,7 +1065,9 @@ final class AppSettings {
       lanDiscovery: oldLinks ? null : pick<bool>('lanDiscovery'),
       wifiDirect: oldLinks ? null : pick<bool>('wifiDirect'),
       bluetoothLinks: oldLinks ? null : pick<bool>('bluetoothLinks'),
-      multipeerLinks: pick<bool>('multipeerLinks'),
+      multipeerLinks: (pick<int>('appleLinksRev') ?? 0) < kAppleLinksRevision
+          ? null
+          : pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       showLastOpened: pick<bool>('showLastOpened'),
       seenTips: switch (json['seenTips']) {
@@ -1052,4 +1105,14 @@ final class AppSettings {
     }
     return AppLockMode.values[value];
   }
+}
+
+/// The level stored under [name], or `null`.
+NotificationPrivacy? _privacyByName(Object? name) {
+  for (final NotificationPrivacy level in NotificationPrivacy.values) {
+    if (level.name == name) {
+      return level;
+    }
+  }
+  return null;
 }

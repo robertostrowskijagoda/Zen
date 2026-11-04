@@ -461,9 +461,9 @@ void main() {
           .data!;
       expect(history, contains('Sprawdzono'));
       expect(history, contains(ZenFormat.time(success)));
-      expect(history, contains('Ostatni błąd'));
-      expect(history, contains(ZenFormat.time(failure)));
-      expect(history, contains('HTTP 403'));
+      // The error stays in the log: the screen does not show it.
+      expect(history, isNot(contains('HTTP 403')));
+      expect(find.textContaining('HTTP 403'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   });
@@ -477,7 +477,7 @@ void main() {
       final _Net net = _Net()
         ..api = (() => throw const GithubStatusException(
           HttpStatus.tooManyRequests,
-          retryAfter: Duration(minutes: 40),
+          retryAfter: Duration(minutes: 20),
         ));
       final BackgroundUpdateCheck check = BackgroundUpdateCheck(
         notices: () async => notices,
@@ -490,9 +490,9 @@ void main() {
       await check.checkIfDue();
       expect(store.state.checkedAtMillis, isNull);
       expect(store.state.error, 'HTTP 429');
-      expect(store.state.retryAtMillis, now + 41 * 60 * 1000);
+      expect(store.state.retryAtMillis, now + 21 * 60 * 1000);
 
-      // The next beat (30 minutes on): GitHub asked to wait 40.
+      // The next beat (15 minutes on): GitHub asked to wait 20.
       now += check.beatEvery.inMilliseconds;
       await check.checkIfDue();
       expect(net.count(kZenReleaseInfoUri), 1);

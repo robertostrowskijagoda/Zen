@@ -441,9 +441,39 @@ void main() {
     expect(settings().mutes(NoticeKind.call), isFalse);
     expect(find.byKey(const Key('settings-notice-call-warning')), findsNothing);
 
-    expect(settings().mutes(NoticeKind.farPost), isTrue);
-    await tapSwitch('settings-notice-farPost');
     expect(settings().mutes(NoticeKind.farPost), isFalse);
+    await tapSwitch('settings-notice-farPost');
+    expect(settings().mutes(NoticeKind.farPost), isTrue);
+
+    // A new version of Zen is always told: its switch does not turn off.
+    await tapSwitch('settings-notice-update');
+    expect(settings().mutes(NoticeKind.update), isFalse);
+
+    // What a kind's notification says: its own level, in a dialog.
+    final Finder level = find.byKey(
+      const Key('settings-notice-privacy-message'),
+    );
+    await tester.ensureVisible(level);
+    await tester.pump();
+    await tester.tap(level);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('notice-privacy-dialog-message')),
+        matching: find.byKey(const Key('notification-privacy-generic')),
+      ),
+    );
+    await tester.pump();
+    expect(
+      settings().privacyFor(NoticeKind.message),
+      NotificationPrivacy.generic,
+    );
+    expect(
+      settings().privacyFor(NoticeKind.groupMessage),
+      settings().notificationPrivacy,
+    );
+    await tester.tap(find.byKey(const Key('notice-privacy-dialog-close')));
+    await tester.pumpAndSettle();
 
     await tapSwitch('settings-notification-sounds');
     expect(settings().notificationSounds, isFalse);

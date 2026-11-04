@@ -10,9 +10,27 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Each kind of notification has its own switch and its own level of what it shows, and a new version of Zen is always announced.
+- [en] Files are saved where you choose (Downloads first), links open in their own apps, and the fundraiser is easy to find.
+- [en] After "Change code" nothing from the old code gets through, and friends of friends' posts and films show by default.
+- [pl] Każdy rodzaj powiadomień ma własny włącznik i własny poziom treści, a o nowej wersji Zen powiadomienie przychodzi zawsze.
+- [pl] Pliki zapisujesz tam, gdzie chcesz (najpierw Pobrane), linki otwierają się w swoich aplikacjach, a zbiórkę łatwo znaleźć.
+- [pl] Po „Zmień kod” nic ze starego kodu nie przechodzi, a posty i filmy znajomych znajomych są domyślnie widoczne.
+
 ### Fixes and changes
+- **Notifications per kind**: Ustawienia → Powiadomienia i dźwięki lists every kind with its switch and, under it, "Treść" (its own level of what a notification shows, or the general one; a conversation's own level still comes first). New kinds: messages from outside friends, introductions, meet-ups and events, the neighbours, dating, questions to the network, pebbles and the pyramid (they were never switchable). Always told: a friend's alarm, a request for help with a recovery, a date's safety check-ins, and a new version of Zen (its switch cannot be turned off). The locked phone applies the same levels. Far friends' posts are on by default, also for settings saved under the old default (once).
+- **New version announced sooner**: while Zen is closed the background service looks every 15 minutes on its beat (it was 30 and 30, so up to an hour); the updates screen shows the whole what's new ("Pokaż całość" in the banner) and no raw errors or retry times ("Nie udało się teraz sprawdzić aktualizacji. Zen spróbuje ponownie sam."): those go to the diagnostics log.
+- **"Czeka na doręczenie" drains**: mail picked up a second time (from another mailbox, or after a direct copy) is acknowledged to its sender again; the only acknowledgement went when the mail was first taken in, often while the sender was away, which kept the message waiting there for its two weeks. The diagnostics log gets a line with what waits and what is held, by kind and age.
+- **Save As everywhere**: call recordings, chat attachments, the key copy, the graph picture, stickers and the diagnostics log open the system's own file browser at Downloads (Android, iPhone, computers); on phones they went to Zen's own hidden folder. An account backup asks for its folder when it is saved, unless one was chosen on its screen (it went to the default folder).
+- **Links open in their app**: "Zen na Discordzie", "Zen na GitHubie" and every other link open in the app the link is for, or the default browser; Android's browser selector listed every app calling itself a browser and never Discord. A link Zen itself claims never comes back to Zen.
+- **No "delete all accounts" button**: accounts are deleted one by one (the emergency wipe password still wipes everything).
+- **The fundraiser in sight**: "Wesprzyj Zen" at the top of the settings and second in "O aplikacji".
+- **macOS and Linux** are described as ready (they were "planned").
+- **On by default**: friends of friends' films and Apple's Multipeer links, also for settings saved under the old defaults (once).
 - **"Zmień kod" turns the old code away**: once the code was changed, a friend request without the current code's token (the old code, or none: an address learned elsewhere, Nearby, the Circle, an event, the neighbours, an introduction, "Dodaj" on a mini-profile) gets a refusal (`friend_reject`) and leaves nothing behind; so does an accept nobody here asked for, and an invitation to a group not known here from someone who is not a friend (`group_leave`). Someone who is not a friend cannot start a new conversation either (an introduction or a paid first message included); one begun before goes on. Friends, people invited from here and requests that already waited stay as they were. 1.15.4 kept those requests among the invitations without a notification. A refusal goes at most once a minute to one sender; the locked phone posts no notice for any of it.
-- **CI**: a test fails when flutter_webrtc brings a WebRTC whose SHA-256 is not pinned; the 1.15.4 tag run failed on every desktop and iOS job for it (the WebRTC of flutter_webrtc 1.6.3 is pinned now, checked against the official release digests).
+- **Tests**: the multi-step protocols on a network that loses, duplicates and reorders datagrams, on many seeds (`test/protocol_chaos_test.dart`); random frames into the parser and, from strangers, into the social controller (`test/signal_fuzz_test.dart`); a Go fuzz target for every parser of the bridge, fuzzed in every CI run; line coverage summed up in every CI run; mutation testing of the core files on every pull request (`tool/mutation.dart`); JVM unit tests of the Kotlin code without Android in it (docs/TESTING.md, section 11).
+- **CI**: the emulator job frees disk space first (toolsets it never uses): the previous release's build ran out of room beside an NDK and the emulator's image. A test fails when flutter_webrtc brings a WebRTC whose SHA-256 is not pinned; the 1.15.4 tag run failed on every desktop and iOS job for it (the WebRTC of flutter_webrtc 1.6.3 is pinned now, checked against the official release digests).
 
 ## 1.15.4 — 04.11.2026
 

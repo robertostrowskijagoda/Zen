@@ -58,6 +58,15 @@ class AboutScreen extends StatelessWidget {
     ),
   );
 
+  /// One section's page on its own ("Wesprzyj Zen" from the settings).
+  static Future<void> openSection(BuildContext context, AboutSection section) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              _AboutPage(title: section.title, child: section.page()),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
@@ -213,12 +222,14 @@ class _NetworkCountsCard extends ConsumerWidget {
 /// The sections of "O aplikacji", in their order; each opens its page.
 enum AboutSection {
   intro,
+  // Second, not last: Zen lives on what people give (the owner wants the
+  // fundraiser in sight).
+  support,
   updates,
   security,
   licences,
   documents,
-  contact,
-  support;
+  contact;
 
   String get title => switch (this) {
     AboutSection.intro => t('Czym jest Zen'),
@@ -763,8 +774,20 @@ class _UpdatesPage extends StatelessWidget {
               _Platform(
                 icon: Icons.laptop_mac_rounded,
                 tone: zenTone(zen, 5),
-                name: t('macOS i Linux'),
-                note: t('W planie — ten sam rdzeń, co na Windows.'),
+                name: 'macOS',
+                note: t(
+                  'Gotowe — Apple Silicon i Intel. Przy pierwszym '
+                  'uruchomieniu: Ustawienia systemowe → Prywatność i '
+                  'ochrona → „Otwórz mimo to”.',
+                ),
+              ),
+              _Platform(
+                icon: Icons.computer_rounded,
+                tone: zenTone(zen, 4),
+                name: 'Linux',
+                note: t(
+                  'Gotowe — pakiet .deb, Flatpak i archiwum, x64 i ARM64.',
+                ),
               ),
               _Platform(
                 icon: Icons.phone_iphone_rounded,

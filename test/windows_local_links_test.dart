@@ -231,7 +231,11 @@ void main() {
   test('the switches turn the Windows transports on', () {
     expect(
       enabledLocalTransports(
-        const AppSettings(wifiDirect: true, bluetoothLinks: true),
+        const AppSettings(
+          wifiDirect: true,
+          bluetoothLinks: true,
+          multipeerLinks: false,
+        ),
       ),
       <LocalLinkTransport>{
         LocalLinkTransport.wifiDirect,
@@ -240,7 +244,11 @@ void main() {
     );
     expect(
       enabledLocalTransports(
-        const AppSettings(bluetoothLinks: false, lanDiscovery: false),
+        const AppSettings(
+          bluetoothLinks: false,
+          lanDiscovery: false,
+          multipeerLinks: false,
+        ),
       ),
       isEmpty,
       reason: 'Wi-Fi Direct only makes a network for the LAN discovery',

@@ -526,7 +526,13 @@ final class FriendPostNotifier {
     );
     if (shouldNotify()) {
       await notify(
-        newPostsNotification(told, level: privacy(), createdAtMillis: now),
+        // Each post carries its level (a friend's own, the friends' posts'
+        // or the far friends' posts' one); the most private of them wins.
+        newPostsNotification(
+          told,
+          level: NotificationPrivacy.senderAndContent,
+          createdAtMillis: now,
+        ),
       );
     }
     return fresh.length;
@@ -555,7 +561,7 @@ final class FriendPostNotifier {
       address: post.authorAddress,
       preview: postNoticePreview(post),
       millis: post.millis,
-      // Not a friend: never a level of their own, always the global one.
+      // Not a friend: never a level of their own, the far posts' one.
       privacy: privacy(),
       far: true,
     );

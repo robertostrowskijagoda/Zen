@@ -38,7 +38,7 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// of the notification of an older one; the notification of a version
 /// that is installed now is taken away.
 /// The shortest round of [BackgroundUpdateCheck] on the service's beat.
-const Duration kUpdateBeatAtMost = Duration(minutes: 30);
+const Duration kUpdateBeatAtMost = Duration(minutes: 15);
 
 final class BackgroundUpdateCheck {
   BackgroundUpdateCheck({

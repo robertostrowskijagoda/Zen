@@ -58,6 +58,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      # Room on the disk: two Gradle builds, an NDK the previous release may
+      # ask for and the emulator's image filled the runner's disk ("No
+      # space left on device" in the previous release's build). Toolsets
+      # this job never uses go first; the Android SDK stays.
+      - name: Disk space
+        run: |
+          df -h /
+          for dir in /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/boost \
+            /usr/local/share/powershell; do
+            sudo rm -rf "$dir"
+          done
+          df -h /
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

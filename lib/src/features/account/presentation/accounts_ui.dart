@@ -1187,25 +1187,8 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
                         unawaited(_wipe(performZenLocalDataReset)),
                   ),
                 ),
-                const SizedBox(height: 18),
-                Text(
-                  t(
-                    'Usuwa z tego urządzenia wszystkie konta — także te spoza '
-                    'listy — i wszystkie ich klucze. Zen zacznie jak nowo '
-                    'zainstalowany.',
-                  ),
-                  style: TextStyle(color: zen.danger, height: 1.4),
-                ),
-                const SizedBox(height: 10),
-                Center(
-                  child: HoldToConfirmButton(
-                    key: const Key('accounts-wipe-all'),
-                    idleLabel: t('Przytrzymaj, aby usunąć wszystkie konta'),
-                    holdingLabel: (int seconds) =>
-                        t('Trzymaj… jeszcze {n} s', {'n': seconds}),
-                    onConfirmed: () => unawaited(_wipe(performZenDeviceWipe)),
-                  ),
-                ),
+                // Only this account: no button wipes every account at once
+                // (the emergency wipe password still does, by design).
               ],
             ],
           ),

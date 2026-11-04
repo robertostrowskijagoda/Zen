@@ -10,7 +10,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 final class FilmPrefs {
   FilmPrefs({
     this.muted = false,
-    this.friendsOfFriends = false,
+    this.friendsOfFriends = true,
     Set<String>? watched,
     Map<String, int>? used,
   }) : watched = watched ?? <String>{},
@@ -24,7 +24,9 @@ final class FilmPrefs {
 
   bool muted;
 
-  /// Show public films friends passed on (off until the person opts in).
+  /// Show public films friends passed on. On by default since 1.15.5 (as
+  /// the far friends' posts); kept from before ('v' below 2) it was off
+  /// only because that was the default, so it is on again once.
   bool friendsOfFriends;
 
   /// Film ids watched on this phone (insertion order: oldest first).
@@ -56,6 +58,7 @@ final class FilmPrefs {
       jsonEncode(<String, dynamic>{
         'm': muted,
         'f': friendsOfFriends,
+        'v': 2,
         'w': watched.toList(),
         'u': used,
       }),
@@ -75,7 +78,7 @@ final class FilmPrefs {
       final Object? u = json['u'];
       return FilmPrefs(
         muted: json['m'] == true,
-        friendsOfFriends: json['f'] == true,
+        friendsOfFriends: json['v'] == 2 ? json['f'] != false : true,
         watched: <String>{
           if (w is List)
             for (final Object? id in w.take(maxKept))

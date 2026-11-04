@@ -27,16 +27,15 @@ List<int> diagnosticsLogFileBytes(String text) => <int>[
 ];
 
 /// Saves the whole log ([ZenDiagnosticsLog.read], both isolates) as a
-/// plain file and says where it went: the system save dialog on a computer;
-/// on an Android phone Downloads (through the media store, the way account
-/// backups go, since the app's own `Android/data` folder is hidden from
-/// every file manager since Android 11), before Android 10 and on an iPhone
-/// the app's folder. Null when cancelled; throws when the file did not
-/// reach the folder.
+/// plain file and says where it went. The person always says where: the
+/// system's save dialog on a computer, its file browser open at Downloads
+/// on a phone ([saveAsWritten]). Null when cancelled; throws when the file
+/// did not get there.
 Future<AccountBackupSaved?> saveDiagnosticsLog({
-  AccountBackupPlaces? places,
   AccountBackupSystem? system,
   Future<String?> Function(String name)? pickTarget,
+  Future<String?> Function(String name, Future<void> Function(File file) write)?
+  saveAs,
   DateTime? now,
 }) async {
   final AccountBackupSystem kind = system ?? AccountBackupSystem.current;
@@ -55,20 +54,29 @@ Future<AccountBackupSaved?> saveDiagnosticsLog({
       canOpen: true,
     );
   }
-  final AccountBackupPlaces where =
-      places ?? PlatformAccountBackupPlaces(system: kind);
-  final AccountBackupFolder folder = await where.defaultFolder();
-  final String first = await where.workPath(folder, name);
-  try {
-    if (folder.isDirect) {
-      await rememberExportedFile(first);
-    }
-    await _write(first);
-    return await where.deliver(folder, first, <String>[first]);
-  } finally {
-    await where.release(folder, first);
+  final String? saved = await (saveAs ?? _askOnPhone)(
+    name,
+    (File file) => _write(file.path),
+  );
+  if (saved == null || saved.isEmpty) {
+    return null;
   }
+  // A content address on a phone: the person is told the file's name.
+  return AccountBackupSaved(
+    folder: AccountBackupFolder.downloads(),
+    shown: <String>[name],
+  );
 }
+
+Future<String?> _askOnPhone(
+  String name,
+  Future<void> Function(File file) write,
+) => saveAsWritten(
+  fileName: name,
+  dialogTitle: t('Zapisz dziennik techniczny'),
+  mime: 'text/plain',
+  write: write,
+);
 
 Future<String?> _askOnDesktop(String name) =>
     pickSavePath(dialogTitle: t('Zapisz dziennik techniczny'), fileName: name);

@@ -1256,6 +1256,61 @@ void main() {
       return captured!;
     }
 
+    test('mail picked up again tells the sender again that it arrived: '
+        'its first word went while the sender was away', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.goOffline(bob);
+      await mesh.nodes[alice]!.engine.submit(bob, _text('Hej'));
+      await mesh.advance(const Duration(seconds: 5));
+      await mesh.goOffline(alice);
+      Map<String, dynamic>? captured;
+      String? relay;
+      mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+        if (to == bob && p['type'] == 'rly_mail' && captured == null) {
+          captured = jsonDecode(jsonEncode(p)) as Map<String, dynamic>;
+          relay = from;
+        }
+        return p;
+      };
+      await mesh.goOnline(bob);
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['Hej']);
+      expect(captured, isNotNull);
+
+      // Another mailbox hands the same mail over later, with Alice back:
+      // Bob does not take it in twice, but tells Alice once more.
+      await mesh.goOnline(alice);
+      await mesh.settle();
+      final List<Object?> acks = <Object?>[];
+      mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+        if (from == bob && to == alice && p['type'] == 'rly_ack') {
+          acks.add(p['rid']);
+        }
+        return p;
+      };
+      await mesh.nodes[bob]!.receive(relay!, captured!);
+      await mesh.settle();
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['Hej']);
+      expect(acks, isNotEmpty);
+    });
+
+    test('the backlog line for the log names kinds and ages, no address', () {
+      final RelayState state = RelayState();
+      const int now = 10 * 24 * 3600 * 1000;
+      state.outbox['r1'] = RelayOutboxEntry(
+        rid: 'r1',
+        recipient: bob,
+        payload: const <String, dynamic>{'type': 'message'},
+        createdAtMillis: now - 4 * 24 * 3600 * 1000,
+        expiresAtMillis: now + 1000,
+        relayable: true,
+      );
+      final String line = relayBacklogSummary(state, now);
+      expect(line, contains('1 waiting'));
+      expect(line, contains('message=1'));
+      expect(line, contains('>=3d=1'));
+      expect(line, isNot(contains(bob)));
+    });
+
     test('an expired copy handed over again is refused', () async {
       final _SimMesh mesh = await _meshWithRelays();
       final Map<String, dynamic> copy = await deliverViaRelays(mesh, 'raz');

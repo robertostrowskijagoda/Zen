@@ -79,7 +79,7 @@ void main() {
     await tester.pumpAndSettle();
     final double usableBottom =
         (tester.view.physicalSize.height - 144) / tester.view.devicePixelRatio;
-    expect(find.text('Wesprzyj Zen'), findsOneWidget);
+    expect(find.text('Kontakt i zgłaszanie błędów'), findsOneWidget);
     expect(tester.getBottomLeft(last).dy, lessThanOrEqualTo(usableBottom));
   });
 
@@ -148,12 +148,14 @@ void main() {
     expect(
       AboutSection.values.map((AboutSection s) => s.name),
       containsAllInOrder(<String>[
+        'intro',
+        // The fundraiser second, in sight.
+        'support',
         'updates',
         'security',
         'licences',
         'documents',
         'contact',
-        'support',
       ]),
     );
     // The long texts are on the section pages, not here.

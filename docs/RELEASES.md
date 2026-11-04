@@ -244,7 +244,7 @@ key, so every release must be signed with this key.
    finds the release within a quarter of an hour, and at once when it
    starts or comes back to the screen 15 minutes or more after its last
    check; an Android phone that receives in the background finds it
-   within about an hour also while Zen is closed (Doze can put that off
+   within about half an hour also while Zen is closed (Doze can put that off
    to its next window). Since 1.15.3 the app learns the newest version
    from the repository itself (GitHub's redirect from `releases/latest`,
    no request limit) the moment the release is published, the files from
@@ -1222,11 +1222,11 @@ or older (`kGithubCheckEvery`): 20 s after start, when the app comes back to
 the screen and every quarter of an hour while it stays open. On Android the background
 service (`background_update_check.dart`, started in every mode of the
 service, also while the app is locked) looks while Zen is closed once the
-last answer is 30 minutes old (`kBackgroundGithubCheckEvery`): it rides the
+last answer is 15 minutes old (`kBackgroundGithubCheckEvery`): it rides the
 service's shared wake as work that does not wake the phone in Doze, looks
-every 30 minutes whether a check is due (one small file,
+every 15 minutes whether a check is due (one small file,
 `update_check.json`, which the app and the service share, so whoever asked
-last counts) and asks at most once in those 2 h when checks succeed; a
+last counts) and asks at most once a quarter of an hour; a
 failed check is tried again on the next beat, or once the wait GitHub
 asked for is over. The file also keeps the last successful check and the
 last error (time and text), which the updates screen shows ("Sprawdzono …",
