@@ -524,6 +524,10 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const CircleReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // No account backup on this device, or a month old.
+                const BackupReminderCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 if (actionableInbox.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

@@ -500,6 +500,8 @@ final class AppSettings {
     this.showLastOpened = true,
     this.seenTips = const <String>{},
     this.notificationsSeenMillis = 0,
+    this.lastAccountBackupMillis = 0,
+    this.backupReminderAfterMillis = 0,
   });
 
   static const int defaultInboxLimitMb = 1024;
@@ -726,6 +728,15 @@ final class AppSettings {
   /// last time it was opened; newer ones count on the bell.
   final int notificationsSeenMillis;
 
+  /// When a backup of the whole account was last saved on this device
+  /// (milliseconds since the epoch, 0 = never): the reminder to make one
+  /// counts from it ([backupReminderDue]).
+  final int lastAccountBackupMillis;
+
+  /// "Później" under the backup reminder: not shown again before this
+  /// (milliseconds since the epoch, 0 = no wait).
+  final int backupReminderAfterMillis;
+
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
 
@@ -820,6 +831,8 @@ final class AppSettings {
     bool? showLastOpened,
     Set<String>? seenTips,
     int? notificationsSeenMillis,
+    int? lastAccountBackupMillis,
+    int? backupReminderAfterMillis,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -872,6 +885,10 @@ final class AppSettings {
       seenTips: seenTips ?? this.seenTips,
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
+      lastAccountBackupMillis:
+          lastAccountBackupMillis ?? this.lastAccountBackupMillis,
+      backupReminderAfterMillis:
+          backupReminderAfterMillis ?? this.backupReminderAfterMillis,
     );
   }
 
@@ -975,6 +992,10 @@ final class AppSettings {
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
     if (notificationsSeenMillis > 0)
       'notificationsSeenMillis': notificationsSeenMillis,
+    if (lastAccountBackupMillis > 0)
+      'lastAccountBackupMillis': lastAccountBackupMillis,
+    if (backupReminderAfterMillis > 0)
+      'backupReminderAfterMillis': backupReminderAfterMillis,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -1075,6 +1096,8 @@ final class AppSettings {
         _ => null,
       },
       notificationsSeenMillis: pick<int>('notificationsSeenMillis'),
+      lastAccountBackupMillis: pick<int>('lastAccountBackupMillis'),
+      backupReminderAfterMillis: pick<int>('backupReminderAfterMillis'),
     );
   }
 

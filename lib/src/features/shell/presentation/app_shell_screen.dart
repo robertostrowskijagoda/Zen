@@ -38,6 +38,7 @@ import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
+import 'package:zen/src/features/account/presentation/backup_reminder_card.dart';
 import 'package:zen/src/features/account/presentation/circle_reminder_card.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';

@@ -301,6 +301,31 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(paperBackupDone: value));
   }
 
+  /// A backup of the whole account was saved now: the reminder to make
+  /// one counts from here.
+  Future<void> noteAccountBackupMade([DateTime? now]) async {
+    await _save(
+      state.copyWith(
+        lastAccountBackupMillis: (now ?? DateTime.now()).millisecondsSinceEpoch,
+        backupReminderAfterMillis: 0,
+      ),
+    );
+  }
+
+  /// "Później" under the backup reminder: quiet for [wait].
+  Future<void> snoozeBackupReminder({
+    Duration wait = const Duration(days: 7),
+    DateTime? now,
+  }) async {
+    await _save(
+      state.copyWith(
+        backupReminderAfterMillis: (now ?? DateTime.now())
+            .add(wait)
+            .millisecondsSinceEpoch,
+      ),
+    );
+  }
+
   /// The one-time card or reminder [id] was shown or dismissed.
   Future<void> markTipSeen(String id) async {
     if (state.seenTips.contains(id)) {
