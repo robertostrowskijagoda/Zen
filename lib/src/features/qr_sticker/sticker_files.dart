@@ -1,11 +1,11 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/security/exported_files.dart';
@@ -61,7 +61,7 @@ final class PlatformStickerOutlet implements StickerOutlet {
   @override
   Future<String?> save(String name, Uint8List bytes, String mime) async {
     if (_desktop) {
-      final String? target = await FilePicker.platform.saveFile(
+      final String? target = await pickSavePath(
         dialogTitle: t('Zapisz naklejkę'),
         fileName: name,
       );

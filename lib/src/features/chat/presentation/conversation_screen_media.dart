@@ -612,18 +612,17 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
   /// A recording from a file (a song, a recorded talk): it goes as a voice
   /// message, played in the chat.
   Future<void> _pickAndSendAudioFile() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+    final PlatformFile? picked = await FilePicker.pickFile(
       type: FileType.audio,
-      withData: false,
     );
-    final PlatformFile? picked = result == null || result.files.isEmpty
-        ? null
-        : result.files.first;
     final String? path = picked?.path;
     if (picked == null || path == null || path.isEmpty || !mounted) {
       return;
     }
-    if (picked.size > kMaxAudioFileBytes) {
+    if (await pickedLength(picked) > kMaxAudioFileBytes) {
+      if (!mounted) {
+        return;
+      }
       _showComposerSnackBar(
         t('Nagranie jest za duże (najwyżej {size} MB).', {
           'size': kMaxAudioFileBytes ~/ (1024 * 1024),
@@ -2420,7 +2419,7 @@ Future<void> _saveAttachmentCopy(
   }
   String? targetPath;
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    targetPath = await FilePicker.platform.saveFile(
+    targetPath = await pickSavePath(
       dialogTitle: t('Zapisz zalacznik'),
       fileName: suggestedName,
     );

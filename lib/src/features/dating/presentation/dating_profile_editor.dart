@@ -145,12 +145,11 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     if (room <= 0) {
       return;
     }
-    final FilePickerResult? r = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: room > 1,
-    );
+    final List<PlatformFile> picked = room > 1
+        ? await FilePicker.pickFiles(type: FileType.image)
+        : <PlatformFile>[?await FilePicker.pickFile(type: FileType.image)];
     final List<String> paths = <String>[
-      for (final PlatformFile f in r?.files ?? const <PlatformFile>[])
+      for (final PlatformFile f in picked)
         if (f.path != null) f.path!,
     ];
     final List<String> added = <String>[];

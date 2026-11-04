@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +10,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
@@ -134,11 +134,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
   }
 
   Future<void> _importFile(UpdateService service) async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    final String? path = picked?.files.firstOrNull?.path;
+    final String? path = await pickOnePath();
     if (path == null) {
       return;
     }

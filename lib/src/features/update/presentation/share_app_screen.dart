@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +11,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/android_abi.dart';
@@ -284,11 +284,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       _isAndroid ? t('ta aplikacja') : t('oficjalny Zen');
 
   Future<void> _pickApk() async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    final String? path = picked?.files.firstOrNull?.path;
+    final String? path = await pickOnePath();
     if (path == null || !mounted) {
       return;
     }

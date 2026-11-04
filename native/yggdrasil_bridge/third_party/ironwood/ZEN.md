@@ -1,6 +1,6 @@
 # ironwood, as Zen builds it
 
-A copy of github.com/Arceliar/ironwood v0.0.0-20260613025018-d50055b11f5e
+A copy of github.com/Arceliar/ironwood v0.0.0-20261023231900-0712eccbb962
 (MPL-2.0, see LICENSE) with one change, used through the `replace` line
 in ../../go.mod. Everything else is upstream's, byte for byte.
 

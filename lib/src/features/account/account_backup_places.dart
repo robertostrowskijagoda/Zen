@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
@@ -194,7 +195,7 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
        _temporary = temporary ?? getTemporaryDirectory,
        _directoryPicker =
            directoryPicker ??
-           (() => FilePicker.platform.getDirectoryPath(
+           (() => FilePicker.getDirectoryPath(
              dialogTitle: t('Wybierz folder na kopię'),
            )),
        _reveal = reveal ?? _revealOnDesktop,
@@ -397,11 +398,7 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
 
   @override
   Future<String?> pick() async {
-    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    return picked?.files.firstOrNull?.path;
+    return pickOnePath();
   }
 }
 

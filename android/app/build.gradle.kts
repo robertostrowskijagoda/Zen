@@ -70,6 +70,12 @@ val zenFlavors: Boolean =
             gradle.startParameter.taskNames.joinToString(" ").lowercase(),
         )
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 android {
     namespace = "com.roj.zen"
     compileSdk = flutter.compileSdkVersion
@@ -85,10 +91,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
@@ -257,7 +259,7 @@ android {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // System biometric prompt with a Keystore key.
     implementation("androidx.biometric:biometric:1.1.0")
 }

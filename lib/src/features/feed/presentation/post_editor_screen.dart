@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
@@ -82,15 +83,14 @@ typedef AudioSource = Future<List<DraftMedia>> Function();
 /// One recording picked from the files (a song, a recorded talk); throws
 /// [ArgumentError] when it is too big or not a recording.
 Future<List<DraftMedia>> pickAudioMedia() async {
-  final FilePickerResult? result = await FilePicker.platform.pickFiles(
+  final PlatformFile? f = await FilePicker.pickFile(
     type: FileType.audio,
     dialogTitle: t('Wybierz nagranie'),
   );
-  final PlatformFile? f = result?.files.firstOrNull;
   if (f == null || f.path == null) {
     return const <DraftMedia>[];
   }
-  if (f.size > kMaxAudioFileBytes) {
+  if (await pickedLength(f) > kMaxAudioFileBytes) {
     throw ArgumentError(
       t('Nagranie jest za duże (maks. {size}).', {
         'size': sizeLabel(kMaxAudioFileBytes),
@@ -148,18 +148,12 @@ Future<List<Uint8List>> pickImageBytes({int? limit}) async {
     final List<XFile> files = await ImagePicker().pickMultiImage(limit: limit);
     return <Uint8List>[for (final XFile f in files) await f.readAsBytes()];
   }
-  final FilePickerResult? result = await FilePicker.platform.pickFiles(
+  final List<PlatformFile> picked = await FilePicker.pickFiles(
     type: FileType.image,
-    allowMultiple: true,
-    withData: true,
     dialogTitle: t('Wybierz zdjęcia'),
   );
   return <Uint8List>[
-    for (final PlatformFile f in result?.files ?? const <PlatformFile>[])
-      ?(f.bytes ??
-          (f.path != null && !kIsWeb
-              ? await File(f.path!).readAsBytes()
-              : null)),
+    for (final PlatformFile f in picked) await f.readAsBytes(),
   ];
 }
 
@@ -189,15 +183,14 @@ Future<List<DraftMedia>> pickVideoMedia({bool camera = false}) async {
       ),
     ];
   }
-  final FilePickerResult? result = await FilePicker.platform.pickFiles(
+  final PlatformFile? f = await FilePicker.pickFile(
     type: FileType.video,
     dialogTitle: t('Wybierz film'),
   );
-  final PlatformFile? f = result?.files.firstOrNull;
   if (f == null || f.path == null) {
     return const <DraftMedia>[];
   }
-  if (f.size > kMaxVideoBytes) {
+  if (await pickedLength(f) > kMaxVideoBytes) {
     throw ArgumentError(
       t('Film jest za duży (maks. {size}).', {
         'size': sizeLabel(kMaxVideoBytes),

@@ -5,13 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -215,15 +215,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
   }
 
   Future<String?> _pickImageFileFromDisk() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-    );
-    final List<PlatformFile> files = result?.files ?? const <PlatformFile>[];
-    if (files.isEmpty) {
-      return null;
-    }
-    return files.first.path;
+    return pickOnePath(type: FileType.image);
   }
 
   Future<void> _storePickedAvatar(String sourcePath) async {
