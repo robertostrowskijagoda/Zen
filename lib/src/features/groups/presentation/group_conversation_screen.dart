@@ -1697,6 +1697,21 @@ const ButtonStyle _composerButtonFrame = ButtonStyle(
   visualDensity: VisualDensity.standard,
 );
 
+/// The members an invitation names: up to six names, then "+n" for the
+/// rest and for those the inviter knows no name of.
+String _inviteMembersLine(List<String> names) {
+  final List<String> known = <String>[
+    for (final String name in names)
+      if (name.trim().isNotEmpty) name.trim(),
+  ];
+  final List<String> shown = known.take(6).toList(growable: false);
+  final int more = names.length - shown.length;
+  return <String>[
+    if (shown.isNotEmpty) shown.join(', '),
+    if (more > 0) '+$more',
+  ].join(' ');
+}
+
 class _PendingInviteBanner extends StatelessWidget {
   const _PendingInviteBanner({
     required this.group,
@@ -1745,6 +1760,20 @@ class _PendingInviteBanner extends StatelessWidget {
               ),
             ],
           ),
+          if (group.inviteMemberNames.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(
+              t('W grupie: {names}', <String, String>{
+                'names': _inviteMembersLine(group.inviteMemberNames),
+              }),
+              key: const Key('group-invite-members'),
+              style: TextStyle(
+                color: zen.textPrimary,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             t(

@@ -166,13 +166,39 @@ void main() {
       expect(group.memberAddresses, unorderedEquals(<String>[bob, cyd]));
       final Map<String, dynamic> invite = h.sentTo(bob, 'group_invite').single;
       expect(invite['groupId'], group.id);
-      expect(invite['memberAddresses'], containsAll(<String>[bob, cyd]));
+      // Names, not addresses: Bob learns Cyd's address only once he joins.
+      expect(invite['memberAddresses'], isNot(contains(cyd)));
+      expect(invite['memberNames'], containsAll(<String>['Bob', 'Cyd']));
 
       await h.deliver(bob, <String, dynamic>{
         'type': 'group_invite_ack',
         'groupId': group.id,
       });
       expect(h.state.groups[group.id]!.pendingInviteAddresses, <String>[cyd]);
+      expect(
+        h.sentTo(bob, 'group_invite'),
+        hasLength(1),
+        reason: 'an invitation that only arrived gets no addresses',
+      );
+    });
+
+    test('who joins gets the address of every member', () async {
+      final _Harness h = _Harness();
+      final GroupProfile group = await h.controller.createGroup(
+        name: 'Wyprawa',
+        description: '',
+        memberAddresses: <String>[bob, cyd],
+      );
+      h.transport.sentSignals.clear();
+
+      await h.deliver(bob, <String, dynamic>{
+        'type': 'group_invite_ack',
+        'groupId': group.id,
+        'joined': true,
+      });
+      final Map<String, dynamic> members = h.sentTo(bob, 'group_invite').single;
+      expect(members['memberAddresses'], containsAll(<String>[bob, cyd]));
+      expect(members.containsKey('inviteId'), isFalse);
     });
 
     test(
@@ -287,6 +313,13 @@ void main() {
 
       await h.controller.acceptGroupInvite(groupId: 'g1', groupName: 'Wyprawa');
       expect(h.state.groups['g1']!.isInvitePending, isFalse);
+      // The reply goes out detached.
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        h.sentTo(ada, 'group_invite_ack').last['joined'],
+        isTrue,
+        reason: 'joining says so, for the addresses of the members',
+      );
       expect(
         h.state.inbox.where(
           (InboxEntry e) => e.type == InboxEntryType.groupInvite,
@@ -294,6 +327,27 @@ void main() {
         isEmpty,
         reason: 'joining clears the invite card',
       );
+    });
+
+    test('an invitation shows the members by name until joining', () async {
+      final _Harness h = _Harness();
+
+      await h.deliver(ada, <String, dynamic>{
+        ..._invite('g2', <String>[ada]),
+        'inviteId': 'i1',
+        'memberNames': <String>['Ada', 'Ola', ''],
+      });
+      final GroupProfile pending = h.state.groups['g2']!;
+      expect(pending.inviteMemberNames, <String>['Ada', 'Ola', '']);
+      expect(pending.memberCount, 4);
+      expect(pending.memberAddresses, <String>[ada]);
+
+      await h.controller.acceptGroupInvite(groupId: 'g2', groupName: 'Wyprawa');
+      // The members' addresses come from Ada now.
+      await h.deliver(ada, _invite('g2', <String>[ada, bob, cyd]), at: 1200);
+      final GroupProfile joined = h.state.groups['g2']!;
+      expect(joined.inviteMemberNames, isEmpty);
+      expect(joined.memberAddresses, containsAll(<String>[ada, bob, cyd]));
     });
 
     test('a declined invite stays declined across a restart', () async {

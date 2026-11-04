@@ -24,6 +24,10 @@ const int kMaxGroupMessageChars = 64 * 1024;
 /// and short; a huge one is only a way to bloat storage.
 const int kMaxSignalIdChars = 256;
 
+/// [ZenSignal.content] of a `group_invite_ack` that says the invitation was
+/// accepted, not only that it arrived.
+const String kGroupJoinedAck = 'joined';
+
 ZenSignal? zenSignalFromTransportPayload({
   required String sender,
   required Map<String, dynamic> payload,
@@ -283,6 +287,13 @@ ZenSignal? zenSignalFromTransportPayload({
           kMaxSignalGroupDescriptionChars,
         ),
         memberAddresses: memberAddresses,
+        memberNames: switch (payload['memberNames']) {
+          final List<dynamic> names => <String>[
+            for (final Object? name in names.take(kMaxGroupMemberCount))
+              _readName(name) ?? '',
+          ],
+          _ => null,
+        },
         avatarPreset: _readString(payload['avatarPreset']),
         displayName: _readName(payload['senderName']),
         inviteId: _readString(payload['inviteId']),
@@ -297,6 +308,7 @@ ZenSignal? zenSignalFromTransportPayload({
         type: ZenSignalType.groupInviteAck,
         sender: sender,
         groupId: _readString(payload['groupId']),
+        content: payload['joined'] == true ? kGroupJoinedAck : null,
       );
     case 'group_message':
       if (_readString(payload['groupId']) == null) {

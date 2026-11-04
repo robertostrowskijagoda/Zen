@@ -407,15 +407,17 @@ void main() {
           memberAddresses: <String>[alice, bob],
         );
     await mesh.settle();
-    // Group mates exchange keys and mailboxes.
-    await mesh.advance(const Duration(seconds: 5));
 
     final _Device a = mesh.devices[alice]!;
     final _Device b = mesh.devices[bob]!;
-    // Both join first: a pending invite does not let anyone write.
+    // Both join first: a pending invite does not let anyone write, and it
+    // names the members without their addresses.
     await a.controller.acceptGroupInvite(groupId: group.id, groupName: 'Ekipa');
     await b.controller.acceptGroupInvite(groupId: group.id, groupName: 'Ekipa');
     await mesh.settle();
+    // Joined, they have each other's addresses from carol: group mates
+    // exchange keys and mailboxes.
+    await mesh.advance(const Duration(seconds: 5));
     await b.goOffline();
     await a.controller.sendGroupMessage(groupId: group.id, text: 'Kto jedzie?');
     await mesh.settle();

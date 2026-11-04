@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/hybrid_signature.dart';
@@ -67,6 +68,16 @@ Uint8List askAnswerSignedBytes({
   'k': pyramidKey ?? '',
   'py': pyramid ?? '',
 });
+
+/// Who answered, as an answer to a question that came through a friend
+/// names them in its signature: a hash of their address bound to the
+/// question, so the asker (a friend's friend) gets no way to write to
+/// them; the answer comes back the way the question went.
+String askBlindAnswerer(String questionId, String address) =>
+    '#${sha256.convert(utf8.encode('zen-ask-answerer|$questionId|$address')).toString().substring(0, 32)}';
+
+bool _isBlindAnswerer(String value) =>
+    value.length == 33 && RegExp(r'^#[0-9a-f]{32}$').hasMatch(value);
 
 /// One answer, with the way it came back ("znajomy Bartka").
 @immutable
@@ -443,6 +454,8 @@ final class AskService extends ChangeNotifier {
       text: body,
       pyramidKey: key,
       pyramid: py,
+      // Through a friend: the asker is not ours, and gets no address.
+      blind: q.via.isNotEmpty,
     );
     if (proof == null) {
       return; // an answer nobody can check is not sent
@@ -468,6 +481,7 @@ final class AskService extends ChangeNotifier {
     required String text,
     String? pyramidKey,
     String? pyramid,
+    bool blind = false,
   }) async {
     final String own = host.ownAddress();
     if (own.isEmpty) {
@@ -478,7 +492,7 @@ final class AskService extends ChangeNotifier {
       if (me == null) {
         return null;
       }
-      final String answerer = _n(own);
+      final String answerer = blind ? askBlindAnswerer(id, _n(own)) : _n(own);
       final Uint8List sig = await me.deviceKey.sign(
         askAnswerSignedBytes(
           id: id,
@@ -518,7 +532,8 @@ final class AskService extends ChangeNotifier {
     if (proof is! Map ||
         !isHybridSignatureText(proof['s']) ||
         proof['a'] is! String ||
-        !isRoutablePeerAddress(proof['a'] as String) ||
+        !(isRoutablePeerAddress(proof['a'] as String) ||
+            _isBlindAnswerer(proof['a'] as String)) ||
         path.isEmpty) {
       return false;
     }
@@ -526,7 +541,8 @@ final class AskService extends ChangeNotifier {
     if (cert == null) {
       return false;
     }
-    final String answerer = _n(proof['a'] as String);
+    final String named = proof['a'] as String;
+    final String answerer = _isBlindAnswerer(named) ? named : _n(named);
     final bool sound =
         await cert.verify() &&
         await cert.verifyByDevice(
@@ -543,7 +559,11 @@ final class AskService extends ChangeNotifier {
     if (!sound) {
       return false;
     }
-    return path.length != 1 || answerer == from;
+    // A friend's own answer is theirs: by address, or (to a question that
+    // came through us from someone else) by the hash we can work out too.
+    return path.length != 1 ||
+        answerer == from ||
+        answerer == askBlindAnswerer(id, _n(from));
   }
 
   /// Notes a tip given for answer [index] of this person's question [id].

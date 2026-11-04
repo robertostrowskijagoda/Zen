@@ -273,6 +273,7 @@ SocialHubState _applySignal(
         lastMessagePreview: t('Zaproszono Cię do grupy.'),
         isInvitePending: true,
         receivedInviteIds: <String>[?signal.inviteId],
+        inviteMemberNames: signal.memberNames ?? const <String>[],
         memberNames: <String, String>{
           if (signal.displayName?.trim().isNotEmpty ?? false)
             signal.sender: signal.displayName!.trim(),

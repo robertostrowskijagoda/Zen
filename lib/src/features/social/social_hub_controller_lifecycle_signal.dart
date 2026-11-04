@@ -501,8 +501,24 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           context: 'Sending the profile after an accept failed',
         );
       }
-      if (signal.type == ZenSignalType.groupInviteAck ||
-          signal.type == ZenSignalType.groupLeave) {
+      if (signal.type == ZenSignalType.groupInviteAck) {
+        // They joined: now they get every member's address (the invitation
+        // named the members but gave no address but ours).
+        final GroupProfile? joined = state.groups[signal.groupId ?? ''];
+        if (signal.content == kGroupJoinedAck &&
+            joined != null &&
+            groupHasMember(joined, signal.sender)) {
+          unawaitedLogged(
+            _sendFriendLifecycleSignal(
+              peerAddress: signal.sender,
+              payload: _groupInvitePayload(joined),
+            ),
+            context: 'Sending the members to who joined failed',
+          );
+        }
+        return;
+      }
+      if (signal.type == ZenSignalType.groupLeave) {
         return;
       }
       unawaitedLogged(

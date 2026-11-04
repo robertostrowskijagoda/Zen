@@ -54,6 +54,8 @@ import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
+    show kGroupJoinedAck;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -69,18 +71,18 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
+part 'social_hub_controller_chat_extras.dart';
+part 'social_hub_controller_devices.dart';
+part 'social_hub_controller_disappearing.dart';
+part 'social_hub_controller_group_call.dart';
 part 'social_hub_controller_helpers.dart';
 part 'social_hub_controller_lifecycle_signal.dart';
 part 'social_hub_controller_messages.dart';
-part 'social_hub_controller_transfers.dart';
-part 'social_hub_controller_social.dart';
-part 'social_hub_controller_retention.dart';
-part 'social_hub_controller_group_call.dart';
 part 'social_hub_controller_profile.dart';
-part 'social_hub_controller_devices.dart';
-part 'social_hub_controller_disappearing.dart';
+part 'social_hub_controller_retention.dart';
+part 'social_hub_controller_social.dart';
 part 'social_hub_controller_strangers.dart';
-part 'social_hub_controller_chat_extras.dart';
+part 'social_hub_controller_transfers.dart';
 
 final Provider<SignalQueueStore> signalQueueStoreProvider =
     Provider<SignalQueueStore>((Ref ref) {
@@ -1203,10 +1205,14 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   ///
   /// Deliberately a single datagram: the other side re-sends the invite
   /// until it gets an answer, so a lost reply only costs one more round.
+  /// [joined]: a `group_invite_ack` that says the invitation was accepted
+  /// (the plain one only says it arrived); the inviter answers it with the
+  /// members' addresses.
   void _replyToGroupSignal({
     required String peerAddress,
     required String type,
     required String groupId,
+    bool joined = false,
   }) {
     final String target = PeerShareCodec.normalizeAddress(peerAddress);
     if (!isRoutablePeerAddress(target)) {
@@ -1218,7 +1224,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
             .read(signalTransportProvider)
             .send(
               remoteAddress: target,
-              payload: <String, dynamic>{'type': type, 'groupId': groupId},
+              payload: <String, dynamic>{
+                'type': type,
+                'groupId': groupId,
+                if (joined) 'joined': true,
+              },
             );
       }),
       context: 'Replying "$type" for group $groupId failed',
@@ -1261,7 +1271,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       ZenSignalType.groupLeave ||
       ZenSignalType.groupUpdate ||
       ZenSignalType.groupInviteAck =>
-        '$sender|group:${signal.groupId}|${signal.type.name}',
+        '$sender|group:${signal.groupId}|${signal.type.name}'
+            // "Joined" right after "arrived" is no repeat.
+            '${signal.content == kGroupJoinedAck ? '|joined' : ''}',
       _ => null,
     };
   }
@@ -1278,6 +1290,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Payload of a group invite; also used to sync the member list. Only a
   /// real invitation carries [inviteId]; member-list syncs never do, so they
   /// cannot bring back a group the recipient declined or left.
+  ///
+  /// An invitation names the members (as this side knows them) but gives
+  /// no address except this device's: someone who has not joined learns
+  /// nobody's address; the full list follows the `group_invite_ack`.
   Map<String, dynamic> _groupInvitePayload(
     GroupProfile group, {
     String? inviteId,
@@ -1285,16 +1301,37 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     final String senderName = ref
         .read(userProfileControllerProvider)
         .publicName;
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     return <String, dynamic>{
       'type': 'group_invite',
       'groupId': group.id,
       'groupName': group.name,
       'description': group.description,
       'avatarPreset': group.avatarPreset,
-      'memberAddresses': _groupMembersWithSelf(group),
+      if (inviteId == null)
+        'memberAddresses': _groupMembersWithSelf(group)
+      else ...<String, dynamic>{
+        'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr],
+        'memberNames': <String>[
+          for (final String member in group.memberAddresses)
+            if (localAddr.isEmpty ||
+                !PeerShareCodec.addressesEqual(member, localAddr))
+              _memberNameForInvite(group, member),
+        ],
+      },
       if (senderName.trim().isNotEmpty) 'senderName': senderName.trim(),
       'inviteId': ?inviteId,
     };
+  }
+
+  /// [member] of [group] as this side calls them: a friend's name, the
+  /// name they gave in the group, or nothing known.
+  String _memberNameForInvite(GroupProfile group, String member) {
+    final FriendProfile? friend = state.friendByAddress(member);
+    if (friend != null && friend.status == FriendRelationshipStatus.accepted) {
+      return state.nameFor(friend);
+    }
+    return group.memberNames[member]?.trim() ?? '';
   }
 
   /// The group's members plus this node, as every peer should see the group.

@@ -2107,6 +2107,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else if (existing.isInvitePending) {
       groups[groupId] = existing.copyWith(
         isInvitePending: false,
+        // The members' addresses come with the inviter's answer to the
+        // `group_invite_ack` below.
+        inviteMemberNames: const <String>[],
         lastMessagePreview: t('Dołączono do grupy.'),
         lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       );
@@ -2141,6 +2144,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         peerAddress: inviter,
         type: 'group_invite_ack',
         groupId: groupId,
+        joined: true,
       );
     }
   }

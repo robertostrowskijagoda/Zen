@@ -4077,6 +4077,7 @@
   "W drodze": "In transit",
   "W grupie nie ma nikogo poza Tobą.": "There’s nobody in the group but you.",
   "W grupie {group}": "In the group {group}",
+  "W grupie: {names}": "In the group: {names}",
   "W kluczu są znaki, których nie ma w kopii. Sprawdź zapis.": "The key has characters that aren't in the backup. Check what you wrote.",
   "W kodzie nie ma niczyich adresów, tylko „drzwi” do pobrania kamyczka: z kodu nie da się nikomu wysłać zaproszenia ani wiadomości.": "The code holds nobody's address, only “doors” for fetching the pebble: nobody can be sent an invitation or a message from it.",
   "W komentarzu": "In a comment",
