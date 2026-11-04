@@ -35,13 +35,13 @@ Every setting is in one place only. The list, top to bottom:
 | Section | What's inside |
 |---|---|
 | *Run the setup again* | the first-start steps again, each with what is set now |
-| (top) | **Invite** (your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend), **About** (version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents with the date you accepted them, contact, support), **Zen on GitHub**, **Zen on Discord** |
+| (top) | **Invite** (your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend), **About** (version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents with the date you accepted them, contact with *Report a problem*, support, Zen on GitHub and on Discord) |
 | Account and recovery | **Account and recovery** (key copy, recovery circle, copy with friends, full account copy, second device), **Accounts on this device** (with *Receive in the background*), **Devices** |
 | Privacy and security | **Security** (app password, emergency wipe password, fingerprint or face, auto-lock, blocking screenshots, use without a password, the disguised icon on Android), **Contact and visibility** (*Show when I last opened the app*, on by default; who may write to you without being a friend and what a first message costs; who may invite you to groups), **Blocked** |
 | Messages and calls | **Notifications and sounds** (everything about notifications, see below), **Call recordings**, **GIFs** (the *GIF search* switch and your own KLIPY key) |
-| Network | **Offline mailboxes**, **Network and service** (technical info, [offline links](offline-links.md), the bridge on a computer), **Public peers**, **Looking around in the background** (Android) |
+| Network | **Offline mailboxes**, **Network and service** (technical info, [offline links](offline-links.md) with *Looking around in the background* on Android under Bluetooth, the bridge on a computer), **Public peers** |
 | App | **Appearance** (theme, mode, animations, colour), **Language**, **Data and storage** (room taken, limits, auto-cleaning, *Download photos and videos* and *Media over Wi-Fi only*), **Permissions and Bluetooth**, **Updates and Pass it on** |
-| Advanced | *Why isn't it working?*, **Diagnostics**, **Delete this account from this device** |
+| Advanced | *Why isn't it working?* (with **Diagnostics** at its end), **Delete this account from this device** |
 
 **Notifications and sounds** holds everything about notifications, top to
 bottom: **notification content** (*Sender and content* by default, *Sender
@@ -51,10 +51,13 @@ system notifications), a switch for **each kind of news** (messages, group
 messages, calls, mentions, reactions to your posts, friends' posts, posts of
 further friends (off by default), invitations, updates; a switched-off kind
 posts no notification and plays no sound but stays in the in-app list,
-except for posts), the **muted people** (whose posts never notify), and the
-**background work** that lets notifications arrive at all (Android:
-permissions, background delivery, battery, the full-screen call screen;
-iPhone: how Zen is woken and *Keep receiving in the background*).
+except for posts), *Only mentions in groups* (on by default; each group can
+choose otherwise in its menu → *Notifications*), *Remind me of unanswered
+messages*, the **muted people** (whose posts never notify), and the
+**background work** that lets notifications arrive at all (Android: the
+permissions page, the same as *Permissions and Bluetooth*; iPhone: how Zen
+is woken and *Keep receiving in the background*). A conversation's own
+*Notifications* (its menu) mutes it for a time and sets its own level.
 
 ### What moved in 1.15
 
@@ -70,6 +73,13 @@ into the page of their topic.
 | Privacy and security → *Show when I last opened the app* | Privacy and security → Contact and visibility |
 | Privacy and security → Messages from non-friends | Privacy and security → Contact and visibility |
 | Privacy and security → Group invitations | Privacy and security → Contact and visibility |
+
+1.15.5 merged a few more: *Zen on GitHub* and *Zen on Discord* are only in
+**About** (they were there twice), **Diagnostics** is at the end of *Why
+isn't it working?*, *Looking around in the background* is on **Network and
+service** under the Bluetooth switch, and *Notifications and background
+operation* opens the permissions page (it was a second copy of three of its
+rows).
 | Privacy and security → Account and recovery, Accounts on this device, Devices | Account and recovery (its own section) |
 | Messages and calls → *Download photos and videos*, *Media over Wi-Fi only* | App → Data and storage |
 | Messages and calls → Offline mailboxes | Network → Offline mailboxes |
