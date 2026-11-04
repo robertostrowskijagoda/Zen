@@ -672,6 +672,13 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
+      # The Gradle wrapper is not in the repository (android/.gitignore):
+      # Flutter writes it, with the build files, without building anything.
+      - name: Gradle files
+        env:
+          ZEN_SKIP_GO_BRIDGE: '1'
+        run: flutter build apk --debug --config-only
+
       - name: Test
         working-directory: android
         env:
