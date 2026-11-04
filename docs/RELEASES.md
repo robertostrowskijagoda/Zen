@@ -520,7 +520,7 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
 
 ### 3.3. iPhone (GitHub Actions)
 
-`.github/workflows/ios.yml` (macOS, Flutter 3.47.1, Go from `go.mod`): Go
+`.github/workflows/ios.yml` (macOS, Flutter 3.47.9, Go from `go.mod`): Go
 bridge → `flutter build ios --release --no-codesign` → `Zen-unsigned.ipa`
 (a `Payload/Runner.app` folder in a ZIP). It runs manually (Actions → iOS →
 Run workflow; the file is in the run's artifacts) or as part of `release.yml`
@@ -583,10 +583,10 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   `release.dart prepare` refuses while native pins are missing
   (`--allow-unpinned-native` only for a test release). Tests:
   `tool/ci/test_check_webrtc_sdk.py`.
-- **Go.** `go.mod` has a `toolchain` line (go1.26.10, the latest 1.26
+- **Go.** `go.mod` has a `toolchain` line (go1.27.3, the latest 1.27
   security fix); `actions/setup-go` with `go-version-file` takes it, and
   `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by
-  hand with every Go 1.26.x release. The CI job `govulncheck`
+  hand with every Go 1.27.x release. The CI job `govulncheck`
   (`golang.org/x/vuln/cmd/govulncheck`, pinned version) reports known
   vulnerabilities in the bridge's modules and in Go itself; it turns CI red
   until the module or toolchain is raised.

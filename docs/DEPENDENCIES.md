@@ -6,10 +6,10 @@ Zen itself is GPL-3.0-only with additional terms ([LICENSE](../LICENSE),
 it. The full licence texts: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md),
 `assets/licenses/` and, in the app, **About → Licenses and thanks**.
 
-Versions: Flutter **3.47.1** (Dart 3.13; `pubspec.yaml` asks for Dart 3.11.4 or newer), Go from
+Versions: Flutter **3.47.9** (Dart 3.13; `pubspec.yaml` asks for Dart 3.11.4 or newer), Go from
 [`native/yggdrasil_bridge/go.mod`](../native/yggdrasil_bridge/go.mod)
-(language **1.26**, built with the `toolchain` **go1.26.10**), Yggdrasil
-**0.5.14**. Exact package versions are in `pubspec.lock` (every build uses
+(language **1.26**, built with the `toolchain` **go1.27.3**), Yggdrasil
+**0.5.15**. Exact package versions are in `pubspec.lock` (every build uses
 it with `--enforce-lockfile`) and `go.sum`. The prebuilt libwebrtc of
 `flutter_webrtc` 1.6.2+hotfix.4 (`m150.7871.03` on Windows and Linux) is
 checked against `tool/ci/libwebrtc.sha256`; the prebuilt WebRTC-SDK

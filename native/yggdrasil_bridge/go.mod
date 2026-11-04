@@ -2,7 +2,7 @@ module zen/native/yggdrasil_bridge
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.27.3
 
 require (
 	github.com/Arceliar/ironwood v0.0.0-20261023231900-0712eccbb962
