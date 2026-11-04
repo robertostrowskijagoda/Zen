@@ -258,7 +258,7 @@ final class LockedNoticeKit {
 
   /// The token of this person's invitation code (`AppSettings.inviteToken`):
   /// a friend request without it is not told about while locked
-  /// ([PeerShareCodec.invitationQuiet]).
+  /// ([PeerShareCodec.fromStaleCode]).
   final String inviteToken;
 
   /// Friends this person removed (normalized addresses): an acceptance

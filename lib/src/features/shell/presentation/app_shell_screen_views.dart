@@ -3368,7 +3368,7 @@ class _MyCodeScreen extends ConsumerWidget {
                 title: t('Zmień kod'),
                 subtitle: t(
                   'Gdy kod trafił, gdzie nie powinien: nowy kod i QR, a '
-                  'zaproszenia ze starego przyjdą bez powiadomienia',
+                  'zaproszenia ze starego są odrzucane',
                 ),
                 onTap: () => unawaited(_changeInviteCode(context, ref)),
               ),
@@ -3431,7 +3431,7 @@ class _MyCodeScreen extends ConsumerWidget {
 /// "Zmień kod": after a confirmation, a new invitation code. Friends stay,
 /// and so does the address in the network: the code only gains a new
 /// token, and an invitation that does not carry it (the old code, an
-/// address learned elsewhere) waits among the invitations unannounced.
+/// address learned elsewhere) is refused.
 Future<void> _changeInviteCode(BuildContext context, WidgetRef ref) async {
   final bool? confirmed = await showDialog<bool>(
     context: context,
@@ -3441,10 +3441,11 @@ Future<void> _changeInviteCode(BuildContext context, WidgetRef ref) async {
       title: Text(t('Zmienić kod?')),
       content: Text(
         t(
-          'Dostaniesz nowy kod i QR. Znajomi zostają. Zaproszenia wysłane '
-          'ze starego kodu (i z Okolicy, Kręgu czy wydarzeń) nadal '
-          'trafią do zaproszeń, ale bez powiadomienia — zajrzyj tam '
-          'czasem. Nowy kod działa tylko w Zen 1.15.4 i nowszym.',
+          'Dostaniesz nowy kod i QR. Znajomi zostają. Zaproszenia ze '
+          'starego kodu i wszystkie bez kodu (z Okolicy, Kręgu, wydarzeń, '
+          'od sąsiadów, z przedstawień) zostaną odrzucone, a osoby spoza '
+          'znajomych nie zaczną z Tobą nowej rozmowy. Nowy kod działa '
+          'tylko w Zen 1.15.4 i nowszym.',
         ),
       ),
       actions: <Widget>[

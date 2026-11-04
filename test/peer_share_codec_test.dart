@@ -229,11 +229,11 @@ void main() {
     expect(PeerShareCodec.addressFromInviteCode(broken), isNot(address));
   });
 
-  test('only a request from the current code is told about', () {
-    expect(PeerShareCodec.invitationQuiet('', null), isFalse);
-    expect(PeerShareCodec.invitationQuiet('', 'ABCDE'), isFalse);
-    expect(PeerShareCodec.invitationQuiet('ABCDE', 'ABCDE'), isFalse);
-    expect(PeerShareCodec.invitationQuiet('ABCDE', null), isTrue);
-    expect(PeerShareCodec.invitationQuiet('ABCDE', 'FGHJK'), isTrue);
+  test('only a request from the current code comes in', () {
+    expect(PeerShareCodec.fromStaleCode('', null), isFalse);
+    expect(PeerShareCodec.fromStaleCode('', 'ABCDE'), isFalse);
+    expect(PeerShareCodec.fromStaleCode('ABCDE', 'ABCDE'), isFalse);
+    expect(PeerShareCodec.fromStaleCode('ABCDE', null), isTrue);
+    expect(PeerShareCodec.fromStaleCode('ABCDE', 'FGHJK'), isTrue);
   });
 }
