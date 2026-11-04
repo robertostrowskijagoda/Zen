@@ -11,6 +11,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/domain/signals/queued_signal.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
@@ -176,12 +177,21 @@ void main() {
     },
   );
 
-  test(
-    'after "Zmień kod" only a request from the new code is told about',
-    () async {
-      final MemoryRuntimeSystemNotificationService notificationService =
-          MemoryRuntimeSystemNotificationService();
-      final ProviderContainer container = ProviderContainer(
+  group('after "Zmień kod"', () {
+    const String stranger = '200:1111:2222:3333:4444:5555:6666:7777';
+    const String oldCode = '200:aaaa:2222:3333:4444:5555:6666:7777';
+    const String newCode = '200:bbbb:2222:3333:4444:5555:6666:7777';
+    const String invited = '200:cccc:2222:3333:4444:5555:6666:7777';
+
+    late MemoryRuntimeSystemNotificationService notificationService;
+    late MemorySignalTransport transport;
+    late ProviderContainer container;
+    late SocialHubController hub;
+
+    setUp(() async {
+      notificationService = MemoryRuntimeSystemNotificationService();
+      transport = MemorySignalTransport();
+      container = ProviderContainer(
         overrides: [
           appSettingsStoreProvider.overrideWithValue(
             MemoryAppSettingsStore(const AppSettings(inviteToken: 'ABCDE')),
@@ -196,6 +206,7 @@ void main() {
           runtimeSystemNotificationServiceProvider.overrideWithValue(
             notificationService,
           ),
+          signalTransportProvider.overrideWithValue(transport),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty(
               lifecycle: const LifecycleSnapshot(
@@ -203,48 +214,183 @@ void main() {
                 generation: 1,
                 capturedAtMillis: 0,
               ),
+            ).copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  invited: FriendProfile(
+                    address: invited,
+                    displayName: 'Ewa',
+                    status: FriendRelationshipStatus.pendingOutgoing,
+                  ),
+                },
+              ),
             ),
           ),
         ],
       );
-      addTearDown(container.dispose);
+      await transport.start();
       container.read(appSettingsControllerProvider);
-      await Future<void>.delayed(Duration.zero);
-      final SocialHubController hub = container.read(
-        socialHubControllerProvider.notifier,
-      );
+      await _settle();
+      hub = container.read(socialHubControllerProvider.notifier);
+    });
 
-      // The old code (or an address learned elsewhere): no token.
+    tearDown(() => container.dispose());
+
+    List<String> sentTo(String address, String type) => <String>[
+      for (final s in transport.sentSignals)
+        if (PeerShareCodec.addressesEqual(s.remoteAddress, address) &&
+            s.payload['type'] == type)
+          type,
+    ];
+
+    test(
+      'a request without the new code is refused and leaves nothing',
+      () async {
+        // An address learned elsewhere (Nearby, a circle, the old QR...): no
+        // token; the old code: another one.
+        await hub.receiveSignal(
+          const ZenSignal(
+            type: ZenSignalType.friendRequest,
+            sender: stranger,
+            displayName: 'Obcy',
+          ),
+          receivedAtMillis: 10,
+        );
+        await hub.receiveSignal(
+          const ZenSignal(
+            type: ZenSignalType.friendRequest,
+            sender: oldCode,
+            displayName: 'Stary',
+            inviteId: 'FGHJK',
+          ),
+          receivedAtMillis: 11,
+        );
+        await _settle();
+        final SocialHubState state = container.read(
+          socialHubControllerProvider,
+        );
+        expect(state.friendByAddress(stranger), isNull);
+        expect(state.friendByAddress(oldCode), isNull);
+        expect(state.inbox, isEmpty);
+        expect(notificationService.activeNotifications, isEmpty);
+        expect(sentTo(stranger, 'friend_reject'), hasLength(1));
+        expect(sentTo(oldCode, 'friend_reject'), hasLength(1));
+
+        // Its copies get no second refusal.
+        await hub.receiveSignal(
+          const ZenSignal(type: ZenSignalType.friendRequest, sender: stranger),
+          receivedAtMillis: 12,
+        );
+        await _settle();
+        expect(sentTo(stranger, 'friend_reject'), hasLength(1));
+      },
+    );
+
+    test('a request from the new code comes in and is told about', () async {
       await hub.receiveSignal(
         const ZenSignal(
           type: ZenSignalType.friendRequest,
-          sender: 'obcy.ygg',
-          displayName: 'Obcy',
-        ),
-        receivedAtMillis: 10,
-      );
-      expect(
-        container.read(socialHubControllerProvider).friends['obcy.ygg']?.status,
-        FriendRelationshipStatus.pendingIncoming,
-      );
-      expect(notificationService.activeNotifications, isEmpty);
-
-      // The new code.
-      await hub.receiveSignal(
-        const ZenSignal(
-          type: ZenSignalType.friendRequest,
-          sender: 'kuba.ygg',
+          sender: newCode,
           displayName: 'Kuba',
           inviteId: 'ABCDE',
         ),
         receivedAtMillis: 11,
       );
       expect(
+        container
+            .read(socialHubControllerProvider)
+            .friendByAddress(newCode)
+            ?.status,
+        FriendRelationshipStatus.pendingIncoming,
+      );
+      expect(
         notificationService.activeNotifications.single.title,
         contains('Kuba'),
       );
-    },
-  );
+      expect(sentTo(newCode, 'friend_reject'), isEmpty);
+    });
+
+    test('someone invited from here still becomes a friend', () async {
+      // Their request crossed ours: it carries no code of ours.
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.friendRequest,
+          sender: invited,
+          displayName: 'Ewa',
+        ),
+        receivedAtMillis: 10,
+      );
+      expect(
+        container
+            .read(socialHubControllerProvider)
+            .friendByAddress(invited)
+            ?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(sentTo(invited, 'friend_reject'), isEmpty);
+    });
+
+    test('an accept nobody here asked for is refused too', () async {
+      await hub.receiveSignal(
+        const ZenSignal(type: ZenSignalType.friendAccept, sender: stranger),
+        receivedAtMillis: 10,
+      );
+      await _settle();
+      expect(
+        container.read(socialHubControllerProvider).friendByAddress(stranger),
+        isNull,
+      );
+      expect(sentTo(stranger, 'friend_reject'), hasLength(1));
+    });
+
+    test('a group invitation from someone not a friend is refused', () async {
+      await hub.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.groupInvite,
+          sender: stranger,
+          groupId: 'g-obcy',
+          groupName: 'Obcy',
+          inviteId: 'inv-1',
+        ),
+        receivedAtMillis: 10,
+      );
+      await _settle();
+      final SocialHubState state = container.read(socialHubControllerProvider);
+      expect(state.groups['g-obcy'], isNull);
+      expect(state.inbox, isEmpty);
+      expect(sentTo(stranger, 'group_leave'), hasLength(1));
+    });
+
+    test('a request kept while locked is refused once the app looks', () async {
+      final MemorySignalQueueStore queue =
+          container.read(signalQueueStoreProvider) as MemorySignalQueueStore;
+      await queue.save(<QueuedSignal>[
+        const QueuedSignal(
+          id: 'locked-1',
+          signal: ZenSignal(
+            type: ZenSignalType.friendRequest,
+            sender: stranger,
+            displayName: 'Obcy',
+          ),
+          receivedAtMillis: 5,
+        ),
+      ]);
+      await hub.setLifecycle(
+        const LifecycleSnapshot(
+          visibility: AppVisibilityState.foregroundFocused,
+          generation: 2,
+          capturedAtMillis: 20,
+        ),
+      );
+      await _settle();
+      expect(
+        container.read(socialHubControllerProvider).friendByAddress(stranger),
+        isNull,
+      );
+      expect(await queue.load(), isEmpty);
+      expect(sentTo(stranger, 'friend_reject'), hasLength(1));
+    });
+  });
 
   test(
     'global settings seed retention defaults into new accepted relation',
@@ -6022,3 +6168,7 @@ SocialHubState _friendSnapshot(String address) =>
         },
       ),
     );
+
+/// Lets the refusals sent without waiting go out.
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 20));

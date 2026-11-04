@@ -114,6 +114,14 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
     if (!book.admits(signal.sender)) {
       return true;
     }
+    if (_appSettings.inviteToken.isNotEmpty &&
+        book.chatWith(signal.sender) == null &&
+        !(book.invited?.call(signal.sender) ?? false)) {
+      // The code was changed ("Zmień kod"): nobody new starts a
+      // conversation without it (an introduction or a paid first message
+      // included). One begun before goes on.
+      return true;
+    }
     final bool onScreen =
         PeerShareCodec.addressesEqual(
           _openConversationAddress ?? '',

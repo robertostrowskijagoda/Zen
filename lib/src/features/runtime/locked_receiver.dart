@@ -1489,15 +1489,22 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
-      if (type == 'friend_request' &&
-          PeerShareCodec.invitationQuiet(
-            _noticeKit.inviteToken,
-            switch (payload['it']) {
-              final String token => token,
-              _ => null,
-            },
-          )) {
-        // Not from the current invitation code: kept, without a notice.
+      if (switch (type) {
+        'friend_request' => PeerShareCodec.fromStaleCode(
+          _noticeKit.inviteToken,
+          switch (payload['it']) {
+            final String token => token,
+            _ => null,
+          },
+        ),
+        'group_invite' =>
+          _noticeKit.inviteToken.isNotEmpty &&
+              kind == BackgroundContactKind.stranger,
+        _ => false,
+      }) {
+        // Not from the current invitation code ("Zmień kod"): the app
+        // refuses it after unlock (or lets in the request of someone it
+        // invited, which needs no notice either).
         return;
       }
       // Who invited (or accepted) and what they wrote, as the

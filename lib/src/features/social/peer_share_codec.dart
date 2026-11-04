@@ -218,12 +218,12 @@ final class PeerShareCodec {
   static bool isInviteToken(String token) =>
       RegExp('^[$_inviteAlphabet]{$inviteTokenLength}\$').hasMatch(token);
 
-  /// Whether a friend request carrying [carried] comes in without a
-  /// notification for someone whose code has the token [current]: once
-  /// the code was changed, only a request from the current code is told
-  /// about (an old code, or an address learned elsewhere, still lands in
-  /// the invitations, quietly).
-  static bool invitationQuiet(String current, String? carried) =>
+  /// Whether a friend request carrying [carried] is refused by someone
+  /// whose code has the token [current]: once the code was changed, only a
+  /// request from the current code comes in. One from an old code, or with
+  /// none (an address learned elsewhere, Nearby, a circle, an event, the
+  /// neighbours, an introduction), gets a refusal and leaves nothing.
+  static bool fromStaleCode(String current, String? carried) =>
       current.isNotEmpty && carried != current;
 
   /// The token of an invitation code ('' for a code without one, or for

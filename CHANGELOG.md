@@ -10,6 +10,12 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **"Zmień kod" turns the old code away**: once the code was changed, a friend request without the current code's token (the old code, or none: an address learned elsewhere, Nearby, the Circle, an event, the neighbours, an introduction, "Dodaj" on a mini-profile) gets a refusal (`friend_reject`) and leaves nothing behind; so does an accept nobody here asked for, and an invitation to a group not known here from someone who is not a friend (`group_leave`). Someone who is not a friend cannot start a new conversation either (an introduction or a paid first message included); one begun before goes on. Friends, people invited from here and requests that already waited stay as they were. 1.15.4 kept those requests among the invitations without a notification. A refusal goes at most once a minute to one sender; the locked phone posts no notice for any of it.
+- **CI**: a test fails when flutter_webrtc brings a WebRTC whose SHA-256 is not pinned; the 1.15.4 tag run failed on every desktop and iOS job for it (the WebRTC of flutter_webrtc 1.6.3 is pinned now, checked against the official release digests).
+
+## 1.15.4 — 04.11.2026
+
 ### What's new
 - [en] A call rings like a phone call, loudly and with vibration, shows as a call over the lock screen, and its sound goes to your car or headphones.
 - [en] Chats show the date of their last activity, nine new pebble shapes, and you can pick which friends keep your pebble.

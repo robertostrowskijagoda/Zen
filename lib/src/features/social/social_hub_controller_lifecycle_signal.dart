@@ -655,6 +655,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     if (isStrangerInvite && !_admitStrangerInvite(signal.sender, timestamp)) {
       return;
     }
+    if (_refusedAsStaleCode(state, signal, _appSettings.inviteToken)) {
+      // Not from the current code ("Zmień kod"): refused, nothing kept.
+      _refuseStaleCode(signal);
+      return;
+    }
     final bool muteStrangerAlert =
         isStrangerInvite && !_admitStrangerAlert(signal.sender, timestamp);
     if (signal.type == ZenSignalType.profileUpdate) {
@@ -1284,6 +1289,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
 
     SocialHubState next = state;
     for (final QueuedSignal queued in queue) {
+      if (_refusedAsStaleCode(next, queued.signal, _appSettings.inviteToken)) {
+        // Kept while locked, before the app could look: refused now.
+        _refuseStaleCode(queued.signal);
+        continue;
+      }
       next = _applySignal(
         next,
         queued.signal,

@@ -583,12 +583,13 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     ZenSignal? about,
   }) async {
     if (about?.type == ZenSignalType.friendRequest &&
-        PeerShareCodec.invitationQuiet(
+        PeerShareCodec.fromStaleCode(
           _appSettings.inviteToken,
           about!.inviteId,
         )) {
-      // Not from the current invitation code ("Zmień kod"): it waits among
-      // the invitations without a notification.
+      // Not from the current invitation code ("Zmień kod") and still let in:
+      // the request of someone invited from here (a friendship now), or one
+      // that waited before the code was changed, sent again. No notice.
       return false;
     }
     if (about != null) {
@@ -1233,6 +1234,46 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       }),
       context: 'Replying "$type" for group $groupId failed',
     );
+  }
+
+  /// When each sender was last refused (see [_refuseStaleCode]).
+  final Map<String, int> _staleCodeRefusedAt = <String, int>{};
+
+  /// The refusal of [signal], which did not come from the current code
+  /// ([_refusedAsStaleCode]): a `friend_reject` for a friend request, a
+  /// `group_leave` for a group invitation. At most one a minute per
+  /// sender, as copies of one invitation arrive several times.
+  void _refuseStaleCode(ZenSignal signal) {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    _staleCodeRefusedAt.removeWhere((String _, int at) => now - at > 60000);
+    if (_staleCodeRefusedAt.length >= 256 ||
+        _staleCodeRefusedAt.containsKey(signal.sender)) {
+      return;
+    }
+    switch (signal.type) {
+      case ZenSignalType.friendRequest:
+        _staleCodeRefusedAt[signal.sender] = now;
+        unawaitedLogged(
+          _sendFriendLifecycleSignal(
+            peerAddress: signal.sender,
+            payload: const <String, dynamic>{'type': 'friend_reject'},
+          ),
+          context: 'Refusing a request from an old code failed',
+        );
+      case ZenSignalType.groupInvite:
+        final String groupId = signal.groupId ?? '';
+        if (groupId.isNotEmpty) {
+          _staleCodeRefusedAt[signal.sender] = now;
+          _replyToGroupSignal(
+            peerAddress: signal.sender,
+            type: 'group_leave',
+            groupId: groupId,
+          );
+        }
+      default:
+        // An accept nobody here asked for, kept while locked: dropped.
+        break;
+    }
   }
 
   /// True when [signal] is an extra copy of a lifecycle/group signal that was
