@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/address"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
@@ -137,7 +136,7 @@ type testMesh struct {
 
 func newTestMesh(t *testing.T) *testMesh {
 	t.Helper()
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	// The mesh's root is the node with the lowest key, as on the real mesh
 	// one long-standing node is: the hub, not one of the keys made below.
 	var hubKey ed25519.PrivateKey

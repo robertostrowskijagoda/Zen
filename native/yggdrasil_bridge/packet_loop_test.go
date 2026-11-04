@@ -31,7 +31,7 @@ type loopbackMesh struct {
 
 func newLoopbackMesh(t *testing.T) *loopbackMesh {
 	t.Helper()
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	// The mesh's root is the hub (the lowest key), as in newTestMesh.
 	var hubKey ed25519.PrivateKey
 	for hubKey == nil || hubKey.Public().(ed25519.PublicKey)[0] != 0 ||

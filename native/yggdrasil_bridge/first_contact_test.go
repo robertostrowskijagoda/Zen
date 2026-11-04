@@ -10,7 +10,6 @@ import (
 	"time"
 
 	iwt "github.com/Arceliar/ironwood/types"
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -27,7 +26,7 @@ import (
 // is a new init, answered again, and the answer goes as soon as there is
 // a way.
 func TestFreshNodeReachesAnOldOneWithinSeconds(t *testing.T) {
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	// Listens on loopback and peers with parent (none: the root, whose key
 	// is the lowest, as one long-standing node's is on the real mesh).
 	node := func(parent string, root bool) (*core.Core, string) {

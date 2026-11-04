@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -128,12 +127,12 @@ func runningNode(t *testing.T, cfg *config.NodeConfig, handle int32, owner nodeO
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := core.New(cfg.Certificate, log.New(io.Discard, "", 0))
+	c, err := core.New(cfg.Certificate, newBridgeLogger(io.Discard))
 	if err != nil {
 		claim.release()
 		t.Fatal(err)
 	}
-	node := &bridgeNode{core: c, config: cfg, logger: log.New(io.Discard, "", 0), identity: claim}
+	node := &bridgeNode{core: c, config: cfg, logger: newBridgeLogger(io.Discard), identity: claim}
 	node.touch()
 	nodes.Store(handle, node)
 	claim.running(handle, node)

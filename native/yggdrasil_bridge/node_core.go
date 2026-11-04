@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"regexp"
@@ -48,7 +49,7 @@ func withNode(handle C.int, fn func(*bridgeNode) *C.char) *C.char {
 }
 
 func createNode(configJSON string) (*bridgeNode, error) {
-	logger := log.New(os.Stdout, "", 0)
+	logger := newBridgeLogger(os.Stdout)
 	logger.EnableLevel("error")
 	logger.EnableLevel("warn")
 	logger.EnableLevel("info")
@@ -447,4 +448,13 @@ func updatePeerList(cfg *config.NodeConfig, uri string, add bool) {
 		filtered = append(filtered, uri)
 	}
 	cfg.Peers = filtered
+}
+
+// newBridgeLogger is log.New with the call depth set at once: gologme/log
+// sets it on the first line written, and two links writing their first
+// lines at the same time raced on it (go test -race).
+func newBridgeLogger(w io.Writer) *log.Logger {
+	logger := log.New(w, "", 0)
+	logger.SetCallDepth(2)
+	return logger
 }

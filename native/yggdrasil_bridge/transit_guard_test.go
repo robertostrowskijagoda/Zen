@@ -9,7 +9,6 @@ import (
 	"time"
 
 	iwt "github.com/Arceliar/ironwood/types"
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -348,7 +347,7 @@ func TestHeldLocalLinksCloseAndTakeNoNewOnes(t *testing.T) {
 func listeningCore(t *testing.T) (*core.Core, string) {
 	t.Helper()
 	cfg := config.GenerateConfig()
-	c, err := core.New(cfg.Certificate, log.New(io.Discard, "", 0))
+	c, err := core.New(cfg.Certificate, newBridgeLogger(io.Discard))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +443,14 @@ func TestAPhoneBetweenTwoPeersStopsCarryingTheirTraffic(t *testing.T) {
 	}
 	waitForPeer(t, node.core, dropped.PublicKey(), false)
 
+	// What went through before the drop may still be on its way (queues
+	// on both sides; slow under -race): counted once it stopped arriving.
+	settled := received.Load()
+	for quiet := time.Now(); time.Since(quiet) < 300*time.Millisecond; time.Sleep(20 * time.Millisecond) {
+		if now := received.Load(); now != settled {
+			settled, quiet = now, time.Now()
+		}
+	}
 	before := received.Load()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

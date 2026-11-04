@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gologme/log"
 	"github.com/yggdrasil-network/yggdrasil-go/src/config"
 	"github.com/yggdrasil-network/yggdrasil-go/src/core"
 )
@@ -44,7 +43,7 @@ func (handlers adminHandlers) AddHandler(name, _ string, _ []string, handler cor
 }
 
 func TestNodeInfoAnswersNothingAboutThisDevice(t *testing.T) {
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	var hubKey ed25519.PrivateKey
 	for hubKey == nil || hubKey.Public().(ed25519.PublicKey)[0] != 0 ||
 		hubKey.Public().(ed25519.PublicKey)[1] > 0x0f {
@@ -119,7 +118,7 @@ func TestNodeInfoAnswersNothingAboutThisDevice(t *testing.T) {
 // stranger's debug_remoteGetPeers goes unanswered, so the friends linked to
 // this device over Wi-Fi or Bluetooth (its peers) stay unknown to them.
 func TestMeshTrafficReaderAnswersNoPeersQuery(t *testing.T) {
-	logger := log.New(io.Discard, "", 0)
+	logger := newBridgeLogger(io.Discard)
 	hubConfig := config.GenerateConfig()
 	hub, err := core.New(hubConfig.Certificate, logger)
 	if err != nil {

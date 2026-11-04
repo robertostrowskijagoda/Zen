@@ -262,7 +262,7 @@ func doorLogger(main *bridgeNode) *log.Logger {
 	if main.logger != nil {
 		return main.logger
 	}
-	return log.New(io.Discard, "", 0)
+	return newBridgeLogger(io.Discard)
 }
 
 // peerURIBase is a peering URI without its query, as GetPeers lists it.
