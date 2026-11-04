@@ -1475,7 +1475,10 @@ final class LockedReceiver {
         ),
         log: (
           kind: inGroup ? 'group-message' : 'message',
-          level: _noticeKit.levelOf(key),
+          level: _noticeKit.levelOf(
+            key,
+            inGroup ? NoticeKind.groupMessage : NoticeKind.message,
+          ),
           known: _noticeKit.senderName(from) != null,
           version: _noticeKit.versionOf(from),
         ),

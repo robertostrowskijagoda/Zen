@@ -254,7 +254,13 @@ final class LockedNoticeKit {
     this.versions = const <String, String>{},
     this.removed = const <String>{},
     this.inviteToken = '',
+    this.kindLevels = const <NoticeKind, NotificationPrivacy>{},
   });
+
+  /// The kinds of news with a level of their own
+  /// (`AppSettings.noticePrivacy`): a conversation's own level comes first,
+  /// the general [privacy] last.
+  final Map<NoticeKind, NotificationPrivacy> kindLevels;
 
   /// The token of this person's invitation code (`AppSettings.inviteToken`):
   /// a friend request without it is not told about while locked
@@ -274,7 +280,8 @@ final class LockedNoticeKit {
   String? senderName(String address) {
     final String key = PeerShareCodec.normalizeAddress(address);
     final String? name = names[key];
-    return name == null || levelOf(key) == NotificationPrivacy.generic
+    return name == null ||
+            levelOf(key, NoticeKind.message) == NotificationPrivacy.generic
         ? null
         : name;
   }
@@ -322,7 +329,12 @@ final class LockedNoticeKit {
   /// its groups together.
   static const int maxEntries = 2000;
 
-  NotificationPrivacy levelOf(String key) => overrides[key] ?? privacy;
+  /// The level of a notice about the conversation [key], of [kind]: the
+  /// conversation's own, the kind's own, or the general one.
+  NotificationPrivacy levelOf(String key, [NoticeKind? kind]) =>
+      overrides[key] ??
+      (kind == null || !kind.hasPrivacy ? null : kindLevels[kind]) ??
+      privacy;
 
   /// What the notice about an invitation from [from] ([type]
   /// `friend_request`) or its acceptance (`friend_accept`) says while the
@@ -335,7 +347,7 @@ final class LockedNoticeKit {
     required Map<String, dynamic> payload,
   }) {
     final String key = PeerShareCodec.normalizeAddress(from);
-    final NotificationPrivacy level = levelOf(key);
+    final NotificationPrivacy level = levelOf(key, NoticeKind.invitation);
     final ZenSignal? signal = zenSignalFromTransportPayload(
       sender: key,
       payload: payload,
@@ -392,7 +404,10 @@ final class LockedNoticeKit {
     }
     final bool inGroup = signal.type == ZenSignalType.groupMessage;
     final String key = inGroup ? conversationKeyOfSignal(signal) : sender;
-    final NotificationPrivacy level = levelOf(key);
+    final NotificationPrivacy level = levelOf(
+      key,
+      inGroup ? NoticeKind.groupMessage : NoticeKind.message,
+    );
     final String? known = names[key];
     if (level == NotificationPrivacy.generic || known == null) {
       return generic;
@@ -436,6 +451,12 @@ final class LockedNoticeKit {
     if (versions.isNotEmpty) 'ver': versions,
     if (removed.isNotEmpty) 'x': removed.toList(growable: false),
     if (inviteToken.isNotEmpty) 'it': inviteToken,
+    if (kindLevels.isNotEmpty)
+      'k': <String, String>{
+        for (final MapEntry<NoticeKind, NotificationPrivacy> e
+            in kindLevels.entries)
+          e.key.name: e.value.name,
+      },
   };
 
   static LockedNoticeKit? fromJson(Object? json) {
@@ -519,6 +540,15 @@ final class LockedNoticeKit {
         final String token when PeerShareCodec.isInviteToken(token) => token,
         _ => '',
       },
+      kindLevels: <NoticeKind, NotificationPrivacy>{
+        if (json['k'] case final Map<dynamic, dynamic> k)
+          for (final MapEntry<dynamic, dynamic> e in k.entries)
+            if ((NoticeKind.byName(e.key), level(e.value)) case (
+              final NoticeKind kind,
+              final NotificationPrivacy l,
+            ))
+              kind: l,
+      },
     );
   }
 }
@@ -536,8 +566,17 @@ LockedNoticeKit lockedNoticeKitOf(
   Set<NoticeKind> muted = const <NoticeKind>{},
   bool sounds = true,
   String inviteToken = '',
+  Map<NoticeKind, NotificationPrivacy> kindLevels =
+      const <NoticeKind, NotificationPrivacy>{},
 }) {
   String normal(String address) => PeerShareCodec.normalizeAddress(address);
+  // A name is worth keeping when some notice may show it: the general
+  // level or one kind's own.
+  final bool anyShowsNames =
+      privacy != NotificationPrivacy.generic ||
+      kindLevels.values.any(
+        (NotificationPrivacy l) => l != NotificationPrivacy.generic,
+      );
   final Map<String, NotificationPrivacy> overrides =
       <String, NotificationPrivacy>{};
   final Map<String, String> names = <String, String>{};
@@ -559,7 +598,9 @@ LockedNoticeKit lockedNoticeKitOf(
     final NotificationPrivacy? own = state.ownNotificationPrivacyOf(
       friend.address,
     );
-    final NotificationPrivacy level = own ?? privacy;
+    final bool showsName = own == null
+        ? anyShowsNames
+        : own != NotificationPrivacy.generic;
     for (final String device in devicesOf(friend.address)) {
       if (device.isEmpty) {
         continue;
@@ -567,7 +608,7 @@ LockedNoticeKit lockedNoticeKitOf(
       if (own != null) {
         overrides[device] = own;
       }
-      if (level != NotificationPrivacy.generic) {
+      if (showsName) {
         names[device] = state.nameFor(friend);
       }
     }
@@ -581,7 +622,10 @@ LockedNoticeKit lockedNoticeKitOf(
     if (own != null) {
       overrides[key] = own;
     }
-    if ((own ?? privacy) == NotificationPrivacy.generic) {
+    if (own == null
+        ? (kindLevels[NoticeKind.groupMessage] ?? privacy) ==
+              NotificationPrivacy.generic
+        : own == NotificationPrivacy.generic) {
       continue;
     }
     names[key] = group.name;
@@ -625,6 +669,7 @@ LockedNoticeKit lockedNoticeKitOf(
     },
     sounds: sounds,
     inviteToken: inviteToken,
+    kindLevels: kindLevels,
   );
 }
 

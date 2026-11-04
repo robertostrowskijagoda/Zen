@@ -507,7 +507,7 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
                 category: RuntimeSystemNotificationCategory.social,
                 routeKey: buildPebblesRouteKey(),
                 slotKey: 'pebble-keep',
-                kind: NoticeKind.invitation,
+                kind: NoticeKind.pebble,
               ),
             ),
         context: 'Notification about keeping a pebble',

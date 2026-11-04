@@ -179,14 +179,10 @@ final class _World {
 
 void main() {
   group('AppSettings', () {
-    test('only the far friends\' posts are off at first', () {
+    test('every kind is on at first, far friends\' posts too', () {
       const AppSettings settings = AppSettings();
       for (final NoticeKind kind in NoticeKind.values) {
-        expect(
-          settings.mutes(kind),
-          kind == NoticeKind.farPost,
-          reason: '$kind',
-        );
+        expect(settings.mutes(kind), isFalse, reason: '$kind');
       }
       expect(settings.notificationSounds, isTrue);
       expect(settings.inAppSounds, isTrue);
@@ -720,6 +716,164 @@ void main() {
         expect(sound.isInAppEffect, isTrue, reason: sound.name);
         expect(sound.isNotificationSound, isFalse, reason: sound.name);
       }
+    });
+  });
+
+  group('a level per kind of news', () {
+    RuntimeSystemNotification notice(
+      String id, {
+      NoticeKind? kind,
+      RuntimeSystemNotificationCategory category =
+          RuntimeSystemNotificationCategory.social,
+    }) => RuntimeSystemNotification(
+      id: id,
+      title: 'Ala',
+      body: 'Co u Ciebie?',
+      createdAtMillis: 1,
+      category: category,
+      kind: kind,
+    );
+
+    test("the features' notices are known by their ids", () {
+      expect(NoticeKind.ofNotificationId('flat-msg-1'), NoticeKind.neighbours);
+      expect(NoticeKind.ofNotificationId('date-match-1'), NoticeKind.dating);
+      expect(NoticeKind.ofNotificationId('event-rsvp-1'), NoticeKind.meetup);
+      expect(NoticeKind.ofNotificationId('circle-food-1'), NoticeKind.meetup);
+      expect(NoticeKind.ofNotificationId('ask-answer-1'), NoticeKind.question);
+      expect(NoticeKind.ofNotificationId('intro-1'), NoticeKind.introduction);
+      expect(NoticeKind.ofNotificationId('pyr-pay-1'), NoticeKind.pyramid);
+      expect(NoticeKind.ofNotificationId('pebble-keep-1'), NoticeKind.pebble);
+      // Always told: a date's safety check-in, an alarm, the unknown.
+      expect(NoticeKind.ofNotificationId('date-safe-rem-1'), isNull);
+      expect(NoticeKind.ofNotificationId('alarm-1'), isNull);
+      expect(NoticeKind.ofNotificationId('recovery-1'), isNull);
+      expect(noticeKindOf(notice('flat-knock-1')), NoticeKind.neighbours);
+      expect(
+        noticeKindOf(
+          notice('x', category: RuntimeSystemNotificationCategory.update),
+        ),
+        NoticeKind.update,
+      );
+    });
+
+    test('a new version cannot be switched off', () {
+      const AppSettings settings = AppSettings(
+        mutedNotices: <NoticeKind>{NoticeKind.update, NoticeKind.dating},
+      );
+      expect(settings.mutes(NoticeKind.update), isFalse);
+      expect(settings.mutes(NoticeKind.dating), isTrue);
+      expect(NoticeKind.update.canMute, isFalse);
+      expect(NoticeKind.update.hasPrivacy, isFalse);
+      expect(NoticeKind.call.hasPrivacy, isFalse);
+    });
+
+    test("a kind's own level, else the general one; kept and read back", () {
+      const AppSettings settings = AppSettings(
+        notificationPrivacy: NotificationPrivacy.senderOnly,
+        noticePrivacy: <NoticeKind, NotificationPrivacy>{
+          NoticeKind.message: NotificationPrivacy.senderAndContent,
+          NoticeKind.neighbours: NotificationPrivacy.generic,
+          // A call always says who calls: a level for it is never used.
+          NoticeKind.call: NotificationPrivacy.generic,
+        },
+      );
+      expect(
+        settings.privacyFor(NoticeKind.message),
+        NotificationPrivacy.senderAndContent,
+      );
+      expect(
+        settings.privacyFor(NoticeKind.neighbours),
+        NotificationPrivacy.generic,
+      );
+      expect(
+        settings.privacyFor(NoticeKind.groupMessage),
+        NotificationPrivacy.senderOnly,
+      );
+      expect(
+        settings.privacyFor(NoticeKind.call),
+        NotificationPrivacy.senderOnly,
+      );
+      expect(settings.privacyFor(null), NotificationPrivacy.senderOnly);
+      final AppSettings back = AppSettings.fromJson(settings.toJson());
+      expect(back.noticePrivacy, settings.noticePrivacy);
+      // Rubbish in the stored form is left out.
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'noticePrivacy': <String, dynamic>{
+            'message': 'loud',
+            'nope': 'generic',
+          },
+        }).noticePrivacy,
+        isEmpty,
+      );
+    });
+
+    test("settings from before 1.15.5 get the far friends' posts on, once", () {
+      final Map<String, dynamic> old = const AppSettings(
+        mutedNotices: <NoticeKind>{NoticeKind.farPost, NoticeKind.call},
+      ).toJson()..remove('noticesRev');
+      final AppSettings read = AppSettings.fromJson(old);
+      expect(read.mutes(NoticeKind.farPost), isFalse);
+      expect(read.mutes(NoticeKind.call), isTrue);
+      // Switched off again and saved, it stays off.
+      final AppSettings again = AppSettings.fromJson(
+        read
+            .copyWith(
+              mutedNotices: <NoticeKind>{
+                ...read.mutedNotices,
+                NoticeKind.farPost,
+              },
+            )
+            .toJson(),
+      );
+      expect(again.mutes(NoticeKind.farPost), isTrue);
+    });
+
+    test("the shade says what the kind's level allows", () {
+      final MemoryRuntimeSystemNotificationService shade =
+          MemoryRuntimeSystemNotificationService();
+      final PrivacyRedactingNotificationService service =
+          PrivacyRedactingNotificationService(
+            shade,
+            privacy: () => NotificationPrivacy.senderAndContent,
+            privacyOfKind: (NoticeKind kind) => kind == NoticeKind.neighbours
+                ? NotificationPrivacy.generic
+                : null,
+          );
+      final RuntimeSystemNotification flat = service.redact(
+        notice('flat-msg-1'),
+      );
+      expect(flat.title, isNot('Ala'));
+      expect(flat.body, isNot('Co u Ciebie?'));
+      final RuntimeSystemNotification ask = service.redact(notice('ask-1'));
+      expect(ask.body, 'Co u Ciebie?');
+    });
+
+    test("the locked phone keeps the kinds' levels", () {
+      const LockedNoticeKit kit = LockedNoticeKit(
+        privacy: NotificationPrivacy.generic,
+        overrides: <String, NotificationPrivacy>{
+          'ala': NotificationPrivacy.senderOnly,
+        },
+        kindLevels: <NoticeKind, NotificationPrivacy>{
+          NoticeKind.message: NotificationPrivacy.senderAndContent,
+        },
+      );
+      final LockedNoticeKit back = LockedNoticeKit.fromJson(kit.toJson())!;
+      expect(back.kindLevels, kit.kindLevels);
+      // A conversation's own level first, then the kind's, then the general.
+      expect(
+        back.levelOf('ala', NoticeKind.message),
+        NotificationPrivacy.senderOnly,
+      );
+      expect(
+        back.levelOf('ola', NoticeKind.message),
+        NotificationPrivacy.senderAndContent,
+      );
+      expect(
+        back.levelOf('ola', NoticeKind.invitation),
+        NotificationPrivacy.generic,
+      );
     });
   });
 }

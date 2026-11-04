@@ -1532,14 +1532,15 @@ void main() {
       await s.check();
       await tester.pump();
       expect(find.byKey(const Key('github-state-failed')), findsOneWidget);
+      // What went wrong and when the next try comes are for the log, not
+      // for the screen.
       expect(
-        find.text(
-          'Nie udało się sprawdzić aktualizacji: GitHub chwilowo ogranicza '
-          'liczbę zapytań.',
-        ),
+        find.text('Nie udało się teraz sprawdzić aktualizacji'),
         findsOneWidget,
       );
-      expect(find.textContaining('Spróbuję ponownie'), findsOneWidget);
+      expect(find.text('Zen spróbuje ponownie sam.'), findsOneWidget);
+      expect(find.textContaining('Spróbuję ponownie'), findsNothing);
+      expect(find.textContaining('429'), findsNothing);
       await finish(tester, s);
     });
 

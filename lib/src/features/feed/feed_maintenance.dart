@@ -188,14 +188,17 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       ? level.atLeast(NotificationPrivacy.senderOnly)
       : level;
 
-  NotificationPrivacy friendPrivacy(String address) => shared(
-    ref
-        .read(socialHubControllerProvider)
-        .notificationPrivacyFor(
-          address,
-          global: ref.read(appSettingsControllerProvider).notificationPrivacy,
-        ),
-  );
+  // A friend's own level, else the level of the kind of news, else the
+  // general one.
+  NotificationPrivacy Function(String address) friendPrivacy(NoticeKind kind) =>
+      (String address) => shared(
+        ref
+            .read(socialHubControllerProvider)
+            .notificationPrivacyFor(
+              address,
+              global: ref.read(appSettingsControllerProvider).privacyFor(kind),
+            ),
+      );
   final PostReachService? reach = ref.watch(postReachProvider);
 
   // Whether Zen fit its limit since it was last told of it: then the same
@@ -251,9 +254,10 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       addToInbox: (InboxEntry entry) =>
           ref.read(socialHubControllerProvider.notifier).putInboxEntry(entry),
       shouldNotify: () => !focused(),
-      privacyOf: friendPrivacy,
-      privacy: () =>
-          shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
+      privacyOf: friendPrivacy(NoticeKind.mention),
+      privacy: () => shared(
+        ref.read(appSettingsControllerProvider).privacyFor(NoticeKind.mention),
+      ),
       // On a friend list shared with this phone: a friend of a friend.
       friendOfFriend: (String address) {
         final String a = PeerShareCodec.normalizeAddress(address);
@@ -302,9 +306,10 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       // Told of as soon as such a post is fetched, not only with the next
       // friend's post.
       farChanges: reach?.changes,
-      privacyOf: friendPrivacy,
-      privacy: () =>
-          shared(ref.read(appSettingsControllerProvider).notificationPrivacy),
+      privacyOf: friendPrivacy(NoticeKind.friendPost),
+      privacy: () => shared(
+        ref.read(appSettingsControllerProvider).privacyFor(NoticeKind.farPost),
+      ),
     ),
   );
   ref.onDispose(maintenance.dispose);
