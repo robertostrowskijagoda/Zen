@@ -6,9 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/desktop_opener.dart';
-import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
-import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
 /// Where a finished sticker goes: a file (Downloads on Android and on a
@@ -60,70 +58,15 @@ final class PlatformStickerOutlet implements StickerOutlet {
   bool get canOpen => _desktop;
 
   @override
-  Future<String?> save(String name, Uint8List bytes, String mime) async {
-    if (_desktop) {
-      final String? target = await pickSavePath(
-        dialogTitle: t('Zapisz naklejkę'),
+  Future<String?> save(String name, Uint8List bytes, String mime) =>
+      // "Zapisz jako", open at Downloads, on every system; the panic
+      // password deletes the copy with the other exports.
+      saveAsWritten(
         fileName: name,
+        dialogTitle: t('Zapisz naklejkę'),
+        mime: mime,
+        write: (File file) => file.writeAsBytes(bytes, flush: true),
       );
-      if (target == null || target.isEmpty) {
-        return null;
-      }
-      return _write(target, bytes);
-    }
-    if (Platform.isAndroid) {
-      final int sdk = await _channel.invokeMethod<int>('sdkInt') ?? 0;
-      if (sdk >= kAndroidDownloadsWithoutPermissionSdk) {
-        final File staged = await _stage('zen_sticker_out', name, bytes);
-        try {
-          final Map<Object?, Object?>? out = await _channel
-              .invokeMapMethod<Object?, Object?>(
-                'exportToDownloads',
-                <String, Object>{
-                  'paths': <String>[staged.path],
-                  'name': name,
-                  'mime': mime,
-                },
-              );
-          final Object? names = out?['names'];
-          final Object? uris = out?['uris'];
-          if (names is! List || names.isEmpty) {
-            throw StateError('The sticker did not reach Downloads');
-          }
-          if (uris is List) {
-            for (final Object? uri in uris) {
-              if (uri is String) {
-                // The panic password deletes it with the other exports.
-                await rememberExportedFile(uri);
-              }
-            }
-          }
-          return '${t('Pobrane')}/${names.first}';
-        } finally {
-          await _remove(staged.parent);
-        }
-      }
-      // Before Android 10 Downloads needs the storage permission: the
-      // app's own folder.
-      final Directory? dir = await getExternalStorageDirectory();
-      if (dir == null) {
-        return null;
-      }
-      return _write('${dir.path}/Zen/$name', bytes);
-    }
-    // iPhone: the app's Documents are in the Files app.
-    final Directory dir = await getApplicationDocumentsDirectory();
-    return _write('${dir.path}/$name', bytes);
-  }
-
-  Future<String> _write(String target, Uint8List bytes) async {
-    final File file = File(target);
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(bytes, flush: true);
-    // Outside Zen's folders: the panic password deletes it too.
-    await rememberExportedFile(target);
-    return target;
-  }
 
   /// [bytes] as [name] alone in the cache folder [folder] (the one before
   /// goes).

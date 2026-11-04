@@ -170,6 +170,13 @@ object ZenSystemBridge {
                             inBackground(result) { exportToDownloads(context, paths, name, mime) }
                         }
                         "pickFolder" -> pickFolder(activity, result)
+                        "saveAs" -> saveAs(
+                            activity,
+                            call.argument<String>("path") ?: "",
+                            call.argument<String>("name") ?: "",
+                            call.argument<String>("mime") ?: OCTET_STREAM,
+                            result,
+                        )
                         "exportToFolder" -> {
                             val tree = call.argument<String>("tree") ?: ""
                             val paths = call.argument<List<String>>("paths") ?: emptyList()
@@ -317,6 +324,89 @@ object ZenSystemBridge {
         observer = watcher
         activity.lifecycle.addObserver(watcher)
         registered.launch(null)
+    }
+
+    /**
+     * "Zapisz jako": the system's file browser, open at Downloads, asks
+     * where [name] goes; the file at [path] is copied there. Answers
+     * {uri, name}, or null when the person closed it (or the Activity went
+     * away while it was open).
+     */
+    private fun saveAs(
+        activity: FragmentActivity,
+        path: String,
+        name: String,
+        mime: String,
+        result: MethodChannel.Result,
+    ) {
+        if (!File(path).isFile) {
+            result.success(null)
+            return
+        }
+        var launcher: ActivityResultLauncher<String>? = null
+        var observer: LifecycleEventObserver? = null
+        var answered = false
+        fun answer(value: Map<String, Any>?) {
+            if (answered) {
+                return
+            }
+            answered = true
+            observer?.let { activity.lifecycle.removeObserver(it) }
+            launcher?.unregister()
+            result.success(value)
+        }
+        val context = activity.applicationContext
+        val registered = activity.activityResultRegistry.register(
+            "zen_save_as_${folderPickSerial++}",
+            object : ActivityResultContracts.CreateDocument(mime) {
+                override fun createIntent(context: Context, input: String): Intent {
+                    val intent = super.createIntent(context, input)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        // Opens at Downloads; the person may go anywhere.
+                        intent.putExtra(
+                            DocumentsContract.EXTRA_INITIAL_URI,
+                            DocumentsContract.buildDocumentUri(
+                                "com.android.externalstorage.documents",
+                                "primary:" + Environment.DIRECTORY_DOWNLOADS,
+                            ),
+                        )
+                    }
+                    return intent
+                }
+            },
+        ) { uri ->
+            if (uri == null) {
+                answer(null)
+                return@register
+            }
+            Thread {
+                val saved = try {
+                    copyInto(context, path, uri)
+                    mapOf(
+                        "uri" to uri.toString(),
+                        "name" to (displayName(context, uri) ?: name),
+                    )
+                } catch (error: Exception) {
+                    Log.w(TAG, "Saving a file failed", error)
+                    runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                    null
+                }
+                Handler(Looper.getMainLooper()).post { answer(saved) }
+            }.start()
+        }
+        launcher = registered
+        val watcher = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                answer(null)
+            }
+        }
+        observer = watcher
+        activity.lifecycle.addObserver(watcher)
+        try {
+            registered.launch(name)
+        } catch (_: ActivityNotFoundException) {
+            answer(null)
+        }
     }
 
     /** Deletes a backup copy at the content address [uri]; true when it went. */

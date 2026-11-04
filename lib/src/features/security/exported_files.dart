@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
 /// Where [ExportedFilesIndex] keeps its list (secure storage).
@@ -200,5 +201,52 @@ Future<void> rememberExportedFile(
     await index.remember(path);
   } on Object catch (error) {
     logZenWarning('Remembering an exported file failed: $error');
+  }
+}
+
+/// "Zapisz jako" for content written by [write]: the system's file browser,
+/// open at Downloads, asks where [fileName] goes (on a computer the dialog
+/// first, then [write] writes straight there; on a phone [write] fills a
+/// temporary file that is copied where the person said and deleted). The
+/// copy is remembered for the panic password ([rememberExportedFile]).
+/// Returns where it went (a path or a content address), `null` when the
+/// person closed the browser.
+Future<String?> saveAsWritten({
+  required String fileName,
+  required Future<void> Function(File target) write,
+  String mime = 'application/octet-stream',
+  String? dialogTitle,
+}) async {
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    final String? target = await pickSavePath(
+      fileName: fileName,
+      dialogTitle: dialogTitle,
+    );
+    if (target == null) {
+      return null;
+    }
+    // Remembered first: the panic password deletes it too, even a copy
+    // cut short.
+    await rememberExportedFile(target);
+    await write(File(target));
+    return target;
+  }
+  final File temporary = await temporaryFileFor(fileName);
+  try {
+    await write(temporary);
+    final String? saved = await saveFileAs(
+      sourcePath: temporary.path,
+      fileName: fileName,
+      mime: mime,
+      dialogTitle: dialogTitle,
+    );
+    if (saved != null) {
+      await rememberExportedFile(saved);
+    }
+    return saved;
+  } finally {
+    if (temporary.existsSync()) {
+      await temporary.delete();
+    }
   }
 }

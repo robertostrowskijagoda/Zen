@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/security/exported_files.dart';
@@ -24,29 +23,14 @@ final class PlatformKeyFileIo implements KeyFileIo {
 
   @override
   Future<String?> save(String name, Uint8List bytes) async {
-    String? target;
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      target = await pickSavePath(
-        dialogTitle: t('Zapisz plik kopii klucza'),
-        fileName: name,
-      );
-    } else {
-      final Directory? dir = Platform.isAndroid
-          ? await getExternalStorageDirectory()
-          : await getApplicationDocumentsDirectory();
-      if (dir != null) {
-        final Directory zen = Directory('${dir.path}/Zen');
-        await zen.create(recursive: true);
-        target = '${zen.path}/$name';
-      }
-    }
-    if (target == null || target.isEmpty) {
-      return null;
-    }
-    await File(target).writeAsBytes(bytes, flush: true);
-    // Outside Zen's folders: the panic password deletes it too.
-    await rememberExportedFile(target);
-    return target;
+    // "Zapisz jako", open at Downloads, on every system; outside Zen's
+    // folders, so the panic password deletes it too.
+    final String? target = await saveAsWritten(
+      fileName: name,
+      dialogTitle: t('Zapisz plik kopii klucza'),
+      write: (File file) => file.writeAsBytes(bytes, flush: true),
+    );
+    return target == null || target.isEmpty ? null : target;
   }
 
   @override

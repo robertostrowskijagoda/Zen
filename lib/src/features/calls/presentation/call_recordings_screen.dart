@@ -3,14 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
-import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -131,33 +129,21 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
 
   Future<void> _export(CallRecording rec) async {
     final String name = 'rozmowa-${rec.id}.${rec.extension}';
-    String? target;
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      target = await pickSavePath(
-        dialogTitle: t('Eksportuj nagranie'),
-        fileName: name,
-      );
-    } else {
-      final Directory? dir = Platform.isAndroid
-          ? await getExternalStorageDirectory()
-          : await getApplicationDocumentsDirectory();
-      if (dir != null) {
-        final Directory zen = Directory('${dir.path}/Zen');
-        await zen.create(recursive: true);
-        target = '${zen.path}/$name';
-      }
-    }
-    if (target == null) {
-      return;
-    }
-    // Remembered first: the panic password deletes it too, even a copy
-    // cut short.
-    await rememberExportedFile(target);
+    final String? target;
     try {
-      await _store.exportTo(rec, File(target));
+      // "Zapisz jako", open at Downloads, on every system.
+      target = await saveAsWritten(
+        fileName: name,
+        dialogTitle: t('Eksportuj nagranie'),
+        mime: rec.extension == 'mp4' ? 'video/mp4' : 'audio/mp4',
+        write: (File file) => _store.exportTo(rec, file),
+      );
     } on Object catch (error, stackTrace) {
       logZenError('Exporting a call recording failed', error, stackTrace);
       _tell(t('Nie udało się zapisać pliku: {error}', {'error': error}));
+      return;
+    }
+    if (target == null) {
       return;
     }
     _tell(t('Zapisano bez szyfrowania: {path}', {'path': target}));
