@@ -15,8 +15,8 @@ String _clock(int millis) {
 }
 
 String _lengthLabel(Duration d) => d.inHours >= 1
-    ? t('{n} godz.', <String, Object?>{'n': d.inHours})
-    : t('{n} min', <String, Object?>{'n': d.inMinutes});
+    ? tn(d.inHours, one: '{n} godzina', few: '{n} godz.', many: '{n} godz.')
+    : tn(d.inMinutes, one: '{n} min', few: '{n} min', many: '{n} min');
 
 /// Asks how to share where the device is in [conversationKey] (once, or
 /// live for a while) and shares it.

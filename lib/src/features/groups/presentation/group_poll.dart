@@ -227,9 +227,7 @@ class GroupPollCard extends StatelessWidget {
             ),
           ),
         Text(
-          total == 1
-              ? t('1 głos')
-              : t('Głosy: {n}', <String, Object?>{'n': total}),
+          tn(total, one: '{n} głos', few: '{n} głosy', many: '{n} głosów'),
           key: const Key('group-poll-total'),
           style: TextStyle(color: muted, fontSize: 11),
         ),
