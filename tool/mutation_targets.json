@@ -1,0 +1,22 @@
+[
+  {
+    "file": "lib/src/features/social/peer_share_codec.dart",
+    "tests": ["test/peer_share_codec_test.dart"]
+  },
+  {
+    "file": "lib/src/features/settings/notice_kind.dart",
+    "tests": ["test/notification_switches_test.dart"]
+  },
+  {
+    "file": "lib/src/features/social/friendship_book.dart",
+    "tests": ["test/friendship_book_test.dart", "test/friendship_book_guard_test.dart"]
+  },
+  {
+    "file": "lib/src/features/runtime/notification_privacy.dart",
+    "tests": ["test/locked_invitation_notice_test.dart", "test/notification_privacy_level_test.dart", "test/notification_switches_test.dart"]
+  },
+  {
+    "file": "lib/src/features/relay/relay_crypto.dart",
+    "tests": ["test/relay_hybrid_cipher_test.dart", "test/relay_engine_test.dart"]
+  }
+]
