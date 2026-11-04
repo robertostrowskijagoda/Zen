@@ -3752,9 +3752,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
     ).read(accountBackupPlacesProvider);
     setState(() => _saving = true);
     try {
-      final AccountBackupSaved? saved = await saveDiagnosticsLog(
-        places: places,
-      );
+      final AccountBackupSaved? saved = await saveDiagnosticsLog();
       if (saved != null) {
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
