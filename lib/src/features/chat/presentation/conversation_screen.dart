@@ -29,6 +29,7 @@ import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_surface_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
@@ -38,6 +39,7 @@ import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/reveal_message.dart';
+import 'package:zen/src/features/chat/presentation/shared_location_card.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/scheduled_messages.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
@@ -678,6 +680,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       ),
                     );
                   }
+                  return;
+                case _ConversationMenuAction.shareLocation:
+                  await shareLocationFrom(
+                    context,
+                    ref,
+                    friend?.address ?? widget.peerAddress,
+                  );
                   return;
                 case _ConversationMenuAction.notificationPrivacy:
                   await showConversationNotificationPrivacyDialog(

@@ -35,6 +35,7 @@ ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
     forwarded: extras['fwd'] == true,
     mentions: usedMentions(message.text, signalMentions(signal)),
     poll: ChatPoll.fromJson(extras[kPollKey]),
+    location: ChatLocation.fromJson(extras[kLocationKey]),
   );
 }
 
@@ -46,6 +47,7 @@ Map<String, dynamic> _outgoingChatExtras(ChatMessage message) =>
       if (message.forwarded) 'fwd': true,
       if (message.mentions.isNotEmpty)
         kMentionsKey: mentionsToJson(message.mentions),
+      if (message.location != null) kLocationKey: message.location!.toJson(),
     };
 
 /// Reactions, replies, editing, deleting for everyone and forwarding, in
@@ -124,6 +126,66 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
   }
 
   // ---------------------------------------------------------------------------
+  // A shared position
+  // ---------------------------------------------------------------------------
+
+  /// Shares [location] in [conversationKey] (a friend's address or
+  /// `group:<id>`) as a new message with [text] (what a Zen without this
+  /// feature shows); the message's id.
+  Future<String> sendLocationMessage({
+    required String conversationKey,
+    required String text,
+    required ChatLocation location,
+  }) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final GroupProfile? group = _groupOfKey(conversationKey);
+    if (group != null) {
+      await sendGroupMessage(
+        groupId: group.id,
+        text: text,
+        location: location,
+        sentAtMillis: now,
+      );
+      return 'grp-msg-$now-${group.id}';
+    }
+    await sendLocalMessage(
+      peerAddress: conversationKey,
+      text: text,
+      location: location,
+      sentAtMillis: now,
+    );
+    return 'outgoing-$now-$conversationKey';
+  }
+
+  /// Puts a newer [location] (with its [text]) on one's own shared
+  /// position [messageId], here and for everyone in the conversation.
+  /// `false` when that message is no longer here (deleted, cleared).
+  Future<bool> updateSharedLocation({
+    required String conversationKey,
+    required String messageId,
+    required String text,
+    required ChatLocation location,
+  }) async {
+    final bool changed = await _changeTimelineMessage(
+      conversationKey,
+      messageId,
+      (ChatMessage m) => !m.isOutgoing || m.isDeleted || m.location == null
+          ? null
+          : m.copyWith(text: text, location: location),
+    );
+    if (changed) {
+      await _sendChatChange(conversationKey, <String, dynamic>{
+        'type': 'msg_edit',
+        'msgId': messageId,
+        'text': text,
+        'at': location.atMillis,
+        kLocationKey: location.toJson(),
+      });
+    }
+    return changed;
+  }
+
+  // ---------------------------------------------------------------------------
   // Editing
   // ---------------------------------------------------------------------------
 
@@ -133,8 +195,10 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       message.isOutgoing &&
       !message.isDeleted &&
       message.type == ChatMessageType.text &&
-      // A poll's answers stay what the votes point at.
+      // A poll's answers stay what the votes point at; a shared position
+      // changes only with the position.
       message.poll == null &&
+      message.location == null &&
       (nowMillis ?? DateTime.now().millisecondsSinceEpoch) -
               message.sentAtMillis <=
           kChatEditWindow.inMilliseconds;
@@ -681,6 +745,17 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
                   (kChatEditWindow + _editClockSkew).inMilliseconds) {
             return null;
           }
+          // A shared position's newer one: only on a message that shares
+          // one, and never an older one over a newer.
+          final ChatLocation? moved = ChatLocation.fromJson(
+            signal.chatExtras?[kLocationKey],
+          );
+          if (m.location != null) {
+            if (moved == null || moved.atMillis < m.location!.atMillis) {
+              return null;
+            }
+            return m.copyWith(text: text, location: moved);
+          }
           return m.copyWith(text: text, editedAtMillis: at);
         case ZenSignalType.messageDelete:
           final GroupProfile? group = _groupOfKey(key);
@@ -741,6 +816,14 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
             final Object? at = payload['at'];
             if (!m.isOutgoing || m.isDeleted || text is! String) {
               return null;
+            }
+            if (m.location != null) {
+              final ChatLocation? moved = ChatLocation.fromJson(
+                payload[kLocationKey],
+              );
+              return moved == null || moved.atMillis < m.location!.atMillis
+                  ? null
+                  : m.copyWith(text: text, location: moved);
             }
             return m.copyWith(text: text, editedAtMillis: at is int ? at : now);
           case 'msg_delete':

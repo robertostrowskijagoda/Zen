@@ -1,6 +1,7 @@
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_location.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
@@ -369,14 +370,22 @@ ZenSignal? zenSignalFromTransportPayload({
             ? _readClipped(payload['text'], kMaxGroupMessageChars)
             : null,
         sentAtMillis: _readInt(payload['at']),
-        chatExtras: type == 'msg_react'
-            ? <String, dynamic>{
-                // Empty: the reaction is taken back.
-                'emoji': emoji != null && emoji.length <= kMaxReactionChars
-                    ? emoji
-                    : '',
-              }
-            : null,
+        chatExtras: switch (type) {
+          'msg_react' => <String, dynamic>{
+            // Empty: the reaction is taken back.
+            'emoji': emoji != null && emoji.length <= kMaxReactionChars
+                ? emoji
+                : '',
+          },
+          // A newer position of a shared one.
+          'msg_edit' => switch (ChatLocation.fromJson(payload[kLocationKey])) {
+            final ChatLocation location => <String, dynamic>{
+              kLocationKey: location.toJson(),
+            },
+            null => null,
+          },
+          _ => null,
+        },
       );
     case 'disappear_timer':
       return ZenSignal(
@@ -445,18 +454,20 @@ ZenSignal? zenSignalFromTransportPayload({
 }
 
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
-/// mentions (`men`) and a poll (`poll`) a chat or group message carries; `null` when none.
+/// mentions (`men`), a poll (`poll`) and a position (`loc`) a chat or group message carries; `null` when none.
 Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final ChatReply? reply = ChatReply.fromJson(payload['re']);
   final Object? media = payload['media'];
   final List<Mention> mentions = mentionsFromJson(payload[kMentionsKey]);
   final ChatPoll? poll = ChatPoll.fromJson(payload[kPollKey]);
+  final ChatLocation? location = ChatLocation.fromJson(payload[kLocationKey]);
   final Map<String, dynamic> out = <String, dynamic>{
     if (reply != null) 're': reply.toJson(),
     if (payload['fwd'] == true) 'fwd': true,
     if (media is Map) 'media': Map<String, dynamic>.from(media),
     if (mentions.isNotEmpty) kMentionsKey: mentionsToJson(mentions),
     if (poll != null) kPollKey: poll.toJson(),
+    if (location != null) kLocationKey: location.toJson(),
   };
   return out.isEmpty ? null : out;
 }

@@ -44,6 +44,7 @@ import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/self_notes_screen.dart';
@@ -394,6 +395,10 @@ class _ScheduledMessagesHostState
     );
     _service = service;
     service.start();
+    // Positions still being shared go on (after a restart too).
+    if (locationSharingAvailable) {
+      ref.read(locationSharingProvider).start();
+    }
   }
 
   @override

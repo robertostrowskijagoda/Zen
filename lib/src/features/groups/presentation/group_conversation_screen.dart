@@ -18,6 +18,7 @@ import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/chat_media_blocks.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/chat_attachment_picker.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
@@ -27,6 +28,7 @@ import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/reveal_message.dart';
+import 'package:zen/src/features/chat/presentation/shared_location_card.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
@@ -911,6 +913,10 @@ class _GroupConversationScreenState
                   unawaited(_confirmLeave());
                 } else if (action == 'disappear') {
                   unawaited(_pickDisappearingTimer());
+                } else if (action == 'location') {
+                  unawaited(
+                    shareLocationFrom(context, ref, 'group:${widget.groupId}'),
+                  );
                 } else if (action == 'notifications') {
                   unawaited(
                     showConversationNotificationPrivacyDialog(
@@ -943,6 +949,18 @@ class _GroupConversationScreenState
                     ],
                   ),
                 ),
+                if (locationSharingAvailable)
+                  PopupMenuItem<String>(
+                    key: const Key('group-location-menu'),
+                    value: 'location',
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.share_location_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(t('Udostępnij położenie'))),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem<String>(
                   key: const Key('group-disappearing-menu'),
                   value: 'disappear',
@@ -1412,6 +1430,22 @@ class _GroupConversationScreenState
                                                   ),
                                           child: ChatAttachmentBody(
                                             message: msg,
+                                          ),
+                                        )
+                                      else if (msg.location != null)
+                                        GestureDetector(
+                                          onLongPressStart:
+                                              (LongPressStartDetails d) =>
+                                                  unawaited(
+                                                    showChatContextMenu(
+                                                      context,
+                                                      d.globalPosition,
+                                                      actions,
+                                                    ),
+                                                  ),
+                                          child: SharedLocationCard(
+                                            message: msg,
+                                            onGradient: onGradient,
                                           ),
                                         )
                                       else if (msg.poll != null)

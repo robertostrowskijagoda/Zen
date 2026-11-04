@@ -11,6 +11,7 @@ enum _ConversationMenuAction {
   retentionSettings,
   disappearingMessages,
   notificationPrivacy,
+  shareLocation,
   postNotifications,
   blockFriend,
   removeFriend,
@@ -226,6 +227,12 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
             }),
           ),
         ),
+        if (locationSharingAvailable)
+          PopupMenuItem<_ConversationMenuAction>(
+            key: const Key('conversation-location-menu'),
+            value: _ConversationMenuAction.shareLocation,
+            child: Text(t('Udostępnij położenie')),
+          ),
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-notification-privacy-menu'),
           value: _ConversationMenuAction.notificationPrivacy,
@@ -431,6 +438,10 @@ class _MessageBubble extends StatelessWidget {
           fontStyle: FontStyle.italic,
         ),
       ),
+      _ when message.location != null => SharedLocationCard(
+        message: message,
+        onGradient: onGradient,
+      ),
       ChatMessageType.image when message.hasAttachment =>
         _ImageAttachmentContent(message: message),
       ChatMessageType.image => _AttachmentStubContent(message: message),
@@ -451,7 +462,7 @@ class _MessageBubble extends StatelessWidget {
     };
     // Files have no text to long-press: the same menu, on the bubble.
     final Widget body =
-        message.type == ChatMessageType.text ||
+        (message.type == ChatMessageType.text && message.location == null) ||
             message.isDeleted ||
             actions.isEmpty
         ? content

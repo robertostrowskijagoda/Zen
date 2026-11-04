@@ -19,6 +19,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_location.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
@@ -1562,6 +1563,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     int? sentAtMillis,
     ChatReply? replyTo,
     bool forwarded = false,
+    ChatLocation? location,
   });
 
   Future<void> sendLocalAttachment({
@@ -1585,6 +1587,8 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     bool forwarded = false,
     List<Mention> mentions = const <Mention>[],
     ChatPoll? poll,
+    ChatLocation? location,
+    int? sentAtMillis,
   });
 
   /// Reactions, edits, deletions, files in groups

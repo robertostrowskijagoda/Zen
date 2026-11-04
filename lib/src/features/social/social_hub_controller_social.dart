@@ -2339,6 +2339,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     bool forwarded = false,
     List<Mention> mentions = const <Mention>[],
     ChatPoll? poll,
+    ChatLocation? location,
+    int? sentAtMillis,
   }) async {
     if (poll != null) {
       text = poll.asText;
@@ -2351,7 +2353,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final int timestamp = DateTime.now().millisecondsSinceEpoch;
+    final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String messageId = 'grp-msg-$timestamp-$groupId';
     // Someone outside the group is never mentioned: such a text goes with
     // plain names.
@@ -2379,6 +2381,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         forwarded: forwarded,
         mentions: named,
         poll: poll,
+        location: location,
       ),
     );
     _bumpTimelineRevision();
@@ -2404,6 +2407,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         if (forwarded) 'fwd': true,
         if (named.isNotEmpty) kMentionsKey: mentionsToJson(named),
         if (poll != null) kPollKey: poll.toJson(),
+        if (location != null) kLocationKey: location.toJson(),
       },
     );
   }
