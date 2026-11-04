@@ -20,6 +20,9 @@
 //       every run into the folder (tool/ci/ci_summary.py reads them).
 //   dart run tool/test.dart --list [--shard 2/4]
 //       The files (of that part) without running them.
+//   dart run tool/test.dart --coverage <folder>
+//       Also writes each run's line coverage (lcov) into the folder;
+//       python tool/ci/coverage_report.py <folder> sums them up.
 //
 // Everything after `--` goes to every `flutter test` (for example
 // `-- --plain-name "mailbox"`). Runs `flutter pub get` itself only when
@@ -62,7 +65,8 @@ Future<void> main(List<String> args) async {
     stderr.writeln(e.message);
     stderr.writeln(
       'Usage: dart run tool/test.dart [paths...] [--groups N] '
-      '[--concurrency N] [--shard PART/PARTS] [--results <folder>] [--list] '
+      '[--concurrency N] [--shard PART/PARTS] [--results <folder>] '
+      '[--coverage <folder>] [--list] '
       '[-- <flutter test options>]',
     );
     exitCode = 64;
@@ -99,6 +103,8 @@ Future<int> _run(List<String> args, List<String> passOn) async {
         shard = (index, total);
       case '--results':
         results = value();
+      case '--coverage':
+        _coverage = Directory(value())..createSync(recursive: true);
       case '--list':
         list = true;
       case final String arg when arg.startsWith('-'):
@@ -319,6 +325,9 @@ final class _GroupResult {
   final List<File> reports;
 }
 
+/// Where each run writes its line coverage (`--coverage`), or `null`.
+Directory? _coverage;
+
 /// One group: its files in as few `flutter test` commands as the command
 /// line allows, one after another; failures only on the screen, every
 /// result in a JSON file of [out].
@@ -358,6 +367,11 @@ Future<_GroupResult> _runGroup(
       groups > 1 ? 'failures-only' : 'expanded',
       '--file-reporter',
       'json:${report.path}',
+      if (_coverage case final Directory folder) ...<String>[
+        '--coverage',
+        '--coverage-path',
+        '${folder.path}/lcov-$reportPrefix-$group-$c.info',
+      ],
       ...passOn,
       ...commands[c],
     ]);
