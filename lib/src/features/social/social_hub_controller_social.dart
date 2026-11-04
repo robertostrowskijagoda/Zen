@@ -1071,7 +1071,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _callMedia.setMuted(nextMuted);
     }
-    state = state.copyWith(activeCall: session.copyWith(isMuted: nextMuted));
+    // The call as it is now: one that ended during the await stays ended.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
+    state = state.copyWith(activeCall: now.copyWith(isMuted: nextMuted));
     await _persistState();
   }
 
@@ -1089,8 +1094,13 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _callMedia.setSpeakerOn(nextSpeakerOn);
     }
+    // The call as it is now: one that ended during the await stays ended.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
     state = state.copyWith(
-      activeCall: session.copyWith(isSpeakerOn: nextSpeakerOn),
+      activeCall: now.copyWith(isSpeakerOn: nextSpeakerOn),
     );
     await _persistState();
   }
@@ -1105,11 +1115,22 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final bool nextCameraEnabled = !session.isCameraEnabled;
     await _callMedia.setCameraEnabled(nextCameraEnabled);
+    // The call as it is now: it may have changed during the await.
+    final CallSession? now = state.activeCall;
+    if (now == null || now.id != session.id) {
+      return;
+    }
     state = state.copyWith(
-      activeCall: session.copyWith(
-        kind: nextCameraEnabled && session.kind == CallInviteKind.audio
+      activeCall: now.copyWith(
+        // A video call while anyone shows a picture; with every camera
+        // off it is a voice call again.
+        kind:
+            nextCameraEnabled ||
+                _callMedia.hasRemoteVideo ||
+                _callMedia.isScreenSharing ||
+                _callMedia.remoteScreenSharing
             ? CallInviteKind.video
-            : session.kind,
+            : CallInviteKind.audio,
         isCameraEnabled: nextCameraEnabled,
       ),
     );
@@ -1256,7 +1277,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       final CallSession? now = state.activeCall;
       if (now != null && _currentCallMatchesSignal(now, signal)) {
         state = state.copyWith(
-          activeCall: now.copyWith(kind: _callKind(signal.content)),
+          activeCall: now.copyWith(
+            // Their camera says what they send; ours still counts.
+            kind: now.isCameraEnabled
+                ? CallInviteKind.video
+                : _callKind(signal.content),
+          ),
         );
         await _persistState();
       }

@@ -10,6 +10,7 @@ import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
+import 'package:zen/src/features/runtime/local_links_controller.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/update/github_release.dart';
@@ -1060,10 +1061,18 @@ final Provider<GithubUpdateService?> githubUpdateServiceProvider =
         beforeDownload: !kIsWeb && Platform.isAndroid
             ? requestInstallPermission
             : null,
-        // The mesh node has peers: the internet works, only GitHub not.
+        // The mesh node has peers on the internet: the internet works,
+        // only GitHub not. Friends linked over Wi-Fi or Bluetooth are
+        // peers too, and say nothing about the internet (a hotspot
+        // without data, a trip abroad).
         internetWorks: () {
           try {
-            return ref.read(runtimeNodeSnapshotProvider).peers > 0;
+            final int peers = ref.read(runtimeNodeSnapshotProvider).peers;
+            final int local = ref
+                .read(localLinksStatusReaderProvider)()
+                .upLinks
+                .length;
+            return peers - local > 0;
           } on Object {
             return false;
           }

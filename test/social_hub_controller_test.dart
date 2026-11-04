@@ -4103,6 +4103,50 @@ void main() {
     },
   );
 
+  test('a call that ends while the speaker is switched stays ended', () async {
+    final _FakeCallMediaSessionController callMedia =
+        _FakeCallMediaSessionController()
+          ..activeCallIdValue = 'call-speaker'
+          ..activeKindValue = CallInviteKind.audio;
+    callMedia.duringSetSpeaker = () => callMedia.onStatusChanged?.call(
+      'call-speaker',
+      CallMediaSessionLifecycle.ended,
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        callMediaSessionControllerProvider.overrideWithValue(callMedia),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            activeCall: const CallSession(
+              id: 'call-speaker',
+              peerAddress: 'ada.ygg',
+              displayName: 'Ada',
+              kind: CallInviteKind.audio,
+              status: CallSessionStatus.active,
+              startedAtMillis: 7,
+            ),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    // Built, so the media's status callback is wired.
+    container.read(socialHubControllerProvider);
+
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .toggleActiveCallSpeaker();
+
+    expect(container.read(socialHubControllerProvider).activeCall, isNull);
+  });
+
   test(
     'busy signal closes the current media session and clears the active call',
     () async {
@@ -5636,6 +5680,10 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
   bool resendOfferResult = true;
   bool mutedValue = false;
   bool speakerOnValue = false;
+
+  /// Runs while the speaker is being switched (the other side hanging up
+  /// meanwhile, say).
+  void Function()? duringSetSpeaker;
   bool cameraEnabledValue = true;
   bool closed = false;
   String? activeCallIdValue;
@@ -5760,6 +5808,8 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
 
   @override
   Future<void> setSpeakerOn(bool enabled) async {
+    duringSetSpeaker?.call();
+    await Future<void>.delayed(Duration.zero);
     speakerOnValue = enabled;
     notifyListeners();
   }

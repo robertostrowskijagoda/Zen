@@ -260,6 +260,10 @@ object ZenWifiDirectBridge {
                             p2pEnabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) ==
                                 WifiP2pManager.WIFI_P2P_STATE_ENABLED
                             send(mapOf("type" to "p2p", "enabled" to p2pEnabled))
+                            if (p2pEnabled) {
+                                // Wi-Fi is back: the record skipped meanwhile.
+                                publishService()
+                            }
                         }
                         WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> refreshGroup()
                     }
@@ -347,6 +351,11 @@ object ZenWifiDirectBridge {
         val p2p = manager ?: return
         val ch = channel ?: return
         val value = advert ?: return
+        // Wi-Fi off: Android answers every call "busy"; the record goes up
+        // when Wi-Fi comes back (WIFI_P2P_STATE_CHANGED).
+        if (!p2pEnabled) {
+            return
+        }
         val txt = HashMap<String, String>()
         txt["a"] = value
         val current = group
@@ -384,6 +393,9 @@ object ZenWifiDirectBridge {
     private fun discover(windowMs: Long): Boolean {
         val p2p = manager ?: return false
         val ch = channel ?: return false
+        if (!p2pEnabled) {
+            return false
+        }
         main.removeCallbacks(stopDiscovery)
         return try {
             p2p.clearServiceRequests(ch, null)

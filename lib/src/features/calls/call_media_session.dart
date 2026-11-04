@@ -1248,6 +1248,11 @@ final class WebRtcCallMediaSessionController
     if (!enabled) {
       await _detachLocalVideoTracks();
       await _pinLocalVideoDirection(sending: false);
+      // Nobody shows a picture any more: a voice call again, on both sides
+      // (the other side takes the kind from the offer that follows).
+      if (!hasRemoteVideo && !isScreenSharing && !remoteScreenSharing) {
+        _activeKind = CallInviteKind.audio;
+      }
       _notify();
       await _renegotiateWhenStable(_activeKind ?? CallInviteKind.audio);
       return;
