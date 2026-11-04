@@ -6,7 +6,8 @@
 #   a branch podfile-lock/<commit> with the new files, opens a pull request
 #   and starts CI on it;
 # - a pull request from a branch of this repository: it commits the new files
-#   to that branch and starts CI on it again;
+#   to that branch and starts CI and the emulator on it again (the runs the
+#   pull request gets from that push wait for approval and can be left);
 # - a Dependabot pull request (its token can only read): it fails and keeps
 #   the files as the artifact podfile-locks; once merged, the push to main
 #   above brings them.
@@ -36,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: '3.47.1'
+  FLUTTER_VERSION: '3.47.9'
 
 jobs:
   refresh:
@@ -120,6 +121,13 @@ jobs:
               --body "The pods resolved for the current packages differ from the committed Podfile.lock files. This updates only ios/Podfile.lock and macos/Podfile.lock." \
               || echo "Open the pull request by hand: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?expand=1" >> "$GITHUB_STEP_SUMMARY"
           fi
-          # A push made with this token starts no workflow, so CI is started
-          # here for the new commit.
+          # A push made with this token starts no workflow run on its own:
+          # GitHub holds the pull request's runs it triggers for a
+          # maintainer's approval ("workflows awaiting approval"), and the
+          # emulator's held run cancels the one of the commit before. So CI
+          # and, on a pull request, the emulator are started here for the
+          # new commit.
           gh workflow run ci.yml --ref "$branch"
+          if [ "$EVENT" = "pull_request" ]; then
+            gh workflow run android-emulator.yml --ref "$branch"
+          fi
