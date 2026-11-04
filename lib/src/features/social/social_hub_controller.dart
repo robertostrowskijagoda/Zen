@@ -1218,18 +1218,18 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     if (!isRoutablePeerAddress(target)) {
       return;
     }
+    // Taken now: the controller may be gone by the time the send runs.
+    final SignalTransport transport = ref.read(signalTransportProvider);
     unawaitedLogged(
       Future<void>(() async {
-        await ref
-            .read(signalTransportProvider)
-            .send(
-              remoteAddress: target,
-              payload: <String, dynamic>{
-                'type': type,
-                'groupId': groupId,
-                if (joined) 'joined': true,
-              },
-            );
+        await transport.send(
+          remoteAddress: target,
+          payload: <String, dynamic>{
+            'type': type,
+            'groupId': groupId,
+            if (joined) 'joined': true,
+          },
+        );
       }),
       context: 'Replying "$type" for group $groupId failed',
     );
@@ -1294,9 +1294,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// An invitation names the members (as this side knows them) but gives
   /// no address except this device's: someone who has not joined learns
   /// nobody's address; the full list follows the `group_invite_ack`.
+  /// [to]: the invited person, left out of the names they are shown.
   Map<String, dynamic> _groupInvitePayload(
     GroupProfile group, {
     String? inviteId,
+    String? to,
   }) {
     final String senderName = ref
         .read(userProfileControllerProvider)
@@ -1314,8 +1316,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
         'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr],
         'memberNames': <String>[
           for (final String member in group.memberAddresses)
-            if (localAddr.isEmpty ||
-                !PeerShareCodec.addressesEqual(member, localAddr))
+            if ((localAddr.isEmpty ||
+                    !PeerShareCodec.addressesEqual(member, localAddr)) &&
+                (to == null || !PeerShareCodec.addressesEqual(member, to)))
               _memberNameForInvite(group, member),
         ],
       },
@@ -1358,6 +1361,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     final int now = DateTime.now().millisecondsSinceEpoch;
     for (final GroupProfile group in state.groups.values) {
+      if (group.awaitingMembersFrom.isNotEmpty &&
+          PeerShareCodec.addressesEqual(group.awaitingMembersFrom, peer)) {
+        // Joined, but their list of the members never came: "joined" again.
+        final String key = '${group.id}|$peer|joined';
+        final int? lastSent = _groupInviteResentAtMillis[key];
+        if (lastSent == null ||
+            now - lastSent >= _groupInviteResendCooldown.inMilliseconds) {
+          _groupInviteResentAtMillis[key] = now;
+          _replyToGroupSignal(
+            peerAddress: peer,
+            type: 'group_invite_ack',
+            groupId: group.id,
+            joined: true,
+          );
+        }
+        continue;
+      }
       if (!group.pendingInviteAddresses.any(
         (String member) => PeerShareCodec.addressesEqual(member, peer),
       )) {
@@ -1378,6 +1398,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
               payload: _groupInvitePayload(
                 group,
                 inviteId: _pendingInviteIdFor(group, peer),
+                to: peer,
               ),
             );
       } catch (error, stackTrace) {

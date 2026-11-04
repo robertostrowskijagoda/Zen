@@ -750,11 +750,21 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
               existing.isInvitePending &&
               inviteId != null &&
               !existing.receivedInviteIds.contains(inviteId);
+          // The inviter's list of the members, asked for after joining.
+          final bool membersCame =
+              inviteId == null &&
+              existing.awaitingMembersFrom.isNotEmpty &&
+              PeerShareCodec.addressesEqual(
+                existing.awaitingMembersFrom,
+                signal.sender,
+              );
           if (updatedMembers.length != existing.memberAddresses.length ||
-              newInvitation) {
+              newInvitation ||
+              membersCame) {
             final Map<String, GroupProfile> groups =
                 Map<String, GroupProfile>.from(state.groups);
             groups[gid] = existing.copyWith(
+              awaitingMembersFrom: membersCame ? '' : null,
               memberAddresses: updatedMembers,
               receivedInviteIds: newInvitation
                   ? <String>[...existing.receivedInviteIds, inviteId]

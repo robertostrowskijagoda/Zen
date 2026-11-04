@@ -219,8 +219,18 @@ SocialHubState _applySignal(
           existingGroup,
           signal,
         );
+        // The inviter's list of the members, asked for after joining.
+        final bool membersCame =
+            updatedMembers != null &&
+            signal.inviteId == null &&
+            existingGroup.awaitingMembersFrom.isNotEmpty &&
+            PeerShareCodec.addressesEqual(
+              existingGroup.awaitingMembersFrom,
+              signal.sender,
+            );
         if (updatedMembers == null ||
-            updatedMembers.length == existingGroup.memberAddresses.length) {
+            (updatedMembers.length == existingGroup.memberAddresses.length &&
+                !membersCame)) {
           return current;
         }
         final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
@@ -228,6 +238,7 @@ SocialHubState _applySignal(
         );
         groups[groupId] = existingGroup.copyWith(
           memberAddresses: updatedMembers,
+          awaitingMembersFrom: membersCame ? '' : null,
         );
         return current.copyWith(groups: groups);
       }
@@ -420,6 +431,12 @@ SocialHubState _applySignal(
       }
       if (_currentCallMatchesSignal(current.activeCall, signal) &&
           current.activeCall != null) {
+        if (current.activeCall!.status == CallSessionStatus.active) {
+          // A renegotiation (a camera or a screen on or off): its kind is
+          // set where the offer is applied, which also counts our own
+          // camera and shared screen; the offer alone says only theirs.
+          return current;
+        }
         return current.copyWith(
           activeCall: current.activeCall!.copyWith(
             kind: _callKind(signal.content),

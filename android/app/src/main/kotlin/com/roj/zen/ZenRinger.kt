@@ -63,6 +63,18 @@ object ZenRinger {
         vibrator = null
     }
 
+    @Synchronized
+    private fun startIfCurrent(prepared: MediaPlayer) {
+        if (prepared !== player) {
+            return
+        }
+        try {
+            prepared.start()
+        } catch (error: Exception) {
+            Log.w(TAG, "The ringtone did not start", error)
+        }
+    }
+
     private fun ringtone(context: Context): MediaPlayer? {
         val uri = RingtoneManager.getActualDefaultRingtoneUri(
             context,
@@ -78,8 +90,11 @@ object ZenRinger {
                 )
                 setDataSource(context, uri)
                 isLooping = true
-                prepare()
-                start()
+                // Prepared off the main thread (a ringtone on slow storage
+                // must not hold up the call's screen); it starts once ready,
+                // unless stop() released it first.
+                setOnPreparedListener { prepared -> startIfCurrent(prepared) }
+                prepareAsync()
             }
         } catch (error: Exception) {
             Log.w(TAG, "The ringtone did not start", error)

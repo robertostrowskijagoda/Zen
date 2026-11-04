@@ -168,7 +168,8 @@ void main() {
       expect(invite['groupId'], group.id);
       // Names, not addresses: Bob learns Cyd's address only once he joins.
       expect(invite['memberAddresses'], isNot(contains(cyd)));
-      expect(invite['memberNames'], containsAll(<String>['Bob', 'Cyd']));
+      // The others' names; Bob is not shown his own.
+      expect(invite['memberNames'], <String>['Cyd']);
 
       await h.deliver(bob, <String, dynamic>{
         'type': 'group_invite_ack',
@@ -335,20 +336,73 @@ void main() {
       await h.deliver(ada, <String, dynamic>{
         ..._invite('g2', <String>[ada]),
         'inviteId': 'i1',
-        'memberNames': <String>['Ada', 'Ola', ''],
+        'memberNames': <String>['Ola', ''],
       });
       final GroupProfile pending = h.state.groups['g2']!;
-      expect(pending.inviteMemberNames, <String>['Ada', 'Ola', '']);
-      expect(pending.memberCount, 4);
+      expect(pending.inviteMemberNames, <String>['Ola', '']);
+      expect(pending.memberCount, 4, reason: 'Ola, someone, Ada and me');
       expect(pending.memberAddresses, <String>[ada]);
 
       await h.controller.acceptGroupInvite(groupId: 'g2', groupName: 'Wyprawa');
+      expect(h.state.groups['g2']!.awaitingMembersFrom, ada);
       // The members' addresses come from Ada now.
       await h.deliver(ada, _invite('g2', <String>[ada, bob, cyd]), at: 1200);
       final GroupProfile joined = h.state.groups['g2']!;
       expect(joined.inviteMemberNames, isEmpty);
       expect(joined.memberAddresses, containsAll(<String>[ada, bob, cyd]));
+      expect(joined.awaitingMembersFrom, isEmpty);
     });
+
+    test(
+      'a lost "joined" is said again when the inviter shows up, until the members come',
+      () async {
+        final _Harness h = _Harness();
+        await h.deliver(ada, <String, dynamic>{
+          ..._invite('g2', <String>[ada]),
+          'inviteId': 'i1',
+          'memberNames': <String>['Ola'],
+        });
+        await h.controller.acceptGroupInvite(
+          groupId: 'g2',
+          groupName: 'Wyprawa',
+        );
+        bool joinedAck(Map<String, dynamic> p) => p['joined'] == true;
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          h.sentTo(ada, 'group_invite_ack').where(joinedAck),
+          hasLength(1),
+        );
+
+        // That datagram was lost (Ada was away); she shows up again.
+        await h.controller.syncGroupInvitesToPeer(ada);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          h.sentTo(ada, 'group_invite_ack').where(joinedAck),
+          hasLength(2),
+          reason: 'asked again for the members',
+        );
+
+        await h.deliver(ada, _invite('g2', <String>[ada, bob, cyd]), at: 1200);
+        expect(h.state.groups['g2']!.awaitingMembersFrom, isEmpty);
+        expect(
+          h.state.groups['g2']!.memberAddresses,
+          containsAll(<String>[bob, cyd]),
+        );
+      },
+    );
+
+    test(
+      'an invitation from an older version (with addresses) awaits nothing',
+      () async {
+        final _Harness h = _Harness();
+        await h.deliver(ada, _invite('g2', <String>[ada, bob, cyd]));
+        await h.controller.acceptGroupInvite(
+          groupId: 'g2',
+          groupName: 'Wyprawa',
+        );
+        expect(h.state.groups['g2']!.awaitingMembersFrom, isEmpty);
+      },
+    );
 
     test('a declined invite stays declined across a restart', () async {
       final MemorySocialSnapshotStore store = MemorySocialSnapshotStore();

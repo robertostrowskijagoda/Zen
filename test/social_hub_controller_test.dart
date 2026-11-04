@@ -4259,6 +4259,75 @@ void main() {
   });
 
   test(
+    'a renegotiation to voice keeps the call a video call while we share our screen',
+    () async {
+      final _FakeCallMediaSessionController callMedia =
+          _FakeCallMediaSessionController()
+            ..activeKindValue = CallInviteKind.video
+            ..activeCallIdValue = 'call-screen'
+            ..cameraEnabledValue = false
+            ..screenSharingValue = true;
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          callMediaSessionControllerProvider.overrideWithValue(callMedia),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              activeCall: const CallSession(
+                id: 'call-screen',
+                peerAddress: 'ada.ygg',
+                displayName: 'Ada',
+                kind: CallInviteKind.video,
+                status: CallSessionStatus.active,
+                startedAtMillis: 9,
+              ),
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  'ada.ygg': FriendProfile(
+                    address: 'ada.ygg',
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Ada turned her camera off: her offer says "audio".
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            const ZenSignal(
+              type: ZenSignalType.callOffer,
+              sender: 'ada.ygg',
+              callId: 'call-screen',
+              content: 'audio',
+              sessionDescription: <String, dynamic>{
+                'type': 'offer',
+                'sdp': 'v=0',
+              },
+            ),
+          );
+
+      expect(callMedia.remoteOfferDescription, isNotNull);
+      expect(
+        container.read(socialHubControllerProvider).activeCall!.kind,
+        CallInviteKind.video,
+        reason: 'our shared screen is still a picture',
+      );
+    },
+  );
+
+  test(
     'remote decline and end signals close the matching active call',
     () async {
       final ProviderContainer declineContainer = ProviderContainer(
@@ -5685,6 +5754,7 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
   /// meanwhile, say).
   void Function()? duringSetSpeaker;
   bool cameraEnabledValue = true;
+  bool screenSharingValue = false;
   bool closed = false;
   String? activeCallIdValue;
   String? remoteAddressValue;
@@ -5703,6 +5773,9 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
 
   @override
   bool get hasLocalVideo => cameraEnabledValue;
+
+  @override
+  bool get isScreenSharing => screenSharingValue;
 
   @override
   bool get hasRemoteStream => activeCallIdValue != null;

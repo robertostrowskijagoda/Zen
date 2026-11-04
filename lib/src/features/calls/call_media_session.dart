@@ -2365,10 +2365,6 @@ final class WebRtcCallMediaSessionController
     return desc;
   }
 
-  /// The camera over the mesh: a steady picture rather than a sharp one
-  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
-  /// frames) and gives up sharpness before frames when the path is tight.
-  /// The shared screen keeps its own settings (sharp text matters there).
   /// Makes every video sender start again with a key frame (its encoding
   /// switched off and on). A sender sealed only once it had a track sent
   /// its first frames, the key frame among them, before it was sealed: the
@@ -2403,6 +2399,10 @@ final class WebRtcCallMediaSessionController
     }
   }
 
+  /// The camera over the mesh: a steady picture rather than a sharp one
+  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
+  /// frames) and gives up sharpness before frames when the path is tight.
+  /// The shared screen keeps its own settings (sharp text matters there).
   Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
     try {
       for (final RTCRtpSender sender in await connection.getSenders()) {

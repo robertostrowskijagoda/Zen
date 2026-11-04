@@ -1278,8 +1278,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       if (now != null && _currentCallMatchesSignal(now, signal)) {
         state = state.copyWith(
           activeCall: now.copyWith(
-            // Their camera says what they send; ours still counts.
-            kind: now.isCameraEnabled
+            // Their camera says what they send; our camera and our shared
+            // screen still count.
+            kind: now.isCameraEnabled || _callMedia.isScreenSharing
                 ? CallInviteKind.video
                 : _callKind(signal.content),
           ),
@@ -1971,6 +1972,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           payload: _groupInvitePayload(
             group,
             inviteId: group.pendingInviteIds[member],
+            to: member,
           ),
         ),
         context: 'broadcast group invite to $member',
@@ -2093,6 +2095,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               ? _groupInvitePayload(
                   updated,
                   inviteId: updated.pendingInviteIds[member],
+                  to: member,
                 )
               : sync,
         ),
@@ -2131,11 +2134,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         lastMessagePreview: t('Dołączono do grupy.'),
       );
     } else if (existing.isInvitePending) {
+      final String inviter = PeerShareCodec.normalizeAddress(
+        senderAddress ?? existing.createdById,
+      );
       groups[groupId] = existing.copyWith(
         isInvitePending: false,
         // The members' addresses come with the inviter's answer to the
-        // `group_invite_ack` below.
+        // `group_invite_ack` below; until they do, it is asked again
+        // ([syncGroupInvitesToPeer]). An invitation without names (from
+        // an older version) carried the addresses already.
         inviteMemberNames: const <String>[],
+        awaitingMembersFrom:
+            existing.inviteMemberNames.isNotEmpty &&
+                isRoutablePeerAddress(inviter)
+            ? inviter
+            : '',
         lastMessagePreview: t('Dołączono do grupy.'),
         lastActivityLabel: activityStamp(DateTime.now().millisecondsSinceEpoch),
       );
