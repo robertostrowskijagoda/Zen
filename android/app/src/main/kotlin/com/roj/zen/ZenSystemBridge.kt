@@ -603,25 +603,67 @@ object ZenSystemBridge {
             notifications.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL
     }
 
+    /**
+     * Opens an https link where it belongs: the app the link is for (Discord,
+     * GitHub, ...) when one claims it, else the default browser. Never in
+     * Zen itself: Zen claims its own invitation pages and its repository's
+     * page, and a tap on "Zen na GitHubie" must not come back here. Until
+     * 1.15.5 every link went to a browser picked by Android's browser
+     * selector, which on some phones lists every app that calls itself a
+     * browser and never the app the link was for.
+     */
     private fun openInBrowser(activity: FragmentActivity, url: String?): Boolean {
         val uri = Uri.parse(url ?: return false)
         if (uri.scheme != "https" || uri.host.isNullOrEmpty()) {
             return false
         }
         val view = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+        val pm = activity.packageManager
+        val own = activity.packageName
+        val handlers = pm.queryIntentActivities(view, 0).map { it.activityInfo.packageName }
         return try {
-            activity.startActivity(
-                Intent(view).apply {
-                    selector = Intent.makeMainSelectorActivity(
-                        Intent.ACTION_MAIN,
-                        Intent.CATEGORY_APP_BROWSER,
-                    )
-                },
-            )
+            if (own !in handlers) {
+                // Not one of Zen's links: Android's own choice (the app the
+                // link is verified for, the default browser, or its picker).
+                activity.startActivity(view)
+                return true
+            }
+            val target = linkTargetWithoutZen(pm, own, handlers)
+            if (target != null) {
+                activity.startActivity(Intent(view).setPackage(target))
+            } else {
+                activity.startActivity(
+                    Intent.createChooser(view, null).putExtra(
+                        Intent.EXTRA_EXCLUDE_COMPONENTS,
+                        arrayOf(ComponentName(activity, MainActivity::class.java)),
+                    ),
+                )
+            }
             true
-        } catch (_: android.content.ActivityNotFoundException) {
-            activity.startActivity(view)
-            true
+        } catch (_: ActivityNotFoundException) {
+            false
         }
+    }
+
+    /**
+     * For a link Zen itself claims ([handlers] lists who can open it): the
+     * app made for the link's site if there is one (an app that opens it but
+     * is not a browser, such as GitHub's), else the default browser; null
+     * when neither is known (a picker without Zen then).
+     */
+    private fun linkTargetWithoutZen(
+        pm: PackageManager,
+        own: String,
+        handlers: List<String>,
+    ): String? {
+        val anyPage = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.org/"))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        val browsers = pm.queryIntentActivities(anyPage, 0)
+            .map { it.activityInfo.packageName }
+            .toSet()
+        handlers.firstOrNull { it != own && it !in browsers }?.let { return it }
+        val default = pm.resolveActivity(anyPage, PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName
+        return default?.takeIf { it != own && it in browsers }
     }
 }

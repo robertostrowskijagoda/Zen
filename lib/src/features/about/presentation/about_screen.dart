@@ -763,8 +763,20 @@ class _UpdatesPage extends StatelessWidget {
               _Platform(
                 icon: Icons.laptop_mac_rounded,
                 tone: zenTone(zen, 5),
-                name: t('macOS i Linux'),
-                note: t('W planie — ten sam rdzeń, co na Windows.'),
+                name: 'macOS',
+                note: t(
+                  'Gotowe — Apple Silicon i Intel. Przy pierwszym '
+                  'uruchomieniu: Ustawienia systemowe → Prywatność i '
+                  'ochrona → „Otwórz mimo to”.',
+                ),
+              ),
+              _Platform(
+                icon: Icons.computer_rounded,
+                tone: zenTone(zen, 4),
+                name: 'Linux',
+                note: t(
+                  'Gotowe — pakiet .deb, Flatpak i archiwum, x64 i ARM64.',
+                ),
               ),
               _Platform(
                 icon: Icons.phone_iphone_rounded,
