@@ -12,7 +12,10 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///
 /// 2 (1.15.2): "Nie blokuj od razu po zamknięciu aplikacji" (1.15.0) is in
 /// the lock step, which people set up before it came never saw.
-const int kSetupRevision = 2;
+/// 3 (1.15.5): the notifications step has "W grupach tylko wzmianki" (new,
+/// on by default) and an additional account's "Powiadomienia z tego konta"
+/// (1.15.4, which did not bump this).
+const int kSetupRevision = 3;
 
 /// Settings saved before this revision had "Znajomi w tej samej sieci
 /// Wi-Fi", Wi-Fi Direct and Bluetooth off from when they were off by
