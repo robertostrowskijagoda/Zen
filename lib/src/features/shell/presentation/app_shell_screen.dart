@@ -105,6 +105,7 @@ import 'package:zen/src/features/settings/presentation/language_screen.dart';
 import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
+import 'package:zen/src/features/settings/presentation/problem_report_sheet.dart';
 import 'package:zen/src/features/settings/presentation/public_peers_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_limits_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_usage_section.dart';

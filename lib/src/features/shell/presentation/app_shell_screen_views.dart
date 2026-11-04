@@ -3919,6 +3919,16 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                             icon: const Icon(Icons.save_alt_rounded, size: 18),
                             label: Text(t('Zapisz plik')),
                           ),
+                          OutlinedButton.icon(
+                            key: const Key('diagnostics-report'),
+                            onPressed: () =>
+                                unawaited(showProblemReportSheet(context)),
+                            icon: const Icon(
+                              Icons.report_problem_outlined,
+                              size: 18,
+                            ),
+                            label: Text(t('Zgłoś problem')),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),

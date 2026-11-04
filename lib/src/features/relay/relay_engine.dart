@@ -3918,6 +3918,10 @@ final class RelayEngine {
     }
   }
 
+  /// [relayBacklogSummary] of the engine's state now (the problem report).
+  Future<String> backlogSummary() =>
+      _locked(() async => relayBacklogSummary(await _load(), _now()));
+
   Future<RelayState> _load() async {
     final RelayState? cached = _state;
     if (cached != null) {

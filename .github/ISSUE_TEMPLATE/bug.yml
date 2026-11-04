@@ -41,4 +41,4 @@ body:
     id: logs
     attributes:
       label: Diagnostics log
-      description: If you can, the diagnostics log saved from Zen's settings (it holds no message text, names or keys). Screenshots help too.
+      description: Zen fills this in when you report from the app (About → Contact → "Zgłoś problem" → "Zgłoś na GitHubie"): the end of the diagnostics log, which holds no message text, names or keys. The whole log can be attached as the file Zen saves. Screenshots help too.
