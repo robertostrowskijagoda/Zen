@@ -197,11 +197,24 @@ void main() {
     await _pumpApp(tester);
     await tester.tap(find.byKey(const Key('chats-status-chip')));
     await _route(tester);
+    // "Diagnostyka" is at the end of "Dlaczego nie działa?".
+    final Finder health = find.byKey(const Key('settings-nav-health'));
+    await tester.scrollUntilVisible(
+      health,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    await tester.tap(health);
+    await _route(tester);
     final Finder entry = find.byKey(const Key('settings-nav-diagnostics'));
     await tester.scrollUntilVisible(
       entry,
       300,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('health-body')),
+        matching: find.byType(Scrollable),
+      ),
     );
     await tester.pump();
     await tester.tap(entry);

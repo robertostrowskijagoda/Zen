@@ -20,16 +20,20 @@ import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 /// service, notifications, battery, the clock and free space — each with
 /// what to do about it.
 class HealthScreen extends ConsumerStatefulWidget {
-  const HealthScreen({this.isAndroid, super.key});
+  const HealthScreen({this.isAndroid, this.openLog, super.key});
 
   /// Tests: pretend to be (not to be) an Android phone.
   final bool? isAndroid;
 
-  static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) => const HealthScreen(),
-    ),
-  );
+  /// Opens the diagnostics log ("Diagnostyka", at the end of the page).
+  final VoidCallback? openLog;
+
+  static Future<void> open(BuildContext context, {VoidCallback? openLog}) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => HealthScreen(openLog: openLog),
+        ),
+      );
 
   @override
   ConsumerState<HealthScreen> createState() => _HealthScreenState();
@@ -218,6 +222,44 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
                     textAlign: TextAlign.center,
                     style: TextStyle(color: zen.textMuted, fontSize: 12),
                   ),
+                  // The log for a bug report, one step further.
+                  if (widget.openLog != null) ...<Widget>[
+                    const SizedBox(height: 16),
+                    ZenCard(
+                      key: const Key('settings-nav-diagnostics'),
+                      onTap: widget.openLog,
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            color: zen.textSecondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  t('Diagnostyka'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  t('Dziennik zdarzeń do zgłaszania błędów'),
+                                  style: TextStyle(
+                                    color: zen.textMuted,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               );
             },

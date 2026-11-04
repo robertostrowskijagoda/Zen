@@ -203,14 +203,10 @@ class _NotificationSettingsSection extends ConsumerWidget {
                 tone: ZenTone.communication,
                 title: t('Powiadomienia i praca w tle'),
                 subtitle: t('Uprawnienia, dostarczanie w tle, ekran połączeń'),
-                pageTitle: t('Powiadomienia i praca w tle'),
-                pageChildren: const <Widget>[
-                  _BackgroundDeliverySection(),
-                  SizedBox(height: 12),
-                  _BatteryOptimizationSection(),
-                  SizedBox(height: 12),
-                  _FullScreenCallSection(),
-                ],
+                // The one page of the permissions (as "Uprawnienia i
+                // Bluetooth"): notifications, no sleeping, the full screen
+                // for calls, the phone maker's own battery limits.
+                onTap: () => unawaited(PermissionsScreen.open(context)),
               ),
             if (Platform.isIOS)
               _SettingsNavTile(
