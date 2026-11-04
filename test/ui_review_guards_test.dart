@@ -337,7 +337,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('conversation-notification-privacy-menu')),
-          matching: find.text('Treść powiadomień'),
+          matching: find.text('Powiadomienia'),
         ),
         findsOneWidget,
       );

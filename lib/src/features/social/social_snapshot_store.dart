@@ -47,6 +47,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'callAcceptToken',
     'disappear',
     'notifyPrivacy',
+    'mutedUntil',
+    'groupNotifyAll',
     'inboxText',
     'peerVersions',
     'groups',
@@ -243,6 +245,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     final Map<String, int> disappearedMessages = <String, int>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
+    final Map<String, int> mutedUntil = <String, int>{};
+    final Map<String, bool> groupNotifyAll = <String, bool>{};
     final Map<String, String> peerAppVersions = <String, String>{};
     final Map<String, FriendshipRecord> records = <String, FriendshipRecord>{};
     Hlc clock = Hlc.zero;
@@ -380,6 +384,22 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      final Object? muted = decoded['mutedUntil'];
+      if (muted is Map) {
+        for (final MapEntry<dynamic, dynamic> e in muted.entries) {
+          if (e.key is String && e.value is int) {
+            mutedUntil[e.key as String] = e.value as int;
+          }
+        }
+      }
+      final Object? notifyAll = decoded['groupNotifyAll'];
+      if (notifyAll is Map) {
+        for (final MapEntry<dynamic, dynamic> e in notifyAll.entries) {
+          if (e.key is String && e.value is bool) {
+            groupNotifyAll[e.key as String] = e.value as bool;
+          }
+        }
+      }
       final Object? versions = decoded['peerVersions'];
       if (versions is Map) {
         for (final MapEntry<dynamic, dynamic> e in versions.entries) {
@@ -469,6 +489,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       disappearingTimers: disappearingTimers,
       disappearedMessages: disappearedMessages,
       notificationPrivacy: notificationPrivacy,
+      mutedUntil: mutedUntil,
+      groupNotifyAll: groupNotifyAll,
       peerAppVersions: peerAppVersions,
     );
   }
@@ -654,6 +676,9 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
               in state.notificationPrivacy.entries)
             e.key: e.value.name,
         },
+        if (state.mutedUntil.isNotEmpty) 'mutedUntil': state.mutedUntil,
+        if (state.groupNotifyAll.isNotEmpty)
+          'groupNotifyAll': state.groupNotifyAll,
         'inboxText': <String, Object?>{
           for (final InboxEntry e in <InboxEntry>[
             ...state.inbox,
@@ -767,6 +792,8 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,
       ),
+      mutedUntil: Map<String, int>.from(state.mutedUntil),
+      groupNotifyAll: Map<String, bool>.from(state.groupNotifyAll),
       peerAppVersions: Map<String, String>.from(state.peerAppVersions),
     );
   }

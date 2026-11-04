@@ -132,6 +132,9 @@ const LifecycleSnapshot _defaultLifecycle = LifecycleSnapshot(
   capturedAtMillis: 0,
 );
 
+/// [SocialHubState.mutedUntil] for "until switched on again".
+const int kMutedForever = 8640000000000000;
+
 @immutable
 final class SocialHubState {
   const SocialHubState({
@@ -151,6 +154,8 @@ final class SocialHubState {
     this.disappearingTimers = const <String, int>{},
     this.disappearedMessages = const <String, int>{},
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
+    this.mutedUntil = const <String, int>{},
+    this.groupNotifyAll = const <String, bool>{},
     this.snapshotUnreadable = false,
     this.peerAppVersions = const <String, String>{},
   });
@@ -301,6 +306,39 @@ final class SocialHubState {
   /// globalnie". Only on this device.
   final Map<String, NotificationPrivacy> notificationPrivacy;
 
+  /// Conversations muted for a while ("Wycisz…"): conversation key (a
+  /// friend's address or `group:<id>`) → until when (milliseconds since
+  /// the epoch; [kMutedForever] until switched on again). No notification
+  /// and no sound for their messages meanwhile (a mention of this person
+  /// still comes); the list in the app still has them. Only on this
+  /// device.
+  final Map<String, int> mutedUntil;
+
+  /// Groups that say otherwise than the setting "W grupach tylko wzmianki"
+  /// (`AppSettings.groupMentionsOnly`): group key → true for every
+  /// message, false for mentions only.
+  final Map<String, bool> groupNotifyAll;
+
+  /// Whether conversation [key] is muted at [nowMillis].
+  bool isMuted(String key, int nowMillis) {
+    final int? until = mutedUntil[_mutedKey(key)];
+    return until != null && until > nowMillis;
+  }
+
+  /// Until when conversation [key] is muted, or null.
+  int? mutedUntilOf(String key, int nowMillis) {
+    final int? until = mutedUntil[_mutedKey(key)];
+    return until != null && until > nowMillis ? until : null;
+  }
+
+  String _mutedKey(String key) =>
+      key.startsWith('group:') ? key : PeerShareCodec.normalizeAddress(key);
+
+  /// Whether every message of the group [groupKey] is told about, not only
+  /// mentions: its own choice, else ![mentionsOnly] (the setting).
+  bool groupNotifiesAll(String groupKey, {required bool mentionsOnly}) =>
+      groupNotifyAll[groupKey] ?? !mentionsOnly;
+
   /// True while the stored snapshot (friends, groups, inbox) could not be
   /// read back - neither the file nor its backup - although the app is
   /// unlocked: this state is a stand-in, not the user's data.
@@ -437,6 +475,8 @@ final class SocialHubState {
     Map<String, int>? disappearingTimers,
     Map<String, int>? disappearedMessages,
     Map<String, NotificationPrivacy>? notificationPrivacy,
+    Map<String, int>? mutedUntil,
+    Map<String, bool>? groupNotifyAll,
     bool? snapshotUnreadable,
     Map<String, String>? peerAppVersions,
   }) {
@@ -465,6 +505,8 @@ final class SocialHubState {
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
       disappearedMessages: disappearedMessages ?? this.disappearedMessages,
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
+      mutedUntil: mutedUntil ?? this.mutedUntil,
+      groupNotifyAll: groupNotifyAll ?? this.groupNotifyAll,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
       peerAppVersions: peerAppVersions ?? this.peerAppVersions,
     );

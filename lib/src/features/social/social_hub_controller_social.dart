@@ -164,6 +164,42 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     });
   }
 
+  /// "Wycisz…" for conversation [key] (a friend's address or
+  /// `group:<id>`) until [untilMillis] ([kMutedForever]: until switched on
+  /// again); null switches its notifications on again. Lapsed mutes are
+  /// dropped on the way.
+  Future<void> setConversationMutedUntil(String key, int? untilMillis) async {
+    final String canonical = key.startsWith('group:')
+        ? key
+        : PeerShareCodec.normalizeAddress(key);
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    await _enqueueStateWork(() async {
+      final Map<String, int> muted = Map<String, int>.of(state.mutedUntil)
+        ..removeWhere((String k, int until) => k == canonical || until <= now);
+      if (untilMillis != null && untilMillis > now) {
+        muted[canonical] = untilMillis;
+      }
+      state = state.copyWith(mutedUntil: muted);
+      await _persistState();
+    });
+  }
+
+  /// "Powiadamiaj o" for the group [groupId]: true every message, false
+  /// mentions only, null as the setting says.
+  Future<void> setGroupNotifyAll(String groupId, bool? all) async {
+    final String key = groupConversationKey(groupId);
+    await _enqueueStateWork(() async {
+      final Map<String, bool> choice = Map<String, bool>.of(
+        state.groupNotifyAll,
+      )..remove(key);
+      if (all != null) {
+        choice[key] = all;
+      }
+      state = state.copyWith(groupNotifyAll: choice);
+      await _persistState();
+    });
+  }
+
   /// Puts [entry] at the top of the inbox, in place of an entry with the
   /// same id (an update of the same news: "3 nowe posty" after "2 nowe
   /// posty"). For news that does not come as a signal: friends' new posts.

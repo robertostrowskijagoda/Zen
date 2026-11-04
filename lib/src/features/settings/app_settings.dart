@@ -501,6 +501,7 @@ final class AppSettings {
     this.seenTips = const <String>{},
     this.notificationsSeenMillis = 0,
     this.lastAccountBackupMillis = 0,
+    this.groupMentionsOnly = true,
     this.backupReminderAfterMillis = 0,
   });
 
@@ -728,6 +729,12 @@ final class AppSettings {
   /// last time it was opened; newer ones count on the bell.
   final int notificationsSeenMillis;
 
+  /// "W grupach tylko wzmianki": a group's messages make a notification
+  /// only when they mention this person (a group may say otherwise,
+  /// `SocialHubState.groupNotifyAll`). On by default: busy groups would
+  /// ring all day.
+  final bool groupMentionsOnly;
+
   /// When a backup of the whole account was last saved on this device
   /// (milliseconds since the epoch, 0 = never): the reminder to make one
   /// counts from it ([backupReminderDue]).
@@ -832,6 +839,7 @@ final class AppSettings {
     Set<String>? seenTips,
     int? notificationsSeenMillis,
     int? lastAccountBackupMillis,
+    bool? groupMentionsOnly,
     int? backupReminderAfterMillis,
   }) {
     return AppSettings(
@@ -887,6 +895,7 @@ final class AppSettings {
           notificationsSeenMillis ?? this.notificationsSeenMillis,
       lastAccountBackupMillis:
           lastAccountBackupMillis ?? this.lastAccountBackupMillis,
+      groupMentionsOnly: groupMentionsOnly ?? this.groupMentionsOnly,
       backupReminderAfterMillis:
           backupReminderAfterMillis ?? this.backupReminderAfterMillis,
     );
@@ -994,6 +1003,7 @@ final class AppSettings {
       'notificationsSeenMillis': notificationsSeenMillis,
     if (lastAccountBackupMillis > 0)
       'lastAccountBackupMillis': lastAccountBackupMillis,
+    'groupMentionsOnly': groupMentionsOnly,
     if (backupReminderAfterMillis > 0)
       'backupReminderAfterMillis': backupReminderAfterMillis,
   };
@@ -1097,6 +1107,7 @@ final class AppSettings {
       },
       notificationsSeenMillis: pick<int>('notificationsSeenMillis'),
       lastAccountBackupMillis: pick<int>('lastAccountBackupMillis'),
+      groupMentionsOnly: pick<bool>('groupMentionsOnly'),
       backupReminderAfterMillis: pick<int>('backupReminderAfterMillis'),
     );
   }

@@ -105,7 +105,7 @@ class _NotificationSettingsSection extends ConsumerWidget {
         _SettingsGroup(
           title: t('Powiadamiaj o'),
           tiles: <Widget>[
-            for (final NoticeKind kind in NoticeKind.values)
+            for (final NoticeKind kind in NoticeKind.values) ...<Widget>[
               _NoticeKindTile(
                 switchKey: _noticeKindKey(kind),
                 kind: kind,
@@ -113,6 +113,24 @@ class _NotificationSettingsSection extends ConsumerWidget {
                 onChanged: (bool value) =>
                     unawaited(controller.setNoticeMuted(kind, muted: !value)),
               ),
+              // Right under the group messages: whether all of them or
+              // only mentions (a group can say otherwise in its menu).
+              if (kind == NoticeKind.groupMessage &&
+                  !settings.mutes(NoticeKind.groupMessage))
+                _SettingsSwitchTile(
+                  key: const Key('settings-group-mentions-only'),
+                  icon: Icons.alternate_email_rounded,
+                  tone: ZenTone.communication,
+                  title: t('W grupach tylko wzmianki'),
+                  subtitle: t(
+                    'Powiadomienie tylko o wiadomości, która Cię wymienia. '
+                    'Grupa może to zmienić w swoim menu → Powiadomienia.',
+                  ),
+                  value: settings.groupMentionsOnly,
+                  onChanged: (bool value) =>
+                      unawaited(controller.setGroupMentionsOnly(value)),
+                ),
+            ],
           ],
         ),
         const SizedBox(height: 10),

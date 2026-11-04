@@ -77,7 +77,12 @@ _boot({
     overrides: [
       ...buildAppSettingsProviderOverrides(
         store: MemoryAppSettingsStore(),
-        initialState: AppSettings(notificationPrivacy: global),
+        // Every group message is told about here (the default is mentions
+        // only, see 'in a mentions-only group' below).
+        initialState: AppSettings(
+          notificationPrivacy: global,
+          groupMentionsOnly: false,
+        ),
         hydrationEnabled: false,
       ),
       runtimeNodeRuntimeProvider.overrideWithValue(runtime),

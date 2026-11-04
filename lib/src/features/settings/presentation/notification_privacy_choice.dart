@@ -9,6 +9,7 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// The "Treść powiadomień" question: the three levels and a line saying
 /// what the chosen one shows. It holds no state, so any screen can ask it
@@ -111,23 +112,74 @@ class NotificationPrivacySettingChoice extends ConsumerWidget {
   }
 }
 
-/// A conversation's own level (a friend's address or `group:<id>` as
-/// [conversationKey]), asked in a dialog and saved at once.
+/// How long "Wycisz" mutes a conversation, from now: an hour, eight
+/// hours, until 8 o'clock tomorrow, a week, or until switched on again.
+enum MuteFor {
+  hour,
+  eightHours,
+  morning,
+  week,
+  forever;
+
+  String get label => switch (this) {
+    MuteFor.hour => t('1 godz.'),
+    MuteFor.eightHours => t('8 godz.'),
+    MuteFor.morning => t('Do rana'),
+    MuteFor.week => t('Tydzień'),
+    MuteFor.forever => t('Do odwołania'),
+  };
+
+  /// Until when, from [now].
+  int untilMillis(DateTime now) => switch (this) {
+    MuteFor.hour => now.add(const Duration(hours: 1)).millisecondsSinceEpoch,
+    MuteFor.eightHours =>
+      now.add(const Duration(hours: 8)).millisecondsSinceEpoch,
+    MuteFor.morning => DateTime(
+      now.year,
+      now.month,
+      now.day + (now.hour < 8 ? 0 : 1),
+      8,
+    ).millisecondsSinceEpoch,
+    MuteFor.week => now.add(const Duration(days: 7)).millisecondsSinceEpoch,
+    MuteFor.forever => kMutedForever,
+  };
+}
+
+/// "Powiadomienia" of one conversation (a friend's address or
+/// `group:<id>` as [conversationKey]), in one dialog, saved at once:
+/// muting it for a while, a group's "Powiadamiaj o" (every message, only
+/// mentions, or as the setting says) and the level of what a notification
+/// says.
 Future<void> showConversationNotificationPrivacyDialog(
   BuildContext context, {
   required String conversationKey,
 }) {
+  final bool group = conversationKey.startsWith('group:');
   return showDialog<void>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
       key: const Key('conversation-notification-privacy-dialog'),
-      title: Text(t('Treść powiadomień z tej rozmowy')),
+      title: Text(t('Powiadomienia z tej rozmowy')),
       scrollable: true,
       content: Consumer(
         builder: (BuildContext context, WidgetRef ref, Widget? child) {
-          final NotificationPrivacy global = ref.watch(
-            appSettingsControllerProvider.select(
-              (AppSettings s) => s.notificationPrivacy,
+          final ZenColors zen = ZenColors.of(context);
+          final AppSettings settings = ref.watch(appSettingsControllerProvider);
+          final SocialHubController hub = ref.read(
+            socialHubControllerProvider.notifier,
+          );
+          final DateTime now = DateTime.now();
+          final int? mutedUntil = ref.watch(
+            socialHubControllerProvider.select(
+              (state) => state.mutedUntilOf(
+                conversationKey,
+                now.millisecondsSinceEpoch,
+              ),
+            ),
+          );
+          final bool? all = ref.watch(
+            socialHubControllerProvider.select(
+              (state) => state.groupNotifyAll[conversationKey],
             ),
           );
           final NotificationPrivacy? own = ref.watch(
@@ -135,14 +187,147 @@ Future<void> showConversationNotificationPrivacyDialog(
               (state) => state.ownNotificationPrivacyOf(conversationKey),
             ),
           );
-          return NotificationPrivacyChoice(
-            value: own,
-            global: global,
-            onChanged: (NotificationPrivacy? value) => unawaited(
-              ref
-                  .read(socialHubControllerProvider.notifier)
-                  .setConversationNotificationPrivacy(conversationKey, value),
-            ),
+          final TextStyle heading = TextStyle(
+            fontWeight: FontWeight.w700,
+            color: zen.textPrimary,
+          );
+          final TextStyle note = TextStyle(
+            color: zen.textSecondary,
+            fontSize: 13.5,
+            height: 1.35,
+          );
+          String until(int millis) {
+            if (millis >= kMutedForever) {
+              return t('Wyciszona do odwołania.');
+            }
+            final DateTime at = DateTime.fromMillisecondsSinceEpoch(millis);
+            String two(int v) => v.toString().padLeft(2, '0');
+            return t('Wyciszona do {date} {time}.', <String, Object?>{
+              'date': '${two(at.day)}.${two(at.month)}',
+              'time': '${two(at.hour)}:${two(at.minute)}',
+            });
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(t('Wycisz'), style: heading),
+              const SizedBox(height: 4),
+              Wrap(
+                key: const Key('conversation-mute-choice'),
+                spacing: 8,
+                children: <Widget>[
+                  ChipTapTarget(
+                    child: ChoiceChip(
+                      key: const Key('conversation-mute-off'),
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      label: Text(t('Nie')),
+                      selected: mutedUntil == null,
+                      onSelected: (_) => unawaited(
+                        hub.setConversationMutedUntil(conversationKey, null),
+                      ),
+                    ),
+                  ),
+                  for (final MuteFor m in MuteFor.values)
+                    ChipTapTarget(
+                      child: ChoiceChip(
+                        key: Key('conversation-mute-${m.name}'),
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        label: Text(m.label),
+                        selected: false,
+                        onSelected: (_) => unawaited(
+                          hub.setConversationMutedUntil(
+                            conversationKey,
+                            m.untilMillis(DateTime.now()),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              Text(
+                mutedUntil == null
+                    ? t(
+                        'Wyciszona rozmowa jest na liście w aplikacji, bez '
+                        'powiadomień i dźwięku. Wzmianka o Tobie przychodzi '
+                        'zawsze.',
+                      )
+                    : until(mutedUntil),
+                key: const Key('conversation-mute-state'),
+                style: note,
+              ),
+              if (group) ...<Widget>[
+                const SizedBox(height: 14),
+                Text(t('Powiadamiaj o'), style: heading),
+                const SizedBox(height: 4),
+                Wrap(
+                  key: const Key('group-notify-choice'),
+                  spacing: 8,
+                  children: <Widget>[
+                    ChipTapTarget(
+                      child: ChoiceChip(
+                        key: const Key('group-notify-setting'),
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        label: Text(
+                          settings.groupMentionsOnly
+                              ? t('Jak w ustawieniach (wzmianki)')
+                              : t('Jak w ustawieniach (wszystko)'),
+                        ),
+                        selected: all == null,
+                        onSelected: (_) => unawaited(
+                          hub.setGroupNotifyAll(
+                            conversationKey.substring('group:'.length),
+                            null,
+                          ),
+                        ),
+                      ),
+                    ),
+                    ChipTapTarget(
+                      child: ChoiceChip(
+                        key: const Key('group-notify-all'),
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        label: Text(t('Każdej wiadomości')),
+                        selected: all == true,
+                        onSelected: (_) => unawaited(
+                          hub.setGroupNotifyAll(
+                            conversationKey.substring('group:'.length),
+                            true,
+                          ),
+                        ),
+                      ),
+                    ),
+                    ChipTapTarget(
+                      child: ChoiceChip(
+                        key: const Key('group-notify-mentions'),
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        label: Text(t('Tylko wzmiankach')),
+                        selected: all == false,
+                        onSelected: (_) => unawaited(
+                          hub.setGroupNotifyAll(
+                            conversationKey.substring('group:'.length),
+                            false,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 14),
+              Text(t('Treść powiadomień'), style: heading),
+              const SizedBox(height: 4),
+              NotificationPrivacyChoice(
+                value: own,
+                global: settings.notificationPrivacy,
+                onChanged: (NotificationPrivacy? value) => unawaited(
+                  hub.setConversationNotificationPrivacy(
+                    conversationKey,
+                    value,
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),

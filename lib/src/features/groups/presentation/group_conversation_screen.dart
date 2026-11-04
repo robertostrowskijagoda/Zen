@@ -951,7 +951,7 @@ class _GroupConversationScreenState
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
-                          t('Treść powiadomień'),
+                          t('Powiadomienia'),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),

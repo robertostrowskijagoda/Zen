@@ -255,7 +255,63 @@ final class LockedNoticeKit {
     this.removed = const <String>{},
     this.inviteToken = '',
     this.kindLevels = const <NoticeKind, NotificationPrivacy>{},
+    this.mutedChats = const <String, int>{},
+    this.groupNotifyAll = const <String, bool>{},
+    this.groupMentionsOnly = true,
+    this.self = '',
   });
+
+  /// Conversations muted for a while (`SocialHubState.mutedUntil`).
+  final Map<String, int> mutedChats;
+
+  /// Groups' own choice of every message or mentions only
+  /// (`SocialHubState.groupNotifyAll`).
+  final Map<String, bool> groupNotifyAll;
+
+  /// "W grupach tylko wzmianki" (`AppSettings.groupMentionsOnly`).
+  final bool groupMentionsOnly;
+
+  /// This device's address: a group message that mentions it is told
+  /// about even in a muted conversation or a mentions-only group.
+  final String self;
+
+  /// Whether the chat message [payload] from [from] makes no notice while
+  /// locked, as the app decides (`_quietChat`): its conversation is
+  /// muted, or it is a group's message in a group that tells only of
+  /// mentions. A mention of this device always comes.
+  bool quietChat({
+    required String from,
+    required Map<String, dynamic> payload,
+    required int nowMillis,
+  }) {
+    final ZenSignal? signal = zenSignalFromTransportPayload(
+      sender: PeerShareCodec.normalizeAddress(from),
+      payload: payload,
+    );
+    if (signal == null ||
+        (signal.type != ZenSignalType.message &&
+            signal.type != ZenSignalType.groupMessage)) {
+      return false;
+    }
+    final bool inGroup = signal.type == ZenSignalType.groupMessage;
+    if (inGroup &&
+        self.isNotEmpty &&
+        mentionsAnyOf(
+          signal.content ?? '',
+          signalMentions(signal),
+          addresses: <String>[self],
+        )) {
+      return false;
+    }
+    final String key = inGroup
+        ? conversationKeyOfSignal(signal)
+        : PeerShareCodec.normalizeAddress(from);
+    final int? until = mutedChats[key];
+    if (until != null && until > nowMillis) {
+      return true;
+    }
+    return inGroup && !(groupNotifyAll[key] ?? !groupMentionsOnly);
+  }
 
   /// The kinds of news with a level of their own
   /// (`AppSettings.noticePrivacy`): a conversation's own level comes first,
@@ -451,6 +507,10 @@ final class LockedNoticeKit {
     if (versions.isNotEmpty) 'ver': versions,
     if (removed.isNotEmpty) 'x': removed.toList(growable: false),
     if (inviteToken.isNotEmpty) 'it': inviteToken,
+    if (mutedChats.isNotEmpty) 'mu': mutedChats,
+    if (groupNotifyAll.isNotEmpty) 'ga': groupNotifyAll,
+    if (!groupMentionsOnly) 'gm': false,
+    if (self.isNotEmpty) 'me': self,
     if (kindLevels.isNotEmpty)
       'k': <String, String>{
         for (final MapEntry<NoticeKind, NotificationPrivacy> e
@@ -540,6 +600,26 @@ final class LockedNoticeKit {
         final String token when PeerShareCodec.isInviteToken(token) => token,
         _ => '',
       },
+      mutedChats: <String, int>{
+        if (json['mu'] case final Map<dynamic, dynamic> mu)
+          for (final MapEntry<dynamic, dynamic> e in mu.entries.take(
+            maxEntries,
+          ))
+            if (fits(e.key) && e.value is int) e.key as String: e.value as int,
+      },
+      groupNotifyAll: <String, bool>{
+        if (json['ga'] case final Map<dynamic, dynamic> ga)
+          for (final MapEntry<dynamic, dynamic> e in ga.entries.take(
+            maxEntries,
+          ))
+            if (fits(e.key) && e.value is bool)
+              e.key as String: e.value as bool,
+      },
+      groupMentionsOnly: json['gm'] != false,
+      self: switch (json['me']) {
+        final String me when fits(me) => me,
+        _ => '',
+      },
       kindLevels: <NoticeKind, NotificationPrivacy>{
         if (json['k'] case final Map<dynamic, dynamic> k)
           for (final MapEntry<dynamic, dynamic> e in k.entries)
@@ -568,6 +648,8 @@ LockedNoticeKit lockedNoticeKitOf(
   String inviteToken = '',
   Map<NoticeKind, NotificationPrivacy> kindLevels =
       const <NoticeKind, NotificationPrivacy>{},
+  bool groupMentionsOnly = true,
+  String self = '',
 }) {
   String normal(String address) => PeerShareCodec.normalizeAddress(address);
   // A name is worth keeping when some notice may show it: the general
@@ -670,6 +752,13 @@ LockedNoticeKit lockedNoticeKitOf(
     sounds: sounds,
     inviteToken: inviteToken,
     kindLevels: kindLevels,
+    mutedChats: <String, int>{
+      for (final MapEntry<String, int> e in state.mutedUntil.entries)
+        if (e.value > DateTime.now().millisecondsSinceEpoch) e.key: e.value,
+    },
+    groupNotifyAll: state.groupNotifyAll,
+    groupMentionsOnly: groupMentionsOnly,
+    self: normal(self),
   );
 }
 

@@ -229,7 +229,7 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-notification-privacy-menu'),
           value: _ConversationMenuAction.notificationPrivacy,
-          child: Text(t('Treść powiadomień')),
+          child: Text(t('Powiadomienia')),
         ),
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-post-notifications-menu'),

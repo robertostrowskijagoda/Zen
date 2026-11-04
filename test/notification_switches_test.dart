@@ -15,6 +15,7 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -380,9 +381,46 @@ void main() {
   });
 
   group('through the hub, with Zen in the background', () {
+    test('groups tell only of mentions by default; a group can say every '
+        'message, and a muted chat is quiet but a mention comes', () async {
+      final _World world = _World(_background);
+      await world.receive(_inGroup('g-1'), at: 100000);
+      expect(world.shade.activeNotifications, isEmpty);
+      await world.receive(_inGroup('g-2', mentionsYou: true), at: 200000);
+      expect(world.shade.activeNotifications.map(noticeKindOf), <NoticeKind?>[
+        NoticeKind.mention,
+      ]);
+      final SocialHubController hub = world.container.read(
+        socialHubControllerProvider.notifier,
+      );
+      final String groupId = _inGroup('g-x').groupId!;
+      await hub.setGroupNotifyAll(groupId, true);
+      await world.receive(_inGroup('g-3'), at: 300000);
+      expect(
+        world.shade.activeNotifications.map(noticeKindOf),
+        contains(NoticeKind.groupMessage),
+      );
+
+      // A muted chat: nothing, until the mute is lifted.
+      final int before = world.shade.activeNotifications.length;
+      await hub.setConversationMutedUntil(
+        _direct('x').sender,
+        DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch,
+      );
+      await world.receive(_direct('m-1'), at: 400000);
+      expect(world.shade.activeNotifications, hasLength(before));
+      await hub.setConversationMutedUntil(_direct('x').sender, null);
+      await world.receive(_direct('m-2'), at: 500000);
+      expect(world.shade.activeNotifications.length, greaterThan(before));
+    });
+
     test('a message, a group message and a mention each follow their own '
         'switch', () async {
-      final _World world = _World(_background);
+      // Every group message told about (the default is mentions only).
+      final _World world = _World(
+        _background,
+        settings: const AppSettings(groupMentionsOnly: false),
+      );
       await world.receive(_direct('m-1'));
       expect(world.shade.activeNotifications.single.kind, NoticeKind.message);
 
@@ -875,5 +913,60 @@ void main() {
         NotificationPrivacy.generic,
       );
     });
+  });
+
+  test('the locked phone is quiet for a muted chat and a mentions-only '
+      'group, as the app is', () {
+    const String ola = '200:1111:2222:3333:4444:5555:6666:7777';
+    final int now = DateTime(2026, 11, 5, 12).millisecondsSinceEpoch;
+    Map<String, dynamic> inGroup(String id) => <String, dynamic>{
+      'type': 'group_message',
+      'groupId': id,
+      'msgId': 'm-$id',
+      'text': 'Hej!',
+    };
+    final LockedNoticeKit kit = LockedNoticeKit.fromJson(
+      LockedNoticeKit(
+        mutedChats: <String, int>{
+          PeerShareCodec.normalizeAddress(ola): now + 3600000,
+        },
+        groupNotifyAll: const <String, bool>{'group:all': true},
+        self: '200::1',
+      ).toJson(),
+    )!;
+    expect(kit.groupMentionsOnly, isTrue);
+    expect(
+      kit.quietChat(
+        from: ola,
+        payload: const <String, dynamic>{
+          'type': 'message',
+          'msgId': 'm-1',
+          'text': 'Hej',
+        },
+        nowMillis: now,
+      ),
+      isTrue,
+    );
+    // After the mute it comes again.
+    expect(
+      kit.quietChat(
+        from: ola,
+        payload: const <String, dynamic>{
+          'type': 'message',
+          'msgId': 'm-2',
+          'text': 'Hej',
+        },
+        nowMillis: now + 7200000,
+      ),
+      isFalse,
+    );
+    expect(
+      kit.quietChat(from: ola, payload: inGroup('g'), nowMillis: now),
+      isTrue,
+    );
+    expect(
+      kit.quietChat(from: ola, payload: inGroup('all'), nowMillis: now),
+      isFalse,
+    );
   });
 }

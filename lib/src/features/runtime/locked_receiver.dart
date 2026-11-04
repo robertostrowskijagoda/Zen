@@ -1453,6 +1453,14 @@ final class LockedReceiver {
         // with nobody behind it is all it could say here.
         return;
       }
+      if (_noticeKit.quietChat(
+        from: from,
+        payload: payload,
+        nowMillis: _now(),
+      )) {
+        // Muted ("Wycisz…"), or a mentions-only group and no mention.
+        return;
+      }
       final NoticeText text = _noticeKit.messageNotice(
         from: from,
         payload: payload,

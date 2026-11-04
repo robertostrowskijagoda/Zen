@@ -312,6 +312,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     );
   }
 
+  /// "W grupach tylko wzmianki".
+  Future<void> setGroupMentionsOnly(bool value) async {
+    await _save(state.copyWith(groupMentionsOnly: value));
+  }
+
   /// "Później" under the backup reminder: quiet for [wait].
   Future<void> snoozeBackupReminder({
     Duration wait = const Duration(days: 7),
