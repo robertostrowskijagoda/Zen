@@ -2278,6 +2278,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('conversation-menu-button')));
     await tester.pumpAndSettle();
+    // The menu is longer than the test's window (it scrolls).
+    await tester.ensureVisible(find.text('Wyczyść historię'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Wyczyść historię'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('clear-history-confirm')));
