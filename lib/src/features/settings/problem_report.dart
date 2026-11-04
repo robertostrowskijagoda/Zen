@@ -6,19 +6,21 @@ import 'package:zen/src/core/logging/zen_log.dart';
 /// The GitHub page of a new bug report (the form `.github/ISSUE_TEMPLATE/
 /// bug.yml`), filled with [description], the version, the device and
 /// [logTail].
-Uri problemIssueUrl({
-  required String description,
-  required String logTail,
-}) => Uri.https('github.com', '/robertostrowskijagoda/Zen/issues/new', <String, String>{
-  'template': 'bug.yml',
-  'title': description.trim().isEmpty
-      ? 'Problem in Zen $kAppVersion'
-      : _firstLine(description),
-  'what': description.trim(),
-  'version': '$kAppVersion ($kAppBuild)',
-  'device': problemDeviceLine(),
-  'logs': logTail,
-});
+Uri problemIssueUrl({required String description, required String logTail}) =>
+    Uri.https(
+      'github.com',
+      '/robertostrowskijagoda/Zen/issues/new',
+      <String, String>{
+        'template': 'bug.yml',
+        'title': description.trim().isEmpty
+            ? 'Problem in Zen $kAppVersion'
+            : _firstLine(description),
+        'what': description.trim(),
+        'version': '$kAppVersion ($kAppBuild)',
+        'device': problemDeviceLine(),
+        'logs': logTail,
+      },
+    );
 
 /// "Android 15 (…)", "Windows 11 …": the system the report comes from.
 String problemDeviceLine() =>

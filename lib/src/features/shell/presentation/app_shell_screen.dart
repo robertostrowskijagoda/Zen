@@ -46,6 +46,7 @@ import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart'
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
+import 'package:zen/src/features/chat/presentation/self_notes_screen.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/presentation/waiting_replies_card.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';

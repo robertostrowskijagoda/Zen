@@ -532,6 +532,26 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const WaitingRepliesCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // A chat with oneself, the same on every device.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: ZenCard(
+                    key: const Key('chats-self-notes'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    onTap: () => unawaited(SelfNotesScreen.open(context)),
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.sticky_note_2_outlined),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(t('Notatki dla siebie'))),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                  ),
+                ),
                 if (actionableInbox.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
