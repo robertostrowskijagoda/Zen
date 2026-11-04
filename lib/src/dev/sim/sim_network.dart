@@ -99,6 +99,7 @@ final class SimNetwork {
     this.minLatencyMs = 20,
     this.maxLatencyMs = 400,
     this.dropRate = 0,
+    this.duplicateRate = 0,
     this.holdForOffline = true,
     int startAt = 1700000000000,
   }) : random = Random(seed),
@@ -110,6 +111,10 @@ final class SimNetwork {
 
   /// Share of messages lost on the way (0–1).
   double dropRate;
+
+  /// Share of messages that arrive twice, each copy at its own time, as a
+  /// mesh that retries or two routes can make them (0–1).
+  double duplicateRate;
 
   /// Messages to a phone that is off wait for it (relays), instead of
   /// being lost.
@@ -215,6 +220,18 @@ final class SimNetwork {
     final Map<String, dynamic> copy =
         jsonDecode(jsonEncode(payload)) as Map<String, dynamic>;
     _queue.add(SimDelivery(now + _latency(), _seq++, from, to, copy));
+    if (duplicateRate > 0 && random.nextDouble() < duplicateRate) {
+      stats.sent++;
+      _queue.add(
+        SimDelivery(
+          now + _latency(),
+          _seq++,
+          from,
+          to,
+          jsonDecode(jsonEncode(payload)) as Map<String, dynamic>,
+        ),
+      );
+    }
   }
 
   /// Delivers everything due up to [until] (or until quiet), in time order.
