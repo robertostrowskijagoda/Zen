@@ -113,6 +113,20 @@ class _NotificationSettingsSection extends ConsumerWidget {
                 onChanged: (bool value) =>
                     unawaited(controller.setNoticeMuted(kind, muted: !value)),
               ),
+              if (kind == NoticeKind.message)
+                _SettingsSwitchTile(
+                  key: const Key('settings-waiting-replies'),
+                  icon: Icons.mark_chat_unread_outlined,
+                  tone: ZenTone.communication,
+                  title: t('Przypominaj o nieodpowiedzianych'),
+                  subtitle: t(
+                    'Na liście czatów: znajomi, których wiadomość czeka na '
+                    'Twoją odpowiedź od 2 dni.',
+                  ),
+                  value: settings.waitingReplyReminder,
+                  onChanged: (bool value) =>
+                      unawaited(controller.setWaitingReplyReminder(value)),
+                ),
               // Right under the group messages: whether all of them or
               // only mentions (a group can say otherwise in its menu).
               if (kind == NoticeKind.groupMessage &&

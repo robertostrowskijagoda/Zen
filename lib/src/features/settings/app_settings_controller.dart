@@ -312,6 +312,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     );
   }
 
+  /// "Przypominaj o nieodpowiedzianych".
+  Future<void> setWaitingReplyReminder(bool value) async {
+    await _save(state.copyWith(waitingReplyReminder: value));
+  }
+
   /// "W grupach tylko wzmianki".
   Future<void> setGroupMentionsOnly(bool value) async {
     await _save(state.copyWith(groupMentionsOnly: value));

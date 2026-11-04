@@ -528,6 +528,10 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const BackupReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // Friends whose last message waits for an answer.
+                const WaitingRepliesCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 if (actionableInbox.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

@@ -502,6 +502,7 @@ final class AppSettings {
     this.notificationsSeenMillis = 0,
     this.lastAccountBackupMillis = 0,
     this.groupMentionsOnly = true,
+    this.waitingReplyReminder = true,
     this.backupReminderAfterMillis = 0,
   });
 
@@ -735,6 +736,11 @@ final class AppSettings {
   /// ring all day.
   final bool groupMentionsOnly;
 
+  /// "Przypominaj o nieodpowiedzianych": the chats list names friends
+  /// whose last message waits for an answer for two days or more. On by
+  /// default.
+  final bool waitingReplyReminder;
+
   /// When a backup of the whole account was last saved on this device
   /// (milliseconds since the epoch, 0 = never): the reminder to make one
   /// counts from it ([backupReminderDue]).
@@ -840,6 +846,7 @@ final class AppSettings {
     int? notificationsSeenMillis,
     int? lastAccountBackupMillis,
     bool? groupMentionsOnly,
+    bool? waitingReplyReminder,
     int? backupReminderAfterMillis,
   }) {
     return AppSettings(
@@ -896,6 +903,7 @@ final class AppSettings {
       lastAccountBackupMillis:
           lastAccountBackupMillis ?? this.lastAccountBackupMillis,
       groupMentionsOnly: groupMentionsOnly ?? this.groupMentionsOnly,
+      waitingReplyReminder: waitingReplyReminder ?? this.waitingReplyReminder,
       backupReminderAfterMillis:
           backupReminderAfterMillis ?? this.backupReminderAfterMillis,
     );
@@ -1004,6 +1012,7 @@ final class AppSettings {
     if (lastAccountBackupMillis > 0)
       'lastAccountBackupMillis': lastAccountBackupMillis,
     'groupMentionsOnly': groupMentionsOnly,
+    'waitingReplyReminder': waitingReplyReminder,
     if (backupReminderAfterMillis > 0)
       'backupReminderAfterMillis': backupReminderAfterMillis,
   };
@@ -1108,6 +1117,7 @@ final class AppSettings {
       notificationsSeenMillis: pick<int>('notificationsSeenMillis'),
       lastAccountBackupMillis: pick<int>('lastAccountBackupMillis'),
       groupMentionsOnly: pick<bool>('groupMentionsOnly'),
+      waitingReplyReminder: pick<bool>('waitingReplyReminder'),
       backupReminderAfterMillis: pick<int>('backupReminderAfterMillis'),
     );
   }
