@@ -9,6 +9,9 @@ import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/meet/intro/gate_route.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -275,6 +278,53 @@ void main() {
         container.read(socialHubControllerProvider).friendByAddress(_zed),
         isNull,
         reason: 'a message does not make anyone a friend',
+      );
+    });
+
+    test('after "Zmień kod" nobody new writes first; a reply still comes '
+        'in', () async {
+      final ProviderContainer changed = ProviderContainer(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(const AppSettings(inviteToken: 'ABCDE')),
+          ),
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(timelines),
+          signalTransportProvider.overrideWithValue(transport),
+          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+          strangerChatsProvider.overrideWithValue(book),
+        ],
+      );
+      addTearDown(changed.dispose);
+      changed.read(appSettingsControllerProvider);
+      await Future<void>.delayed(Duration.zero);
+      final SocialHubController changedHub = changed.read(
+        socialHubControllerProvider.notifier,
+      );
+      await book.setFrom(StrangerMessagesFrom.everyone);
+      await changedHub.receiveSignal(
+        message('m1', mini: <String, dynamic>{'n': 'Zed'}),
+        receivedAtMillis: 1,
+      );
+      expect(await timelines.load(_zed), isEmpty);
+      expect(book.chatWith(_zed), isNull);
+
+      // This person wrote first: the answer is let in.
+      await changedHub.sendLocalMessage(
+        peerAddress: _zed,
+        text: 'Hej',
+        sentAtMillis: 2,
+      );
+      await changedHub.receiveSignal(
+        message('m2', mini: <String, dynamic>{'n': 'Zed'}),
+        receivedAtMillis: 3,
+      );
+      expect(
+        (await timelines.load(_zed)).where((ChatMessage m) => m.id == 'm2'),
+        hasLength(1),
       );
     });
 

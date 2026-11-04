@@ -10,7 +10,8 @@ SocialHubState _applySignal(
   String? openGroupId,
   Set<String>? dismissedOrRejectedGroupIds,
 }) {
-  if (!_isSignalAllowedFromPeer(current, signal)) {
+  if (!_isSignalAllowedFromPeer(current, signal) ||
+      _refusedAsStaleCode(current, signal, appSettings.inviteToken)) {
     return current;
   }
   final FriendshipBook book = current.book;
@@ -2102,6 +2103,43 @@ String _clipText(String value, int maxChars) {
     end -= 1;
   }
   return value.substring(0, end);
+}
+
+/// Whether [signal] starts something new with this person from someone
+/// who did not use their current code ("Zmień kod", [inviteToken] set): a
+/// friend request without the current code's token (an accept nobody here
+/// asked for is one too) or an invitation to a group not known here, from
+/// anyone who is not a friend, not invited from here and whose own request
+/// did not already wait. Refused (see `_refuseStaleCode`) and kept nowhere.
+bool _refusedAsStaleCode(
+  SocialHubState state,
+  ZenSignal signal,
+  String inviteToken,
+) {
+  if (inviteToken.isEmpty) {
+    return false;
+  }
+  switch (state.friendByAddress(signal.sender)?.status) {
+    case FriendRelationshipStatus.accepted ||
+        FriendRelationshipStatus.pendingOutgoing ||
+        FriendRelationshipStatus.pendingIncoming ||
+        FriendRelationshipStatus.blocked:
+      return false;
+    default:
+      break;
+  }
+  switch (signal.type) {
+    case ZenSignalType.friendRequest:
+      return PeerShareCodec.fromStaleCode(inviteToken, signal.inviteId);
+    case ZenSignalType.friendAccept:
+      // Nobody here invited them (see above): the request it amounts to
+      // carries no code.
+      return true;
+    case ZenSignalType.groupInvite:
+      return !state.groups.containsKey(signal.groupId ?? '');
+    default:
+      return false;
+  }
 }
 
 /// A `friend_accept` nobody here asked for, as the request it amounts to.
