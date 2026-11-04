@@ -758,6 +758,9 @@ void main() {
         members: <String, Set<String>>{
           'group:g1': <String>{_ada, _member},
         },
+        // Every group message notifies here ("W grupach tylko wzmianki"
+        // has its own tests).
+        groupMentionsOnly: false,
       );
       LockedNoticeKit kit({
         NotificationPrivacy privacy = NotificationPrivacy.senderAndContent,
@@ -768,6 +771,7 @@ void main() {
         overrides: overrides,
         names: names.names,
         members: names.members,
+        groupMentionsOnly: false,
       );
 
       Future<RuntimeSystemNotification> noticeFor(
@@ -826,6 +830,7 @@ void main() {
             LockedNoticeKit(
               names: const <String, String>{'group:g1': 'Ekipa', _ada: 'Ada'},
               members: names.members,
+              groupMentionsOnly: false,
             ),
             _member,
             <String, dynamic>{...inGroup, '_rid': 'p4', 'senderName': 'Ada'},
