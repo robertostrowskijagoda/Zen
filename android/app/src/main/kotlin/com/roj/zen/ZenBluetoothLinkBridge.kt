@@ -119,6 +119,11 @@ object ZenBluetoothLinkBridge {
     private const val MAX_STREAMS = 16
     private const val INCOMING_WAIT_MS = 15_000L
     private const val LOOPBACK_WAIT_MS = 5_000
+    // The bridge listens on 127.0.0.1 only; getLoopbackAddress() is ::1 on
+    // phones that prefer IPv6 (in airplane mode, say), where every stream
+    // was refused and no Bluetooth link ever came up.
+    private val BRIDGE_LOOPBACK: InetAddress =
+        InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     private const val GATT_READ_MS = 10_000L
     private const val GATT_REREAD_MS = 120_000L
     private const val GATT_CONNECT_MS = 20_000L
@@ -469,7 +474,7 @@ object ZenBluetoothLinkBridge {
             val loop = Socket()
             try {
                 loop.tcpNoDelay = true
-                loop.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), LOOPBACK_WAIT_MS)
+                loop.connect(InetSocketAddress(BRIDGE_LOOPBACK, port), LOOPBACK_WAIT_MS)
                 loop.getOutputStream().write(token)
             } catch (error: IOException) {
                 Log.w(TAG, "The bridge's endpoint is gone", error)
@@ -504,7 +509,7 @@ object ZenBluetoothLinkBridge {
             val loop = Socket()
             try {
                 loop.tcpNoDelay = true
-                loop.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), LOOPBACK_WAIT_MS)
+                loop.connect(InetSocketAddress(BRIDGE_LOOPBACK, port), LOOPBACK_WAIT_MS)
                 loop.getOutputStream().write(token)
             } catch (error: IOException) {
                 Log.w(TAG, "The bridge's endpoint is gone", error)
