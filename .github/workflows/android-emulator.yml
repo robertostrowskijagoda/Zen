@@ -2,8 +2,9 @@
 # Ubuntu runner): a fresh install must get past the logo; the previous
 # release, built from its tag, then this commit installed over its data,
 # must too, keeping the node identity and every file; then a seeded monkey
-# run (500 random events inside Zen) without a crash or an ANR
-# (tool/ci/android_smoke.sh, integration_test/app_start_test.dart,
+# run (500 random events inside Zen) without a crash or an ANR, and the
+# instrumented Kotlin tests (tool/ci/android_smoke.sh,
+# integration_test/app_start_test.dart, android/app/src/androidTest,
 # docs/TESTING.md, "Android emulator").
 #
 # On pull requests to main, for a release tag, once a week on main and by
@@ -201,6 +202,16 @@ jobs:
 
       - name: Monkey (500 events, no crash, no ANR)
         run: sh tool/ci/android_smoke.sh monkey 500 20261028
+
+      # The Kotlin code against a real Android (android/app/src/androidTest):
+      # what the file provider hands out, what other apps may start. The
+      # same debug build for x86_64 the steps above made (its Go bridge is
+      # there); Gradle installs the app and its test app, runs them and
+      # takes both off again.
+      - name: Instrumented Kotlin tests
+        working-directory: android
+        run: |
+          ZEN_SKIP_GO_BRIDGE=1 timeout 900 ./gradlew --no-daemon :app:connectedDebugAndroidTest -Ptarget-platform=android-x64
 
       - name: Logs
         if: ${{ failure() || cancelled() }}
