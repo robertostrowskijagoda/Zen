@@ -1,3 +1,4 @@
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/chat/scheduled_messages.dart';
@@ -66,5 +67,31 @@ void main() {
     fail = false;
     await scheduled.sendDue();
     expect(sent, <String>['Tak']);
+  });
+
+  test('started, it waits with one timer for the soonest message and none '
+      'while nothing waits', () {
+    fakeAsync((FakeAsync async) {
+      final DateTime start = DateTime(2026, 11, 4, 12);
+      int now() => start.add(async.elapsed).millisecondsSinceEpoch;
+      final List<String> sent = <String>[];
+      final ScheduledMessagesService scheduled = ScheduledMessagesService(
+        disk: MemoryLedgerDisk(),
+        send: (String to, String text) async => sent.add(text),
+        now: now,
+      )..start();
+      async.flushMicrotasks();
+      expect(async.pendingTimers, isEmpty, reason: 'nothing waits');
+
+      scheduled.schedule(to: ola, text: 'Za 5 minut', atMillis: now() + 300000);
+      async.flushMicrotasks();
+      expect(async.pendingTimers, hasLength(1));
+      async.elapse(const Duration(minutes: 4));
+      expect(sent, isEmpty);
+      async.elapse(const Duration(minutes: 1, seconds: 1));
+      expect(sent, <String>['Za 5 minut']);
+      expect(async.pendingTimers, isEmpty);
+      scheduled.dispose();
+    });
   });
 }

@@ -77,6 +77,7 @@ final class ScheduledMessagesService extends ChangeNotifier {
 
   Map<String, ScheduledMessage> _waiting = <String, ScheduledMessage>{};
   bool _loaded = false;
+  bool _started = false;
   Timer? _timer;
   Future<void>? _sending;
 
@@ -150,18 +151,36 @@ final class ScheduledMessagesService extends ChangeNotifier {
     }
   }
 
-  /// Sends what is due, then checks every minute while Zen runs.
+  /// Sends what is due, then waits for the next one while Zen runs: one
+  /// timer at its time, none while nothing waits (no ticking for nothing).
   void start() {
-    _timer ??= Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => unawaited(sendDue()),
-    );
+    _started = true;
     unawaited(sendDue());
   }
 
   void stop() {
+    _started = false;
     _timer?.cancel();
     _timer = null;
+  }
+
+  /// The timer for the soonest message. At most an hour: a phone's timers
+  /// stand still while it sleeps, so a long one is checked again (and
+  /// [sendDue] runs when Zen comes back to the screen too).
+  void _plan() {
+    _timer?.cancel();
+    _timer = null;
+    if (!_started || _waiting.isEmpty) {
+      return;
+    }
+    final int soonest = _waiting.values
+        .map((ScheduledMessage m) => m.atMillis)
+        .reduce(min);
+    final int wait = (soonest - _now()).clamp(
+      0,
+      const Duration(hours: 1).inMilliseconds,
+    );
+    _timer = Timer(Duration(milliseconds: wait), () => unawaited(sendDue()));
   }
 
   /// Sends every message whose time came (one run at a time). A message
@@ -185,6 +204,15 @@ final class ScheduledMessagesService extends ChangeNotifier {
         logZenWarning('Sending a scheduled message failed: $error');
       }
     }
+    // A failed one is tried again in a minute at the soonest.
+    if (_waiting.values.any((ScheduledMessage m) => m.atMillis <= now)) {
+      _timer?.cancel();
+      _timer = _started
+          ? Timer(const Duration(minutes: 1), () => unawaited(sendDue()))
+          : null;
+    } else {
+      _plan();
+    }
   }
 
   Future<void> _ensureLoaded() async {
@@ -204,6 +232,9 @@ final class ScheduledMessagesService extends ChangeNotifier {
         ),
       ),
     );
+    if (_sending == null) {
+      _plan();
+    }
     notifyListeners();
   }
 

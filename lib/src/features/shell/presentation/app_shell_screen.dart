@@ -382,6 +382,7 @@ class _ScheduledMessagesHost extends ConsumerStatefulWidget {
 class _ScheduledMessagesHostState
     extends ConsumerState<_ScheduledMessagesHost> {
   ScheduledMessagesService? _service;
+  AppLifecycleListener? _lifecycle;
 
   @override
   void initState() {
@@ -395,10 +396,21 @@ class _ScheduledMessagesHostState
     if (locationSharingAvailable) {
       ref.read(locationSharingProvider).start();
     }
+    // Timers stand still while a phone sleeps: back on screen, what came
+    // due meanwhile goes now.
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        unawaited(service.sendDue());
+        if (locationSharingAvailable) {
+          unawaited(ref.read(locationSharingProvider).tick());
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _service?.stop();
     super.dispose();
   }
