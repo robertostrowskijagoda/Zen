@@ -137,6 +137,12 @@ jobs:
           done
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/previous.apk"
           echo "apk=$RUNNER_TEMP/previous.apk" >> "$GITHUB_OUTPUT"
+          # Its Gradle (and Kotlin) daemons go: a release on another Gradle
+          # than this commit's left a second daemon of up to 8 GB beside
+          # this commit's and the emulator's 4 GB, and the runner ran out of
+          # memory in the next build ("The operation was canceled").
+          (cd android && ./gradlew --stop) || true
+          pkill -f KotlinCompileDaemon || true
 
       - name: Packages and the Go bridge (x86_64)
         run: |
