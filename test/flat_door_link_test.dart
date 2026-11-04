@@ -353,7 +353,9 @@ void main() {
     } finally {
       dir.deleteSync(recursive: true);
     }
-  });
+    // A cold start of node on a CI runner (Windows, a virus scan of a new
+    // process) once took past the default 30 s.
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
 
 /// What node reads from each vector with the door page's reader.
