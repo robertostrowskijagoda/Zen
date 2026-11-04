@@ -406,23 +406,35 @@ void main() {
 
   test('Wi-Fi Direct needs the LAN setting', () {
     expect(
-      enabledLocalTransports(const AppSettings(bluetoothLinks: false)),
+      enabledLocalTransports(
+        const AppSettings(bluetoothLinks: false, multipeerLinks: false),
+      ),
       <LocalLinkTransport>{LocalLinkTransport.wifiDirect},
     );
     expect(
       enabledLocalTransports(
-        const AppSettings(bluetoothLinks: false, lanDiscovery: false),
+        const AppSettings(
+          bluetoothLinks: false,
+          lanDiscovery: false,
+          multipeerLinks: false,
+        ),
       ),
       isEmpty,
     );
-    // Wi-Fi Direct and Bluetooth are on by default.
+    // Wi-Fi Direct, Bluetooth and Apple's Multipeer are on by default (each
+    // runs only where the device has it).
     expect(enabledLocalTransports(const AppSettings()), <LocalLinkTransport>{
       LocalLinkTransport.wifiDirect,
       LocalLinkTransport.bluetooth,
+      LocalLinkTransport.multipeer,
     });
     expect(
       enabledLocalTransports(
-        const AppSettings(wifiDirect: false, bluetoothLinks: false),
+        const AppSettings(
+          wifiDirect: false,
+          bluetoothLinks: false,
+          multipeerLinks: false,
+        ),
       ),
       isEmpty,
     );

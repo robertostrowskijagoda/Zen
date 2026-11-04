@@ -267,9 +267,10 @@ void main() {
     expect(find.text('Apple Wi-Fi/Bluetooth'), findsOneWidget);
     await tester.ensureVisible(toggle);
     await tester.pump();
+    // On by default (since 1.15.5): the switch turns it off.
     await tester.tap(toggle);
     await tester.pump();
     await tester.pump();
-    expect((await store.load())?.multipeerLinks, isTrue);
+    expect((await store.load())?.multipeerLinks, isFalse);
   });
 }

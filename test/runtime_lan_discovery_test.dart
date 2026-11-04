@@ -25,7 +25,8 @@ void main() {
     expect(defaults.lanDiscoveryOn, isTrue);
     expect(defaults.wifiDirect, isTrue);
     expect(defaults.bluetoothLinks, isTrue);
-    expect(defaults.multipeerLinks, isFalse);
+    // Apple's Multipeer links too, since 1.15.5.
+    expect(defaults.multipeerLinks, isTrue);
     expect(defaults.toJson().containsKey('lanDiscovery'), isFalse);
     expect(AppSettings.fromJson(const <String, dynamic>{}).wifiDirect, isTrue);
 

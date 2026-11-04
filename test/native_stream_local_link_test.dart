@@ -147,12 +147,18 @@ void main() {
   test('Bluetooth and Multipeer are turned on by their own settings', () {
     expect(
       enabledLocalTransports(
-        const AppSettings(wifiDirect: false, bluetoothLinks: false),
+        const AppSettings(
+          wifiDirect: false,
+          bluetoothLinks: false,
+          multipeerLinks: false,
+        ),
       ),
       isEmpty,
     );
     expect(
-      enabledLocalTransports(const AppSettings(lanDiscovery: false)),
+      enabledLocalTransports(
+        const AppSettings(lanDiscovery: false, multipeerLinks: false),
+      ),
       <LocalLinkTransport>{LocalLinkTransport.bluetooth},
       reason: 'Bluetooth needs no local network',
     );

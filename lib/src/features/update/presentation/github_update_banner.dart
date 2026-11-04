@@ -238,7 +238,9 @@ class _WhatsNewLinesState extends State<_WhatsNewLines> {
                         tapTargetSize: MaterialTapTargetSize.padded,
                       ),
                       onPressed: () => setState(() => _whole = !_whole),
-                      child: Text(_whole ? t('Pokaż mniej') : t('Pokaż całość')),
+                      child: Text(
+                        _whole ? t('Pokaż mniej') : t('Pokaż całość'),
+                      ),
                     ),
                 ],
               );

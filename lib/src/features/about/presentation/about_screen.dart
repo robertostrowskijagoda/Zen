@@ -59,15 +59,13 @@ class AboutScreen extends StatelessWidget {
   );
 
   /// One section's page on its own ("Wesprzyj Zen" from the settings).
-  static Future<void> openSection(
-    BuildContext context,
-    AboutSection section,
-  ) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) =>
-          _AboutPage(title: section.title, child: section.page()),
-    ),
-  );
+  static Future<void> openSection(BuildContext context, AboutSection section) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              _AboutPage(title: section.title, child: section.page()),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {

@@ -1065,8 +1065,7 @@ final class AppSettings {
       lanDiscovery: oldLinks ? null : pick<bool>('lanDiscovery'),
       wifiDirect: oldLinks ? null : pick<bool>('wifiDirect'),
       bluetoothLinks: oldLinks ? null : pick<bool>('bluetoothLinks'),
-      multipeerLinks:
-          (pick<int>('appleLinksRev') ?? 0) < kAppleLinksRevision
+      multipeerLinks: (pick<int>('appleLinksRev') ?? 0) < kAppleLinksRevision
           ? null
           : pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
