@@ -13,6 +13,7 @@ import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
 import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -600,7 +601,7 @@ final class UpdateService extends ChangeNotifier {
     await rememberExportedFile(out.path);
     if (!kIsWeb && Platform.isWindows) {
       unawaited(
-        Process.run(windowsExplorerPath(), <String>['/select,', out.path]),
+        runDesktopOpener(windowsExplorerPath(), <String>['/select,', out.path]),
       );
     }
     return t(

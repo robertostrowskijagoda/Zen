@@ -10,6 +10,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/single_instance_guard.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
 import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/security/exported_files.dart';
@@ -478,12 +479,15 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
     try {
       if (Platform.isWindows) {
         unawaited(
-          Process.run(windowsExplorerPath(), <String>['/select,', out.path]),
+          runDesktopOpener(windowsExplorerPath(), <String>[
+            '/select,',
+            out.path,
+          ]),
         );
       } else if (Platform.isMacOS) {
-        unawaited(Process.run('/usr/bin/open', <String>['-R', out.path]));
+        unawaited(runDesktopOpener('/usr/bin/open', <String>['-R', out.path]));
       } else {
-        unawaited(Process.run('xdg-open', <String>[dir.path]));
+        unawaited(runDesktopOpener('xdg-open', <String>[dir.path]));
       }
     } on Object catch (error) {
       logZenWarning('Pokazanie pobranej aktualizacji: $error');
