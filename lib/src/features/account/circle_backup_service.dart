@@ -233,6 +233,12 @@ final class CircleBackupService {
     await _frames?.cancel();
   }
 
+  /// Lets go of [status] and [restore] (after [stop], for good).
+  void dispose() {
+    status.dispose();
+    restore.dispose();
+  }
+
   /// Waits for the work queued so far (tests).
   Future<void> get idle => _queue;
 
