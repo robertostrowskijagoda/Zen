@@ -12,11 +12,11 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ### What's new
 - [en] Each kind of notification has its own switch and its own level of what it shows, and a new version of Zen is always announced.
-- [en] Polls in groups, your location live for a while, notes to yourself, messages sent later, and chats muted for a time; in groups only mentions notify, unless you choose otherwise.
-- [en] Files are saved where you choose, links open in their own apps, after "Change code" nothing from the old code gets through, and a problem is reported with one tap.
+- [en] Polls in groups, live location for a while, notes to yourself, messages sent later and chats muted for a time; in groups only mentions notify by default.
+- [en] Files are saved where you choose, links open in their own apps, after "Change code" the old code stops working, and you report a problem with one tap.
 - [pl] Każdy rodzaj powiadomień ma własny włącznik i własny poziom treści, a o nowej wersji Zen powiadomienie przychodzi zawsze.
-- [pl] Ankiety w grupach, położenie na żywo na czas, notatki dla siebie, wiadomości wysyłane później i wyciszanie rozmów na czas; w grupach powiadamiają tylko wzmianki, chyba że wybierzesz inaczej.
-- [pl] Pliki zapisujesz tam, gdzie chcesz, linki otwierają się w swoich aplikacjach, po „Zmień kod” nic ze starego kodu nie przechodzi, a problem zgłosisz jednym przyciskiem.
+- [pl] Ankiety w grupach, położenie na żywo, notatki dla siebie, wysyłanie później i wyciszanie na czas; w grupach domyślnie powiadamiają tylko wzmianki.
+- [pl] Pliki zapisujesz, gdzie chcesz, linki otwierają się w swoich aplikacjach, po „Zmień kod” stary kod nie działa, a problem zgłosisz jednym przyciskiem.
 
 ### Fixes and changes
 - **Notifications per kind**: Ustawienia → Powiadomienia i dźwięki lists every kind with its switch and, under it, "Treść" (its own level of what a notification shows, or the general one; a conversation's own level still comes first). New kinds: messages from outside friends, introductions, meet-ups and events, the neighbours, dating, questions to the network, pebbles and the pyramid (they were never switchable). Always told: a friend's alarm, a request for help with a recovery, a date's safety check-ins, and a new version of Zen (its switch cannot be turned off). The locked phone applies the same levels. Far friends' posts are on by default, also for settings saved under the old default (once).
