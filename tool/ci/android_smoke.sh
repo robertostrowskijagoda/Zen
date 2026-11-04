@@ -37,9 +37,20 @@ files_of_app() {
     | tr -d '\r' | sort -k 2
 }
 
-# The debug app for the emulator, with these `flutter build` arguments.
+# The debug app for the emulator, with these `flutter build` arguments;
+# tried again twice, 30 s apart, when Gradle's plugin portal fails to hand
+# out what it holds (it now and then does, for Kotlin's own artifacts).
 build_app() {
-  flutter build apk --no-pub --debug --target-platform android-x64 "$@"
+  for attempt in 1 2 3; do
+    if flutter build apk --no-pub --debug --target-platform android-x64 "$@"; then
+      return 0
+    fi
+    if [ "$attempt" = 3 ]; then
+      return 1
+    fi
+    echo "The build failed (attempt $attempt): again in 30 s."
+    sleep 30
+  done
 }
 
 # The start test built into the app, installed over what is there (`adb
