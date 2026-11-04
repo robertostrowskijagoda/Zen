@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.4 — 04.11.2026
+
 ### What's new
 - [en] A call rings like a phone call, loudly and with vibration, shows as a call over the lock screen, and its sound goes to your car or headphones.
 - [en] Chats show the date of their last activity, nine new pebble shapes, and you can pick which friends keep your pebble.
