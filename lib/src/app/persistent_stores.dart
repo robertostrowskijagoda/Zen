@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
@@ -44,11 +43,6 @@ final class ZenPersistentStores {
 
   /// Files of the ledger (posts, profiles, media), in the encrypted store.
   final LedgerDisk ledgerDisk;
-}
-
-Future<ZenPersistentStores> buildDefaultZenPersistentStores() async {
-  final Directory supportDirectory = await ZenInstance.supportDirectory();
-  return buildZenPersistentStoresForDirectory(supportDirectory);
 }
 
 /// The settings file, read before the app is unlocked (so it is not

@@ -1119,17 +1119,6 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
-  Future<void> clearBackgroundAlerts() async {
-    if (state.backgroundAlerts.isEmpty) {
-      return;
-    }
-    for (final InboxEntry entry in state.backgroundAlerts) {
-      await _systemNotifications.dismiss(entry.id);
-    }
-    state = state.copyWith(backgroundAlerts: const <InboxEntry>[]);
-    await _persistState();
-  }
-
   @override
   Future<void> dismissInboxEntry(String id) async {
     await _systemNotifications.dismiss(id);
@@ -1247,10 +1236,6 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     }
     state = state.copyWith(pendingLaunchIntent: null);
     await _persistState();
-  }
-
-  Future<void> flushPendingSignals() {
-    return _enqueueStateWork(_flushPendingSignals);
   }
 
   Future<void> _flushPendingSignals() async {

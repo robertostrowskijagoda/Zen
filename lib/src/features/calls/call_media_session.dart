@@ -215,12 +215,6 @@ final Provider<CallMediaSessionController> callMediaSessionControllerProvider =
       return controller;
     });
 
-List buildCallMediaSessionProviderOverrides({
-  required CallMediaSessionController controller,
-}) {
-  return [callMediaSessionControllerProvider.overrideWithValue(controller)];
-}
-
 final class WebRtcCallMediaSessionController
     extends CallMediaSessionController {
   WebRtcCallMediaSessionController({

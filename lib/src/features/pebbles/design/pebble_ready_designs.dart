@@ -62,12 +62,6 @@ final class PebbleSketch {
   void fill(PebbleFace f, int colour) =>
       _ops.add(PebbleFaceFill(face: f.index, colour: colour));
 
-  void fillAll(List<PebbleFace> faces, int colour) {
-    for (final PebbleFace f in faces) {
-      fill(f, colour);
-    }
-  }
-
   void pattern(
     PebbleFace f,
     PebblePattern p,

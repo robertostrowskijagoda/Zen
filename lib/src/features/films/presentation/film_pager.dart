@@ -76,13 +76,6 @@ class FilmPagerState extends State<FilmPager> {
     }
   }
 
-  /// Shows the film at [index].
-  void showIndex(int index) {
-    if (_pages.hasClients) {
-      _pages.jumpToPage(index);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final List<FilmPost> films = widget.backend.films;

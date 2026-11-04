@@ -3893,13 +3893,6 @@ final class PyramidService extends ChangeNotifier {
     return s == null ? 0 : _treasury.view(s).balanceOf(key);
   }
 
-  /// The next number of [key]'s account in this phone's ledger (tests).
-  @visibleForTesting
-  int ledgerSeqOf(String key) {
-    final PyramidState? s = state;
-    return s == null ? 0 : _treasury.view(s).seqOf(key);
-  }
-
   /// The operations this phone's ledger keeps (tests: what a phone knows).
   @visibleForTesting
   Set<String> get ledgerIds => _treasury.ledger.ops.keys.toSet();

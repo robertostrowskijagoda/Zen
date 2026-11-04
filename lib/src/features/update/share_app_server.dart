@@ -360,11 +360,6 @@ ShareNetwork? chooseShareNetwork(
   return networks.firstOrNull;
 }
 
-/// Addresses other devices nearby can reach this one at, best first.
-Future<List<InternetAddress>> localShareAddresses() async => <InternetAddress>[
-  for (final ShareNetwork n in await localShareNetworks()) n.address,
-];
-
 bool isPrivateIPv4(InternetAddress a) {
   if (a.type != InternetAddressType.IPv4) {
     return false;

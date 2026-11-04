@@ -902,10 +902,6 @@ final class LedgerReplicator {
   Future<void> dispose() => _subscription.cancel();
 }
 
-/// Size of [message] as it would travel, for budgeting in tests.
-int ledgerMessageBytes(Map<String, dynamic> message) =>
-    utf8.encode(jsonEncode(message)).length;
-
 /// Whether [message] belongs to this protocol.
 bool isLedgerMessage(Map<String, dynamic> message) =>
     LedgerMessages.all.contains(message['type']);

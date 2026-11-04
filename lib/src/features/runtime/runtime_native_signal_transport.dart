@@ -497,19 +497,6 @@ RuntimeNodeRuntime buildDefaultRuntimeNodeRuntime({
   );
 }
 
-SignalTransport buildDefaultSignalTransport({
-  RuntimeSignalBootstrapConfig? config,
-}) {
-  if (!_hasNativeBridge) {
-    return const NoopSignalTransport();
-  }
-  final RuntimeSignalBootstrapConfig resolvedConfig =
-      config ?? RuntimeSignalBootstrapConfig();
-  return LazySignalTransport(
-    bootstrap: () => _bootstrapDefaultSignalTransport(config: resolvedConfig),
-  );
-}
-
 /// [configJson] with the number of public peers a phone node should dial
 /// (the bridge takes the key out again before it reads the config). Never
 /// stored: only what goes to the bridge at start.
@@ -1766,15 +1753,6 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     _doorFrames.close();
     super.dispose();
   }
-}
-
-Future<SignalTransport> _bootstrapDefaultSignalTransport({
-  required RuntimeSignalBootstrapConfig config,
-}) async {
-  final RuntimeNodeSession session = await _bootstrapDefaultRuntimeSession(
-    config: config,
-  );
-  return session.transport;
 }
 
 Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({

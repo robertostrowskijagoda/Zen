@@ -819,13 +819,6 @@ abstract class AppSecurityService extends ChangeNotifier {
   AppSecurityCredentialsStore get credentialsStore;
 }
 
-Future<bool> loadStoredAppSecurityHasPassword([
-  AppSecurityCredentialsStore credentialsStore =
-      const SecureStorageCredentialsStore(),
-]) async {
-  return await credentialsStore.read(appSecurityPasswordHashStorageKey) != null;
-}
-
 Uint8List? _decodeMasterKeyHex(String? encoded) {
   final String? trimmed = encoded?.trim();
   if (trimmed == null || trimmed.isEmpty) {

@@ -2022,10 +2022,6 @@ final class MeetService extends ChangeNotifier {
       .convert(utf8.encode(jsonEncode(const <Object>[])))
       .toString();
 
-  Future<void> setShareFriendList(bool on) => setFriendListAudience(
-    on ? FriendListAudience.all : FriendListAudience.nobody,
-  );
-
   /// Who sees this person's friend list. Send the list again after
   /// this (`shareFriendList(..., force: true)`).
   Future<void> setFriendListAudience(FriendListAudience audience) =>

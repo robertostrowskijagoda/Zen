@@ -186,10 +186,6 @@ final class AppSettingsController extends Notifier<AppSettings> {
     );
   }
 
-  Future<void> setSecureScreens(bool value) async {
-    await _save(state.copyWith(secureScreens: value));
-  }
-
   /// Android: switches the launcher icon and name and remembers the
   /// choice. Returns `false`, changing nothing, when the phone did not take
   /// the switch.

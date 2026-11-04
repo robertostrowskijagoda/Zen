@@ -388,10 +388,6 @@ final class EventService extends ChangeNotifier {
     return t != null && pin != null && t.pin == EventTicket.pinIdOf(pin);
   }
 
-  /// The organizer's real address (for sending to them).
-  String organizerAddress(MeetEvent e) =>
-      e.isMine ? host.ownAddress() : e.organizer;
-
   /// This person's own entry on [e].
   EventGuest? myGuest(MeetEvent e) =>
       e.isMine ? null : e.guest(host.ownAddress());
@@ -807,18 +803,6 @@ final class EventService extends ChangeNotifier {
               ),
             },
           ),
-  );
-
-  Future<void> inviteMore(String id, List<String> addresses) => _change(
-    id,
-    (MeetEvent e) => e.copyWith(
-      guests: <String, EventGuest>{
-        ...e.guests,
-        for (final String a in addresses)
-          if (!e.guests.containsKey(_n(a)))
-            _n(a): EventGuest(address: _n(a), name: host.nameOf(a)),
-      },
-    ),
   );
 
   /// Lets [guest] bring [count] people without asking.
