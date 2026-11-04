@@ -34,10 +34,7 @@ List<int> diagnosticsLogFileBytes(String text) => <int>[
 Future<AccountBackupSaved?> saveDiagnosticsLog({
   AccountBackupSystem? system,
   Future<String?> Function(String name)? pickTarget,
-  Future<String?> Function(
-    String name,
-    Future<void> Function(File file) write,
-  )?
+  Future<String?> Function(String name, Future<void> Function(File file) write)?
   saveAs,
   DateTime? now,
 }) async {

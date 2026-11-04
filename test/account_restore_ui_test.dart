@@ -29,13 +29,17 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 
 /// Backup files at fixed places (no dialogs): the default folder is the
-/// one of [path]; [chosen] is what the folder chooser answers (null: the
-/// person cancels).
+/// one of [path]; the folder chooser answers [chosen], the default folder
+/// when none is given, or null ([cancel]: the person closes it).
 final class _Places implements AccountBackupPlaces {
-  _Places(this.path, {this.chosen});
+  _Places(this.path, {AccountBackupFolder? chosen, this.cancel = false})
+    : _chosen = chosen;
 
   final String path;
-  AccountBackupFolder? chosen;
+  final AccountBackupFolder? _chosen;
+  final bool cancel;
+
+  AccountBackupFolder? get chosen => cancel ? null : _chosen ?? defaultPlace;
   int chooserCalls = 0;
   final List<AccountBackupFolder> written = <AccountBackupFolder>[];
 
@@ -635,19 +639,17 @@ void main() {
       }
     }
 
-    testWidgets('the default one is shown and written to', (
+    testWidgets('the place is asked when saving and written to', (
       WidgetTester tester,
     ) async {
       final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final _Places places = _Places('${dir.path}/k.$kAccountBackupExtension');
       await pumpBackup(tester, places);
-      expect(
-        find.text('${dir.path} (domyślnie)'),
-        findsOneWidget,
-        reason: 'the default folder is named',
-      );
+      expect(find.textContaining('Zapytam o miejsce'), findsOneWidget);
+      expect(places.chooserCalls, 0);
       await create(tester);
+      expect(places.chooserCalls, 1);
       expect(places.written.single, places.defaultPlace);
       expect(File(places.path).existsSync(), isTrue);
     });
@@ -666,36 +668,41 @@ void main() {
       await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
       await _real(tester);
       expect(find.text(other.path), findsOneWidget);
-      expect(find.textContaining('(domyślnie)'), findsNothing);
+      expect(find.textContaining('Zapytam o miejsce'), findsNothing);
       await create(tester);
+      // Chosen on the screen already: not asked again.
+      expect(places.chooserCalls, 1);
       expect(places.written.single.path, other.path);
       expect(other.listSync().single.path, endsWith(kAccountBackupExtension));
       expect(find.textContaining(other.path), findsWidgets);
       expect(File(places.path).existsSync(), isFalse);
-      // Back to the default.
+      // Back to asking when saving.
       await tester.tap(find.byKey(const Key('account-backup-folder-default')));
       await _real(tester);
-      expect(find.text('${dir.path} (domyślnie)'), findsOneWidget);
+      expect(find.textContaining('Zapytam o miejsce'), findsOneWidget);
     });
 
-    testWidgets('a cancelled chooser keeps the default', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('a closed chooser saves nothing', (WidgetTester tester) async {
       final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
       addTearDown(() => dir.deleteSync(recursive: true));
-      final _Places places = _Places('${dir.path}/k.$kAccountBackupExtension');
+      final _Places places = _Places(
+        '${dir.path}/k.$kAccountBackupExtension',
+        cancel: true,
+      );
       await pumpBackup(tester, places);
       await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
       await _real(tester);
       expect(places.chooserCalls, 1);
-      expect(find.text('${dir.path} (domyślnie)'), findsOneWidget);
+      expect(find.textContaining('Zapytam o miejsce'), findsOneWidget);
       expect(
         find.byKey(const Key('account-backup-folder-default')),
         findsNothing,
       );
       await create(tester);
-      expect(places.written.single, places.defaultPlace);
-      expect(File(places.path).existsSync(), isTrue);
+      expect(places.chooserCalls, 2);
+      expect(places.written, isEmpty);
+      expect(File(places.path).existsSync(), isFalse);
+      expect(find.text('Nie wybrano miejsca na kopię.'), findsOneWidget);
     });
 
     testWidgets('the passwords are hidden until "Pokaż", both fields at once', (
