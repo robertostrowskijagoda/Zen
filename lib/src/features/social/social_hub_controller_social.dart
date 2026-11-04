@@ -2329,7 +2329,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   /// Sends [text] to a group; as a reply to [replyTo], or marked as
   /// [forwarded] from another chat. Its `<@N>` tokens name [mentions]
   /// (`mentions.dart`): only members of the group are kept, and only those
-  /// the text really names.
+  /// the text really names. With [poll] it is that poll (its text is the
+  /// poll's, `chat_poll.dart`).
   @override
   Future<void> sendGroupMessage({
     required String groupId,
@@ -2337,7 +2338,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     ChatReply? replyTo,
     bool forwarded = false,
     List<Mention> mentions = const <Mention>[],
+    ChatPoll? poll,
   }) async {
+    if (poll != null) {
+      text = poll.asText;
+      mentions = const <Mention>[];
+    }
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
       return;
@@ -2372,6 +2378,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         reply: replyTo,
         forwarded: forwarded,
         mentions: named,
+        poll: poll,
       ),
     );
     _bumpTimelineRevision();
@@ -2396,6 +2403,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         if (replyTo != null) 're': replyTo.toJson(),
         if (forwarded) 'fwd': true,
         if (named.isNotEmpty) kMentionsKey: mentionsToJson(named),
+        if (poll != null) kPollKey: poll.toJson(),
       },
     );
   }

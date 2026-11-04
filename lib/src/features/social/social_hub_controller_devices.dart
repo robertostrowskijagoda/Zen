@@ -140,6 +140,7 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               direction: ChatMessageDirection.outgoing,
               deliveryState: ChatMessageDeliveryState.delivered,
               mentions: mentionsFromJson(payload[kMentionsKey]),
+              poll: ChatPoll.fromJson(payload[kPollKey]),
             ),
       );
     });

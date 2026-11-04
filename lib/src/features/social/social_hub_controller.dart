@@ -20,6 +20,7 @@ import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/queued_signal.dart';
@@ -1583,6 +1584,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     ChatReply? replyTo,
     bool forwarded = false,
     List<Mention> mentions = const <Mention>[],
+    ChatPoll? poll,
   });
 
   /// Reactions, edits, deletions, files in groups

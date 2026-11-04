@@ -19,7 +19,18 @@ import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 
 /// Where a file for a chat comes from.
-enum ChatAttachmentSource { camera, video, gallery, file, gif, voice, paste }
+/// Where a chat attachment comes from; [poll] is no file: a group's poll
+/// made in a dialog (`group_poll.dart`).
+enum ChatAttachmentSource {
+  camera,
+  video,
+  gallery,
+  file,
+  gif,
+  voice,
+  paste,
+  poll,
+}
 
 /// A file picked for a chat, ready for `sendLocalAttachment` /
 /// `sendGroupAttachment`: a photo already as a fresh JPEG (no location or
@@ -47,6 +58,7 @@ final class PickedChatAttachment {
 Future<ChatAttachmentSource?> pickChatAttachmentSource(
   BuildContext context, {
   required bool gifEnabled,
+  bool pollEnabled = false,
 }) {
   final ZenColors zen = ZenColors.of(context);
   Widget option(
@@ -113,6 +125,13 @@ Future<ChatAttachmentSource?> pickChatAttachmentSource(
                 Icons.content_paste_rounded,
                 t('Wklej obrazek ze schowka'),
               ),
+            if (pollEnabled)
+              option(
+                sheetContext,
+                ChatAttachmentSource.poll,
+                Icons.poll_outlined,
+                t('Ankieta'),
+              ),
           ],
         ),
       ),
@@ -142,6 +161,8 @@ Future<PickedChatAttachment?> pickChatAttachment(
       return _fromVoice(context, ref);
     case ChatAttachmentSource.paste:
       return _fromClipboard(context);
+    case ChatAttachmentSource.poll:
+      return null;
   }
 }
 

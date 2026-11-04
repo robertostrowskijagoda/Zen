@@ -23,7 +23,8 @@ const int _maxEditChars = 64 * 1024;
 /// [kChatEditWindow].
 const Duration _editClockSkew = Duration(hours: 1);
 
-/// [message] with the reply, forwarding and mentions [signal] carries.
+/// [message] with the reply, forwarding, mentions and poll [signal]
+/// carries.
 ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
   final Map<String, dynamic>? extras = signal.chatExtras;
   if (extras == null) {
@@ -33,6 +34,7 @@ ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
     reply: ChatReply.fromJson(extras['re']),
     forwarded: extras['fwd'] == true,
     mentions: usedMentions(message.text, signalMentions(signal)),
+    poll: ChatPoll.fromJson(extras[kPollKey]),
   );
 }
 
@@ -131,6 +133,8 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       message.isOutgoing &&
       !message.isDeleted &&
       message.type == ChatMessageType.text &&
+      // A poll's answers stay what the votes point at.
+      message.poll == null &&
       (nowMillis ?? DateTime.now().millisecondsSinceEpoch) -
               message.sentAtMillis <=
           kChatEditWindow.inMilliseconds;

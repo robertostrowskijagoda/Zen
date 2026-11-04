@@ -2,6 +2,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -444,16 +445,18 @@ ZenSignal? zenSignalFromTransportPayload({
 }
 
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
-/// and mentions (`men`) a chat or group message carries; `null` when none.
+/// mentions (`men`) and a poll (`poll`) a chat or group message carries; `null` when none.
 Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final ChatReply? reply = ChatReply.fromJson(payload['re']);
   final Object? media = payload['media'];
   final List<Mention> mentions = mentionsFromJson(payload[kMentionsKey]);
+  final ChatPoll? poll = ChatPoll.fromJson(payload[kPollKey]);
   final Map<String, dynamic> out = <String, dynamic>{
     if (reply != null) 're': reply.toJson(),
     if (payload['fwd'] == true) 'fwd': true,
     if (media is Map) 'media': Map<String, dynamic>.from(media),
     if (mentions.isNotEmpty) kMentionsKey: mentionsToJson(mentions),
+    if (poll != null) kPollKey: poll.toJson(),
   };
   return out.isEmpty ? null : out;
 }

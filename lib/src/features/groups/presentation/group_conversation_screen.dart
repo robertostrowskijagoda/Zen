@@ -13,6 +13,7 @@ import 'package:zen/src/domain/calls/ongoing_group_call.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/chat_media_blocks.dart';
@@ -29,6 +30,7 @@ import 'package:zen/src/features/chat/presentation/reveal_message.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
+import 'package:zen/src/features/groups/presentation/group_poll.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
@@ -237,8 +239,13 @@ class _GroupConversationScreenState
     final ChatAttachmentSource? source = await pickChatAttachmentSource(
       context,
       gifEnabled: ref.read(gifSearchEnabledProvider),
+      pollEnabled: true,
     );
     if (source == null || !mounted) {
+      return;
+    }
+    if (source == ChatAttachmentSource.poll) {
+      await _sendPoll();
       return;
     }
     setState(() => _attaching = true);
@@ -277,6 +284,23 @@ class _GroupConversationScreenState
       if (mounted) {
         setState(() => _attaching = false);
       }
+    }
+  }
+
+  /// Asks for a poll and sends it to the group.
+  Future<void> _sendPoll() async {
+    final ChatPoll? poll = await showPollComposer(context);
+    if (poll == null || !mounted) {
+      return;
+    }
+    try {
+      await _socialHub.sendGroupMessage(
+        groupId: widget.groupId,
+        text: poll.asText,
+        poll: poll,
+      );
+    } on StateError catch (error) {
+      _showSnack(error.message);
     }
   }
 
@@ -1390,6 +1414,20 @@ class _GroupConversationScreenState
                                             message: msg,
                                           ),
                                         )
+                                      else if (msg.poll != null)
+                                        GroupPollCard(
+                                          poll: msg.poll!,
+                                          reactions: msg.reactions,
+                                          nameOf: _nameOf,
+                                          onGradient: onGradient,
+                                          onVote: (int answer) => unawaited(
+                                            _socialHub.reactToMessage(
+                                              conversationKey: key,
+                                              messageId: msg.id,
+                                              emoji: kPollVotes[answer],
+                                            ),
+                                          ),
+                                        )
                                       else
                                         CopyableText(
                                           msg.text,
@@ -1440,9 +1478,15 @@ class _GroupConversationScreenState
                                                 ),
                                         ),
                                       if (!msg.isDeleted &&
-                                          msg.reactions.isNotEmpty)
+                                          reactionsBesidePoll(
+                                            msg.poll,
+                                            msg.reactions,
+                                          ).isNotEmpty)
                                         ChatReactionsBar(
-                                          reactions: msg.reactions,
+                                          reactions: reactionsBesidePoll(
+                                            msg.poll,
+                                            msg.reactions,
+                                          ),
                                           nameOf: _nameOf,
                                           onToggle: (String emoji) => unawaited(
                                             _socialHub.reactToMessage(
