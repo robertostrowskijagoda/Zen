@@ -49,6 +49,7 @@ import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/self_notes_screen.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/presentation/waiting_replies_card.dart';
+import 'package:zen/src/features/chat/scheduled_messages.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
@@ -354,6 +355,7 @@ class AppShellScreen extends ConsumerWidget {
         child: Column(
           children: <Widget>[
             _CallFeedbackHost(),
+            _ScheduledMessagesHost(),
             _StatusBar(),
             // A newer release on GitHub, or GitHub blocked.
             GithubUpdateBanner(),
@@ -368,6 +370,40 @@ class AppShellScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Sends the scheduled messages ("Wyślij później") whose time came, while
+/// the app runs: at the start and every minute.
+class _ScheduledMessagesHost extends ConsumerStatefulWidget {
+  const _ScheduledMessagesHost();
+
+  @override
+  ConsumerState<_ScheduledMessagesHost> createState() =>
+      _ScheduledMessagesHostState();
+}
+
+class _ScheduledMessagesHostState
+    extends ConsumerState<_ScheduledMessagesHost> {
+  ScheduledMessagesService? _service;
+
+  @override
+  void initState() {
+    super.initState();
+    final ScheduledMessagesService service = ref.read(
+      scheduledMessagesProvider,
+    );
+    _service = service;
+    service.start();
+  }
+
+  @override
+  void dispose() {
+    _service?.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// Plays ring feedback for incoming/outgoing calls regardless of the
