@@ -6,11 +6,14 @@ import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
@@ -169,6 +172,96 @@ void main() {
       expect(restored.activeCall!.isMuted, isTrue);
       expect(restored.activeCall!.isSpeakerOn, isTrue);
       expect(restored.activeCall!.isCameraEnabled, isFalse);
+    });
+
+    test('pinned by mutation testing: presence kept when only part of it '
+        "is known, an entry said by its body's event, timers, levels, a "
+        "group's notify-all and a group call's members", () async {
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'zen-social-store-pinned-',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        ),
+      );
+      final SocialHubState snapshot = SocialHubState.empty().copyWith(
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            'ada.ygg': FriendProfile(
+              address: 'ada.ygg',
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.accepted,
+              lastOpenedAtMillis: 42,
+            ),
+            'bob.ygg': FriendProfile(
+              address: 'bob.ygg',
+              displayName: 'Bob',
+              status: FriendRelationshipStatus.accepted,
+              presenceAtMillis: 7,
+            ),
+            'cat.ygg': FriendProfile(
+              address: 'cat.ygg',
+              displayName: 'Cat',
+              status: FriendRelationshipStatus.accepted,
+              presence: PeerPresence.background,
+            ),
+          },
+        ),
+        inbox: const <InboxEntry>[
+          InboxEntry(
+            id: 'said',
+            type: InboxEntryType.message,
+            title: 'Ada',
+            body: 'x',
+            createdAtMillis: 3,
+            bodyEvent: SocialEventText(
+              'chat.attachmentFailed',
+              <String, String>{'name': 'Ada'},
+            ),
+          ),
+        ],
+        disappearingTimers: const <String, int>{'ada.ygg': 30, 'group:g': 0},
+        notificationPrivacy: const <String, NotificationPrivacy>{
+          'ada.ygg': NotificationPrivacy.senderAndContent,
+        },
+        groupNotifyAll: const <String, bool>{'group:g': true},
+        activeCall: const CallSession(
+          id: 'call-g',
+          peerAddress: 'ada.ygg',
+          displayName: 'Grupa',
+          kind: CallInviteKind.audio,
+          status: CallSessionStatus.active,
+          startedAtMillis: 9,
+          isGroup: true,
+          groupId: 'g',
+          participantAddresses: <String>['ada.ygg', 'bob.ygg'],
+        ),
+      );
+      await store.save(snapshot);
+      final SocialHubState restored = (await store.load())!;
+      expect(restored.friendByAddress('ada.ygg')?.lastOpenedAtMillis, 42);
+      expect(restored.friendByAddress('bob.ygg')?.presenceAtMillis, 7);
+      expect(
+        restored.friendByAddress('bob.ygg')?.presence,
+        PeerPresence.offline,
+      );
+      expect(
+        restored.friendByAddress('cat.ygg')?.presence,
+        PeerPresence.background,
+      );
+      expect(restored.inbox.single.bodyEvent?.code, 'chat.attachmentFailed');
+      expect(restored.disappearingTimers, snapshot.disappearingTimers);
+      expect(restored.notificationPrivacy, snapshot.notificationPrivacy);
+      expect(restored.groupNotifyAll, snapshot.groupNotifyAll);
+      expect(restored.activeCall?.isGroup, isTrue);
+      expect(restored.activeCall?.groupId, 'g');
+      expect(restored.activeCall?.participantAddresses, <String>[
+        'ada.ygg',
+        'bob.ygg',
+      ]);
     });
 
     test('a friend goes by the name of their newest profile', () async {

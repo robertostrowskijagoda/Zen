@@ -807,7 +807,9 @@ nothing under `presentation/`) with a fast test of its own
 and is not in `tool/mutation_targets.json` yet. Each goes in there before
 the release, or goes in with `"skip": "<reason>"` (listed, never run), so
 the reminder stops naming it. Survivors of a new target are pinned with a
-test in the same pull request.
+test in the same pull request, unless the change behaves exactly as the
+original (an equivalent mutant: `growable: true`, a flag that only makes
+something be read again); those are named in the pull request.
 
 ### 11.5 Kotlin unit tests (`android/app/src/test`)
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -239,5 +240,55 @@ void main() {
     expect(updates, hasLength(1));
     expect(find.byKey(const Key('shared-location-stop')), findsNothing);
     sharing.dispose();
+  });
+  test('how often a position is read, by the length; which shares are '
+      "a conversation's; which systems share", () async {
+    expect(
+      locationUpdateEvery(const Duration(minutes: 15)),
+      const Duration(minutes: 1),
+    );
+    expect(
+      locationUpdateEvery(const Duration(minutes: 16)),
+      const Duration(minutes: 2),
+    );
+    expect(
+      locationUpdateEvery(const Duration(hours: 1)),
+      const Duration(minutes: 2),
+    );
+    expect(
+      locationUpdateEvery(const Duration(minutes: 61)),
+      const Duration(minutes: 5),
+    );
+
+    int id = 0;
+    final LocationSharingService sharing = LocationSharingService(
+      disk: MemoryLedgerDisk(),
+      now: () => 5000,
+      readFix: ({required bool ask}) async => const GeoFix(1, 2, 3),
+      send: (String key, String text, ChatLocation location) async =>
+          'm${id++}',
+      update: (String key, String id, String text, ChatLocation l) async =>
+          true,
+    );
+    await sharing.share(ola, length: const Duration(hours: 1));
+    await sharing.share('group:g', length: const Duration(hours: 1));
+    expect(sharing.active(ola).map((LocationShare s) => s.messageId), <String>[
+      'm0',
+    ]);
+    expect(sharing.active('group:x'), isEmpty);
+    expect(sharing.active(), hasLength(2));
+    sharing.dispose();
+
+    for (final (TargetPlatform platform, bool shares)
+        in <(TargetPlatform, bool)>[
+          (TargetPlatform.android, true),
+          (TargetPlatform.windows, true),
+          (TargetPlatform.linux, false),
+          (TargetPlatform.fuchsia, false),
+        ]) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(locationSharingAvailable, shares, reason: '$platform');
+    }
+    debugDefaultTargetPlatformOverride = null;
   });
 }

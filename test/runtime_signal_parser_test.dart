@@ -307,4 +307,115 @@ void main() {
     expect(signal.callId, 'call-9');
     expect(signal.content, 'video');
   });
+  group('pinned by mutation testing', () {
+    const String ola = '200:1111:2222:3333:4444:5555:6666:7777';
+    ZenSignal? parse(Map<String, dynamic> payload) =>
+        zenSignalFromTransportPayload(sender: ola, payload: payload);
+
+    test('a group signal without its group, or a group call without its '
+        'call, is dropped', () {
+      for (final String type in <String>[
+        'group_invite',
+        'group_invite_ack',
+        'group_message',
+      ]) {
+        expect(parse(<String, dynamic>{'type': type}), isNull, reason: type);
+        expect(
+          parse(<String, dynamic>{
+            'type': type,
+            'groupId': 'g',
+            'msgId': 'm',
+            'text': 'x',
+          }),
+          isNotNull,
+          reason: type,
+        );
+      }
+      for (final Map<String, dynamic> call in <Map<String, dynamic>>[
+        <String, dynamic>{'type': 'group_call_join', 'groupId': 'g'},
+        <String, dynamic>{'type': 'group_call_join', 'callId': 'c'},
+      ]) {
+        expect(parse(call), isNull, reason: '$call');
+      }
+      expect(
+        parse(<String, dynamic>{
+          'type': 'group_call_join',
+          'groupId': 'g',
+          'callId': 'c',
+        })?.type,
+        ZenSignalType.groupCallJoin,
+      );
+    });
+
+    test('an invitation answer says joined only when it says so', () {
+      for (final (Object? joined, String? content) in <(Object?, String?)>[
+        (true, kGroupJoinedAck),
+        (false, null),
+        ('true', null),
+        (null, null),
+      ]) {
+        expect(
+          parse(<String, dynamic>{
+            'type': 'group_invite_ack',
+            'groupId': 'g',
+            'joined': joined,
+          })!.content,
+          content,
+          reason: '$joined',
+        );
+      }
+    });
+
+    test("an invitation's members: trimmed, no empty or overlong address", () {
+      final ZenSignal invite = parse(<String, dynamic>{
+        'type': 'group_invite',
+        'groupId': 'g',
+        'memberAddresses': <Object?>[
+          ' $ola ',
+          '',
+          '   ',
+          'x' * (kMaxSignalIdChars + 1),
+          'y' * kMaxSignalIdChars,
+          7,
+        ],
+      })!;
+      expect(invite.memberAddresses, <String>[ola, 'y' * kMaxSignalIdChars]);
+    });
+
+    test('forwarded only when marked so', () {
+      Map<String, dynamic>? extras(Object? fwd) => parse(<String, dynamic>{
+        'type': 'message',
+        'msgId': 'm',
+        'text': 'x',
+        'fwd': fwd,
+      })!.chatExtras;
+      expect(extras(true)?['fwd'], isTrue);
+      expect(extras(false)?['fwd'], isNull);
+      expect(extras('true')?['fwd'], isNull);
+    });
+
+    test('typing reads a yes or a no in any case, anything else as typing', () {
+      bool? typing(Object? value) => parse(<String, dynamic>{
+        'type': 'typing',
+        'isTyping': value,
+      })!.isTyping;
+      expect(typing(false), isFalse);
+      expect(typing('False'), isFalse);
+      expect(typing('TRUE'), isTrue);
+      expect(typing('nie'), isTrue);
+      expect(typing(null), isTrue);
+    });
+
+    test('a long name is cut whole: at the limit, without half an emoji', () {
+      String? name(String given) => parse(<String, dynamic>{
+        'type': 'friend_request',
+        'senderName': given,
+      })!.displayName;
+      final String plain = 'a' * (kMaxSignalSenderNameChars + 10);
+      expect(name(plain), 'a' * kMaxSignalSenderNameChars);
+      // An emoji (two UTF-16 units) across the limit is left out whole.
+      final String across = '${'b' * (kMaxSignalSenderNameChars - 1)}😀zzz';
+      expect(name(across), 'b' * (kMaxSignalSenderNameChars - 1));
+    });
+  });
 }
