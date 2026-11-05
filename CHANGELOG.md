@@ -23,6 +23,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **"Pomiń konfigurację" at the top** of the setup, away from "Wstecz" and "Dalej" (it sat right under them).
 - **The graph: a friend's card** has "Napisz" and "Profil" right under the name (they were at the very end of the card, under all it tells) and "Usuń znajomego" at its end, asked once more first.
 - **"Czekają na Twoją odpowiedź" one by one**: a cross beside each waiting chat hides that one until a newer message comes from that friend; "Ukryj wszystkie" (with more than one) hides them all, as "Ukryj" did.
+- **No error when the ledger stops mid-announce**: the ledger node's callbacks (friends, own address, session key, auto-download, bridges) answer empty once its provider is gone, instead of reading through a disposed ref; an announce scheduled just before a restart threw (CI's crash end-to-end test caught it).
 - **Tests**: the upgrade fixture of 1.15.6.
 
 ## 1.15.6 — 05.11.2026
