@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/presentation/gate_widgets.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/settings/presentation/first_run_setup.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 String addr(String hex) => PeerShareCodec.normalizeAddress('200::$hex');
@@ -174,8 +176,12 @@ final class _Phone implements MeetHost, EventHost {
       if (s.$2['type'] == type) s.$2,
   ];
 
+  /// While set, sending waits for it (a friend's phone slow to answer).
+  Completer<void>? hold;
+
   @override
   Future<void> send(String to, Map<String, dynamic> payload) async {
+    await hold?.future;
     sent.add((to, payload));
     final _Phone? other = net.phones[PeerShareCodec.normalizeAddress(to)];
     if (other == null) {
@@ -1238,5 +1244,43 @@ void main() {
       // Every gatekeeper's terms travel: there is no switch any more.
       expect(line[6].intro.gates.relay, isTrue);
     });
+  });
+  test("the setup's gate choice holds at once and goes back and forth, "
+      'also while the friends are slow to answer', () async {
+    final ({
+      _Net net,
+      _Phone ania,
+      _Phone bartek,
+      _Phone celina,
+      _Phone darek,
+      _Phone ewa,
+    })
+    line = await _line();
+    final _Phone bartek = line.bartek;
+    final IntroGateDefaults gates = IntroGateDefaults(bartek.intro);
+    expect(gates.current, GateDefault.open);
+    // The friends' phones do not answer for now.
+    bartek.hold = Completer<void>();
+    await gates.set(GateDefault.consent).timeout(const Duration(seconds: 2));
+    expect(gates.current, GateDefault.consent);
+    await gates.set(GateDefault.open).timeout(const Duration(seconds: 2));
+    expect(gates.current, GateDefault.open);
+    await gates
+        .setTerms(const GateTerms(price: 50))
+        .timeout(const Duration(seconds: 2));
+    expect(gates.current, isNull);
+    expect(gates.terms?.price, 50);
+    await gates.set(GateDefault.consent).timeout(const Duration(seconds: 2));
+    expect(gates.current, GateDefault.consent);
+    // They answer: the friends get the last choice.
+    bartek.hold!.complete();
+    bartek.hold = null;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(
+      bartek.sentOf(IntroTypes.gate).isNotEmpty,
+      isTrue,
+      reason: 'the gates were told',
+    );
+    expect(bartek.intro.gates.sameForAll, GateTerms.freeWithConsent);
   });
 }

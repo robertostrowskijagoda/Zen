@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -1281,6 +1282,24 @@ final class IntroService extends ChangeNotifier {
     _gates.tiers[tier] = terms;
     await _save();
     await shareGates();
+  }
+
+  /// The same [terms] for every tier at once (the setup's choice): saved
+  /// before the friends are told, and told in the background, so the
+  /// choice holds at once even while a friend's phone is slow to answer
+  /// (one tier after another, each waiting for every friend, left the
+  /// gates mixed while the next choice came).
+  Future<void> setAllGateTiers(GateTerms terms) async {
+    await _ready();
+    for (final GateTier tier in GateTier.values) {
+      _gates.tiers[tier] = terms;
+    }
+    await _save();
+    unawaited(
+      shareGates().catchError((Object error, StackTrace stack) {
+        logZenWarning('Introductions: telling the gates failed: $error');
+      }),
+    );
   }
 
   /// Opens the gate for free for [person] ([free]), or back to the price of
