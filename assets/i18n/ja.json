@@ -100,6 +100,7 @@
   "Anulować zmianę limitu?": "上限の変更を取り消しますか？",
   "Anuluj": "キャンセル",
   "Anuluj odpowiedź": "返信をキャンセル",
+  "Anuluj wysłanie": "送信を取り消す",
   "Anuluj zaproszenie": "招待を取り消す",
   "Anuluj zmianę": "変更を取り消す",
   "Aparat": "カメラ",
@@ -533,6 +534,7 @@
   "Do {max} numerów. Zostają tylko w tym telefonie.": "最大{max}件まで。この端末にだけ保存されます。",
   "Do: {name}": "宛先：{name}",
   "Do: {name} ({price})": "宛先：{name}（{price}）",
+  "Do: {who} · {when}": "宛先：{who} · {when}",
   "Dobrze": "よかった",
   "Dodaj": "追加",
   "Dodaj członka": "メンバーを追加",
@@ -1043,6 +1045,7 @@
   "Jeszcze nic": "まだ何もありません",
   "Jeszcze nic.": "まだ何もありません。",
   "Jeszcze nic: bez wspólnych spotkań, kartek wdzięczności i wydarzeń, które widzi ten telefon.": "まだ何もありません。この端末に見える、一緒の集まり、お礼カード、イベントがありません。",
+  "Jeszcze nie głosowali: {names}": "まだ投票していない人：{names}",
   "Jeszcze nie ma filmów": "まだ動画がありません",
   "Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.": "まだ無事の確認がありません。このままだと、15分後に緊急アラームが届きます。",
   "Jeszcze nie rozmawialiście. Może napiszesz?": "まだ話したことがありません。メッセージを送ってみては？",
@@ -1876,6 +1879,7 @@
   "Nic do ustawienia": "設定するものはありません",
   "Nic jeszcze nie wybrano": "まだ何も選ばれていません",
   "Nic nie czeka.": "待っているものはありません。",
+  "Nic nie czeka. Przytrzymaj przycisk wysyłania, żeby wysłać wiadomość później.": "待機中のメッセージはありません。送信ボタンを長押しすると後で送信できます。",
   "Nic od przyjaciół": "親しい友だちの投稿はありません",
   "Nic od znajomych znajomych": "友だちの友だちからは何もありません",
   "Nic się nie zmienia.": "何も変わりません。",
@@ -2101,6 +2105,7 @@
   "Nie wszystkie zdjęcia tego posta są na urządzeniu — spróbuj za chwilę.": "この投稿の写真がすべて端末にあるわけではありません。少ししてから、もう一度お試しください。",
   "Nie wybrano kraju.": "国が選ばれていません。",
   "Nie wybrano miejsca na kopię.": "バックアップの保存先が選ばれていません。",
+  "Nie zagłosowali: {names}": "投票しなかった人：{names}",
   "Nie zamykaj Zen w przełączniku aplikacji": "App切り替えでZenを閉じないでください",
   "Nie zapisuj": "保存しない",
   "Nie zezwolono na udostępnienie ekranu.": "画面共有が許可されませんでした。",
@@ -4270,6 +4275,7 @@
   "Wszystkie": "すべて",
   "Wszystkie w rozmowie ({count})": "会話内のすべて（{count}）",
   "Wszystkie zakończone": "すべて完了",
+  "Wszystkie zaplanowane": "予約済みをすべて表示",
   "Wszystkie zmiany": "すべての変更",
   "Wszystko": "すべて",
   "Wszystko OK": "無事です",
@@ -4663,6 +4669,7 @@
   "Zapisz to ID w bezpiecznym miejscu. Bez niego nie otworzysz tego konta — Zen nigdzie go nie pokazuje poza ustawieniami samego konta.": "このIDを安全な場所に保存してください。IDがないとこのアカウントは開けません — Zenはこのアカウント自体の設定以外ではIDを表示しません。",
   "Zapisz to ID. Zobaczysz je też w ustawieniach tego konta.": "このIDを保存してください。このアカウントの設定でも確認できます。",
   "Zapisz zalacznik": "添付ファイルを保存",
+  "Zaplanowane wiadomości": "予約メッセージ",
   "Zaplanowano na {when}": "{when} に予約済み",
   "Zapowiedziana zmiana limitów": "上限の予告変更",
   "Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.": "上限の予告変更：発行 {old} → 30日で{limit}、待機{hours}時間；送金 {oldXfers} → 1人1日{xfers}件。頂点が取り消さなければ{date}から適用されます。",
@@ -4928,6 +4935,7 @@
   "Zmierzch": "夕暮れ",
   "Zmień": "変更",
   "Zmień cenę": "価格を変更",
+  "Zmień godzinę": "時刻を変更",
   "Zmień hasło": "パスワードを変更",
   "Zmień hasło aplikacji": "アプリのパスワードを変更",
   "Zmień kamerę": "カメラを切り替え",
@@ -4935,6 +4943,7 @@
   "Zmień kod": "コードを変更",
   "Zmień limity": "上限を変更",
   "Zmień status": "ステータスを変更",
+  "Zmień treść": "内容を変更",
   "Zmień zasady": "ルールを変更",
   "Zmień zdjęcie": "写真を変更",
   "Zmniejszanie filmu…": "動画を圧縮中…",
@@ -5793,6 +5802,9 @@
   },
   "{n} za zgodą": {
     "other": "同意あり{n}件"
+  },
+  "{n} zaplanowanych wiadomości": {
+    "other": "予約メッセージ {n} 件"
   },
   "{n} zgód": {
     "other": "同意{n}件"

@@ -100,6 +100,7 @@
   "Anulować zmianę limitu?": "Hủy thay đổi giới hạn?",
   "Anuluj": "Hủy",
   "Anuluj odpowiedź": "Hủy trả lời",
+  "Anuluj wysłanie": "Hủy gửi",
   "Anuluj zaproszenie": "Hủy lời mời",
   "Anuluj zmianę": "Hủy thay đổi",
   "Aparat": "Camera",
@@ -533,6 +534,7 @@
   "Do {max} numerów. Zostają tylko w tym telefonie.": "Tối đa {max} số. Chỉ lưu trên điện thoại này.",
   "Do: {name}": "Đến: {name}",
   "Do: {name} ({price})": "Cho: {name} ({price})",
+  "Do: {who} · {when}": "Gửi: {who} · {when}",
   "Dobrze": "Ổn",
   "Dodaj": "Thêm",
   "Dodaj członka": "Thêm thành viên",
@@ -1043,6 +1045,7 @@
   "Jeszcze nic": "Chưa có gì",
   "Jeszcze nic.": "Chưa có gì.",
   "Jeszcze nic: bez wspólnych spotkań, kartek wdzięczności i wydarzeń, które widzi ten telefon.": "Chưa có gì: không có buổi gặp chung, thiệp cảm ơn hay sự kiện mà điện thoại này thấy.",
+  "Jeszcze nie głosowali: {names}": "Chưa bình chọn: {names}",
   "Jeszcze nie ma filmów": "Chưa có video nào",
   "Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.": "Họ chưa xác nhận là mọi việc ổn. Nếu không có gì thay đổi, sau 15 phút bạn sẽ nhận được báo động.",
   "Jeszcze nie rozmawialiście. Może napiszesz?": "Hai bạn chưa trò chuyện. Nhắn tin nhé?",
@@ -1876,6 +1879,7 @@
   "Nic do ustawienia": "Không có gì để cài đặt",
   "Nic jeszcze nie wybrano": "Chưa chọn gì",
   "Nic nie czeka.": "Không có gì đang chờ.",
+  "Nic nie czeka. Przytrzymaj przycisk wysyłania, żeby wysłać wiadomość później.": "Không có gì đang chờ. Nhấn giữ nút gửi để gửi tin nhắn sau.",
   "Nic od przyjaciół": "Chưa có gì từ bạn thân",
   "Nic od znajomych znajomych": "Không có gì từ bạn của bạn bè",
   "Nic się nie zmienia.": "Không có gì thay đổi.",
@@ -2101,6 +2105,7 @@
   "Nie wszystkie zdjęcia tego posta są na urządzeniu — spróbuj za chwilę.": "Không phải ảnh nào của bài đăng này cũng có trên thiết bị — hãy thử lại sau giây lát.",
   "Nie wybrano kraju.": "Chưa chọn quốc gia.",
   "Nie wybrano miejsca na kopię.": "Chưa chọn nơi lưu bản sao.",
+  "Nie zagłosowali: {names}": "Không bình chọn: {names}",
   "Nie zamykaj Zen w przełączniku aplikacji": "Đừng đóng Zen trong trình chuyển ứng dụng",
   "Nie zapisuj": "Không lưu",
   "Nie zezwolono na udostępnienie ekranu.": "Chưa được cho phép chia sẻ màn hình.",
@@ -4270,6 +4275,7 @@
   "Wszystkie": "Tất cả",
   "Wszystkie w rozmowie ({count})": "Tất cả trong cuộc trò chuyện ({count})",
   "Wszystkie zakończone": "Tất cả đã hoàn tất",
+  "Wszystkie zaplanowane": "Tất cả tin đã hẹn",
   "Wszystkie zmiany": "Mọi thay đổi",
   "Wszystko": "Tất cả",
   "Wszystko OK": "Mọi việc ổn",
@@ -4663,6 +4669,7 @@
   "Zapisz to ID w bezpiecznym miejscu. Bez niego nie otworzysz tego konta — Zen nigdzie go nie pokazuje poza ustawieniami samego konta.": "Hãy lưu ID này ở nơi an toàn. Không có nó bạn không mở được tài khoản này — Zen không hiển thị nó ở đâu ngoài cài đặt của chính tài khoản đó.",
   "Zapisz to ID. Zobaczysz je też w ustawieniach tego konta.": "Hãy lưu ID này. Bạn cũng sẽ thấy nó trong cài đặt của tài khoản này.",
   "Zapisz zalacznik": "Lưu tệp đính kèm",
+  "Zaplanowane wiadomości": "Tin nhắn đã hẹn giờ",
   "Zaplanowano na {when}": "Đã hẹn lúc {when}",
   "Zapowiedziana zmiana limitów": "Thay đổi giới hạn đã thông báo",
   "Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.": "Thay đổi giới hạn đã thông báo: phát hành {old} → {limit} mỗi 30 ngày, chờ {hours} giờ; chuyển khoản {oldXfers} → {xfers} mỗi người mỗi ngày. Có hiệu lực từ {date}, trừ khi đỉnh hủy.",
@@ -4928,6 +4935,7 @@
   "Zmierzch": "Hoàng hôn",
   "Zmień": "Đổi",
   "Zmień cenę": "Đổi giá",
+  "Zmień godzinę": "Đổi giờ",
   "Zmień hasło": "Đổi mật khẩu",
   "Zmień hasło aplikacji": "Đổi mật khẩu ứng dụng",
   "Zmień kamerę": "Đổi camera",
@@ -4935,6 +4943,7 @@
   "Zmień kod": "Đổi mã",
   "Zmień limity": "Đổi giới hạn",
   "Zmień status": "Đổi trạng thái",
+  "Zmień treść": "Sửa nội dung",
   "Zmień zasady": "Đổi quy tắc",
   "Zmień zdjęcie": "Đổi ảnh",
   "Zmniejszanie filmu…": "Đang thu nhỏ video…",
@@ -5793,6 +5802,9 @@
   },
   "{n} za zgodą": {
     "other": "{n} khi được đồng ý"
+  },
+  "{n} zaplanowanych wiadomości": {
+    "other": "{n} tin nhắn đã hẹn giờ"
   },
   "{n} zgód": {
     "other": "{n} đồng ý"

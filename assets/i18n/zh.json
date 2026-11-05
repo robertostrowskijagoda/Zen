@@ -100,6 +100,7 @@
   "Anulować zmianę limitu?": "取消上限变更？",
   "Anuluj": "取消",
   "Anuluj odpowiedź": "取消回复",
+  "Anuluj wysłanie": "取消发送",
   "Anuluj zaproszenie": "取消邀请",
   "Anuluj zmianę": "取消变更",
   "Aparat": "相机",
@@ -533,6 +534,7 @@
   "Do {max} numerów. Zostają tylko w tym telefonie.": "最多 {max} 个号码。只保存在这部手机上。",
   "Do: {name}": "给：{name}",
   "Do: {name} ({price})": "给：{name}（{price}）",
+  "Do: {who} · {when}": "发给：{who} · {when}",
   "Dobrze": "不错",
   "Dodaj": "添加",
   "Dodaj członka": "添加成员",
@@ -1043,6 +1045,7 @@
   "Jeszcze nic": "暂无",
   "Jeszcze nic.": "还没有内容。",
   "Jeszcze nic: bez wspólnych spotkań, kartek wdzięczności i wydarzeń, które widzi ten telefon.": "还没有：这部手机看不到你们共同的见面、感谢卡或活动。",
+  "Jeszcze nie głosowali: {names}": "尚未投票：{names}",
   "Jeszcze nie ma filmów": "还没有视频",
   "Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.": "对方还没有确认一切正常。如果情况没有变化，15 分钟后你会收到警报。",
   "Jeszcze nie rozmawialiście. Może napiszesz?": "你们还没聊过。要不发个消息？",
@@ -1876,6 +1879,7 @@
   "Nic do ustawienia": "没有需要设置的",
   "Nic jeszcze nie wybrano": "尚未选择任何内容",
   "Nic nie czeka.": "没有待处理的事项。",
+  "Nic nie czeka. Przytrzymaj przycisk wysyłania, żeby wysłać wiadomość później.": "没有等待发送的消息。按住发送按钮即可稍后发送消息。",
   "Nic od przyjaciół": "密友没有新内容",
   "Nic od znajomych znajomych": "没有好友的好友的消息",
   "Nic się nie zmienia.": "没有任何变化。",
@@ -2101,6 +2105,7 @@
   "Nie wszystkie zdjęcia tego posta są na urządzeniu — spróbuj za chwilę.": "这篇帖子的照片并未全部在设备上——请稍后再试。",
   "Nie wybrano kraju.": "未选择国家。",
   "Nie wybrano miejsca na kopię.": "未选择备份的保存位置。",
+  "Nie zagłosowali: {names}": "未投票：{names}",
   "Nie zamykaj Zen w przełączniku aplikacji": "不要在应用切换器中关闭 Zen",
   "Nie zapisuj": "不保存",
   "Nie zezwolono na udostępnienie ekranu.": "未获准共享屏幕。",
@@ -4270,6 +4275,7 @@
   "Wszystkie": "全部",
   "Wszystkie w rozmowie ({count})": "对话中的全部（{count}）",
   "Wszystkie zakończone": "全部已结束",
+  "Wszystkie zaplanowane": "全部定时消息",
   "Wszystkie zmiany": "所有变化",
   "Wszystko": "全部",
   "Wszystko OK": "一切正常",
@@ -4663,6 +4669,7 @@
   "Zapisz to ID w bezpiecznym miejscu. Bez niego nie otworzysz tego konta — Zen nigdzie go nie pokazuje poza ustawieniami samego konta.": "把这个 ID 存在安全的地方。没有它你打不开这个账户 —— 除了账户自己的设置外，Zen 不会在任何地方显示它。",
   "Zapisz to ID. Zobaczysz je też w ustawieniach tego konta.": "记下这个 ID。在此账户的设置中也能看到。",
   "Zapisz zalacznik": "保存附件",
+  "Zaplanowane wiadomości": "定时消息",
   "Zaplanowano na {when}": "已安排在 {when}",
   "Zapowiedziana zmiana limitów": "已公告的上限变更",
   "Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.": "已公告的上限变更：发行 {old} → 每 30 天 {limit}，等待 {hours} 小时；转账 {oldXfers} → 每人每天 {xfers} 笔。自 {date} 起生效，除非塔尖取消。",
@@ -4928,6 +4935,7 @@
   "Zmierzch": "黄昏",
   "Zmień": "更改",
   "Zmień cenę": "更改价格",
+  "Zmień godzinę": "修改时间",
   "Zmień hasło": "更改密码",
   "Zmień hasło aplikacji": "更改应用密码",
   "Zmień kamerę": "切换摄像头",
@@ -4935,6 +4943,7 @@
   "Zmień kod": "更换邀请码",
   "Zmień limity": "更改上限",
   "Zmień status": "更改状态",
+  "Zmień treść": "修改内容",
   "Zmień zasady": "更改规则",
   "Zmień zdjęcie": "更换照片",
   "Zmniejszanie filmu…": "正在压缩视频…",
@@ -5793,6 +5802,9 @@
   },
   "{n} za zgodą": {
     "other": "{n} 个需同意"
+  },
+  "{n} zaplanowanych wiadomości": {
+    "other": "{n} 条定时消息"
   },
   "{n} zgód": {
     "other": "{n} 个同意"
