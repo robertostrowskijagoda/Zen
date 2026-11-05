@@ -389,6 +389,7 @@ class _EditScheduledState extends State<_EditScheduled> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: Text(t('Zmień treść')),
     content: TextField(
       key: const Key('scheduled-edit-field'),
