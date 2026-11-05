@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.5 — 05.11.2026
+
 ### What's new
 - [en] Each kind of notification has its own switch and its own level of what it shows, and a new version of Zen is always announced.
 - [en] Polls in groups, live location for a while, notes to yourself, messages sent later and chats muted for a time; in groups only mentions notify by default.
