@@ -287,7 +287,7 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
           Align(
             alignment: AlignmentDirectional.centerEnd,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 8, 0),
               child: TextButton(
                 key: const Key('first-run-skip'),
                 onPressed: _finishing ? null : () => unawaited(_finish()),
