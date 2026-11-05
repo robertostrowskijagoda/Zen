@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.7 — 05.11.2026
+
 ### What's new
 - [en] "Waiting for your reply" can be hidden for one chat at a time, and a friend's card on the graph lets you write to them or remove them.
 - [en] The setup keeps your choice of gates at once, and "Skip setup" is away from the Back and Next buttons.
