@@ -1697,60 +1697,67 @@ void main() {
   });
 
   group('telling people about Zen', () {
-    test('the home page leads with the promise, one big download for the '
-        "visitor's system and how it works, then the reasons", () {
-      final String home = _read('index.html');
-      final Map<String, Map<String, String>> texts = _texts('index.html');
-      int at(String part) {
-        final int i = home.indexOf(part);
-        expect(i, greaterThan(0), reason: part);
-        return i;
-      }
+    test(
+      'the home page leads with the promise, one big download for the '
+      "visitor's system, how it works and the app itself, then the reasons",
+      () {
+        final String home = _read('index.html');
+        final Map<String, Map<String, String>> texts = _texts('index.html');
+        int at(String part) {
+          final int i = home.indexOf(part);
+          expect(i, greaterThan(0), reason: part);
+          return i;
+        }
 
-      // In this order: the promise, the download, the reasons, the
-      // screenshots, how it works, the idea, questions, the last call.
-      final List<int> order = <int>[
-        at('data-i="heroTitle"'),
-        at('data-i="lead"'),
-        at('id="android" class="btn primary big block"'),
-        at('href="#how"'),
-        at('<section class="sec" id="why"'),
-        at('<section class="sec" id="shots"'),
-        at('<section class="sec" id="how"'),
-        at('<section class="sec" id="idea"'),
-        at('<section class="sec" id="faq"'),
-        at('<section class="sec final" id="start"'),
-      ];
-      for (int i = 1; i < order.length; i++) {
-        expect(order[i], greaterThan(order[i - 1]), reason: 'part $i');
-      }
-      // Every system keeps its big button; the script shows the visitor's.
-      for (final String os in <String>[
-        'android',
-        'windows',
-        'linux',
-        'iphone',
-        'macos',
-      ]) {
-        expect(home, contains('id="$os" class="btn primary big block"'));
-      }
-      expect(home, contains('Zen.systemButtons()'));
-      // An invitation still opens the app first; the home page only offers
-      // it to those who have the app, and stays a page to read.
-      expect(home, contains('Zen.t(code ? "invTitle" : "heroTitle")'));
-      expect(home, contains('if (android && code && !noApp)'));
-      expect(home, contains('id="openApp"'));
-      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
-        expect(lang.value['heroTitle'], isNotEmpty, reason: lang.key);
+        // In this order: the promise, the download, how it works, the
+        // screenshots (the product before the words about it), the reasons,
+        // the idea, questions, the last call.
+        final List<int> order = <int>[
+          at('data-i="heroTitle"'),
+          at('data-i="lead"'),
+          at('id="android" class="btn primary big block"'),
+          at('<section class="sec" id="how"'),
+          at('<section class="sec" id="shots"'),
+          at('<section class="sec" id="why"'),
+          at('<section class="sec" id="idea"'),
+          at('<section class="sec" id="faq"'),
+          at('<section class="sec final" id="start"'),
+        ];
+        for (int i = 1; i < order.length; i++) {
+          expect(order[i], greaterThan(order[i - 1]), reason: 'part $i');
+        }
+        // Every system keeps its big button; the script shows the visitor's.
+        for (final String os in <String>[
+          'android',
+          'windows',
+          'linux',
+          'iphone',
+          'macos',
+        ]) {
+          expect(home, contains('id="$os" class="btn primary big block"'));
+        }
+        expect(home, contains('Zen.systemButtons()'));
+        // An invitation still opens the app first; the home page only offers
+        // it to those who have the app, and stays a page to read.
+        expect(home, contains('Zen.t(code ? "invTitle" : "heroTitle")'));
+        expect(home, contains('if (android && code && !noApp)'));
+        expect(home, contains('id="openApp"'));
+        for (final MapEntry<String, Map<String, String>> lang
+            in texts.entries) {
+          expect(lang.value['heroTitle'], isNotEmpty, reason: lang.key);
+          expect(
+            lang.value['heroTitle'],
+            isNot(lang.value['invTitle']),
+            reason: lang.key,
+          );
+        }
         expect(
-          lang.value['heroTitle'],
-          isNot(lang.value['invTitle']),
-          reason: lang.key,
+          texts['en']!['heroTitle'],
+          'Your people. No company in between.',
         );
-      }
-      expect(texts['en']!['heroTitle'], 'Your people. No company in between.');
-      expect(texts['pl']!['heroTitle'], 'Twoi ludzie. Bez firmy pośrodku.');
-    });
+        expect(texts['pl']!['heroTitle'], 'Twoi ludzie. Bez firmy pośrodku.');
+      },
+    );
 
     test('the reasons go from the most tempting, in a stable order, each '
         'with an icon and a text in every language', () {
@@ -1909,7 +1916,8 @@ void main() {
         expect(texts['pl']!['r3'], contains(way), reason: way);
       }
       expect(texts['pl']!['q1'], 'Czy to bezpieczne?');
-      expect(texts['pl']!['q2'], 'Czemu nie ma go w sklepie?');
+      // The stores as what Zen gains, not as a warning.
+      expect(texts['pl']!['q2'], 'Dlaczego Zen jest poza sklepami?');
       expect(texts['pl']!['q3'], 'Co jeśli zgubię telefon?');
       for (final Map<String, String> t in texts.values) {
         expect(t['r1'], contains('docs/SECURITY_MODEL.md]'));
