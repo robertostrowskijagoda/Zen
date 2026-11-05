@@ -29,17 +29,99 @@ const List<String> kPollVotes = <String>[
   '\u{1F51F}',
 ];
 
-/// A poll in a group: a question and its answers, one vote per person.
+/// The longest a poll can be set to stay open.
+const Duration kMaxPollOpen = Duration(days: 30);
+
+/// A poll in a group: a question and its answers, one vote per person;
+/// open until [closesAtMillis] (when one was set) or until its author ends
+/// it ([closedAtMillis]). Votes cast after that do not count.
 @immutable
 final class ChatPoll {
-  const ChatPoll({required this.question, required this.options});
+  const ChatPoll({
+    required this.question,
+    required this.options,
+    this.closesAtMillis,
+    this.closedAtMillis,
+  });
 
   final String question;
   final List<String> options;
 
+  /// Set when the poll was made: it closes by itself then.
+  final int? closesAtMillis;
+
+  /// When its author ended it (before [closesAtMillis]).
+  final int? closedAtMillis;
+
+  /// Since when it is closed, or `null` while it is open at [nowMillis].
+  int? closedSince(int nowMillis) {
+    final int? deadline = closesAtMillis;
+    final int? ended = closedAtMillis;
+    if (ended != null && (deadline == null || ended <= deadline)) {
+      return ended;
+    }
+    return deadline != null && nowMillis >= deadline ? deadline : null;
+  }
+
+  /// No more votes count at [nowMillis].
+  bool isClosedAt(int nowMillis) => closedSince(nowMillis) != null;
+
+  /// This poll ended by its author at [atMillis] (an ended one stays as it
+  /// was).
+  ChatPoll endedAt(int atMillis) => closedAtMillis != null
+      ? this
+      : ChatPoll(
+          question: question,
+          options: options,
+          closesAtMillis: closesAtMillis,
+          closedAtMillis: atMillis,
+        );
+
+  /// What its author's ending, arrived as [json] (in an edit of the
+  /// poll's message) at [receivedAtMillis], makes of this poll; `null` when
+  /// it is no ending of this poll (another poll, one not ended) or this one
+  /// already ended. An ending claimed later than its arrival counts as
+  /// ended on arrival.
+  ChatPoll? endingOf(Object? json, {required int receivedAtMillis}) {
+    final ChatPoll? sent = fromJson(json);
+    final int? at = sent?.closedAtMillis;
+    if (sent == null ||
+        at == null ||
+        closedAtMillis != null ||
+        !isSamePollAs(sent)) {
+      return null;
+    }
+    return endedAt(at > receivedAtMillis ? receivedAtMillis : at);
+  }
+
+  /// The same poll: question, answers and time limit (whether ended or not).
+  bool isSamePollAs(ChatPoll other) =>
+      other.question == question &&
+      listEquals(other.options, options) &&
+      other.closesAtMillis == closesAtMillis;
+
+  /// The answers with the most votes among [voters] (several on a tie);
+  /// empty when nobody voted.
+  List<int> leading(List<List<String>> voters) {
+    int most = 0;
+    for (final List<String> v in voters) {
+      most = v.length > most ? v.length : most;
+    }
+    return most == 0
+        ? const <int>[]
+        : <int>[
+            for (int i = 0; i < voters.length; i++)
+              if (voters[i].length == most) i,
+          ];
+  }
+
   /// The poll made of what was typed: trimmed, empty answers and repeats
   /// left out; `null` without a question or with fewer than two answers.
-  static ChatPoll? of(String question, Iterable<String> options) {
+  static ChatPoll? of(
+    String question,
+    Iterable<String> options, {
+    int? closesAtMillis,
+  }) {
     final String q = question.trim();
     final List<String> answers = <String>[];
     for (final String raw in options) {
@@ -56,7 +138,11 @@ final class ChatPoll {
         answers.length > kMaxPollOptions) {
       return null;
     }
-    return ChatPoll(question: q, options: List<String>.unmodifiable(answers));
+    return ChatPoll(
+      question: q,
+      options: List<String>.unmodifiable(answers),
+      closesAtMillis: closesAtMillis,
+    );
   }
 
   /// The poll as text: the question and the numbered answers (the message's
@@ -69,6 +155,8 @@ final class ChatPoll {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'q': question,
     'o': options,
+    'd': ?closesAtMillis,
+    'c': ?closedAtMillis,
   };
 
   static ChatPoll? fromJson(Object? json) {
@@ -84,10 +172,18 @@ final class ChatPoll {
     if (options.length != o.length) {
       return null;
     }
-    final ChatPoll? poll = ChatPoll.of(q, options);
+    final Object? d = json['d'];
+    final Object? c = json['c'];
+    if ((d != null && (d is! int || d <= 0)) ||
+        (c != null && (c is! int || c <= 0))) {
+      return null;
+    }
+    final ChatPoll? poll = ChatPoll.of(q, options, closesAtMillis: d as int?);
     // Exactly what was sent, or nothing: the numbers must point at the
     // same answers for everyone.
-    return poll != null && listEquals(poll.options, options) ? poll : null;
+    return poll != null && listEquals(poll.options, options)
+        ? (c == null ? poll : poll.endedAt(c as int))
+        : null;
   }
 
   /// Which answer [reaction] votes for; `null` when it is no vote here.
@@ -113,9 +209,14 @@ final class ChatPoll {
   @override
   bool operator ==(Object other) =>
       other is ChatPoll &&
-      other.question == question &&
-      listEquals(other.options, options);
+      isSamePollAs(other) &&
+      other.closedAtMillis == closedAtMillis;
 
   @override
-  int get hashCode => Object.hash(question, Object.hashAll(options));
+  int get hashCode => Object.hash(
+    question,
+    Object.hashAll(options),
+    closesAtMillis,
+    closedAtMillis,
+  );
 }

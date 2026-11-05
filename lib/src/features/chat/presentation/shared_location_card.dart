@@ -94,7 +94,7 @@ Future<void> shareLocationFrom(
 }
 
 /// A shared position in a chat: when and how precise, live or not, the
-/// map; on one's own live one, ending it.
+/// map; on one's own live one, ending it or saying one arrived.
 class SharedLocationCard extends ConsumerWidget {
   const SharedLocationCard({
     super.key,
@@ -130,18 +130,25 @@ class SharedLocationCard extends ConsumerWidget {
             Row(
               children: <Widget>[
                 Icon(
-                  live ? Icons.share_location_rounded : Icons.place_outlined,
+                  location.arrived
+                      ? Icons.where_to_vote_rounded
+                      : live
+                      ? Icons.share_location_rounded
+                      : Icons.place_outlined,
                   size: 20,
                   color: text,
                 ),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    live
+                    location.arrived
+                        ? t('Na miejscu')
+                        : live
                         ? t('Położenie na żywo do {time}', <String, Object?>{
                             'time': _clock(location.untilMillis),
                           })
                         : t('Położenie'),
+                    key: const Key('shared-location-title'),
                     style: TextStyle(
                       color: text,
                       fontSize: 15,
@@ -160,7 +167,9 @@ class SharedLocationCard extends ConsumerWidget {
               key: const Key('shared-location-when'),
               style: TextStyle(color: muted, fontSize: 12),
             ),
-            if (!live && location.untilMillis > location.atMillis)
+            if (!live &&
+                !location.arrived &&
+                location.untilMillis > location.atMillis)
               Text(
                 t('Udostępnianie zakończone'),
                 style: TextStyle(color: muted, fontSize: 12),
@@ -182,6 +191,18 @@ class SharedLocationCard extends ConsumerWidget {
                   icon: const Icon(Icons.map_outlined, size: 18),
                   label: Text(t('Otwórz mapę')),
                 ),
+                if (mineLive)
+                  OutlinedButton.icon(
+                    key: const Key('shared-location-arrived'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: text,
+                      side: BorderSide(color: muted),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => unawaited(sharing.arrive(message.id)),
+                    icon: const Icon(Icons.where_to_vote_outlined, size: 18),
+                    label: Text(t('Jestem na miejscu')),
+                  ),
                 if (mineLive)
                   OutlinedButton.icon(
                     key: const Key('shared-location-stop'),

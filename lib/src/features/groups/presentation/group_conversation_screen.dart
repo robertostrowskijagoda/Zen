@@ -1461,6 +1461,14 @@ class _GroupConversationScreenState
                                               emoji: kPollVotes[answer],
                                             ),
                                           ),
+                                          onEnd: isSelf && isMember
+                                              ? () => unawaited(
+                                                  _socialHub.endPoll(
+                                                    conversationKey: key,
+                                                    messageId: msg.id,
+                                                  ),
+                                                )
+                                              : null,
                                         )
                                       else
                                         CopyableText(

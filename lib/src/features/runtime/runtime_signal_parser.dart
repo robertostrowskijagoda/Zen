@@ -377,13 +377,8 @@ ZenSignal? zenSignalFromTransportPayload({
                 ? emoji
                 : '',
           },
-          // A newer position of a shared one.
-          'msg_edit' => switch (ChatLocation.fromJson(payload[kLocationKey])) {
-            final ChatLocation location => <String, dynamic>{
-              kLocationKey: location.toJson(),
-            },
-            null => null,
-          },
+          // A newer position of a shared one, or a poll its author ended.
+          'msg_edit' => _editExtras(payload),
           _ => null,
         },
       );
@@ -455,6 +450,18 @@ ZenSignal? zenSignalFromTransportPayload({
 
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
 /// mentions (`men`), a poll (`poll`) and a position (`loc`) a chat or group message carries; `null` when none.
+/// What an edit carries beside its text: a newer position of a shared one
+/// ([kLocationKey]) or the poll its author ended ([kPollKey]).
+Map<String, dynamic>? _editExtras(Map<String, dynamic> payload) {
+  final ChatLocation? location = ChatLocation.fromJson(payload[kLocationKey]);
+  final ChatPoll? poll = ChatPoll.fromJson(payload[kPollKey]);
+  final Map<String, dynamic> out = <String, dynamic>{
+    if (location != null) kLocationKey: location.toJson(),
+    if (poll != null && poll.closedAtMillis != null) kPollKey: poll.toJson(),
+  };
+  return out.isEmpty ? null : out;
+}
+
 Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final ChatReply? reply = ChatReply.fromJson(payload['re']);
   final Object? media = payload['media'];
