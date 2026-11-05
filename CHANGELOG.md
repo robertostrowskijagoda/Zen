@@ -10,11 +10,20 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.7 — 05.11.2026
+
+### What's new
+- [en] "Waiting for your reply" can be hidden for one chat at a time, and a friend's card on the graph lets you write to them or remove them.
+- [en] The setup keeps your choice of gates at once, and "Skip setup" is away from the Back and Next buttons.
+- [pl] „Czekają na Twoją odpowiedź” ukryjesz dla jednej rozmowy, a z karty znajomego na grafie napiszesz do niego albo go usuniesz.
+- [pl] Konfiguracja od razu zapamiętuje wybór bram, a „Pomiń konfigurację” jest z dala od „Wstecz” i „Dalej”.
+
 ### Fixes and changes
 - **The setup's gate choice holds**: "Otwarte za darmo", "Za moją zgodą" or a price is saved for every tier at once and told to the friends in the background. It set one tier after another, each waiting until every friend was told; with friends slow to answer the gates stayed mixed (no choice shown as chosen) and the next tap seemed not to take.
 - **"Pomiń konfigurację" at the top** of the setup, away from "Wstecz" and "Dalej" (it sat right under them).
 - **The graph: a friend's card** has "Napisz" and "Profil" right under the name (they were at the very end of the card, under all it tells) and "Usuń znajomego" at its end, asked once more first.
 - **"Czekają na Twoją odpowiedź" one by one**: a cross beside each waiting chat hides that one until a newer message comes from that friend; "Ukryj wszystkie" (with more than one) hides them all, as "Ukryj" did.
+- **No error when the ledger stops mid-announce**: the ledger node's callbacks (friends, own address, session key, auto-download, bridges) answer empty once its provider is gone, instead of reading through a disposed ref; an announce scheduled just before a restart threw (CI's crash end-to-end test caught it).
 - **Tests**: the upgrade fixture of 1.15.6.
 
 ## 1.15.6 — 05.11.2026

@@ -197,12 +197,20 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   final LedgerNode node = LedgerNode(
     // Devices, not accounts: the ledger knows which device it talks to.
     transport: ref.read(meshTransportProvider),
-    localAddress: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
-    localSessionKey: () => ref.read(runtimeNodeRuntimeProvider).sessionKey,
+    // The node's work can outlive this provider by a turn (an announce
+    // scheduled before the provider went, a restart): each callback then
+    // answers empty instead of reading through a dead ref.
+    localAddress: () =>
+        ref.mounted ? ref.read(runtimeNodeSnapshotProvider).localAddress : '',
+    localSessionKey: () =>
+        ref.mounted ? ref.read(runtimeNodeRuntimeProvider).sessionKey : '',
     deviceName: thisDeviceName,
     // Group members who are not friends: their answer tells their account,
     // so their other devices count as them too.
     greetAlso: () {
+      if (!ref.mounted) {
+        return const <String>[];
+      }
       final SocialHubState s = ref.read(socialHubControllerProvider);
       final Set<String> friends = acceptedFriendAddresses(
         s,
@@ -212,15 +220,23 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
           .where((String a) => !friends.contains(a));
     },
     disk: ref.read(ledgerDiskProvider),
-    friendAddresses: () =>
-        acceptedFriendAddresses(ref.read(socialHubControllerProvider)),
-    autoDownloadMedia: () => ref
-        .read(appSettingsControllerProvider)
-        .allowsAutoDownload(onUnmetered: UnmeteredNetwork.instance.onUnmetered),
+    friendAddresses: () => ref.mounted
+        ? acceptedFriendAddresses(ref.read(socialHubControllerProvider))
+        : const <String>[],
+    autoDownloadMedia: () =>
+        ref.mounted &&
+        ref
+            .read(appSettingsControllerProvider)
+            .allowsAutoDownload(
+              onUnmetered: UnmeteredNetwork.instance.onUnmetered,
+            ),
     // The chosen bridges replace the earlier choice (dropped ones are
     // disconnected).
-    onBridgesChosen: (List<String> uris) =>
-        ref.read(runtimeNodeRuntimeProvider).setMeshPeers(uris),
+    onBridgesChosen: (List<String> uris) {
+      if (ref.mounted) {
+        ref.read(runtimeNodeRuntimeProvider).setMeshPeers(uris);
+      }
+    },
     bridgeConnections: ledgerBridgeConnections(
       phone: !kIsWeb && (Platform.isAndroid || Platform.isIOS),
     ),
