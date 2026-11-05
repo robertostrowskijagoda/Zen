@@ -26,6 +26,9 @@ void main() {
       untilMillis: 1000 + 3600000,
     );
     expect(ChatLocation.fromJson(here.toJson()), here);
+    // A plain position is no arrival, and says nothing of one on the wire.
+    expect(here.arrived, isFalse);
+    expect(here.toJson().containsKey('ar'), isFalse);
     expect(
       ChatLocation.fromJson(<String, Object?>{
         'la': 91,
@@ -85,6 +88,8 @@ void main() {
     final LocationSharingService sharing = service();
     await sharing.share(ola, length: const Duration(minutes: 15));
     expect(sent.single, contains('openstreetmap.org'));
+    // Live, not "arrived": that only "Jestem na miejscu" says.
+    expect(sent.single, startsWith('📍 Moje położenie na żywo do '));
     expect(sharing.isSharing('msg-1'), isTrue);
 
     // A minute later, still standing: nothing new.
