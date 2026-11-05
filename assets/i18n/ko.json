@@ -100,6 +100,7 @@
   "Anulować zmianę limitu?": "한도 변경을 취소할까요?",
   "Anuluj": "취소",
   "Anuluj odpowiedź": "답장 취소",
+  "Anuluj wysłanie": "전송 취소",
   "Anuluj zaproszenie": "초대 취소",
   "Anuluj zmianę": "변경 취소",
   "Aparat": "카메라",
@@ -533,6 +534,7 @@
   "Do {max} numerów. Zostają tylko w tym telefonie.": "최대 {max}개까지. 이 휴대폰에만 저장돼요.",
   "Do: {name}": "받는 사람: {name}",
   "Do: {name} ({price})": "받는 사람: {name}님 ({price})",
+  "Do: {who} · {when}": "받는 곳: {who} · {when}",
   "Dobrze": "좋았어요",
   "Dodaj": "추가",
   "Dodaj członka": "멤버 추가",
@@ -1043,6 +1045,7 @@
   "Jeszcze nic": "아직 없어요",
   "Jeszcze nic.": "아직 아무것도 없어요.",
   "Jeszcze nic: bez wspólnych spotkań, kartek wdzięczności i wydarzeń, które widzi ten telefon.": "아직 없어요: 이 휴대폰에 보이는 함께한 모임, 감사 카드, 이벤트가 없어요.",
+  "Jeszcze nie głosowali: {names}": "아직 투표하지 않음: {names}",
   "Jeszcze nie ma filmów": "아직 동영상이 없어요",
   "Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.": "아직 괜찮다고 확인하지 않았어요. 달라지지 않으면 15분 뒤에 알람이 가요.",
   "Jeszcze nie rozmawialiście. Może napiszesz?": "아직 대화한 적이 없어요. 메시지를 보내 볼까요?",
@@ -1876,6 +1879,7 @@
   "Nic do ustawienia": "설정할 것 없음",
   "Nic jeszcze nie wybrano": "아직 선택한 것이 없어요",
   "Nic nie czeka.": "대기 중인 것이 없어요.",
+  "Nic nie czeka. Przytrzymaj przycisk wysyłania, żeby wysłać wiadomość później.": "기다리는 메시지가 없습니다. 보내기 버튼을 길게 누르면 나중에 보낼 수 있습니다.",
   "Nic od przyjaciół": "친한 친구 소식 없음",
   "Nic od znajomych znajomych": "친구의 친구에게서 온 것 없음",
   "Nic się nie zmienia.": "바뀌는 건 없어요.",
@@ -2101,6 +2105,7 @@
   "Nie wszystkie zdjęcia tego posta są na urządzeniu — spróbuj za chwilę.": "이 게시물의 사진이 모두 기기에 있지는 않아요 — 잠시 후 다시 시도하세요.",
   "Nie wybrano kraju.": "선택한 국가가 없어요.",
   "Nie wybrano miejsca na kopię.": "백업을 저장할 위치를 선택하지 않았습니다.",
+  "Nie zagłosowali: {names}": "투표하지 않음: {names}",
   "Nie zamykaj Zen w przełączniku aplikacji": "앱 전환기에서 Zen을 닫지 마세요",
   "Nie zapisuj": "저장 안 함",
   "Nie zezwolono na udostępnienie ekranu.": "화면 공유가 허용되지 않았어요.",
@@ -4270,6 +4275,7 @@
   "Wszystkie": "전체",
   "Wszystkie w rozmowie ({count})": "대화 내 전체 ({count})",
   "Wszystkie zakończone": "모두 완료",
+  "Wszystkie zaplanowane": "예약된 메시지 모두 보기",
   "Wszystkie zmiany": "모든 변경",
   "Wszystko": "전체",
   "Wszystko OK": "다 괜찮아요",
@@ -4663,6 +4669,7 @@
   "Zapisz to ID w bezpiecznym miejscu. Bez niego nie otworzysz tego konta — Zen nigdzie go nie pokazuje poza ustawieniami samego konta.": "이 ID를 안전한 곳에 보관하세요. ID가 없으면 이 계정을 열 수 없어요 — Zen은 이 계정 자체 설정 외에는 어디에도 보여 주지 않아요.",
   "Zapisz to ID. Zobaczysz je też w ustawieniach tego konta.": "이 ID를 저장하세요. 이 계정 설정에서도 볼 수 있어요.",
   "Zapisz zalacznik": "첨부 파일 저장",
+  "Zaplanowane wiadomości": "예약 메시지",
   "Zaplanowano na {when}": "{when}에 예약됨",
   "Zapowiedziana zmiana limitów": "예고된 한도 변경",
   "Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.": "예고된 한도 변경: 발행 {old} → 30일에 {limit}, 대기 {hours}시간; 이체 {oldXfers} → 1인당 하루 {xfers}건. 꼭대기가 취소하지 않으면 {date}부터 적용돼요.",
@@ -4928,6 +4935,7 @@
   "Zmierzch": "황혼",
   "Zmień": "변경",
   "Zmień cenę": "가격 변경",
+  "Zmień godzinę": "시간 변경",
   "Zmień hasło": "비밀번호 변경",
   "Zmień hasło aplikacji": "앱 비밀번호 변경",
   "Zmień kamerę": "카메라 전환",
@@ -4935,6 +4943,7 @@
   "Zmień kod": "코드 변경",
   "Zmień limity": "한도 변경",
   "Zmień status": "상태 변경",
+  "Zmień treść": "내용 변경",
   "Zmień zasady": "규칙 변경",
   "Zmień zdjęcie": "사진 변경",
   "Zmniejszanie filmu…": "동영상 줄이는 중…",
@@ -5793,6 +5802,9 @@
   },
   "{n} za zgodą": {
     "other": "동의 필요 {n}개"
+  },
+  "{n} zaplanowanych wiadomości": {
+    "other": "예약 메시지 {n}개"
   },
   "{n} zgód": {
     "other": "동의 {n}개"

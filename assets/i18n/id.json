@@ -100,6 +100,7 @@
   "Anulować zmianę limitu?": "Batalkan perubahan batas?",
   "Anuluj": "Batal",
   "Anuluj odpowiedź": "Batalkan balasan",
+  "Anuluj wysłanie": "Batalkan pengiriman",
   "Anuluj zaproszenie": "Batalkan undangan",
   "Anuluj zmianę": "Batalkan perubahan",
   "Aparat": "Kamera",
@@ -533,6 +534,7 @@
   "Do {max} numerów. Zostają tylko w tym telefonie.": "Hingga {max} nomor. Hanya disimpan di ponsel ini.",
   "Do: {name}": "Kepada: {name}",
   "Do: {name} ({price})": "Untuk: {name} ({price})",
+  "Do: {who} · {when}": "Kepada: {who} · {when}",
   "Dobrze": "Baik",
   "Dodaj": "Tambah",
   "Dodaj członka": "Tambah anggota",
@@ -1043,6 +1045,7 @@
   "Jeszcze nic": "Belum ada",
   "Jeszcze nic.": "Belum ada apa-apa.",
   "Jeszcze nic: bez wspólnych spotkań, kartek wdzięczności i wydarzeń, które widzi ten telefon.": "Belum ada: tidak ada pertemuan bersama, kartu terima kasih, atau acara yang terlihat di ponsel ini.",
+  "Jeszcze nie głosowali: {names}": "Belum memilih: {names}",
   "Jeszcze nie ma filmów": "Belum ada video",
   "Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.": "Belum mengonfirmasi bahwa semuanya baik-baik saja. Jika tidak berubah, 15 menit lagi Anda akan mendapat alarm.",
   "Jeszcze nie rozmawialiście. Może napiszesz?": "Kalian belum pernah mengobrol. Mau kirim pesan?",
@@ -1876,6 +1879,7 @@
   "Nic do ustawienia": "Tidak ada yang perlu diatur",
   "Nic jeszcze nie wybrano": "Belum ada yang dipilih",
   "Nic nie czeka.": "Tidak ada yang menunggu.",
+  "Nic nie czeka. Przytrzymaj przycisk wysyłania, żeby wysłać wiadomość później.": "Tidak ada yang menunggu. Tahan tombol kirim untuk mengirim pesan nanti.",
   "Nic od przyjaciół": "Tidak ada dari teman dekat",
   "Nic od znajomych znajomych": "Tidak ada dari teman dari teman",
   "Nic się nie zmienia.": "Tidak ada yang berubah.",
@@ -2101,6 +2105,7 @@
   "Nie wszystkie zdjęcia tego posta są na urządzeniu — spróbuj za chwilę.": "Tidak semua foto postingan ini ada di perangkat — coba lagi sebentar lagi.",
   "Nie wybrano kraju.": "Belum ada negara yang dipilih.",
   "Nie wybrano miejsca na kopię.": "Tidak ada tempat yang dipilih untuk cadangan.",
+  "Nie zagłosowali: {names}": "Tidak memilih: {names}",
   "Nie zamykaj Zen w przełączniku aplikacji": "Jangan tutup Zen di pengalih aplikasi",
   "Nie zapisuj": "Jangan simpan",
   "Nie zezwolono na udostępnienie ekranu.": "Berbagi layar tidak diizinkan.",
@@ -4270,6 +4275,7 @@
   "Wszystkie": "Semua",
   "Wszystkie w rozmowie ({count})": "Semua di obrolan ({count})",
   "Wszystkie zakończone": "Semua selesai",
+  "Wszystkie zaplanowane": "Semua yang terjadwal",
   "Wszystkie zmiany": "Semua perubahan",
   "Wszystko": "Semua",
   "Wszystko OK": "Semua OK",
@@ -4663,6 +4669,7 @@
   "Zapisz to ID w bezpiecznym miejscu. Bez niego nie otworzysz tego konta — Zen nigdzie go nie pokazuje poza ustawieniami samego konta.": "Simpan ID ini di tempat aman. Tanpanya Anda tak bisa membuka akun ini — Zen tidak menampilkannya di mana pun selain di pengaturan akun itu sendiri.",
   "Zapisz to ID. Zobaczysz je też w ustawieniach tego konta.": "Simpan ID ini. Anda juga bisa melihatnya di pengaturan akun ini.",
   "Zapisz zalacznik": "Simpan lampiran",
+  "Zaplanowane wiadomości": "Pesan terjadwal",
   "Zaplanowano na {when}": "Dijadwalkan untuk {when}",
   "Zapowiedziana zmiana limitów": "Perubahan batas yang diumumkan",
   "Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.": "Perubahan batas yang diumumkan: penerbitan {old} → {limit} per 30 hari, tunggu {hours} jam; transfer {oldXfers} → {xfers} per orang per hari. Berlaku mulai {date}, kecuali puncak membatalkannya.",
@@ -4928,6 +4935,7 @@
   "Zmierzch": "Senja",
   "Zmień": "Ubah",
   "Zmień cenę": "Ubah harga",
+  "Zmień godzinę": "Ubah waktu",
   "Zmień hasło": "Ubah kata sandi",
   "Zmień hasło aplikacji": "Ubah kata sandi aplikasi",
   "Zmień kamerę": "Ganti kamera",
@@ -4935,6 +4943,7 @@
   "Zmień kod": "Ganti kode",
   "Zmień limity": "Ubah batas",
   "Zmień status": "Ubah status",
+  "Zmień treść": "Ubah teks",
   "Zmień zasady": "Ubah aturan",
   "Zmień zdjęcie": "Ganti foto",
   "Zmniejszanie filmu…": "Mengecilkan video…",
@@ -5793,6 +5802,9 @@
   },
   "{n} za zgodą": {
     "other": "{n} dengan persetujuan"
+  },
+  "{n} zaplanowanych wiadomości": {
+    "other": "{n} pesan terjadwal"
   },
   "{n} zgód": {
     "other": "{n} persetujuan"

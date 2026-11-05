@@ -13,12 +13,18 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 ### What's new
 - [en] A poll can close by itself after an hour, a day or a week, or when you end it; the leading answer shows at the top.
 - [en] Sharing your location live ends with "I'm here", which marks where you arrived.
+- [en] Send later works in groups too, all scheduled messages are in one place to change, and a poll shows who has not voted yet.
 - [pl] Ankieta może zamknąć się sama po godzinie, dniu lub tygodniu albo gdy ją zakończysz; prowadząca odpowiedź jest na górze.
 - [pl] Udostępnianie położenia na żywo kończysz przyciskiem „Jestem na miejscu”, który zaznacza, gdzie jesteś.
+- [pl] „Wyślij później” działa też w grupach, wszystkie zaplanowane wiadomości zmienisz w jednym miejscu, a ankieta pokazuje, kto jeszcze nie głosował.
 
 ### Fixes and changes
 - **Polls end**: the poll composer offers "Głosowanie trwa": without a time limit, 1 hour, 1 day or 1 week; its author can also "Zakończ ankietę" at any time. The ending travels as an edit of the poll's message (`msg_edit` with the poll and its `c`, ended at; the time limit is `d`), only its author's counts and only once; a Zen without this shows the poll's text with "Ankieta zakończona." under it. After the end no vote is cast, changed or taken back, also when one arrives from a Zen that does not know it ended. The card shows "Prowadzi: …", "Remis: …" or, ended, "Wynik: …" at the top, and the time limit or "Ankieta zakończona". At its time limit the card turns ended by itself.
 - **"Jestem na miejscu"**: beside "Przestań udostępniać" on one's own live location: the sharing ends with where the phone is now (or the last position), marked as arrived (`ar`); the card says "Na miejscu", a Zen without this shows "📍 Jestem na miejscu: <map link>".
+- **Wyślij później in groups**: holding a group's send button schedules the text for the group, with whom it mentions (the chat's own send then); a friend's and a group's waiting messages keep apart. Stored as before for friends (a group's is `group:<id>` with its mentions under `m`).
+- **Zaplanowane wiadomości**: every waiting message in one place (from "Wszystkie zaplanowane" in the send-later sheet, and a card on the chats list saying how many wait): where it goes, when, "Zmień treść" (not for a text with mentions), "Zmień godzinę" and "Anuluj wysłanie".
+- **Who has not voted**: a poll names the members without a vote yet ("Jeszcze nie głosowali: …"), once ended who did not ("Nie zagłosowali: …").
+- **More pinned by mutation testing**: a save asked for before the stored state was read waits for it (the empty start never goes over the stored friends), removing a friend drops only their queued signals. The pebble QR test keeps the picture the scanner got when it cannot read it, and CI keeps it (`build/test_failures`) from a failing shard.
 - **Tests keep up by themselves**: `test/fuzz_coverage_test.dart` fails while a frame type or a field the parser reads is not fuzzed (26 fields were not); the fuzzer sends polls and locations of every shape and aims frames at a friend's live location and poll, from a stranger and from another friend. Mutation testing covers 19 files (the chat extras logic too) (the 1.15.5 features, the parser, the social controller, the update notice and more; 10 changes per file per run), and `release.dart prepare` names the changed logic with a fast test of its own that it does not cover yet (docs/TESTING.md, sections 11.2 and 11.4). The start is tested on the data of 1.15.5 too (its upgrade fixture).
 
 ## 1.15.5 — 05.11.2026

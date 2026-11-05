@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -212,6 +213,7 @@ void main() {
         matching: find.byType(RepaintBoundary),
       ),
     );
+    String? missed;
     final String? read = await tester.runAsync<String?>(() async {
       final ui.Image image = await boundary.toImage(pixelRatio: 3);
       final ByteData rgba = (await image.toByteData())!;
@@ -226,10 +228,26 @@ void main() {
         height: image.height,
         bytes: gray,
       );
+      final String? text = decodeQrLuma(frame);
+      if (text == null) {
+        // Once in a while under load the code could not be read (not since
+        // seen again): keep the picture the scanner got, for a look.
+        final ByteData? png = await image.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
+        final File file = File('build/test_failures/pebble-code.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(png!.buffer.asUint8List());
+        missed = file.absolute.path;
+      }
       image.dispose();
-      return decodeQrLuma(frame);
+      return text;
     });
-    expect(read, pebbleWebLink(card));
+    expect(
+      read,
+      pebbleWebLink(card),
+      reason: 'the picture the scanner got: $missed',
+    );
     // What the scanner read opens the same pebble.
     expect(pebbleCardFromLink(read), card.qrCard);
     final RuntimeRouteIntent? intent = runtimeRouteIntentFromRouteKey(
