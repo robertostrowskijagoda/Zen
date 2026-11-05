@@ -206,6 +206,13 @@ List<bool> _stringMask(String code) {
   return mask;
 }
 
+/// A test process (flutter_tester) past this much memory is stopped. A
+/// change can turn a loop endless: one that writes on every turn (in CI,
+/// `index != bestStart` in the IPv6 shortening wrote "::" forever) fills
+/// the machine's memory long before --timeout, and the runner went down
+/// with it. Stopped like this, the change counts as noticed.
+const int _testMemoryLimitMb = 2048;
+
 Future<bool> _testsPass(List<String> tests, int timeout) async {
   final Process p = await Process.start(
     Platform.isWindows ? 'flutter.bat' : 'flutter',
@@ -214,13 +221,83 @@ Future<bool> _testsPass(List<String> tests, int timeout) async {
   );
   unawaited(p.stdout.drain<void>());
   unawaited(p.stderr.drain<void>());
-  final int code = await p.exitCode.timeout(
-    Duration(seconds: timeout),
-    onTimeout: () {
-      p.kill();
-      // A test that hangs on the change noticed it.
-      return 1;
-    },
-  );
-  return code == 0;
+  bool looking = false;
+  final Timer watch = Timer.periodic(const Duration(seconds: 2), (_) async {
+    if (looking) {
+      return;
+    }
+    looking = true;
+    try {
+      final Map<int, int> testers = await _testersUnder(p.pid);
+      testers.forEach((int pid, int mb) {
+        if (mb > _testMemoryLimitMb) {
+          stdout.writeln('   a test went past $mb MB: stopped');
+          Process.killPid(pid, ProcessSignal.sigkill);
+        }
+      });
+    } finally {
+      looking = false;
+    }
+  });
+  try {
+    final int code = await p.exitCode.timeout(
+      Duration(seconds: timeout),
+      onTimeout: () async {
+        // flutter_tester spinning in a loop outlives the flutter tool.
+        for (final int pid in (await _testersUnder(p.pid)).keys) {
+          Process.killPid(pid, ProcessSignal.sigkill);
+        }
+        p.kill();
+        // A test that hangs on the change noticed it.
+        return 1;
+      },
+    );
+    return code == 0;
+  } finally {
+    watch.cancel();
+  }
+}
+
+/// The flutter_tester processes started (at any depth) by [root], each
+/// with the memory it holds in MB.
+Future<Map<int, int>> _testersUnder(int root) async {
+  final ProcessResult r = Platform.isWindows
+      ? await Process.run('powershell', <String>[
+          '-NoProfile',
+          '-Command',
+          r'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $([long]($_.WorkingSetSize / 1024)) $($_.Name)" }',
+        ])
+      : await Process.run('ps', <String>['-A', '-o', 'pid=,ppid=,rss=,comm=']);
+  final Map<int, int> parentOf = <int, int>{};
+  final Map<int, int> kbOf = <int, int>{};
+  final Set<int> testers = <int>{};
+  for (final String line in const LineSplitter().convert('${r.stdout}')) {
+    final List<String> f = line.trim().split(RegExp(r'\s+'));
+    if (f.length < 4) {
+      continue;
+    }
+    final int? pid = int.tryParse(f[0]);
+    final int? parent = int.tryParse(f[1]);
+    final int? kb = int.tryParse(f[2]);
+    if (pid == null || parent == null || kb == null) {
+      continue;
+    }
+    parentOf[pid] = parent;
+    kbOf[pid] = kb;
+    if (f.sublist(3).join(' ').contains('flutter_tester')) {
+      testers.add(pid);
+    }
+  }
+  final Map<int, int> out = <int, int>{};
+  for (final int pid in testers) {
+    int? at = pid;
+    for (int depth = 0; at != null && depth < 32; depth++) {
+      if (at == root) {
+        out[pid] = kbOf[pid]! ~/ 1024;
+        break;
+      }
+      at = parentOf[at];
+    }
+  }
+  return out;
 }

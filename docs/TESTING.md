@@ -776,7 +776,11 @@ at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
 file's tests; a change no test notices is named in the summary, a line to
 pin down. On every pull request to `main` (its own runner, about 20
 minutes), weekly and by hand; each run tries other changes (the seed is the
-run's number). Locally: `dart run tool/mutation.dart [file] --max 40`.
+run's number). A change that makes a test hang (after `--timeout`, 240 s)
+or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
+on every turn does within seconds) counts as noticed; the test is stopped
+before it takes the machine down. Locally:
+`dart run tool/mutation.dart [file] --max 40`.
 
 ### 11.5 Kotlin unit tests (`android/app/src/test`)
 
