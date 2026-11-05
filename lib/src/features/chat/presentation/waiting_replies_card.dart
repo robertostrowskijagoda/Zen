@@ -12,7 +12,8 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// "Czekają na Twoją odpowiedź": on the chats list, the friends whose last
 /// message waits two days or more ([waitingRepliesProvider]); a tap opens
-/// the chat, "Ukryj" hides these until a newer message comes.
+/// the chat, the cross beside one hides that one, "Ukryj wszystkie" all of
+/// them, each until a newer message comes from that friend.
 class WaitingRepliesCard extends ConsumerWidget {
   const WaitingRepliesCard({super.key, this.padding = EdgeInsets.zero});
 
@@ -28,6 +29,9 @@ class WaitingRepliesCard extends ConsumerWidget {
     final ZenColors zen = ZenColors.of(context);
     final DateTime now = ref.read(waitingRepliesClockProvider)();
     final List<WaitingReply> shown = waiting.take(3).toList();
+    Future<void> hide(WaitingReply w) => ref
+        .read(appSettingsControllerProvider.notifier)
+        .markTipSeen(waitingReplyTip(w.friend.address, w.sinceMillis));
     return Padding(
       padding: padding,
       child: ZenCard(
@@ -62,6 +66,12 @@ class WaitingRepliesCard extends ConsumerWidget {
                     many: 'od {n} dni',
                   ),
                 ),
+                trailing: IconButton(
+                  key: Key('waiting-reply-hide-${w.friend.address}'),
+                  tooltip: t('Ukryj tę rozmowę'),
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => unawaited(hide(w)),
+                ),
                 onTap: () => unawaited(
                   openConversationWith(
                     context,
@@ -77,23 +87,20 @@ class WaitingRepliesCard extends ConsumerWidget {
                 }),
                 style: TextStyle(color: zen.textSecondary),
               ),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: TextButton(
-                key: const Key('waiting-replies-hide'),
-                onPressed: () async {
-                  final AppSettingsController settings = ref.read(
-                    appSettingsControllerProvider.notifier,
-                  );
-                  for (final WaitingReply w in waiting) {
-                    await settings.markTipSeen(
-                      waitingReplyTip(w.friend.address, w.sinceMillis),
-                    );
-                  }
-                },
-                child: Text(t('Ukryj')),
+            // One alone has its cross; with more, all at once too.
+            if (waiting.length > 1)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  key: const Key('waiting-replies-hide'),
+                  onPressed: () async {
+                    for (final WaitingReply w in waiting) {
+                      await hide(w);
+                    }
+                  },
+                  child: Text(t('Ukryj wszystkie')),
+                ),
               ),
-            ),
           ],
         ),
       ),
