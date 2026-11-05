@@ -268,6 +268,55 @@ void main() {
     expect(votes, isEmpty);
   });
 
+  testWidgets('the card names who has not voted yet, the address in any '
+      'spelling; ended, who did not vote', (WidgetTester tester) async {
+    const String ola = '200:aaaa:1111:2222:3333:4444:5555:6666';
+    const String jan = '200:bbbb:1111:2222:3333:4444:5555:6666';
+    const String ewa = '200:cccc:1111:2222:3333:4444:5555:6666';
+    final ChatPoll poll = ChatPoll.of('Kiedy?', <String>['A', 'B'])!;
+    Future<void> show(ChatPoll p, Map<String, String> reactions) =>
+        tester.pumpWidget(
+          MaterialApp(
+            theme: ZenTheme.light(),
+            home: Scaffold(
+              body: GroupPollCard(
+                poll: p,
+                reactions: reactions,
+                members: const <String>['self', ola, jan, ewa],
+                nameOf: (String who) => switch (who) {
+                  'self' => 'Ty',
+                  ola => 'Ola',
+                  jan => 'Jan',
+                  _ => 'Ewa',
+                },
+                onVote: (_) {},
+                nowMillis: 1000,
+              ),
+            ),
+          ),
+        );
+    await show(poll, <String, String>{
+      ola.toUpperCase(): kPollVotes[0],
+      'self': kPollVotes[1],
+      // Not a vote: still not voted.
+      jan: '❤️',
+    });
+    expect(find.text('Jeszcze nie głosowali: Jan, Ewa'), findsOneWidget);
+    await show(poll.endedAt(500), <String, String>{
+      ola: kPollVotes[0],
+      'self': kPollVotes[1],
+      jan: kPollVotes[1],
+    });
+    expect(find.text('Nie zagłosowali: Ewa'), findsOneWidget);
+    await show(poll, <String, String>{
+      ola: kPollVotes[0],
+      'self': kPollVotes[1],
+      jan: kPollVotes[1],
+      ewa: kPollVotes[0],
+    });
+    expect(find.byKey(const Key('group-poll-not-voted')), findsNothing);
+  });
+
   testWidgets('the card shows the counts; a tap votes', (
     WidgetTester tester,
   ) async {

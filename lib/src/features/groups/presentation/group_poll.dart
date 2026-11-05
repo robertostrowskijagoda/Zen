@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// How long a new poll can stay open (null: until its author ends it).
 const List<Duration?> kPollLengths = <Duration?>[
@@ -172,6 +173,7 @@ class GroupPollCard extends StatelessWidget {
     required this.onVote,
     this.onEnd,
     this.nowMillis,
+    this.members = const <String>[],
     this.onGradient = false,
   });
 
@@ -189,6 +191,10 @@ class GroupPollCard extends StatelessWidget {
 
   /// The time it is looked at (now when null).
   final int? nowMillis;
+
+  /// Who can vote: the group's members (`self` for this person), so the
+  /// card names who has not voted yet.
+  final List<String> members;
 
   /// Drawn on one's own (accent) bubble.
   final bool onGradient;
@@ -232,6 +238,18 @@ class GroupPollCard extends StatelessWidget {
         ? t('Wynik: {answer}', <String, Object?>{'answer': answers})
         : t('Prowadzi: {answer}', <String, Object?>{'answer': answers});
     final int? deadline = poll.closesAtMillis;
+    bool voted(String who) => reactions.entries.any(
+      (MapEntry<String, String> e) =>
+          poll.answerOf(e.value) != null &&
+          (e.key == who ||
+              (who != 'self' &&
+                  e.key != 'self' &&
+                  PeerShareCodec.addressesEqual(e.key, who))),
+    );
+    final List<String> notVoted = <String>[
+      for (final String who in members)
+        if (!voted(who)) nameOf(who),
+    ];
     return Column(
       key: const Key('group-poll'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -347,6 +365,23 @@ class GroupPollCard extends StatelessWidget {
           key: const Key('group-poll-total'),
           style: TextStyle(color: muted, fontSize: 11),
         ),
+        if (notVoted.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              (closed
+                  ? t('Nie zagłosowali: {names}', <String, Object?>{
+                      'names': notVoted.join(', '),
+                    })
+                  : t('Jeszcze nie głosowali: {names}', <String, Object?>{
+                      'names': notVoted.join(', '),
+                    })),
+              key: const Key('group-poll-not-voted'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: muted, fontSize: 11),
+            ),
+          ),
         if (onEnd != null && !closed)
           Align(
             alignment: AlignmentDirectional.centerStart,

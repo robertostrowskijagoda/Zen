@@ -48,6 +48,7 @@ import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/shell/presentation/remembered_place.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
 import 'package:zen/src/features/social/mentions.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/presentation/mention_field.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -1483,6 +1484,20 @@ class _GroupConversationScreenState
                                               emoji: kPollVotes[answer],
                                             ),
                                           ),
+                                          members: <String>[
+                                            'self',
+                                            for (final String member
+                                                in memberAddresses)
+                                              if (!PeerShareCodec.addressesEqual(
+                                                member,
+                                                ref
+                                                    .read(
+                                                      runtimeNodeSnapshotProvider,
+                                                    )
+                                                    .localAddress,
+                                              ))
+                                                member,
+                                          ],
                                           onEnd: isSelf && isMember
                                               ? () => unawaited(
                                                   _socialHub.endPoll(
