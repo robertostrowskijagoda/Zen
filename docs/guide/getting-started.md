@@ -30,9 +30,13 @@ through **[SideStore](https://sidestore.io/)**, which signs it with your own
 Apple Account (a free one is enough). Once, with a computer and a cable:
 **LocalDevVPN** from the App Store on the iPhone (**Connect**), **iloader** on
 the computer (**Install SideStore (Stable)**), then on the iPhone trust your
-Apple Account in **Settings → General → VPN & Device Management** and, on
+own e-mail (you are the developer) in **Settings → General → VPN & Device
+Management** and, on
 iOS 16 and later, turn on **Settings → Privacy & Security → Developer Mode**.
-In SideStore sign in, tap the **7 DAYS** counter in **My Apps**, add Zen's
+With LocalDevVPN connected (before everything SideStore does), sign in to
+SideStore (error -80045: the fix is on the
+[install page](https://robertostrowskijagoda.github.io/Zen/install/iphone/#fix-80045)),
+tap the **7 DAYS** counter in **My Apps**, add Zen's
 source (**Add Zen to SideStore** on the install page, or **Sources → +** with
 `https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen.
 An app signed with a free Apple Account opens for 7 days; SideStore renews it

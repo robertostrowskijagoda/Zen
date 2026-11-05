@@ -10,6 +10,9 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **The iPhone install guide, so nothing is left to guess**: the install page says before the steps, as a warning, to connect LocalDevVPN (in its own app, **Connect**) before SideStore signs in, installs, renews or updates anything; step 3 says that the e-mail under "VPN & Device Management" is your own Apple Account, the developer, so you trust yourself; step 4 links to a new first answer under "If something goes wrong", opened by its link: error **-80045** when signing in to SideStore (Apple turns down SideStore's default anisette since October 2026), fixed once in SideStore's settings (On-Device Anisette off, the "SideStore (New)" server without auto rotation, Remote Server Sync, Reset adi.pb), with what to do on ADP, 502 or a -80045 that stays, and on iloader. Another new answer: SideStore or Zen doesn't open because the developer isn't trusted. In all 21 languages; the app's own iPhone steps (and docs/INSTALL.md, the guide) say the same in short.
+
 ## 1.15.7 — 05.11.2026
 
 ### What's new

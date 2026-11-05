@@ -1110,6 +1110,53 @@ void main() {
       expect(texts['pl']!['s3d'], contains('Tryb dewelopera'));
     });
 
+    test('iPhone: LocalDevVPN first, trusting your own e-mail and the fix '
+        'of -80045, in every language', () {
+      final String iphone = _read('install/iphone/index.html');
+      // Said before the steps, as a warning.
+      final int rule = iphone.indexOf('<div class="note warn" id="vpnFirst">');
+      expect(rule, greaterThan(iphone.indexOf('id="need"')));
+      expect(rule, lessThan(iphone.indexOf('<ol class="how"')));
+      // The answer step 4 links to: first under "If something goes wrong",
+      // opened by its link.
+      final int trouble = iphone.indexOf('<div class="accs" id="trouble">');
+      expect(
+        iphone.indexOf('<details class="acc" id="fix-80045">'),
+        allOf(greaterThan(trouble), lessThan(iphone.indexOf('data-i="t1q"'))),
+      );
+      expect(iphone, contains('<details class="acc" id="fix-trust">'));
+      expect(iphone, contains('function openAnswer()'));
+      final Map<String, Map<String, String>> texts = _texts(
+        'install/iphone/index.html',
+      );
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        final Map<String, String> t = lang.value;
+        final String why = lang.key;
+        expect(
+          t['vpnRule'],
+          allOf(contains('**LocalDevVPN**'), contains('**Connect**')),
+          reason: why,
+        );
+        expect(t['s4d'], contains('|#fix-80045]'), reason: why);
+        expect(t['s4d'], contains('**-80045**'), reason: why);
+        expect(t['t0q'], contains('-80045'), reason: why);
+        // SideStore's own (English) names, as on the iPhone.
+        expect(t['f1'], contains('**On-Device Anisette**'), reason: why);
+        expect(t['f2'], contains('**SideStore (New)**'), reason: why);
+        expect(t['f2'], contains('**Enable Auto Rotation**'), reason: why);
+        expect(t['f3'], contains('**Save as Overrides**'), reason: why);
+        expect(t['f4'], contains('**Reset adi.pb**'), reason: why);
+        expect(t['f5'], contains('**Sign In**'), reason: why);
+        expect(t['t0n'], contains('**Reset Anisette State**'), reason: why);
+        expect(t['t0n'], contains('|i80045]'), reason: why);
+        // The place to trust is the language's own, as in step 3.
+        final String place = RegExp(r'\*\*([^*]+)\*\*').firstMatch(
+          t['s3d']!,
+        )![1]!;
+        expect(t['t7a'], contains('**$place**'), reason: why);
+      }
+    });
+
     test('iPhone: the pictures are drawn on the page, hidden from screen '
         'readers, one per step', () {
       final String iphone = _read('install/iphone/index.html');
