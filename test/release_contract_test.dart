@@ -42,6 +42,48 @@ void main() {
     );
   });
 
+  test('preparing a release names the changed logic with a fast test of '
+      'its own that mutation testing does not cover yet', () {
+    const String logic = "import 'dart:math';\n";
+    const String widget = "import 'package:flutter/material.dart';\n";
+    expect(
+      missingMutationTargets(
+        changed: <String>[
+          'lib/a/poll.dart',
+          'lib/a/listed.dart',
+          'lib/a/skipped.dart',
+          'lib/a/slow.dart',
+          'lib/a/untested.dart',
+          'lib/a/screen.dart',
+          'lib/a/presentation/card.dart',
+          'lib/a/gone.dart',
+          'tool/x.dart',
+        ],
+        sources: const <String, String>{
+          'lib/a/poll.dart': logic,
+          'lib/a/listed.dart': logic,
+          'lib/a/skipped.dart': logic,
+          'lib/a/slow.dart': logic,
+          'lib/a/untested.dart': logic,
+          'lib/a/screen.dart': widget,
+          'lib/a/presentation/card.dart': logic,
+        },
+        tests: <String>{
+          'test/poll_test.dart',
+          'test/listed_test.dart',
+          'test/skipped_test.dart',
+          'test/slow_test.dart',
+          'test/screen_test.dart',
+          'test/card_test.dart',
+          'test/gone_test.dart',
+        },
+        slowTests: <String>{'test/slow_test.dart'},
+        listed: <String>{'lib/a/listed.dart', 'lib/a/skipped.dart'},
+      ),
+      <String>['lib/a/poll.dart'],
+    );
+  });
+
   group('the app and the release agree', () {
     test('the contract names exactly the files the app downloads', () {
       expect(_appAssetNames(), kUpdateAssets.toSet());

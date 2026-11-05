@@ -760,8 +760,17 @@ settle). Six seeds in every run (seconds); `ZEN_CHAOS_SEEDS=50` tries more.
 The Dart side: random and broken frames of every signal type go into the
 parser (it must never throw) and, from a stranger, into the social
 controller (they must never make a friend, change who is one, join a group
-or change its members). Seeded (`ZEN_FUZZ_SEED`), `ZEN_FUZZ_FRAMES=20000`
-tries more. The Go side: `native/yggdrasil_bridge/wire_fuzz_test.go` has a
+or change its members). Frames aimed at a friend's live location and poll,
+from a stranger and from another friend in the group, must never change,
+delete or move them; the other friend's vote still counts. What the parser
+lets through as a poll or a location is one the app can show. Seeded
+(`ZEN_FUZZ_SEED`), `ZEN_FUZZ_FRAMES=20000` tries more.
+
+The fuzzer keeps up with the parser by itself:
+`test/fuzz_coverage_test.dart` fails while a frame type the parser knows
+(`case '…'`) or a field it reads (`payload['…']`, `payload[kPollKey]`) is
+missing from `_types` / `_keys` of the fuzzer. A new chat extra also gets
+a shape of its own in `_value`, as `_poll` and `_location` have. The Go side: `native/yggdrasil_bridge/wire_fuzz_test.go` has a
 fuzz target for every parser of what comes from the network or a nearby
 device (relay frames, IPv6 packets, LAN beacons, the local link's hello and
 frames, the door's JSON, DNS questions, signal reassembly), with round trips
@@ -784,12 +793,23 @@ at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
 `true`/`false`, a `!` dropped, `+ 1`/`- 1`), each change run against the
 file's tests; a change no test notices is named in the summary, a line to
 pin down. On every pull request to `main` (its own runner, about 20
-minutes), weekly and by hand; each run tries other changes (the seed is the
+minutes, 10 changes per file), weekly and by hand; each run tries other changes (the seed is the
 run's number). A change that makes a test hang (after `--timeout`, 240 s)
 or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
 on every turn does within seconds) counts as noticed; the test is stopped
 before it takes the machine down. Locally:
 `dart run tool/mutation.dart [file] --max 40`.
+
+The targets grow with the app. `dart run tool/release.dart prepare` names
+every file changed since the last release that is plain logic (no widgets,
+nothing under `presentation/`) with a fast test of its own
+(`test/<name>_test.dart`, not among the slow ones of `tool/test_times.json`)
+and is not in `tool/mutation_targets.json` yet. Each goes in there before
+the release, or goes in with `"skip": "<reason>"` (listed, never run), so
+the reminder stops naming it. Survivors of a new target are pinned with a
+test in the same pull request, unless the change behaves exactly as the
+original (an equivalent mutant: `growable: true`, a flag that only makes
+something be read again); those are named in the pull request.
 
 ### 11.5 Kotlin unit tests (`android/app/src/test`)
 

@@ -65,6 +65,13 @@ final class _Notices implements RuntimeSystemNotificationService {
   Future<void> clear() async {}
 }
 
+/// A shade whose notification cannot be taken away.
+final class _StuckNotices extends _Notices {
+  @override
+  Future<void> dismissSlot(String slotKey) async =>
+      throw StateError('no notification service');
+}
+
 final class _Installer implements GithubUpdateInstaller {
   @override
   UpdateTarget get target => UpdateTarget.android;
@@ -994,6 +1001,46 @@ void main() {
       );
       expect(newerNotices.onScreen.single.id, '$kUpdateNoticeSlot-1.15.0');
       expect(newer.state.notifiedVersion, '1.15.0');
+    });
+  });
+  group('pinned by mutation testing', () {
+    test('the notice of the version now installed is taken away (said so); '
+        'when it cannot be, said so too', () async {
+      final _Notices notices = _Notices();
+      await notices.show(
+        updateAvailableNotification('1.14.0', createdAtMillis: 1),
+      );
+      expect(
+        await withdrawInstalledUpdateNotice(
+          store: MemoryUpdateNoticeStore(
+            const UpdateNoticeState(notifiedVersion: '1.14.0'),
+          ),
+          notices: notices,
+          currentVersion: '1.14.0',
+        ),
+        isTrue,
+      );
+      expect(notices.onScreen, isEmpty);
+      expect(
+        await withdrawInstalledUpdateNotice(
+          store: MemoryUpdateNoticeStore(
+            const UpdateNoticeState(notifiedVersion: '1.14.0'),
+          ),
+          notices: _StuckNotices(),
+          currentVersion: '1.14.0',
+        ),
+        isFalse,
+      );
+    });
+
+    test('an error is kept whole up to the limit, past it cut with "…"', () {
+      final String fits = 'e' * kUpdateNoticeErrorChars;
+      expect(updateNoticeErrorText(fits), fits);
+      expect(
+        updateNoticeErrorText('${fits}x'),
+        '${'e' * (kUpdateNoticeErrorChars - 1)}…',
+      );
+      expect(updateNoticeErrorText('a \n  b'), 'a b');
     });
   });
 }

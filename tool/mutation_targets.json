@@ -18,5 +18,57 @@
   {
     "file": "lib/src/features/relay/relay_crypto.dart",
     "tests": ["test/relay_hybrid_cipher_test.dart", "test/relay_engine_test.dart"]
+  },
+  {
+    "file": "lib/src/domain/messages/chat_poll.dart",
+    "tests": ["test/chat_poll_test.dart"]
+  },
+  {
+    "file": "lib/src/domain/messages/chat_location.dart",
+    "tests": ["test/location_sharing_test.dart"]
+  },
+  {
+    "file": "lib/src/features/chat/location_sharing.dart",
+    "tests": ["test/location_sharing_test.dart"]
+  },
+  {
+    "file": "lib/src/features/chat/scheduled_messages.dart",
+    "tests": ["test/scheduled_messages_test.dart"]
+  },
+  {
+    "file": "lib/src/features/chat/self_notes.dart",
+    "tests": ["test/self_notes_test.dart"]
+  },
+  {
+    "file": "lib/src/features/runtime/runtime_signal_parser.dart",
+    "tests": ["test/runtime_signal_parser_test.dart"]
+  },
+  {
+    "file": "lib/src/features/social/social_hub_controller.dart",
+    "tests": ["test/social_hub_controller_test.dart", "test/group_mentions_test.dart"]
+  },
+  {
+    "file": "lib/src/features/social/social_snapshot_store.dart",
+    "tests": ["test/social_snapshot_store_test.dart"]
+  },
+  {
+    "file": "lib/src/features/update/update_notice.dart",
+    "tests": ["test/update_notice_test.dart"]
+  },
+  {
+    "file": "lib/src/features/settings/app_settings_controller.dart",
+    "tests": ["test/app_settings_controller_test.dart"]
+  },
+  {
+    "file": "lib/src/features/chat/waiting_replies.dart",
+    "tests": ["test/waiting_replies_test.dart"]
+  },
+  {
+    "file": "lib/src/features/settings/diagnostics_log_file.dart",
+    "tests": ["test/diagnostics_log_file_test.dart"]
+  },
+  {
+    "file": "lib/src/features/settings/problem_report.dart",
+    "tests": ["test/problem_report_test.dart"]
   }
 ]
