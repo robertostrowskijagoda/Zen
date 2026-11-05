@@ -9,6 +9,7 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -32,6 +33,10 @@ String lockedNoticeKitSignature(SocialHubState state) {
     for (final MapEntry<String, NotificationPrivacy> e
         in state.notificationPrivacy.entries)
       'n:${e.key}:${e.value.name}',
+    for (final MapEntry<String, int> e in state.mutedUntil.entries)
+      'm:${e.key}:${e.value}',
+    for (final MapEntry<String, bool> e in state.groupNotifyAll.entries)
+      'a:${e.key}:${e.value}',
   ]..sort();
   return parts.join('|');
 }
@@ -76,6 +81,7 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
           settings.postNotifications,
           settings.inviteToken,
           settings.noticePrivacy,
+          settings.groupMentionsOnly,
         ),
       ),
     );
@@ -111,6 +117,8 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
       sounds: settings.notificationSounds,
       inviteToken: settings.inviteToken,
       kindLevels: settings.noticePrivacy,
+      groupMentionsOnly: settings.groupMentionsOnly,
+      self: ref.read(runtimeNodeSnapshotProvider).localAddress,
     );
     final Map<String, dynamic> json = kit.toJson();
     final String signature = jsonEncode(json);

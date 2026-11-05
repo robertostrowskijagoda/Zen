@@ -98,6 +98,7 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               deliveryState: ChatMessageDeliveryState.sent,
               reply: ChatReply.fromJson(payload['re']),
               forwarded: payload['fwd'] == true,
+              location: ChatLocation.fromJson(payload[kLocationKey]),
             ),
       );
       _updateFriendPreview(peerAddress: peer, preview: text.trim());
@@ -140,6 +141,8 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               direction: ChatMessageDirection.outgoing,
               deliveryState: ChatMessageDeliveryState.delivered,
               mentions: mentionsFromJson(payload[kMentionsKey]),
+              poll: ChatPoll.fromJson(payload[kPollKey]),
+              location: ChatLocation.fromJson(payload[kLocationKey]),
             ),
       );
     });

@@ -427,15 +427,11 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
   }
 
   /// The gate sits above the root Navigator (MaterialApp.builder), so the
-  /// lock screen must provide its own Overlay for text fields.
+  /// lock screen must provide its own Overlay for text fields. Overlay.wrap
+  /// keeps one entry for it and disposes it with the screen (a new
+  /// OverlayEntry in every build was never disposed).
   Widget _unlockOverlay() {
-    return Overlay(
-      initialEntries: <OverlayEntry>[
-        OverlayEntry(
-          builder: (BuildContext context) => _UnlockScreen(wiping: _wiping),
-        ),
-      ],
-    );
+    return Overlay.wrap(child: _UnlockScreen(wiping: _wiping));
   }
 }
 

@@ -705,6 +705,15 @@ build.
   20261028), then no crash and no "not responding" in monkey's output or
   the crash log.
 
+Then the instrumented Kotlin tests (`android/app/src/androidTest`, JUnit
+on the real Android): `./gradlew :app:connectedDebugAndroidTest
+-Ptarget-platform=android-x64` in `android/`, with the same debug build.
+They check what `ZenFileProvider` hands out (only the shared installer and
+the QR sticker, readable through their content address) and which of Zen's
+components other apps may start (the launcher entries and "Otwórz w Zen";
+the file provider never). Gradle installs the app and its test app and
+takes both off again.
+
 The start test is built into the app (`flutter build apk -t
 integration_test/app_start_test.dart`), installed with adb, opened from the
 launcher, and its result read from the log: `flutter test -d` cannot start
@@ -789,6 +798,26 @@ power-button alarm's counting (`PowerPressCounter`) and where a link Zen
 claims goes instead of back to Zen (`linkTargetWithoutZen`). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
+
+### 11.6 Race detector (Go)
+
+The CI job *Go bridge* runs the bridge's tests once more under the race
+detector (`go test -race -count=1 ./...`, cgo on): two goroutines touching
+one variable without a lock or an actor between them fail the run. The few
+tests that measure speed skip themselves under it (`raceEnabled`,
+`race_on_test.go`). It found ironwood's counters read across actors
+(`third_party/ironwood/ZEN.md`).
+
+### 11.7 Leak tracking (Flutter)
+
+`flutter test --dart-define=zen.leaks=true` tracks every object Flutter
+can (notifiers, controllers, animations, pictures, overlay entries) that a
+test's widgets made: one never disposed fails its test file
+(`test/flutter_test_config.dart`). Not counted: what the test helpers make,
+objects only not collected yet, process singletons, Flutter's image cache
+and the services the tests themselves build (the list in that file). It
+runs on demand, not in CI: some test files still report notifiers the
+tests leave behind; a new class in its report is worth a look.
 
 ## What this does not check
 

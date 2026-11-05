@@ -57,6 +57,9 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Widgets left undisposed (test/flutter_test_config.dart); the version
+  # flutter_test itself pins.
+  leak_tracker_flutter_testing: any
 
 # system_tray 2.0.3 pins uuid ^3; this lets the rest of the tree use uuid 4
 # (system_tray only calls `const Uuid().v1()`, which uuid 4 keeps unchanged).

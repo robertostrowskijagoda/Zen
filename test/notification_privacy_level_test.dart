@@ -110,7 +110,12 @@ _boot({
     overrides: [
       ...buildAppSettingsProviderOverrides(
         store: MemoryAppSettingsStore(),
-        initialState: AppSettings(notificationPrivacy: global),
+        // Every group message notifies here ("W grupach tylko wzmianki"
+        // has its own tests).
+        initialState: AppSettings(
+          notificationPrivacy: global,
+          groupMentionsOnly: false,
+        ),
         hydrationEnabled: false,
       ),
       signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),

@@ -115,16 +115,24 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
 
   @override
   void dispose() {
+    _curve?.dispose();
     _motion.dispose();
     super.dispose();
   }
 
+  /// The curve of the move going on (each move has its own; the previous
+  /// one is let go).
+  CurvedAnimation? _curve;
+
   Future<void> _animate(double to, Duration duration, Curve curve) {
     _motion.duration = duration;
-    _tween = Tween<double>(
-      begin: _dx,
-      end: to,
-    ).animate(CurvedAnimation(parent: _motion, curve: curve));
+    _curve?.dispose();
+    final CurvedAnimation curved = CurvedAnimation(
+      parent: _motion,
+      curve: curve,
+    );
+    _curve = curved;
+    _tween = Tween<double>(begin: _dx, end: to).animate(curved);
     return _motion.forward(from: 0);
   }
 

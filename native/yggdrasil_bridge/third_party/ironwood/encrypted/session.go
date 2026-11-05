@@ -2,6 +2,7 @@ package encrypted
 
 import (
 	"encoding/binary"
+	"sync/atomic"
 	"time"
 
 	"github.com/Arceliar/phony"
@@ -227,9 +228,9 @@ type sessionInfo struct {
 	timer          *time.Timer
 	ack            *sessionAck
 	since          time.Time
-	rotated        time.Time // last time we rotated keys
-	rx             uint64
-	tx             uint64
+	rotated        time.Time     // last time we rotated keys
+	rx             atomic.Uint64 // Zen: read by Debug.GetSessions from another actor
+	tx             atomic.Uint64
 	nextSendShared boxShared
 	nextSendNonce  uint64
 	nextRecvShared boxShared
@@ -338,7 +339,7 @@ func (info *sessionInfo) doSend(from phony.Actor, msg []byte) {
 		freeBytes(tmp)
 		// send
 		info.mgr.pc.PacketConn.WriteTo(bs, types.Addr(info.ed[:]))
-		info.tx += uint64(len(msg))
+		info.tx.Add(uint64(len(msg)))
 		info._resetTimer()
 	})
 }
@@ -450,7 +451,7 @@ func (info *sessionInfo) doRecv(from phony.Actor, msg []byte) {
 			info.mgr.pc.network.recv(info, msg)
 			// Misc remaining followup work
 			onSuccess(key)
-			info.rx += uint64(len(msg))
+			info.rx.Add(uint64(len(msg)))
 			info._resetTimer()
 		} else {
 			// Keys somehow became out-of-sync

@@ -13,6 +13,7 @@ import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/account/account_state_sync.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
@@ -657,6 +658,15 @@ final class AccountDevicesKeeper {
     for (final StoredStateSyncDomain d in meet) {
       _listen(services[d.key]!.$1(), d);
     }
+    // "Notatki dla siebie": the same notes on every device, merged note by
+    // note (self_notes.dart).
+    final SelfNotesService notes = ref.read(selfNotesServiceProvider);
+    final StoredStateSyncDomain notesDomain = StoredStateSyncDomain(
+      kSelfNotesKey,
+      disk,
+      notes.load,
+    );
+    _listen(notes, notesDomain);
     // The hand-picked mailboxes (where store-and-forward runs).
     final RelayEngine? relay = ref.read(relayEngineProvider);
     final RelayMailboxSyncDomain? mailboxes = relay == null
@@ -680,6 +690,7 @@ final class AccountDevicesKeeper {
       ?dating,
       profile,
       ...meet,
+      notesDomain,
       strangers,
       ?mailboxes,
     ]);

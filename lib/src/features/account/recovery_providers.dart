@@ -165,7 +165,10 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
         context: 'Starting the circle backup failed',
       );
       ref.onDispose(() {
-        unawaitedLogged(service.stop(), context: 'Stopping the circle backup');
+        unawaitedLogged(
+          service.stop().whenComplete(service.dispose),
+          context: 'Stopping the circle backup',
+        );
       });
       return service;
     });

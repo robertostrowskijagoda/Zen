@@ -524,6 +524,14 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const CircleReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // No account backup on this device, or a month old.
+                const BackupReminderCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // Friends whose last message waits for an answer.
+                const WaitingRepliesCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 if (actionableInbox.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -660,6 +668,28 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                           ],
                         ),
                 ),
+                // A chat with oneself, the same on every device: below the
+                // conversations, out of the way of the list.
+                if (!searchingMessages)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: ZenCard(
+                      key: const Key('chats-self-notes'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      onTap: () => unawaited(SelfNotesScreen.open(context)),
+                      child: Row(
+                        children: <Widget>[
+                          const Icon(Icons.sticky_note_2_outlined),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(t('Notatki dla siebie'))),
+                          const Icon(Icons.chevron_right_rounded),
+                        ],
+                      ),
+                    ),
+                  ),
                 // Messages of every conversation with the words typed.
                 MessageSearchResults(
                   key: const Key('chats-message-search'),
@@ -983,24 +1013,6 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                     subtitle: t('Wersja, dokumenty, licencje, kontakt'),
                     onTap: () => unawaited(AboutScreen.open(context)),
                   ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-github'),
-                    icon: Icons.code_rounded,
-                    tone: ZenTone.system,
-                    title: t('Zen na GitHubie'),
-                    subtitle: t('Kod, wydania, instrukcje i zgłaszanie błędów'),
-                    onTap: () =>
-                        unawaited(openOrCopyLink(context, kZenRepositoryUrl)),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-discord'),
-                    icon: Icons.forum_rounded,
-                    tone: ZenTone.system,
-                    title: t('Zen na Discordzie'),
-                    subtitle: t('Pytania, nowości i rozmowy o Zen'),
-                    onTap: () =>
-                        unawaited(openOrCopyLink(context, kZenDiscordUrl)),
-                  ),
                 ],
               ),
               // Your profile is edited on the profile tab, not here.
@@ -1155,11 +1167,18 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                     title: t('Sieć i usługa'),
                     subtitle: state.connectionLabel,
                     pageTitle: t('Sieć i usługa'),
-                    pageChildren: const <Widget>[
-                      _LiveTechInfoSection(),
-                      _OfflineLinksPanel(),
-                      _BridgeHostSection(),
-                      Padding(
+                    pageChildren: <Widget>[
+                      const _LiveTechInfoSection(),
+                      const _OfflineLinksPanel(),
+                      // How often Bluetooth looks around in the background
+                      // (its own page until 1.15.4), under its switch.
+                      if (Platform.isAndroid)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 12),
+                          child: NearbyLookSettingsSection(),
+                        ),
+                      const _BridgeHostSection(),
+                      const Padding(
                         padding: EdgeInsets.only(top: 12),
                         child: _Panel(child: PebbleServeSwitch()),
                       ),
@@ -1174,17 +1193,6 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                     pageTitle: t('Publiczne węzły'),
                     pageChildren: const <Widget>[PublicPeersSection()],
                   ),
-                  // How often Bluetooth looks around in the background.
-                  if (Platform.isAndroid)
-                    _SettingsNavTile(
-                      key: const Key('settings-nav-nearby-look'),
-                      icon: Icons.radar_rounded,
-                      tone: ZenTone.places,
-                      title: t('Rozglądanie w tle'),
-                      subtitle: t('Bluetooth: jak często i jak długo'),
-                      pageTitle: t('Rozglądanie w tle'),
-                      pageChildren: const <Widget>[NearbyLookSettingsSection()],
-                    ),
                 ],
               ),
               _SettingsGroup(
@@ -1267,20 +1275,18 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                     tone: ZenTone.network,
                     title: t('Dlaczego nie działa?'),
                     subtitle: t(
-                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
+                      'Sieć, praca w tle, powiadomienia, zegar, miejsce; '
+                      'dziennik zdarzeń',
                     ),
-                    onTap: () => unawaited(HealthScreen.open(context)),
-                  ),
-                  _SettingsNavTile(
-                    key: const Key('settings-nav-diagnostics'),
-                    icon: Icons.receipt_long_outlined,
-                    tone: ZenTone.system,
-                    title: t('Diagnostyka'),
-                    subtitle: t('Dziennik zdarzeń do zgłaszania błędów'),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext context) =>
-                            const _DiagnosticsScreen(),
+                    onTap: () => unawaited(
+                      HealthScreen.open(
+                        context,
+                        openLog: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext context) =>
+                                const _DiagnosticsScreen(),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -3911,6 +3917,16 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                             icon: const Icon(Icons.save_alt_rounded, size: 18),
                             label: Text(t('Zapisz plik')),
                           ),
+                          OutlinedButton.icon(
+                            key: const Key('diagnostics-report'),
+                            onPressed: () =>
+                                unawaited(showProblemReportSheet(context)),
+                            icon: const Icon(
+                              Icons.report_problem_outlined,
+                              size: 18,
+                            ),
+                            label: Text(t('Zgłoś problem')),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -3946,360 +3962,6 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                   ),
                 ),
               ),
-      ),
-    );
-  }
-}
-
-class _BackgroundDeliverySection extends StatefulWidget {
-  const _BackgroundDeliverySection();
-
-  @override
-  State<_BackgroundDeliverySection> createState() =>
-      _BackgroundDeliverySectionState();
-}
-
-class _BackgroundDeliverySectionState
-    extends State<_BackgroundDeliverySection> {
-  bool? _unrestricted;
-  bool _allPermissionsGranted = false;
-  bool _requestInFlight = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_refresh());
-  }
-
-  Future<void> _refresh() async {
-    final bool unrestricted = await isAndroidBackgroundDeliveryUnrestricted();
-    final Map<String, bool> perms = await checkAllPermissions();
-    final bool fullScreen = await canUseCallFullScreenIntent();
-    final bool overlays = await canDrawOverlays();
-    if (!mounted) {
-      return;
-    }
-    final bool allPerms =
-        perms.isNotEmpty &&
-        perms['audio'] == true &&
-        perms['camera'] == true &&
-        perms['notifications'] == true &&
-        unrestricted &&
-        fullScreen &&
-        overlays;
-    setState(() {
-      _unrestricted = unrestricted;
-      _allPermissionsGranted = allPerms;
-    });
-  }
-
-  Future<void> _request() async {
-    setState(() => _requestInFlight = true);
-    // 1. Audio, Camera, Notifications
-    await requestAllAppPermissions();
-    // 2. Battery optimization exemption
-    await requestAndroidBackgroundDeliveryExemption();
-    // 3. Full-screen intent
-    await requestCallFullScreenIntentPermission();
-    // 4. Floating overlay
-    final bool canOverlay = await canDrawOverlays();
-    if (!canOverlay) {
-      await openOverlaySettings();
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await _refresh();
-    if (mounted) {
-      setState(() => _requestInFlight = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!Platform.isAndroid) {
-      return const SizedBox.shrink();
-    }
-    final ZenColors zen = ZenColors.of(context);
-    final bool granted = _unrestricted == true && _allPermissionsGranted;
-    return SizedBox(
-      width: double.infinity,
-      child: _Panel(
-        key: const Key('settings-background-delivery-card'),
-        accentTone: granted ? zen.success : zen.warning,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _PanelHeader(
-              icon: granted
-                  ? Icons.verified_user_outlined
-                  : Icons.notifications_paused_outlined,
-              tone: granted ? zen.success : zen.warning,
-              title: t('Uprawnienia i praca w tle'),
-              pill: _StatusPill(
-                label: granted ? t('Wszystkie aktywne') : t('Wymaga uprawnień'),
-                tone: granted ? zen.success : zen.warning,
-              ),
-              caption: granted
-                  ? t(
-                      'Aplikacja ma komplet uprawnień (praca w tle, '
-                      'powiadomienia, mikrofon, kamera, okno rozmowy).',
-                    )
-                  : t(
-                      'Aby nie przegapić połączeń i wiadomości oraz móc '
-                      'korzystać z rozmów i pływającego okna połączeń, '
-                      'zezwól na wszystkie uprawnienia.',
-                    ),
-            ),
-            if (!granted) ...<Widget>[
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                key: const Key('settings-background-delivery-request'),
-                onPressed: _requestInFlight ? null : _request,
-                icon: const Icon(Icons.verified_user_outlined, size: 18),
-                label: Text(t('Zezwól na wszystko')),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Battery optimisation on its own (the panel above folds it into "all
-/// permissions"): whether Android may put Zen to sleep, the system dialog
-/// that exempts it, and where phone makers hide their own battery limits.
-class _BatteryOptimizationSection extends StatefulWidget {
-  const _BatteryOptimizationSection();
-
-  @override
-  State<_BatteryOptimizationSection> createState() =>
-      _BatteryOptimizationSectionState();
-}
-
-class _BatteryOptimizationSectionState
-    extends State<_BatteryOptimizationSection>
-    with WidgetsBindingObserver {
-  bool? _exempt;
-  bool _requestInFlight = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    unawaited(_refresh());
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Back from the system dialog or the phone maker's settings.
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_refresh());
-    }
-  }
-
-  Future<void> _refresh() async {
-    final bool exempt = await isAndroidBackgroundDeliveryUnrestricted();
-    if (!mounted) {
-      return;
-    }
-    setState(() => _exempt = exempt);
-  }
-
-  Future<void> _request() async {
-    setState(() => _requestInFlight = true);
-    // ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS for this package: the
-    // system asks the person, nothing changes without their yes.
-    final bool exempt = await requestAndroidBackgroundDeliveryExemption();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _exempt = exempt;
-      _requestInFlight = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!Platform.isAndroid) {
-      return const SizedBox.shrink();
-    }
-    final ZenColors zen = ZenColors.of(context);
-    final bool? exempt = _exempt;
-    final Color tone = exempt == false ? zen.warning : zen.success;
-    return SizedBox(
-      width: double.infinity,
-      child: _Panel(
-        key: const Key('settings-battery-card'),
-        accentTone: exempt == null ? null : tone,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _PanelHeader(
-              icon: exempt == false
-                  ? Icons.battery_alert_rounded
-                  : Icons.battery_charging_full_rounded,
-              tone: exempt == null ? null : tone,
-              title: t('Oszczędzanie baterii'),
-              pill: exempt == null
-                  ? null
-                  : _StatusPill(
-                      label: exempt
-                          ? t('Zen bez ograniczeń')
-                          : t('Zen jest usypiany'),
-                      tone: tone,
-                    ),
-              caption: switch (exempt) {
-                null => t('Sprawdzam, czy Android może usypiać Zen…'),
-                false => t(
-                  'Android może usypiać Zen przy zgaszonym ekranie. '
-                  'Wiadomości, połączenia i alarmy dotrą wtedy dopiero po '
-                  'otwarciu aplikacji.',
-                ),
-                true => t(
-                  'Android nie usypia Zen, więc wiadomości, połączenia i '
-                  'alarmy docierają także przy zgaszonym ekranie.',
-                ),
-              },
-            ),
-            if (exempt == false) ...<Widget>[
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                key: const Key('settings-battery-request'),
-                onPressed: _requestInFlight
-                    ? null
-                    : () => unawaited(_request()),
-                icon: const Icon(Icons.battery_saver_outlined, size: 18),
-                label: Text(t('Wyłącz optymalizację baterii')),
-              ),
-            ],
-            const SizedBox(height: 12),
-            ZenInfo(
-              icon: Icons.phone_android_rounded,
-              tone: zen.warning,
-              title: t('Telefony mają też własne „zabójce baterii”'),
-              text: t(
-                'Xiaomi, Samsung, Huawei czy OnePlus potrafią zamknąć Zen '
-                'mimo tego ustawienia. Samsung: Ustawienia → Bateria → '
-                'Limity użycia w tle — Zen nie może być na liście „Uśpione '
-                'aplikacje” ani „Głęboko uśpione aplikacje”. Xiaomi: w '
-                'ustawieniach aplikacji włącz „Autostart” i ustaw '
-                'oszczędzanie baterii na „Bez ograniczeń”.',
-              ),
-            ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
-                key: const Key('settings-battery-app-settings'),
-                onPressed: () => unawaited(openAndroidAppSettings()),
-                icon: const Icon(Icons.settings_outlined, size: 18),
-                label: Text(t('Otwórz ustawienia aplikacji')),
-              ),
-            ),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
-                key: const Key('settings-battery-vendor-help'),
-                onPressed: () => unawaited(PermissionsScreen.open(context)),
-                icon: const Icon(Icons.menu_book_outlined, size: 18),
-                label: Text(t('Instrukcja dla Twojego telefonu')),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Android 14 hands USE_FULL_SCREEN_INTENT only to apps the Play Store knows
-/// as calling apps. Without it a ringing call never takes over a locked
-/// screen, which is exactly when a missed call hurts most — so the state is
-/// worth showing instead of leaving the user wondering why calls are silent.
-class _FullScreenCallSection extends StatefulWidget {
-  const _FullScreenCallSection();
-
-  @override
-  State<_FullScreenCallSection> createState() => _FullScreenCallSectionState();
-}
-
-class _FullScreenCallSectionState extends State<_FullScreenCallSection> {
-  bool? _granted;
-  bool _requestInFlight = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_refresh());
-  }
-
-  Future<void> _refresh() async {
-    final bool granted = await canUseCallFullScreenIntent();
-    if (!mounted) {
-      return;
-    }
-    setState(() => _granted = granted);
-  }
-
-  Future<void> _request() async {
-    setState(() => _requestInFlight = true);
-    final bool granted = await requestCallFullScreenIntentPermission();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _granted = granted;
-      _requestInFlight = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!Platform.isAndroid) {
-      return const SizedBox.shrink();
-    }
-    final ZenColors zen = ZenColors.of(context);
-    final bool granted = _granted == true;
-    if (_granted == null || granted) {
-      // Nothing to act on: either still unknown, or the system already allows
-      // the ringing screen. Do not spend a settings card on a healthy state.
-      return const SizedBox.shrink();
-    }
-    return SizedBox(
-      width: double.infinity,
-      child: _Panel(
-        key: const Key('settings-full-screen-call-card'),
-        accentTone: zen.warning,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _PanelHeader(
-              icon: Icons.phone_locked_outlined,
-              tone: zen.warning,
-              title: t('Połączenia na ekranie blokady'),
-              pill: _StatusPill(label: t('Ograniczone'), tone: zen.warning),
-              caption: t(
-                'System nie pozwala Zen otwierać pełnoekranowego powiadomienia o '
-                'rozmowie. Połączenie przychodzące pojawi się tylko jako zwykłe '
-                'powiadomienie i łatwo je przegapić przy zablokowanym ekranie.',
-              ),
-            ),
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              key: const Key('settings-full-screen-call-request'),
-              onPressed: _requestInFlight ? null : _request,
-              icon: const Icon(Icons.ring_volume_outlined, size: 18),
-              label: Text(t('Zezwól na pełny ekran')),
-            ),
-          ],
-        ),
       ),
     );
   }

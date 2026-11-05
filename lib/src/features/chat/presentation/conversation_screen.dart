@@ -29,6 +29,7 @@ import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_surface_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
@@ -38,7 +39,9 @@ import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/reveal_message.dart';
+import 'package:zen/src/features/chat/presentation/shared_location_card.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
+import 'package:zen/src/features/chat/scheduled_messages.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -678,6 +681,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     );
                   }
                   return;
+                case _ConversationMenuAction.shareLocation:
+                  await shareLocationFrom(
+                    context,
+                    ref,
+                    friend?.address ?? widget.peerAddress,
+                  );
+                  return;
                 case _ConversationMenuAction.notificationPrivacy:
                   await showConversationNotificationPrivacyDialog(
                     context,
@@ -1102,6 +1112,150 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         ),
       ),
     );
+  }
+
+  /// "Wyślij później": the composer's text goes at a chosen time (an
+  /// hour from now, this evening, tomorrow morning, or a day and hour
+  /// picked); the sheet also lists what already waits for this person,
+  /// each with "Anuluj".
+  Future<void> _scheduleMessage() async {
+    final String text = _composerController.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+    final ScheduledMessagesService scheduled = ref.read(
+      scheduledMessagesProvider,
+    );
+    await scheduled.load();
+    if (!mounted) {
+      return;
+    }
+    final DateTime now = DateTime.now();
+    final DateTime evening = DateTime(now.year, now.month, now.day, 20);
+    final DateTime morning = DateTime(now.year, now.month, now.day + 1, 8);
+    String when(DateTime at) {
+      String two(int v) => v.toString().padLeft(2, '0');
+      return '${two(at.day)}.${two(at.month)} ${two(at.hour)}:${two(at.minute)}';
+    }
+
+    final DateTime? at = await showModalBottomSheet<DateTime>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheet) => SafeArea(
+        child: ListenableBuilder(
+          listenable: scheduled,
+          builder: (BuildContext context, Widget? _) => ListView(
+            shrinkWrap: true,
+            children: <Widget>[
+              ListTile(
+                title: Text(
+                  t('Wyślij później'),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  t(
+                    'Wiadomość czeka na tym urządzeniu i wychodzi o swojej '
+                    'porze, gdy Zen działa (albo zaraz po jego otwarciu).',
+                  ),
+                ),
+              ),
+              ListTile(
+                key: const Key('schedule-hour'),
+                leading: const Icon(Icons.schedule_rounded),
+                title: Text(t('Za godzinę')),
+                onTap: () =>
+                    Navigator.of(sheet).pop(now.add(const Duration(hours: 1))),
+              ),
+              if (evening.isAfter(now.add(const Duration(minutes: 30))))
+                ListTile(
+                  key: const Key('schedule-evening'),
+                  leading: const Icon(Icons.nights_stay_outlined),
+                  title: Text(t('Dziś o 20:00')),
+                  onTap: () => Navigator.of(sheet).pop(evening),
+                ),
+              ListTile(
+                key: const Key('schedule-morning'),
+                leading: const Icon(Icons.wb_sunny_outlined),
+                title: Text(t('Jutro o 8:00')),
+                onTap: () => Navigator.of(sheet).pop(morning),
+              ),
+              ListTile(
+                key: const Key('schedule-pick'),
+                leading: const Icon(Icons.event_rounded),
+                title: Text(t('Wybierz dzień i godzinę')),
+                onTap: () async {
+                  final DateTime? day = await showDatePicker(
+                    context: sheet,
+                    firstDate: now,
+                    lastDate: now.add(const Duration(days: 365)),
+                    initialDate: now,
+                  );
+                  if (day == null || !sheet.mounted) {
+                    return;
+                  }
+                  final TimeOfDay? time = await showTimePicker(
+                    context: sheet,
+                    initialTime: TimeOfDay.fromDateTime(
+                      now.add(const Duration(hours: 1)),
+                    ),
+                  );
+                  if (time == null || !sheet.mounted) {
+                    return;
+                  }
+                  Navigator.of(sheet).pop(
+                    DateTime(
+                      day.year,
+                      day.month,
+                      day.day,
+                      time.hour,
+                      time.minute,
+                    ),
+                  );
+                },
+              ),
+              for (final ScheduledMessage m in scheduled.waiting(
+                widget.peerAddress,
+              ))
+                ListTile(
+                  key: Key('scheduled-${m.id}'),
+                  leading: const Icon(Icons.outbox_outlined),
+                  title: Text(
+                    m.text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    when(DateTime.fromMillisecondsSinceEpoch(m.atMillis)),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => unawaited(scheduled.cancel(m.id)),
+                    child: Text(t('Anuluj')),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (at == null || !mounted) {
+      return;
+    }
+    await scheduled.schedule(
+      to: widget.peerAddress,
+      text: text,
+      atMillis: at.millisecondsSinceEpoch,
+    );
+    _composerController.clear();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          key: const Key('scheduled-snack'),
+          content: Text(
+            t('Zaplanowano na {when}', <String, Object?>{'when': when(at)}),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _sendMessage() async {

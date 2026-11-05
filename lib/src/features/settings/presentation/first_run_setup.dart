@@ -393,11 +393,13 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
         icon: Icons.notifications_none_rounded,
         text: t(
           'Powiadomienia widać na ekranie blokady i zostają w historii '
-          'systemu. Rozmowa może mieć własny poziom (menu rozmowy → '
-          'Treść powiadomień).',
+          'systemu. Rozmowę możesz wyciszyć albo dać jej własny poziom '
+          '(menu rozmowy → Powiadomienia), a każdy rodzaj powiadomień '
+          'ustawisz osobno w Ustawieniach.',
         ),
       ),
       const ZenCard(child: NotificationPrivacySettingChoice()),
+      const ZenCard(child: _GroupMentionsOnlySwitch()),
       // An additional account: whether it tells anything while closed.
       if (!ref.read(zenAccountProvider).isDefault)
         const ZenCard(child: AccountNotifySwitch()),
@@ -580,6 +582,35 @@ class _GateDefaultChoice extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// "W grupach tylko wzmianki" in the setup's notifications step.
+class _GroupMentionsOnlySwitch extends ConsumerWidget {
+  const _GroupMentionsOnlySwitch();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool on = ref.watch(
+      appSettingsControllerProvider.select((s) => s.groupMentionsOnly),
+    );
+    return SwitchListTile.adaptive(
+      key: const Key('first-run-group-mentions-only'),
+      contentPadding: EdgeInsets.zero,
+      title: Text(t('W grupach tylko wzmianki')),
+      subtitle: Text(
+        t(
+          'Powiadomienie tylko o wiadomości, która Cię wymienia. Grupa może '
+          'to zmienić w swoim menu → Powiadomienia.',
+        ),
+      ),
+      value: on,
+      onChanged: (bool value) => unawaited(
+        ref
+            .read(appSettingsControllerProvider.notifier)
+            .setGroupMentionsOnly(value),
+      ),
     );
   }
 }

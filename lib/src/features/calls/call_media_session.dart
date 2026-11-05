@@ -826,6 +826,7 @@ final class WebRtcCallMediaSessionController
   String? _remoteAddress;
   CallInviteKind? _activeKind;
   bool _renderersInitialized = false;
+  bool _renderersDisposed = false;
   bool _remoteDescriptionSet = false;
 
   /// Hosts the relay candidate was added with (loopback, then the LAN
@@ -2721,9 +2722,12 @@ final class WebRtcCallMediaSessionController
   /// `srcObject` on an already-freed native renderer.
   Future<void> _shutdown() async {
     await close();
-    if (!_renderersInitialized) {
+    // Never initialized ones too: they hold no native texture then, but
+    // each is a notifier of its own to dispose.
+    if (_renderersDisposed) {
       return;
     }
+    _renderersDisposed = true;
     _renderersInitialized = false;
     try {
       await _localRenderer.dispose();

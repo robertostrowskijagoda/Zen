@@ -82,7 +82,7 @@ func (d *Debug) GetPeers() (infos []DebugPeerInfo) {
 				info.Key = append(info.Key[:0], peer.key[:]...)
 				info.Priority = peer.prio
 				info.Conn = peer.conn
-				if rtt := peer.srrt.Sub(peer.srst).Round(time.Millisecond / 100); rtt > 0 {
+				if rtt := time.Duration(peer.srrt.Load() - peer.srst.Load()).Round(time.Millisecond / 100); rtt > 0 {
 					info.Latency = rtt
 				}
 				infos = append(infos, info)

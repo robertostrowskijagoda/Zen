@@ -24,8 +24,6 @@ const List<String> _rows = <String>[
   'settings-rerun-setup',
   'settings-nav-invite',
   'settings-nav-about',
-  'settings-nav-github',
-  'settings-nav-discord',
   'settings-lock-now-button',
   // Konto i odzyskiwanie
   'settings-nav-account',
@@ -51,7 +49,6 @@ const List<String> _rows = <String>[
   'settings-nav-updates',
   // Zaawansowane
   'settings-nav-health',
-  'settings-nav-diagnostics',
   'settings-nav-reset',
 ];
 
@@ -120,7 +117,7 @@ final Map<String, List<String>> _pages = <String, List<String>>{
 /// on there.
 const Map<String, String> _androidOnly = <String, String>{
   'settings-nav-delivery': 'settings-nav-notifications',
-  'settings-nav-nearby-look': '',
+  'settings-nearby-look': 'settings-nav-network',
   'settings-disguise-icon-switch': 'settings-nav-security',
 };
 const Map<String, String> _iosOnly = <String, String>{
@@ -211,6 +208,13 @@ const List<String> _before = <String>[
 const Map<String, String> _mergedRows = <String, String>{
   'settings-nav-group-invites': 'group-invite-from',
   'settings-nav-stranger-messages': 'stranger-messages-from',
+  // 1.15.5: the links are in "O aplikacji" (they were there twice), the
+  // log at the end of "Dlaczego nie działa?".
+  'settings-nav-github': 'settings-nav-about',
+  'settings-nav-discord': 'settings-nav-about',
+  'settings-nav-diagnostics': 'settings-nav-health',
+  // "Rozglądanie w tle" is on "Sieć i usługa", under the Bluetooth switch.
+  'settings-nav-nearby-look': 'settings-nearby-look',
 };
 
 /// Keys of the map that are no setting of their own, so the settings

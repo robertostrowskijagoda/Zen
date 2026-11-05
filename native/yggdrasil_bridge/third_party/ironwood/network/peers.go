@@ -7,6 +7,7 @@ import (
 
 	//"math"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/Arceliar/phony"
@@ -99,6 +100,12 @@ func (ps *peers) removePeer(p *peer) error {
 	return err
 }
 
+// Zen: monoStart and monoNow time the signature round trips (peer.srst,
+// peer.srrt) on the monotonic clock, as time.Time's Sub did.
+var monoStart = time.Now()
+
+func monoNow() int64 { return int64(time.Since(monoStart)) }
+
 type peer struct {
 	phony.Inbox // Only used to process or send some protocol traffic
 	peers       *peers
@@ -111,9 +118,11 @@ type peer struct {
 	order       uint64 // order in which peers were connected (relative uptime)
 	monitor     peerMonitor
 	writer      peerWriter
-	ready       bool      // is the writer ready for traffic?
-	srst        time.Time // sigReq send time
-	srrt        time.Time // sigRes receive time
+	ready       bool // is the writer ready for traffic?
+	// Zen: written by the writer (srst) and the peer (srrt), read by both
+	// and by Debug.GetPeers: monotonic nanoseconds since monoStart, atomic.
+	srst atomic.Int64 // sigReq send time
+	srrt atomic.Int64 // sigRes receive time
 }
 
 type peerMonitor struct {
@@ -320,7 +329,7 @@ func (p *peer) _handleSigReq(bs []byte) error {
 
 func (p *peer) sendSigReq(from phony.Actor, req *routerSigReq) {
 	p.sendDirect(from, wireProtoSigReq, req, func() {
-		p.srst = time.Now()
+		p.srst.Store(monoNow())
 	})
 }
 
@@ -332,8 +341,8 @@ func (p *peer) _handleSigRes(bs []byte) error {
 	if !res.check(p.peers.core.crypto.publicKey, p.key) {
 		return types.ErrBadMessage
 	}
-	p.srrt = time.Now()
-	rtt := p.srrt.Sub(p.srst)
+	p.srrt.Store(monoNow())
+	rtt := time.Duration(p.srrt.Load() - p.srst.Load())
 	p.peers.core.router.handleResponse(p, p, res, rtt)
 	return nil
 }

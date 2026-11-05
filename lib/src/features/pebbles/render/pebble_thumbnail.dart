@@ -30,7 +30,13 @@ Future<Uint8List> pebbleThumbnail(PebbleDesign design) async {
     zoom: 1.15,
     shadow: false,
   );
-  final ui.Image image = await rec.endRecording().toImage(px, px);
+  final ui.Picture picture = rec.endRecording();
+  final ui.Image image;
+  try {
+    image = await picture.toImage(px, px);
+  } finally {
+    picture.dispose();
+  }
   final ByteData? data = await image.toByteData();
   image.dispose();
   texture.dispose();

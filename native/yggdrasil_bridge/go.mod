@@ -26,6 +26,7 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 )
 
-// ironwood with one change of Zen's (third_party/ironwood/ZEN.md): a
-// session init not acked within a second is sent anew, not repeated.
+// ironwood with two changes of Zen's (third_party/ironwood/ZEN.md): a
+// session init not acked within a second is sent anew, not repeated; the
+// traffic counters and round-trip times read across actors are atomic.
 replace github.com/Arceliar/ironwood => ./third_party/ironwood

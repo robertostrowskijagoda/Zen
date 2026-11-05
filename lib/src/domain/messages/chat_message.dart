@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
+import 'package:zen/src/domain/messages/chat_location.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/features/social/mentions.dart';
 
 enum ChatMessageDirection { incoming, outgoing, system }
@@ -114,6 +116,8 @@ final class ChatMessage {
     this.pendingMedia,
     this.attachmentUnavailable = false,
     this.mentions = const <Mention>[],
+    this.poll,
+    this.location,
   });
 
   final String id;
@@ -163,6 +167,12 @@ final class ChatMessage {
   /// The people the text mentions (its `<@N>` tokens point into this list,
   /// `mentions.dart`).
   final List<Mention> mentions;
+
+  /// A poll in a group (its votes are [reactions], `chat_poll.dart`).
+  final ChatPoll? poll;
+
+  /// A position shared here, maybe live for a while (`chat_location.dart`).
+  final ChatLocation? location;
 
   /// [text] with "@name" in place of each mention (previews, copies).
   String get plainText => mentionsAsPlainText(text, mentions);
@@ -225,6 +235,8 @@ final class ChatMessage {
     Object? pendingMedia = _chatMessageUnset,
     bool? attachmentUnavailable,
     List<Mention>? mentions,
+    Object? poll = _chatMessageUnset,
+    Object? location = _chatMessageUnset,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -293,6 +305,12 @@ final class ChatMessage {
       attachmentUnavailable:
           attachmentUnavailable ?? this.attachmentUnavailable,
       mentions: mentions ?? this.mentions,
+      poll: identical(poll, _chatMessageUnset)
+          ? this.poll
+          : castCopyWithValue<ChatPoll>(poll, fieldName: 'poll'),
+      location: identical(location, _chatMessageUnset)
+          ? this.location
+          : castCopyWithValue<ChatLocation>(location, fieldName: 'location'),
     );
   }
 
@@ -324,6 +342,8 @@ Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
     'pm': ?m.pendingMedia,
     if (m.attachmentUnavailable) 'nf': true,
     if (m.mentions.isNotEmpty) kMentionsKey: mentionsToJson(m.mentions),
+    if (m.poll != null) kPollKey: m.poll!.toJson(),
+    if (m.location != null) kLocationKey: m.location!.toJson(),
   };
   return out.isEmpty ? null : out;
 }
@@ -356,6 +376,8 @@ ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
     pendingMedia: pending is Map ? Map<String, dynamic>.from(pending) : null,
     attachmentUnavailable: json['nf'] == true,
     mentions: mentionsFromJson(json[kMentionsKey]),
+    poll: ChatPoll.fromJson(json[kPollKey]),
+    location: ChatLocation.fromJson(json[kLocationKey]),
   );
 }
 

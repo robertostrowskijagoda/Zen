@@ -17,7 +17,6 @@ import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_theme_picker.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
-import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
@@ -30,7 +29,6 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
-import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
@@ -38,14 +36,18 @@ import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
+import 'package:zen/src/features/account/presentation/backup_reminder_card.dart';
 import 'package:zen/src/features/account/presentation/circle_reminder_card.dart';
-import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/presence_label.dart';
+import 'package:zen/src/features/chat/presentation/self_notes_screen.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
+import 'package:zen/src/features/chat/presentation/waiting_replies_card.dart';
+import 'package:zen/src/features/chat/scheduled_messages.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
@@ -81,7 +83,6 @@ import 'package:zen/src/features/relay/mailbox_quiet_notice.dart';
 import 'package:zen/src/features/relay/presentation/friend_device_kinds.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
-import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
 import 'package:zen/src/features/runtime/presentation/offline_links_section.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -103,6 +104,7 @@ import 'package:zen/src/features/settings/presentation/language_screen.dart';
 import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
+import 'package:zen/src/features/settings/presentation/problem_report_sheet.dart';
 import 'package:zen/src/features/settings/presentation/public_peers_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_limits_section.dart';
 import 'package:zen/src/features/settings/presentation/storage_usage_section.dart';
@@ -350,6 +352,7 @@ class AppShellScreen extends ConsumerWidget {
         child: Column(
           children: <Widget>[
             _CallFeedbackHost(),
+            _ScheduledMessagesHost(),
             _StatusBar(),
             // A newer release on GitHub, or GitHub blocked.
             GithubUpdateBanner(),
@@ -364,6 +367,56 @@ class AppShellScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Sends the scheduled messages ("Wyślij później") whose time came, while
+/// the app runs: at the start and every minute.
+class _ScheduledMessagesHost extends ConsumerStatefulWidget {
+  const _ScheduledMessagesHost();
+
+  @override
+  ConsumerState<_ScheduledMessagesHost> createState() =>
+      _ScheduledMessagesHostState();
+}
+
+class _ScheduledMessagesHostState
+    extends ConsumerState<_ScheduledMessagesHost> {
+  ScheduledMessagesService? _service;
+  AppLifecycleListener? _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    final ScheduledMessagesService service = ref.read(
+      scheduledMessagesProvider,
+    );
+    _service = service;
+    service.start();
+    // Positions still being shared go on (after a restart too).
+    if (locationSharingAvailable) {
+      ref.read(locationSharingProvider).start();
+    }
+    // Timers stand still while a phone sleeps: back on screen, what came
+    // due meanwhile goes now.
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        unawaited(service.sendDue());
+        if (locationSharingAvailable) {
+          unawaited(ref.read(locationSharingProvider).tick());
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycle?.dispose();
+    _service?.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// Plays ring feedback for incoming/outgoing calls regardless of the
