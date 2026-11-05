@@ -11,6 +11,7 @@ import 'package:zen/src/core/crypto/hybrid_signature_ffi.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pyramid/pyramid_root.dart';
+import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 
 /// The bridge built for this computer (build_linux.sh, build_windows.ps1),
 /// or the one `ZEN_BRIDGE_LIBRARY` names; `null` when there is none.
@@ -22,7 +23,14 @@ String? _bridgeLibrary() {
       'native/yggdrasil_bridge/bin/linux-x64/libyggdrasil_bridge.so',
       'native/yggdrasil_bridge/bin/linux-arm64/libyggdrasil_bridge.so',
     ],
-    if (Platform.isWindows) r'native\yggdrasil_bridge\bin\yggdrasil_bridge.dll',
+    // Where the app itself looks (next to flutter_tester first): a bridge
+    // it finds there is the one it uses, whatever the checkout has.
+    if (Platform.isWindows)
+      ...windowsBridgeLibraryCandidates(
+        exeDirectory: File(Platform.resolvedExecutable).parent.path,
+        currentDirectory: Directory.current.path,
+        debugMode: true,
+      ),
   ];
   for (final String candidate in candidates) {
     if (File(candidate).existsSync()) {
