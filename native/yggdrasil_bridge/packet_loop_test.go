@@ -309,13 +309,13 @@ func TestFirstContactArrivesQuickly(t *testing.T) {
 	mesh.waitFindable(a, b)
 	took := deliverWithin(t, a, b, `{"type":"friend_request","text":"cześć"}`, 20*time.Second)
 	t.Logf("first contact: %v", took)
-	if took > firstContactBound {
-		t.Fatalf("the first message took %v (at most %v)", took, firstContactBound)
+	if took > firstContactLimit() {
+		t.Fatalf("the first message took %v (at most %v)", took, firstContactLimit())
 	}
 	took = deliverWithin(t, b, a, `{"type":"friend_accept"}`, 20*time.Second)
 	t.Logf("the answer: %v", took)
-	if took > firstContactBound {
-		t.Fatalf("the answer took %v (at most %v)", took, firstContactBound)
+	if took > firstContactLimit() {
+		t.Fatalf("the answer took %v (at most %v)", took, firstContactLimit())
 	}
 }
 
@@ -362,13 +362,13 @@ func TestMessagesFlowQuicklyAfterARestart(t *testing.T) {
 	b = restartTestNode(t, mesh, b)
 	took := deliverWithin(t, b, a, `{"type":"hello","text":"po starcie"}`, 30*time.Second)
 	t.Logf("restarted device to friend: %v", took)
-	if took > firstContactBound {
-		t.Fatalf("after the restart the restarted device's message took %v (at most %v)", took, firstContactBound)
+	if took > firstContactLimit() {
+		t.Fatalf("after the restart the restarted device's message took %v (at most %v)", took, firstContactLimit())
 	}
 	took = deliverWithin(t, a, b, `{"type":"message","text":"po restarcie"}`, 30*time.Second)
 	t.Logf("friend to restarted device: %v", took)
-	if took > firstContactBound {
-		t.Fatalf("after the restart the friend's message took %v (at most %v)", took, firstContactBound)
+	if took > firstContactLimit() {
+		t.Fatalf("after the restart the friend's message took %v (at most %v)", took, firstContactLimit())
 	}
 }
 
@@ -397,8 +397,8 @@ func TestFriendReachesARestartedDeviceQuickly(t *testing.T) {
 	}
 	took := time.Since(started)
 	t.Logf("friend to restarted device: %v", took)
-	if took > afterRestartBound {
-		t.Fatalf("the friend's message to the restarted device took %v (at most %v)", took, afterRestartBound)
+	if took > afterRestartLimit() {
+		t.Fatalf("the friend's message to the restarted device took %v (at most %v)", took, afterRestartLimit())
 	}
 }
 
@@ -416,8 +416,8 @@ func TestFriendReachesASilentlyRestartedDevice(t *testing.T) {
 	mesh.waitFinding(b)
 	took := deliverWithin(t, a, b, `{"type":"message","text":"halo?"}`, 30*time.Second)
 	t.Logf("friend to silently restarted device: %v", took)
-	if took > afterRestartBound {
-		t.Fatalf("the friend's message to the silently restarted device took %v (at most %v)", took, afterRestartBound)
+	if took > afterRestartLimit() {
+		t.Fatalf("the friend's message to the silently restarted device took %v (at most %v)", took, afterRestartLimit())
 	}
 }
 
@@ -425,6 +425,15 @@ func TestFriendReachesASilentlyRestartedDevice(t *testing.T) {
 // that restarted may take on a loopback mesh: the device must first become
 // findable again (ironwood's router rounds).
 const afterRestartBound = 5 * time.Second
+
+// afterRestartLimit is [afterRestartBound], four times as long under the
+// race detector (see [firstContactLimit]).
+func afterRestartLimit() time.Duration {
+	if raceEnabled {
+		return 4 * afterRestartBound
+	}
+	return afterRestartBound
+}
 
 // R5-F5: a friend's message to a device that restarted a moment before is
 // not lost, although the two talked again already: ironwood can drop it
@@ -475,8 +484,8 @@ func TestAMessageSoonAfterARestartIsNotLost(t *testing.T) {
 	time.Sleep(time.Second)
 	took := deliverWithin(t, a, b, `{"type":"message","text":"po awarii"}`, 15*time.Second)
 	t.Logf("the friend's message a moment after the restart: %v", took)
-	if took > afterRestartBound {
-		t.Fatalf("the friend's message a moment after the restart took %v (at most %v)", took, afterRestartBound)
+	if took > afterRestartLimit() {
+		t.Fatalf("the friend's message a moment after the restart took %v (at most %v)", took, afterRestartLimit())
 	}
 }
 
@@ -641,15 +650,18 @@ func sessionState(node, peer *bridgeNode) string {
 }
 
 // firstContactBound is the longest a first contact (or the first message
-// after a restart) may take on a loopback mesh. Under the race detector,
-// which slows everything several times, four times as long: that run looks
-// for races, not speed (one took 3.2 s in CI).
-var firstContactBound = func() time.Duration {
+// after a restart) may take on a loopback mesh (test/regressions reads it).
+const firstContactBound = 3 * time.Second
+
+// firstContactLimit is [firstContactBound], four times as long under the
+// race detector, which slows everything several times: that run looks for
+// races, not speed (a message after a restart took 3.2 s there in CI).
+func firstContactLimit() time.Duration {
 	if raceEnabled {
-		return 12 * time.Second
+		return 4 * firstContactBound
 	}
-	return 3 * time.Second
-}()
+	return firstContactBound
+}
 
 // deliverWithin sends payload from from to to once and waits for it at
 // to; it returns how long that took, failing after limit.
