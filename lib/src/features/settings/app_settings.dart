@@ -12,7 +12,10 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///
 /// 2 (1.15.2): "Nie blokuj od razu po zamknięciu aplikacji" (1.15.0) is in
 /// the lock step, which people set up before it came never saw.
-const int kSetupRevision = 2;
+/// 3 (1.15.5): the notifications step has "W grupach tylko wzmianki" (new,
+/// on by default) and an additional account's "Powiadomienia z tego konta"
+/// (1.15.4, which did not bump this).
+const int kSetupRevision = 3;
 
 /// Settings saved before this revision had "Znajomi w tej samej sieci
 /// Wi-Fi", Wi-Fi Direct and Bluetooth off from when they were off by
@@ -500,6 +503,10 @@ final class AppSettings {
     this.showLastOpened = true,
     this.seenTips = const <String>{},
     this.notificationsSeenMillis = 0,
+    this.lastAccountBackupMillis = 0,
+    this.groupMentionsOnly = true,
+    this.waitingReplyReminder = true,
+    this.backupReminderAfterMillis = 0,
   });
 
   static const int defaultInboxLimitMb = 1024;
@@ -726,6 +733,26 @@ final class AppSettings {
   /// last time it was opened; newer ones count on the bell.
   final int notificationsSeenMillis;
 
+  /// "W grupach tylko wzmianki": a group's messages make a notification
+  /// only when they mention this person (a group may say otherwise,
+  /// `SocialHubState.groupNotifyAll`). On by default: busy groups would
+  /// ring all day.
+  final bool groupMentionsOnly;
+
+  /// "Przypominaj o nieodpowiedzianych": the chats list names friends
+  /// whose last message waits for an answer for two days or more. On by
+  /// default.
+  final bool waitingReplyReminder;
+
+  /// When a backup of the whole account was last saved on this device
+  /// (milliseconds since the epoch, 0 = never): the reminder to make one
+  /// counts from it ([backupReminderDue]).
+  final int lastAccountBackupMillis;
+
+  /// "Później" under the backup reminder: not shown again before this
+  /// (milliseconds since the epoch, 0 = no wait).
+  final int backupReminderAfterMillis;
+
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
 
@@ -820,6 +847,10 @@ final class AppSettings {
     bool? showLastOpened,
     Set<String>? seenTips,
     int? notificationsSeenMillis,
+    int? lastAccountBackupMillis,
+    bool? groupMentionsOnly,
+    bool? waitingReplyReminder,
+    int? backupReminderAfterMillis,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -872,6 +903,12 @@ final class AppSettings {
       seenTips: seenTips ?? this.seenTips,
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
+      lastAccountBackupMillis:
+          lastAccountBackupMillis ?? this.lastAccountBackupMillis,
+      groupMentionsOnly: groupMentionsOnly ?? this.groupMentionsOnly,
+      waitingReplyReminder: waitingReplyReminder ?? this.waitingReplyReminder,
+      backupReminderAfterMillis:
+          backupReminderAfterMillis ?? this.backupReminderAfterMillis,
     );
   }
 
@@ -975,6 +1012,12 @@ final class AppSettings {
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
     if (notificationsSeenMillis > 0)
       'notificationsSeenMillis': notificationsSeenMillis,
+    if (lastAccountBackupMillis > 0)
+      'lastAccountBackupMillis': lastAccountBackupMillis,
+    'groupMentionsOnly': groupMentionsOnly,
+    'waitingReplyReminder': waitingReplyReminder,
+    if (backupReminderAfterMillis > 0)
+      'backupReminderAfterMillis': backupReminderAfterMillis,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -1075,6 +1118,10 @@ final class AppSettings {
         _ => null,
       },
       notificationsSeenMillis: pick<int>('notificationsSeenMillis'),
+      lastAccountBackupMillis: pick<int>('lastAccountBackupMillis'),
+      groupMentionsOnly: pick<bool>('groupMentionsOnly'),
+      waitingReplyReminder: pick<bool>('waitingReplyReminder'),
+      backupReminderAfterMillis: pick<int>('backupReminderAfterMillis'),
     );
   }
 

@@ -468,6 +468,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
                     child: Column(
                       children: <Widget>[
                         const _CallFeedbackHost(),
+                        const _ScheduledMessagesHost(),
                         Expanded(
                           child: IndexedStack(
                             index: index,

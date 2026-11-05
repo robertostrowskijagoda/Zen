@@ -138,7 +138,9 @@ ProviderContainer _bootFor(
     overrides: [
       ...buildAppSettingsProviderOverrides(
         store: MemoryAppSettingsStore(),
-        initialState: const AppSettings(),
+        // Every group message notifies here ("W grupach tylko wzmianki"
+        // has its own tests).
+        initialState: const AppSettings(groupMentionsOnly: false),
         hydrationEnabled: false,
       ),
       signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),

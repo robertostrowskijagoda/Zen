@@ -19,6 +19,7 @@ import 'package:zen/src/features/qr_sticker/sticker_design.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
+import 'package:zen/src/features/settings/presentation/problem_report_sheet.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/presentation/own_copy_card.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
@@ -1082,11 +1083,19 @@ class _ContactPage extends StatelessWidget {
       children: <Widget>[
         _Paragraph(
           t(
-            'Błąd, pomysł albo pytanie? Napisz na GitHubie w zakładce Issues. '
-            'Przy błędzie dołącz dziennik zdarzeń: Ustawienia → Zaawansowane → '
-            'Diagnostyka (bez treści wiadomości). Zen nie ma własnego serwera, '
-            'więc nikt nie zobaczy problemu, dopóki go nie zgłosisz.',
+            'Błąd, pomysł albo pytanie? „Zgłoś problem” dołącza sam wersję '
+            'i dziennik techniczny (bez treści wiadomości) i wysyła je '
+            'znajomemu w Zen, na GitHub albo do pliku. Zen nie ma własnego '
+            'serwera, więc nikt nie zobaczy problemu, dopóki go nie zgłosisz.',
           ),
+        ),
+        _LinkTile(
+          key: const Key('about-report-problem'),
+          icon: Icons.report_problem_outlined,
+          tone: zen.warning,
+          title: t('Zgłoś problem'),
+          subtitle: t('Z wersją i dziennikiem, jednym przyciskiem'),
+          onTap: () => unawaited(showProblemReportSheet(context)),
         ),
         _LinkTile(
           key: const Key('about-issues'),

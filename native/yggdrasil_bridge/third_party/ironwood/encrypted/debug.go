@@ -28,7 +28,7 @@ func (d *Debug) GetSessions() (infos []DebugSessionInfo) {
 			var info DebugSessionInfo
 			info.Key = append(info.Key, key[:]...)
 			info.Uptime = time.Since(session.since)
-			info.RX, info.TX = session.rx, session.tx
+			info.RX, info.TX = session.rx.Load(), session.tx.Load()
 			infos = append(infos, info)
 		}
 	})

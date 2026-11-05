@@ -171,7 +171,6 @@ const Map<String, List<String>> kSettingsRowKeywords = <String, List<String>>{
     'peers',
     'servers',
   ],
-  'settings-nav-nearby-look': <String>['Bluetooth', 'bateria', 'battery'],
   'settings-nav-appearance': <String>[
     'motyw',
     'kolor',
@@ -199,8 +198,15 @@ const Map<String, List<String>> kSettingsRowKeywords = <String, List<String>>{
     'permissions',
   ],
   'settings-nav-updates': <String>['aktualizacja', 'wersja', 'update'],
-  'settings-nav-health': <String>['problem', 'nie działa', 'help'],
-  'settings-nav-diagnostics': <String>['dziennik', 'logi', 'logs'],
+  'settings-nav-health': <String>[
+    'problem',
+    'nie działa',
+    'help',
+    'diagnostyka',
+    'dziennik',
+    'logi',
+    'logs',
+  ],
   'settings-nav-reset': <String>['reset', 'usuń dane', 'wyczyść'],
 };
 
@@ -211,7 +217,6 @@ List<SettingsSearchEntry> settingsSearchIndex(SettingsSearchDevice device) {
   final String notifications = t('Powiadomienia i dźwięki');
   final String gifs = t('GIF-y');
   final String network = t('Sieć i usługa');
-  final String nearby = t('Rozglądanie w tle');
   final String appearance = t('Wygląd');
   final String data = t('Dane i pamięć');
   final String reset = t('Usuń konto z urządzenia');
@@ -435,8 +440,8 @@ List<SettingsSearchEntry> settingsSearchIndex(SettingsSearchDevice device) {
     if (device.android)
       SettingsSearchEntry(
         key: 'settings-nearby-look',
-        row: 'settings-nav-nearby-look',
-        page: nearby,
+        row: networkRow,
+        page: network,
         title: t('Rozglądaj się też w tle'),
         keywords: const <String>['Bluetooth', 'bateria', 'battery'],
       ),

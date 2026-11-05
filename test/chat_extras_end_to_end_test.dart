@@ -9,7 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_location.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
@@ -620,6 +622,133 @@ void main() {
       final ChatMessage gone = (await member.message(key, pizza.id))!;
       expect(gone.isDeleted, isTrue, reason: member.address);
       expect(gone.reactions, isEmpty, reason: member.address);
+    }
+  });
+
+  test('a poll in a group: everyone sees it, votes as reactions, one '
+      'vote per person, changed and taken back', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final _Device b = mesh.devices[bob]!;
+    final _Device c = mesh.devices[carol]!;
+    final GroupProfile group = await _group(mesh);
+    final String key = 'group:${group.id}';
+    final ChatPoll poll = ChatPoll.of('Kiedy?', <String>[
+      'Sobota',
+      'Niedziela',
+    ])!;
+
+    await a.controller.sendGroupMessage(
+      groupId: group.id,
+      text: poll.asText,
+      poll: poll,
+    );
+    await mesh.settle();
+    final ChatMessage sent = await _sentText(a, key, poll.asText);
+    expect(sent.poll, poll);
+    // Not editable: the votes point at the answers.
+    expect(a.controller.canEditMessage(sent), isFalse);
+
+    await b.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[0],
+    );
+    await c.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[0],
+    );
+    await mesh.settle();
+    // Carol changes her mind, Bob takes his vote back.
+    await c.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[1],
+    );
+    await b.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[0],
+    );
+    await mesh.settle();
+    for (final _Device member in <_Device>[a, b, c]) {
+      final ChatMessage got = (await member.message(key, sent.id))!;
+      expect(got.poll, poll, reason: member.address);
+      final List<List<String>> voters = got.poll!.votersIn(got.reactions);
+      expect(voters[0], isEmpty, reason: member.address);
+      expect(voters[1], hasLength(1), reason: member.address);
+    }
+  });
+
+  test('a shared position reaches the friend and the group, moves with '
+      'newer ones, never back to an older one', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final _Device b = mesh.devices[bob]!;
+    final _Device c = mesh.devices[carol]!;
+    final GroupProfile group = await _group(mesh);
+    final int t0 = DateTime.now().millisecondsSinceEpoch;
+    ChatLocation at(double lat, int when) => ChatLocation(
+      lat: lat,
+      lon: 21,
+      accuracy: 8,
+      atMillis: when,
+      untilMillis: t0 + 3600000,
+    );
+
+    for (final String key in <String>[bob, 'group:${group.id}']) {
+      final String id = await a.controller.sendLocationMessage(
+        conversationKey: key,
+        text: 'tu jestem 1',
+        location: at(52, t0),
+      );
+      await mesh.settle();
+      final _Device reader = key == bob ? b : c;
+      final String theirKey = key == bob ? alice : key;
+      expect(
+        (await reader.message(theirKey, id))?.location,
+        at(52, t0),
+        reason: key,
+      );
+      // Not something to edit by hand.
+      expect(a.controller.canEditMessage((await a.message(key, id))!), isFalse);
+
+      expect(
+        await a.controller.updateSharedLocation(
+          conversationKey: key,
+          messageId: id,
+          text: 'tu jestem 2',
+          location: at(52.01, t0 + 60000),
+        ),
+        isTrue,
+      );
+      await mesh.settle();
+      final ChatMessage moved = (await reader.message(theirKey, id))!;
+      expect(moved.location!.lat, 52.01, reason: key);
+      expect(moved.text, 'tu jestem 2', reason: key);
+      expect(moved.isEdited, isFalse, reason: key);
+
+      // An older position arriving late changes nothing.
+      await reader.controller.receiveSignal(
+        ZenSignal(
+          type: ZenSignalType.messageEdit,
+          sender: alice,
+          messageId: id,
+          groupId: key == bob ? null : group.id,
+          content: 'stare',
+          sentAtMillis: t0 + 30000,
+          chatExtras: <String, dynamic>{
+            kLocationKey: at(51, t0 + 30000).toJson(),
+          },
+        ),
+        receivedAtMillis: t0 + 90000,
+      );
+      expect(
+        (await reader.message(theirKey, id))!.location!.lat,
+        52.01,
+        reason: key,
+      );
     }
   });
 

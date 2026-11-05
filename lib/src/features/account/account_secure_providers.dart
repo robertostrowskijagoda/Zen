@@ -74,3 +74,47 @@ final Provider<bool> accountSecureReminderProvider = Provider<bool>(
   (Ref ref) =>
       ref.watch(ledgerNodeEnabledProvider) && !accountIsSecured(ref.watch),
 );
+
+/// How old the last backup of the account may get before Zen reminds.
+const Duration kAccountBackupReminderAge = Duration(days: 30);
+
+/// Whether the person should be reminded to save a backup of the whole
+/// account: there is something to lose (a friend at least), no backup was
+/// saved on this device yet or the last one is older than
+/// [kAccountBackupReminderAge], and "Później" is not waiting. Without the
+/// password-less recovery (gone in 1.15.4) a backup and the circle are the
+/// only ways back.
+bool backupReminderDue({
+  required bool ledgerOn,
+  required int friends,
+  required AppSettings settings,
+  required DateTime now,
+}) {
+  final int at = now.millisecondsSinceEpoch;
+  if (!ledgerOn || friends < 1 || at < settings.backupReminderAfterMillis) {
+    return false;
+  }
+  final int last = settings.lastAccountBackupMillis;
+  return last <= 0 || at - last >= kAccountBackupReminderAge.inMilliseconds;
+}
+
+/// The clock of [backupReminderProvider] (replaced in tests).
+final Provider<DateTime Function()> backupReminderClockProvider =
+    Provider<DateTime Function()>((Ref ref) => DateTime.now);
+
+/// [backupReminderDue] for this account; never at the same time as the
+/// circle reminder (one card at a time).
+final Provider<bool> backupReminderProvider = Provider<bool>(
+  (Ref ref) =>
+      !ref.watch(circleReminderProvider) &&
+      backupReminderDue(
+        ledgerOn: ref.watch(ledgerNodeEnabledProvider),
+        friends: ref.watch(
+          socialHubControllerProvider.select(
+            (SocialHubState s) => s.acceptedFriends.length,
+          ),
+        ),
+        settings: ref.watch(appSettingsControllerProvider),
+        now: ref.watch(backupReminderClockProvider)(),
+      ),
+);

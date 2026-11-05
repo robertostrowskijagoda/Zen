@@ -102,6 +102,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Instrumented tests (android/app/src/androidTest, run on the CI
+        // emulator: docs/TESTING.md, "Android emulator").
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         if (!zenSplitPerAbi) {
             ndk {
                 abiFilters.clear()
@@ -263,6 +266,13 @@ dependencies {
     // JVM unit tests of the Kotlin code with no Android in it
     // (android/app/src/test, CI's "Kotlin unit tests").
     testImplementation("junit:junit:4.13.2")
+    // Instrumented tests of the Kotlin code against a real Android
+    // (android/app/src/androidTest, the emulator workflow). The runner is
+    // the one a plugin already brings into the app (1.3.0, with JUnit 4.12:
+    // Gradle keeps one version for the app and its tests), ext-junit the
+    // one made with it.
+    androidTestImplementation("androidx.test:runner:1.3.0")
+    androidTestImplementation("androidx.test.ext:junit:1.1.2")
     // System biometric prompt with a Keystore key.
     implementation("androidx.biometric:biometric:1.1.0")
 }

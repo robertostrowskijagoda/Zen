@@ -11,6 +11,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     int? sentAtMillis,
     ChatReply? replyTo,
     bool forwarded = false,
+    ChatLocation? location,
   }) async {
     final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String trimmed = text.trim();
@@ -39,6 +40,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             : ChatMessageDeliveryState.delivered,
         reply: replyTo,
         forwarded: forwarded,
+        location: location,
       ),
     );
     _bumpTimelineRevision();
@@ -60,6 +62,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         miniProfile: mini,
         reply: replyTo,
         forwarded: forwarded,
+        location: location,
       );
       await _markMessageQueued(
         conversationKey: peerAddress,
@@ -313,6 +316,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           sentAtMillis: message.sentAtMillis,
           reply: message.reply,
           forwarded: message.forwarded,
+          location: message.location,
           // The same message again: no new message against the limits.
           miniProfile: _isStrangerChatPeer(peerAddress)
               ? _ownStrangerMini()
@@ -1137,6 +1141,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     Map<String, dynamic>? miniProfile,
     ChatReply? reply,
     bool forwarded = false,
+    ChatLocation? location,
   }) async {
     if (!isRoutablePeerAddress(peerAddress)) {
       return;
@@ -1155,6 +1160,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             'mp': ?miniProfile,
             if (reply != null) 're': reply.toJson(),
             if (forwarded) 'fwd': true,
+            if (location != null) kLocationKey: location.toJson(),
           },
         );
   }

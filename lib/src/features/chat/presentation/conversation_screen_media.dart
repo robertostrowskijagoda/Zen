@@ -228,38 +228,45 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                   )
                                 : ZenBreathingGlow(
                                     active: hasText,
-                                    child: IconButton.filled(
-                                      key: const Key(
-                                        'conversation-send-button',
-                                      ),
-                                      onPressed: onPressed,
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: hasText
-                                            ? zen.accent
-                                            : zen.surfaceMuted,
-                                        foregroundColor: hasText
-                                            ? zen.onAccent
-                                            : zen.textSecondary,
-                                        disabledBackgroundColor:
-                                            zen.surfaceMuted,
-                                        disabledForegroundColor: zen.textMuted
-                                            .withValues(alpha: 0.6),
-                                        padding: EdgeInsets.zero,
-                                        shape: const CircleBorder(),
-                                      ),
-                                      icon: _isRecordingBusy
-                                          ? SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: zen.textSecondary,
+                                    // Held: "Wyślij później" (scheduled).
+                                    child: GestureDetector(
+                                      onLongPress: hasText && canCompose
+                                          ? () => unawaited(_scheduleMessage())
+                                          : null,
+                                      child: IconButton.filled(
+                                        key: const Key(
+                                          'conversation-send-button',
+                                        ),
+                                        onPressed: onPressed,
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: hasText
+                                              ? zen.accent
+                                              : zen.surfaceMuted,
+                                          foregroundColor: hasText
+                                              ? zen.onAccent
+                                              : zen.textSecondary,
+                                          disabledBackgroundColor:
+                                              zen.surfaceMuted,
+                                          disabledForegroundColor: zen.textMuted
+                                              .withValues(alpha: 0.6),
+                                          padding: EdgeInsets.zero,
+                                          shape: const CircleBorder(),
+                                        ),
+                                        icon: _isRecordingBusy
+                                            ? SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: zen.textSecondary,
+                                                    ),
+                                              )
+                                            : const Icon(
+                                                Icons.send_rounded,
+                                                size: 20,
                                               ),
-                                            )
-                                          : const Icon(
-                                              Icons.send_rounded,
-                                              size: 20,
-                                            ),
+                                      ),
                                     ),
                                   ),
                           ),

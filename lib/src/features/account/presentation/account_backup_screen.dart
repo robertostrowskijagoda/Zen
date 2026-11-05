@@ -20,6 +20,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// Argon2id cost of new backup files (lighter in tests).
 final Provider<PasswordCost> accountBackupCostProvider = Provider<PasswordCost>(
@@ -242,6 +243,9 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
         ..._scope,
         AccountScope.keys,
       }, appLock: true);
+      final AppSettingsController settings = ref.read(
+        appSettingsControllerProvider.notifier,
+      );
       _saved = await saveAccountBackup(
         places: places,
         folder: folder,
@@ -258,6 +262,8 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
           }
         },
       );
+      // The reminder to make a backup counts from now.
+      await settings.noteAccountBackupMade();
     } on Object catch (error, stackTrace) {
       logZenError('Writing the account backup failed', error, stackTrace);
       _message = t('Nie udało się zapisać kopii. Sprawdź miejsce na dysku.');

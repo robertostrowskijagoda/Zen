@@ -19,7 +19,9 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_location.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/queued_signal.dart';
@@ -596,6 +598,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       // that waited before the code was changed, sent again. No notice.
       return false;
     }
+    if (about != null && _quietChat(about, notification)) {
+      // A muted conversation ("Wycisz…"), or a group that tells only of
+      // mentions: in the list in the app, without a notification.
+      return false;
+    }
     if (about != null) {
       final FriendProfile? friend = state.friendByAddress(about.sender);
       final bool chat =
@@ -627,6 +634,29 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       );
     }
     return _systemNotifications.show(notification);
+  }
+
+  /// Whether a chat message [about] makes no notification: its
+  /// conversation is muted, or it is a group's message in a group that
+  /// tells only of mentions. A mention of this person always comes.
+  bool _quietChat(ZenSignal about, RuntimeSystemNotification notification) {
+    if (about.type != ZenSignalType.message &&
+        about.type != ZenSignalType.groupMessage) {
+      return false;
+    }
+    if (notification.kind == NoticeKind.mention ||
+        about.chatExtras?[kMentionsYouKey] == true) {
+      return false;
+    }
+    final String key = conversationKeyOfSignal(about);
+    if (state.isMuted(key, DateTime.now().millisecondsSinceEpoch)) {
+      return true;
+    }
+    return about.type == ZenSignalType.groupMessage &&
+        !state.groupNotifiesAll(
+          key,
+          mentionsOnly: _appSettings.groupMentionsOnly,
+        );
   }
 
   Future<void> _syncRingingCallWindow() async {
@@ -1533,6 +1563,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     int? sentAtMillis,
     ChatReply? replyTo,
     bool forwarded = false,
+    ChatLocation? location,
   });
 
   Future<void> sendLocalAttachment({
@@ -1555,6 +1586,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     ChatReply? replyTo,
     bool forwarded = false,
     List<Mention> mentions = const <Mention>[],
+    ChatPoll? poll,
+    ChatLocation? location,
+    int? sentAtMillis,
   });
 
   /// Reactions, edits, deletions, files in groups

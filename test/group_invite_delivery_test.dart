@@ -71,6 +71,9 @@ final class _Harness {
             notificationPrivacy: hideContent
                 ? NotificationPrivacy.senderOnly
                 : NotificationPrivacy.senderAndContent,
+            // Every group message notifies here ("W grupach tylko
+            // wzmianki" has its own tests).
+            groupMentionsOnly: false,
           ),
           hydrationEnabled: false,
         ),

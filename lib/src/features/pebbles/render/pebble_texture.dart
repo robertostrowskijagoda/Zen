@@ -125,7 +125,7 @@ abstract final class PebbleTextures {
     () {
       final ui.PictureRecorder rec = ui.PictureRecorder();
       paintBase(ui.Canvas(rec), d, atlas);
-      return rec.endRecording().toImageSync(atlas.width, atlas.height);
+      return _imageOf(rec, atlas);
     },
   );
 
@@ -151,10 +151,7 @@ abstract final class PebbleTextures {
       if (thumbnail != null) {
         painter.thumbnail(canvas, thumbnail);
       }
-      final ui.Image out = rec.endRecording().toImageSync(
-        atlas.width,
-        atlas.height,
-      );
+      final ui.Image out = _imageOf(rec, atlas);
       under.dispose();
       return out;
     });
@@ -173,7 +170,18 @@ abstract final class PebbleTextures {
     final ui.Canvas canvas = ui.Canvas(rec)
       ..drawImage(under, ui.Offset.zero, ui.Paint());
     _OpPainter(atlas, base, d).paint(canvas, op, d.ops.length);
-    return rec.endRecording().toImageSync(atlas.width, atlas.height);
+    return _imageOf(rec, atlas);
+  }
+
+  /// What [rec] recorded as an image of the atlas; the picture itself goes
+  /// at once (it holds the drawing until then, the image needs it no more).
+  static ui.Image _imageOf(ui.PictureRecorder rec, PebbleAtlas atlas) {
+    final ui.Picture picture = rec.endRecording();
+    try {
+      return picture.toImageSync(atlas.width, atlas.height);
+    } finally {
+      picture.dispose();
+    }
   }
 
   /// Paints the bare stone of [d] into [canvas] (the whole atlas).

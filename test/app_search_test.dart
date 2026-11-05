@@ -219,7 +219,7 @@ void main() {
 
     // A group's title shows the whole group.
     await _search(tester, field, 'zaawansowane');
-    expect(find.byKey(const Key('settings-nav-diagnostics')), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-health')), findsOneWidget);
     expect(find.byKey(const Key('settings-nav-network')), findsNothing);
     await _search(tester, field, 'siec');
     expect(find.byKey(const Key('settings-nav-network')), findsOneWidget);
