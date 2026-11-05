@@ -94,4 +94,75 @@ void main() {
       scheduled.dispose();
     });
   });
+  test('nothing goes by itself before start or after stop; a cancel '
+      'holds after a restart', () {
+    fakeAsync((FakeAsync async) {
+      final DateTime start = DateTime(2026, 11, 4, 12);
+      int now() => start.add(async.elapsed).millisecondsSinceEpoch;
+      final List<String> sent = <String>[];
+      final MemoryLedgerDisk disk = MemoryLedgerDisk();
+      final ScheduledMessagesService scheduled = ScheduledMessagesService(
+        disk: disk,
+        send: (String to, String text) async => sent.add(text),
+        now: now,
+      );
+      scheduled.schedule(to: ola, text: 'Za minutę', atMillis: now() + 60000);
+      async.flushMicrotasks();
+      async.elapse(const Duration(minutes: 2));
+      expect(sent, isEmpty, reason: 'not started');
+      expect(async.pendingTimers, isEmpty);
+
+      scheduled.start();
+      async.flushMicrotasks();
+      expect(sent, <String>['Za minutę']);
+
+      scheduled.stop();
+      scheduled.schedule(to: ola, text: 'Po stopie', atMillis: now() + 60000);
+      async.flushMicrotasks();
+      async.elapse(const Duration(minutes: 2));
+      expect(sent, <String>['Za minutę'], reason: 'stopped');
+
+      ScheduledMessage? gone;
+      scheduled.waiting().forEach((ScheduledMessage m) => gone = m);
+      scheduled.cancel(gone!.id);
+      async.flushMicrotasks();
+      final ScheduledMessagesService again = ScheduledMessagesService(
+        disk: disk,
+        send: (String to, String text) async => sent.add(text),
+        now: now,
+      );
+      again.load();
+      async.flushMicrotasks();
+      expect(again.waiting(), isEmpty);
+      scheduled.dispose();
+      again.dispose();
+    });
+  });
+
+  test('a failed send is tried again by itself a minute later', () {
+    fakeAsync((FakeAsync async) {
+      final DateTime start = DateTime(2026, 11, 4, 12);
+      int now() => start.add(async.elapsed).millisecondsSinceEpoch;
+      bool fail = true;
+      final List<String> sent = <String>[];
+      final ScheduledMessagesService scheduled = ScheduledMessagesService(
+        disk: MemoryLedgerDisk(),
+        send: (String to, String text) async {
+          if (fail) {
+            throw StateError('offline');
+          }
+          sent.add(text);
+        },
+        now: now,
+      )..start();
+      scheduled.schedule(to: ola, text: 'Teraz', atMillis: now() + 1000);
+      async.flushMicrotasks();
+      async.elapse(const Duration(seconds: 2));
+      expect(sent, isEmpty);
+      fail = false;
+      async.elapse(const Duration(seconds: 59));
+      expect(sent, <String>['Teraz']);
+      scheduled.dispose();
+    });
+  });
 }

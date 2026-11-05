@@ -62,6 +62,7 @@ Future<
 _boot({
   NotificationPrivacy global = NotificationPrivacy.senderAndContent,
   MemoryMessageTimelineStore? timelines,
+  bool mentionsOnly = false,
 }) async {
   final MemoryRuntimeSystemNotificationService shade =
       MemoryRuntimeSystemNotificationService();
@@ -81,7 +82,7 @@ _boot({
         // only, see 'in a mentions-only group' below).
         initialState: AppSettings(
           notificationPrivacy: global,
-          groupMentionsOnly: false,
+          groupMentionsOnly: mentionsOnly,
         ),
         hydrationEnabled: false,
       ),
@@ -220,6 +221,34 @@ void main() {
         container.read(socialHubControllerProvider),
       ).where((InboxEntry e) => e.type == InboxEntryType.mention),
       isEmpty,
+    );
+  });
+
+  test('in a mentions-only group a message for others is quiet, a mention '
+      'of this person comes; past the mention limit the flood is quiet '
+      'too', () async {
+    final (:container, :shade) = await _boot(mentionsOnly: true);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    await hub.receiveSignal(
+      _message('m-bob', mentions: const <Mention>[_bobM]),
+      receivedAtMillis: 1000,
+    );
+    expect(shade.activeNotifications, isEmpty);
+
+    for (int i = 0; i < kMaxMentionAlertsPerSender + 2; i++) {
+      await hub.receiveSignal(_message('m-$i'), receivedAtMillis: 2000 + i);
+    }
+    expect(
+      shade.activeNotifications.map((RuntimeSystemNotification n) => n.slotKey),
+      <String>['group-mention:$_groupId'],
+    );
+    expect(
+      _entries(
+        container.read(socialHubControllerProvider),
+      ).where((InboxEntry e) => e.type == InboxEntryType.mention),
+      hasLength(kMaxMentionAlertsPerSender),
     );
   });
 

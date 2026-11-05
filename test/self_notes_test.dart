@@ -57,4 +57,48 @@ void main() {
     await a.load();
     expect(a.notes.map((SelfNote n) => n.text), <String>['z telefonu']);
   });
+  test('a note written before the stored ones were read keeps them', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final SelfNotesService first = SelfNotesService(disk: disk, now: () => 1);
+    await first.add('stara');
+    final SelfNotesService second = SelfNotesService(disk: disk, now: () => 2);
+    await second.add('nowa');
+    expect(second.notes.map((SelfNote n) => n.text), <String>['stara', 'nowa']);
+    final SelfNotesService read = SelfNotesService(disk: disk);
+    await read.load();
+    expect(read.notes, hasLength(2));
+  });
+
+  test('past the limit the deletion markers go first, then the oldest '
+      'notes', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    await disk.write(
+      kSelfNotesKey,
+      utf8.encode(
+        jsonEncode(<String, Object?>{
+          for (int i = 0; i < kMaxSelfNotes - 1; i++)
+            'n$i': <String, Object?>{'t': 'n$i', 'a': 10 + i},
+          // Newer than every note, yet the first to go.
+          'gone': <String, Object?>{'t': '', 'a': 99999, 'd': true},
+        }),
+      ),
+    );
+    final SelfNotesService notes = SelfNotesService(
+      disk: disk,
+      now: () => 100000,
+    );
+    await notes.add('jeszcze jedna');
+    final Map<String, Object?> kept = Map<String, Object?>.from(
+      jsonDecode(utf8.decode((await disk.read(kSelfNotesKey))!)) as Map,
+    );
+    expect(kept, hasLength(kMaxSelfNotes));
+    expect(kept.containsKey('gone'), isFalse);
+    expect(kept.containsKey('n0'), isTrue);
+    expect(notes.notes.last.text, 'jeszcze jedna');
+
+    // One more: now the oldest note goes.
+    await notes.add('i jeszcze');
+    expect(notes.notes.first.text, 'n1');
+    expect(notes.notes, hasLength(kMaxSelfNotes));
+  });
 }

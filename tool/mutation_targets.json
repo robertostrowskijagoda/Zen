@@ -45,7 +45,7 @@
   },
   {
     "file": "lib/src/features/social/social_hub_controller.dart",
-    "tests": ["test/social_hub_controller_test.dart"]
+    "tests": ["test/social_hub_controller_test.dart", "test/group_mentions_test.dart"]
   },
   {
     "file": "lib/src/features/social/social_snapshot_store.dart",
