@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -33,6 +34,25 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
+
+/// A snapshot store whose reading waits for [release]: what is saved
+/// before it lands in [saved].
+final class _SlowSnapshotStore implements SocialSnapshotStore {
+  _SlowSnapshotStore(this._stored);
+
+  final SocialHubState _stored;
+  final Completer<void> release = Completer<void>();
+  final List<SocialHubState> saved = <SocialHubState>[];
+
+  @override
+  Future<SocialHubState?> load() async {
+    await release.future;
+    return _stored;
+  }
+
+  @override
+  Future<void> save(SocialHubState state) async => saved.add(state);
+}
 
 void main() {
   test(
@@ -962,6 +982,110 @@ void main() {
       );
     },
   );
+
+  test('removing a friend drops what they sent that waits in the queue, '
+      "and only theirs", () async {
+    const String ada = '200:1111:2222:3333:4444:5555:6666:7777';
+    const String bob = '200:2222:2222:3333:4444:5555:6666:7777';
+    final MemorySignalQueueStore queue = MemorySignalQueueStore();
+    QueuedSignal waiting(String id, String from) => QueuedSignal(
+      id: id,
+      signal: ZenSignal(
+        type: ZenSignalType.message,
+        sender: from,
+        messageId: id,
+        content: 'czeka',
+      ),
+      receivedAtMillis: 1,
+    );
+    await queue.save(<QueuedSignal>[
+      waiting('a1', ada.toUpperCase()),
+      waiting('b1', bob),
+      waiting('a2', ada),
+    ]);
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(queue),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                ada: FriendProfile(
+                  address: ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+                bob: FriendProfile(
+                  address: bob,
+                  displayName: 'Bob',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .removeFriend(peerAddress: ada);
+    expect((await queue.load()).map((QueuedSignal q) => q.id), <String>['b1']);
+    expect(container.read(socialHubControllerProvider).pendingSignalCount, 1);
+  });
+
+  test('a save asked for before the stored state was read waits for it: '
+      'the empty start never goes over the stored friends', () async {
+    const String ada = '200:1111:2222:3333:4444:5555:6666:7777';
+    final _SlowSnapshotStore store = _SlowSnapshotStore(
+      SocialHubState.empty().copyWith(
+        book: FriendshipBook.restore(
+          profiles: const <String, FriendProfile>{
+            ada: FriendProfile(
+              address: ada,
+              displayName: 'Ada',
+              status: FriendRelationshipStatus.accepted,
+            ),
+          },
+        ),
+      ),
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(store),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    final Future<void> muted = hub.setConversationMutedUntil(
+      'group:g',
+      DateTime.now().millisecondsSinceEpoch + 3600000,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(store.saved, isEmpty, reason: 'nothing saved before the read');
+    store.release.complete();
+    await muted;
+    await hub.whenHydrated;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(store.saved, isNotEmpty);
+    for (final SocialHubState saved in store.saved) {
+      expect(saved.friendByAddress(ada), isNotNull);
+    }
+  });
 
   test('rejecting a pending request removes the local relation', () async {
     final MemorySignalTransport transport = MemorySignalTransport();
