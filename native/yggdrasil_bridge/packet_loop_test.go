@@ -641,8 +641,15 @@ func sessionState(node, peer *bridgeNode) string {
 }
 
 // firstContactBound is the longest a first contact (or the first message
-// after a restart) may take on a loopback mesh.
-const firstContactBound = 3 * time.Second
+// after a restart) may take on a loopback mesh. Under the race detector,
+// which slows everything several times, four times as long: that run looks
+// for races, not speed (one took 3.2 s in CI).
+var firstContactBound = func() time.Duration {
+	if raceEnabled {
+		return 12 * time.Second
+	}
+	return 3 * time.Second
+}()
 
 // deliverWithin sends payload from from to to once and waits for it at
 // to; it returns how long that took, failing after limit.
