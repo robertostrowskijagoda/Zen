@@ -177,6 +177,35 @@ void main() {
     sharing.dispose();
   });
 
+  test('sharing asks for the position (the person is looking), the rounds '
+      'in the background do not; shared once it says so', () async {
+    int now = 5000;
+    final List<bool> asked = <bool>[];
+    final List<String> sent = <String>[];
+    final LocationSharingService sharing = LocationSharingService(
+      disk: MemoryLedgerDisk(),
+      now: () => now,
+      readFix: ({required bool ask}) async {
+        asked.add(ask);
+        return GeoFix(1 + asked.length / 100, 2, 3);
+      },
+      send: (String key, String text, ChatLocation location) async {
+        sent.add(text);
+        return 'm${sent.length}';
+      },
+      update: (String key, String id, String text, ChatLocation l) async =>
+          true,
+    );
+    await sharing.share(ola);
+    expect(asked, <bool>[true]);
+    expect(sent.single, startsWith('📍 Moje położenie: '));
+    await sharing.share(ola, length: const Duration(minutes: 15));
+    now += 120000;
+    await sharing.tick();
+    expect(asked, <bool>[true, true, false]);
+    sharing.dispose();
+  });
+
   test('no position: a message for the person, nothing sent', () async {
     final List<String> sent = <String>[];
     final LocationSharingService sharing = LocationSharingService(
