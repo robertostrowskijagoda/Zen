@@ -157,6 +157,11 @@ pre code { background: none; border: 0; padding: 0; word-break: normal; }
   font-size: clamp(16.5px, 3.6vw, 20px);
 }
 .hero .cta-row { margin-top: 22px; }
+@media (max-width: 559px) {
+  .hero { padding-top: 20px; }
+  .hero-icon { width: 60px; height: 60px; margin-bottom: 10px; border-radius: 17px; }
+  .hero .lead { font-size: 16px; }
+}
 .pill {
   display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; padding: 4px 14px;
   border: 1px solid var(--line); border-radius: 999px; background: var(--card);
@@ -611,7 +616,8 @@ html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
    first), how it works, the idea, questions and one last call. */
 .get { text-align: center; }
 .get .stack { margin-top: 4px; }
-.get .get-more { margin-top: 16px; }
+.get #others { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 16px; }
+.get .more-install { font-weight: 600; }
 .get .get-more .btn { min-height: 44px; font-size: 15px; }
 #have a { font-weight: 700; }
 /* Seven reasons fill whole rows: the first (and on wide screens the last)
@@ -628,6 +634,14 @@ html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
 .adv > li:first-child { border: 2px solid var(--btn1); box-shadow: 0 0 0 4px var(--glow), var(--shadow); }
 .adv > li:first-child h3 { font-size: 20px; }
 .adv .fi { margin-bottom: 10px; }
+/* Folded reasons: the title and two lines; a tap opens the rest. */
+.adv > li.fold { cursor: pointer; }
+.adv > li.fold p {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.adv > li.fold.open p { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+.adv > li.fold:hover { border-color: var(--link); }
+.adv > li.fold:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
 .adv + .hint { margin-top: 18px; }
 .steps {
   list-style: none; margin: 0 auto; padding: 0; counter-reset: st; max-width: 900px;
@@ -673,3 +687,12 @@ html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
 .qr-card .qr { width: min(64vw, 260px); height: auto; border-radius: 10px; border: 1px solid var(--line); }
 
 /* Right-to-left pages. */
+/* The lead of a card: its point before the details ("Poza sklepami"). */
+.blk .lead-in { font-size: 17px; font-weight: 600; }
+/* Phones: the step's number and the reason's icon beside the title, not
+   above it (less to scroll past before the screenshots). */
+@media (max-width: 559px) {
+  .steps > li, .adv > li.feat { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: start; padding: 14px 16px; }
+  .steps > li::before, .adv .fi { grid-row: span 2; margin-bottom: 0; }
+  .steps h3, .adv .feat h3 { margin-top: 6px; }
+}
