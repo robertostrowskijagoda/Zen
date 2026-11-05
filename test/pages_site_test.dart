@@ -1150,9 +1150,9 @@ void main() {
         expect(t['t0n'], contains('**Reset Anisette State**'), reason: why);
         expect(t['t0n'], contains('|i80045]'), reason: why);
         // The place to trust is the language's own, as in step 3.
-        final String place = RegExp(r'\*\*([^*]+)\*\*').firstMatch(
-          t['s3d']!,
-        )![1]!;
+        final String place = RegExp(
+          r'\*\*([^*]+)\*\*',
+        ).firstMatch(t['s3d']!)![1]!;
         expect(t['t7a'], contains('**$place**'), reason: why);
       }
     });

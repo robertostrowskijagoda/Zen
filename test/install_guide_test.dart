@@ -37,7 +37,10 @@ void main() {
     // e-mail, and where the fix of -80045 is.
     expect(iphone[0], contains('przed każdym logowaniem'));
     expect(iphone[2], contains('Twój e-mail jest tam deweloperem'));
-    expect(iphone[3], allOf(contains('-80045'), contains('stronie instalacji')));
+    expect(
+      iphone[3],
+      allOf(contains('-80045'), contains('stronie instalacji')),
+    );
     expect(iphone[4], contains('„Dodaj Zen do SideStore”'));
     expect(
       iphone[5],
