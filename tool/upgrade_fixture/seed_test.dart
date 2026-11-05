@@ -285,6 +285,20 @@ void main() {
       );
       await drafts.flush();
 
+      // A save still going on (one the code above did not wait for) shows
+      // as a `*.lock` and a `*.tmp`; the first run for 1.15.4 copied both
+      // into the fixture. Let the account settle, never keep leftovers.
+      bool unsettled() => account
+          .listSync(recursive: true)
+          .any(
+            (FileSystemEntity e) =>
+                e.path.endsWith('.lock') || e.path.endsWith('.tmp'),
+          );
+      for (int i = 0; i < 100 && unsettled(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(unsettled(), isFalse, reason: 'a save never finished');
+
       final Map<String, int> sizes = <String, int>{};
       for (final FileSystemEntity e in account.listSync(recursive: true)) {
         if (e is File) {
