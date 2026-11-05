@@ -28,7 +28,9 @@ import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/reveal_message.dart';
+import 'package:zen/src/features/chat/presentation/send_later.dart';
 import 'package:zen/src/features/chat/presentation/shared_location_card.dart';
+import 'package:zen/src/features/chat/scheduled_messages.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
@@ -557,6 +559,26 @@ class _GroupConversationScreenState
       selfAddress: ref.read(runtimeNodeSnapshotProvider).localAddress,
       nameOf: _nameOf,
     );
+  }
+
+  /// "Wyślij później": the composer's text (with whom it mentions) goes
+  /// to the group at a chosen time (send_later.dart).
+  Future<void> _scheduleMessage() async {
+    final String text = _composerController.text.trim();
+    if (text.isEmpty || !_canWrite || _boardTab) {
+      return;
+    }
+    final ({String text, List<Mention> mentions}) stored = _composerController
+        .storedText();
+    if (await scheduleFromComposer(
+      context,
+      ref.read(scheduledMessagesProvider),
+      to: '$kGroupConversationPrefix${widget.groupId}',
+      text: stored.text,
+      mentions: stored.mentions,
+    )) {
+      _composerController.clear();
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -1743,18 +1765,24 @@ class _GroupConversationScreenState
                                 ),
                               ),
                               composer.sendSlot(
-                                IconButton.filled(
-                                  key: const Key('group-chat-send-button'),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: zen.accent,
-                                    foregroundColor: zen.onAccent,
-                                    shape: const CircleBorder(),
-                                  ).merge(_composerButtonFrame),
-                                  icon: const Icon(
-                                    Icons.send_rounded,
-                                    size: 20,
+                                // Held: "Wyślij później" (not on the board).
+                                GestureDetector(
+                                  onLongPress: _boardTab || !_canWrite
+                                      ? null
+                                      : () => unawaited(_scheduleMessage()),
+                                  child: IconButton.filled(
+                                    key: const Key('group-chat-send-button'),
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: zen.accent,
+                                      foregroundColor: zen.onAccent,
+                                      shape: const CircleBorder(),
+                                    ).merge(_composerButtonFrame),
+                                    icon: const Icon(
+                                      Icons.send_rounded,
+                                      size: 20,
+                                    ),
+                                    onPressed: _sendMessage,
                                   ),
-                                  onPressed: _sendMessage,
                                 ),
                               ),
                             ],

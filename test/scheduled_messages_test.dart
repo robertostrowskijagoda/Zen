@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/chat/scheduled_messages.dart';
+import 'package:zen/src/features/social/mentions.dart';
 
 // "Wyślij później": what waits goes at its time, once, and a failed send
 // is tried again.
@@ -164,5 +167,115 @@ void main() {
       expect(sent, <String>['Teraz']);
       scheduled.dispose();
     });
+  });
+  test('to a group: it goes there with whom it mentions; a friend and a '
+      'group keep apart', () async {
+    final List<String> toFriends = <String>[];
+    final List<(String, String, List<Mention>)> toGroups =
+        <(String, String, List<Mention>)>[];
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final ScheduledMessagesService scheduled = ScheduledMessagesService(
+      disk: disk,
+      send: (String to, String text) async => toFriends.add(text),
+      sendToGroup: (String groupId, String text, List<Mention> m) async =>
+          toGroups.add((groupId, text, m)),
+      now: () => 10000,
+    );
+    const Mention ola = Mention(address: '200::7', name: 'Ola');
+    await scheduled.schedule(
+      to: '${kGroupConversationPrefix}g1',
+      text: 'Hej <@0>',
+      atMillis: 1,
+      mentions: const <Mention>[ola],
+    );
+    await scheduled.schedule(
+      to: ola.address.toUpperCase(),
+      text: 'Ty',
+      atMillis: 2,
+    );
+    expect(scheduled.waiting('group:g1').single.plainText, 'Hej @Ola');
+    expect(scheduled.waiting('group:g2'), isEmpty);
+    expect(scheduled.waiting(ola.address).single.text, 'Ty');
+
+    // Kept with its mentions across a restart.
+    final ScheduledMessagesService again = ScheduledMessagesService(
+      disk: disk,
+      send: (String to, String text) async => toFriends.add(text),
+      sendToGroup: (String groupId, String text, List<Mention> m) async =>
+          toGroups.add((groupId, text, m)),
+      now: () => 10000,
+    );
+    await again.sendDue();
+    expect(toFriends, <String>['Ty']);
+    expect(toGroups.single.$1, 'g1');
+    expect(toGroups.single.$2, 'Hej <@0>');
+    expect(toGroups.single.$3, const <Mention>[ola]);
+    expect(again.waiting(), isEmpty);
+  });
+
+  test('without a way to send to groups a group message waits', () async {
+    final ScheduledMessagesService scheduled = ScheduledMessagesService(
+      disk: MemoryLedgerDisk(),
+      send: (String to, String text) async {},
+      now: () => 10000,
+    );
+    await scheduled.schedule(to: 'group:g1', text: 'Hej', atMillis: 1);
+    await scheduled.sendDue();
+    expect(scheduled.waiting(), hasLength(1));
+  });
+
+  test('what waits can be changed before it goes: its text, its time; '
+      'never to nothing', () async {
+    final List<String> sent = <String>[];
+    int now = 1000;
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final ScheduledMessagesService scheduled = ScheduledMessagesService(
+      disk: disk,
+      send: (String to, String text) async => sent.add(text),
+      now: () => now,
+    );
+    final ScheduledMessage m = (await scheduled.schedule(
+      to: ola,
+      text: 'Rano',
+      atMillis: 5000,
+    ))!;
+    expect(await scheduled.change(m.id, text: '  Wieczorem '), isTrue);
+    expect(await scheduled.change(m.id, text: '   '), isFalse);
+    expect(await scheduled.change(m.id, atMillis: 9000), isTrue);
+    expect(await scheduled.change('nie-ma', atMillis: 1), isFalse);
+    final ScheduledMessagesService read = ScheduledMessagesService(
+      disk: disk,
+      send: (String to, String text) async {},
+    );
+    await read.load();
+    expect(read.waiting().single.text, 'Wieczorem');
+    expect(read.waiting().single.atMillis, 9000);
+    now = 6000;
+    await scheduled.sendDue();
+    expect(sent, isEmpty, reason: 'moved to 9000');
+    now = 9000;
+    await scheduled.sendDue();
+    expect(sent, <String>['Wieczorem']);
+  });
+
+  test('a message stored by 1.15.5 (no mentions) is read as it was', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    await disk.write(
+      kScheduledMessagesKey,
+      utf8.encode(
+        jsonEncode(<String, Object?>{
+          'x': <String, Object?>{'to': ola, 't': 'Stara', 'a': 5},
+        }),
+      ),
+    );
+    final ScheduledMessagesService scheduled = ScheduledMessagesService(
+      disk: disk,
+      send: (String to, String text) async {},
+    );
+    await scheduled.load();
+    final ScheduledMessage m = scheduled.waiting().single;
+    expect(m.groupId, isNull);
+    expect(m.mentions, isEmpty);
+    expect(m.toJson().containsKey('m'), isFalse);
   });
 }

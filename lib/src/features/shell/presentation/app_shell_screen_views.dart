@@ -690,6 +690,8 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       ),
                     ),
                   ),
+                // What waits to be sent later, while something does.
+                if (!searchingMessages) const ScheduledMessagesCard(),
                 // Messages of every conversation with the words typed.
                 MessageSearchResults(
                   key: const Key('chats-message-search'),
