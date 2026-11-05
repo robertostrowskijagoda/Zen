@@ -53,6 +53,9 @@ bool get locationSharingAvailable =>
 /// it, and the previews).
 String sharedLocationText(ChatLocation location, {required int nowMillis}) {
   final String link = mapUrl(location.lat, location.lon);
+  if (location.arrived) {
+    return t('📍 Jestem na miejscu: {link}', <String, Object?>{'link': link});
+  }
   if (!location.isLiveAt(nowMillis)) {
     return t('📍 Moje położenie: {link}', <String, Object?>{'link': link});
   }
@@ -271,6 +274,52 @@ final class LocationSharingService extends ChangeNotifier {
       );
     } on Object catch (error) {
       logZenWarning('Ending a shared position failed: $error');
+    }
+  }
+
+  /// "Jestem na miejscu": ends the live sharing [messageId] with where the
+  /// device is now (the last position when that cannot be read), marked
+  /// as the place the sharer arrived at.
+  Future<void> arrive(String messageId) async {
+    await _ensureLoaded();
+    final LocationShare? share = _shares[messageId];
+    if (share == null) {
+      return;
+    }
+    GeoFix? fix;
+    try {
+      fix = await readFix(ask: true);
+    } on Object catch (error) {
+      logZenWarning('Reading the position failed: $error');
+    }
+    // The share may have ended while the position was read.
+    if (_shares.remove(messageId) == null) {
+      return;
+    }
+    await _save();
+    final int now = _now();
+    final ChatLocation here = fix == null
+        ? share.last.copyWith(untilMillis: now, arrived: true)
+        : ChatLocation(
+            lat: fix.lat,
+            lon: fix.lon,
+            accuracy: fix.accuracy,
+            atMillis: math.max(now, share.last.atMillis),
+            untilMillis: now,
+            arrived: true,
+          );
+    try {
+      await update(
+        share.conversationKey,
+        messageId,
+        sharedLocationText(here, nowMillis: now),
+        here,
+      );
+    } on Object catch (error) {
+      logZenWarning('Sending the arrival failed: $error');
+    }
+    if (_shares.isEmpty) {
+      _stopTimer();
     }
   }
 

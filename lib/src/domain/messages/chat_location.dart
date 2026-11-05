@@ -17,6 +17,7 @@ final class ChatLocation {
     required this.accuracy,
     required this.atMillis,
     required this.untilMillis,
+    this.arrived = false,
   });
 
   final double lat;
@@ -32,15 +33,20 @@ final class ChatLocation {
   /// or the sharing ended.
   final int untilMillis;
 
+  /// The sharer said "Jestem na miejscu": the last position, where they
+  /// arrived (the sharing ended with it).
+  final bool arrived;
+
   /// Newer positions still come at [nowMillis].
   bool isLiveAt(int nowMillis) => nowMillis < untilMillis;
 
-  ChatLocation copyWith({int? untilMillis}) => ChatLocation(
+  ChatLocation copyWith({int? untilMillis, bool? arrived}) => ChatLocation(
     lat: lat,
     lon: lon,
     accuracy: accuracy,
     atMillis: atMillis,
     untilMillis: untilMillis ?? this.untilMillis,
+    arrived: arrived ?? this.arrived,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -49,6 +55,7 @@ final class ChatLocation {
     'ac': accuracy.round(),
     'at': atMillis,
     'un': untilMillis,
+    if (arrived) 'ar': true,
   };
 
   static ChatLocation? fromJson(Object? json) {
@@ -80,6 +87,7 @@ final class ChatLocation {
       atMillis: at,
       // Never longer than the longest sharing.
       untilMillis: until.clamp(0, at + kMaxLocationShare.inMilliseconds),
+      arrived: json['ar'] == true,
     );
   }
 
@@ -90,8 +98,10 @@ final class ChatLocation {
       other.lon == lon &&
       other.accuracy == accuracy &&
       other.atMillis == atMillis &&
-      other.untilMillis == untilMillis;
+      other.untilMillis == untilMillis &&
+      other.arrived == arrived;
 
   @override
-  int get hashCode => Object.hash(lat, lon, accuracy, atMillis, untilMillis);
+  int get hashCode =>
+      Object.hash(lat, lon, accuracy, atMillis, untilMillis, arrived);
 }

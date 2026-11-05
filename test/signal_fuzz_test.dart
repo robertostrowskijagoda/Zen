@@ -186,12 +186,17 @@ Map<String, Object?> _poll(Random r) => <String, Object?>{
       for (int i = 0; i < r.nextInt(13); i++)
         r.nextInt(8) == 0 ? _value(r, 3) : 'odp $i',
     ],
+  // Its time limit and its ending.
+  if (r.nextInt(3) == 0) 'd': r.nextInt(6) == 0 ? _value(r, 3) : _number(r),
+  if (r.nextInt(3) == 0) 'c': r.nextInt(6) == 0 ? _value(r, 3) : _number(r),
 };
 
 /// A location as one is sent, mostly a little wrong.
 Map<String, Object?> _location(Random r) => <String, Object?>{
   for (final String k in <String>['la', 'lo', 'ac', 'at', 'un'])
     if (r.nextInt(8) != 0) k: r.nextInt(6) == 0 ? _value(r, 3) : _number(r),
+  // Arrived ("Jestem na miejscu").
+  if (r.nextInt(4) == 0) 'ar': r.nextBool() ? true : _value(r, 3),
 };
 
 Object? _value(Random r, int depth) {

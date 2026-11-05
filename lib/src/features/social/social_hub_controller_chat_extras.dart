@@ -100,7 +100,14 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       conversationKey,
       messageId,
       (ChatMessage m) {
-        if (m.isDeleted || m.isSystem) {
+        if (m.isDeleted ||
+            m.isSystem ||
+            _votesAfterClose(
+              m,
+              'self',
+              chosen,
+              DateTime.now().millisecondsSinceEpoch,
+            )) {
           return null;
         }
         final Map<String, String> next = Map<String, String>.of(m.reactions);
@@ -183,6 +190,57 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       });
     }
     return changed;
+  }
+
+  /// Ends one's own poll [messageId] now, for everyone: votes cast after
+  /// this do not count. `false` when it is not one's own open poll.
+  Future<bool> endPoll({
+    required String conversationKey,
+    required String messageId,
+  }) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    ChatPoll? ended;
+    final bool changed = await _changeTimelineMessage(
+      conversationKey,
+      messageId,
+      (ChatMessage m) {
+        final ChatPoll? poll = m.poll;
+        if (!m.isOutgoing ||
+            m.isDeleted ||
+            poll == null ||
+            poll.isClosedAt(now)) {
+          return null;
+        }
+        ended = poll.endedAt(now);
+        return m.copyWith(text: endedPollText(ended!), poll: ended);
+      },
+    );
+    final ChatPoll? sent = ended;
+    if (changed && sent != null) {
+      await _sendChatChange(conversationKey, <String, dynamic>{
+        'type': 'msg_edit',
+        'msgId': messageId,
+        'text': endedPollText(sent),
+        'at': now,
+        kPollKey: sent.toJson(),
+      });
+    }
+    return changed;
+  }
+
+  /// Whether a reaction of [who] ([emoji], empty: taken back) to [m] would
+  /// cast, change or take back a vote in a poll closed at [nowMillis].
+  bool _votesAfterClose(
+    ChatMessage m,
+    String who,
+    String emoji,
+    int nowMillis,
+  ) {
+    final ChatPoll? poll = m.poll;
+    return poll != null &&
+        poll.isClosedAt(nowMillis) &&
+        (poll.answerOf(emoji) != null ||
+            poll.answerOf(m.reactions[who] ?? '') != null);
   }
 
   // ---------------------------------------------------------------------------
@@ -721,6 +779,9 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
             return null;
           }
           final String emoji = (signal.chatExtras?['emoji'] as String?) ?? '';
+          if (_votesAfterClose(m, signal.sender, emoji, timestamp)) {
+            return null;
+          }
           final Map<String, String> next = Map<String, String>.of(m.reactions);
           if (emoji.isEmpty) {
             next.remove(signal.sender);
@@ -731,6 +792,19 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
           return m.copyWith(reactions: next);
         case ZenSignalType.messageEdit:
           final String text = signal.content?.trim() ?? '';
+          // A poll changes only by its author ending it, at any time.
+          final ChatPoll? poll = m.poll;
+          if (poll != null) {
+            final ChatPoll? ended = !wrote(m) || m.isDeleted
+                ? null
+                : poll.endingOf(
+                    signal.chatExtras?[kPollKey],
+                    receivedAtMillis: timestamp,
+                  );
+            return ended == null
+                ? null
+                : m.copyWith(text: text.isEmpty ? m.text : text, poll: ended);
+          }
           // When it was edited, on this phone's clock as the message's
           // time is: a claim later than its arrival counts as the arrival.
           final int? claimed = signal.sentAtMillis;
@@ -800,6 +874,14 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         switch (payload['type']) {
           case 'msg_react':
             final Object? emoji = payload['emoji'];
+            if (_votesAfterClose(
+              m,
+              'self',
+              emoji is String ? emoji : '',
+              now,
+            )) {
+              return null;
+            }
             final Map<String, String> next = Map<String, String>.of(
               m.reactions,
             );
@@ -816,6 +898,14 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
             final Object? at = payload['at'];
             if (!m.isOutgoing || m.isDeleted || text is! String) {
               return null;
+            }
+            final ChatPoll? poll = m.poll;
+            if (poll != null) {
+              final ChatPoll? ended = poll.endingOf(
+                payload[kPollKey],
+                receivedAtMillis: now,
+              );
+              return ended == null ? null : m.copyWith(text: text, poll: ended);
             }
             if (m.location != null) {
               final ChatLocation? moved = ChatLocation.fromJson(
@@ -935,3 +1025,8 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     ]);
   }
 }
+
+/// What an ended poll says as its text (a Zen without polls shows it, and
+/// the previews).
+String endedPollText(ChatPoll poll) =>
+    '${poll.asText}\n${t('Ankieta zakończona.')}';

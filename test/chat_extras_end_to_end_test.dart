@@ -17,6 +17,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/chat_media_blocks.dart';
+import 'package:zen/src/features/chat/location_sharing.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
@@ -679,6 +680,147 @@ void main() {
       expect(voters[0], isEmpty, reason: member.address);
       expect(voters[1], hasLength(1), reason: member.address);
     }
+  });
+
+  test('its author ends a poll for everyone: the result stays, no vote '
+      'counts after; nobody else can end it', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final _Device b = mesh.devices[bob]!;
+    final _Device c = mesh.devices[carol]!;
+    final GroupProfile group = await _group(mesh);
+    final String key = 'group:${group.id}';
+    final ChatPoll poll = ChatPoll.of('Kiedy?', <String>[
+      'Sobota',
+      'Niedziela',
+    ])!;
+    await a.controller.sendGroupMessage(
+      groupId: group.id,
+      text: poll.asText,
+      poll: poll,
+    );
+    await mesh.settle();
+    final ChatMessage sent = await _sentText(a, key, poll.asText);
+    await b.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[1],
+    );
+    await mesh.settle();
+
+    // Bob's own copy is not his poll: nothing ends.
+    expect(
+      await b.controller.endPoll(conversationKey: key, messageId: sent.id),
+      isFalse,
+    );
+    expect(
+      await a.controller.endPoll(conversationKey: key, messageId: sent.id),
+      isTrue,
+    );
+    await mesh.settle();
+    for (final _Device member in <_Device>[a, b, c]) {
+      final ChatMessage got = (await member.message(key, sent.id))!;
+      expect(got.poll!.closedAtMillis, isNotNull, reason: member.address);
+      expect(got.poll!.isSamePollAs(poll), isTrue, reason: member.address);
+      expect(got.text, endsWith('Ankieta zakończona.'), reason: member.address);
+    }
+
+    // Carol's late vote and Bob's change count nowhere.
+    await c.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[0],
+    );
+    await b.controller.reactToMessage(
+      conversationKey: key,
+      messageId: sent.id,
+      emoji: kPollVotes[0],
+    );
+    await mesh.settle();
+    // A vote from a Zen that does not know the poll ended (an older one)
+    // does not count where it arrives either.
+    await a.controller.receiveSignal(
+      ZenSignal(
+        type: ZenSignalType.messageReaction,
+        sender: carol,
+        messageId: sent.id,
+        groupId: group.id,
+        chatExtras: <String, dynamic>{'emoji': kPollVotes[0]},
+      ),
+      receivedAtMillis: DateTime.now().millisecondsSinceEpoch,
+    );
+    for (final _Device member in <_Device>[a, b, c]) {
+      final ChatMessage got = (await member.message(key, sent.id))!;
+      final List<List<String>> voters = got.poll!.votersIn(got.reactions);
+      expect(voters[0], isEmpty, reason: member.address);
+      expect(voters[1], hasLength(1), reason: member.address);
+    }
+
+    // An ending forged by a member for Alice's poll changes nothing.
+    final ChatMessage atCarol = (await c.message(key, sent.id))!;
+    final ChatPoll other = ChatPoll.of('Gdzie?', <String>['Tu', 'Tam'])!;
+    await b.controller.sendGroupMessage(
+      groupId: group.id,
+      text: other.asText,
+      poll: other,
+    );
+    await mesh.settle();
+    final ChatMessage bobs = await _sentText(b, key, other.asText);
+    await c.controller.receiveSignal(
+      ZenSignal(
+        type: ZenSignalType.messageEdit,
+        sender: alice,
+        messageId: bobs.id,
+        groupId: group.id,
+        content: 'koniec',
+        chatExtras: <String, dynamic>{kPollKey: other.endedAt(1).toJson()},
+      ),
+      receivedAtMillis: DateTime.now().millisecondsSinceEpoch,
+    );
+    expect((await c.message(key, bobs.id))!.poll, other);
+    expect((await c.message(key, sent.id))!.poll, atCarol.poll);
+  });
+
+  test('"Jestem na miejscu" reaches the friend: the last position, marked '
+      'as arrived, no longer live', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final _Device b = mesh.devices[bob]!;
+    final int t0 = DateTime.now().millisecondsSinceEpoch;
+    final String id = await a.controller.sendLocationMessage(
+      conversationKey: bob,
+      text: 'w drodze',
+      location: ChatLocation(
+        lat: 52,
+        lon: 21,
+        accuracy: 8,
+        atMillis: t0,
+        untilMillis: t0 + 3600000,
+      ),
+    );
+    await mesh.settle();
+    final ChatLocation here = ChatLocation(
+      lat: 52.1,
+      lon: 21,
+      accuracy: 5,
+      atMillis: t0 + 60000,
+      untilMillis: t0 + 60000,
+      arrived: true,
+    );
+    expect(
+      await a.controller.updateSharedLocation(
+        conversationKey: bob,
+        messageId: id,
+        text: sharedLocationText(here, nowMillis: t0 + 60000),
+        location: here,
+      ),
+      isTrue,
+    );
+    await mesh.settle();
+    final ChatMessage got = (await b.message(alice, id))!;
+    expect(got.location, here);
+    expect(got.location!.isLiveAt(t0 + 60001), isFalse);
+    expect(got.text, startsWith('📍 Jestem na miejscu'));
   });
 
   test('a shared position reaches the friend and the group, moves with '
