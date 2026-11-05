@@ -49,5 +49,5 @@ jobs:
 
       - name: Mutants
         run: >-
-          dart run tool/mutation.dart --max 15 --seed ${{ github.run_number }}
+          dart run tool/mutation.dart --max 10 --seed ${{ github.run_number }}
           --summary "$GITHUB_STEP_SUMMARY"

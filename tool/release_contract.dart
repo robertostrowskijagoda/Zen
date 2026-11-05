@@ -1039,3 +1039,36 @@ String? missingUpgradeFixture(String released, Iterable<String> present) {
       'commit ${upgradeFixtureFolder(released)} (docs/TESTING.md, '
       '"Upgrade fixtures").';
 }
+
+/// The files of [changed] (paths under lib/ changed since the last release)
+/// that mutation testing should cover and does not: plain logic (no widget
+/// code: nothing under `presentation/`, [sources] does not import Flutter's
+/// widgets) with a fast test of its own (`test/<name>_test.dart` among
+/// [tests], not among the slow ones of tool/test_times.json, [slowTests]),
+/// and not yet in tool/mutation_targets.json ([listed]: its targets and the
+/// files it skips with a reason). `release.dart prepare` reminds of them,
+/// so the targets grow with the app (docs/TESTING.md, section 11.4).
+List<String> missingMutationTargets({
+  required Iterable<String> changed,
+  required Map<String, String> sources,
+  required Set<String> tests,
+  required Set<String> slowTests,
+  required Set<String> listed,
+}) => <String>[
+  for (final String file in changed)
+    if (file.startsWith('lib/') &&
+        file.endsWith('.dart') &&
+        !file.contains('/presentation/') &&
+        !listed.contains(file) &&
+        sources[file] != null &&
+        !sources[file]!.contains("import 'package:flutter/material.dart'") &&
+        !sources[file]!.contains("import 'package:flutter/widgets.dart'"))
+      if (_ownTest(file) case final String test
+          when tests.contains(test) && !slowTests.contains(test))
+        file,
+];
+
+String _ownTest(String file) {
+  final String name = file.split('/').last;
+  return 'test/${name.substring(0, name.length - '.dart'.length)}_test.dart';
+}

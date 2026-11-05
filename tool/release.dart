@@ -298,6 +298,55 @@ Future<bool> _prepare(List<String> args) async {
     stdout.writeln('Reminder: $fixture');
   }
 
+  // 1a'. Mutation testing grows with the app: the logic changed since the
+  // last release that has a fast test of its own goes into
+  // tool/mutation_targets.json (or is skipped there, with a reason).
+  final ProcessResult changedFiles = await _run('git', <String>[
+    'diff',
+    '--name-only',
+    'v$current..HEAD',
+    '--',
+    'lib',
+  ], show: false);
+  if (changedFiles.exitCode == 0) {
+    final List<String> changed = const LineSplitter().convert(
+      '${changedFiles.stdout}',
+    );
+    final List<dynamic> mutationTargets =
+        jsonDecode(File('tool/mutation_targets.json').readAsStringSync())
+            as List<dynamic>;
+    final List<String> missing = missingMutationTargets(
+      changed: changed,
+      sources: <String, String>{
+        for (final String file in changed)
+          if (File(file).existsSync()) file: File(file).readAsStringSync(),
+      },
+      tests: <String>{
+        for (final FileSystemEntity e in Directory('test').listSync())
+          if (e is File) e.path.replaceAll(r'\', '/'),
+      },
+      slowTests:
+          (jsonDecode(File('tool/test_times.json').readAsStringSync())
+                  as Map<String, dynamic>)
+              .keys
+              .toSet(),
+      listed: <String>{
+        for (final dynamic t in mutationTargets)
+          (t as Map<String, dynamic>)['file'] as String,
+      },
+    );
+    if (missing.isNotEmpty) {
+      stdout.writeln(
+        'Reminder: changed since v$current, with a fast test of its own, '
+        'and not in tool/mutation_targets.json (add it, or add it with '
+        '"skip" and the reason; docs/TESTING.md, section 11.4):',
+      );
+      for (final String file in missing) {
+        stdout.writeln('  $file');
+      }
+    }
+  }
+
   // 1b. The short note the app shows with the update notice; release.yml
   // makes whats-new.json of it, which the signature covers.
   final ({Map<String, List<String>> lines, List<String> problems}) note =

@@ -13,6 +13,7 @@
 // every run looks at others. The file is put back after every change,
 // also when the run is stopped (Ctrl+C) or a test hangs (--timeout,
 // seconds per change). --summary appends Markdown (CI's job summary).
+// A target with "skip" (and the reason in it) is listed but not run.
 // Exit code 0 always unless the tests fail on the unchanged code (then 1):
 // the score informs, it does not block.
 import 'dart:async';
@@ -88,6 +89,11 @@ Future<void> main(List<String> args) async {
   for (final dynamic t in targets) {
     final String file = (t as Map<String, dynamic>)['file'] as String;
     if (only.isNotEmpty && !only.contains(file)) {
+      continue;
+    }
+    // Listed on purpose and left out, with the reason ("skip"): so the
+    // reminder of release.dart prepare stops naming it.
+    if (t['skip'] != null) {
       continue;
     }
     final List<String> tests = (t['tests'] as List<dynamic>).cast<String>();
