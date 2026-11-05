@@ -1017,4 +1017,64 @@ void main() {
     });
     expect((await a.message(bob, mine.id))!.isDeleted, isTrue);
   });
+  test("another device of the account moves one's shared position only "
+      "forward, and ends one's poll", () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final int t0 = DateTime.now().millisecondsSinceEpoch;
+    ChatLocation at(double lat, int when) => ChatLocation(
+      lat: lat,
+      lon: 21,
+      accuracy: 8,
+      atMillis: when,
+      untilMillis: t0 + 3600000,
+    );
+    final String id = await a.controller.sendLocationMessage(
+      conversationKey: bob,
+      text: 'tu',
+      location: at(52, t0),
+    );
+    await mesh.settle();
+    Future<void> mirrored(ChatLocation l) =>
+        a.controller.recordMirroredSend(bob, <String, dynamic>{
+          'type': 'msg_edit',
+          'msgId': id,
+          'text': 'tu ${l.lat}',
+          'at': l.atMillis,
+          kLocationKey: l.toJson(),
+        });
+    await mirrored(at(52.02, t0 + 120000));
+    expect((await a.message(bob, id))!.location!.lat, 52.02);
+    // An older one from the other device, arriving late: nothing changes.
+    await mirrored(at(52.01, t0 + 60000));
+    expect((await a.message(bob, id))!.location!.lat, 52.02);
+
+    final GroupProfile group = await _group(mesh);
+    final String key = 'group:${group.id}';
+    final ChatPoll poll = ChatPoll.of('Kiedy?', <String>['A', 'B'])!;
+    await a.controller.sendGroupMessage(
+      groupId: group.id,
+      text: poll.asText,
+      poll: poll,
+    );
+    await mesh.settle();
+    final ChatMessage sent = await _sentText(a, key, poll.asText);
+    await a.controller.recordMirroredSend(bob, <String, dynamic>{
+      'type': 'msg_edit',
+      'msgId': sent.id,
+      'groupId': group.id,
+      'text': 'koniec',
+      'at': t0,
+      kPollKey: poll.endedAt(t0).toJson(),
+    });
+    expect((await a.message(key, sent.id))!.poll!.closedAtMillis, t0);
+    // Voted on the other device after the end: does not count here.
+    await a.controller.recordMirroredSend(bob, <String, dynamic>{
+      'type': 'msg_react',
+      'msgId': sent.id,
+      'groupId': group.id,
+      'emoji': kPollVotes[0],
+    });
+    expect((await a.message(key, sent.id))!.reactions, isEmpty);
+  });
 }
