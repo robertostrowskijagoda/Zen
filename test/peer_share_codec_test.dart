@@ -67,6 +67,30 @@ void main() {
     );
   });
 
+  test('the code is found anywhere in a pasted invitation', () {
+    final PeerShareProfile profile = PeerShareCodec.buildLocalProfile(
+      address: address,
+      displayName: 'Ada',
+    )!;
+    final String code = profile.inviteCode.replaceAll('-', '');
+    // The link comes after other words, the way the copied message reads.
+    expect(
+      PeerShareCodec.inviteCodeInText(
+        PeerShareCodec.inviteMessageForCode(profile.inviteCode),
+      ),
+      code,
+    );
+    expect(
+      PeerShareCodec.inviteCodeInText('Hej, łap: ${profile.qrData}). Pa!'),
+      code,
+    );
+    expect(PeerShareCodec.inviteCodeInText('Hej, nic tu nie ma.'), isNull);
+    expect(
+      PeerShareCodec.inviteCodeInText('Zobacz ${PeerShareCodec.repositoryUrl}'),
+      isNull,
+    );
+  });
+
   test('the invite code is short and enough on its own', () {
     final String code = PeerShareCodec.inviteCodeForAddress(address)!;
     expect(

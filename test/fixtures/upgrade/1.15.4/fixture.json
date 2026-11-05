@@ -1,0 +1,32 @@
+{
+  "written": "1.15.4",
+  "password": "fixture-password",
+  "space": "feed/ZZNADT50_X2ebBqjE3aIQzNqHzd-VGuB8YwE3hMdfLM=",
+  "posts": 4,
+  "friends": [
+    "201:1111:2222:3333:4444:5555:6666:7777",
+    "202:aaaa:bbbb:cccc:dddd:eeee:ffff:1234"
+  ],
+  "pending": "203:1234:5678:9abc:def0:1234:5678:9abc",
+  "group": "group-fixture",
+  "messagesWithA": 6,
+  "files": {
+    "data/groups.zenbin": 420,
+    "data/hidden/00/0030f8f5a12345d524130d66bf82e771bd8c71de.zenbin": 85,
+    "data/hidden/0c/0c22f0a9cff050fb1b81088afa8ea23eeac84767.zenbin": 114,
+    "data/hidden/36/36b08da7830969ca56cd26d4b003c5bb7e5383c2.zenbin": 179,
+    "data/hidden/8c/8cb7d829797d8665fec07a9eb2382f8741e1e180.zenbin": 10031,
+    "data/hidden/a3/a3e99ca81ab27b1f2dc261e59746da955cbdb7b4.zenbin": 328,
+    "data/hidden/a3/a3e99ca81ab27b1f2dc261e59746da955cbdb7b4.zenbin.bak": 328,
+    "data/hidden/a3/a3e99ca81ab27b1f2dc261e59746da955cbdb7b4.zenbin.bak2": 328,
+    "data/hidden/b4/b44c27df7101e724d50c103233e4e92e06c11fd6.zenbin": 19768,
+    "data/hidden/df/df58193006f7033070db9bab2d4b0ce7bec01054.zenbin": 114,
+    "data/hidden/e7/e70a2e2f3691e8ed0bd52cf65c749b16d76bd92d.zenbin": 539,
+    "data/relay/state.zenbin": 279,
+    "data/signals/pending.zenbin": 206,
+    "data/social/hub.zenbin": 1418,
+    "data/ui/drafts.zenbin": 200,
+    "data/user_profile.zenbin": 227,
+    "settings/settings/app.zenbin": 946
+  }
+}
