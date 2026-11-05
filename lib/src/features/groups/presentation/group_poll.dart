@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -191,8 +193,20 @@ class GroupPollCard extends StatelessWidget {
   /// Drawn on one's own (accent) bubble.
   final bool onGradient;
 
+  /// Drawn again when its time limit comes, so it says "ended" then and
+  /// takes no more taps (nothing else changes the chat at that moment).
   @override
   Widget build(BuildContext context) {
+    final int? deadline = poll.closesAtMillis;
+    return _RebuildAt(
+      atMillis: nowMillis == null && poll.closedAtMillis == null
+          ? deadline
+          : null,
+      builder: _card,
+    );
+  }
+
+  Widget _card(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color text = onGradient ? zen.onAccent : zen.textPrimary;
     final Color muted = onGradient
@@ -350,6 +364,60 @@ class GroupPollCard extends StatelessWidget {
       ],
     );
   }
+}
+
+/// [builder]'s widget, built once more at [atMillis] (when it is ahead).
+class _RebuildAt extends StatefulWidget {
+  const _RebuildAt({required this.atMillis, required this.builder});
+
+  final int? atMillis;
+  final WidgetBuilder builder;
+
+  @override
+  State<_RebuildAt> createState() => _RebuildAtState();
+}
+
+class _RebuildAtState extends State<_RebuildAt> {
+  Timer? _timer;
+
+  void _plan() {
+    _timer?.cancel();
+    _timer = null;
+    final int? at = widget.atMillis;
+    final int wait = at == null
+        ? 0
+        : at - DateTime.now().millisecondsSinceEpoch;
+    if (wait > 0) {
+      _timer = Timer(Duration(milliseconds: wait + 1), () {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _plan();
+  }
+
+  @override
+  void didUpdateWidget(_RebuildAt old) {
+    super.didUpdateWidget(old);
+    if (old.atMillis != widget.atMillis) {
+      _plan();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
 }
 
 /// [reactions] without the votes of [poll] (shown in the poll itself).

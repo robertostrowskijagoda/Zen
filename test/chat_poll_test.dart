@@ -237,6 +237,37 @@ void main() {
     expect(votes, isEmpty);
   });
 
+  testWidgets('the card says ended by itself when its time comes', (
+    WidgetTester tester,
+  ) async {
+    final ChatPoll poll = ChatPoll.of('Kiedy?', <String>[
+      'A',
+      'B',
+    ], closesAtMillis: DateTime.now().millisecondsSinceEpoch + 300)!;
+    final List<int> votes = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZenTheme.light(),
+        home: Scaffold(
+          body: GroupPollCard(
+            poll: poll,
+            reactions: const <String, String>{},
+            nameOf: (String who) => who,
+            onVote: votes.add,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Ankieta zakończona'), findsNothing);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 400)),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Ankieta zakończona'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('group-poll-option-0')));
+    expect(votes, isEmpty);
+  });
+
   testWidgets('the card shows the counts; a tap votes', (
     WidgetTester tester,
   ) async {

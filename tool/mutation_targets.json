@@ -70,5 +70,9 @@
   {
     "file": "lib/src/features/settings/problem_report.dart",
     "tests": ["test/problem_report_test.dart"]
+  },
+  {
+    "file": "lib/src/features/social/social_hub_controller_chat_extras.dart",
+    "tests": ["test/chat_extras_end_to_end_test.dart", "test/signal_fuzz_test.dart"]
   }
 ]
