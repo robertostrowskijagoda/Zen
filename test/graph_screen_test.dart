@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -126,6 +127,63 @@ final class _GatePrices extends ChangeNotifier implements GatePriceSource {
 
   @override
   Listenable? get changes => this;
+}
+
+/// The graph of a phone with two friends, Ania and Bartek, on a phone-sized
+/// screen.
+Future<void> _pumpTwoFriends(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(400, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final _Host host = _Host(<String, String>{_ania: 'Ania', _bartek: 'Bartek'});
+  final MeetService meet = MeetService(
+    host: host,
+    store: MeetStore(MemoryLedgerDisk()),
+  );
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        socialHubAutoHydrateProvider.overrideWithValue(false),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty().copyWith(
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+              },
+            ),
+          ),
+        ),
+        signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+        ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+        meetServiceProvider.overrideWithValue(meet),
+        pyramidServiceProvider.overrideWithValue(
+          PyramidService(
+            host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+            disk: MemoryLedgerDisk(),
+          ),
+        ),
+      ],
+      child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+    ),
+  );
+  await tester.pump();
+  await tester.pump();
+}
+
+/// Ania's card, found by search.
+Future<void> _openAnia(WidgetTester tester) async {
+  await tester.ensureVisible(find.byKey(const Key('graph-search')));
+  await tester.pump();
+  await tester.enterText(find.byKey(const Key('graph-search')), '');
+  await tester.pump();
+  await tester.enterText(find.byKey(const Key('graph-search')), 'ani');
+  await tester.pump();
+  await tester.ensureVisible(find.byKey(Key('graph-hit-$_ania')));
+  await tester.pump();
+  await tester.tap(find.byKey(Key('graph-hit-$_ania')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
 }
 
 void main() {
@@ -528,6 +586,67 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));
   });
+  testWidgets('graph: a friend\'s card shows "Napisz" at once, and it opens '
+      'the chat', (WidgetTester tester) async {
+    await _pumpTwoFriends(tester);
+    await _openAnia(tester);
+    // In sight as the card opens, without scrolling it.
+    final Rect write = tester.getRect(find.byKey(const Key('graph-write')));
+    expect(write.bottom, lessThan(800));
+    expect(write.top, greaterThan(0));
+    await tester.tap(find.byKey(const Key('graph-write')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.byType(ConversationScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('graph: "Usuń znajomego" on a friend\'s card asks first, then '
+      'removes only them', (WidgetTester tester) async {
+    await _pumpTwoFriends(tester);
+    await _openAnia(tester);
+    await tester.ensureVisible(find.byKey(const Key('graph-remove-friend')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('graph-remove-friend')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Usunąć znajomego?'), findsOneWidget);
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(GraphScreen)),
+    );
+    expect(
+      container
+          .read(socialHubControllerProvider)
+          .friendByAddress(_ania)
+          ?.status,
+      FriendRelationshipStatus.accepted,
+      reason: 'asked first',
+    );
+    await tester.tap(find.byKey(const Key('graph-remove-friend-confirm')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    expect(
+      container
+          .read(socialHubControllerProvider)
+          .friendByAddress(_ania)
+          ?.status,
+      isNot(FriendRelationshipStatus.accepted),
+    );
+    expect(
+      container
+          .read(socialHubControllerProvider)
+          .friendByAddress(_bartek)
+          ?.status,
+      FriendRelationshipStatus.accepted,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   testWidgets('graph modes: legends, "open to meet" only for who opted in, '
       'gates without data and with prices, the cheapest route', (
     WidgetTester tester,
