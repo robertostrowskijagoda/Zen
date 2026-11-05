@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.5 — 05.11.2026
+
 ### What's new
 - [en] Each kind of notification has its own switch and its own level of what it shows, and a new version of Zen is always announced.
 - [en] Polls in groups, live location for a while, notes to yourself, messages sent later and chats muted for a time; in groups only mentions notify by default.
@@ -44,6 +46,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **ironwood**: its traffic counters and signature round-trip times were read and written by two actors at once (found by the race detector); they are atomic now (native/yggdrasil_bridge/third_party/ironwood/ZEN.md).
 - **More tests**: the Go bridge under the race detector in every CI run; leak tracking of the widget tests on demand (`--dart-define=zen.leaks=true`); instrumented Kotlin tests on the CI emulator (what the file provider hands out, what other apps may start).
 - **Tests**: the multi-step protocols on a network that loses, duplicates and reorders datagrams, on many seeds (`test/protocol_chaos_test.dart`); random frames into the parser and, from strangers, into the social controller (`test/signal_fuzz_test.dart`); a Go fuzz target for every parser of the bridge, fuzzed in every CI run; line coverage summed up in every CI run; mutation testing of the core files on every pull request (`tool/mutation.dart`); JVM unit tests of the Kotlin code without Android in it (docs/TESTING.md, section 11).
+- **Mutation testing** stops a test past 2 GB of memory and counts the change as caught: a change that made a loop endless filled the CI machine's memory and the job died. The start is tested on the data of 1.15.4 too (its upgrade fixture).
+- **The site**: what Zen is, how it works and the app itself come first, the reasons are folded to two lines each, and the part about the stores tells what Zen gains by being outside them, in every language.
 - **CI**: the emulator job frees disk space first (toolsets it never uses): the previous release's build ran out of room beside an NDK and the emulator's image. A test fails when flutter_webrtc brings a WebRTC whose SHA-256 is not pinned; the 1.15.4 tag run failed on every desktop and iOS job for it (the WebRTC of flutter_webrtc 1.6.3 is pinned now, checked against the official release digests).
 
 ## 1.15.4 — 04.11.2026
