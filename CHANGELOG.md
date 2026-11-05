@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.6 — 05.11.2026
+
 ### What's new
 - [en] A poll can close by itself after an hour, a day or a week, or when you end it; the leading answer shows at the top.
 - [en] Sharing your location live ends with "I'm here", which marks where you arrived.
