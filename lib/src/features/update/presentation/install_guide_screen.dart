@@ -86,7 +86,8 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
     InstallStep(
       t(
         'Na iPhonie zainstaluj LocalDevVPN z App Store, otwórz go, stuknij '
-        '„Connect” i pozwól dodać VPN.',
+        '„Connect” i pozwól dodać VPN. Łącz go przed każdym logowaniem, '
+        'instalacją i odnowieniem w SideStore.',
       ),
     ),
     InstallStep(
@@ -99,13 +100,14 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
       t(
         'Na iPhonie: Ustawienia → Ogólne → VPN i zarządzanie urządzeniem → '
         'Twoje konto Apple → Ufaj. Od iOS 16 też Prywatność i ochrona → Tryb '
-        'dewelopera.',
+        'dewelopera. Twój e-mail jest tam deweloperem: ufasz samemu sobie.',
       ),
     ),
     InstallStep(
       t(
         'Otwórz SideStore, zaloguj się tym samym kontem Apple, w „My Apps” '
-        'stuknij licznik „7 DAYS” przy SideStore.',
+        'stuknij licznik „7 DAYS” przy SideStore. Błąd -80045 przy '
+        'logowaniu: poprawka jest na stronie instalacji.',
       ),
     ),
     InstallStep(

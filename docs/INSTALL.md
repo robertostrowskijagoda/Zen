@@ -77,17 +77,23 @@ Option names may differ a little depending on the phone. You do this once.
 Account (a free one is enough). You need a computer and a cable once, Wi-Fi,
 a passcode on the iPhone and iOS 15 or later; about 15 minutes.
 
-1. On the iPhone install **LocalDevVPN** from the App Store, open it and tap
-   **Connect**. SideStore needs this VPN on whenever it installs or renews apps.
+**Always first, LocalDevVPN:** before SideStore signs in, installs, renews or
+updates anything, open the **LocalDevVPN** app and tap **Connect** (the **VPN**
+switch in Settings is then on). Most errors come from the VPN being off.
+
+1. On the iPhone install **LocalDevVPN** from the App Store, open it, tap
+   **Connect** and allow the VPN configuration.
 2. On the computer install **iloader**
    ([SideStore's guide](https://docs.sidestore.io/docs/installation/prerequisites)),
    connect the iPhone by cable, sign in with your Apple Account and choose
    **Install SideStore (Stable)**.
 3. On the iPhone: **Settings → General → VPN & Device Management** → your
-   Apple Account → trust it; on iOS 16 and later also **Settings → Privacy &
-   Security → Developer Mode**.
+   own e-mail (the Apple Account from step 2 is the developer: you trust
+   yourself) → trust it; on iOS 16 and later also **Settings → Privacy &
+   Security → Developer Mode**. Until then SideStore and Zen don't open.
 4. Open SideStore (LocalDevVPN connected), sign in with the same Apple Account
-   and tap the **7 DAYS** counter next to SideStore in **My Apps**.
+   and tap the **7 DAYS** counter next to SideStore in **My Apps**. If signing
+   in fails with **-80045**, see below.
 5. Add Zen's source (**Add Zen to SideStore** on the install page, or in
    SideStore **Sources → +**:
    `https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen
@@ -109,6 +115,20 @@ always points to the latest release's
 [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa).
 Other ways: **AltStore Classic** (the same source; it renews through AltServer
 on a computer) and Sideloadly (from a computer).
+
+**Signing in to SideStore fails with -80045.** Since October 2026 Apple turns
+down sign-ins made with SideStore's default settings. Change them once in
+SideStore: **Settings → User Customizations** → turn off **On-Device
+Anisette** (SideStore restarts); **Settings → Anisette Servers** → **SideStore
+(New)**, and at the bottom turn off **Enable Auto Rotation**; **User
+Customizations → Anisette Client Configuration → Remote Server Sync** →
+**Fetch**, then **Save as Overrides**; **User Customizations → Reset
+adi.pb**. Then, with LocalDevVPN connected, sign in again and tap **Sign In**
+only once. If it now says ADP or 502, pick another server and repeat; if it
+is still -80045, wait a few hours (Apple blocks repeated tries) or use another
+free Apple Account. If iloader shows -80045, use **Reset Anisette State** in
+its settings. More in
+[SideStore's report](https://github.com/SideStore/SideStore/issues/1709).
 
 **What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
 the background for long. Messages and calls arrive while Zen is open, and

@@ -384,8 +384,8 @@ main.prose { max-width: 780px; }
 .need li span { padding-top: 6px; min-width: 0; }
 .need li b { color: var(--text); }
 @media (min-width: 700px) { .need ul { grid-template-columns: 1fr 1fr; } }
-.how ol.sub { margin: 10px 0 0; padding-inline-start: 22px; color: var(--muted); font-size: 15.5px; display: grid; gap: 6px; }
-.how ol.sub li::marker { color: var(--link); font-weight: 800; }
+.how ol.sub, .acc-body ol.sub { margin: 10px 0 0; padding-inline-start: 22px; color: var(--muted); font-size: 15.5px; display: grid; gap: 6px; }
+.how ol.sub li::marker, .acc-body ol.sub li::marker { color: var(--link); font-weight: 800; }
 .how .btns { display: flex; flex-wrap: wrap; gap: 0 10px; }
 .how p.small { margin-top: 10px; font-size: 14.5px; }
 

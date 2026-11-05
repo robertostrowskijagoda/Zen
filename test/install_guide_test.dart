@@ -33,6 +33,14 @@ void main() {
       allOf(contains('VPN i zarządzanie urządzeniem'), contains('Tryb')),
     );
     expect(iphone[3], allOf(contains('„My Apps”'), contains('„7 DAYS”')));
+    // LocalDevVPN before everything SideStore does, trusting your own
+    // e-mail, and where the fix of -80045 is.
+    expect(iphone[0], contains('przed każdym logowaniem'));
+    expect(iphone[2], contains('Twój e-mail jest tam deweloperem'));
+    expect(
+      iphone[3],
+      allOf(contains('-80045'), contains('stronie instalacji')),
+    );
     expect(iphone[4], contains('„Dodaj Zen do SideStore”'));
     expect(
       iphone[5],
