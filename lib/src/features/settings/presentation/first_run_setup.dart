@@ -105,11 +105,7 @@ final class IntroGateDefaults implements GateDefaults {
   Future<void> set(GateDefault value) => setTerms(value.terms);
 
   @override
-  Future<void> setTerms(GateTerms terms) async {
-    for (final GateTier tier in GateTier.values) {
-      await intro.setGateTier(tier, terms);
-    }
-  }
+  Future<void> setTerms(GateTerms terms) => intro.setAllGateTiers(terms);
 
   @override
   Listenable get changes => intro;
@@ -286,6 +282,19 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
             backgroundColor: zen.surfaceSunk,
             color: zen.accent,
           ),
+          // On every step, so nobody is held in the setup; at the top, away
+          // from "Wstecz" and "Dalej", so it is never tapped by mistake.
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 8, 0),
+              child: TextButton(
+                key: const Key('first-run-skip'),
+                onPressed: _finishing ? null : () => unawaited(_finish()),
+                child: Text(t('Pomiń konfigurację')),
+              ),
+            ),
+          ),
           Expanded(
             child: step == _SetupStep.permissions
                 ? const PermissionsPanel()
@@ -330,7 +339,7 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: Row(
               children: <Widget>[
                 if (index > 0)
@@ -359,15 +368,6 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
                   ),
                 ),
               ],
-            ),
-          ),
-          // On every step, so nobody is held in the setup.
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: TextButton(
-              key: const Key('first-run-skip'),
-              onPressed: _finishing ? null : () => unawaited(_finish()),
-              child: Text(t('Pomiń konfigurację')),
             ),
           ),
         ],

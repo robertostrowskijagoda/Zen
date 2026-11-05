@@ -10,6 +10,13 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **The setup's gate choice holds**: "Otwarte za darmo", "Za moją zgodą" or a price is saved for every tier at once and told to the friends in the background. It set one tier after another, each waiting until every friend was told; with friends slow to answer the gates stayed mixed (no choice shown as chosen) and the next tap seemed not to take.
+- **"Pomiń konfigurację" at the top** of the setup, away from "Wstecz" and "Dalej" (it sat right under them).
+- **The graph: a friend's card** has "Napisz" and "Profil" right under the name (they were at the very end of the card, under all it tells) and "Usuń znajomego" at its end, asked once more first.
+- **"Czekają na Twoją odpowiedź" one by one**: a cross beside each waiting chat hides that one until a newer message comes from that friend; "Ukryj wszystkie" (with more than one) hides them all, as "Ukryj" did.
+- **Tests**: the upgrade fixture of 1.15.6.
+
 ## 1.15.6 — 05.11.2026
 
 ### What's new

@@ -2949,6 +2949,49 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     );
   }
 
+  /// "Usuń znajomego" from the graph: asked first, as on the chats list.
+  Future<void> _confirmRemoveFriend(String address, String name) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        final ZenColors zen = ZenColors.of(dialogContext);
+        return AlertDialog(
+          scrollable: true,
+          icon: Icon(Icons.person_remove_outlined, color: zen.danger, size: 30),
+          title: Text(t('Usunąć znajomego?')),
+          content: Text(
+            t('Czy na pewno chcesz usunąć {name} z listy kontaktów?', {
+              'name': name,
+            }),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              key: const Key('graph-remove-friend-confirm'),
+              style: FilledButton.styleFrom(
+                backgroundColor: zen.danger,
+                foregroundColor: ZenColors.foregroundFor(zen.danger),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(t('Usuń')),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed == true && mounted) {
+      await ref
+          .read(socialHubControllerProvider.notifier)
+          .removeFriend(peerAddress: address);
+      if (mounted) {
+        setState(() => _selected = null);
+      }
+    }
+  }
+
   Future<void> _show(
     BuildContext context, {
     required MeetService meet,
@@ -3109,6 +3152,59 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                     ),
                   ],
                 ),
+                // What one does with a friend first: in sight as the card
+                // opens, not under everything it tells.
+                if (friend != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: FilledButton.icon(
+                          key: const Key('graph-write'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            unawaited(
+                              Navigator.of(this.context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (BuildContext context) =>
+                                      ConversationScreen(
+                                        peerAddress: friend.address,
+                                        title: n.name,
+                                      ),
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline_rounded),
+                          label: Text(t('Napisz')),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('graph-profile'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            unawaited(
+                              ProfileScreen.open(
+                                this.context,
+                                address: friend.address,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.account_circle_outlined),
+                          label: Text(t('Profil')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 if (s != null ||
                     met ||
                     openTo != null ||
@@ -3221,47 +3317,6 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                     ),
                   ),
                 if (friend != null) ...<Widget>[
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    key: const Key('graph-write'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                    ),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      unawaited(
-                        Navigator.of(this.context).push(
-                          MaterialPageRoute<void>(
-                            builder: (BuildContext context) =>
-                                ConversationScreen(
-                                  peerAddress: friend.address,
-                                  title: n.name,
-                                ),
-                          ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.chat_bubble_outline_rounded),
-                    label: Text(t('Napisz')),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    key: const Key('graph-profile'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                    ),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      unawaited(
-                        ProfileScreen.open(
-                          this.context,
-                          address: friend.address,
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.account_circle_outlined),
-                    label: Text(t('Profil')),
-                  ),
                   const SizedBox(height: 8),
                   // The gate to this person's own friends, free for this
                   // friend (nobody asks for it here: they ask in a chat).
@@ -3302,6 +3357,19 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                       ),
                     ),
                   ],
+                  // Last, away from "Napisz": asked once more before it is
+                  // done.
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    key: const Key('graph-remove-friend'),
+                    style: TextButton.styleFrom(foregroundColor: zen.danger),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(_confirmRemoveFriend(friend.address, n.name));
+                    },
+                    icon: const Icon(Icons.person_remove_outlined),
+                    label: Text(t('Usuń znajomego')),
+                  ),
                 ],
                 if (far) ...<Widget>[
                   const SizedBox(height: 16),
