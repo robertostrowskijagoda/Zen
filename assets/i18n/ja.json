@@ -1704,7 +1704,7 @@
   "Na razie pusto.": "まだ何もありません。",
   "Na razie żadnych planów": "予定はまだありません",
   "Na stronach ustawień": "設定ページ内",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "インストールページ（上のQRコード）で「ZenをSideStoreに追加」をタップし、そのソースからZenをインストールします。",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "インストールページ（上のQRコード）で「ZenをSideStoreに追加」をタップし、そのソースからZenをインストールします。先に LocalDevVPN を接続し、インストール後は「VPNとデバイス管理」で Zen を信頼します。",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "インストールページ（上のQRコード）で「Zenをダウンロード」をタップします。",
   "Na tablicę można dodać tylko zdjęcie.": "フィードに追加できるのは写真だけです。",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "このバージョンのAndroidでは、1つのアプリだけを共有できません。相手には、通知やSMSのコードを含め、画面のすべてが見えます。",

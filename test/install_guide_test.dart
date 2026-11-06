@@ -43,6 +43,10 @@ void main() {
     );
     expect(iphone[4], contains('„Dodaj Zen do SideStore”'));
     expect(
+      iphone[4],
+      allOf(contains('połącz LocalDevVPN'), contains('zaufaj Zen')),
+    );
+    expect(
       iphone[5],
       allOf(contains('Skrótach'), contains('„Refresh All Apps”')),
     );

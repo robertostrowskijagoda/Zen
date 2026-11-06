@@ -1727,7 +1727,7 @@
   "Na razie pusto.": "Per ora è vuoto.",
   "Na razie żadnych planów": "Per ora nessun piano",
   "Na stronach ustawień": "Nelle pagine delle impostazioni",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "Nella pagina di installazione (codice QR sopra) tocca «Aggiungi Zen a SideStore» e installa Zen da quella fonte.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "Nella pagina di installazione (codice QR sopra) tocca «Aggiungi Zen a SideStore» e installa Zen da quella fonte. Prima collega LocalDevVPN; dopo l’installazione autorizza Zen in «VPN e gestione dispositivi».",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "Nella pagina di installazione (codice QR sopra) tocca «Scarica Zen».",
   "Na tablicę można dodać tylko zdjęcie.": "Sulla bacheca si può aggiungere solo una foto.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Su questa versione di Android non si può condividere una sola app. L’altra parte vedrà tutto ciò che è sullo schermo, anche notifiche e codici SMS.",

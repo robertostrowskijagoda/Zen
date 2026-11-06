@@ -1773,7 +1773,7 @@
   "Na razie pusto.": "Пока пусто.",
   "Na razie żadnych planów": "Пока никаких планов",
   "Na stronach ustawień": "На страницах настроек",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "На странице установки (QR-код выше) нажми «Добавить Zen в SideStore» и установи Zen из этого источника.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "На странице установки (QR-код выше) нажми «Добавить Zen в SideStore» и установи Zen из этого источника. Сначала подключи LocalDevVPN; после установки доверься Zen в «VPN и управление устройством».",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "На странице установки (QR-код выше) нажми «Скачать Zen».",
   "Na tablicę można dodać tylko zdjęcie.": "В ленту можно добавить только фото.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "В этой версии Android нельзя поделиться одним приложением. Другая сторона увидит всё, что на экране, в том числе уведомления и коды из SMS.",

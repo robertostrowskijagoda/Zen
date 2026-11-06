@@ -38,7 +38,9 @@ SideStore (error -80045: the fix is on the
 [install page](https://robertostrowskijagoda.github.io/Zen/install/iphone/#fix-80045)),
 tap the **7 DAYS** counter in **My Apps**, add Zen's
 source (**Add Zen to SideStore** on the install page, or **Sources → +** with
-`https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen.
+`https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen,
+then trust Zen too in **Settings → General → VPN & Device Management** (your
+e-mail → trust).
 An app signed with a free Apple Account opens for 7 days; SideStore renews it
 on the phone whenever LocalDevVPN is connected, and a daily Shortcuts
 automation (**Set VPN** to connect LocalDevVPN, then SideStore's **Refresh

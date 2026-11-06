@@ -1750,7 +1750,7 @@
   "Na razie pusto.": "Deocamdată e gol.",
   "Na razie żadnych planów": "Deocamdată niciun plan",
   "Na stronach ustawień": "În paginile de setări",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "Pe pagina de instalare (codul QR de mai sus) atinge „Adaugă Zen în SideStore” și instalează Zen din această sursă.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "Pe pagina de instalare (codul QR de mai sus) atinge „Adaugă Zen în SideStore” și instalează Zen din această sursă. Conectează întâi LocalDevVPN; după instalare, acordă încredere lui Zen în „VPN și gestionare dispozitiv”.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "Pe pagina de instalare (codul QR de mai sus) atinge „Descarcă Zen”.",
   "Na tablicę można dodać tylko zdjęcie.": "În flux poți adăuga doar o poză.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Pe această versiune de Android nu se poate partaja o singură aplicație. Cealaltă parte va vedea tot ce e pe ecran, inclusiv notificările și codurile SMS.",

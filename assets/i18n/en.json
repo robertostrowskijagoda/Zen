@@ -1727,7 +1727,7 @@
   "Na razie pusto.": "Nothing here yet.",
   "Na razie żadnych planów": "No plans yet",
   "Na stronach ustawień": "On settings pages",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "On the install page (QR code above), tap “Add Zen to SideStore” and install Zen from that source.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "On the install page (QR code above), tap “Add Zen to SideStore” and install Zen from that source. Connect LocalDevVPN first; after installing, trust Zen in VPN & Device Management.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "On the install page (QR code above), tap “Download Zen”.",
   "Na tablicę można dodać tylko zdjęcie.": "Only a photo can be added to the feed.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "This version of Android can’t share a single app. The other side will see everything on the screen, including notifications and SMS codes.",

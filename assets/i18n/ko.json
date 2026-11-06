@@ -1704,7 +1704,7 @@
   "Na razie pusto.": "아직 비어 있어요.",
   "Na razie żadnych planów": "아직 계획이 없어요",
   "Na stronach ustawień": "설정 페이지 안",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "설치 페이지(위 QR 코드)에서 “Zen을 SideStore에 추가”를 탭하고 그 소스에서 Zen을 설치하세요.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "설치 페이지(위 QR 코드)에서 “Zen을 SideStore에 추가”를 탭하고 그 소스에서 Zen을 설치하세요. 먼저 LocalDevVPN을 연결하고, 설치 후에는 ‘VPN 및 기기 관리’에서 Zen을 신뢰하세요.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "설치 페이지(위 QR 코드)에서 “Zen 다운로드”를 탭하세요.",
   "Na tablicę można dodać tylko zdjęcie.": "피드에는 사진만 올릴 수 있어요.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "이 Android 버전에서는 앱 하나만 공유할 수 없어요. 상대방은 알림과 문자 인증번호를 포함해 화면에 있는 모든 것을 보게 돼요.",

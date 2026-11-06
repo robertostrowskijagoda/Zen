@@ -1704,7 +1704,7 @@
   "Na razie pusto.": "目前还是空的。",
   "Na razie żadnych planów": "暂时没有计划",
   "Na stronach ustawień": "在设置页面里",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "在安装页面（上方二维码）点“将 Zen 添加到 SideStore”，然后从该源安装 Zen。",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "在安装页面（上方二维码）点“将 Zen 添加到 SideStore”，然后从该源安装 Zen。先连接 LocalDevVPN；安装后在“VPN与设备管理”中信任 Zen。",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "在安装页面（上方二维码）点按“下载 Zen”。",
   "Na tablicę można dodać tylko zdjęcie.": "动态里只能添加照片。",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "这个 Android 版本无法只共享单个应用。对方会看到屏幕上的一切，包括通知和短信验证码。",
