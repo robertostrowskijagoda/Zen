@@ -387,6 +387,10 @@ main.prose { max-width: 780px; }
 .how ol.sub, .acc-body ol.sub { margin: 10px 0 0; padding-inline-start: 22px; color: var(--muted); font-size: 15.5px; display: grid; gap: 6px; }
 .how ol.sub li::marker, .acc-body ol.sub li::marker { color: var(--link); font-weight: 800; }
 .how .btns { display: flex; flex-wrap: wrap; gap: 0 10px; }
+/* "First: LocalDevVPN → Connect" at the top of a step, "trust Zen too"
+   after installing it. */
+.how .note.vpnnow { margin: 8px 0 10px; }
+.how .note.vpnnow p, .how .note.trustzen p { font-weight: 600; }
 .how p.small { margin-top: 10px; font-size: 14.5px; }
 
 /* Troubleshooting and other ways: native disclosure widgets. */

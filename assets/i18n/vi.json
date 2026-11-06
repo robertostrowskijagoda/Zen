@@ -1704,7 +1704,7 @@
   "Na razie pusto.": "Hiện còn trống.",
   "Na razie żadnych planów": "Hiện chưa có kế hoạch nào",
   "Na stronach ustawień": "Trong các trang cài đặt",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "Trên trang cài đặt (mã QR ở trên), chạm “Thêm Zen vào SideStore” và cài Zen từ nguồn đó.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "Trên trang cài đặt (mã QR ở trên), chạm “Thêm Zen vào SideStore” và cài Zen từ nguồn đó. Kết nối LocalDevVPN trước; sau khi cài, hãy tin cậy Zen trong VPN & Quản lý thiết bị.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "Trên trang cài đặt (mã QR ở trên), chạm “Tải Zen”.",
   "Na tablicę można dodać tylko zdjęcie.": "Chỉ có thể thêm ảnh vào bảng tin.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Trên phiên bản Android này không thể chia sẻ riêng một ứng dụng. Bên kia sẽ thấy mọi thứ trên màn hình, kể cả thông báo và mã SMS.",

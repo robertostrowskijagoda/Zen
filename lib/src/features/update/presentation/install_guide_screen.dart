@@ -113,7 +113,9 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
     InstallStep(
       t(
         'Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do '
-        'SideStore” i zainstaluj Zen z tego źródła.',
+        'SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz '
+        'LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie '
+        'urządzeniem.',
       ),
     ),
     InstallStep(

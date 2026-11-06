@@ -1727,7 +1727,7 @@
   "Na razie pusto.": "Voorlopig leeg.",
   "Na razie żadnych planów": "Nog geen plannen",
   "Na stronach ustawień": "Op instellingenpagina’s",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "Tik op de installatiepagina (QR-code hierboven) op “Zen toevoegen aan SideStore” en installeer Zen vanuit die bron.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "Tik op de installatiepagina (QR-code hierboven) op “Zen toevoegen aan SideStore” en installeer Zen vanuit die bron. Verbind eerst LocalDevVPN; vertrouw Zen na de installatie in ‘VPN en apparaatbeheer’.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "Tik op de installatiepagina (QR-code hierboven) op “Zen downloaden”.",
   "Na tablicę można dodać tylko zdjęcie.": "Op het prikbord kun je alleen een foto zetten.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Op deze versie van Android kun je niet één app delen. De ander ziet alles wat op het scherm staat, ook meldingen en sms-codes.",

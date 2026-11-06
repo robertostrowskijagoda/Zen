@@ -91,19 +91,21 @@ switch in Settings is then on). Most errors come from the VPN being off.
    own e-mail (the Apple Account from step 2 is the developer: you trust
    yourself) → trust it; on iOS 16 and later also **Settings → Privacy &
    Security → Developer Mode**. Until then SideStore and Zen don't open.
-4. Open SideStore (LocalDevVPN connected), sign in with the same Apple Account
+4. Open LocalDevVPN and tap **Connect**, then open SideStore, sign in with the same Apple Account
    and tap the **7 DAYS** counter next to SideStore in **My Apps**. If signing
    in fails with **-80045**, see below.
-5. Add Zen's source (**Add Zen to SideStore** on the install page, or in
-   SideStore **Sources → +**:
+5. Open LocalDevVPN and tap **Connect**, then add Zen's source (**Add Zen to
+   SideStore** on the install page, or in SideStore **Sources → +**:
    `https://robertostrowskijagoda.github.io/Zen/apps.json`) and install Zen
-   from it.
+   from it. After installing, trust Zen too: **Settings → General → VPN &
+   Device Management** → your e-mail → trust it (if it already says trusted,
+   you're done); without this Zen doesn't open.
 6. Let it renew by itself: in the Shortcuts app make a daily **Time of Day**
    automation that runs immediately, with **Set VPN** (connect LocalDevVPN)
    and SideStore's **Refresh All Apps**. An app signed with a free Apple
    Account opens for 7 days; SideStore renews it on the phone, no computer
    needed.
-7. New versions: Zen tells you, and its update button hands the new version
+7. New versions: open LocalDevVPN and tap **Connect**; Zen tells you, and its update button hands the new version
    to SideStore (or **My Apps → Update** next to Zen).
 
 With a free Apple Account at most 3 apps from SideStore run at a time,

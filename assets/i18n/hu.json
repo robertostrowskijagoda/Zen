@@ -1727,7 +1727,7 @@
   "Na razie pusto.": "Egyelőre üres.",
   "Na razie żadnych planów": "Egyelőre nincsenek tervek",
   "Na stronach ustawień": "A beállítások oldalain",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "A telepítési oldalon (fenti QR-kód) koppints a „Zen hozzáadása a SideStore-hoz” gombra, és telepítsd a Zent erről a forrásról.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "A telepítési oldalon (fenti QR-kód) koppints a „Zen hozzáadása a SideStore-hoz” gombra, és telepítsd a Zent erről a forrásról. Előbb kapcsold be a LocalDevVPN-t; telepítés után jelöld megbízhatónak a Zent a „VPN és eszközkezelés” részben.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "A telepítési oldalon (fenti QR-kód) koppints a „Zen letöltése” gombra.",
   "Na tablicę można dodać tylko zdjęcie.": "A hírfolyamba csak fotót lehet feltenni.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Az Android ezen a verzióján nem lehet egyetlen alkalmazást megosztani. A másik fél mindent lát a képernyőn, az értesítéseket és az SMS-kódokat is.",

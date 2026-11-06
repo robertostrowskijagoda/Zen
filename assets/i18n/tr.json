@@ -1727,7 +1727,7 @@
   "Na razie pusto.": "Şimdilik boş.",
   "Na razie żadnych planów": "Şimdilik plan yok",
   "Na stronach ustawień": "Ayarlar sayfalarında",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "Kurulum sayfasında (yukarıdaki QR kod) “Zen’i SideStore’a ekle” düğmesine dokun ve Zen’i bu kaynaktan kur.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "Kurulum sayfasında (yukarıdaki QR kod) “Zen’i SideStore’a ekle” düğmesine dokun ve Zen’i bu kaynaktan kur. Önce LocalDevVPN’i bağla; kurduktan sonra “VPN ve Aygıt Yönetimi”nde Zen’e güven.",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "Kurulum sayfasında (yukarıdaki QR kod) “Zen'i indir”e dokun.",
   "Na tablicę można dodać tylko zdjęcie.": "Akışa yalnızca fotoğraf eklenebilir.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "Android'in bu sürümünde tek bir uygulamayı paylaşmak mümkün değil. Karşı taraf ekrandaki her şeyi görür; bildirimleri ve SMS kodlarını da.",

@@ -1819,7 +1819,7 @@
   "Na razie pusto.": "فارغ حاليًا.",
   "Na razie żadnych planów": "لا خطط حاليًا",
   "Na stronach ustawień": "في صفحات الإعدادات",
-  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła.": "في صفحة التثبيت (رمز QR أعلاه) اضغط «أضِف Zen إلى SideStore» وثبّت Zen من هذا المصدر.",
+  "Na stronie instalacji (kod QR wyżej) stuknij „Dodaj Zen do SideStore” i zainstaluj Zen z tego źródła. Najpierw połącz LocalDevVPN; po instalacji zaufaj Zen w VPN i zarządzanie urządzeniem.": "في صفحة التثبيت (رمز QR أعلاه) اضغط «أضِف Zen إلى SideStore» وثبّت Zen من هذا المصدر. صِل LocalDevVPN أولًا؛ وبعد التثبيت ثِق بـ Zen في «VPN وإدارة الأجهزة».",
   "Na stronie instalacji (kod QR wyżej) stuknij „Pobierz Zen”.": "في صفحة التثبيت (رمز QR أعلاه) اضغط «نزّل Zen».",
   "Na tablicę można dodać tylko zdjęcie.": "يمكن إضافة صورة فقط إلى الخلاصة.",
   "Na tej wersji Androida nie da się udostępnić jednej aplikacji. Druga strona zobaczy wszystko, co jest na ekranie, także powiadomienia i kody SMS.": "في هذا الإصدار من Android لا يمكن مشاركة تطبيق واحد. سيرى الطرف الآخر كل ما على الشاشة، حتى الإشعارات ورموز SMS.",
