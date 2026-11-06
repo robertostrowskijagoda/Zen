@@ -1117,11 +1117,25 @@ void main() {
       final int rule = iphone.indexOf('<div class="note warn" id="vpnFirst">');
       expect(rule, greaterThan(iphone.indexOf('id="need"')));
       expect(rule, lessThan(iphone.indexOf('<ol class="how"')));
-      // The answer step 4 links to: first under "If something goes wrong",
-      // opened by its link.
+      // The fix of -80045 (right now it comes almost every time): a warning
+      // in step 4 itself, right under signing in, and the first answer
+      // under "If something goes wrong" points there.
+      final int step4 = iphone.indexOf('<li id="step-refresh">');
+      final int fix = iphone.indexOf(
+        '<div class="note warn fix" id="fix-80045">',
+      );
+      expect(fix, greaterThan(iphone.indexOf('data-i="s4d"', step4)));
+      expect(fix, lessThan(iphone.indexOf('<li id="step-source">')));
+      for (final String key in <String>['f1', 'f2', 'f3', 'f4', 'f5']) {
+        expect(
+          iphone.indexOf('data-i="$key"'),
+          inInclusiveRange(fix, iphone.indexOf('<li id="step-source">')),
+          reason: key,
+        );
+      }
       final int trouble = iphone.indexOf('<div class="accs" id="trouble">');
       expect(
-        iphone.indexOf('<details class="acc" id="fix-80045">'),
+        iphone.indexOf('<details class="acc" id="trouble-80045">'),
         allOf(greaterThan(trouble), lessThan(iphone.indexOf('data-i="t1q"'))),
       );
       expect(iphone, contains('<details class="acc" id="fix-trust">'));
@@ -1140,6 +1154,8 @@ void main() {
         expect(t['s4d'], contains('|#fix-80045]'), reason: why);
         expect(t['s4d'], contains('**-80045**'), reason: why);
         expect(t['t0q'], contains('-80045'), reason: why);
+        expect(t['fixTitle'], contains('-80045'), reason: why);
+        expect(t['t0see'], contains('|#fix-80045]'), reason: why);
         // SideStore's own (English) names, as on the iPhone.
         expect(t['f1'], contains('**On-Device Anisette**'), reason: why);
         expect(t['f2'], contains('**SideStore (New)**'), reason: why);
