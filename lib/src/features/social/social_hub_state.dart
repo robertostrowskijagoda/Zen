@@ -450,9 +450,18 @@ final class SocialHubState {
 
   /// Groups the user is in. An invitation not answered yet is not a group of
   /// theirs - it lives in the inbox until they join.
-  List<GroupProfile> get groupList => groups.values
-      .where((GroupProfile group) => !group.isInvitePending)
-      .toList();
+  /// The groups joined, the one with the latest message first (then by
+  /// name).
+  List<GroupProfile> get groupList =>
+      groups.values
+          .where((GroupProfile group) => !group.isInvitePending)
+          .toList()
+        ..sort((GroupProfile left, GroupProfile right) {
+          final int activity = _activityOf(
+            right.lastActivityLabel,
+          ).compareTo(_activityOf(left.lastActivityLabel));
+          return activity != 0 ? activity : left.name.compareTo(right.name);
+        });
 
   GroupProfile? groupById(String id) => groups[id];
 
@@ -517,13 +526,17 @@ final class SocialHubState {
         .where((FriendProfile friend) => friend.status == status)
         .toList(growable: false);
     entries.sort((FriendProfile left, FriendProfile right) {
-      final int unreadDelta = right.unreadCount.compareTo(left.unreadCount);
-      if (unreadDelta != 0) {
-        return unreadDelta;
+      // The latest conversation first, like any messenger: a new message
+      // (sent or received) moves its friend to the top.
+      final int activity = _activityOf(
+        right.lastActivityLabel,
+      ).compareTo(_activityOf(left.lastActivityLabel));
+      if (activity != 0) {
+        return activity;
       }
-      // Online first, then in the background, as last known (a friend
-      // hiding it comes after the offline ones; one whose Zen is too old to
-      // tell it counts as offline here).
+      // Never written to: online first, then in the background, as last
+      // known (a friend hiding it comes after the offline ones; one whose
+      // Zen is too old to tell it counts as offline here).
       final int presenceDelta = _presenceRank(
         right.presence,
       ).compareTo(_presenceRank(left.presence));
@@ -535,6 +548,11 @@ final class SocialHubState {
     return entries;
   }
 }
+
+/// The moment of the last message in a conversation ([activityStamp]); 0
+/// for none (or an old text label, which says no day).
+int _activityOf(String? label) =>
+    label == null ? 0 : activityStampMillis(label) ?? 0;
 
 int _presenceRank(PeerPresence presence) => switch (presence) {
   PeerPresence.online => 3,

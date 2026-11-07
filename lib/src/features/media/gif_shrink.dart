@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
+import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
@@ -86,7 +87,8 @@ const int _maxAttempts = 12;
 /// [gif] made fit for a place with a size limit: at most [maxSide] px a
 /// side, [maxBytes] and [maxFrames] frames, still animated. With [aspect]
 /// (width / height) the middle of the canvas is cropped to that shape
-/// first. A GIF already within the limits (and of that shape) is only
+/// first, or the part [region] names (the person framed it) made that
+/// shape. A GIF already within the limits (and of that shape) is only
 /// stripped of its metadata. Null for anything that is not a complete GIF
 /// within [isAcceptableGif], or one that cannot be made small enough. Pure
 /// and slow for a big GIF: run it in an isolate.
@@ -96,6 +98,7 @@ Uint8List? shrinkGif(
   required int maxBytes,
   int maxFrames = kMaxShrunkGifFrames,
   double? aspect,
+  CropRegion? region,
 }) {
   final Uint8List? clean = stripGifMetadata(gif);
   if (clean == null || !isAcceptableGif(clean)) {
@@ -108,11 +111,27 @@ Uint8List? shrinkGif(
   final int w = shape.width;
   final int h = shape.height;
   // The part of the canvas that is kept.
+  int cx;
+  int cy;
   int cw = w;
   int ch = h;
-  if (aspect != null && aspect > 0) {
-    ch = math.min(h, math.max(1, (w / aspect).round()));
-    cw = math.min(w, math.max(1, (ch * aspect).round()));
+  if (region != null && !region.isFull) {
+    final ({int x, int y, int width, int height}) px = region.pixels(
+      w,
+      h,
+      aspect: aspect,
+    );
+    cx = px.x;
+    cy = px.y;
+    cw = px.width;
+    ch = px.height;
+  } else {
+    if (aspect != null && aspect > 0) {
+      ch = math.min(h, math.max(1, (w / aspect).round()));
+      cw = math.min(w, math.max(1, (ch * aspect).round()));
+    }
+    cx = (w - cw) ~/ 2;
+    cy = (h - ch) ~/ 2;
   }
   final bool cropped = cw < w - 1 || ch < h - 1;
   if (!cropped &&
@@ -135,8 +154,8 @@ Uint8List? shrinkGif(
     return null;
   }
   final _Crop crop = _Crop(
-    x: cropped ? (w - cw) ~/ 2 : 0,
-    y: cropped ? (h - ch) ~/ 2 : 0,
+    x: cropped ? cx : 0,
+    y: cropped ? cy : 0,
     width: cropped ? cw : w,
     height: cropped ? ch : h,
     canvasWidth: w,

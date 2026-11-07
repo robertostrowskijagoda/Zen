@@ -13,10 +13,15 @@ import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/chat/chat_gif_catalog.dart';
+import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
+import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/profile/presentation/image_crop_screen.dart';
+import 'package:zen/src/features/profile/presentation/keyboard_picture_dialog.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/profile_cover.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
@@ -39,6 +44,12 @@ class ProfileEditDialog extends ConsumerStatefulWidget {
   @override
   ConsumerState<ProfileEditDialog> createState() => _ProfileEditDialogState();
 }
+
+/// A picked picture: a file, or bytes already in memory.
+typedef _Picked = ({String? path, Uint8List? bytes});
+
+/// Where a photo or a cover comes from.
+enum _PictureSource { gallery, camera, file, gifSearch, keyboard }
 
 class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
   late TextEditingController _nameController;
@@ -112,16 +123,16 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     if (path == null || !mounted) {
       return;
     }
-    await _storePickedAvatar(path);
+    await _storePickedAvatar((path: path, bytes: null));
   }
 
   Future<void> _pickAvatarImage() async {
     if (_isProcessingImage) {
       return;
     }
-    String? originalPath;
+    _Picked? picked;
     try {
-      originalPath = await _selectAvatarSourcePath();
+      picked = await _selectPicture();
     } catch (error, stackTrace) {
       logZenError('Opening the avatar picker failed', error, stackTrace);
       _showAvatarMessage(
@@ -132,76 +143,126 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       );
       return;
     }
-    if (originalPath == null || !mounted) {
+    if (picked == null || !mounted) {
       return;
     }
-    await _storePickedAvatar(originalPath);
+    await _storePickedAvatar(picked);
   }
 
-  /// Returns the path of the image the user picked, or `null` when the picker
-  /// was dismissed. Throws when the picker itself could not run — that has to
-  /// reach the user instead of looking like a silent no-op.
-  Future<String?> _selectAvatarSourcePath() async {
+  /// What the person picked: a file ([_Picked.path]) or a picture already in
+  /// memory ([_Picked.bytes]: a GIF from the search or the keyboard); `null`
+  /// when they closed the picker. Throws when the picker itself could not
+  /// run — that has to reach the user instead of looking like a silent
+  /// no-op.
+  Future<_Picked?> _selectPicture() async {
     final bool isDesktop =
         !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    if (isDesktop) {
-      return _pickImageFileFromDisk();
+    final bool gifs = ref.read(gifSearchEnabledProvider);
+    if (isDesktop && !gifs) {
+      return _fromFile();
     }
 
     final ZenColors zen = ZenColors.of(context);
-    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+    Widget option(
+      BuildContext sheet,
+      _PictureSource source,
+      IconData icon,
+      String label,
+    ) => ListTile(
+      key: Key('profile-picture-${source.name}'),
+      leading: Icon(icon, color: zen.accent),
+      title: Text(label),
+      onTap: () => Navigator.of(sheet).pop(source),
+    );
+    final _PictureSource? source = await showModalBottomSheet<_PictureSource>(
       context: context,
       backgroundColor: zen.surfaceRaised,
       showDragHandle: true,
       isScrollControlled: true,
       useSafeArea: true,
       shape: context.zenSheetShape(),
-      builder: (BuildContext sheetContext) {
+      builder: (BuildContext sheet) {
         return SafeArea(
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                ListTile(
-                  leading: Icon(
+                if (!isDesktop) ...<Widget>[
+                  option(
+                    sheet,
+                    _PictureSource.gallery,
                     Icons.photo_library_outlined,
-                    color: zen.accent,
+                    t('Wybierz z galerii'),
                   ),
-                  title: Text(t('Wybierz z galerii')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(ImageSource.gallery),
+                  option(
+                    sheet,
+                    _PictureSource.camera,
+                    Icons.photo_camera_outlined,
+                    t('Zrób zdjęcie (Aparat)'),
+                  ),
+                ],
+                option(
+                  sheet,
+                  _PictureSource.file,
+                  Icons.folder_open_outlined,
+                  t('Wybierz plik z urządzenia'),
                 ),
-                ListTile(
-                  leading: Icon(Icons.photo_camera_outlined, color: zen.accent),
-                  title: Text(t('Zrób zdjęcie (Aparat)')),
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(ImageSource.camera),
-                ),
-                ListTile(
-                  leading: Icon(Icons.folder_open_outlined, color: zen.accent),
-                  title: Text(t('Wybierz plik z urządzenia')),
-                  onTap: () => Navigator.of(sheetContext).pop(null),
-                ),
+                if (gifs)
+                  option(
+                    sheet,
+                    _PictureSource.gifSearch,
+                    Icons.gif_box_outlined,
+                    t('Wyszukaj GIF'),
+                  ),
+                if (!isDesktop)
+                  option(
+                    sheet,
+                    _PictureSource.keyboard,
+                    Icons.keyboard_alt_outlined,
+                    t('GIF z klawiatury'),
+                  ),
               ],
             ),
           ),
         );
       },
     );
-    if (!mounted) {
+    if (!mounted || source == null) {
       return null;
     }
-    if (source == null) {
-      return _pickImageFileFromDisk();
+    switch (source) {
+      case _PictureSource.file:
+        return _fromFile();
+      case _PictureSource.gifSearch:
+        final GifCatalogEntry? entry = await showChatGifPicker(context, ref);
+        if (entry == null || !mounted) {
+          return null;
+        }
+        // This device fetches the GIF; friends get it as the photo itself.
+        final Uint8List bytes;
+        try {
+          bytes = await ref.read(gifDownloaderProvider).download(entry.sendUrl);
+        } on Object {
+          throw FormatException(t('Nie udało się pobrać GIF-a.'));
+        }
+        return (path: null, bytes: bytes);
+      case _PictureSource.keyboard:
+        final Uint8List? bytes = await showKeyboardPictureDialog(context);
+        return bytes == null ? null : (path: null, bytes: bytes);
+      case _PictureSource.gallery:
+      case _PictureSource.camera:
+        break;
     }
     try {
       final XFile? image = await ImagePicker().pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
+        source: source == _PictureSource.camera
+            ? ImageSource.camera
+            : ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
         imageQuality: 88,
       );
-      return image?.path;
+      return image == null ? null : (path: image.path, bytes: null);
     } catch (error, stackTrace) {
       // Some ROMs have no usable gallery/camera intent; the file browser is a
       // reliable fallback there.
@@ -210,26 +271,91 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
         error,
         stackTrace,
       );
-      return _pickImageFileFromDisk();
+      return _fromFile();
     }
   }
 
-  Future<String?> _pickImageFileFromDisk() async {
-    return pickOnePath(type: FileType.image);
+  Future<_Picked?> _fromFile() async {
+    final String? path = await pickOnePath(type: FileType.image);
+    return path == null ? null : (path: path, bytes: null);
   }
 
-  Future<void> _storePickedAvatar(String sourcePath) async {
+  /// The picture [picked], read and checked before it is framed: throws
+  /// [FormatException] (said to the person) when it is too big or not a
+  /// picture this app takes.
+  Future<Uint8List> _readPicked(_Picked picked, {required int max}) async {
+    Uint8List? bytes = picked.bytes;
+    if (bytes == null) {
+      final File source = File(picked.path!);
+      if (!source.existsSync() || source.lengthSync() > max) {
+        bytes = null;
+      } else {
+        bytes = await source.readAsBytes();
+      }
+    }
+    if (bytes == null || bytes.length > max) {
+      throw FormatException(
+        t(
+          'To zdjęcie jest za duże albo nie da się go otworzyć (najwyżej 20 MB).',
+        ),
+      );
+    }
+    if (AvatarSanitizer.hasDangerousHeader(bytes)) {
+      throw FormatException(
+        t('Wykryto niebezpieczną zawartość lub plik wykonywalny.'),
+      );
+    }
+    if (!AvatarSanitizer.isValidImageBytes(bytes)) {
+      throw FormatException(
+        t('Nieobsługiwany format pliku. Wybierz obraz JPG, PNG, WEBP lub GIF.'),
+      );
+    }
+    return bytes;
+  }
+
+  Future<void> _storePickedAvatar(_Picked source) async {
     setState(() => _isProcessingImage = true);
     try {
+      final Uint8List picked = await _readPicked(
+        source,
+        max: kMaxAvatarSourceBytes,
+      );
+      if (!mounted) {
+        return;
+      }
+      // The person frames it: a circle over the picture.
+      final CropRegion? region = await ImageCropScreen.open(
+        context,
+        bytes: picked,
+        aspect: 1,
+        round: true,
+        title: t('Kadruj zdjęcie'),
+      );
+      if (region == null) {
+        if (mounted) {
+          setState(() => _isProcessingImage = false);
+        }
+        return;
+      }
+      final Uint8List? framed = await compute(makeAvatarImage, (
+        picked,
+        region,
+      ));
+      if (framed == null) {
+        throw FormatException(
+          t('To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).'),
+        );
+      }
       // Everything else Zen owns lives in the support directory; Documents can
       // be redirected (OneDrive & co.) and is not a safe home for app data.
       final Directory storageDir = await ZenInstance.supportDirectory();
 
       // Strict security validation: magic bytes, size limits, dangerous payloads.
-      final String sanitizedPath = await AvatarSanitizer.validateAndStoreAvatar(
-        sourcePath: sourcePath,
-        storageDir: storageDir,
-      );
+      final String sanitizedPath =
+          await AvatarSanitizer.validateAndStoreAvatarBytes(
+            rawBytes: framed,
+            storageDir: storageDir,
+          );
       final String? previousStaged = _stagedAvatarPath;
       if (previousStaged != null && previousStaged != sanitizedPath) {
         await AvatarSanitizer.cleanupOldAvatar(previousStaged);
@@ -279,9 +405,9 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     if (_isProcessingCover) {
       return;
     }
-    String? source;
+    _Picked? source;
     try {
-      source = await _selectAvatarSourcePath();
+      source = await _selectPicture();
     } catch (error, stackTrace) {
       logZenError('Opening the cover picker failed', error, stackTrace);
       _showAvatarMessage(
@@ -295,9 +421,30 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     }
     setState(() => _isProcessingCover = true);
     try {
-      final String path = await storeCoverImage(
-        sourcePath: source,
+      final Uint8List picked = await _readPicked(
+        source,
+        max: kMaxCoverSourceBytes,
+      );
+      if (!mounted) {
+        return;
+      }
+      // The person frames it: the 3:1 band behind the profile header.
+      final CropRegion? region = await ImageCropScreen.open(
+        context,
+        bytes: picked,
+        aspect: kCoverWidth / kCoverHeight,
+        title: t('Kadruj tło'),
+      );
+      if (region == null) {
+        if (mounted) {
+          setState(() => _isProcessingCover = false);
+        }
+        return;
+      }
+      final String path = await storeCoverBytes(
+        bytes: picked,
         storageDir: await ZenInstance.supportDirectory(),
+        region: region,
       );
       final String? previous = _stagedCoverPath;
       if (previous != null) {

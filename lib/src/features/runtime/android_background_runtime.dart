@@ -976,6 +976,10 @@ final class _AndroidBackgroundRuntimeBridgeState
 
   /// This widget emptied the inbox since the service last ran the node.
   bool _inboxDrained = false;
+
+  /// The statuses the service kept were shown before the inbox was opened
+  /// ([replayKeptPresence]), once per inbox.
+  bool _presenceReplayed = false;
   Timer? _drainRetry;
 
   /// Waits for the node to come up, to drain the inbox at that moment.
@@ -1466,6 +1470,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     _handoffInFlight = true;
     final Stopwatch handoff = Stopwatch()..start();
     _inboxDrained = false;
+    _presenceReplayed = false;
     _cancelReceiveOnlyWake();
     // The phone may be asleep but for the alarm that woke it: it stays
     // awake until the service runs the node.
@@ -1615,6 +1620,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       ZenTechLog.handover('service', ok: true, took: Duration.zero);
       if (mounted) {
         _inboxDrained = false;
+        _presenceReplayed = false;
         _handoffActive = true;
         _lastConfirmedMode = AndroidBackgroundRuntimeMode.active;
         _lastParkedCallSignature = null;
@@ -1982,6 +1988,15 @@ final class _AndroidBackgroundRuntimeBridgeState
         logZenWarning('The inbox waits: the stored friends are unreadable.');
         return;
       }
+      if (!_presenceReplayed) {
+        // Friends' statuses need no node: shown now, not once it is up.
+        _presenceReplayed = true;
+        await replayKeptPresence(
+          vault: vault,
+          masterKey: masterKey,
+          replay: runtime.replayReceived,
+        );
+      }
       if (!runtime.snapshot.serviceRunning) {
         _drainRetry?.cancel();
         _drainRetry = Timer(_drainRetryDelay, () {
@@ -2018,6 +2033,7 @@ final class _AndroidBackgroundRuntimeBridgeState
         self: runtime.snapshot.localAddress,
       );
       _inboxDrained = true;
+      _presenceReplayed = false;
       logZenMessage(
         'Drained $delivered frame(s) kept while the app was locked.',
       );

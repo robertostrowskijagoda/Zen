@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_digest.dart';
@@ -16,7 +17,7 @@ class ReactionNoticesFeed extends ChangeNotifier {
   ReactionNoticesFeed({required this.node, required this.nameOf}) {
     _changes = node.store.changed.listen((_) => _schedule());
     _added = node.store.added.listen((_) => _schedule());
-    unawaited(_start());
+    unawaitedLogged(_start(), context: 'The reaction notices did not start');
   }
 
   final LedgerNode node;

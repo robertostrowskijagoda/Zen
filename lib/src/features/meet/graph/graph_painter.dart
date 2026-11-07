@@ -259,6 +259,16 @@ const double _fadeSteps = 8;
 /// day has passed — the layout stays, so playing it is only repainting.
 /// [still]: no growing or fading in (animations are off), everyone is
 /// there or not.
+/// [zoom] in steps of about a tenth: the people are drawn again for each
+/// step of a pinch, not on every frame of it.
+double graphZoomStep(double zoom) {
+  if (zoom <= 1) {
+    return 1;
+  }
+  const double step = 1.1;
+  return pow(step, (log(zoom) / log(step)).round()).toDouble();
+}
+
 class GraphPainter extends CustomPainter {
   GraphPainter({
     required this.scene,
@@ -271,6 +281,7 @@ class GraphPainter extends CustomPainter {
     required this.labelBg,
     required this.guide,
     this.scale = 1,
+    this.zoom = 1,
     this.visible,
     this.timeline,
     this.clock,
@@ -295,6 +306,14 @@ class GraphPainter extends CustomPainter {
 
   /// The zoom of the picture (labels and badges by level of detail).
   final double scale;
+
+  /// The zoom the people are drawn for (in small steps, see
+  /// [graphZoomStep]): dots, rings, lines and names keep their size on the
+  /// screen however far the picture is zoomed in; only the distances grow.
+  final double zoom;
+
+  /// What a size on the screen is in the picture at [zoom].
+  double get _k => zoom > 1 ? 1 / zoom : 1;
 
   /// The part of the picture on screen (`null`: all of it).
   final Rect? visible;
@@ -380,7 +399,7 @@ class GraphPainter extends CustomPainter {
     final Paint ringPaint = Paint()
       ..color = guide
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
+      ..strokeWidth = _k;
     final List<double> radii = scene.layout.radii;
     if (radii.length <= 40) {
       for (final double r in radii) {
@@ -422,9 +441,9 @@ class GraphPainter extends CustomPainter {
         _dashed(canvas, a, b, l);
         continue;
       }
-      batches.putIfAbsent((color.toARGB32(), l.width), () => <double>[]).addAll(
-        <double>[a.dx, a.dy, b.dx, b.dy],
-      );
+      batches
+          .putIfAbsent((color.toARGB32(), l.width * _k), () => <double>[])
+          .addAll(<double>[a.dx, a.dy, b.dx, b.dy]);
     }
     final Paint edge = Paint()..strokeCap = StrokeCap.round;
     batches.forEach(((int, double) k, List<double> pts) {
@@ -445,7 +464,7 @@ class GraphPainter extends CustomPainter {
       final Paint link = Paint()
         ..color = look.link
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1;
+        ..strokeWidth = 1.1 * _k;
       if (linkCount > 600) {
         final Float32List pts = Float32List(linkCount * 4);
         for (int i = 0; i < linkCount; i++) {
@@ -493,7 +512,7 @@ class GraphPainter extends CustomPainter {
             Paint()
               ..color = _faded(look.link, step / _fadeSteps)
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 0.9,
+              ..strokeWidth = 0.9 * _k,
           );
         });
       }
@@ -504,7 +523,7 @@ class GraphPainter extends CustomPainter {
       final Paint way = Paint()
         ..color = me
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.2
+        ..strokeWidth = 3.2 * _k
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
       final Path p = Path()..moveTo(c.dx, c.dy);
@@ -526,21 +545,24 @@ class GraphPainter extends CustomPainter {
 
     // "Ty".
     canvas
-      ..drawCircle(c, 26, Paint()..color = me.withValues(alpha: 0.16))
-      ..drawCircle(c, 17, Paint()..color = me);
+      ..drawCircle(c, 26 * _k, Paint()..color = me.withValues(alpha: 0.16))
+      ..drawCircle(c, 17 * _k, Paint()..color = me);
     final TextPainter you = labels.get(t('Ty'), meText, bold: true);
-    you.paint(canvas, c - Offset(you.width / 2, you.height / 2));
+    _onScreen(canvas, c, () {
+      you.paint(canvas, Offset(-you.width / 2, -you.height / 2));
+    });
 
     // People: small dots batched by colour, bigger ones one by one.
     final Map<int, (double, List<double>)> dots =
         <int, (double, List<double>)>{};
     final Paint fill = Paint();
+    final double k = _k;
     final Paint stroke = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6;
+      ..strokeWidth = 1.6 * k;
     final Paint metRing = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
+      ..strokeWidth = 2 * k
       ..color = metTone ?? me;
     for (int i = 0; i < n; i++) {
       final NodeLook l = look.nodes[i];
@@ -553,32 +575,34 @@ class GraphPainter extends CustomPainter {
         final bool metBy = _metBy(i, now);
         if (g < 1 || metBy) {
           // Growing and fading in, or met by now: drawn on its own.
-          final double r = l.radius * (0.4 + 0.6 * g);
+          final double r = l.radius * k * (0.4 + 0.6 * g);
           canvas.drawCircle(
             p,
             r,
             fill..color = l.fill.withValues(alpha: l.fill.a * g),
           );
           if (metBy) {
-            canvas.drawCircle(p, r + 3.5, metRing);
+            canvas.drawCircle(p, r + 3.5 * k, metRing);
           }
           continue;
         }
       }
       if (l.hollow) {
-        canvas.drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+        canvas.drawCircle(p, (l.radius - 0.8) * k, stroke..color = l.fill);
         continue;
       }
       if (l.unknown) {
         canvas
           ..drawCircle(
             p,
-            l.radius - 0.8,
+            (l.radius - 0.8) * k,
             fill..color = l.fill.withValues(alpha: 0.3),
           )
-          ..drawCircle(p, l.radius - 0.8, stroke..color = l.fill);
+          ..drawCircle(p, (l.radius - 0.8) * k, stroke..color = l.fill);
         final TextPainter mark = labels.get('?', l.fill, bold: true);
-        mark.paint(canvas, p - Offset(mark.width / 2, mark.height / 2));
+        _onScreen(canvas, p, () {
+          mark.paint(canvas, Offset(-mark.width / 2, -mark.height / 2));
+        });
         continue;
       }
       if (l.noConnection) {
@@ -587,7 +611,9 @@ class GraphPainter extends CustomPainter {
           l.fill,
           l.radius * 2 + 2,
         );
-        cloud.paint(canvas, p - Offset(cloud.width / 2, cloud.height / 2));
+        _onScreen(canvas, p, () {
+          cloud.paint(canvas, Offset(-cloud.width / 2, -cloud.height / 2));
+        });
         continue;
       }
       if (l.radius <= 5 && l.ring == null && l.dot == null) {
@@ -601,19 +627,19 @@ class GraphPainter extends CustomPainter {
       if (l.radius > 5 && l.fill.a > 0.5) {
         canvas.drawCircle(
           p,
-          l.radius + 5,
+          (l.radius + 5) * k,
           fill..color = l.fill.withValues(alpha: 0.18),
         );
       }
-      canvas.drawCircle(p, l.radius, fill..color = l.fill);
+      canvas.drawCircle(p, l.radius * k, fill..color = l.fill);
       if (l.ring != null) {
-        canvas.drawCircle(p, l.radius + 3.5, stroke..color = l.ring!);
+        canvas.drawCircle(p, (l.radius + 3.5) * k, stroke..color = l.ring!);
       }
       if (l.dot != null) {
-        final Offset d = p + Offset(l.radius * 0.75, -l.radius * 0.75);
+        final Offset d = p + Offset(l.radius * 0.75, -l.radius * 0.75) * k;
         canvas
-          ..drawCircle(d, 3.6, fill..color = labelBg)
-          ..drawCircle(d, 2.6, fill..color = l.dot!);
+          ..drawCircle(d, 3.6 * k, fill..color = labelBg)
+          ..drawCircle(d, 2.6 * k, fill..color = l.dot!);
       }
     }
     final Paint dot = Paint()..strokeCap = StrokeCap.round;
@@ -623,7 +649,7 @@ class GraphPainter extends CustomPainter {
         Float32List.fromList(b.$2),
         dot
           ..color = Color(color)
-          ..strokeWidth = b.$1 * 2,
+          ..strokeWidth = b.$1 * 2 * k,
       );
     });
 
@@ -665,18 +691,26 @@ class GraphPainter extends CustomPainter {
           continue;
         }
         final TextPainter tp = labels.get(g.name, text, bold: true);
-        final Offset topLeft = p + Offset(-tp.width / 2, l.radius + 6);
-        _pill(canvas, topLeft, tp, labelBg.withValues(alpha: 0.88));
+        _onScreen(canvas, p, () {
+          _pill(
+            canvas,
+            Offset(-tp.width / 2, l.radius + 6),
+            tp,
+            labelBg.withValues(alpha: 0.88),
+          );
+        });
         drawn++;
         if (l.tag != null && (tags || forced)) {
           final TextPainter tag = labels.get(l.tag!, l.tagTone ?? text);
-          _pill(
-            canvas,
-            p + Offset(l.radius + 4, -l.radius - tag.height),
-            tag,
-            labelBg.withValues(alpha: 0.94),
-            border: l.tagTone,
-          );
+          _onScreen(canvas, p, () {
+            _pill(
+              canvas,
+              Offset(l.radius + 4, -l.radius - tag.height),
+              tag,
+              labelBg.withValues(alpha: 0.94),
+              border: l.tagTone,
+            );
+          });
         }
       }
     }
@@ -695,14 +729,15 @@ class GraphPainter extends CustomPainter {
         continue;
       }
       final TextPainter tag = labels.get(l.tag!, l.tagTone ?? text);
-      final Offset p = at(i);
-      _pill(
-        canvas,
-        p + Offset(l.radius + 4, -l.radius - tag.height),
-        tag,
-        labelBg.withValues(alpha: 0.94),
-        border: l.tagTone,
-      );
+      _onScreen(canvas, at(i), () {
+        _pill(
+          canvas,
+          Offset(l.radius + 4, -l.radius - tag.height),
+          tag,
+          labelBg.withValues(alpha: 0.94),
+          border: l.tagTone,
+        );
+      });
       drawn++;
     }
   }
@@ -735,15 +770,31 @@ class GraphPainter extends CustomPainter {
         continue;
       }
       final TextPainter tp = labels.get(l.tag!, l.color.withValues(alpha: 1));
-      _pill(
-        canvas,
-        mid - Offset(tp.width / 2, tp.height / 2),
-        tp,
-        labelBg.withValues(alpha: 0.94),
-        border: l.color,
-      );
+      _onScreen(canvas, mid, () {
+        _pill(
+          canvas,
+          Offset(-tp.width / 2, -tp.height / 2),
+          tp,
+          labelBg.withValues(alpha: 0.94),
+          border: l.color,
+        );
+      });
       drawn++;
     }
+  }
+
+  /// Runs [draw] with the canvas at [anchor] and at the size of the
+  /// screen: what it draws (names, badges, marks) keeps its size however
+  /// far the picture is zoomed in.
+  void _onScreen(Canvas canvas, Offset anchor, void Function() draw) {
+    canvas
+      ..save()
+      ..translate(anchor.dx, anchor.dy);
+    if (_k != 1) {
+      canvas.scale(_k);
+    }
+    draw();
+    canvas.restore();
   }
 
   void _pill(
@@ -792,17 +843,19 @@ class GraphPainter extends CustomPainter {
           Paint()
             ..color = h.color.withValues(alpha: 0.28 * phase)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1,
+            ..strokeWidth = _k,
         );
       if (phase > 0.6 && h.name.isNotEmpty) {
         final TextPainter tp = labels.get(h.name, h.color, bold: true);
-        final Offset top = h.center - Offset(tp.width / 2, h.radius + 2);
-        _pill(
-          canvas,
-          top - Offset(0, tp.height),
-          tp,
-          labelBg.withValues(alpha: 0.9),
-        );
+        // Over the top of the circle, at the size of the screen.
+        _onScreen(canvas, h.center - Offset(0, h.radius), () {
+          _pill(
+            canvas,
+            Offset(-tp.width / 2, -2 - tp.height),
+            tp,
+            labelBg.withValues(alpha: 0.9),
+          );
+        });
       }
     }
   }
@@ -810,16 +863,16 @@ class GraphPainter extends CustomPainter {
   void _dashed(Canvas canvas, Offset a, Offset b, EdgeLook l) {
     final Paint p = Paint()
       ..color = l.color
-      ..strokeWidth = l.width
+      ..strokeWidth = l.width * _k
       ..strokeCap = StrokeCap.round;
     final Offset d = b - a;
     final double len = d.distance;
-    if (len < 1) {
+    if (len < _k) {
       return;
     }
     final Offset u = d / len;
-    const double on = 5;
-    const double off = 4;
+    final double on = 5 * _k;
+    final double off = 4 * _k;
     final int parts = min(400, (len / (on + off)).ceil());
     final Float32List pts = Float32List(parts * 4);
     int k = 0;
@@ -844,6 +897,7 @@ class GraphPainter extends CustomPainter {
       !identical(old.timeline, timeline) ||
       old.still != still ||
       old.scale != scale ||
+      old.zoom != zoom ||
       old.visible != visible ||
       old.me != me ||
       old.text != text ||

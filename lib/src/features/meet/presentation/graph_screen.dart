@@ -2466,6 +2466,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   labelBg: zen.surfaceRaised,
                   guide: zen.outlineSoft,
                   scale: lod,
+                  zoom: graphZoomStep(scale),
                   visible: visible,
                   timeline: timeline,
                   clock: timeline == null ? null : _clock,

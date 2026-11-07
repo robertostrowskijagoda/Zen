@@ -12,6 +12,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
@@ -748,6 +749,46 @@ void main() {
       },
     );
 
+    test('a post, comment or like pushed to it, and a mention, are kept and '
+        "confirmed, quietly; the ledger's other frames are not", () async {
+      await startReceiver(await publishFor(_masterKey()));
+      transport.sentSignals.clear();
+      await receive(_ada, <String, dynamic>{
+        'type': 'lg_push',
+        '_rid': 'p1',
+        'e': <String>['wpis'],
+      });
+      await receive(_ada, <String, dynamic>{
+        'type': 'lg_mention',
+        '_rid': 'p2',
+        'post': 'x',
+      });
+      expect(receiver.keptCount, 2);
+      expect(
+        transport.sentSignals.map((s) => s.payload),
+        <Map<String, dynamic>>[
+          <String, dynamic>{'type': 'rly_ack', 'rid': 'p1'},
+          <String, dynamic>{'type': 'rly_ack', 'rid': 'p2'},
+        ],
+      );
+      expect(notices.activeNotifications, isEmpty);
+      // A repeat is only confirmed again.
+      transport.sentSignals.clear();
+      await receive(_ada, <String, dynamic>{
+        'type': 'lg_push',
+        '_rid': 'p1',
+        'e': <String>['wpis'],
+      });
+      expect(receiver.keptCount, 2);
+      expect(transport.sentSignals.single.payload['rid'], 'p1');
+      // Asking and syncing waits for the unlock: neither kept nor answered.
+      transport.sentSignals.clear();
+      await receive(_ada, <String, dynamic>{'type': 'lg_heads', 'h': 1});
+      await receive(_ada, <String, dynamic>{'type': 'lg_push'});
+      expect(receiver.keptCount, 2);
+      expect(transport.sentSignals, isEmpty);
+    });
+
     group('a message\'s notice follows the notification privacy level', () {
       const LockedNoticeKit names = LockedNoticeKit(
         names: <String, String>{
@@ -801,6 +842,18 @@ void main() {
         'text': 'Kto idzie?',
         'senderName': 'Marek',
       };
+
+      test('a newer message within the minute replaces the notice, '
+          'silently: the shade shows the newest, one sound', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+        await receive(_ada, direct);
+        await receive(_member, inGroup);
+        final RuntimeSystemNotification notice =
+            notices.activeNotifications.single;
+        expect(notice.title, 'Ekipa');
+        expect(notice.body, 'Marek: Kto idzie?');
+        expect(notices.audibleAlertCount, 1);
+      });
 
       test('"Nadawca i treść": who and what, in a group too', () async {
         RuntimeSystemNotification notice = await noticeFor(kit(), _ada, direct);
@@ -1144,6 +1197,21 @@ void main() {
       );
       expect(receiver.keptCount, 0);
       await receiver.stop();
+      // The app shows them as soon as it is unlocked, before its node is up
+      // and the inbox is opened: only statuses, and the inbox stays.
+      final List<SignalTransportFrame> early = <SignalTransportFrame>[];
+      expect(
+        await replayKeptPresence(
+          vault: appVault,
+          masterKey: masterKey,
+          replay: early.add,
+        ),
+        1,
+      );
+      expect(early.single.from, _ada);
+      expect(early.single.payload['state'], 'foreground');
+      expect(early.single.receivedAtMillis, clock);
+      expect(await appVault.hasInbox(), isTrue);
       final List<SignalTransportFrame> delivered = <SignalTransportFrame>[];
       await appVault.drain(
         masterKey: masterKey,

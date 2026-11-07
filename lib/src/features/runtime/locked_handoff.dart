@@ -78,6 +78,32 @@ final class BackgroundCapabilityPublisher {
   }
 }
 
+/// Friends' statuses the locked receiver kept (`ping`, `pong`, `away`),
+/// handed to [runtime] at once, with the time they came: the app shows
+/// them the moment it is unlocked instead of when its node is up and the
+/// whole inbox is opened ([drainLockedInbox], which hands them over again;
+/// a status told before is not taken twice). [replay] is the runtime's
+/// `replayReceived`. Returns how many.
+Future<int> replayKeptPresence({
+  required BackgroundVault vault,
+  required Uint8List masterKey,
+  required void Function(SignalTransportFrame frame) replay,
+}) async {
+  int replayed = 0;
+  for (final Uint8List record in await vault.peek(masterKey: masterKey)) {
+    final SignalTransportFrame? frame = decodeInboxFrame(record);
+    final Object? type = frame?.payload['type'];
+    if (frame == null ||
+        frame.door ||
+        (type != 'ping' && type != 'pong' && type != kPresenceAwayType)) {
+      continue;
+    }
+    replay(frame);
+    replayed += 1;
+  }
+  return replayed;
+}
+
 /// Opens what the locked receiver kept (with the inbox key of [masterKey])
 /// and hands it to [runtime] as if it had just arrived; "Mijani" seen while
 /// locked goes to [encounters] instead (only this device's own records,

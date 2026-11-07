@@ -71,6 +71,81 @@ void main() {
     expect(saved!.text, isNot(contains('{{media')));
   });
 
+  testWidgets('likes under an old post open it in the profile: brought into '
+      'view and marked for a moment', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final ValueNotifier<String?> focus = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerNodeEnabledProvider.overrideWithValue(true),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+        ],
+        child: MaterialApp(
+          home: ValueListenableBuilder<String?>(
+            valueListenable: focus,
+            builder: (BuildContext context, String? id, Widget? _) =>
+                ProfileScreen(key: ValueKey<String?>(id), focusPostId: id),
+          ),
+        ),
+      ),
+    );
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(ProfileScreen)),
+    );
+    final LedgerNode node = container.read(ledgerNodeProvider)!;
+    for (int i = 0; i < 20 && !node.isReady; i++) {
+      await tester.runAsync(() => _settle());
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    Future<void> until(bool Function() done) async {
+      for (int i = 0; i < 40 && !done(); i++) {
+        await tester.runAsync(() => _settle());
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    // The oldest of many posts: far down the profile.
+    final Future<String> publishing = () async {
+      final LogEntry old = await node.publish(
+        kPostKind,
+        newPostBody('Najstarszy'),
+      );
+      for (int i = 0; i < 12; i++) {
+        await node.publish(kPostKind, newPostBody('Nowszy $i'));
+      }
+      return old.id;
+    }();
+    await until(() => find.text('Nowszy 11').evaluate().isNotEmpty);
+    final String id = await publishing;
+    expect(find.text('Najstarszy'), findsNothing, reason: 'off screen');
+
+    focus.value = id;
+    await until(
+      () => find.byKey(const Key('profile-post-focus')).evaluate().isNotEmpty,
+    );
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final Finder card = find.byKey(const Key('profile-post-focus'));
+    expect(
+      find.descendant(of: card, matching: find.text('Najstarszy')),
+      findsOneWidget,
+    );
+    final double top = tester.getTopLeft(card).dy;
+    expect(top, inInclusiveRange(0, 900));
+    BoxDecoration decoration() =>
+        tester.widget<AnimatedContainer>(card).decoration! as BoxDecoration;
+    expect((decoration().border! as Border).top.color.a, greaterThan(0));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect((decoration().border! as Border).top.color.a, 0);
+  });
+
   testWidgets('own posts are edited and deleted from the profile', (
     WidgetTester tester,
   ) async {

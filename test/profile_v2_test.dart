@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/profile/presentation/image_crop_screen.dart';
 import 'package:zen/src/features/profile/presentation/profile_edit_dialog.dart';
 import 'package:zen/src/features/profile/profile_cover.dart';
 
@@ -76,4 +78,76 @@ void main() {
     // Formatting shows right in the field; no separate preview.
     expect(find.byKey(const Key('profile-bio-preview')), findsNothing);
   });
+
+  testWidgets('a GIF from the GIF search becomes the cover: it is framed '
+      'like a photo', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(500, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final img.Image frame = img.Image(width: 60, height: 20);
+    final Uint8List gif = Uint8List.fromList(img.encodeGif(frame));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          gifSearchEnabledProvider.overrideWithValue(true),
+          gifCatalogProvider.overrideWithValue(
+            const _Catalog(<GifCatalogEntry>[
+              GifCatalogEntry(
+                previewUrl: 'https://example.com/cat-preview.gif',
+                sendUrl: 'https://example.com/cat.gif',
+                label: 'Kot',
+              ),
+            ]),
+          ),
+          gifDownloaderProvider.overrideWithValue(_Downloader(gif)),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: Builder(
+            builder: (BuildContext context) => Scaffold(
+              body: TextButton(
+                onPressed: () => ProfileEditDialog.show(context),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('profile-pick-cover-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('profile-picture-gifSearch')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.byKey(const Key('conversation-gif-tile-0')));
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    final ImageCropScreen crop = tester.widget(find.byType(ImageCropScreen));
+    expect(crop.bytes, gif);
+    expect(crop.aspect, kCoverWidth / kCoverHeight);
+  });
+}
+
+final class _Catalog implements GifCatalog {
+  const _Catalog(this.entries);
+
+  final List<GifCatalogEntry> entries;
+
+  @override
+  Future<List<GifCatalogEntry>> loadFeatured() async => entries;
+
+  @override
+  Future<List<GifCatalogEntry>> search(String query) async => entries;
+}
+
+final class _Downloader implements GifDownloader {
+  const _Downloader(this.bytes);
+
+  final Uint8List bytes;
+
+  @override
+  Future<Uint8List> download(String url) async => bytes;
 }

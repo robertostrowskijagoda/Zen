@@ -54,8 +54,8 @@ final class _NoticeItem {
       title: likes.isNotEmpty ? likes : comments,
       body: likes.isNotEmpty ? comments : '',
       millis: millis,
-      // A tap opens the Tablica, where the post and its reactions are.
-      routeKey: buildFeedRouteKey(FeedFilter.all.name),
+      // A tap opens the post in one's profile.
+      routeKey: buildOwnPostRouteKey(notice.postId),
       reaction: notice,
     );
   }

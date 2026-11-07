@@ -837,9 +837,16 @@ void unawaitedLogged(
   if (future == null) {
     return;
   }
+  // `then<void>`, not `catchError`: [future] may well be a `Future<int>`
+  // (anything fits a `Future<void>` parameter), and a `catchError` handler
+  // that returns nothing then throws an error of its own, unhandled, in
+  // place of the one it was to log.
   unawaited(
-    future.catchError((Object error, StackTrace stackTrace) {
-      logZenError(context, error, stackTrace, tag: tag);
-    }),
+    future.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        logZenError(context, error, stackTrace, tag: tag);
+      },
+    ),
   );
 }

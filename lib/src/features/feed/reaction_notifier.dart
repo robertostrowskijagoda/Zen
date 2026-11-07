@@ -4,7 +4,6 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/quiet_timer.dart';
-import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
@@ -156,7 +155,7 @@ RuntimeSystemNotification reactionNotification(
     category: RuntimeSystemNotificationCategory.social,
     kind: NoticeKind.reaction,
     slotKey: '$kReactionNoticeIdPrefix${n.postId}',
-    // A tap opens the Tablica, where the post and its reactions are.
-    routeKey: buildFeedRouteKey(FeedFilter.all.name),
+    // A tap opens the post in one's profile.
+    routeKey: buildOwnPostRouteKey(n.postId),
   );
 }

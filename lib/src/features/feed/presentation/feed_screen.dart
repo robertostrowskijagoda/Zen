@@ -120,14 +120,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   /// A filter was picked (or asked for) before the stored one was read.
   bool _filterPicked = false;
 
-  /// The post a notification asked to show ([feedPostRequest]), until its
-  /// card is on screen; the card wears [_revealKey] meanwhile.
-  String? _revealId;
-  final GlobalKey _revealKey = GlobalKey(debugLabel: 'feed-reveal');
+  /// The post a notification asked to show ([feedPostRequest]): it stands
+  /// at the top of the wall, under "Z powiadomienia", whatever the chip,
+  /// how far the reader looks or how far down it would be, until "Pokaż
+  /// całą Tablicę" (or another chip) puts it back in its place.
+  String? _focusId;
   final ScrollController _scroll = ScrollController();
-
-  /// The ids of what the wall shows, as last built.
-  List<String> _shownIds = const <String>[];
 
   /// The search field over the wall is open: only posts with the words
   /// typed (in the text, the author's name or a comment) are shown.
@@ -242,66 +240,33 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     _pick(asked);
   }
 
-  /// A new post's notification asked for a post ([openFeed]): a chip under
-  /// which friends' posts show, then the post itself.
+  /// A notification asked for a post ([openFeed]: a new post, a mention,
+  /// likes and comments under one's own): shown at the top ([_focusId]),
+  /// the wall scrolled up to it.
   void _onPostRequest({bool initial = false}) {
     final String? id = feedPostRequest.value;
     if (id == null) {
       return;
     }
     feedPostRequest.value = null;
-    if (_filter == FeedFilter.pyramid ||
-        _filter == FeedFilter.national ||
-        _filter == FeedFilter.close) {
-      if (initial) {
-        _filterPicked = true;
-        _filter = FeedFilter.all;
-      } else {
-        _pick(FeedFilter.all);
-      }
+    _focusId = id;
+    if (_searching) {
+      _searching = false;
+      _searchText.clear();
     }
-    _revealId = id;
-    if (!initial && mounted) {
-      setState(() {});
+    if (initial || !mounted) {
+      return;
     }
-    WidgetsBinding.instance
-      ..addPostFrameCallback((_) => unawaited(_reveal(id)))
-      ..ensureVisualUpdate();
+    setState(() {});
+    if (_scroll.hasClients) {
+      _scroll.jumpTo(0);
+    }
   }
 
-  /// Scrolls the wall until the card of post [id] is built, then brings it
-  /// into view. Cards are built lazily, so it steps down a screen at a time
-  /// from the top (a new post is near it); it gives up after a while.
-  Future<void> _reveal(String id) async {
-    for (int step = 0; step < 80 && mounted && _revealId == id; step++) {
-      final BuildContext? card = _revealKey.currentContext;
-      if (card != null && card.mounted) {
-        _revealId = null;
-        await Scrollable.ensureVisible(
-          card,
-          alignment: 0.05,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-        );
-        return;
-      }
-      if (_scroll.hasClients && _shownIds.contains(id)) {
-        final ScrollPosition position = _scroll.position;
-        final double next = step == 0
-            ? 0
-            : math.min(
-                position.pixels + position.viewportDimension * 0.8,
-                position.maxScrollExtent,
-              );
-        if (step > 0 && next <= position.pixels) {
-          break;
-        }
-        position.jumpTo(next);
-      }
-      await WidgetsBinding.instance.endOfFrame;
-    }
-    if (_revealId == id) {
-      _revealId = null;
+  /// "Pokaż całą Tablicę": the post goes back to its place.
+  void _unfocus() {
+    if (_focusId != null && mounted) {
+      setState(() => _focusId = null);
     }
   }
 
@@ -369,6 +334,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   void _pick(FeedFilter filter) {
     _filterPicked = true;
+    _focusId = null;
     _lookAsFar(filter);
     if (mounted && filter != _filter) {
       setState(() => _filter = filter);
@@ -993,6 +959,29 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   /// Others' posts on the wall, built again only when needed ([FeedMemo]).
+  /// The last post looked up by [_postById]: the revision of the wall it
+  /// was read at, its id, and the post.
+  (int, String, FeedPost?)? _byId;
+
+  /// Post [id] among all the posts this device has, one's own included
+  /// (they are not on the wall, only in the profile): the likes and
+  /// comments under one's own post open it here.
+  FeedPost? _postById(LedgerNode node, SocialHubState social, String id) {
+    final (int, String, FeedPost?)? had = _byId;
+    if (had != null && had.$1 == _feedRevision && had.$2 == id) {
+      return had.$3;
+    }
+    final FeedPost? found = buildFeed(
+      node,
+      nameOf: (String address) => _nameOf(social, address),
+      reshares: _reshares,
+      held: _reach,
+      pyramidAddresses: _pyramidAddresses(),
+    ).where((FeedPost p) => p.id == id).firstOrNull;
+    _byId = (_feedRevision, id, found);
+    return found;
+  }
+
   List<FeedPost> _feedFor(LedgerNode node, SocialHubState social) =>
       _feedMemo.wallOf(
         node,
@@ -1034,8 +1023,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           node.levelOf(p.authorAddress) == FriendLevel.close,
       depth: _reach?.depth ?? kDefaultFeedDepth,
     );
-    final List<FeedItem> items = searchFeed(composed, searched);
-    _shownIds = <String>[for (final FeedItem i in items) i.id];
+    final String? focusId = _focusId;
+    final FeedPost? focused = focusId == null || node == null || !node.isReady
+        ? null
+        : posts.where((FeedPost p) => p.id == focusId).firstOrNull ??
+              _postById(node, social, focusId);
+    final List<FeedItem> items = <FeedItem>[
+      for (final FeedItem i in searchFeed(composed, searched))
+        // Shown at the top already.
+        if (focused == null || i.id != focused.id) i,
+    ];
     final Set<String> mutedAuthors = ref.watch(
       appSettingsControllerProvider.select(
         (AppSettings s) => s.mutedPostAuthors,
@@ -1159,9 +1156,54 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             ? null
             : () => unawaited(_setPostsMuted(post, friend, muted: !muted)),
       );
-      return post.id == _revealId
-          ? KeyedSubtree(key: _revealKey, child: card)
-          : card;
+      return card;
+    }
+
+    // The post a notification opened, at the top.
+    if (focusId != null && node != null) {
+      header.insertAll(0, <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(
+              Icons.notifications_active_outlined,
+              size: 18,
+              color: zen.accent,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                t('Z powiadomienia'),
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            TextButton(
+              key: const Key('feed-focus-close'),
+              onPressed: _unfocus,
+              child: Text(t('Pokaż całą Tablicę')),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (focused != null)
+          KeyedSubtree(
+            key: const Key('feed-focus'),
+            child: postItem(node, focused),
+          )
+        else
+          ZenEmpty(
+            key: const Key('feed-focus-missing'),
+            icon: node.isReady
+                ? Icons.search_off_rounded
+                : Icons.hourglass_empty_rounded,
+            title: node.isReady
+                ? t('Tego posta nie ma już na Tablicy.')
+                : t('Szukam posta…'),
+          ),
+        const SizedBox(height: 16),
+      ]);
     }
 
     Widget card(LedgerNode node, FeedItem entry) => switch (entry) {

@@ -106,6 +106,14 @@ const Set<String> _keptRelayTypes = <String>{
 /// kept.
 const Set<String> _keptLedgerTypes = <String>{'lg_keys', 'lg_revoke'};
 
+/// The ledger's frames that come reliably (queued at the sender until this
+/// phone confirms them, [kReliablePayloadTypes]): a post, comment or like
+/// pushed to a friend who is away, a mention. Kept and confirmed like a
+/// message. Dropped unconfirmed, as the other ledger frames are, each one
+/// waited at its sender ("Czeka na doręczenie") and with the sender's
+/// mailboxes for two weeks, tried again and again.
+const Set<String> _reliableLedgerTypes = <String>{'lg_push', 'lg_mention'};
+
 const Set<String> _messageTypes = <String>{
   'message',
   'group_message',
@@ -1160,7 +1168,13 @@ final class LockedReceiver {
       return;
     }
     if (type.startsWith('lg_')) {
-      if (contact && _keptLedgerTypes.contains(type)) {
+      final Object? ledgerRid = frame.payload[kReliableIdKey];
+      if (contact &&
+          _reliableLedgerTypes.contains(type) &&
+          ledgerRid is String &&
+          ledgerRid.isNotEmpty) {
+        await _keep(frame, from, type, kind, rid: ledgerRid);
+      } else if (contact && _keptLedgerTypes.contains(type)) {
         await _keep(frame, from, type, kind, rid: null);
       }
       return;
@@ -1663,8 +1677,11 @@ final class LockedReceiver {
     );
   }
 
-  /// One entry per kind at most every [noticeThrottle], posted anew (so
-  /// the shade does not stack the same line).
+  /// One entry per kind, posted anew (so the shade does not stack the same
+  /// line), with a sound at most every [noticeThrottle]: one that comes
+  /// sooner updates the entry on screen, silently. It was not shown at all
+  /// then, so the shade kept the first message of the minute and a newer
+  /// one looked as if it had not come.
   Future<void> _postThrottled(
     RuntimeSystemNotification notice, {
     NoticeLog? log,
@@ -1676,7 +1693,11 @@ final class LockedReceiver {
     final String slot = notice.slotKey!;
     final int now = _now();
     final int? last = _lastNoticeAt[slot];
-    if (last != null && now - last < noticeThrottle.inMilliseconds) {
+    final bool sounded =
+        last != null && now - last < noticeThrottle.inMilliseconds;
+    if (sounded) {
+      // An update of the one on screen (stacked with it), without a sound.
+      await _post(notice.asSilent(), log: log);
       return;
     }
     _lastNoticeAt[slot] = now;

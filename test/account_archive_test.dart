@@ -4,12 +4,15 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
+import 'package:zen/src/features/pebbles/pebble_card.dart';
+import 'package:zen/src/features/pebbles/pebble_store.dart';
 
 const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 const List<PasswordCost> _accepted = <PasswordCost>[_light];
@@ -699,6 +702,62 @@ void main() {
         ),
         isEmpty,
       );
+    });
+
+    test('the pebbles come along: a new device has them with their '
+        'designs, but makes its own pebble door', () async {
+      final _Source source = _Source();
+      await source.fill();
+      final PebbleStore pebbles = PebbleStore(source.disk);
+      final LedgerKeyPair key = await LedgerKeyPair.generate();
+      final Uint8List design = Uint8List.fromList(List<int>.filled(500, 3));
+      final PebbleCard card = await PebbleCard.sign(
+        key: key,
+        design: design,
+        createdSeconds: 1767225600,
+        look: const PebbleCardLook(
+          shape: 1,
+          seed: 9,
+          material: 2,
+          mainColour: 0x808080,
+          secondColour: 0x202020,
+        ),
+        name: 'Kamyk',
+        note: '',
+        authorName: 'Ada',
+      );
+      await pebbles.addCreated(card, design);
+      final String door = await pebbles.doorSeed();
+      final AccountArchiveBuild withPebbles = await buildAccountArchive(
+        source,
+        <AccountScope>{AccountScope.keys, AccountScope.profile},
+        at: 5,
+      );
+      expect(withPebbles.archive.raw.keys, contains('pebbles/index'));
+      expect(withPebbles.archive.raw.keys, isNot(contains('pebbles/door')));
+      final List<String> files = await writeAccountBackup(
+        build: withPebbles,
+        password: 'dobre hasło 1',
+        first: '${dir.path}/p.$kAccountBackupExtension',
+        cost: _light,
+        remember: false,
+      );
+      final _Sink sink = _Sink(account: 'fresh-1');
+      final AccountBackupRestore r = await restoreAccountBackup(
+        paths: files,
+        password: 'dobre hasło 1',
+        importer: AccountArchiveImporter(
+          sink: sink,
+          staging: AccountImportStaging(sink.disk),
+        ),
+        acceptedCosts: _accepted,
+      );
+      expect(r.error, isNull);
+      final PebbleStore taken = PebbleStore(sink.disk);
+      await taken.load();
+      expect(taken.created.single.card.id, card.id);
+      expect(await taken.design(card.id), design);
+      expect(await taken.doorSeed(), isNot(door));
     });
 
     test('the same account merges: what is here stays, the log is not '

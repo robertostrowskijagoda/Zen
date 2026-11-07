@@ -21,6 +21,7 @@ import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/pebbles/pebble_link.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
 import 'package:zen/src/features/pebbles/presentation/pebble_profile_section.dart';
+import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -249,6 +250,12 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
       case RuntimeRouteTarget.pebbles:
         // "Prośba o przechowanie kamyczka": the requests wait there.
         unawaited(PebblesScreen.open(context));
+        break;
+      case RuntimeRouteTarget.ownPost:
+        // Likes and comments under one's own post: the post in one's
+        // profile (one's own posts are not on the Tablica).
+        Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+        unawaited(ProfileScreen.open(context, focusPostId: intent.postId));
         break;
       case RuntimeRouteTarget.account:
         // A notification of another account of this device: that account

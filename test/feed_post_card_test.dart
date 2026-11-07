@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_reach.dart';
 import 'package:zen/src/features/feed/post_reach_service.dart';
@@ -316,5 +317,57 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() => _settle());
     });
+  });
+
+  testWidgets('a notification about likes opens the Tablica with that post at '
+      'the top, once, until "Pokaż całą Tablicę"', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final w = (await tester.runAsync(
+      () => _world(<String>['a', 'b'], 'b', <String, String>{'a': 'Ada'}),
+    ))!;
+    final LogEntry own = (await tester.runAsync(() async {
+      final LogEntry e = await _post(w.node, 'Mój stary post');
+      // Newer posts of a friend on the wall.
+      for (int i = 0; i < 3; i++) {
+        await _post(w.mesh['a'], 'Nowszy $i');
+      }
+      await w.mesh.settle();
+      return e;
+    }))!;
+    // The notification was tapped before the Tablica was built.
+    openFeed(FeedFilter.all, postId: own.id);
+    addTearDown(() {
+      feedFilterRequest.value = null;
+      feedPostRequest.value = null;
+    });
+    await tester.pumpWidget(
+      _feed(w.node, w.reach, w.social, const AppSettings()),
+    );
+    await tester.runAsync(() => _settle());
+    await tester.pump();
+
+    final Finder focus = find.byKey(const Key('feed-focus'));
+    expect(focus, findsOneWidget);
+    expect(
+      find.descendant(of: focus, matching: find.text('Mój stary post')),
+      findsOneWidget,
+    );
+    expect(find.text('Mój stary post'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Mój stary post')).dy,
+      lessThan(tester.getTopLeft(find.text('Nowszy 2')).dy),
+    );
+
+    await tester.tap(find.byKey(const Key('feed-focus-close')));
+    await tester.pump();
+    expect(focus, findsNothing);
+    // One's own posts are in the profile, not on the wall.
+    expect(find.text('Mój stary post'), findsNothing);
+    expect(find.text('Nowszy 2'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() => _settle());
   });
 }

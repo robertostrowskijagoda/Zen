@@ -22,6 +22,9 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/graph/graph_model.dart';
+import 'package:zen/src/features/meet/graph/graph_painter.dart';
+import 'package:zen/src/features/meet/graph/graph_panels.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -796,6 +799,47 @@ void main() {
     // The field to write is above the bar as well.
     expect(
       tester.getBottomLeft(find.byType(TextField).last).dy,
+      lessThanOrEqualTo(_usableBottom),
+    );
+  });
+
+  testWidgets('"Zrzut grafu": "Wyślij znajomemu" and "Zapisz" are above the '
+      'system bar', (WidgetTester tester) async {
+    final List<GraphNode> nodes = <GraphNode>[
+      for (int i = 0; i < 6; i++)
+        GraphNode(
+          address: PeerShareCodec.normalizeAddress('200::a$i'),
+          name: 'P$i',
+          ring: 1,
+        ),
+    ];
+    final GraphLayout layout = graphLayout(nodes, const Size(600, 600));
+    final GraphScene scene = GraphScene(
+      layout: layout,
+      from: Float32List.fromList(layout.xy),
+      edgeFrom: Int32List.fromList(<int>[for (final GraphNode _ in nodes) -1]),
+      edgeTo: Int32List.fromList(<int>[for (int i = 0; i < 6; i++) i]),
+      links: Int32List(0),
+    );
+    await _pumpOnPhone(
+      tester,
+      Consumer(
+        builder: (BuildContext context, WidgetRef ref, Widget? _) => _Opener(
+          (BuildContext context) => unawaited(
+            showGraphSnapshot(
+              context,
+              ref,
+              scene: scene,
+              clusters: const <String, int>{},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _waitFor(tester, find.byKey(const Key('graph-snapshot-sheet')));
+    await _expectSheetAbove(tester);
+    expect(
+      tester.getBottomLeft(find.byKey(const Key('graph-snapshot-save'))).dy,
       lessThanOrEqualTo(_usableBottom),
     );
   });

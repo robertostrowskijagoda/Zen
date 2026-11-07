@@ -176,11 +176,20 @@ final class ReliableSignalTransport implements SignalTransport {
   }
 
   Duration _nextTickDelay() {
+    // A quick first try due before the next tick: a tick then (never more
+    // often than every [_quickestTick]).
+    final Duration? due = engine.nextTryWithin(tickInterval);
+    if (due != null) {
+      return due < _quickestTick ? _quickestTick : due;
+    }
     if (engine.wantsFrequentTicks || idleTickInterval <= tickInterval) {
       return tickInterval;
     }
     return idleTickInterval;
   }
+
+  /// The shortest wait between two ticks.
+  static const Duration _quickestTick = Duration(milliseconds: 250);
 
   /// Something was queued or came in: the next tick comes at the short
   /// interval, not the idle one.
@@ -189,8 +198,10 @@ final class ReliableSignalTransport implements SignalTransport {
     if (!_engineActive || _ticker == null || due == null) {
       return; // a tick is running and arms the next one itself
     }
-    if (due.isAfter(DateTime.now().add(tickInterval))) {
-      _scheduleTick(tickInterval);
+    final Duration next = _nextTickDelay();
+    final Duration wanted = next < tickInterval ? next : tickInterval;
+    if (due.isAfter(DateTime.now().add(wanted))) {
+      _scheduleTick(wanted);
     }
   }
 

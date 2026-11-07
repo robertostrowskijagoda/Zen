@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -61,16 +62,24 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// status is set from the top bar.
 class ProfileScreen extends ConsumerStatefulWidget {
   /// Own profile when [address] is null, a friend's otherwise.
-  const ProfileScreen({super.key, this.address});
+  const ProfileScreen({super.key, this.address, this.focusPostId});
 
   final String? address;
 
-  static Future<void> open(BuildContext context, {String? address}) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) => ProfileScreen(address: address),
-        ),
-      );
+  /// A post to bring into view and mark for a moment (likes or comments
+  /// under one's own post, from a notification).
+  final String? focusPostId;
+
+  static Future<void> open(
+    BuildContext context, {
+    String? address,
+    String? focusPostId,
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) =>
+          ProfileScreen(address: address, focusPostId: focusPostId),
+    ),
+  );
 
   @override
   ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
@@ -78,6 +87,65 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   StreamSubscription<LogEntry>? _updates;
+
+  /// The card of [ProfileScreen.focusPostId], once built; brought into view
+  /// once ([_focused]) and marked while [_marked].
+  final GlobalKey _focusKey = GlobalKey(debugLabel: 'profile-focus');
+  bool _focused = false;
+  bool _marked = false;
+
+  /// A place at the top of the posts' list: its scroll position.
+  final GlobalKey _postsTop = GlobalKey(debugLabel: 'profile-posts-top');
+  bool _seeking = false;
+
+  /// Scrolls the posts' list down a screen at a time until the focused
+  /// post is built (the list builds only what is near the screen), then
+  /// brings it into view and marks it for a moment. Gives up at the end.
+  Future<void> _seekFocused() async {
+    if (_seeking || _focused) {
+      return;
+    }
+    _seeking = true;
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      for (int step = 0; step < 80 && mounted && !_focused; step++) {
+        final BuildContext? card = _focusKey.currentContext;
+        if (card != null && card.mounted) {
+          _focused = true;
+          setState(() => _marked = true);
+          await Scrollable.ensureVisible(
+            card,
+            alignment: 0.1,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          );
+          Timer(const Duration(milliseconds: 2500), () {
+            if (mounted) {
+              setState(() => _marked = false);
+            }
+          });
+          return;
+        }
+        final BuildContext? top = _postsTop.currentContext;
+        if (top != null && top.mounted) {
+          final ScrollPosition position = Scrollable.of(top).position;
+          if (position.pixels >= position.maxScrollExtent) {
+            return;
+          }
+          position.jumpTo(
+            math.min(
+              position.pixels + position.viewportDimension * 0.8,
+              position.maxScrollExtent,
+            ),
+          );
+        }
+        await WidgetsBinding.instance.endOfFrame;
+      }
+    } finally {
+      _seeking = false;
+    }
+  }
+
   StreamSubscription<void>? _opened;
   StreamSubscription<void>? _followers;
   LedgerNode? _node;
@@ -116,6 +184,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         }
       }),
       context: 'The profile waits for a ledger that did not start',
+    );
+  }
+
+  /// [card] of post [p], marked and brought into view when it is the
+  /// focused one ([ProfileScreen.focusPostId]).
+  Widget _focusWrap(FeedPost p, Widget card) {
+    if (p.id != widget.focusPostId) {
+      return card;
+    }
+    unawaited(_seekFocused());
+    final ZenColors zen = ZenColors.of(context);
+    return KeyedSubtree(
+      key: _focusKey,
+      child: AnimatedContainer(
+        key: const Key('profile-post-focus'),
+        duration: const Duration(milliseconds: 400),
+        decoration: BoxDecoration(
+          borderRadius: context.zenRadius(20),
+          border: Border.all(
+            color: _marked ? zen.accent : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: card,
+      ),
     );
   }
 
@@ -280,6 +373,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
     }
 
+    if (!_focused &&
+        widget.focusPostId != null &&
+        posts.any((FeedPost p) => p.id == widget.focusPostId)) {
+      unawaited(_seekFocused());
+    }
     final Widget avatar;
     if (_isOwn) {
       avatar = const OwnAvatar(size: 92);
@@ -858,7 +956,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           padding: readableInsets(context, bottom: 32),
                           children: <Widget>[
                             // The person's price list in the pyramid.
-                            PyramidPriceList(address: other, own: _isOwn),
+                            KeyedSubtree(
+                              key: _postsTop,
+                              child: PyramidPriceList(
+                                address: other,
+                                own: _isOwn,
+                              ),
+                            ),
                             if (posts.isEmpty)
                               ZenEmpty(
                                 icon: Icons.article_outlined,
@@ -891,40 +995,45 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   },
                                 )
                               else
-                                _ProfilePost(
-                                  post: p,
-                                  node: node,
-                                  onEdit: _isOwn && node != null && p.isOwn
-                                      ? () => unawaited(_editPost(node, p))
-                                      : null,
-                                  onDelete: _isOwn && node != null && p.isOwn
-                                      ? () => unawaited(_deletePost(node, p))
-                                      : null,
-                                  onReport: _isOwn || p.isOwn
-                                      ? null
-                                      : () => unawaited(
-                                          reportContent(
-                                            context,
-                                            ref,
-                                            authorAddress: other,
-                                            text: mentionsAsPlainText(
-                                              p.text,
-                                              p.mentions,
+                                _focusWrap(
+                                  p,
+                                  _ProfilePost(
+                                    post: p,
+                                    node: node,
+                                    onEdit: _isOwn && node != null && p.isOwn
+                                        ? () => unawaited(_editPost(node, p))
+                                        : null,
+                                    onDelete: _isOwn && node != null && p.isOwn
+                                        ? () => unawaited(_deletePost(node, p))
+                                        : null,
+                                    onReport: _isOwn || p.isOwn
+                                        ? null
+                                        : () => unawaited(
+                                            reportContent(
+                                              context,
+                                              ref,
+                                              authorAddress: other,
+                                              text: mentionsAsPlainText(
+                                                p.text,
+                                                p.mentions,
+                                              ),
+                                              header: t(
+                                                'Post na profilu — {name}',
+                                                {'name': name},
+                                              ),
+                                              contentId: p.id,
+                                              deleteLocal:
+                                                  node == null ||
+                                                      p.images.isEmpty
+                                                  ? null
+                                                  : () =>
+                                                        deletePostMediaLocally(
+                                                          node,
+                                                          p.images,
+                                                        ),
                                             ),
-                                            header: t(
-                                              'Post na profilu — {name}',
-                                              {'name': name},
-                                            ),
-                                            contentId: p.id,
-                                            deleteLocal:
-                                                node == null || p.images.isEmpty
-                                                ? null
-                                                : () => deletePostMediaLocally(
-                                                    node,
-                                                    p.images,
-                                                  ),
                                           ),
-                                        ),
+                                  ),
                                 ),
                           ],
                         ),

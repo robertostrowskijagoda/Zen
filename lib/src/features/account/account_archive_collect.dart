@@ -5,6 +5,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
+import 'package:zen/src/features/pebbles/pebble_store.dart';
 
 /// The profile photos in a copy (keys of the profile section naming their
 /// files).
@@ -175,6 +176,16 @@ Future<AccountArchiveBuild> buildAccountArchive(
       continue;
     }
     for (final String key in e.value) {
+      final Uint8List? value = await source.readState(key);
+      if (value != null) {
+        b.raw[key] = b.addBytes(value);
+      }
+    }
+  }
+  if (b.has(AccountScope.profile)) {
+    // The pebbles shown on the profile: made, collected and kept ones,
+    // with their designs.
+    for (final String key in await PebbleStore.archiveKeys(source.readState)) {
       final Uint8List? value = await source.readState(key);
       if (value != null) {
         b.raw[key] = b.addBytes(value);

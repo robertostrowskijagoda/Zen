@@ -147,6 +147,27 @@ final class PresenceReport {
   }
 }
 
+/// When a friend last had Zen open, after [report] came at
+/// [receivedAtMillis], given what was [known] (0: nothing). It never goes
+/// back: each of a friend's devices tells its own last opening (a computer
+/// in the tray where Zen was on the screen a week ago, a locked phone's
+/// service with the time it was given when Zen left the screen), and the
+/// newest one counts. A report that does
+/// not tell it (the device does not know, or keeps it to itself) leaves
+/// what was known; one that shows no presence at all (the friend stopped
+/// showing it to this person) leaves nothing.
+int lastOpenedAfterReport({
+  required int known,
+  required PresenceReport report,
+  required int receivedAtMillis,
+}) {
+  if (report.presence == PeerPresence.hidden) {
+    return 0;
+  }
+  final int told = report.lastOpenedAt(receivedAtMillis);
+  return told > known ? told : known;
+}
+
 /// The presence fields of a frame about this device: [own] is
 /// [PeerPresence.online] (on the screen), [PeerPresence.background] (off
 /// it, still receiving) or [PeerPresence.offline] (off it and about to stop
