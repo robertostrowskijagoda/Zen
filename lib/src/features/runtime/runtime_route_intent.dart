@@ -56,6 +56,10 @@ enum RuntimeRouteTarget {
   /// notification of an account that receives in the background);
   /// [rawInput] holds its folder.
   account,
+
+  /// One's own post in one's profile (`zen://post?p=<id>`): likes and
+  /// comments under it ([postId]).
+  ownPost,
 }
 
 @immutable
@@ -197,6 +201,18 @@ final class RuntimeRouteIntent {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.pebbles);
   }
 
+  /// One's own post [postId] in one's profile.
+  factory RuntimeRouteIntent.ownPost({
+    required String id,
+    required String postId,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.ownPost,
+      postId: postId,
+    );
+  }
+
   /// "O Zen" (one of Zen's pages).
   factory RuntimeRouteIntent.about({required String id}) {
     return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.about);
@@ -306,6 +322,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.about => t('O Zen'),
     RuntimeRouteTarget.installGuide => t('Jak zainstalować Zen'),
     RuntimeRouteTarget.account => t('Otwórz konto'),
+    RuntimeRouteTarget.ownPost => t('Otwórz post'),
   };
 }
 
@@ -329,6 +346,13 @@ String buildAccountRouteKey(String folder) => 'zen://account/$folder';
 
 /// The knocks at the flat's door (a knock's notification).
 String buildFlatKnocksRouteKey() => 'zen://knocks';
+
+/// One's own post [postId] in one's profile (likes and comments under it).
+String buildOwnPostRouteKey(String postId) => Uri(
+  scheme: 'zen',
+  host: 'post',
+  queryParameters: <String, String>{'p': postId},
+).toString();
 
 /// The Tablica on [filter] (`zen://feed?f=pyramid`), at the post [postId]
 /// when given (`zen://feed?f=all&p=<id>`).
@@ -483,6 +507,12 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
     return isPebbleLink(trimmed)
         ? RuntimeRouteIntent.pebble(id: id, rawInput: trimmed)
         : null;
+  }
+  if (uri.host == 'post') {
+    final String post = uri.queryParameters['p'] ?? '';
+    return post.isEmpty || post.length > 200
+        ? null
+        : RuntimeRouteIntent.ownPost(id: id, postId: post);
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(

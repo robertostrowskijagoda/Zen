@@ -96,7 +96,24 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   }
 
   /// "Wybierz folder": a cancelled chooser keeps what was there.
+  ///
+  /// On Android Downloads comes first: the system's folder chooser does not
+  /// let any app pick Downloads itself ("to protect your privacy, choose
+  /// another folder"), but the copy goes there without the chooser, through
+  /// the media store ([AccountBackupFolderKind.downloads]).
   Future<void> _chooseFolder() async {
+    final AccountBackupFolder? downloads =
+        _default?.kind == AccountBackupFolderKind.downloads ? _default : null;
+    if (downloads != null) {
+      final bool? other = await _askDownloadsOrOther(downloads);
+      if (!mounted || other == null) {
+        return;
+      }
+      if (!other) {
+        setState(() => _chosen = downloads);
+        return;
+      }
+    }
     setState(() => _choosing = true);
     try {
       final AccountBackupFolder? folder = await ref
@@ -115,6 +132,48 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
         setState(() => _choosing = false);
       }
     }
+  }
+
+  /// Downloads ([downloads]: false) or another folder (true); null when
+  /// the sheet was closed.
+  Future<bool?> _askDownloadsOrOther(AccountBackupFolder downloads) {
+    final ZenColors zen = ZenColors.of(context);
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: zen.surfaceRaised,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: context.zenSheetShape(),
+      builder: (BuildContext sheet) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                key: const Key('account-backup-folder-downloads'),
+                leading: Icon(Icons.download_rounded, color: zen.accent),
+                title: Text(downloads.label),
+                subtitle: Text(t('Folder pobranych plików na tym telefonie')),
+                onTap: () => Navigator.of(sheet).pop(false),
+              ),
+              ListTile(
+                key: const Key('account-backup-folder-other'),
+                leading: Icon(Icons.folder_open_rounded, color: zen.accent),
+                title: Text(t('Inny folder…')),
+                subtitle: Text(
+                  t(
+                    'Android nie pozwala wybrać tam samych Pobranych — '
+                    'wybierz je wyżej albo folder w nich.',
+                  ),
+                ),
+                onTap: () => Navigator.of(sheet).pop(true),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openFolder(AccountBackupSaved saved) async {

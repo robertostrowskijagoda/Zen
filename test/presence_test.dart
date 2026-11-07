@@ -430,6 +430,53 @@ void main() {
       expect(read().lastOpenedAtMillis, later);
     });
 
+    test('the last opening never goes back: a second device with Zen last '
+        'open a week ago does not hide that it was open today', () async {
+      final ProviderContainer container = hub(
+        ada: ada.copyWith(
+          presence: PeerPresence.offline,
+          presenceAtMillis: _day - _hour,
+        ),
+      );
+      final SocialHubController controller = container.read(
+        socialHubControllerProvider.notifier,
+      );
+      FriendProfile read() =>
+          container.read(socialHubControllerProvider).friends[_ada]!;
+      // Her phone, Zen on its screen now.
+      await controller.updatePeerPresence(
+        peerAddress: _ada,
+        report: PresenceReport.fromPayload(<String, dynamic>{
+          'type': 'pong',
+          'state': 'foreground',
+          'lo': 0,
+        }),
+        observedAtMillis: _day,
+      );
+      expect(read().lastOpenedAtMillis, _day);
+      // Her computer in the tray: Zen was on its screen a week ago.
+      await controller.updatePeerPresence(
+        peerAddress: _ada,
+        report: PresenceReport.fromPayload(<String, dynamic>{
+          'type': 'pong',
+          'state': 'background',
+          'lo': const Duration(days: 7).inSeconds,
+        }),
+        observedAtMillis: _day + _minute,
+      );
+      expect(read().lastOpenedAtMillis, _day);
+      // A device that does not tell it leaves it too.
+      await controller.updatePeerPresence(
+        peerAddress: _ada,
+        report: PresenceReport.fromPayload(<String, dynamic>{
+          'type': 'pong',
+          'state': 'background',
+        }),
+        observedAtMillis: _day + 2 * _minute,
+      );
+      expect(read().lastOpenedAtMillis, _day);
+    });
+
     test('a friend who stops showing presence shows nothing', () async {
       final ProviderContainer container = hub(
         ada: ada.copyWith(

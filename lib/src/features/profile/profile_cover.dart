@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
@@ -24,8 +25,9 @@ const int kMaxCoverGifBytes = 3 * 1024 * 1024;
 
 /// A cropped, scaled JPEG of [bytes] (a GIF: a cropped, scaled GIF that
 /// still plays), or `null` when it is not an image this app is willing to
-/// handle. Runs in an isolate.
-Uint8List? makeCoverImage(Uint8List bytes) {
+/// handle: the part [region] names (framed by the person, made 3:1), or
+/// the middle band. Runs in an isolate.
+Uint8List? makeCoverImage(Uint8List bytes, {CropRegion? region}) {
   if (bytes.length > kMaxCoverSourceBytes ||
       !AvatarSanitizer.isValidImageBytes(bytes) ||
       AvatarSanitizer.hasDangerousHeader(bytes)) {
@@ -37,6 +39,7 @@ Uint8List? makeCoverImage(Uint8List bytes) {
       maxSide: kCoverGifWidth,
       maxBytes: kMaxCoverGifBytes,
       aspect: kCoverWidth / kCoverHeight,
+      region: region,
     );
   }
   final img.Decoder? decoder = img.findDecoderForData(bytes);
@@ -54,24 +57,35 @@ Uint8List? makeCoverImage(Uint8List bytes) {
     return null;
   }
   final img.Image oriented = img.bakeOrientation(decoded);
-  // Crop the middle band at 3:1, then scale down.
+  // Crop the framed part (or the middle band) at 3:1, then scale down.
   final int w = oriented.width;
   final int h = oriented.height;
-  int cw = w;
-  int ch = (w / 3).round();
-  if (ch > h) {
-    ch = h;
-    cw = h * 3;
+  final ({int x, int y, int width, int height}) part;
+  if (region != null && !region.isFull) {
+    part = region.pixels(w, h, aspect: kCoverWidth / kCoverHeight);
+  } else {
+    int cw = w;
+    int ch = (w / 3).round();
+    if (ch > h) {
+      ch = h;
+      cw = h * 3;
+    }
+    part = (x: (w - cw) ~/ 2, y: (h - ch) ~/ 2, width: cw, height: ch);
   }
+  final int cw = part.width;
   final img.Image band = img.copyCrop(
     oriented,
-    x: (w - cw) ~/ 2,
-    y: (h - ch) ~/ 2,
-    width: cw,
-    height: ch,
+    x: part.x,
+    y: part.y,
+    width: part.width,
+    height: part.height,
   );
   final img.Image scaled = cw > kCoverWidth
-      ? img.copyResize(band, width: kCoverWidth, height: kCoverHeight)
+      ? img.copyResize(
+          band,
+          width: kCoverWidth,
+          height: (kCoverWidth * band.height / band.width).round(),
+        )
       : band;
   return img.encodeJpg(scaled, quality: 82);
 }
@@ -82,6 +96,7 @@ Uint8List? makeCoverImage(Uint8List bytes) {
 Future<String> storeCoverImage({
   required String sourcePath,
   required Directory storageDir,
+  CropRegion? region,
 }) async {
   final File source = File(sourcePath);
   if (!source.existsSync() || source.lengthSync() > kMaxCoverSourceBytes) {
@@ -91,10 +106,28 @@ Future<String> storeCoverImage({
       ),
     );
   }
-  final Uint8List? cover = await compute(
-    makeCoverImage,
-    await source.readAsBytes(),
+  return storeCoverBytes(
+    bytes: await source.readAsBytes(),
+    storageDir: storageDir,
+    region: region,
   );
+}
+
+/// [storeCoverImage] for a picture already in memory (a GIF from the search
+/// or the keyboard).
+Future<String> storeCoverBytes({
+  required Uint8List bytes,
+  required Directory storageDir,
+  CropRegion? region,
+}) async {
+  if (bytes.length > kMaxCoverSourceBytes) {
+    throw FormatException(
+      t(
+        'To zdjęcie jest za duże albo nie da się go otworzyć (najwyżej 20 MB).',
+      ),
+    );
+  }
+  final Uint8List? cover = await compute(_makeCover, (bytes, region));
   if (cover == null) {
     throw FormatException(
       t('To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).'),
@@ -111,6 +144,9 @@ Future<String> storeCoverImage({
   await out.writeAsBytes(cover, flush: true);
   return out.path;
 }
+
+Uint8List? _makeCover((Uint8List, CropRegion?) job) =>
+    makeCoverImage(job.$1, region: job.$2);
 
 /// Removes a cover written by [storeCoverImage], or the vault copy it was
 /// moved into. Ignores anything else.

@@ -304,6 +304,11 @@ abstract interface class BackgroundVault {
     required Future<void> Function(Uint8List record) deliver,
     Duration settle,
   });
+
+  /// What the service kept, opened but left where it is (a [drain] takes
+  /// it later): the app reads friends' statuses from it the moment it is
+  /// unlocked, before its node is up. Empty when nothing can be read.
+  Future<List<Uint8List>> peek({required Uint8List masterKey});
 }
 
 /// How long the drained inbox files stay after the last record was handed
@@ -450,6 +455,30 @@ final class FileBackgroundVault implements BackgroundVault {
     final Directory folder = await directory();
     return await (await inboxFile()).exists() ||
         (await _drainingFiles(folder)).isNotEmpty;
+  }
+
+  @override
+  Future<List<Uint8List>> peek({required Uint8List masterKey}) async {
+    final Directory folder = await directory();
+    final File inbox = await inboxFile();
+    final List<File> files = <File>[
+      ...await _drainingFiles(folder),
+      if (await inbox.exists()) inbox,
+    ];
+    if (files.isEmpty) {
+      return const <Uint8List>[];
+    }
+    final HybridKeyPair recipient = await inboxKeyPairFor(masterKey);
+    final List<Uint8List> out = <Uint8List>[];
+    for (final File file in files) {
+      try {
+        out.addAll(await readSealedInbox(file, recipient));
+      } on Object catch (error) {
+        // Being written, or damaged: the drain deals with it.
+        logZenWarning('Looking into the inbox failed: $error');
+      }
+    }
+    return out;
   }
 
   @override

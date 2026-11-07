@@ -74,5 +74,17 @@
   {
     "file": "lib/src/features/social/social_hub_controller_chat_extras.dart",
     "tests": ["test/chat_extras_end_to_end_test.dart", "test/signal_fuzz_test.dart"]
+  },
+  {
+    "file": "lib/src/features/feed/reaction_notifier.dart",
+    "tests": ["test/reaction_notifier_test.dart"]
+  },
+  {
+    "file": "lib/src/features/profile/avatar_sanitizer.dart",
+    "tests": ["test/avatar_sanitizer_test.dart", "test/image_crop_test.dart"]
+  },
+  {
+    "file": "lib/src/features/media/crop_region.dart",
+    "tests": ["test/image_crop_test.dart"]
   }
 ]

@@ -2044,12 +2044,76 @@ void main() {
       expect(mesh.nodes[bob]!.receivedTexts, <String>['tylko u mnie']);
     });
 
+    test('three tries at once: two lost tries cost two seconds, and the '
+        'transport is told when the next one is due', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      int lost = 0;
+      mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+        if (from == alice && to == bob && p['type'] == 'message' && lost < 2) {
+          lost++;
+          return null;
+        }
+        return p;
+      };
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await sender.submit(bob, _text('od razu'));
+      await mesh.settle();
+      expect(lost, 1);
+      expect(
+        sender.nextTryWithin(const Duration(seconds: 5)),
+        const Duration(seconds: 1),
+      );
+      await mesh.advance(const Duration(seconds: 1));
+      expect(lost, 2);
+      expect(mesh.nodes[bob]!.receivedTexts, isEmpty);
+      await mesh.advance(const Duration(seconds: 1));
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['od razu']);
+      expect(sender.nextTryWithin(const Duration(seconds: 5)), isNull);
+    });
+
+    test('a recipient heard from a moment ago: its late confirmation shows '
+        'as sending, not as waiting here, and its next word brings the '
+        'message again at once', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      for (final String relay
+          in (await mesh.nodes[bob]!.state()).currentRelays) {
+        await mesh.goOffline(relay);
+      }
+      // The first tries to bob get lost on the way.
+      bool lose = true;
+      mesh.interceptor = (String from, String to, Map<String, dynamic> p) =>
+          lose && from == alice && to == bob && p['type'] == 'message'
+          ? null
+          : p;
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await sender.submit(bob, _text('zaraz'));
+      await mesh.advance(const Duration(seconds: 5));
+      await mesh.advance(const Duration(seconds: 10));
+      MessageDeliveryProgress? progress =
+          sender.progress.value.messages['m-zaraz'];
+      expect(progress?.sending, 1);
+      expect(progress?.waitingHere, 0);
+      expect(mesh.nodes[bob]!.receivedTexts, isEmpty);
+
+      // Bob says something a few seconds after the last try: the message
+      // goes with it, not half a minute later on its backoff.
+      lose = false;
+      mesh.now += const Duration(seconds: 5).inMilliseconds;
+      await mesh.send(bob, alice, const <String, dynamic>{'type': 'hello'});
+      await mesh.settle();
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['zaraz']);
+      progress = sender.progress.value.messages['m-zaraz'];
+      expect(progress?.delivered, 1);
+    });
+
     test("a copy only the sender holds, as the recipient's one mailbox, "
         "waits here, not in friends' mailboxes", () async {
       final _SimMesh mesh = await _meshWithRelays();
       await mesh.nodes[bob]!.engine.setManualRelays(<String>[alice]);
       await mesh.settle();
       await mesh.goOffline(bob);
+      // Away for a while (heard from a moment ago it would show as sent).
+      await mesh.advance(const Duration(minutes: 3));
       final RelayEngine sender = mesh.nodes[alice]!.engine;
       await sender.submit(bob, _text('tylko u siebie'));
       await mesh.advance(const Duration(seconds: 5));
@@ -2110,6 +2174,8 @@ void main() {
       for (final String relay in bobRelays) {
         await mesh.goOffline(relay);
       }
+      // Away for a while (heard from a moment ago it would show as sent).
+      await mesh.advance(const Duration(minutes: 3));
       final RelayEngine sender = mesh.nodes[alice]!.engine;
       MessageDeliveryProgress? current() =>
           sender.progress.value.messages['m-po kolei'];
@@ -2276,8 +2342,9 @@ void main() {
         });
         await mesh.advance(const Duration(seconds: 6));
       }
-      // The schedule's 3 s, 10 s, 30 s, 2 min, 10 min (it was a hundred).
-      expect(direct, lessThanOrEqualTo(6));
+      // The schedule's 1 s, 1 s, 3 s, 10 s, 30 s, 2 min, 10 min (it was a
+      // hundred).
+      expect(direct, lessThanOrEqualTo(8));
       expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
       // Twenty minutes more: once every ten at most, so a device that gets
       // well while it keeps talking does not wait hours either.

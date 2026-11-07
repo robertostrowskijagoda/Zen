@@ -32,19 +32,27 @@ const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 /// one of [path]; the folder chooser answers [chosen], the default folder
 /// when none is given, or null ([cancel]: the person closes it).
 final class _Places implements AccountBackupPlaces {
-  _Places(this.path, {AccountBackupFolder? chosen, this.cancel = false})
-    : _chosen = chosen;
+  _Places(
+    this.path, {
+    AccountBackupFolder? chosen,
+    this.cancel = false,
+    this.downloads = false,
+  }) : _chosen = chosen;
 
   final String path;
   final AccountBackupFolder? _chosen;
   final bool cancel;
 
+  /// An Android phone: the default place is Downloads (the media store).
+  final bool downloads;
+
   AccountBackupFolder? get chosen => cancel ? null : _chosen ?? defaultPlace;
   int chooserCalls = 0;
   final List<AccountBackupFolder> written = <AccountBackupFolder>[];
 
-  AccountBackupFolder get defaultPlace =>
-      AccountBackupFolder.directory(File(path).parent.path);
+  AccountBackupFolder get defaultPlace => downloads
+      ? AccountBackupFolder.downloads()
+      : AccountBackupFolder.directory(File(path).parent.path);
 
   @override
   Future<String?> pick() async => path;
@@ -680,6 +688,42 @@ void main() {
       await tester.tap(find.byKey(const Key('account-backup-folder-default')));
       await _real(tester);
       expect(find.textContaining('Zapytam o miejsce'), findsOneWidget);
+    });
+
+    testWidgets('on Android Downloads is offered before the system chooser, '
+        'which cannot pick it', (WidgetTester tester) async {
+      final Directory dir = Directory.systemTemp.createTempSync('zen-ui-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final _Places places = _Places(
+        '${dir.path}/k.$kAccountBackupExtension',
+        downloads: true,
+      );
+      await pumpBackup(tester, places);
+      await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('account-backup-folder-downloads')),
+      );
+      await tester.pumpAndSettle();
+      await _real(tester);
+      // Taken without the system's chooser.
+      expect(places.chooserCalls, 0);
+      expect(find.text('Pobrane'), findsOneWidget);
+      await create(tester);
+      expect(places.chooserCalls, 0);
+      expect(places.written.single.kind, AccountBackupFolderKind.downloads);
+      expect(File(places.path).existsSync(), isTrue);
+
+      // "Inny folder…" opens the system's chooser.
+      await tester.ensureVisible(
+        find.byKey(const Key('account-backup-folder-choose')),
+      );
+      await tester.tap(find.byKey(const Key('account-backup-folder-choose')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-backup-folder-other')));
+      await tester.pumpAndSettle();
+      await _real(tester);
+      expect(places.chooserCalls, 1);
     });
 
     testWidgets('a closed chooser saves nothing', (WidgetTester tester) async {

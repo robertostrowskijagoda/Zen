@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/social/mentions.dart';
 
@@ -83,7 +84,15 @@ final class ReactionsSeen {
     LedgerDisk disk, {
     String key = _seenKey,
   }) async {
-    final Uint8List? raw = await disk.read(key);
+    final Uint8List? raw;
+    try {
+      raw = await disk.read(key);
+    } on Object catch (error) {
+      // Damaged past its backups (or too big to read): what was seen is
+      // learnt again, as on a first start.
+      logZenWarning('The reactions seen are unreadable: $error');
+      return ReactionsSeen.empty(key: key);
+    }
     if (raw == null) {
       return ReactionsSeen.empty(key: key);
     }

@@ -8,6 +8,7 @@ import 'package:zen/src/features/feed/reaction_digest.dart';
 import 'package:zen/src/features/feed/reaction_notifier.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -149,6 +150,128 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
     expect(posted, isNotEmpty);
+  });
+
+  test('only reactions wake it, a check asked for during another one comes '
+      'once after it, and nothing more', () async {
+    final (LedgerNode a, LedgerNode b) = await pair();
+    int checks = 0;
+    final ReactionSystemNotifier notifier = ReactionSystemNotifier(
+      node: a,
+      nameOf: (String address) => address,
+      notify: (RuntimeSystemNotification n) async {},
+      // Asked once per check that gets as far as announcing.
+      shouldNotify: () {
+        checks++;
+        return true;
+      },
+      quiet: const Duration(milliseconds: 30),
+      atMost: const Duration(milliseconds: 100),
+    );
+    addTearDown(notifier.dispose);
+    // The first round only learns what is there (and asks nothing).
+    expect(await notifier.check(), 0);
+    expect(checks, 0);
+    expect(await notifier.check(), 0);
+    expect(checks, 1);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(checks, 1, reason: 'nothing was asked for in between');
+
+    // Two at once: the second waits for the first, then goes once.
+    await Future.wait(<Future<int>>[notifier.check(), notifier.check()]);
+    expect(checks, 2);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(checks, 3);
+
+    // Started: one look now, then only what reacts to posts wakes it.
+    notifier.start();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(checks, 4);
+    final LogEntry post = await b.publish(kPostKind, newPostBody('Nowy'));
+    await _settle();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(checks, 4, reason: 'a post is no reaction');
+    await b.publish(kLikeKind, likeBody(post.id), spaceKind: 'acts');
+    await _settle();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(checks, 5);
+  });
+
+  test("reactions under a friend's post are not about yours; a suspended or "
+      'closed notifier tells nothing', () async {
+    final (LedgerNode a, LedgerNode b) = await pair();
+    final List<RuntimeSystemNotification> posted =
+        <RuntimeSystemNotification>[];
+    final ReactionSystemNotifier notifier = ReactionSystemNotifier(
+      node: a,
+      nameOf: (String address) => address == bob ? 'Bob' : address,
+      notify: (RuntimeSystemNotification n) async => posted.add(n),
+      shouldNotify: () => true,
+    );
+    addTearDown(notifier.dispose);
+    final LogEntry mine = await a.publish(kPostKind, newPostBody('Mój'));
+    final LogEntry his = await b.publish(kPostKind, newPostBody('Jego'));
+    await _settle();
+    expect(await notifier.check(), 0);
+    // This phone likes the friend's post: a reaction, not under one's own.
+    await a.publish(kLikeKind, likeBody(his.id), spaceKind: 'acts');
+    await _settle();
+    expect(await notifier.check(), 0);
+
+    await b.publish(kLikeKind, likeBody(mine.id), spaceKind: 'acts');
+    await _settle();
+    final ReactionSystemNotifier closed = ReactionSystemNotifier(
+      node: a,
+      nameOf: (String address) => address,
+      notify: (RuntimeSystemNotification n) async => posted.add(n),
+      shouldNotify: () => true,
+    )..dispose();
+    expect(await closed.check(), 0, reason: 'closed');
+    await a.suspend();
+    expect(await notifier.check(), 0, reason: 'suspended');
+    expect(posted, isEmpty);
+  });
+
+  test('likes alone, comments alone: the title says it, the body is general; '
+      'a tap opens that post', () {
+    ReactionNotice notice({int likes = 0, int comments = 0}) => ReactionNotice(
+      postId: 'p1',
+      excerpt: 'Hej',
+      likers: <String>[if (likes > 0) 'Cela'],
+      likes: likes,
+      commenters: <String>[if (comments > 0) 'Dan'],
+      comments: comments,
+      millis: 0,
+    );
+    final RuntimeSystemNotification liked = reactionNotification(
+      notice(likes: 1),
+      createdAtMillis: 1,
+    );
+    expect(liked.title, contains('Cela'));
+    expect(liked.body, 'Reakcje na Twoje posty');
+    final RuntimeRouteIntent tap = runtimeRouteIntentFromRouteKey(
+      id: 'tap',
+      routeKey: liked.routeKey,
+    )!;
+    // One's own post in one's profile (they are not on the Tablica).
+    expect(tap.target, RuntimeRouteTarget.ownPost);
+    expect(tap.postId, 'p1');
+    expect(
+      runtimeRouteIntentFromRouteKey(id: 'x', routeKey: 'zen://post?p='),
+      isNull,
+    );
+    final RuntimeSystemNotification commented = reactionNotification(
+      notice(comments: 1),
+      createdAtMillis: 1,
+    );
+    expect(commented.title, contains('Dan'));
+    expect(commented.body, 'Reakcje na Twoje posty');
+    final RuntimeSystemNotification both = reactionNotification(
+      notice(likes: 1, comments: 1),
+      createdAtMillis: 1,
+    );
+    expect(both.title, contains('Cela'));
+    expect(both.body, contains('Dan'));
   });
 
   test('the notification title is one that the privacy setting redacts', () {

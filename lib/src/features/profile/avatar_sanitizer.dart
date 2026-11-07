@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:image/image.dart' as img;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
 /// Security validator and sanitizer for user profile avatar images.
@@ -105,7 +108,18 @@ final class AvatarSanitizer {
       throw FormatException(t('Plik źródłowy awatara nie istnieje.'));
     }
 
-    final Uint8List rawBytes = await sourceFile.readAsBytes();
+    return validateAndStoreAvatarBytes(
+      rawBytes: await sourceFile.readAsBytes(),
+      storageDir: storageDir,
+    );
+  }
+
+  /// [validateAndStoreAvatar] for a picture already in memory (one the
+  /// person framed: [makeAvatarImage]).
+  static Future<String> validateAndStoreAvatarBytes({
+    required Uint8List rawBytes,
+    required Directory storageDir,
+  }) async {
     if (rawBytes.isEmpty) {
       throw FormatException(t('Plik awatara jest pusty.'));
     }
@@ -206,4 +220,89 @@ final class AvatarSanitizer {
       logZenError('Cleaning up old avatar failed', error, stackTrace);
     }
   }
+}
+
+/// The longest side of a photo of one's own, framed ([makeAvatarImage]).
+const int kAvatarSide = 1024;
+
+/// The longest side of an animated GIF photo, framed.
+const int kAvatarGifSide = 512;
+
+/// Largest picked file that can be framed as a photo (the result is far
+/// smaller).
+const int kMaxAvatarSourceBytes = 20 * 1024 * 1024;
+
+/// The part [region] of the picture [bytes] (framed by the person, made
+/// square) as one's photo: a JPEG at most [kAvatarSide] a side (a PNG when
+/// it has see-through parts), turned upright and without its metadata
+/// (no EXIF, no GPS); a GIF stays animated ([kAvatarGifSide]). `null` when
+/// it is not a picture this app handles. Pure and slow for a big picture:
+/// run it in an isolate.
+Uint8List? makeAvatarImage((Uint8List, CropRegion?) job) {
+  final Uint8List bytes = job.$1;
+  final CropRegion? region = job.$2;
+  if (bytes.length > kMaxAvatarSourceBytes ||
+      !AvatarSanitizer.isValidImageBytes(bytes) ||
+      AvatarSanitizer.hasDangerousHeader(bytes)) {
+    return null;
+  }
+  if (looksLikeGif(bytes)) {
+    return shrinkGif(
+      bytes,
+      maxSide: kAvatarGifSide,
+      maxBytes: AvatarSanitizer.maxAvatarFileSize,
+      aspect: 1,
+      region: region,
+    );
+  }
+  final img.Decoder? decoder = img.findDecoderForData(bytes);
+  final img.DecodeInfo? info = decoder?.startDecode(bytes);
+  if (decoder == null ||
+      info == null ||
+      info.width <= 0 ||
+      info.height <= 0 ||
+      info.width > 12000 ||
+      info.height > 12000) {
+    return null;
+  }
+  final img.Image? decoded = decoder.decode(bytes, frame: 0);
+  if (decoded == null) {
+    return null;
+  }
+  final img.Image oriented = img.bakeOrientation(decoded);
+  final ({int x, int y, int width, int height}) part =
+      (region ?? CropRegion.full).pixels(
+        oriented.width,
+        oriented.height,
+        aspect: 1,
+      );
+  img.Image out = img.copyCrop(
+    oriented,
+    x: part.x,
+    y: part.y,
+    width: part.width,
+    height: part.height,
+  );
+  if (out.width > kAvatarSide) {
+    out = img.copyResize(
+      out,
+      width: kAvatarSide,
+      height: kAvatarSide,
+      interpolation: img.Interpolation.average,
+    );
+  }
+  if (out.hasAlpha && _seeThrough(out)) {
+    return img.encodePng(out, level: 6);
+  }
+  return img.encodeJpg(out, quality: 88);
+}
+
+/// Whether any pixel of [image] is not fully opaque.
+bool _seeThrough(img.Image image) {
+  for (final img.Pixel p in image) {
+    if (p.a < p.maxChannelValue) {
+      return true;
+    }
+  }
+  return false;
 }

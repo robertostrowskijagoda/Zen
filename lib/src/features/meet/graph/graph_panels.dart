@@ -930,7 +930,14 @@ Future<void> showGraphSnapshot(
       final ZenColors zen = ZenColors.of(sheet);
       return SingleChildScrollView(
         key: const Key('graph-snapshot-sheet'),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        // Clear of the system's navigation bar (edge to edge, the sheet
+        // reaches under it): "Wyślij znajomemu" and "Zapisz" stay reachable.
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          24 + MediaQuery.viewPaddingOf(sheet).bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -99,6 +99,11 @@ final class RelayConfig {
     this.messageTtl = const Duration(days: 14),
     this.depositAfter = const Duration(seconds: 4),
     this.directRetrySchedule = const <Duration>[
+      // Three tries at once (the first right away, then a second apart):
+      // a datagram lost while the mesh finds the way to an online phone
+      // goes again within a second, not three. Then longer and longer.
+      Duration(seconds: 1),
+      Duration(seconds: 1),
       Duration(seconds: 3),
       Duration(seconds: 10),
       Duration(seconds: 30),
@@ -124,6 +129,10 @@ final class RelayConfig {
     this.depositRetryMaxInterval = const Duration(minutes: 30),
     this.networkQuietGap = const Duration(minutes: 10),
     this.sightingRetryAfter = const Duration(minutes: 10),
+    this.quickSightingTries = 6,
+    this.quickSightingRetryAfter = const Duration(seconds: 4),
+    this.answeringFor = const Duration(minutes: 2),
+    this.sendingWhileAnsweringFor = const Duration(minutes: 1),
     this.maxTrackedMessages = 1000,
     this.announceRetryInterval = const Duration(minutes: 2),
     this.pollInterval = const Duration(minutes: 5),
@@ -223,6 +232,23 @@ final class RelayConfig {
   /// does not wait hours, and one that stays unwell gets each payload at
   /// most this often.
   final Duration sightingRetryAfter;
+
+  /// A small payload (one the mailboxes take) tried fewer than this many
+  /// times goes again whenever its recipient is heard from, once its last
+  /// try is [quickSightingRetryAfter] ago, not at the end of its backoff
+  /// (3 s, 10 s, 30 s, 2 min…): the recipient is there now, and a first
+  /// try lost while the mesh found the way to it is not left waiting.
+  /// Past that many tries, a device that talks without confirming gets it
+  /// on the backoff again ([sightingRetryAfter]).
+  final int quickSightingTries;
+  final Duration quickSightingRetryAfter;
+
+  /// A recipient heard from within this long is around: its message that
+  /// is younger than [sendingWhileAnsweringFor] shows as being sent, not as
+  /// "waiting here, the recipient is offline" while its confirmation is on
+  /// the way.
+  final Duration answeringFor;
+  final Duration sendingWhileAnsweringFor;
 
   /// Outgoing chat messages whose delivery is kept for the chat
   /// ([RelayTrackedMessage]); settled ones go first.
@@ -1423,6 +1449,12 @@ final class RelayEngine {
     });
   }
 
+  /// Whether [address] was heard from within [RelayConfig.answeringFor].
+  bool _answering(String address, int now) {
+    final int? at = _lastSeenHandledAt[address];
+    return at != null && now - at < config.answeringFor.inMilliseconds;
+  }
+
   RelayProgressSnapshot _progressOf(RelayState state, int now) {
     final Map<String, MessageDeliveryProgress> messages =
         <String, MessageDeliveryProgress>{};
@@ -1463,6 +1495,16 @@ final class RelayEngine {
           } else {
             stage = 1;
           }
+        }
+        if (stage == 1 &&
+            entry != null &&
+            _answering(entry.recipient, now) &&
+            now - entry.createdAtMillis <
+                config.sendingWhileAnsweringFor.inMilliseconds) {
+          // "Waiting here, the recipient is offline" while the recipient
+          // was heard from a moment ago: on its way, its confirmation not
+          // here yet.
+          stage = 2;
         }
         final String person = _personOf(recipient);
         final ({int stage, int copies, bool self})? known = people[person];
@@ -1571,6 +1613,30 @@ final class RelayEngine {
   /// in lately. Otherwise a slow tick does (see `ReliableSignalTransport`),
   /// which spares the battery while everything just waits.
   bool get wantsFrequentTicks => _frequentTicks;
+
+  /// How long until the soonest direct try of the outbox is due, when that
+  /// is sooner than [within] (the next tick would be late for it); `null`
+  /// otherwise. The quick first tries come a second apart.
+  Duration? nextTryWithin(Duration within) {
+    final RelayState? state = _state;
+    if (!_active || state == null) {
+      return null;
+    }
+    final int now = _now();
+    int? soonest;
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      if (_isPart(entry)) {
+        continue;
+      }
+      final int wait = entry.nextDirectAttemptAtMillis - now;
+      if (wait < within.inMilliseconds && (soonest == null || wait < soonest)) {
+        soonest = wait;
+      }
+    }
+    return soonest == null
+        ? null
+        : Duration(milliseconds: soonest < 0 ? 0 : soonest);
+  }
 
   bool _computeFrequentTicks(RelayState state, int now) {
     const int soon = 30 * 1000;
@@ -2918,7 +2984,11 @@ final class RelayEngine {
         changed = true;
       } else if (now >= entry.nextDirectAttemptAtMillis ||
           now - _lastDirectAttemptAt(entry) >=
-              config.sightingRetryAfter.inMilliseconds) {
+              config.sightingRetryAfter.inMilliseconds ||
+          (entry.relayable &&
+              entry.directAttempts < config.quickSightingTries &&
+              now - _lastDirectAttemptAt(entry) >=
+                  config.quickSightingRetryAfter.inMilliseconds)) {
         state.outbox[entry.rid] = await _attemptDirect(entry, now);
         changed = true;
       }
@@ -2971,6 +3041,9 @@ final class RelayEngine {
         }
       }
       if (_forgetFormerContacts(state)) {
+        changed = true;
+      }
+      if (await _dropForUnlinkedDevices(state)) {
         changed = true;
       }
       if (_noteOwnClass(state)) {
@@ -3667,38 +3740,85 @@ final class RelayEngine {
   }) {
     return _locked(() async {
       final RelayState state = await _load();
-      final String to = PeerShareCodec.normalizeAddress(recipient);
-      final int before = state.outbox.length;
-      state.outbox.removeWhere(
-        (String _, RelayOutboxEntry e) =>
-            e.recipient == to && !keepTypes.contains(e.payload['type']),
-      );
-      bool changed = state.outbox.length != before;
-      // Their messages are not on their way any more: nobody to wait for.
-      for (final RelayTrackedMessage tracked in state.tracked.values.toList()) {
-        final String? rid = tracked.pending[to];
-        if (rid != null && !state.outbox.containsKey(rid)) {
-          tracked.pending.remove(to);
-          if (tracked.pending.isEmpty &&
-              tracked.delivered.isEmpty &&
-              tracked.expired.isEmpty) {
-            state.tracked.remove(tracked.messageId);
-          } else if (tracked.isSettled) {
-            tracked.settledAtMillis = _now();
-          }
-          changed = true;
-        }
-      }
-      for (final RelayBlobOut blob in state.outBlobs.values.toList()) {
-        if (blob.recipient == to) {
-          await _dropOutBlob(state, blob);
-          changed = true;
-        }
-      }
-      if (changed) {
+      if (await _dropPendingTo(
+        state,
+        PeerShareCodec.normalizeAddress(recipient),
+        keepTypes: keepTypes,
+      )) {
         await _save(state);
       }
     });
+  }
+
+  /// [cancelPendingTo] on [state] for the canonical address [to]; true when
+  /// something went (the caller saves).
+  Future<bool> _dropPendingTo(
+    RelayState state,
+    String to, {
+    Set<String> keepTypes = const <String>{},
+  }) async {
+    final int before = state.outbox.length;
+    state.outbox.removeWhere(
+      (String _, RelayOutboxEntry e) =>
+          e.recipient == to && !keepTypes.contains(e.payload['type']),
+    );
+    bool changed = state.outbox.length != before;
+    // Their messages are not on their way any more: nobody to wait for.
+    for (final RelayTrackedMessage tracked in state.tracked.values.toList()) {
+      final String? rid = tracked.pending[to];
+      if (rid != null && !state.outbox.containsKey(rid)) {
+        tracked.pending.remove(to);
+        if (tracked.pending.isEmpty &&
+            tracked.delivered.isEmpty &&
+            tracked.expired.isEmpty) {
+          state.tracked.remove(tracked.messageId);
+        } else if (tracked.isSettled) {
+          tracked.settledAtMillis = _now();
+        }
+        changed = true;
+      }
+    }
+    for (final RelayBlobOut blob in state.outBlobs.values.toList()) {
+      if (blob.recipient == to) {
+        await _dropOutBlob(state, blob);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /// Drops what waits for a friend's device its owner unlinked (a lost or
+  /// stolen phone, an old one replaced): nothing should go there any more,
+  /// and it was retried and held by mailboxes for two weeks, counted in
+  /// "Czeka na doręczenie", and what this device held for it as one of its
+  /// mailboxes ("Przechowujesz dla znajomych": it never comes for it). The
+  /// friend's other devices have their own copies.
+  Future<bool> _dropForUnlinkedDevices(RelayState state) async {
+    if (!_peers.isReady || (state.outbox.isEmpty && state.mailbox.isEmpty)) {
+      return false;
+    }
+    final List<RelayFriend> friends = _acceptedFriends();
+    final Set<String> unlinked = <String>{
+      for (final RelayFriend f in friends)
+        if (!f.linked) PeerShareCodec.normalizeAddress(f.address),
+    };
+    if (unlinked.isEmpty) {
+      return false;
+    }
+    for (final RelayFriend f in friends) {
+      unlinked.removeAll(f.allAddresses);
+    }
+    bool changed = false;
+    for (final String to in unlinked) {
+      if (state.outbox.values.any((RelayOutboxEntry e) => e.recipient == to)) {
+        changed = await _dropPendingTo(state, to) || changed;
+      }
+      if (state.mailbox.remove(to) != null) {
+        _lastPushedAt.remove(to);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   /// Turns sharing this device's key and mailboxes with group members who are

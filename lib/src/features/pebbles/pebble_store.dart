@@ -306,6 +306,37 @@ final class PebbleStore extends ChangeNotifier {
 
   static const String _doorSeedKey = 'pebbles/door';
 
+  /// The stored keys a copy of the account takes along (a backup file, a
+  /// move to a new phone): the index and every pebble's full design, read
+  /// through [read]. Not this device's own pebble door ([_doorSeedKey]):
+  /// the new device makes its own. Without them a new phone had only the
+  /// list in the profile and waited for designs from a phone that was
+  /// often gone.
+  static Future<List<String>> archiveKeys(
+    Future<Uint8List?> Function(String key) read,
+  ) async {
+    final Uint8List? raw = await read(_indexKey);
+    if (raw == null) {
+      return const <String>[];
+    }
+    final List<String> keys = <String>[_indexKey];
+    final Object? json;
+    try {
+      json = jsonDecode(utf8.decode(raw));
+    } on FormatException {
+      return keys;
+    }
+    if (json is Map) {
+      for (final Object? e in _list(json['e'])) {
+        final PebbleEntry? entry = PebbleEntry.fromJson(e);
+        if (entry != null) {
+          keys.add(_designKey(entry.id));
+        }
+      }
+    }
+    return keys;
+  }
+
   /// The pebble door address the authors of the kept pebbles were last
   /// told (so a door that comes later is told once, not at every start).
   String? get toldDoor => _toldDoor;

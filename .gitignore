@@ -45,3 +45,6 @@ maintainer.key
 # Python
 __pycache__/
 *.pyc
+
+# Keys and other private files of the owner: never in the repository.
+/private/

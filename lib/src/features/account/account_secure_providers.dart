@@ -15,6 +15,20 @@ final Provider<bool> accountSecureStepRequiredProvider = Provider<bool>(
   (Ref ref) => false,
 );
 
+/// Whether the account's node has loaded its identity (it settled ready):
+/// until then nobody can tell whether a circle or a password is there.
+/// Watched, so whatever reads the identity is read again once it is.
+final FutureProvider<bool> ledgerIdentityLoadedProvider = FutureProvider<bool>((
+  Ref ref,
+) async {
+  final LedgerNode? node = ref.watch(ledgerNodeProvider);
+  if (node == null) {
+    return false;
+  }
+  await node.settled;
+  return node.isReady;
+});
+
 /// Whether the account is secured against a lost phone: the recovery
 /// circle holds pieces (an account password is set) or the paper copy of
 /// the key was written down. `false` while the account is still starting
@@ -33,6 +47,11 @@ bool accountHasCircle(T Function<T>(ProviderListenable<T> provider) watch) {
   final LedgerNode? node = watch(ledgerNodeProvider);
   return node != null && node.isReady && node.identity.hasPassword;
 }
+
+/// Whether the account's identity is loaded, as [ledgerIdentityLoadedProvider]
+/// says (watched: the reminders that read the identity come back to it).
+bool _identityLoaded(Ref ref) =>
+    ref.watch(ledgerIdentityLoadedProvider).value ?? false;
 
 /// The id in `AppSettings.seenTips` of a dismissed circle reminder.
 const String kCircleReminderTip = 'circle-reminder';
@@ -55,9 +74,13 @@ bool circleReminderDue({
 
 /// [circleReminderDue] for this account. Invalidate it after the circle
 /// is set up.
+///
+/// Nothing is said until the identity is loaded: read before that, the
+/// circle looked missing, and the card stayed after it was set up (nothing
+/// made this read again).
 final Provider<bool> circleReminderProvider = Provider<bool>(
   (Ref ref) => circleReminderDue(
-    ledgerOn: ref.watch(ledgerNodeEnabledProvider),
+    ledgerOn: ref.watch(ledgerNodeEnabledProvider) && _identityLoaded(ref),
     hasCircle: accountHasCircle(ref.watch),
     friends: ref.watch(
       socialHubControllerProvider.select(
@@ -72,7 +95,9 @@ final Provider<bool> circleReminderProvider = Provider<bool>(
 /// Invalidate it after the circle is set up.
 final Provider<bool> accountSecureReminderProvider = Provider<bool>(
   (Ref ref) =>
-      ref.watch(ledgerNodeEnabledProvider) && !accountIsSecured(ref.watch),
+      ref.watch(ledgerNodeEnabledProvider) &&
+      _identityLoaded(ref) &&
+      !accountIsSecured(ref.watch),
 );
 
 /// How old the last backup of the account may get before Zen reminds.
@@ -106,6 +131,8 @@ final Provider<DateTime Function()> backupReminderClockProvider =
 /// circle reminder (one card at a time).
 final Provider<bool> backupReminderProvider = Provider<bool>(
   (Ref ref) =>
+      // Not before the circle reminder could tell whether it shows.
+      _identityLoaded(ref) &&
       !ref.watch(circleReminderProvider) &&
       backupReminderDue(
         ledgerOn: ref.watch(ledgerNodeEnabledProvider),

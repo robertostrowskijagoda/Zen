@@ -1606,7 +1606,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final int timestamp =
         observedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String key = PeerShareCodec.normalizeAddress(friend.address);
-    final int openedAt = report.lastOpenedAt(timestamp);
+    final int openedAt = lastOpenedAfterReport(
+      known: friend.lastOpenedAtMillis,
+      report: report,
+      receivedAtMillis: timestamp,
+    );
     if (reachable) {
       _presenceSeenAt[key] = timestamp;
     }
