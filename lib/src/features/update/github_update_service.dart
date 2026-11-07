@@ -155,9 +155,9 @@ final class GithubUpdateService extends ChangeNotifier {
   final RuntimeSystemNotificationService? notifications;
 
   /// The maintainers' keys (hybrid ids) a release's [kSignedSumsAssetName]
-  /// must be signed with. Empty (as today): only `SHA256SUMS`, which comes from the same
-  /// release as the file, so it protects against damage, not against a
-  /// forged release.
+  /// must be signed with ([kReleaseMaintainers] by default). Empty (tests):
+  /// only `SHA256SUMS`, which comes from the same release as the file, so it
+  /// protects against damage, not against a forged release.
   final List<String> releaseKeys;
   final Duration firstCheckAfter;
   final Duration checkEvery;

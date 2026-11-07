@@ -64,4 +64,14 @@ void main() {
     expect(safeFileName('Wakacje 2026 (1).jpg'), 'Wakacje 2026 (1).jpg');
     expect(safeFileName('zażółć.txt'), 'zażółć.txt');
   });
+
+  test("Windows' device names are not left to open the device", () {
+    expect(safeFileName('CON.txt'), '_CON.txt');
+    expect(safeFileName('nul'), '_nul');
+    expect(safeFileName('../com1.png'), '_com1.png');
+    expect(safeFileName('Lpt9.tar.gz'), '_Lpt9.tar.gz');
+    // Only the whole first part counts.
+    expect(safeFileName('console.txt'), 'console.txt');
+    expect(safeFileName('COM10.txt'), 'COM10.txt');
+  });
 }

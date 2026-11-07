@@ -2,7 +2,8 @@
 /// one path segment: only the last segment of any path in it, no control
 /// or reserved characters, no leading dots, no dots, spaces or invisible
 /// characters at the end (Windows drops those, so `evil.exe.` is `evil.exe`
-/// there), at most [maxLength] characters.
+/// there), not a Windows device name (`CON.txt` becomes `_CON.txt`), at
+/// most [maxLength] characters.
 /// Null when nothing usable is left — callers fall back to their own name.
 String? safeFileName(String? raw, {int maxLength = 120}) {
   if (raw == null) {
@@ -23,8 +24,25 @@ String? safeFileName(String? raw, {int maxLength = 120}) {
     // The cut may leave a dot or space at the end of the stem or the name.
     name = trimNameEnd(name.substring(0, maxLength - ext.length)) + ext;
   }
-  return name.isEmpty ? null : name;
+  if (name.isEmpty) {
+    return null;
+  }
+  // Windows' device names, with any extension ("CON.txt", "nul", "COM1.png")
+  // open the device, not a file.
+  final String stem = name.split('.').first.toUpperCase();
+  if (_windowsDeviceNames.contains(stem)) {
+    name = '_$name';
+  }
+  return name;
 }
+
+const Set<String> _windowsDeviceNames = <String>{
+  'CON', 'PRN', 'AUX', 'NUL', 'CONIN\$', 'CONOUT\$', //
+  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'COM¹', 'COM²', 'COM³', //
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+  'LPT¹', 'LPT²', 'LPT³',
+};
 
 /// [name] without what the end of a file name does not count for: dots and
 /// whitespace, which Windows silently drops (`skrypt.ps1 ` and `faktura.exe.`
