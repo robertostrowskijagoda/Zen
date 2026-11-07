@@ -681,6 +681,7 @@ void main() {
       bool asleepOffScreen = false,
       ValueListenable<bool>? reachable,
       SocialSnapshotStore? store,
+      KeptPresenceReader? kept,
       Map<String, FriendProfile> friends = const <String, FriendProfile>{
         _ada: FriendProfile(
           address: _ada,
@@ -708,6 +709,8 @@ void main() {
               ),
             if (store != null)
               socialSnapshotStoreProvider.overrideWithValue(store),
+            if (kept != null)
+              keptPresenceReaderProvider.overrideWithValue(kept),
             socialHubSeedProvider.overrideWithValue(
               SocialHubState.empty().copyWith(
                 book: FriendshipBook.restore(profiles: friends),
@@ -1218,6 +1221,55 @@ void main() {
       await tester.pump();
       expect(friendIn(tester, _bob).presenceDoubt, isNull);
       expect(friendIn(tester, _bob).shownPresence, PeerPresence.offline);
+    });
+
+    testWidgets('what the background service kept shows the moment Zen '
+        'opens, before the node reaches the mesh; it is not answered, and the '
+        "start's pings still go", (WidgetTester tester) async {
+      final ValueNotifier<bool> reachable = ValueNotifier<bool>(false);
+      addTearDown(reachable.dispose);
+      final int at = DateTime.now().millisecondsSinceEpoch - _minute;
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        reachable: reachable,
+        kept: () async => <SignalTransportFrame>[
+          // Ada's ping from her Zen on the screen, a minute ago.
+          SignalTransportFrame(
+            from: _ada,
+            payload: const <String, dynamic>{
+              'type': 'ping',
+              'state': 'foreground',
+            },
+            receivedAtMillis: at,
+          ),
+          // Someone who is not a friend: not taken.
+          SignalTransportFrame(
+            from: _carol,
+            payload: const <String, dynamic>{
+              'type': 'pong',
+              'state': 'foreground',
+            },
+            receivedAtMillis: at,
+          ),
+        ],
+      );
+      expect(friendIn(tester, _ada).shownPresence, PeerPresence.online);
+      expect(friendIn(tester, _ada).presenceAtMillis, at);
+      expect(
+        ProviderScope.containerOf(
+          tester.element(find.byType(ZenRewriteApp)),
+        ).read(socialHubControllerProvider).friends[_carol],
+        isNull,
+      );
+      expect(sent(transport, 'pong'), 0, reason: 'answered by the service');
+
+      // Not "heard in this run": once the node reaches the mesh, the
+      // start's ping to her still says this Zen just started.
+      reachable.value = true;
+      await tester.pump();
+      await tester.pump();
+      final Map<String, dynamic> ping = last(transport, 'ping');
+      expect(ping[kPresenceFreshKey], isTrue);
     });
 
     testWidgets('pings that went out before the node reached the mesh go out '

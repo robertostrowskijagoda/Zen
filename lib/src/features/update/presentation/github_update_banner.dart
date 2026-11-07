@@ -305,13 +305,25 @@ class _UpdateProgress extends StatelessWidget {
           if (step != null) ...<Widget>[
             ClipRRect(
               borderRadius: context.zenRadius(99),
-              child: LinearProgressIndicator(
-                value: state == GithubInstallState.downloading
-                    ? service.progress
-                    : null,
-                minHeight: 5,
-                color: zen.accent,
-                backgroundColor: zen.accent.withValues(alpha: 0.14),
+              // Glides from one value to the next, and stays full while the
+              // file is checked and installed (it ran across the bar again
+              // from the start before, as if the download began anew).
+              child: TweenAnimationBuilder<double>(
+                key: const Key('github-update-progress'),
+                tween: Tween<double>(
+                  end: state == GithubInstallState.downloading
+                      ? service.progress
+                      : 1,
+                ),
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOut,
+                builder: (BuildContext context, double value, Widget? _) =>
+                    LinearProgressIndicator(
+                      value: value,
+                      minHeight: 5,
+                      color: zen.accent,
+                      backgroundColor: zen.accent.withValues(alpha: 0.14),
+                    ),
               ),
             ),
             const SizedBox(height: 6),
@@ -355,7 +367,7 @@ class _UpdateProgress extends StatelessWidget {
               if (route == GithubUpdateRoute.download)
                 FilledButton.icon(
                   key: const Key('github-update-install'),
-                  onPressed: service.installing
+                  onPressed: service.updating
                       ? null
                       : () => unawaited(service.update()),
                   icon: const Icon(Icons.system_update_rounded, size: 18),

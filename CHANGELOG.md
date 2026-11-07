@@ -10,6 +10,11 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **Friends' statuses straight from the service when Zen opens**: the background service (Android, and an iPhone receiving in the background) keeps the newest status of each friend in a sealed file of its own (`presence.zbox`, next to the inbox and sealed for the same key), written again as soon as a friend's status comes. The app reads it the moment the friends are read after the unlock, before its node is up, and shows them at once. Before, the service handed the statuses over only when it stopped (as the app took the node back) and the app read them only after its core had started, which waits for the node, so statuses still took seconds. Statuses taken from the service are not answered and do not count as heard in this run: the start's pings still go to those friends.
+- **The update's progress bar no longer jumps**: a second tap on "Aktualizuj" while the release's files were still being asked for (a version known from GitHub's release page alone, its API out of requests) started a second download into the same file, and the bar jumped between the two. "Aktualizuj" now waits from the first tap. The bar glides from one value to the next, never goes back, and stays full while the file is checked and installed (it ran across the bar from the start again before).
+- **Tests**: the service's statuses kept as they come and read before the node is up (not answered, the start still pings), a second "Aktualizuj" during the release's details, a late progress count, an inbox in folders not made yet. Mutation target: the sealed inbox (19 of 20 changes caught; the one left, the folders, is pinned now).
+
 ## 1.15.8 — 07.11.2026
 
 ### What's new

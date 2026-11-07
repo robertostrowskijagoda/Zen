@@ -686,9 +686,6 @@ final class _IosBackgroundBridgeState
   bool _draining = false;
   bool _drained = false;
 
-  /// The statuses the service kept were shown before the inbox was opened
-  /// ([replayKeptPresence]), once per inbox.
-  bool _presenceReplayed = false;
   Timer? _drainRetry;
   int _drainTries = 0;
 
@@ -892,15 +889,6 @@ final class _IosBackgroundBridgeState
           ref.read(socialHubControllerProvider).snapshotUnreadable) {
         return;
       }
-      if (!_presenceReplayed) {
-        // Friends' statuses need no node: shown now, not once it is up.
-        _presenceReplayed = true;
-        await replayKeptPresence(
-          vault: vault,
-          masterKey: masterKey,
-          replay: runtime.replayReceived,
-        );
-      }
       if (!runtime.snapshot.serviceRunning) {
         // The node comes up a moment after the unlock.
         if (_drainTries++ < 20) {
@@ -922,7 +910,6 @@ final class _IosBackgroundBridgeState
         self: runtime.snapshot.localAddress,
       );
       _drained = true;
-      _presenceReplayed = false;
       logZenMessage(
         'Drained $delivered frame(s) kept while the app was locked (iOS).',
       );

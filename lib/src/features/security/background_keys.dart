@@ -305,11 +305,19 @@ abstract interface class BackgroundVault {
     Duration settle,
   });
 
-  /// What the service kept, opened but left where it is (a [drain] takes
-  /// it later): the app reads friends' statuses from it the moment it is
-  /// unlocked, before its node is up. Empty when nothing can be read.
-  Future<List<Uint8List>> peek({required Uint8List masterKey});
+  /// The newest status of each friend as the service heard it (a `ping`,
+  /// `pong` or `away` frame each, `encodeInboxFrame`), opened with the inbox
+  /// key of [masterKey]: the service keeps the file up to date while it
+  /// runs, so the app shows friends' statuses the moment it is unlocked,
+  /// before its node is up. Left where it is. Empty when there is none or
+  /// it cannot be read.
+  Future<List<Uint8List>> keptPresence({required Uint8List masterKey});
 }
+
+/// The file in the background folder with the newest status of each friend
+/// ([BackgroundVault.keptPresence]), next to the inbox and sealed for the
+/// same key (`SealedSnapshotWriter`).
+const String kKeptPresenceFileName = 'presence.zbox';
 
 /// How long the drained inbox files stay after the last record was handed
 /// over, so what it held is stored before the only sealed copy goes.
@@ -457,28 +465,24 @@ final class FileBackgroundVault implements BackgroundVault {
         (await _drainingFiles(folder)).isNotEmpty;
   }
 
+  /// The file with the newest status of each friend ([keptPresence]).
+  Future<File> presenceFile() async => File(
+    '${(await directory()).path}${Platform.pathSeparator}'
+    '$kKeptPresenceFileName',
+  );
+
   @override
-  Future<List<Uint8List>> peek({required Uint8List masterKey}) async {
-    final Directory folder = await directory();
-    final File inbox = await inboxFile();
-    final List<File> files = <File>[
-      ...await _drainingFiles(folder),
-      if (await inbox.exists()) inbox,
-    ];
-    if (files.isEmpty) {
+  Future<List<Uint8List>> keptPresence({required Uint8List masterKey}) async {
+    final File file = await presenceFile();
+    try {
+      if (!await file.exists()) {
+        return const <Uint8List>[];
+      }
+      return await readSealedInbox(file, await inboxKeyPairFor(masterKey));
+    } on Object catch (error) {
+      logZenWarning('Reading the friends\' statuses kept failed: $error');
       return const <Uint8List>[];
     }
-    final HybridKeyPair recipient = await inboxKeyPairFor(masterKey);
-    final List<Uint8List> out = <Uint8List>[];
-    for (final File file in files) {
-      try {
-        out.addAll(await readSealedInbox(file, recipient));
-      } on Object catch (error) {
-        // Being written, or damaged: the drain deals with it.
-        logZenWarning('Looking into the inbox failed: $error');
-      }
-    }
-    return out;
   }
 
   @override

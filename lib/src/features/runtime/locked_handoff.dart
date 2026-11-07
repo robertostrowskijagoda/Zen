@@ -78,31 +78,23 @@ final class BackgroundCapabilityPublisher {
   }
 }
 
-/// Friends' statuses the locked receiver kept (`ping`, `pong`, `away`),
-/// handed to [runtime] at once, with the time they came: the app shows
-/// them the moment it is unlocked instead of when its node is up and the
-/// whole inbox is opened ([drainLockedInbox], which hands them over again;
-/// a status told before is not taken twice). [replay] is the runtime's
-/// `replayReceived`. Returns how many.
-Future<int> replayKeptPresence({
+/// The newest status of each friend the background service keeps
+/// (`ping`, `pong` or `away` frames, with the time they came;
+/// [BackgroundVault.keptPresence]), opened with the inbox key of
+/// [masterKey]: the app shows them the moment it is unlocked, before its
+/// node is up (runtime_signal_module.dart). Anything else is left out.
+Future<List<SignalTransportFrame>> keptPresenceFrames({
   required BackgroundVault vault,
   required Uint8List masterKey,
-  required void Function(SignalTransportFrame frame) replay,
-}) async {
-  int replayed = 0;
-  for (final Uint8List record in await vault.peek(masterKey: masterKey)) {
-    final SignalTransportFrame? frame = decodeInboxFrame(record);
-    final Object? type = frame?.payload['type'];
-    if (frame == null ||
-        frame.door ||
-        (type != 'ping' && type != 'pong' && type != kPresenceAwayType)) {
-      continue;
-    }
-    replay(frame);
-    replayed += 1;
-  }
-  return replayed;
-}
+}) async => <SignalTransportFrame>[
+  for (final Uint8List record in await vault.keptPresence(masterKey: masterKey))
+    if (decodeInboxFrame(record) case final SignalTransportFrame frame
+        when !frame.door &&
+            (frame.payload['type'] == 'ping' ||
+                frame.payload['type'] == 'pong' ||
+                frame.payload['type'] == kPresenceAwayType))
+      frame,
+];
 
 /// Opens what the locked receiver kept (with the inbox key of [masterKey])
 /// and hands it to [runtime] as if it had just arrived; "Mijani" seen while
