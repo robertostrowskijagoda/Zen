@@ -86,5 +86,17 @@
   {
     "file": "lib/src/features/media/crop_region.dart",
     "tests": ["test/image_crop_test.dart"]
+  },
+  {
+    "file": "lib/src/core/utils/safe_file_name.dart",
+    "tests": ["test/safe_file_name_test.dart"]
+  },
+  {
+    "file": "lib/src/features/feed/reaction_digest.dart",
+    "tests": ["test/reaction_digest_test.dart", "test/unawaited_logged_test.dart"]
+  },
+  {
+    "file": "lib/src/features/runtime/runtime_route_intent.dart",
+    "tests": ["test/runtime_route_intent_test.dart", "test/reaction_notifier_test.dart"]
   }
 ]
