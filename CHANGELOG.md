@@ -10,6 +10,14 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Frame your photo and cover before they are saved, and use a GIF for either.
+- [en] Messages and statuses come through faster while friends' Zen runs in the background, and a like opens your post.
+- [en] Backups save to Downloads on Android, pebbles move to a new phone, and zooming the graph keeps people their size.
+- [pl] Kadrujesz zdjęcie i tło przed zapisem, a na oba możesz dać GIF-a.
+- [pl] Wiadomości i statusy docierają szybciej, gdy Zen znajomych działa w tle, a polubienie otwiera Twój post.
+- [pl] Kopia zapisze się w Pobranych na Androidzie, kamyczki przechodzą na nowy telefon, a przybliżanie grafu nie powiększa ludzi.
+
 ### Fixes and changes
 - **The iPhone install guide, so nothing is left to guess**: the install page says before the steps, as a warning, to connect LocalDevVPN (in its own app, **Connect**) before SideStore signs in, installs, renews or updates anything; step 3 says that the e-mail under "VPN & Device Management" is your own Apple Account, the developer, so you trust yourself; step 4 links to a new first answer under "If something goes wrong", opened by its link: error **-80045** when signing in to SideStore (Apple turns down SideStore's default anisette since October 2026), fixed once in SideStore's settings (On-Device Anisette off, the "SideStore (New)" server without auto rotation, Remote Server Sync, Reset adi.pb), with what to do on ADP, 502 or a -80045 that stays, and on iloader. Another new answer: SideStore or Zen doesn't open because the developer isn't trusted. In all 21 languages; the app's own iPhone steps (and docs/INSTALL.md, the guide) say the same in short.
 - **The fix of -80045 in step 4 itself**: right now signing in to SideStore fails with -80045 almost every time, so the fix is no longer folded away under "If something goes wrong" but a warning box right under signing in, in step 4 ("Signing in ends with -80045? Right now it almost always does."); the answer under "If something goes wrong" points there.
@@ -32,6 +40,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Failures of background work are logged, not left unhandled**: work started in the background with a result (a check that returns a count) threw an error of its own when it failed, in place of logging the failure; the reactions seen of a damaged file start afresh instead of failing the reaction notices (the persistence fuzz test caught it).
 - **The framing screen reads a picture's size first**: a small file that claims a huge picture (from a file, the keyboard or the GIF search) is not decoded at all, and others are shown at most 2048 px a side.
 - **Security review** (dependencies: `osv-scanner` on `pubspec.lock` and `go.mod`, `govulncheck` on the Go bridge: nothing that affects Zen; the one advisory, `golang.org/x/crypto/openpgp`, is in a package the bridge never uses). Fixed: an attachment's name that is a Windows device name (`CON.txt`, `NUL`, `COM1.png`) gets a `_` in front, so saving it on a computer writes a file, not to the device; `/private/` is in `.gitignore`, not only in the local excludes; the update service's comment said the maintainers' signature was not checked yet (it is).
+- **Tests**: the upgrade fixture of 1.15.7.
 - **Tests**: framing (the region, the photo, the cover, a GIF, the screen), a GIF cover from the GIF search, the own post in the profile, a friend's post from a notification, the order of chats and groups, Downloads on Android, pebbles in a copy, the graph's zoom and its snapshot sheet, the circle reminder, the last opening (a hidden one stays hidden), statuses before the node is up, posts and mentions kept by the service, the silent update of a notification, sending while the recipient is around, three quick tries and the quick retry. Mutation targets: the reaction notifier, the photo's sanitizer, the crop region.
 
 ## 1.15.7 — 05.11.2026
