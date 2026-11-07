@@ -74,4 +74,17 @@ void main() {
     expect(safeFileName('console.txt'), 'console.txt');
     expect(safeFileName('COM10.txt'), 'COM10.txt');
   });
+
+  test('invisible characters of every range go from the end, and a long name '
+      'whose last dot is far from the end is cut, not broken', () {
+    for (final int unit in <int>[0x85, 0x9F, 0x2063, 0x2068]) {
+      expect(
+        safeFileName('faktura.exe${String.fromCharCode(unit)}'),
+        'faktura.exe',
+        reason: unit.toRadixString(16),
+      );
+    }
+    final String far = safeFileName('a.${'b' * 200}')!;
+    expect(far, 'a.${'b' * 118}');
+  });
 }

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
@@ -104,5 +107,20 @@ void main() {
       noticeCommentsText(n),
       'Bob skomentował(a) Twój post (2 komentarze)',
     );
+  });
+
+  test('a stored entry that is not a post\'s is skipped; comments under a '
+      'post never seen before are news', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    await disk.write(
+      'feed/seen_reactions',
+      Uint8List.fromList(utf8.encode('{"x": 5, "p0": {"l": ["b"]}}')),
+    );
+    final ReactionsSeen seen = await ReactionsSeen.load(disk);
+    expect(seen.fresh, isFalse);
+    final List<ReactionNotice> notices = seen.noticesFor(<FeedPost>[
+      _post(comments: <FeedComment>[_comment('c1', 'c', 'Cela')]),
+    ]);
+    expect(notices.single.comments, 1);
   });
 }
