@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.8 — 07.11.2026
+
 ### What's new
 - [en] Frame your photo and cover before they are saved, and use a GIF for either.
 - [en] Messages and statuses come through faster while friends' Zen runs in the background, and a like opens your post.
