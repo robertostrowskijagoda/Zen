@@ -10,6 +10,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **A save on Windows never leaves a file empty or half-written for a reader**: a small file (the update check, the language, the background kits, the sealed inbox) is written beside the old one and moved over it in one step. On Windows that move is refused while anyone has the file open, and after a quarter of a second of refusals the save wrote into the file in place, so on a busy machine a reader could find it empty (a test of two isolates saving at once caught it during the release of 1.15.9). The move is tried again for up to three seconds, at growing intervals; only a file held for longer is written in place, with a warning in the log.
+- **Tests**: a move refused twelve times (the file holds the whole old save until the new one replaces it), a file held open on Windows for longer than the old quarter second, a file held for longer than the wait, a save into folders not made yet. Mutation target: the atomic save (2 of 5 changes caught; the three left are the flushes to the disk, which only a power cut shows, and a millisecond of the wait's random part).
+
 ## 1.15.9 — 08.11.2026
 
 ### What's new
