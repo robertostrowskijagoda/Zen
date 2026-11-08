@@ -36,14 +36,15 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
-  test('the locked receiver dials fewer public peers than the app', () {
+  test('the locked receiver dials one public peer: a node with two can be '
+      'the shortest way between them and carry the traffic of strangers', () {
     final RuntimeSignalBootstrapConfig config = lockedReceiverNodeConfig(
       waitTimeout: const Duration(seconds: 30),
       credentials: MemorySecurityCredentialsStore(),
     );
     expect(config.peerTarget, kReceiveOnlyPeerTarget);
     // The bridge's own number for the app on screen is four.
-    expect(kReceiveOnlyPeerTarget, inInclusiveRange(1, 3));
+    expect(kReceiveOnlyPeerTarget, 1);
     expect(config.waitTimeout, const Duration(seconds: 30));
     expect(config.fallbackPollInterval, const Duration(seconds: 2));
     expect(config.nodeConfigProtector, isA<BackgroundKeyProtector>());

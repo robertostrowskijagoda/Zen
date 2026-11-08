@@ -25,8 +25,8 @@ func TestPhoneDialsAFewOfItsPool(t *testing.T) {
 	if phonePeerCount < 3 || phonePeerCount > 4 {
 		t.Fatalf("a phone keeps 3-4 public peers, not %d", phonePeerCount)
 	}
-	if phonePeerTarget(phoneExtraAccountPeerCount) != 2 {
-		t.Fatal("an extra account's node dials 2 peers")
+	if phonePeerTarget(phoneExtraAccountPeerCount) != 1 {
+		t.Fatal("a node that only receives dials 1 peer: nobody's shortcut")
 	}
 	if phonePeerTarget(100) != maxPhonePeerTarget || phonePeerTarget(-1) != phonePeerCount {
 		t.Fatal("a nonsense request falls back to sane numbers")
@@ -180,43 +180,43 @@ func (w *peerWorld) untilUp(want int, limit time.Duration) time.Duration {
 	return w.now.Sub(from)
 }
 
-// A peer of the two a locked phone dials goes away: stand-ins are dialled
-// right then, and two links are up again within seconds, also when the
-// candidates first in line are dead.
+// The one peer a locked phone dials goes away: two stand-ins are dialled
+// right then (not after the 5 s a phone without network waits), and a link
+// is up again within seconds, also when candidates first in line are dead.
 func TestALockedPhoneReplacesAPeerThatGoesDownWithinSeconds(t *testing.T) {
 	for dead := 0; dead <= 3; dead++ {
 		pool := testPool(16)
 		w := newPeerWorld(t, pool, phoneExtraAccountPeerCount)
-		w.untilUp(2, time.Minute)
+		w.untilUp(1, time.Minute)
 		w.run(time.Minute)
+		if len(w.dialled) != 1 {
+			t.Fatalf("a locked phone dials one peer, got %v", w.dialled)
+		}
 		// The first candidates in line are dead too.
 		for i := 0; i < dead; i++ {
-			w.dead[pool[2+i]] = true
+			w.dead[pool[1+i]] = true
 		}
 		dialsBefore := w.dials
 		w.kill(pool[0])
-		if w.dials == dialsBefore {
-			t.Fatalf("%d dead: no stand-in dialled the moment the link went down", dead)
+		if w.dials-dialsBefore != 2 {
+			t.Fatalf("%d dead: %d stand-ins dialled the moment the link went down, want 2", dead, w.dials-dialsBefore)
 		}
-		took := w.untilUp(2, time.Minute)
-		t.Logf("%d dead candidate(s) in line: two links up again after %v", dead, took)
-		// Two stand-ins at once, then two more after a dial grace: up to
-		// three dead candidates in line still make it within 15 s.
-		limit := 15 * time.Second
+		took := w.untilUp(1, time.Minute)
+		t.Logf("%d dead candidate(s) in line: a link up again after %v", dead, took)
+		// Two stand-ins at once, two more a wave (15 s) later.
+		limit := 5 * time.Second
+		if dead >= 2 {
+			limit = 25 * time.Second
+		}
 		if took > limit {
-			t.Fatalf("%d dead: two links up after %v, want at most %v", dead, took, limit)
+			t.Fatalf("%d dead: a link up after %v, want at most %v", dead, took, limit)
 		}
 		if w.most > 2*phoneExtraAccountPeerCount {
 			t.Fatalf("%d dead: %d peers dialled at once", dead, w.most)
 		}
 		w.run(time.Minute)
-		if len(w.dialled) != 2 || w.upCount() != 2 {
-			t.Fatalf("%d dead: back to two peers, both up, got %v", dead, w.dialled)
-		}
-		for _, peer := range w.dialled {
-			if peer == pool[0] || w.dead[peer] {
-				t.Fatalf("%d dead: still dials %s: %v", dead, peer, w.dialled)
-			}
+		if len(w.dialled) != 1 || w.upCount() != 1 {
+			t.Fatalf("%d dead: back to one peer, up, got %v", dead, w.dialled)
 		}
 	}
 }

@@ -469,8 +469,8 @@ final class BackgroundAccountNode {
         nodeConfigProtector: BackgroundKeyProtector(credentials),
         fallbackPollInterval: const Duration(seconds: 2),
         supportDirectory: folder,
-        // Only receives: fewer public peers do (the app on screen dials
-        // four; computers keep their own number).
+        // Only receives: one public peer, nobody's shortcut (the app on
+        // screen dials four; computers keep their own number).
         peerTarget: kReceiveOnlyPeerTarget,
       ),
       // The account open in the app keeps its node there; this one starts

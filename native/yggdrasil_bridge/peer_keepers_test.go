@@ -124,15 +124,14 @@ func deadPeerURI(t *testing.T) string {
 	return "tcp://" + addr
 }
 
-// A phone node that only receives dials two public peers. One goes away
+// A phone node that only receives dials one public peer. It goes away
 // (its node stops): the core's log line tells the keeper, which dials
-// stand-ins at once, past a dead candidate in line, and two links are up
-// again within seconds, back to two peers.
+// stand-ins at once, past a dead candidate in line, and a link is up again
+// within seconds, back to one peer.
 func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	coreA, uriA := listeningCore(t)
-	coreB, uriB := listeningCore(t)
 	coreC, uriC := listeningCore(t)
-	keeper := newPhonePeerKeeper([]string{uriA, uriB, deadPeerURI(t), uriC}, phoneExtraAccountPeerCount)
+	keeper := newPhonePeerKeeper([]string{uriA, deadPeerURI(t), uriC}, phoneExtraAccountPeerCount)
 	cfg := config.GenerateConfig()
 	yggCore, err := core.New(cfg.Certificate, withPeerEvents(newBridgeLogger(io.Discard), keeper))
 	if err != nil {
@@ -148,7 +147,6 @@ func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	}
 	node.swapPublicPeers(nil, keeper.dialled)
 	waitForPeer(t, yggCore, coreA.PublicKey(), true)
-	waitForPeer(t, yggCore, coreB.PublicKey(), true)
 	go node.watchPhonePeers()
 	t.Cleanup(keeper.stopWatch)
 
@@ -156,18 +154,18 @@ func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	coreA.Stop()
 	waitForPeer(t, yggCore, coreC.PublicKey(), true)
 	took := time.Since(started)
-	t.Logf("two links up again %v after a peer went away", took)
+	t.Logf("a link up again %v after its peer went away", took)
 	if took > 15*time.Second {
-		t.Fatalf("two links up again only after %v", took)
+		t.Fatalf("a link up again only after %v", took)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		dialled := node.dialledPublicPeers()
-		if len(dialled) == 2 && dialled[0] == uriB && dialled[1] == uriC {
+		if len(dialled) == 1 && dialled[0] == uriC {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("back to two peers, got %v", dialled)
+			t.Fatalf("back to one peer, got %v", dialled)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

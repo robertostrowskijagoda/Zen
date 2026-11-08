@@ -2242,14 +2242,15 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
 
 /// How many public peers a phone node dials while it only receives: the
 /// locked receiver of the default account and the extra accounts' nodes in
-/// the background service. Every peer passes on the tree's signed updates
-/// (each node renews its own every few minutes) and each of them is
-/// answered, so on a locked phone the peers are what wakes the radio most
-/// (about a thousand small packets an hour each way with four); two halve
-/// that and are what Yggdrasil advises for end nodes. A peer whose link
-/// goes down is replaced within seconds by the next of the pool
-/// (phone_peers.go). The app on screen dials the bridge's own number (four).
-const int kReceiveOnlyPeerTarget = 2;
+/// the background service. One: a node with two peerings can become the
+/// shortest way between them, and strangers' traffic on the mesh then
+/// passes through the phone (a locked phone with two public peers carried
+/// 1-6 KB/s of it, in and out, for seven hours, and lost a third of its
+/// battery in a day). With one it is nobody's shortcut, and the tree's
+/// updates come over one link only. A peer whose link goes down is
+/// replaced at once by the next of the pool (phone_peers.go). The app on
+/// screen dials the bridge's own number (four).
+const int kReceiveOnlyPeerTarget = 1;
 
 final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({
