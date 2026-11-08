@@ -177,6 +177,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         setState(() {});
       }
     });
+    // Read from disk: shown at once, before the node goes online (on
+    // Android once the background service lets go of it).
+    unawaitedLogged(
+      _node?.settled.then((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      }),
+      context: 'The profile waits for a ledger that did not load',
+    );
     unawaitedLogged(
       _node?.start().then((_) {
         if (mounted) {

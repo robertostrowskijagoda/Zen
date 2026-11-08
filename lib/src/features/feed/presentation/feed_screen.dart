@@ -195,6 +195,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         setState(() {});
       }
     });
+    // Read from disk: shown at once, before the node goes online (on
+    // Android once the background service lets go of it).
+    unawaitedLogged(
+      _node?.settled.then((_) async {
+        if (_node?.isReady ?? false) {
+          _feedRevision++;
+          await _checkReshares();
+          if (mounted) {
+            setState(() {});
+          }
+        }
+      }),
+      context: 'The feed waits for a ledger that did not load',
+    );
     // A ledger that cannot start (its identity damaged) is said in the
     // settings; here the feed just stays empty.
     unawaitedLogged(

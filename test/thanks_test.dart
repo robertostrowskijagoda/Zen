@@ -165,4 +165,56 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => _settle());
   });
+
+  testWidgets('own posts show on the profile the moment Zen opens, before the '
+      'background service lets go of the node', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    late LedgerNode node;
+    await tester.runAsync(() async {
+      // Zen ran before and wrote a post.
+      final LedgerNode before = LedgerNode(
+        transport: MemorySignalTransport(),
+        disk: disk,
+        friendAddresses: () => const <String>[],
+        bridges: BridgeBook(probe: (String _) async => null),
+      );
+      await before.start();
+      await before.publish(kPostKind, newPostBody('Z wczoraj'));
+      await before.stop();
+      // Zen opens on Android: started suspended, never resumed here.
+      node = LedgerNode(
+        transport: MemorySignalTransport(),
+        disk: disk,
+        friendAddresses: () => const <String>[],
+        bridges: BridgeBook(probe: (String _) async => null),
+        syncInterval: Duration.zero,
+        startSuspended: true,
+      );
+    });
+    // Not awaited: its archive's writes were queued in the test's clock.
+    addTearDown(() => unawaited(node.stop()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerNodeProvider.overrideWithValue(node),
+        ],
+        child: const MaterialApp(home: ProfileScreen()),
+      ),
+    );
+    for (int i = 0; i < 20 && !node.isReady; i++) {
+      await tester.runAsync(() => _settle());
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(node.isSuspended, isTrue);
+    expect(find.text('Z wczoraj'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() => _settle());
+  });
 }
