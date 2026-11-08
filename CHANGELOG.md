@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.0 — 08.11.2026
+
 ### What's new
 - [en] A locked phone no longer drains its battery carrying strangers' traffic, and stays reachable when its connection quietly drops.
 - [en] Video calls show all their buttons and the picture from the start, your camera reaches the other side, and in the car Speaker goes back to the car.
