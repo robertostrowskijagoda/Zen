@@ -6,9 +6,8 @@ package main
 import "C"
 
 import (
+	"crypto/ed25519"
 	"time"
-
-	iwt "github.com/Arceliar/ironwood/types"
 )
 
 // A phone that only receives dials one public peer (phone_peers.go). When
@@ -22,13 +21,16 @@ import (
 // that long nobody could reach it.
 //
 // checkLinks sends that something on the wakes the phone has anyway (the
-// app's beat, ZenWake in the app): an empty packet to each peer's own key,
-// so the core sends it over that peer's link. A peer that is there answers
-// within a second or so (the lookup's answer, or its keepalive), and the
-// link counts as answered as soon as anything comes back over it. One that
+// app's beat, ZenWake in the app): a path lookup for each peer's own key,
+// which the core sends over that peer's link (a link of the tree: a phone's
+// one peer is its parent). A peer that is there answers within a second or
+// so (the lookup's answer, or its keepalive), and the link counts as
+// answered as soon as anything comes back over it. A lookup, not a packet:
+// only the mesh writer writes to the core (mesh_io.go, R5-F4), and a lookup
+// waits for nothing. One that
 // is gone does not, the core ends the link after its peer timeout, and the
 // keeper dials stand-ins (peerEventLogger): the check then waits, while the
-// phone is still held awake, until a link is up again. A packet of a few
+// phone is still held awake, until a link is up again. A lookup of a few
 // dozen bytes to each peer, on wakes that come anyway: nothing the battery
 // notices.
 const (
@@ -44,7 +46,7 @@ const (
 
 // linkCheck is what one check found.
 type linkCheck struct {
-	// Links that were up and got a packet.
+	// Links that were up and got a lookup.
 	Probed int `json:"probed"`
 	// Of those, the ones something came back over.
 	Answered int `json:"answered"`
@@ -86,7 +88,7 @@ func (node *bridgeNode) checkLinks() linkCheck {
 		probes = append(probes, &probe{key: key, rx: info.RXBytes})
 	}
 	for _, p := range probes {
-		_, _ = node.core.WriteTo(nil, iwt.Addr(p.key))
+		node.core.SendLookup(ed25519.PublicKey(p.key))
 	}
 	result.Probed = len(probes)
 	deadline := started.Add(linkCheckAnswerWait)

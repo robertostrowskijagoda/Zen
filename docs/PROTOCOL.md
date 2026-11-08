@@ -38,7 +38,7 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
 - Peering: a built-in list of public peers (`public_peers.go`; a phone
   dials 4 at once, 1 while it only receives in the background (with two
   it can be the shortest way between them and carry strangers' transit;
-  `link_check.go`: on every wake of the app's beat an empty packet to each
+  `link_check.go`: on every wake of the app's beat a path lookup for each
   peer's own key, so a link that died silently is ended by the core's 3 s
   peer timeout and replaced while the phone is awake), a TLS-only
   subset first, the rest of the encrypted list
