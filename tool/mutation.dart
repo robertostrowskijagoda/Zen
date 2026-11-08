@@ -8,6 +8,7 @@
 //   dart run tool/mutation.dart                 every target, 15 changes each
 //   dart run tool/mutation.dart --max 40 --seed 7 --summary FILE
 //   dart run tool/mutation.dart lib/src/features/social/peer_share_codec.dart
+//   dart run tool/mutation.dart --shard 2/3    every third target (CI's jobs)
 //
 // The changes are picked at random among all possible ones (--seed), so
 // every run looks at others. The file is put back after every change,
@@ -63,6 +64,7 @@ Future<void> main(List<String> args) async {
   int seed = DateTime.now().millisecondsSinceEpoch;
   int timeout = 240;
   String? summary;
+  (int, int)? shard;
   final List<String> only = <String>[];
   for (int i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -74,13 +76,32 @@ Future<void> main(List<String> args) async {
         timeout = int.parse(args[++i]);
       case '--summary':
         summary = args[++i];
+      case '--shard':
+        final List<String> pieces = args[++i].split('/');
+        final int? part = pieces.length == 2 ? int.tryParse(pieces[0]) : null;
+        final int? count = pieces.length == 2 ? int.tryParse(pieces[1]) : null;
+        if (part == null || count == null || part < 1 || part > count) {
+          stderr.writeln('--shard is PART/PARTS, e.g. 2/3');
+          exit(64);
+        }
+        shard = (part, count);
       default:
         only.add(args[i].replaceAll(r'\', '/'));
     }
   }
-  final List<dynamic> targets =
+  final List<dynamic> listed =
       jsonDecode(File(_targetsFile).readAsStringSync()) as List<dynamic>;
-  final StringBuffer report = StringBuffer('### Mutation testing\n\n')
+  // Every PARTS-th target from PART on: each part gets targets from all
+  // over the list, so the parts take about as long as each other.
+  final (int, int)? split = shard;
+  final List<dynamic> targets = split == null
+      ? listed
+      : <dynamic>[
+          for (int i = split.$1 - 1; i < listed.length; i += split.$2)
+            listed[i],
+        ];
+  final String part = split == null ? '' : ' (part ${split.$1} of ${split.$2})';
+  final StringBuffer report = StringBuffer('### Mutation testing$part\n\n')
     ..writeln('Seed $seed, at most $max changes per file.\n')
     ..writeln('| File | Caught | Survived |')
     ..writeln('|---|---|---|');
