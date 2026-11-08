@@ -1,0 +1,8 @@
+{
+  "zen_rewrite_master_key_fingerprint": "7a9fe34155639cde6414340fe89578ad48c0d55c8a03a49372a50cd90fe7bb9a",
+  "zen_rewrite_password_kdf": "{\"a\":\"argon2id\",\"m\":64,\"t\":1,\"p\":1}",
+  "zen_rewrite_password_salt": "aef1811f8d54fcd6435a9425e50c0b19f7561873269a90b9d776c9736f529a7c",
+  "zen_rewrite_password_hash": "8886e4913fdab725ff30ed265322182cf1a1994685e838437c1430032e84023e",
+  "zen_rewrite_wrapped_master_key": "130d6046ba5d55801948919521258b93a7176dc00f408fac7404c8e560ed304dc5242e72908d0387525ad01213a8a4039a8e00c7315329185f8ab003",
+  "zen_rewrite_guarded_settings": "{\"v\":1,\"lock\":\"background\",\"delay\":300,\"resume\":false,\"secure\":true,\"notify\":\"senderAndContent\",\"noPassword\":false}"
+}
