@@ -49,6 +49,27 @@ func (keeper *phonePeerKeeper) appSends() {
 	keeper.lookNow()
 }
 
+// lookAgainAfter are the looks that follow a link's log line: the core
+// logs "Connected" before the other side's key is known (upPeers counts a
+// link only with it) and "Disconnected" before it marks the link down, so
+// a look right at the line often sees the link as it was. The stand-ins
+// then waited for the next look, phonePeerCheckInterval of awake time
+// later, and a locked phone, woken only by the packet that ended the link,
+// was often asleep again by then.
+var lookAgainAfter = []time.Duration{250 * time.Millisecond, time.Second}
+
+// lookSettled has the keeper look now and again once the link's state has
+// settled (lookAgainAfter). It never blocks.
+func (keeper *phonePeerKeeper) lookSettled() {
+	if keeper == nil {
+		return
+	}
+	keeper.lookNow()
+	for _, after := range lookAgainAfter {
+		time.AfterFunc(after, keeper.lookNow)
+	}
+}
+
 // lookNow has the keeper look at its peers now (one of the node's links came
 // up or went down, or the app sends). It never blocks.
 func (keeper *phonePeerKeeper) lookNow() {
@@ -75,7 +96,7 @@ type peerEventLogger struct {
 func (logger peerEventLogger) Infof(format string, args ...interface{}) {
 	logger.Logger.Infof(format, args...)
 	if strings.HasPrefix(format, "Connected ") || strings.HasPrefix(format, "Disconnected ") {
-		logger.keeper.lookNow()
+		logger.keeper.lookSettled()
 	}
 }
 
@@ -115,6 +136,10 @@ func (node *bridgeNode) watchPhonePeers() {
 	ticker := time.NewTicker(phonePeerCheckInterval)
 	defer ticker.Stop()
 	var sampled time.Time
+	// A first look at once: a peer that came up before the watch started
+	// is then known to have been up, and its going down brings stand-ins
+	// at once (not taken for a dial that failed).
+	node.checkPhonePeers(time.Now().Round(0))
 	for {
 		select {
 		case <-keeper.stop:

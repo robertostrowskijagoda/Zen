@@ -155,7 +155,12 @@ func TestAPhoneNodeReplacesAPeerThatWentAwayWithinSeconds(t *testing.T) {
 	waitForPeer(t, yggCore, coreC.PublicKey(), true)
 	took := time.Since(started)
 	t.Logf("a link up again %v after its peer went away", took)
-	if took > 15*time.Second {
+	// Within the few seconds the packet that ended the link keeps a locked
+	// phone awake (ZenWake.signalHold): the core logs "Disconnected" before
+	// it marks the link down, and a look right at the line used to see it
+	// still up, so the stand-ins waited for the next look, 5 s of awake
+	// time later (lookAgainAfter).
+	if took > 3*time.Second {
 		t.Fatalf("a link up again only after %v", took)
 	}
 	deadline := time.Now().Add(10 * time.Second)

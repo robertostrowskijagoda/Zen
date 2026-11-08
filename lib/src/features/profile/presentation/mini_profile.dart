@@ -18,6 +18,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/presentation/ledger_picture.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/profile/presentation/profile_photo_viewer.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
@@ -30,8 +31,8 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// The mini-profile: a compact card made from someone's profile —
 /// photo, name, status, badges and numbers — with what can be done right
 /// away: open the whole profile, write ("Wiadomość") or invite ("Dodaj"),
-/// follow. Opened from the graph, people nearby, lists of likes and
-/// followers, and a conversation's header.
+/// follow. Opened from the graph, people nearby, and lists of likes and
+/// followers (a conversation's header opens the whole profile).
 Future<void> showMiniProfile(BuildContext context, String address) =>
     showModalBottomSheet<void>(
       context: context,
@@ -155,7 +156,10 @@ class _MiniProfileSheetState extends ConsumerState<MiniProfileSheet> {
 
     final Widget avatar;
     if (peer?.avatarPath != null) {
-      avatar = PeerAvatar(address: address, name: shownName, size: 76);
+      avatar = ZoomableProfilePhoto(
+        image: peerAvatarImage(peer!.avatarPath),
+        child: PeerAvatar(address: address, name: shownName, size: 76),
+      );
     } else if (view?.avatar != null && node != null) {
       avatar = LedgerAvatar(
         node: node,

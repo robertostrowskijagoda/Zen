@@ -53,6 +53,7 @@ import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/search/chat_search_controller.dart';
@@ -448,7 +449,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         title: InkWell(
           key: const Key('conversation-open-profile'),
           borderRadius: context.zenRadius(12),
-          onTap: () => showPeerProfileSheet(context, widget.peerAddress),
+          // Straight to the whole profile: from here "Wiadomość" of the
+          // mini-profile would only lead back to this conversation.
+          onTap: () => unawaited(
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (BuildContext context) => ProfileScreen(
+                  address: widget.peerAddress,
+                  fromConversation: true,
+                ),
+              ),
+            ),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
             child: Row(
