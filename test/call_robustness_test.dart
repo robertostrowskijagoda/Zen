@@ -381,6 +381,7 @@ final class _Media extends CallMediaSessionController {
   String? _remote;
   CallInviteKind? _kind;
   bool _connected = false;
+
   /// Offers of this side not answered yet.
   int _awaitingAnswers = 0;
   bool _camera = false;
