@@ -88,11 +88,15 @@ func withPeerEvents(logger core.Logger, keeper *phonePeerKeeper) core.Logger {
 	return peerEventLogger{Logger: logger, keeper: keeper}
 }
 
-// upPeers are the peerings that are up now, as GetPeers lists them.
+// upPeers are the peerings that are up now, as GetPeers lists them: with
+// the other side's key, so the routing carries their traffic. The core
+// lists a connection as up from its first byte, also one whose handshake
+// never ends (a server that takes the connection and answers nothing):
+// counted as up, it held the rotation from its stand-ins.
 func (node *bridgeNode) upPeers() map[string]bool {
 	up := make(map[string]bool)
 	for _, info := range node.core.GetPeers() {
-		if info.Up {
+		if info.Up && len(info.Key) > 0 {
 			up[peerURIBase(info.URI)] = true
 		}
 	}

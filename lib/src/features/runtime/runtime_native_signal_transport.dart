@@ -23,6 +23,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_waiter.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 typedef SignalTransportBootstrap = Future<SignalTransport> Function();
@@ -1792,6 +1793,16 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     _sampled(startResult),
   );
   final SignalPayloadCompressor doorCompressor = ZstdSignalPayloadCompressor();
+  // A node that only receives has one public peer: whether its link still
+  // answers is checked on every wake the phone has anyway.
+  final WakeTimer? linkCheck = config.peerTarget == kReceiveOnlyPeerTarget
+      ? checkLinksOnWakes(
+          () => runNodeCallOffThread<Map<String, dynamic>>(
+            () => YggdrasilBridgeFfi.load().checkLinks(handle),
+            what: 'link check',
+          ),
+        )
+      : null;
   return RuntimeNodeSession(
     transport: ManagedSignalTransport(
       delegate: YggdrasilSignalTransport(
@@ -1806,6 +1817,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         fallbackPollInterval: config.fallbackPollInterval,
       ),
       onStop: () async {
+        linkCheck?.cancel();
         await pins.stop();
         await stopNodeOffThread(handle);
         ZenTechLog.nodeStopped(handle);
@@ -2238,6 +2250,40 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
     default:
       return magnitude.round();
   }
+}
+
+/// How long a wake stays held for the link check at most: the bridge's own
+/// limits (an answer within 3.5 s, a stand-in up within 12 s) and a little
+/// more.
+const Duration kLinkCheckHold = Duration(seconds: 20);
+
+/// Checks on every wake of the shared beat, whatever work the wake is for
+/// ([ZenWake.alongsideBeat]; [beat] in tests), that the links of a node
+/// that only receives still answer: [check] is the bridge's check
+/// (link_check.go). With one public peer, a link that died without a word
+/// (a mobile network that forgot the connection, a server gone off the
+/// network) left the phone unreachable until its next mailbox poll, up to
+/// half an hour later: now until its next wake (about a quarter of an
+/// hour), and the stand-in is up before the phone sleeps again. The phone
+/// stays awake for the check ([kLinkCheckHold] at most): a link that is
+/// there answers within a second or so.
+WakeTimer checkLinksOnWakes(
+  Future<Map<String, dynamic>> Function() check, {
+  WakeBeat? beat,
+}) {
+  Future<void> tick() => ZenWake.holdWhile(
+    () async {
+      final Map<String, dynamic> found = await check();
+      if (((found['dropped'] as num?) ?? 0) > 0) {
+        ZenTechLog.event('link-check', found);
+      }
+    },
+    tag: 'link-check',
+    limit: kLinkCheckHold,
+  );
+  return beat == null
+      ? ZenWake.alongsideBeat('link-check', tick)
+      : beat.alongside('link-check', tick);
 }
 
 /// How many public peers a phone node dials while it only receives: the

@@ -390,6 +390,29 @@ final class _BeatWork implements BeatTimer {
   }
 }
 
+/// Work that runs on every wake of the beat and never wakes the phone itself
+/// ([ZenWake.alongsideBeat]).
+final class _BeatCompanion implements WakeTimer {
+  _BeatCompanion(this._beat, this.name, this.tick);
+
+  final WakeBeat _beat;
+  final String name;
+  final Future<void> Function() tick;
+  bool _cancelled = false;
+
+  @override
+  bool get isActive => !_cancelled;
+
+  @override
+  void cancel() {
+    if (_cancelled) {
+      return;
+    }
+    _cancelled = true;
+    _beat._companions.remove(this);
+  }
+}
+
 /// Work that comes back every few minutes (asking the mailboxes for mail,
 /// for every account; the locked outbox's rounds; a look around nearby; the
 /// parked service's watchdog; the update check), all on one alarm: one wake
@@ -402,6 +425,9 @@ final class WakeBeat {
   WakeBeat();
 
   final List<_BeatWork> _works = <_BeatWork>[];
+
+  /// What runs on every wake besides what is due ([alongside]).
+  final List<_BeatCompanion> _companions = <_BeatCompanion>[];
 
   /// The next wake, for whatever is due first.
   WakeTimer? _alarm;
@@ -445,6 +471,15 @@ final class WakeBeat {
     return work;
   }
 
+  /// Runs [tick] on every wake of this beat, beside the work due then; it
+  /// never wakes the phone itself. The wake lets the phone sleep once
+  /// [tick]'s future completes too.
+  WakeTimer alongside(String name, Future<void> Function() tick) {
+    final _BeatCompanion companion = _BeatCompanion(this, name, tick);
+    _companions.add(companion);
+    return companion;
+  }
+
   void _remove(_BeatWork work) {
     _works.remove(work);
     _plan();
@@ -452,6 +487,7 @@ final class WakeBeat {
 
   void clear() {
     _works.clear();
+    _companions.clear();
     _firing = false;
     _cancelAlarms();
   }
@@ -593,6 +629,17 @@ final class WakeBeat {
               .whenComplete(() => took[w.name] = wake.elapsedMilliseconds),
         );
       }
+      if (running.isNotEmpty) {
+        for (final _BeatCompanion c in List<_BeatCompanion>.of(_companions)) {
+          running.add(
+            Future<void>.sync(c.tick)
+                .catchError((Object error, StackTrace st) {
+                  logZenError('Work on the wake (${c.name}) failed', error, st);
+                })
+                .whenComplete(() => took[c.name] = wake.elapsedMilliseconds),
+          );
+        }
+      }
     } finally {
       _firing = false;
     }
@@ -686,6 +733,13 @@ abstract final class ZenWake {
     Duration hold = defaultHold,
     bool whileIdle = true,
   }) => _beat.add(name, every, tick, hold: hold, whileIdle: whileIdle);
+
+  /// Runs [tick] on every wake of the shared beat, whatever work it is for,
+  /// and never wakes the phone itself ([WakeBeat.alongside]): work worth
+  /// doing whenever the phone is awake anyway, such as checking that its
+  /// links still answer.
+  static WakeTimer alongsideBeat(String name, Future<void> Function() tick) =>
+      _beat.alongside(name, tick);
 
   /// Names of the works the next beat runs (tests).
   @visibleForTesting

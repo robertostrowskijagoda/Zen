@@ -188,5 +188,11 @@
     "tests": [
       "test/storage_crash_consistency_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/runtime/zen_wake.dart",
+    "tests": [
+      "test/zen_wake_test.dart"
+    ]
   }
 ]

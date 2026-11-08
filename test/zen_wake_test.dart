@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
 
 final class _Alarm implements WakeTimer {
@@ -11,9 +12,11 @@ final class _Alarm implements WakeTimer {
     this.fire, {
     required this.hold,
     required this.whileIdle,
+    this.exact = false,
   });
 
   final String name;
+  final bool exact;
   final Duration delay;
   final FutureOr<void> Function() fire;
   final Duration hold;
@@ -57,6 +60,7 @@ final class _Platform implements ZenWakePlatform {
       fire,
       hold: hold,
       whileIdle: whileIdle,
+      exact: exact,
     );
     alarms.add(alarm);
     return alarm;
@@ -144,6 +148,93 @@ void main() {
     expect(ZenWake.plannedBeat, <String>['mailbox-poll']);
     poll.cancel();
     expect(platform.live, isEmpty);
+  });
+
+  test('work alongside the beat runs on every wake and never wakes the phone '
+      'itself', () async {
+    final List<String> ran = <String>[];
+    final WakeTimer check = ZenWake.alongsideBeat('link-check', () async {
+      ran.add('check');
+    });
+    expect(platform.live, isEmpty, reason: 'no wake of its own');
+    final WakeTimer update = ZenWake.beat(
+      'update-check',
+      const Duration(minutes: 15),
+      () async => ran.add('update'),
+    );
+    ZenWake.beat(
+      'mailbox-poll',
+      const Duration(minutes: 30),
+      () async => ran.add('poll'),
+    );
+    for (int i = 0; i < 4; i++) {
+      final _Alarm next = platform.live.single;
+      now += next.delay.inMilliseconds;
+      await next.ring();
+    }
+    expect(
+      ran.where((String r) => r == 'check'),
+      hasLength(4),
+      reason: 'every wake, also the ones without the poll',
+    );
+    expect(ran.where((String r) => r == 'poll'), hasLength(2));
+    expect(ZenWake.plannedBeat, isNot(contains('link-check')));
+
+    // The wake lets go only once the check is done too.
+    check.cancel();
+    final Completer<void> slow = Completer<void>();
+    final WakeTimer slowCheck = ZenWake.alongsideBeat(
+      'link-check',
+      () => slow.future,
+    );
+    final _Alarm next = platform.live.single;
+    now += next.delay.inMilliseconds;
+    bool done = false;
+    unawaited((next.ring() as Future<void>).then((_) => done = true));
+    await _settle();
+    expect(done, isFalse, reason: 'the check still runs');
+    slow.complete();
+    await _settle();
+    expect(done, isTrue);
+    expect(ran.where((String r) => r == 'check'), hasLength(4));
+
+    slowCheck.cancel();
+    update.cancel();
+  });
+
+  test('the link check holds the phone under its own tag while the bridge '
+      'checks, and a failed check spoils no wake', () async {
+    final List<String> ran = <String>[];
+    int checks = 0;
+    final WakeTimer check = checkLinksOnWakes(() async {
+      checks++;
+      if (checks == 2) {
+        throw StateError('the bridge is gone');
+      }
+      return <String, dynamic>{'probed': 1, 'dropped': checks == 3 ? 1 : 0};
+    });
+    ZenWake.beat(
+      'update-check',
+      const Duration(minutes: 15),
+      () async => ran.add('update'),
+    );
+    for (int i = 0; i < 3; i++) {
+      final _Alarm next = platform.live.single;
+      now += next.delay.inMilliseconds;
+      await next.ring();
+      await _settle();
+    }
+    expect(checks, 3);
+    expect(ran, hasLength(3), reason: 'the failed check stopped nothing');
+    expect(
+      platform.calls.where((String c) => c == 'hold link-check 20'),
+      hasLength(3),
+    );
+    expect(
+      platform.calls.where((String c) => c.startsWith('release link-check')),
+      hasLength(3),
+    );
+    check.cancel();
   });
 
   test('a clock set back does not stop the works', () async {
@@ -353,6 +444,23 @@ void main() {
     ]);
   });
 
+  test('a wake is inexact and comes in Doze unless asked otherwise', () {
+    ZenWake.after('reminder', const Duration(minutes: 1), () {});
+    final _Alarm alarm = platform.live.single;
+    expect(alarm.exact, isFalse, reason: 'Android may wake once for several');
+    expect(alarm.whileIdle, isTrue);
+    expect(alarm.hold, ZenWake.defaultHold);
+    ZenWake.after(
+      'alarm',
+      const Duration(minutes: 1),
+      () {},
+      exact: true,
+      whileIdle: false,
+    );
+    expect(platform.live.last.exact, isTrue);
+    expect(platform.live.last.whileIdle, isFalse);
+  });
+
   test('a signal holds the phone only a moment', () {
     expect(ZenWake.signalHold, lessThanOrEqualTo(const Duration(seconds: 3)));
     ZenWake.signalArrived();
@@ -390,7 +498,7 @@ void main() {
       final AndroidWakePlatform android = AndroidWakePlatform();
       final Completer<void> work = Completer<void>();
       bool fired = false;
-      android.after(
+      final WakeTimer timer = android.after(
         'beat',
         const Duration(minutes: 5),
         () {
@@ -402,6 +510,7 @@ void main() {
         whileIdle: false,
       );
       await _settle();
+      expect(timer.isActive, isTrue);
       final Map<Object?, Object?> scheduled = argsOf('schedule');
       expect(scheduled['holdMs'], 15000);
       expect(scheduled['whileIdle'], isFalse);
@@ -412,6 +521,7 @@ void main() {
       sink!.success(<String, Object?>{'type': 'wake', 'id': scheduled['id']});
       await _settle();
       expect(fired, isTrue);
+      expect(timer.isActive, isFalse, reason: 'spent once it rang');
       expect(calls.where((MethodCall c) => c.method == 'release'), isEmpty);
       work.complete();
       await _settle();
@@ -458,9 +568,47 @@ void main() {
       );
       await _settle();
       final Map<Object?, Object?> scheduled = argsOf('schedule');
+      expect(
+        scheduled['whileIdle'],
+        isTrue,
+        reason: 'unless asked otherwise, Doze does not put a wake off',
+      );
       sink!.success(<String, Object?>{'type': 'wake', 'id': scheduled['id']});
       await _settle();
       expect(argsOf('release')['tag'], scheduled['tag']);
+    });
+
+    testWidgets('without alarms a plain timer runs the work and holds '
+        'nothing', (WidgetTester tester) async {
+      calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(power, (MethodCall call) async {
+        calls.add(call);
+        if (call.method == 'schedule') {
+          throw PlatformException(code: 'unavailable');
+        }
+        return null;
+      });
+      final AndroidWakePlatform android = AndroidWakePlatform();
+      int runs = 0;
+      final WakeTimer timer = android.after(
+        'look',
+        const Duration(seconds: 30),
+        () async => runs++,
+        hold: const Duration(seconds: 5),
+        exact: false,
+      );
+      await tester.pump();
+      expect(timer.isActive, isTrue);
+      await tester.pump(const Duration(seconds: 31));
+      expect(runs, 1, reason: 'the timer, long before the backup');
+      expect(timer.isActive, isFalse);
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        calls.where((MethodCall c) => c.method == 'release'),
+        isEmpty,
+        reason: 'no alarm held the phone: nothing to let go',
+      );
+      expect(calls.where((MethodCall c) => c.method == 'cancel'), isEmpty);
     });
 
     testWidgets('the backup timer that came first cancels the alarm', (

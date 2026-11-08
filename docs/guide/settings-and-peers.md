@@ -134,12 +134,18 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
-- A phone keeps links to 4 peers at a time (2 while Zen only receives in
-  the background): its 16 first picks, then the rest of the list in
+- A phone keeps links to 4 peers at a time (1 while Zen only receives in
+  the background: a phone with two links can become the shortest way
+  between them, and strangers' traffic would then pass through it and
+  drain its battery): its 16 first picks, then the rest of the list in
   reserve. When a link goes down the phone dials the next two of the list
   at once and keeps whichever comes up first; a peer that does not
   connect within 8 seconds is replaced by the next one. So the links are
-  back within seconds, also when the next peer in line is down too. With
+  back within seconds, also when the next peer in line is down too. A
+  link that dies without a word (a mobile network that forgot it) is
+  noticed on the phone's next wake, about every quarter of an hour: each
+  wake sends its peer a tiny packet, and a peer that does not answer
+  within 3 seconds is replaced. With
   no network at all the phone tries again in waves, less and less often
   (up to every 15 minutes), so a phone whose first picks went quiet moves
   on to peers that still answer without dialling round and round. A
