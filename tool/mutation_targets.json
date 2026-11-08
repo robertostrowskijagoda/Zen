@@ -163,5 +163,24 @@
     "tests": [
       "test/locked_background_inbox_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/ledger/ledger_node.dart",
+    "tests": [
+      "test/offline_content_test.dart",
+      "test/ledger_node_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_audio_route.dart",
+    "tests": [
+      "test/call_audio_route_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pebbles/pebble_hosting.dart",
+    "tests": [
+      "test/pebble_hosting_test.dart"
+    ]
   }
 ]

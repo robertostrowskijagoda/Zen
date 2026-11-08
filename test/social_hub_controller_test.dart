@@ -3636,6 +3636,165 @@ void main() {
     );
   });
 
+  group('a call follows its media, whatever order the events come in', () {
+    late _FakeCallMediaSessionController callMedia;
+    late ProviderContainer container;
+    late SocialHubController controller;
+
+    setUp(() async {
+      callMedia = _FakeCallMediaSessionController()..reportsActive = false;
+      final MemorySignalTransport transport = MemorySignalTransport();
+      await transport.start();
+      container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          callMediaSessionControllerProvider.overrideWithValue(callMedia),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              book: FriendshipBook.restore(
+                profiles: const <String, FriendProfile>{
+                  _peer: FriendProfile(
+                    address: _peer,
+                    displayName: 'Ada',
+                    status: FriendRelationshipStatus.accepted,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+      controller = container.read(socialHubControllerProvider.notifier);
+    });
+
+    /// A friend calls ([kind]: 'video' or 'audio').
+    Future<void> ring([String kind = 'video']) async {
+      await controller.receiveSignal(
+        ZenSignal(
+          type: ZenSignalType.callInvite,
+          sender: _peer,
+          callId: 'call-first',
+          content: kind,
+        ),
+        receivedAtMillis: 11,
+      );
+      await controller.receiveSignal(
+        ZenSignal(
+          type: ZenSignalType.callOffer,
+          sender: _peer,
+          callId: 'call-first',
+          content: kind,
+          sessionDescription: const <String, dynamic>{
+            'type': 'offer',
+            'sdp': 'v=0',
+          },
+        ),
+        receivedAtMillis: 12,
+      );
+    }
+
+    tearDown(() => container.dispose());
+
+    CallSession call() =>
+        container.read(socialHubControllerProvider).activeCall!;
+
+    test('media that connected make the call active even when the '
+        '"connected" event was lost: not "Łączenie…" with only "Rozłącz" '
+        'for the whole call', () async {
+      await ring();
+      // Connected by the time the answer is set up; the one event saying
+      // so never came.
+      callMedia.connectedValue = true;
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.active);
+    });
+
+    test('the media connecting later make it active too', () async {
+      await ring();
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.connecting);
+      callMedia.connectedValue = true;
+      callMedia.notifyListeners();
+      expect(call().status, CallSessionStatus.active);
+    });
+
+    test('a write that read the call before it connected does not leave it '
+        'connecting', () async {
+      await ring();
+      callMedia.connectedValue = true;
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.active);
+      // The media said "connecting" a moment before "connected", and its
+      // word arrives late.
+      callMedia.onStatusChanged!(
+        'call-first',
+        CallMediaSessionLifecycle.connecting,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.active);
+    });
+
+    test('the other side turning its camera on while the call still said '
+        '"connecting" reaches the call (their video shows), and is not '
+        'taken for a new incoming call', () async {
+      await ring();
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.connecting);
+      // Connected, and nobody told the controller yet.
+      callMedia.connectedValue = true;
+      await controller.receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.callOffer,
+          sender: _peer,
+          callId: 'call-first',
+          content: 'video',
+          sessionDescription: <String, dynamic>{'type': 'offer', 'sdp': 'v=1'},
+        ),
+        receivedAtMillis: 20,
+      );
+      expect(callMedia.remoteOfferDescription?['sdp'], 'v=1');
+      expect(call().status, CallSessionStatus.active);
+      expect(call().isIncoming, isFalse);
+    });
+
+    test("a call whose sound went to the car's speakers shows 'Głośnik' "
+        "on; off takes it to the phone's ear, on brings it back", () async {
+      await ring('audio');
+      callMedia
+        ..audioOnHeadsetValue = true
+        ..connectedValue = true;
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().status, CallSessionStatus.active);
+      expect(call().isSpeakerOn, isTrue);
+      await controller.toggleActiveCallSpeaker();
+      expect(call().isSpeakerOn, isFalse);
+      expect(callMedia.speakerOnValue, isFalse);
+      await controller.toggleActiveCallSpeaker();
+      expect(call().isSpeakerOn, isTrue);
+      expect(callMedia.speakerOnValue, isTrue);
+    });
+
+    test('an audio call with no headset stays on the earpiece', () async {
+      await ring('audio');
+      callMedia.connectedValue = true;
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(call().isSpeakerOn, isFalse);
+    });
+  });
+
   test('a re-ringed invite re-sends a lost answer', () async {
     final _FakeCallMediaSessionController callMedia =
         _FakeCallMediaSessionController()
@@ -6032,6 +6191,22 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
   CallMediaStatusListener? _onStatusChanged;
   CallMediaErrorListener? _onError;
 
+  /// Whether accepting tells the controller the call connected; false: the
+  /// event is lost on its way (the media connects all the same).
+  bool reportsActive = true;
+
+  /// What [isConnected] says.
+  bool connectedValue = false;
+
+  /// What [audioOnHeadset] says.
+  bool audioOnHeadsetValue = false;
+
+  @override
+  bool get audioOnHeadset => audioOnHeadsetValue;
+
+  @override
+  bool get isConnected => connectedValue && activeCallIdValue != null;
+
   @override
   String? get activeCallId => activeCallIdValue;
 
@@ -6092,7 +6267,9 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
     remoteAddressValue = remoteAddress;
     activeKindValue = kind;
     cameraEnabledValue = false;
-    _onStatusChanged?.call(callId, CallMediaSessionLifecycle.active);
+    if (reportsActive) {
+      _onStatusChanged?.call(callId, CallMediaSessionLifecycle.active);
+    }
     notifyListeners();
   }
 

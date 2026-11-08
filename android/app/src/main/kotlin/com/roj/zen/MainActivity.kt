@@ -145,6 +145,16 @@ class MainActivity : FlutterFragmentActivity() {
         } catch (error: Exception) {
             Log.w(TAG, "Updating picture-in-picture params failed", error)
         }
+        if (!active && isInPictureInPictureMode) {
+            // The call ended while it floated: the small window goes with
+            // it. Left up, it showed a corner of the app with nothing of
+            // the call; the person was in another app and stays there.
+            try {
+                moveTaskToBack(false)
+            } catch (error: Exception) {
+                Log.w(TAG, "Closing picture-in-picture after the call failed", error)
+            }
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)

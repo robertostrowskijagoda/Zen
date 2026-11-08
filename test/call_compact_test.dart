@@ -8,6 +8,7 @@ import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/noop_call_media_session.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 // The call's length is read from this fixed moment, not the wall clock, so a
 // slow machine cannot tick it over to the next second mid-test.
@@ -51,6 +52,78 @@ void main() {
     expect(mode.active.value, isTrue);
     mode.reportPictureInPicture(false);
     expect(mode.active.value, isFalse);
+  });
+
+  group('the floating window on Android follows the call', () {
+    late List<(bool, bool)> pip;
+
+    setUp(() {
+      pip = <(bool, bool)>[];
+      CallCompactMode.instance
+        ..androidForTest = true
+        ..pipSetter = ({required bool active, required bool video}) async {
+          pip.add((active, video));
+        };
+    });
+
+    test('armed when a call starts, disarmed (which closes the small window '
+        'if it floats) when it ends', () {
+      final CallCompactMode mode = CallCompactMode.instance;
+      mode.updateCall(running: true, video: true);
+      mode.reportPictureInPicture(true);
+      expect(mode.active.value, isTrue);
+      mode.updateCall(running: false, video: true);
+      expect(pip, <(bool, bool)>[(true, true), (false, true)]);
+    });
+
+    test('the same call reported again changes nothing; every start and end '
+        'of many calls goes through exactly once', () {
+      final CallCompactMode mode = CallCompactMode.instance;
+      for (int i = 0; i < 5; i++) {
+        mode
+          ..updateCall(running: true, video: i.isEven)
+          ..updateCall(running: true, video: i.isEven)
+          ..updateCall(running: false, video: i.isEven)
+          ..updateCall(running: false, video: i.isEven);
+      }
+      expect(pip, hasLength(10));
+      for (int i = 0; i < 10; i++) {
+        expect(pip[i].$1, i.isEven, reason: 'start, end, start, end…');
+      }
+    });
+
+    testWidgets('a call ending from the layer disarms it: no window left '
+        'behind with a corner of the app in it', (WidgetTester tester) async {
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          callMediaSessionControllerProvider.overrideWithValue(
+            NoopCallMediaSessionController(),
+          ),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              activeCall: _call(CallSessionStatus.active),
+            ),
+          ),
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CallCompactLayer(child: Text('app'))),
+        ),
+      );
+      expect(pip.last.$1, isTrue, reason: 'armed for the running call');
+      // The media say the call ended (the other side hung up).
+      container.read(callMediaSessionControllerProvider).onStatusChanged!(
+        'c1',
+        CallMediaSessionLifecycle.ended,
+      );
+      await tester.pump();
+      expect(container.read(socialHubControllerProvider).activeCall, isNull);
+      expect(pip.last.$1, isFalse, reason: 'the call ended: disarmed');
+    });
   });
 
   Future<void> pumpView(

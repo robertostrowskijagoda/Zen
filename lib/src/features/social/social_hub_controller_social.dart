@@ -1268,6 +1268,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (callId == null || callId.isEmpty || description == null) {
       return;
     }
+    // A call already talking says so before its offer is read: an offer for
+    // it is the other side's camera or screen (a renegotiation), never a
+    // new incoming call.
+    _reconcileCallWithMedia();
     final CallSession? currentCall = state.activeCall;
     if (_isSimultaneousCallGlare(currentCall, signal)) {
       if (_shouldPreferLocalOutgoingCall(currentCall!, callId)) {
@@ -1299,12 +1303,23 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _closeCallMediaSession();
     }
     final CallSession? nextCurrentCall = state.activeCall;
+    // A renegotiation (their camera or screen on or off): the call is
+    // active, or answered here with its media already running it. The
+    // caller's call is active the moment the answer comes, a second or two
+    // before the media here connect; its camera turned on in that moment
+    // was taken for a new incoming call, never applied, and this side
+    // never saw them.
     if (_currentCallMatches(
           call: nextCurrentCall,
           peerAddress: signal.sender,
           callId: callId,
         ) &&
-        nextCurrentCall?.status == CallSessionStatus.active) {
+        (nextCurrentCall?.status == CallSessionStatus.active ||
+            (nextCurrentCall != null &&
+                nextCurrentCall.status == CallSessionStatus.connecting &&
+                !nextCurrentCall.isIncoming &&
+                !nextCurrentCall.isGroup &&
+                _callMedia.activeCallId == callId))) {
       await _callMedia.handleRemoteOffer(
         kind: _callKind(signal.content),
         remoteDescription: description,
@@ -1401,6 +1416,54 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _callMedia.close();
   }
 
+  /// [session] is talking: active, with what its media has.
+  void _markCallConnected(CallSession session) {
+    // Connected: the ringing deadline no longer applies, and the ringing
+    // notification the call was answered from has to go with it.
+    _cancelCallRingingTimeout();
+    _stopCallReRing();
+    unawaitedLogged(
+      _dismissCallNotification(session.peerAddress),
+      context: 'Dismissing the connected call notification failed',
+    );
+    state = state.copyWith(
+      activeCall: session.copyWith(
+        status: CallSessionStatus.active,
+        kind: _callMedia.activeKind ?? session.kind,
+        isCameraEnabled: _callMedia.hasLocalVideo,
+        // The sound went to a car's speakers or earphones: out loud, so
+        // "Głośnik" is on, and off takes the call to the phone's ear.
+        isSpeakerOn: session.isSpeakerOn || _callMedia.audioOnHeadset,
+      ),
+    );
+    unawaited(_persistState());
+  }
+
+  /// The media's own word over any event: a call whose media is connected
+  /// is active. The single "connected" event could be lost (fired before
+  /// the call was known here) or undone by a write that read the call
+  /// before it (the answer applied, a hydration, an accept): the call then
+  /// stayed on "Łączenie…" for good, with only "Rozłącz" on the screen,
+  /// and the other side's camera, a renegotiation, was taken for a new
+  /// incoming call and never shown. Run on every change of the media and
+  /// of the call.
+  @override
+  void _reconcileCallWithMedia() {
+    if (!ref.mounted || _controllerDisposed) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null ||
+        session.isGroup ||
+        session.status == CallSessionStatus.active ||
+        !_callMedia.isConnected ||
+        _callMedia.activeCallId != session.id) {
+      return;
+    }
+    logZenMessage('Call made active from its connected media');
+    _markCallConnected(session);
+  }
+
   @override
   void _handleCallMediaStatusChanged(
     String callId,
@@ -1417,7 +1480,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     switch (status) {
       case CallMediaSessionLifecycle.connecting:
-        if (session.status != CallSessionStatus.connecting) {
+        if (session.status != CallSessionStatus.connecting &&
+            !(_callMedia.isConnected && _callMedia.activeCallId == callId)) {
           state = state.copyWith(
             activeCall: session.copyWith(status: CallSessionStatus.connecting),
           );
@@ -1425,22 +1489,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         }
         return;
       case CallMediaSessionLifecycle.active:
-        // Connected: the ringing deadline no longer applies, and the ringing
-        // notification the call was answered from has to go with it.
-        _cancelCallRingingTimeout();
-        _stopCallReRing();
-        unawaitedLogged(
-          _dismissCallNotification(session.peerAddress),
-          context: 'Dismissing the connected call notification failed',
-        );
-        state = state.copyWith(
-          activeCall: session.copyWith(
-            status: CallSessionStatus.active,
-            kind: _callMedia.activeKind ?? session.kind,
-            isCameraEnabled: _callMedia.hasLocalVideo,
-          ),
-        );
-        unawaited(_persistState());
+        _markCallConnected(session);
         return;
       case CallMediaSessionLifecycle.ended:
         _pendingIncomingCallOffer = null;

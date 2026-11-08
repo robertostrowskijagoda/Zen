@@ -29,6 +29,7 @@ import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/relay/reliable_signal_transport.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -716,6 +717,14 @@ final class FriendsPhone implements RelayPeerSource {
       taken: kit.taken,
       now: () => world.net.now,
       mailboxPollInterval: Duration.zero,
+      // As the app hands it over: its friends see "w tle" and when Zen was
+      // last open.
+      presence: LockedPresenceKit(
+        shownTo: <String>{
+          for (final String f in friends) PeerShareCodec.normalizeAddress(f),
+        },
+        lastOpenedAtMillis: world.net.now,
+      ),
     );
     side = _LockedSide(receiver: receiver, mailbox: mailbox, vault: vault);
     _locked = side;

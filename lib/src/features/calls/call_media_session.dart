@@ -40,9 +40,13 @@ typedef CallMediaStatusListener =
     void Function(String callId, CallMediaSessionLifecycle status);
 typedef CallMediaErrorListener = void Function(String? callId, Object error);
 
-/// The most a call's camera sends, in bits per second: plenty for 640 x 360
-/// to 960 x 540 at 24 frames, and little enough to cross the mesh smoothly.
-const int kCallVideoMaxBitrate = 900000;
+/// The most a call's camera sends, in bits per second: a sharp 960 x 540
+/// (up to 1280 x 720) at 24 frames on a good connection. It is a ceiling,
+/// not a rate: WebRTC sends what the path carries, and on a tight one it
+/// lowers the resolution before the frames ([_tuneCameraSenders]). At
+/// 900 kbit/s and 640 x 360 the picture was soft even when both sides had
+/// a fast connection.
+const int kCallVideoMaxBitrate = 1800000;
 
 abstract class CallMediaSessionController extends ChangeNotifier {
   RTCVideoRenderer? get localRenderer;
@@ -54,6 +58,17 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   bool get hasRemoteStream;
   bool get hasLocalVideo;
   bool get hasRemoteVideo;
+
+  /// Whether the media of [activeCallId] is connected now (its connection's
+  /// latest state says so). The call is talking whatever any event said:
+  /// the controller makes its call active from this, so a "connected" that
+  /// was lost or overwritten (the first call after Zen started, now and
+  /// then) no longer leaves it on "Łączenie…" without its buttons.
+  bool get isConnected => false;
+
+  /// Whether the call's sound is on a headset now (a car's Bluetooth,
+  /// earphones): out loud, hands free, so "Głośnik" shows on.
+  bool get audioOnHeadset => false;
 
   CallMediaStatusListener? get onStatusChanged;
   set onStatusChanged(CallMediaStatusListener? value);
@@ -484,6 +499,17 @@ final class WebRtcCallMediaSessionController
 
   @override
   bool get isScreenSharing => _screenStream != null;
+
+  /// The SDP of the last offer applied from the other side (the first one
+  /// and each renegotiation): the same one again is not applied twice.
+  String? _lastRemoteOfferSdp;
+
+  @override
+  bool get isConnected =>
+      _activeCallId != null &&
+      _peerConnection != null &&
+      _lastConnectionState ==
+          RTCPeerConnectionState.RTCPeerConnectionStateConnected;
 
   @override
   bool get remoteScreenSharing => _remoteScreenSharing;
@@ -1091,6 +1117,8 @@ final class WebRtcCallMediaSessionController
       // then have them before anything arrives.
       await _answerE2ee(remoteDescription[kMediaE2eeField]);
       await _setRemoteDescriptionPinned(remoteDescription);
+      final Object? firstSdp = remoteDescription['sdp'];
+      _lastRemoteOfferSdp = firstSdp is String ? firstSdp : null;
       await _bindLocalTracksToAnswerTransceivers();
       await _pinLocalVideoDirection(sending: _localCameraWanted);
       final RTCSessionDescription answer = await _requireConnection()
@@ -1127,8 +1155,21 @@ final class WebRtcCallMediaSessionController
     if (connection == null) {
       throw StateError(t('Brak aktywnej sesji do renegocjacji rozmowy.'));
     }
+    final Object? sdp = remoteDescription['sdp'];
+    if (sdp is String && sdp.isNotEmpty && sdp == _lastRemoteOfferSdp) {
+      // The same offer again (the mesh delivers one twice, a late copy of
+      // the first): applied once, its answer only goes again.
+      final String? callId = _activeCallId;
+      if (callId != null) {
+        await resendLocalAnswer(callId);
+      }
+      return;
+    }
     try {
       await _setRemoteDescriptionPinned(remoteDescription);
+      if (sdp is String) {
+        _lastRemoteOfferSdp = sdp;
+      }
       await _bindLocalTracksToAnswerTransceivers();
       await _pinLocalVideoDirection(sending: _localCameraWanted);
       final RTCSessionDescription answer = await connection.createAnswer(
@@ -1197,7 +1238,16 @@ final class WebRtcCallMediaSessionController
   }
 
   @override
-  Future<void> setSpeakerOn(bool enabled) => routeCallAudio(speaker: enabled);
+  Future<void> setSpeakerOn(bool enabled) async {
+    _audioOutput = await routeCallAudio(speaker: enabled) ?? _audioOutput;
+    _notify();
+  }
+
+  /// Where the call's sound went last ([routeCallAudio]).
+  CallAudioOutput? _audioOutput;
+
+  @override
+  bool get audioOnHeadset => _audioOutput == CallAudioOutput.headset;
 
   /// The camera of a video call could not be opened (the call went on
   /// with sound only): tried again by [recoverCamera].
@@ -1333,9 +1383,16 @@ final class WebRtcCallMediaSessionController
             label.contains('speaker') ||
             label.contains('głośnik') ||
             label.contains('glosnik');
-        await setSpeakerOn(speaker);
         try {
+          // Exactly the output picked: the loudspeaker with a headset
+          // connected too, which "Głośnik" alone does not give.
+          await Helper.setSpeakerphoneOn(speaker);
           await Helper.selectAudioOutput(device.id);
+          _audioOutput = speaker
+              ? CallAudioOutput.loudspeaker
+              : callHeadsetOutput(<String>[device.id]) != null
+              ? CallAudioOutput.headset
+              : CallAudioOutput.earpiece;
         } catch (error, stackTrace) {
           logZenError('Selecting audio output failed', error, stackTrace);
         }
@@ -1737,6 +1794,7 @@ final class WebRtcCallMediaSessionController
     _relaySdpMid = null;
     _localCandidateIp = null;
     _lastConnectionState = null;
+    _lastRemoteOfferSdp = null;
     if (captureVideo || kind == CallInviteKind.video) {
       await _ensureRenderers();
     }
@@ -1975,6 +2033,8 @@ final class WebRtcCallMediaSessionController
       if (activeCallId == null) {
         return;
       }
+      // Listeners see [isConnected] change too, not only the one callback.
+      _notify();
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _disconnectGraceTimer?.cancel();
@@ -2072,7 +2132,7 @@ final class WebRtcCallMediaSessionController
     if (Platform.isAndroid || Platform.isIOS) {
       // A connected headset (a car's Bluetooth) first; else the
       // loudspeaker for video, the earpiece for audio.
-      await routeCallAudio(
+      _audioOutput = await routeCallAudio(
         speaker: kind == CallInviteKind.video,
         preferHeadset: true,
       );
@@ -2551,6 +2611,7 @@ final class WebRtcCallMediaSessionController
     _relayMetadataReady = null;
     _relayPort = null;
     _lastConnectionState = null;
+    _lastRemoteOfferSdp = null;
     _lastSentOfferDescription = null;
     _lastSentAnswerDescription = null;
     _awaitingRemoteAnswer = false;
@@ -3033,9 +3094,12 @@ Map<String, dynamic> _buildAudioConstraints({String? deviceId}) {
   };
 }
 
-/// The camera for a call: 640 x 360 at 24 frames (up to 960 x 540 at 30).
-/// The picture crosses the mesh through a relay and every frame is
-/// encrypted on its way; 720p at 30 frames came through late and jerky.
+/// The camera for a call: 960 x 540 at 24 frames (up to 1280 x 720 at
+/// 30). The picture crosses the mesh through a relay and every frame is
+/// encrypted on its way: 720p at 30 frames with nothing to give way came
+/// through late and jerky, so the senders keep the frames and give up
+/// sharpness on a tight path ([kCallVideoMaxBitrate]); on a good one the
+/// picture stays sharp (640 x 360 was soft for everyone).
 Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
   final bool isMobile = Platform.isAndroid || Platform.isIOS;
   if (isMobile) {
@@ -3044,8 +3108,8 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
         'deviceId': deviceId
       else
         'facingMode': 'user',
-      'width': <String, dynamic>{'ideal': 640, 'max': 960},
-      'height': <String, dynamic>{'ideal': 360, 'max': 540},
+      'width': <String, dynamic>{'ideal': 960, 'max': 1280},
+      'height': <String, dynamic>{'ideal': 540, 'max': 720},
       'frameRate': <String, dynamic>{'ideal': 24, 'max': 30},
     };
   }
@@ -3055,8 +3119,8 @@ Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
       'optional': <Map<String, dynamic>>[
         <String, dynamic>{'sourceId': deviceId},
       ],
-    'width': 960,
-    'height': 540,
+    'width': 1280,
+    'height': 720,
     'frameRate': 24,
   };
 }
