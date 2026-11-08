@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.15.9 — 08.11.2026
+
 ### What's new
 - [en] Video calls show all their buttons and the picture from the start, your camera reaches the other side, and the picture is sharper.
 - [en] In the car the Speaker button goes back to the car's speakers, and the floating window closes when the call ends.
