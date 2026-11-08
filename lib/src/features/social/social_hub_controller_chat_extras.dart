@@ -144,24 +144,19 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     required String text,
     required ChatLocation location,
   }) async {
-    final int now = DateTime.now().millisecondsSinceEpoch;
     final GroupProfile? group = _groupOfKey(conversationKey);
     if (group != null) {
-      await sendGroupMessage(
+      return sendGroupMessage(
         groupId: group.id,
         text: text,
         location: location,
-        sentAtMillis: now,
       );
-      return 'grp-msg-$now-${group.id}';
     }
-    await sendLocalMessage(
+    return sendLocalMessage(
       peerAddress: conversationKey,
       text: text,
       location: location,
-      sentAtMillis: now,
     );
-    return 'outgoing-$now-$conversationKey';
   }
 
   /// Puts a newer [location] (with its [text]) on one's own shared
@@ -473,9 +468,9 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     final ChatMessageType resolvedType =
         type ??
         _attachmentTransport.inferType(mimeType: mimeType, fileName: name);
-    final int timestamp = DateTime.now().millisecondsSinceEpoch;
     final String key = 'group:$groupId';
-    final String messageId = 'grp-msg-$timestamp-$groupId';
+    final int timestamp = _outgoingStamp(key);
+    final String messageId = _groupMessageId(timestamp, groupId);
     final String label = chatMessageLabelForType(
       resolvedType,
       fileName: name,

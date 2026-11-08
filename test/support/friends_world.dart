@@ -837,7 +837,6 @@ final class FriendsWorld {
 
   /// Devices their owner unlinked.
   final Set<String> _unlinked = <String>{};
-  int _sentAtGuard = 0;
 
   /// How long a device needs to find its way to an address it has not
   /// talked to since it was last switched on (Yggdrasil's key and path
@@ -1273,12 +1272,17 @@ final class FriendsWorld {
     String text, {
     bool settleAfter = true,
   }) async {
-    // A group message's id is made from the wall clock to the millisecond.
-    while (DateTime.now().millisecondsSinceEpoch <= _sentAtGuard) {
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
-    _sentAtGuard = DateTime.now().millisecondsSinceEpoch;
-    await from.hub.sendGroupMessage(groupId: groupId, text: text);
+    // Back to back, as fast as the phone takes them: two messages within
+    // one millisecond keep ids of their own (the controller's
+    // _outgoingStamp; the world waited for the next millisecond before).
+    // Stamped with the world's clock, as [send] is: with the wall clock,
+    // years ahead of the receivers' virtual one, every copy took its time
+    // of arrival and the order of arrival.
+    await from.hub.sendGroupMessage(
+      groupId: groupId,
+      text: text,
+      sentAtMillis: net.now,
+    );
     if (settleAfter) {
       await settle();
     }

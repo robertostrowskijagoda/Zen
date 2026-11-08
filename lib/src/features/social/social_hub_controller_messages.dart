@@ -4,7 +4,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
   /// Sends [text] to [peerAddress]; as a reply to [replyTo], or marked as
   /// [forwarded] from another chat.
   @override
-  Future<void> sendLocalMessage({
+  Future<String> sendLocalMessage({
     required String peerAddress,
     required String text,
     String? displayName,
@@ -13,13 +13,13 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     bool forwarded = false,
     ChatLocation? location,
   }) async {
-    final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
     final String messageId = 'outgoing-$timestamp-$peerAddress';
     final bool requiresDeliveryAck = isRoutablePeerAddress(peerAddress);
-    if (trimmed.isEmpty) {
-      return;
-    }
     // Someone who is not a friend: within the limits, and
     // with this person's mini-profile. Throws [StrangerMessageRefused].
     final bool toStranger = _isStrangerChatPeer(peerAddress);
@@ -79,6 +79,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     } finally {
       unawaited(_finalizeOutgoingMessage(peerAddress, timestamp));
     }
+    return messageId;
   }
 
   Future<void> sendTypingState({
@@ -128,7 +129,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         normalizedFileName.isEmpty) {
       return;
     }
-    final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
     final String messageId = 'outgoing-$timestamp-$peerAddress';
     final bool requiresDeliveryAck = isRoutablePeerAddress(peerAddress);
     final String? resolvedMimeType = mimeType;

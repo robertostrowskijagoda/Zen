@@ -80,7 +80,7 @@ void main() {
     final SemanticsHandle semantics = tester.ensureSemantics();
     expect(
       tester.getSemantics(find.byKey(const Key('profile-photo-open'))),
-      containsSemantics(label: 'Zdjęcie profilowe', isButton: true),
+      isSemantics(label: 'Zdjęcie profilowe', isButton: true),
       reason: 'a screen reader says what opens',
     );
     semantics.dispose();
