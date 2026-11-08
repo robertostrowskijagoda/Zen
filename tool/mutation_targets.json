@@ -182,5 +182,11 @@
     "tests": [
       "test/pebble_hosting_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/core/storage/atomic_file.dart",
+    "tests": [
+      "test/storage_crash_consistency_test.dart"
+    ]
   }
 ]
