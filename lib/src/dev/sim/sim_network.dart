@@ -7,6 +7,9 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
+/// About how much of a message one mesh fragment carries.
+const int kSimFragmentBytes = 1300;
+
 /// Something on a phone that takes incoming frames (any of the app's
 /// services: `handle(frame)`).
 typedef SimHandler = Future<bool> Function(SignalTransportFrame frame);
@@ -111,6 +114,11 @@ final class SimNetwork {
 
   /// Share of messages lost on the way (0–1).
   double dropRate;
+
+  /// Share of fragments lost on the way (0–1): the mesh carries a message
+  /// in pieces of about [kSimFragmentBytes], and one piece lost loses the
+  /// whole message, so a large one is lost far more often than a small one.
+  double fragmentDropRate = 0;
 
   /// Share of messages that arrive twice, each copy at its own time, as a
   /// mesh that retries or two routes can make them (0–1).
@@ -265,6 +273,18 @@ final class SimNetwork {
       if (dropRate > 0 && random.nextDouble() < dropRate) {
         stats.dropped++;
         continue;
+      }
+      if (fragmentDropRate > 0) {
+        // Each fragment may go missing, and with it the whole message.
+        final int fragments = max(
+          1,
+          (jsonEncode(d.payload).length / kSimFragmentBytes).ceil(),
+        );
+        if (random.nextDouble() >
+            pow(1 - fragmentDropRate, fragments).toDouble()) {
+          stats.dropped++;
+          continue;
+        }
       }
       stats.delivered++;
       if (tracing) {

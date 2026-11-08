@@ -14,6 +14,7 @@ import 'package:zen/src/features/update/github_redirects.dart';
 import 'package:zen/src/features/update/github_release.dart';
 import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
+import 'package:zen/src/features/update/latest_release.dart';
 import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/presentation/sidestore_source_option.dart';
 import 'package:zen/src/features/update/release.dart';
@@ -469,6 +470,7 @@ void main() {
 
     GithubUpdateService service({
       required GithubJsonFetcher fetchJson,
+      GithubTagFetcher? fetchTag,
       bool internet = true,
       Future<String> Function(Uri uri)? fetchSums,
       GithubDownloader? download,
@@ -481,6 +483,7 @@ void main() {
         beforeDownload: beforeDownload,
         releaseKeys: releaseKeys,
         fetchJson: fetchJson,
+        fetchTag: fetchTag,
         fetchSums: fetchSums ?? (Uri uri) async => '',
         download:
             download ??
@@ -728,6 +731,67 @@ void main() {
       expect(installer.installed, hasLength(1));
       expect(s.installMessage, 'installed');
     });
+
+    test(
+      "update: a second tap while the release's files are still asked "
+      'for starts no second download, and the progress never goes back',
+      () async {
+        final List<int> bytes = utf8.encode('hello');
+        final _FakeInstaller installer = _FakeInstaller(dir);
+        // GitHub's API is out of requests: the version comes from the release
+        // page alone, its files are asked for again at "Aktualizuj".
+        Completer<Object?>? details;
+        int downloads = 0;
+        final List<double> shown = <double>[];
+        late final GithubUpdateService s;
+        s = service(
+          installer: installer,
+          fetchTag: (Uri uri) async => 'v1.12.0',
+          fetchJson: (Uri uri) {
+            final Completer<Object?>? waiting = details;
+            if (waiting == null) {
+              throw const GithubStatusException(403);
+            }
+            return waiting.future;
+          },
+          download:
+              (
+                Uri uri,
+                File target, {
+                required int maxBytes,
+                void Function(int received)? onProgress,
+              }) async {
+                downloads += 1;
+                await target.writeAsBytes(bytes);
+                onProgress?.call(3);
+                // A late callback of an older count is not shown.
+                onProgress?.call(2);
+                onProgress?.call(bytes.length);
+              },
+          fetchSums: (Uri uri) async =>
+              '${sha256Hex(bytes)}  Zen-arm64-v8a.apk\n',
+        );
+        await s.check();
+        expect(s.newer?.detailed, isFalse);
+        s.addListener(() {
+          if (s.installState == GithubInstallState.downloading) {
+            shown.add(s.progress);
+          }
+        });
+        details = Completer<Object?>();
+        final Future<void> first = s.update();
+        expect(s.updating, isTrue, reason: 'the button waits at once');
+        final Future<void> second = s.update();
+        details.complete(_releaseJson('v1.12.0'));
+        await Future.wait(<Future<void>>[first, second]);
+        expect(downloads, 1);
+        expect(installer.installed, hasLength(1));
+        expect(s.updating, isFalse);
+        for (int i = 1; i < shown.length; i++) {
+          expect(shown[i], greaterThanOrEqualTo(shown[i - 1]));
+        }
+      },
+    );
 
     test('update: a sum that does not match installs nothing', () async {
       final _FakeInstaller installer = _FakeInstaller(dir);

@@ -352,6 +352,259 @@ void main() {
     expect(fromDoor.single.$2['c'], card.text);
   });
 
+  test('a large design reaches its keeper within a couple of minutes on a '
+      'mesh that loses fragments: it goes in parts, and only the missing '
+      'ones go again', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    // One fragment in 25 lost: a whole design of some 60 fragments almost
+    // never got through, so "Pełny wygląd jeszcze w drodze" stayed while
+    // both were online.
+    w.net.fragmentDropRate = 0.04;
+    final PebbleCard card = await net.publish(w['A'], size: 60000);
+    await net.until(
+      () => net.hasDesign(w['B'], card),
+      within: const Duration(minutes: 3),
+      reason: 'the keeper holding the design',
+    );
+    expect(net.store(w['B']).entry(card.id)!.kept, isTrue);
+    expect(
+      w.net.stats.byType['pbl_design'] ?? 0,
+      0,
+      reason: 'a Zen that takes parts gets parts',
+    );
+    expect(w.net.stats.byType['pbl_part'], greaterThan(0));
+  });
+
+  // Every size from just over one part to the largest design, every loss
+  // from none to one fragment in ten, with datagrams also arriving twice
+  // and out of order, several seeds: the keeper always ends up with the
+  // design, exactly as the author made it, within a bound.
+  for (final int size in <int>[2251, 9000, 30000, kPebbleDesignMaxBytes]) {
+    for (final double loss in <double>[0, 0.02, 0.05, 0.1]) {
+      for (final int seed in <int>[1, 2, 3]) {
+        test(
+          'a design of $size bytes at ${(loss * 100).round()}% fragment '
+          'loss (seed $seed) reaches its keeper, whole and the same',
+          () async {
+            final FriendsWorld w = await FriendsWorld.create(
+              <String>['A', 'B'],
+              seed: seed,
+              duplicateRate: 0.05,
+            );
+            final _Net net = await _Net.of(w, keeperTarget: 1);
+            w.net.fragmentDropRate = loss;
+            final PebbleCard card = await net.publish(w['A'], size: size);
+            await net.until(
+              () => net.hasDesign(w['B'], card),
+              within: Duration(minutes: loss >= 0.1 ? 15 : 5),
+              reason: 'the keeper holding the design',
+            );
+            expect(
+              await net.store(w['B']).design(card.id),
+              await net.store(w['A']).design(card.id),
+              reason: 'the very bytes the author made',
+            );
+          },
+        );
+      }
+    }
+  }
+
+  test('parts that are wrong in every way are ignored, never crash, never '
+      'fill the memory, and the real parts still make the design', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A'], size: 20000);
+    final PebbleHosting b = net.hosts[w['B']]!;
+    final Uint8List design = (await net.store(w['A']).design(card.id))!;
+    final String encoded = b64(design);
+    final int n = (encoded.length / kPebblePartChars).ceil();
+    // Kept by B, without the design (as when every copy was lost).
+    await net.store(w['B']).addKept(card, from: w['A'].address);
+    final List<Map<String, dynamic>> junk = <Map<String, dynamic>>[
+      <String, dynamic>{'type': 'pbl_part'},
+      <String, dynamic>{'type': 'pbl_part', 'id': 'x', 'i': 0, 'n': 1},
+      <String, dynamic>{'type': 'pbl_part', 'id': card.id.text, 'i': -1},
+      for (final Object? i in <Object?>[-1, n, 1 << 40, 'a', null, 0.5])
+        <String, dynamic>{
+          'type': 'pbl_part',
+          'id': card.id.text,
+          'i': i,
+          'n': n,
+          'd': 'AAAA',
+        },
+      for (final Object? count in <Object?>[0, -3, 100000, 'n', null])
+        <String, dynamic>{
+          'type': 'pbl_part',
+          'id': card.id.text,
+          'i': 0,
+          'n': count,
+          'd': 'AAAA',
+        },
+      <String, dynamic>{
+        'type': 'pbl_part',
+        'id': card.id.text,
+        'i': 1,
+        'n': n,
+        'd': 'A' * (kPebblePartChars + 1),
+      },
+      <String, dynamic>{
+        'type': 'pbl_part',
+        'id': card.id.text,
+        'i': 1,
+        'n': n,
+        'd': '',
+      },
+      <String, dynamic>{
+        'type': 'pbl_part',
+        'id': card.id.text,
+        'i': 0,
+        'n': n,
+        'd': 'AAAA',
+        'c': 12,
+        'k': 'nonsense',
+      },
+    ];
+    for (final Map<String, dynamic> f in junk) {
+      await w['A'].appTransport.send(remoteAddress: w['B'].address, payload: f);
+    }
+    await net.settle();
+    expect(net.hasDesign(w['B'], card), isFalse);
+    // A whole set of parts with every part's content forged: the design
+    // does not match the card, so it is refused.
+    for (int i = 0; i < n; i++) {
+      await w['A'].appTransport.send(
+        remoteAddress: w['B'].address,
+        payload: <String, dynamic>{
+          'type': 'pbl_part',
+          'id': card.id.text,
+          'i': i,
+          'n': n,
+          'd':
+              'B' *
+              min(kPebblePartChars, encoded.length - i * kPebblePartChars),
+          if (i == 0) 'c': card.text,
+        },
+      );
+    }
+    await net.settle();
+    expect(net.hasDesign(w['B'], card), isFalse, reason: 'forged: refused');
+    // The real parts, last one first, each twice.
+    for (int i = n - 1; i >= 0; i--) {
+      for (int twice = 0; twice < 2; twice++) {
+        await w['A'].appTransport.send(
+          remoteAddress: w['B'].address,
+          payload: <String, dynamic>{
+            'type': 'pbl_part',
+            'id': card.id.text,
+            'i': i,
+            'n': n,
+            'd': encoded.substring(
+              i * kPebblePartChars,
+              min(encoded.length, (i + 1) * kPebblePartChars),
+            ),
+            if (i == 0) 'c': card.text,
+          },
+        );
+      }
+    }
+    await net.settle();
+    expect(net.hasDesign(w['B'], card), isTrue);
+    expect(await net.store(w['B']).design(card.id), design);
+    await b.idle;
+  });
+
+  test('parts for a pebble nobody here wants are dropped at once', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A'], size: 20000);
+    final String encoded = b64((await net.store(w['A']).design(card.id))!);
+    final int n = (encoded.length / kPebblePartChars).ceil();
+    for (int i = 0; i < n; i++) {
+      await w['A'].appTransport.send(
+        remoteAddress: w['B'].address,
+        payload: <String, dynamic>{
+          'type': 'pbl_part',
+          'id': card.id.text,
+          'i': i,
+          'n': n,
+          'd': encoded.substring(
+            i * kPebblePartChars,
+            min(encoded.length, (i + 1) * kPebblePartChars),
+          ),
+          if (i == 0) 'c': card.text,
+        },
+      );
+    }
+    await net.settle();
+    expect(net.store(w['B']).entry(card.id), isNull);
+  });
+
+  test('an asker that does not say it takes parts (an older Zen) gets the '
+      'design whole, as before', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A'], size: 20000);
+    final List<Map<String, dynamic>> got = <Map<String, dynamic>>[];
+    final StreamSubscription<SignalTransportFrame> sub = w['B']
+        .appTransport
+        .frames
+        .listen((SignalTransportFrame f) => got.add(f.payload));
+    addTearDown(sub.cancel);
+    await w['B'].appTransport.send(
+      remoteAddress: w['A'].address,
+      payload: <String, dynamic>{
+        'type': 'pbl_get',
+        'id': card.id.text,
+        'a': card.authorAccount,
+        'h': 0,
+      },
+    );
+    await net.settle();
+    final Map<String, dynamic> design = got.singleWhere(
+      (Map<String, dynamic> p) => p['type'] == 'pbl_design',
+    );
+    expect(design['c'], card.text);
+    expect(
+      got.where((Map<String, dynamic> p) => p['type'] == 'pbl_part'),
+      isEmpty,
+    );
+  });
+
+  test('a keeper whose pebble door runs already says yes with its door, and '
+      'still gets the design at once', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final _Net net = await _Net.of(w, keeperTarget: 1);
+    await net.hosts[w['B']]!.stop();
+    final PebbleHosting b = PebbleHosting(
+      transport: w['B'].appTransport,
+      store: net.store(w['B']),
+      peers: net.peers[w['B']]!,
+      accountKey: () => net.keys[w['B']],
+      serveCollected: () => true,
+      clock: () => w.now,
+      keeperTarget: 1,
+      doorRequests: const Stream<SignalTransportFrame>.empty(),
+      sendFromDoor: (String to, Map<String, dynamic> payload) async => true,
+      runDoor: (String? seed) {},
+    );
+    b.onKeepRequest = (PebbleKeepRequest r) =>
+        Future<void>.microtask(() => b.acceptKeep(r.card.id));
+    net.hosts[w['B']] = b;
+    await b.start();
+    final PebbleCard first = await net.publish(w['A']);
+    await net.until(() => net.hasDesign(w['B'], first));
+    await net.until(() => b.doorAddress != null, reason: 'the door known');
+    // The second pebble: B's yes now names its door.
+    final PebbleCard second = await net.publish(w['A'], size: 9000);
+    expect(
+      net.hasDesign(w['B'], second),
+      isTrue,
+      reason: 'served with the yes, not a round later',
+    );
+  });
+
   test('the author asks friends of their own choice to keep it', () async {
     final FriendsWorld w = await FriendsWorld.create(<String>[
       'A',
@@ -854,6 +1107,14 @@ void main() {
         'c': card.text,
         'd': b64(design),
         'k': list.toJson(),
+      },
+      <String, dynamic>{
+        'type': PebbleFrames.part,
+        'id': card.id.text,
+        'i': 0,
+        'n': 2,
+        'd': b64(design).substring(0, kPebblePartChars),
+        'c': card.text,
       },
       <String, dynamic>{
         'type': PebbleFrames.keepAsk,

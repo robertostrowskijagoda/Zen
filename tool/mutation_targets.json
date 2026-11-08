@@ -1,102 +1,186 @@
 [
   {
     "file": "lib/src/features/social/peer_share_codec.dart",
-    "tests": ["test/peer_share_codec_test.dart"]
+    "tests": [
+      "test/peer_share_codec_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/settings/notice_kind.dart",
-    "tests": ["test/notification_switches_test.dart"]
+    "tests": [
+      "test/notification_switches_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/social/friendship_book.dart",
-    "tests": ["test/friendship_book_test.dart", "test/friendship_book_guard_test.dart"]
+    "tests": [
+      "test/friendship_book_test.dart",
+      "test/friendship_book_guard_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/runtime/notification_privacy.dart",
-    "tests": ["test/locked_invitation_notice_test.dart", "test/notification_privacy_level_test.dart", "test/notification_switches_test.dart"]
+    "tests": [
+      "test/locked_invitation_notice_test.dart",
+      "test/notification_privacy_level_test.dart",
+      "test/notification_switches_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/relay/relay_crypto.dart",
-    "tests": ["test/relay_hybrid_cipher_test.dart", "test/relay_engine_test.dart"]
+    "tests": [
+      "test/relay_hybrid_cipher_test.dart",
+      "test/relay_engine_test.dart"
+    ]
   },
   {
     "file": "lib/src/domain/messages/chat_poll.dart",
-    "tests": ["test/chat_poll_test.dart"]
+    "tests": [
+      "test/chat_poll_test.dart"
+    ]
   },
   {
     "file": "lib/src/domain/messages/chat_location.dart",
-    "tests": ["test/location_sharing_test.dart"]
+    "tests": [
+      "test/location_sharing_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/chat/location_sharing.dart",
-    "tests": ["test/location_sharing_test.dart"]
+    "tests": [
+      "test/location_sharing_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/chat/scheduled_messages.dart",
-    "tests": ["test/scheduled_messages_test.dart"]
+    "tests": [
+      "test/scheduled_messages_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/chat/self_notes.dart",
-    "tests": ["test/self_notes_test.dart"]
+    "tests": [
+      "test/self_notes_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/runtime/runtime_signal_parser.dart",
-    "tests": ["test/runtime_signal_parser_test.dart"]
+    "tests": [
+      "test/runtime_signal_parser_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/social/social_hub_controller.dart",
-    "tests": ["test/social_hub_controller_test.dart", "test/group_mentions_test.dart"]
+    "tests": [
+      "test/social_hub_controller_test.dart",
+      "test/group_mentions_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/social/social_snapshot_store.dart",
-    "tests": ["test/social_snapshot_store_test.dart"]
+    "tests": [
+      "test/social_snapshot_store_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/update/update_notice.dart",
-    "tests": ["test/update_notice_test.dart"]
+    "tests": [
+      "test/update_notice_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/settings/app_settings_controller.dart",
-    "tests": ["test/app_settings_controller_test.dart"]
+    "tests": [
+      "test/app_settings_controller_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/chat/waiting_replies.dart",
-    "tests": ["test/waiting_replies_test.dart"]
+    "tests": [
+      "test/waiting_replies_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/settings/diagnostics_log_file.dart",
-    "tests": ["test/diagnostics_log_file_test.dart"]
+    "tests": [
+      "test/diagnostics_log_file_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/settings/problem_report.dart",
-    "tests": ["test/problem_report_test.dart"]
+    "tests": [
+      "test/problem_report_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/social/social_hub_controller_chat_extras.dart",
-    "tests": ["test/chat_extras_end_to_end_test.dart", "test/signal_fuzz_test.dart"]
+    "tests": [
+      "test/chat_extras_end_to_end_test.dart",
+      "test/signal_fuzz_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/feed/reaction_notifier.dart",
-    "tests": ["test/reaction_notifier_test.dart"]
+    "tests": [
+      "test/reaction_notifier_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/profile/avatar_sanitizer.dart",
-    "tests": ["test/avatar_sanitizer_test.dart", "test/image_crop_test.dart"]
+    "tests": [
+      "test/avatar_sanitizer_test.dart",
+      "test/image_crop_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/media/crop_region.dart",
-    "tests": ["test/image_crop_test.dart"]
+    "tests": [
+      "test/image_crop_test.dart"
+    ]
   },
   {
     "file": "lib/src/core/utils/safe_file_name.dart",
-    "tests": ["test/safe_file_name_test.dart"]
+    "tests": [
+      "test/safe_file_name_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/feed/reaction_digest.dart",
-    "tests": ["test/reaction_digest_test.dart", "test/unawaited_logged_test.dart"]
+    "tests": [
+      "test/reaction_digest_test.dart",
+      "test/unawaited_logged_test.dart"
+    ]
   },
   {
     "file": "lib/src/features/runtime/runtime_route_intent.dart",
-    "tests": ["test/runtime_route_intent_test.dart", "test/reaction_notifier_test.dart"]
+    "tests": [
+      "test/runtime_route_intent_test.dart",
+      "test/reaction_notifier_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/security/sealed_inbox.dart",
+    "tests": [
+      "test/locked_background_inbox_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/ledger/ledger_node.dart",
+    "tests": [
+      "test/offline_content_test.dart",
+      "test/ledger_node_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_audio_route.dart",
+    "tests": [
+      "test/call_audio_route_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pebbles/pebble_hosting.dart",
+    "tests": [
+      "test/pebble_hosting_test.dart"
+    ]
   }
 ]

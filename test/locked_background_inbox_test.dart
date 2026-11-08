@@ -381,6 +381,19 @@ void main() {
       expect(kem.decapsulations, 1);
     });
 
+    test('the first record makes the folders the inbox is in', () async {
+      final File file = File('${support.path}/a/b/inbox.zbox');
+      final SealedInboxWriter writer = SealedInboxWriter(
+        file: file,
+        recipientPublicKey: await inboxPublicKeyFor(_masterKey()),
+      );
+      expect(await writer.append(Uint8List.fromList(<int>[1])), isTrue);
+      expect(
+        await readSealedInbox(file, await inboxKeyPairFor(_masterKey())),
+        hasLength(1),
+      );
+    });
+
     test('a record cut short by a killed write is cut off', () async {
       final File file = File('${support.path}/inbox.zbox');
       final Uint8List publicKey = await inboxPublicKeyFor(_masterKey());
@@ -1143,8 +1156,8 @@ void main() {
       },
     );
 
-    test('pings the friends who see its status every few minutes and hands '
-        'their newest statuses to the app', () async {
+    test('pings the friends who see its status every few minutes and keeps '
+        'their newest statuses for the app as they come', () async {
       int clock = DateTime.now().millisecondsSinceEpoch;
       final Uint8List masterKey = _masterKey();
       final BackgroundCapability capability = await publishFor(masterKey);
@@ -1196,33 +1209,31 @@ void main() {
         clock - const Duration(hours: 1).inMilliseconds,
       );
       expect(receiver.keptCount, 0);
-      await receiver.stop();
-      // The app shows them as soon as it is unlocked, before its node is up
-      // and the inbox is opened: only statuses, and the inbox stays.
-      final List<SignalTransportFrame> early = <SignalTransportFrame>[];
-      expect(
-        await replayKeptPresence(
-          vault: appVault,
-          masterKey: masterKey,
-          replay: early.add,
-        ),
-        1,
-      );
-      expect(early.single.from, _ada);
-      expect(early.single.payload['state'], 'foreground');
-      expect(early.single.receivedAtMillis, clock);
-      expect(await appVault.hasInbox(), isTrue);
-      final List<SignalTransportFrame> delivered = <SignalTransportFrame>[];
-      await appVault.drain(
+      await receiver.presenceKept;
+      // Written down while the receiver still runs: the app reads them the
+      // moment it is unlocked, without the receiver stopping first and
+      // without the inbox (which holds no statuses).
+      List<SignalTransportFrame> kept = await keptPresenceFrames(
+        vault: appVault,
         masterKey: masterKey,
-        settle: Duration.zero,
-        deliver: (Uint8List record) async {
-          delivered.add(decodeInboxFrame(record)!);
-        },
       );
-      expect(delivered.single.from, _ada);
-      expect(delivered.single.payload['state'], 'foreground');
-      expect(delivered.single.receivedAtMillis, clock);
+      expect(kept.single.from, _ada);
+      expect(kept.single.payload['state'], 'foreground');
+      expect(kept.single.receivedAtMillis, clock);
+      expect(await appVault.hasInbox(), isFalse);
+      // A newer one replaces it at once.
+      await heard(_ada, 'background', clock + 1000);
+      await receiver.presenceKept;
+      kept = await keptPresenceFrames(vault: appVault, masterKey: masterKey);
+      expect(kept.single.payload['state'], 'background');
+      // Another key (a new master key) opens none of it.
+      expect(
+        await keptPresenceFrames(vault: appVault, masterKey: _masterKey(9)),
+        isEmpty,
+      );
+      await receiver.stop();
+      kept = await keptPresenceFrames(vault: appVault, masterKey: masterKey);
+      expect(kept.single.receivedAtMillis, clock + 1000);
     });
 
     test('without a presence kit a pong says nothing about presence', () async {

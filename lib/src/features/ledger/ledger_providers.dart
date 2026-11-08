@@ -240,9 +240,10 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     bridgeConnections: ledgerBridgeConnections(
       phone: !kIsWeb && (Platform.isAndroid || Platform.isIOS),
     ),
-    // On Android the background service may still be serving the ledger
-    // (the app was closed): the background bridge resumes this node once
-    // the service has handed it back.
+    // On Android the background service may still run the node (the app
+    // was locked or closed): the ledger is read from disk at once (the
+    // service never writes it), and the background bridge resumes this
+    // node, which then goes online, once the service has let go.
     startSuspended: !inService && !kIsWeb && Platform.isAndroid,
     createIdentity: !inService,
   );

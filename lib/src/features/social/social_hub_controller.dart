@@ -1652,6 +1652,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     CallMediaSessionLifecycle status,
   );
 
+  /// Makes the call active when its media is connected
+  /// ([CallMediaSessionController.isConnected]) and the call does not say
+  /// so yet.
+  void _reconcileCallWithMedia();
+
   void _handleCallMediaError(String? callId, Object error);
 
   GroupCallMedia get _groupMedia => ref.read(groupCallMediaProvider);

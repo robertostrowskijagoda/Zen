@@ -9,6 +9,18 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       final CallMediaSessionController callMedia = _callMedia;
       callMedia.onStatusChanged = _handleCallMediaStatusChanged;
       callMedia.onError = _handleCallMediaError;
+      // The call follows its media whatever order the events came in
+      // (_reconcileCallWithMedia): on each change of the media, and of the
+      // call here (a write that read the call before it connected).
+      callMedia.addListener(_reconcileCallWithMedia);
+      listenSelf((SocialHubState? previous, SocialHubState next) {
+        if (!identical(previous?.activeCall, next.activeCall) &&
+            next.activeCall != null &&
+            next.activeCall!.status != CallSessionStatus.active) {
+          // Not from inside the listener: the state is being set now.
+          scheduleMicrotask(_reconcileCallWithMedia);
+        }
+      });
       _wireGroupCallMedia();
       _watchOwnProfile();
       // Image providers and players of this isolate find the vault there.
@@ -22,6 +34,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         _markHydrationSettled();
         callMedia.onStatusChanged = null;
         callMedia.onError = null;
+        callMedia.removeListener(_reconcileCallWithMedia);
         _pendingOfferTimeoutTimer?.cancel();
         _pendingOfferTimeoutTimer = null;
         _callRingingTimeoutTimer?.cancel();

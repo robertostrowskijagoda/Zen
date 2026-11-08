@@ -133,6 +133,7 @@ final class RelayConfig {
     this.quickSightingRetryAfter = const Duration(seconds: 4),
     this.answeringFor = const Duration(minutes: 2),
     this.sendingWhileAnsweringFor = const Duration(minutes: 1),
+    this.waitingProbeEvery = const Duration(minutes: 2),
     this.maxTrackedMessages = 1000,
     this.announceRetryInterval = const Duration(minutes: 2),
     this.pollInterval = const Duration(minutes: 5),
@@ -249,6 +250,16 @@ final class RelayConfig {
   /// the way.
   final Duration answeringFor;
   final Duration sendingWhileAnsweringFor;
+
+  /// While this app runs, each recipient with payloads waiting on a long
+  /// backoff gets its oldest small one again this often: one frame per
+  /// recipient, a probe. A phone whose Zen receives in the background (its
+  /// service) and came back on the network says nothing by itself, and the
+  /// long steps of [directRetrySchedule] (10 min, 30 min, an hour…) left
+  /// "Czeka u Ciebie — odbiorca offline" while it was there to take it.
+  /// Its acknowledgement counts as hearing from it, so the rest goes at
+  /// once ([_onPeerSeen]). Zero: no probes.
+  final Duration waitingProbeEvery;
 
   /// Outgoing chat messages whose delivery is kept for the chat
   /// ([RelayTrackedMessage]); settled ones go first.
@@ -3025,6 +3036,57 @@ final class RelayEngine {
     return changed;
   }
 
+  /// When each recipient was last probed ([RelayConfig.waitingProbeEvery]).
+  final Map<String, int> _probedAt = <String, int>{};
+
+  /// One small payload to each recipient whose waiting ones are all on a
+  /// long backoff, at most every [RelayConfig.waitingProbeEvery]: the
+  /// oldest one, sent as it is (its backoff stays as it was).
+  Future<void> _probeWaitingRecipients(RelayState state, int now) async {
+    final int every = config.waitingProbeEvery.inMilliseconds;
+    if (every <= 0) {
+      _probedAt.clear();
+      return;
+    }
+    final Map<String, RelayOutboxEntry> oldest = <String, RelayOutboxEntry>{};
+    final Set<String> soon = <String>{};
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      if (_isPart(entry) || entry.recipient == _self) {
+        continue;
+      }
+      if (entry.directAttempts == 0 ||
+          entry.nextDirectAttemptAtMillis - now < every) {
+        // Its own next try comes soon enough (or the first ones run).
+        soon.add(entry.recipient);
+        continue;
+      }
+      if (!entry.relayable) {
+        continue;
+      }
+      final RelayOutboxEntry? known = oldest[entry.recipient];
+      if (known == null || entry.createdAtMillis < known.createdAtMillis) {
+        oldest[entry.recipient] = entry;
+      }
+    }
+    _probedAt.removeWhere((String r, int _) => !oldest.containsKey(r));
+    for (final MapEntry<String, RelayOutboxEntry> m in oldest.entries) {
+      // Heard from lately: its sightings retry already (_onPeerSeen), and
+      // a device that talks without confirming must not get more.
+      if (soon.contains(m.key) || _answering(m.key, now)) {
+        continue;
+      }
+      final int last = max(
+        _probedAt[m.key] ?? 0,
+        _lastDirectAttemptAt(m.value),
+      );
+      if (now - last < every) {
+        continue;
+      }
+      _probedAt[m.key] = now;
+      await _sendQuietly(m.key, m.value.payload);
+    }
+  }
+
   /// Periodic housekeeping; cheap when there is nothing to do.
   Future<void> tick() {
     return _locked(() async {
@@ -3076,6 +3138,7 @@ final class RelayEngine {
           changed = true;
         }
       }
+      await _probeWaitingRecipients(state, now);
       changed = await _depositPending(state) || changed;
       if (_blobs != null) {
         changed = await _blobHousekeeping(state, now) || changed;

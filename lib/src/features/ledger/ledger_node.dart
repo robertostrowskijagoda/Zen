@@ -225,9 +225,10 @@ final class LedgerNode {
   /// it must use the identity the app created, never make its own.
   final bool createIdentity;
 
-  /// While suspended another process owns the ledger on disk (the Android
-  /// background service while the app is not on screen): this node neither
-  /// reads frames nor writes. [resume] catches up with what was written.
+  /// While suspended the node is not this isolate's (the Android background
+  /// service runs it while the app is locked or away): this node neither
+  /// reads frames nor saves. Started suspended it still reads the disk at
+  /// once, so what is there shows; [resume] catches up and goes online.
   bool _suspended;
   Completer<void>? _resumed;
   bool _loaded = false;
@@ -244,9 +245,9 @@ final class LedgerNode {
   bool _ownershipManaged = false;
 
   /// Safety net for a node started suspended that nobody ever resumed (the
-  /// bridge failed early): take the disk after all.
+  /// bridge failed early): go online after all.
   Future<void> resumeIfUnmanaged() async {
-    if (!_ownershipManaged && _suspended && !_loaded) {
+    if (!_ownershipManaged && _suspended && !_online) {
       logZenWarning(
         'The ledger got no go-ahead to start; starting on its own.',
       );
@@ -686,12 +687,9 @@ final class LedgerNode {
   Future<void> start() => _started ??= _start().whenComplete(_settle);
 
   Future<void> _start() async {
-    // Started suspended: the disk belongs to someone else until [resume].
-    // (No await otherwise: an extra async step changes nothing but timing.)
-    final Completer<void>? gate = _resumed;
-    if (gate != null) {
-      await gate.future;
-    }
+    // Read at once, even started suspended: no other process writes the
+    // ledger (the locked service has no key to it), so the profile and the
+    // feed show the moment Zen opens. Only the network waits for [resume].
     if (!createIdentity && !await LedgerIdentity.exists(disk)) {
       throw StateError(t('Brak tożsamości dziennika na tym urządzeniu.'));
     }
@@ -788,11 +786,35 @@ final class LedgerNode {
     _loaded = true;
     _ready = true;
     _settle();
+    if (!_openedChanges.isClosed) {
+      // Readable now: screens built before show what was read.
+      _openedChanges.add(null);
+    }
     if (_suspended) {
-      // Handed over while loading: stay quiet until [resume].
-      await archive.pause();
+      // Started suspended (the node is not this isolate's yet) or handed
+      // over while loading: quiet until [resume], which goes online.
+      await (_pausing = archive.pause());
+      final Completer<void>? gate = _resumed;
+      if (gate != null) {
+        await gate.future;
+      }
       return;
     }
+    await _goOnline();
+  }
+
+  /// Whether the start's network part ran ([_goOnline]).
+  bool _online = false;
+
+  /// The archive's last [LedgerArchive.pause], which [resume] waits for so
+  /// its catch-up is never undone by a pause landing after it.
+  Future<void>? _pausing;
+
+  /// Listens, greets friends, connects to the bridges known from before and
+  /// tells the account's devices about this one: once, when the node first
+  /// goes online.
+  Future<void> _goOnline() async {
+    _online = true;
     _listen();
     _startSyncTimer();
     // Connect to the bridges known from before right away.
@@ -916,7 +938,7 @@ final class LedgerNode {
     await _frames?.cancel();
     _frames = null;
     if (_loaded) {
-      await archive.pause();
+      await (_pausing = archive.pause());
     }
   }
 
@@ -931,18 +953,27 @@ final class LedgerNode {
     final Completer<void>? gate = _resumed;
     _resumed = null;
     if (!_loaded) {
-      // Never loaded: [start] goes on from where it waited.
+      // Still loading: [start] sees it is not suspended and goes online.
       gate?.complete();
       return;
     }
     try {
+      await _pausing;
       await archive.catchUp();
     } finally {
       gate?.complete();
     }
-    _listen();
-    _startSyncTimer();
-    await greetFriends();
+    if (_suspended || _stopped) {
+      // Suspended again (or stopped) while catching up.
+      return;
+    }
+    if (_online) {
+      _listen();
+      _startSyncTimer();
+      await greetFriends();
+    } else {
+      await _goOnline();
+    }
   }
 
   /// Sends a hello to every friend (again at most every [helloInterval]).
@@ -1966,6 +1997,9 @@ final class LedgerNode {
 
   void _send(String peer, Map<String, dynamic> message) {
     if (_stopped ||
+        // Not this isolate's node now: what is missed goes at [resume]'s
+        // greeting.
+        _suspended ||
         _unlinked.containsKey(PeerShareCodec.normalizeAddress(peer))) {
       // Nothing of the ledger goes to a device its owner cut off.
       return;
@@ -3140,6 +3174,12 @@ final class LedgerNode {
   Future<void> _stop() async {
     _stopped = true;
     _settle();
+    // A start waiting to go online ends: there is nothing to wait for.
+    final Completer<void>? gate = _resumed;
+    _resumed = null;
+    if (gate != null && !gate.isCompleted) {
+      gate.complete();
+    }
     _syncTimer?.cancel();
     _unknownTimer?.cancel();
     _unknownTimer = null;

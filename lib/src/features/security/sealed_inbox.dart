@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
 
@@ -211,6 +212,75 @@ Future<List<Uint8List>> readSealedInbox(
   return out;
 }
 
+/// A sealed file the background service writes whole, again and again (the
+/// newest status of each friend, `presence.zbox`): the inbox's records
+/// (sealed for the same key, read with [readSealedInbox]), but replaced at
+/// once rather than appended to, so the file always says what the service
+/// knows now and a reader sees the old one or the new one, never half.
+/// Only ever holds the public key.
+final class SealedSnapshotWriter {
+  SealedSnapshotWriter({
+    required this.file,
+    required Uint8List recipientPublicKey,
+  }) : _recipient = Uint8List.fromList(recipientPublicKey);
+
+  final File file;
+  final Uint8List _recipient;
+  InboxSealKey? _sealKey;
+
+  /// One write after another; writes asked for while one runs come down to
+  /// the newest ([_next]).
+  Future<void> _queue = Future<void>.value();
+  List<Uint8List>? _next;
+
+  /// Done once every write asked for so far is on the disk.
+  Future<void> get idle => _queue;
+
+  /// Writes [plaintexts] (each at most [kSealedInboxMaxRecordBytes]; bigger
+  /// ones are left out) as the whole file. Never throws: a failed write is
+  /// logged and the next one tries again.
+  Future<void> write(List<Uint8List> plaintexts) {
+    _next = plaintexts;
+    return _queue = _queue.then((_) async {
+      final List<Uint8List>? records = _next;
+      _next = null;
+      if (records == null) {
+        // Written already by a turn that came before this one.
+        return;
+      }
+      try {
+        await _write(records);
+      } on Object catch (error, stackTrace) {
+        logZenError('Writing a sealed snapshot failed', error, stackTrace);
+      }
+    });
+  }
+
+  Future<void> _write(List<Uint8List> plaintexts) async {
+    InboxSealKey? sealKey = _sealKey;
+    if (sealKey == null || sealKey.spent) {
+      sealKey = _sealKey = await InboxSealKey.make(_recipient);
+    }
+    final BytesBuilder out = BytesBuilder(copy: false);
+    for (final Uint8List plaintext in plaintexts) {
+      if (plaintext.length > kSealedInboxMaxRecordBytes) {
+        continue;
+      }
+      final Uint8List record = await sealInboxRecord(
+        plaintext,
+        _recipient,
+        key: sealKey,
+      );
+      final Uint8List length = Uint8List(_lengthBytes);
+      ByteData.sublistView(length).setUint32(0, record.length, Endian.little);
+      out
+        ..add(length)
+        ..add(record);
+    }
+    await writeFileAtomically(file, out.takeBytes());
+  }
+}
+
 /// Appends sealed records to the inbox [file]; only ever holds the public
 /// key.
 final class SealedInboxWriter {
@@ -226,6 +296,9 @@ final class SealedInboxWriter {
 
   final File file;
   final int maxFileBytes;
+
+  /// The inbox key's public part the records are sealed for.
+  Uint8List get recipientPublicKey => Uint8List.fromList(_recipient);
 
   /// The most one sender's records may take until the app drains the
   /// inbox, so that one friend (or one key) cannot fill it for the others.

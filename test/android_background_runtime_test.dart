@@ -1275,8 +1275,8 @@ final class _FakeBackgroundVault implements BackgroundVault {
   Future<bool> hasInbox() async => records.isNotEmpty;
 
   @override
-  Future<List<Uint8List>> peek({required Uint8List masterKey}) async =>
-      List<Uint8List>.of(records);
+  Future<List<Uint8List>> keptPresence({required Uint8List masterKey}) async =>
+      const <Uint8List>[];
 
   @override
   Future<int> drain({

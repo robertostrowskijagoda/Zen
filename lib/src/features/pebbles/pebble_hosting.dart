@@ -21,6 +21,16 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///   its own friends, who then answer the asker `o` directly;
 /// * `pbl_design {c, d, k?}`: the card, the full design and the newest
 ///   keeper list known;
+/// * `pbl_part {id, i, n, d, c?, k?}`: part `i` of `n` of the design (its
+///   base64, [kPebblePartChars] at most; the card and the keeper list in
+///   part 0), to whoever said it takes parts (`pp` 1 in its `pbl_get` or
+///   `pbl_keep_yes`). The mesh carries a message in fragments of about
+///   1.3 kB and one lost fragment loses it all: a whole design (up to
+///   [kPebbleDesignMaxBytes], some 70 fragments) was lost again and again,
+///   and "Pełny wygląd jeszcze w drodze" stayed while both were online.
+///   A part that did not come is asked for alone (`m`: the missing parts,
+///   in a `pbl_get`). An older Zen asks without `pp` and gets the whole
+///   design, as before;
 /// * `pbl_keep_ask {c, n}`: author → friend, "keep my pebble" (n bytes);
 /// * `pbl_keep_yes {id}`, `pbl_keep_no {id}`: the friend's answer;
 /// * `pbl_keep_quit {id}`: a keeper gives the role up;
@@ -30,6 +40,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 abstract final class PebbleFrames {
   static const String get = 'pbl_get';
   static const String design = 'pbl_design';
+  static const String part = 'pbl_part';
   static const String keepAsk = 'pbl_keep_ask';
   static const String keepYes = 'pbl_keep_yes';
   static const String keepNo = 'pbl_keep_no';
@@ -40,6 +51,7 @@ abstract final class PebbleFrames {
   static const Set<String> all = <String>{
     get,
     design,
+    part,
     keepAsk,
     keepYes,
     keepNo,
@@ -48,6 +60,19 @@ abstract final class PebbleFrames {
     found,
   };
 }
+
+/// The base64 of a design one `pbl_part` carries at most: three mesh
+/// fragments or so. A design this long or shorter goes whole.
+const int kPebblePartChars = 3000;
+
+/// The most parts a design has ([kPebbleDesignMaxBytes] in base64).
+final int kPebbleMaxParts =
+    ((kPebbleDesignMaxBytes + 2) ~/ 3 * 4 / kPebblePartChars).ceil();
+
+/// How long the parts of a design may take before the missing ones are
+/// asked for, and how many times they are asked for so.
+const Duration kPebblePartWait = Duration(seconds: 4);
+const int kPebblePartAsks = 6;
 
 /// A friend who could keep a pebble, as this device has seen them.
 @immutable
@@ -177,11 +202,20 @@ final class PebbleHosting {
   Future<void> _queue = Future<void>.value();
 
   final Map<PebbleId, _Fetch> _fetches = <PebbleId, _Fetch>{};
+
+  /// Designs coming in parts ([PebbleFrames.part]), until whole.
+  final Map<PebbleId, _Parts> _parts = <PebbleId, _Parts>{};
+  Timer? _partTimer;
   final Map<PebbleId, int> _askedAt = <PebbleId, int>{};
   final Set<PebbleId> _listDirty = <PebbleId>{};
   final Map<String, int> _forwarded = <String, int>{};
   final Map<String, int> _heardAt = <String, int>{};
   final _Budget _perSender = _Budget(30);
+
+  /// Parts of designs have a budget of their own: a design is up to
+  /// [kPebbleMaxParts] of them, which the frames' budget above would cut
+  /// short (the rest dropped and asked for again a minute later).
+  final _Budget _partsPerSender = _Budget(kPebbleMaxParts * 3);
   final _Budget _served = _Budget(60);
   final _Budget _forwards = _Budget(10);
 
@@ -296,6 +330,8 @@ final class PebbleHosting {
   }
 
   Future<void> stop() async {
+    _partTimer?.cancel();
+    _partTimer = null;
     await _frames?.cancel();
     _frames = null;
     await _doorFrames?.cancel();
@@ -354,6 +390,7 @@ final class PebbleHosting {
         await _keepUp(e);
       }
     }
+    await _askMissingParts();
     for (final PebbleEntry e in store.lackingDesign.take(20)) {
       await _fetchStep(e);
     }
@@ -667,7 +704,7 @@ final class PebbleHosting {
           // Only their door's news: the design is there already.
           return;
         }
-        await _serve(from, e);
+        await _serve(from, e, parts: p['pp'] == 1);
         await _publishList(id);
       case PebbleFrames.keepNo:
         if (status.state == PebbleKeeperState.asked ||
@@ -723,6 +760,7 @@ final class PebbleHosting {
         'type': PebbleFrames.keepYes,
         'id': card.id.text,
         'pd': ?_doorAddress,
+        if (!had.hasDesign) 'pp': 1,
       });
       return;
     }
@@ -754,8 +792,14 @@ final class PebbleHosting {
       'type': PebbleFrames.keepYes,
       'id': id.text,
       'pd': ?_doorAddress,
+      'pp': 1,
     });
-    _fetches.remove(id);
+    // The author sends the design now. Should it not come whole, it is
+    // asked for again in a minute, and at once whenever the author is
+    // heard from (_heard), not at the next beat a quarter of an hour on.
+    _fetches[id] = _Fetch()
+      ..round = 1
+      ..nextAt = _now + _backoff.first.inMilliseconds;
     return true;
   });
 
@@ -818,7 +862,17 @@ final class PebbleHosting {
   /// through them, it goes back the same way ([_onDesign] passes it on), so
   /// neither learns the other's address. The keeper list goes to a keeper
   /// only: it names the keepers' own addresses.
-  Future<void> _serve(String to, PebbleEntry e, {String? asker}) async {
+  ///
+  /// With [parts] (the asker takes them, [PebbleFrames.part]) a design
+  /// longer than [kPebblePartChars] goes in parts, only those in [only]
+  /// when it names some (the ones that did not come).
+  Future<void> _serve(
+    String to,
+    PebbleEntry e, {
+    String? asker,
+    bool parts = false,
+    Set<int>? only,
+  }) async {
     if (!_served.take('all', _now)) {
       return;
     }
@@ -827,13 +881,36 @@ final class PebbleHosting {
       return;
     }
     final PebbleKeeperList? keepers = e.keepers;
+    final bool withList =
+        asker == null && keepers != null && keepers.keepers.contains(to);
+    final String encoded = b64(design);
+    if (parts && asker == null && encoded.length > kPebblePartChars) {
+      final int n = (encoded.length / kPebblePartChars).ceil();
+      for (int i = 0; i < n; i++) {
+        if (only != null && only.isNotEmpty && !only.contains(i)) {
+          continue;
+        }
+        await _send(to, <String, dynamic>{
+          'type': PebbleFrames.part,
+          'id': e.id.text,
+          'i': i,
+          'n': n,
+          'd': encoded.substring(
+            i * kPebblePartChars,
+            min(encoded.length, (i + 1) * kPebblePartChars),
+          ),
+          if (i == 0) 'c': e.card.text,
+          if (i == 0 && withList) 'k': keepers.toJson(),
+        });
+      }
+      return;
+    }
     await _send(to, <String, dynamic>{
       'type': PebbleFrames.design,
       'c': e.card.text,
-      'd': b64(design),
+      'd': encoded,
       'o': ?asker,
-      if (asker == null && keepers != null && keepers.keepers.contains(to))
-        'k': keepers.toJson(),
+      if (withList) 'k': keepers.toJson(),
     });
   }
 
@@ -852,7 +929,19 @@ final class PebbleHosting {
     }
     final PebbleEntry? e = store.entry(id);
     if (e != null && _serves(e)) {
-      await _serve(from, e, asker: asker == from ? null : asker);
+      final Object? m = p['m'];
+      await _serve(
+        from,
+        e,
+        asker: asker == from ? null : asker,
+        parts: p['pp'] == 1,
+        only: m is List
+            ? <int>{
+                for (final Object? i in m.take(kPebbleMaxParts))
+                  if (i is int) i,
+              }
+            : null,
+      );
       return;
     }
     // A friend's own question may go one step further.
@@ -948,12 +1037,7 @@ final class PebbleHosting {
     }
     final int end = min(targets.length, f.cursor + parallel);
     for (final (String to, int hops) in targets.sublist(f.cursor, end)) {
-      await _send(to, <String, dynamic>{
-        'type': PebbleFrames.get,
-        'id': e.id.text,
-        'a': e.card.authorAccount,
-        'h': hops,
-      });
+      await _send(to, _getFrame(e, hops: hops));
     }
     f.cursor = end;
     if (f.cursor >= targets.length) {
@@ -991,15 +1075,120 @@ final class PebbleHosting {
           e.keptFrom == from ||
           e.hinted.contains(from) ||
           (e.keepers?.keepers.contains(from) ?? false);
-      if (f == null || f.round == 0 || !direct) {
+      if (f == null || f.round == 0 || !direct || _partsFlowing(e.id)) {
         continue;
       }
-      await _send(from, <String, dynamic>{
-        'type': PebbleFrames.get,
-        'id': e.id.text,
-        'a': e.card.authorAccount,
-        'h': 0,
-      });
+      await _send(from, _getFrame(e, hops: 0));
+    }
+  }
+
+  /// "Send me [e]": in parts, and only the ones still missing when some
+  /// came already.
+  Map<String, dynamic> _getFrame(PebbleEntry e, {required int hops}) {
+    final _Parts? got = _parts[e.id];
+    return <String, dynamic>{
+      'type': PebbleFrames.get,
+      'id': e.id.text,
+      'a': e.card.authorAccount,
+      'h': hops,
+      'pp': 1,
+      if (got != null) 'm': got.missing,
+    };
+  }
+
+  /// Parts of [id] came within the last [kPebblePartWait]: more are on the
+  /// way, asking now would only bring them twice.
+  bool _partsFlowing(PebbleId id) {
+    final _Parts? got = _parts[id];
+    return got != null && _now - got.lastAt < kPebblePartWait.inMilliseconds;
+  }
+
+  /// A part of a design this device wants. Whole, the design goes on as
+  /// if it had come in one piece ([_onDesign], which checks it against
+  /// the card); otherwise the missing parts are asked for in a moment.
+  Future<void> _onPart(String from, Map<String, dynamic> p) async {
+    final PebbleId? id = PebbleId.parse(p['id']);
+    final Object? i = p['i'];
+    final Object? n = p['n'];
+    final Object? d = p['d'];
+    if (id == null ||
+        i is! int ||
+        n is! int ||
+        d is! String ||
+        n < 1 ||
+        n > kPebbleMaxParts ||
+        i < 0 ||
+        i >= n ||
+        d.isEmpty ||
+        d.length > kPebblePartChars) {
+      return;
+    }
+    final PebbleEntry? e = store.entry(id);
+    // Only for a pebble this device wants: nobody fills its memory.
+    if (e == null || e.hasDesign) {
+      _parts.remove(id);
+      return;
+    }
+    _Parts? got = _parts[id];
+    if (got == null || got.n != n) {
+      got = _parts[id] = _Parts(n: n, from: from, startedAt: _now);
+    }
+    got
+      ..lastAt = _now
+      ..from = from
+      ..pieces[i] = d;
+    if (i == 0) {
+      final Object? c = p['c'];
+      if (c is String) {
+        got.card = c;
+      }
+      got.keepers = p['k'];
+    }
+    if (got.pieces.length < n || got.card == null) {
+      _armPartTimer();
+      return;
+    }
+    _parts.remove(id);
+    await _onDesign(from, <String, dynamic>{
+      'c': got.card,
+      'd': <String>[for (int k = 0; k < n; k++) got.pieces[k]!].join(),
+      'k': ?got.keepers,
+    });
+  }
+
+  void _armPartTimer() {
+    _partTimer ??= Timer(kPebblePartWait, () {
+      _partTimer = null;
+      _enqueue(_askMissingParts);
+    });
+  }
+
+  /// Designs whose parts stopped coming: the missing ones are asked of
+  /// whoever sent the others, a few times, then left to the rounds of
+  /// asking ([_fetchStep], which asks for the missing ones as well).
+  Future<void> _askMissingParts() async {
+    for (final MapEntry<PebbleId, _Parts> m in _parts.entries.toList()) {
+      final _Parts got = m.value;
+      final PebbleEntry? e = store.entry(m.key);
+      if (e == null || e.hasDesign) {
+        _parts.remove(m.key);
+        continue;
+      }
+      if (_partsFlowing(m.key)) {
+        _armPartTimer();
+        continue;
+      }
+      if (got.asks >= kPebblePartAsks) {
+        if (_now - got.lastAt > const Duration(hours: 1).inMilliseconds) {
+          _parts.remove(m.key);
+        }
+        continue;
+      }
+      got
+        ..asks += 1
+        ..lastAt = _now;
+      await _send(got.from, _getFrame(e, hops: 0));
+      _armPartTimer();
     }
   }
 
@@ -1101,14 +1290,20 @@ final class PebbleHosting {
 
   Future<void> _onFrame(SignalTransportFrame frame) async {
     final Object? type = frame.payload['type'];
-    if (_fetches.isNotEmpty) {
+    // A design or its part coming is no reason to ask for it again.
+    if (_fetches.isNotEmpty &&
+        type != PebbleFrames.design &&
+        type != PebbleFrames.part) {
       await _heard(PeerShareCodec.normalizeAddress(frame.from));
     }
     if (type is! String || !PebbleFrames.all.contains(type)) {
       return;
     }
     final String from = PeerShareCodec.normalizeAddress(frame.from);
-    if (peers.isBlocked(from) || !_perSender.take(from, _now)) {
+    final _Budget budget = type == PebbleFrames.part
+        ? _partsPerSender
+        : _perSender;
+    if (peers.isBlocked(from) || !budget.take(from, _now)) {
       return;
     }
     await store.load();
@@ -1118,6 +1313,8 @@ final class PebbleHosting {
         await _onGet(from, p);
       case PebbleFrames.design:
         await _onDesign(from, p);
+      case PebbleFrames.part:
+        await _onPart(from, p);
       case PebbleFrames.keepAsk:
         await _onKeepAsk(from, p);
       case PebbleFrames.keepYes:
@@ -1191,6 +1388,31 @@ final class _Fetch {
   int nextAt = 0;
   int cursor = 0;
   int round = 0;
+}
+
+/// The parts of one design that came so far.
+final class _Parts {
+  _Parts({required this.n, required this.from, required this.startedAt})
+    : lastAt = startedAt;
+
+  final int n;
+
+  /// Who sent the latest part: asked for the missing ones.
+  String from;
+  final int startedAt;
+  int lastAt;
+  int asks = 0;
+  final Map<int, String> pieces = <int, String>{};
+
+  /// The card and the keeper list, from part 0.
+  String? card;
+  Object? keepers;
+
+  /// The parts still missing (part 0 also while its card is).
+  List<int> get missing => <int>[
+    for (int i = 0; i < n; i++)
+      if (!pieces.containsKey(i) || (i == 0 && card == null)) i,
+  ];
 }
 
 /// At most [perMinute] per key in a minute.

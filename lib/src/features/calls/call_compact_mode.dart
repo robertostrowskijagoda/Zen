@@ -51,6 +51,19 @@ final class CallCompactMode {
 
   bool get callRunning => _callRunning;
 
+  /// Arms or disarms Android's picture-in-picture (the platform call; a
+  /// recorder in tests). Disarming it while the call floats also closes the
+  /// small window (MainActivity.setPipCall).
+  @visibleForTesting
+  Future<void> Function({required bool active, required bool video}) pipSetter =
+      setPictureInPictureCall;
+
+  /// Android, for tests on a computer.
+  @visibleForTesting
+  bool? androidForTest;
+
+  bool get _isAndroid => androidForTest ?? (!kIsWeb && Platform.isAndroid);
+
   static bool get _isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
@@ -63,8 +76,8 @@ final class CallCompactMode {
     }
     _callRunning = running;
     _video = video;
-    if (!kIsWeb && Platform.isAndroid) {
-      unawaited(setPictureInPictureCall(active: running, video: video));
+    if (_isAndroid) {
+      unawaited(pipSetter(active: running, video: video));
     }
     if (!running && _isDesktop && active.value) {
       unawaited(exitDesktop());
@@ -153,5 +166,7 @@ final class CallCompactMode {
     _video = false;
     desktopWindowReady = false;
     _savedBounds = null;
+    pipSetter = setPictureInPictureCall;
+    androidForTest = null;
   }
 }

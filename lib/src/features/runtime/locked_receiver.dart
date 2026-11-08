@@ -193,7 +193,7 @@ const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 /// How often a locked phone asks the friends who see its status how they
 /// are (a `ping`, on the mailbox polls' wake), so the app knows their
 /// statuses at once when it opens: their answers, and the pings of friends
-/// with Zen open, are handed to the app with the inbox (the newest of each
+/// with Zen open, are kept for the app as they come (the newest of each
 /// friend, [kPresenceRememberedFor] old at most). Under
 /// kPresenceRememberedFor, so a status is never unknown for want of a
 /// round; a friend's locked phone answers at most every
@@ -558,6 +558,7 @@ final class LockedReceiver {
     LockedMailbox? mailbox,
     LockedNoticeKit? noticeKit,
     LockedPresenceKit? presence,
+    SealedSnapshotWriter? presenceSnapshot,
     Set<String> taken = const <String>{},
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
@@ -584,6 +585,15 @@ final class LockedReceiver {
        _mailbox = mailbox,
        _noticeKit = noticeKit ?? const LockedNoticeKit(),
        _presence = presence ?? const LockedPresenceKit(),
+       _presenceSnapshot =
+           presenceSnapshot ??
+           SealedSnapshotWriter(
+             file: File(
+               '${inbox.file.parent.path}${Platform.pathSeparator}'
+               '$kKeptPresenceFileName',
+             ),
+             recipientPublicKey: inbox.recipientPublicKey,
+           ),
        _taken = taken,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -620,11 +630,13 @@ final class LockedReceiver {
   final Duration presenceRoundEvery;
   int _presenceRoundAt = 0;
 
-  /// The newest ping, pong or `away` of each friend: handed to the app with
-  /// the inbox when this receiver stops ([stop]), so their statuses are
-  /// known the moment Zen opens.
+  /// The newest ping, pong or `away` of each friend, kept up to date in
+  /// [_presenceSnapshot] as they come, so the app shows their statuses the
+  /// moment it opens (BackgroundVault.keptPresence), without waiting for
+  /// this receiver to stop or for its own node.
   final Map<String, SignalTransportFrame> _presenceHeard =
       <String, SignalTransportFrame>{};
+  final SealedSnapshotWriter _presenceSnapshot;
 
   /// [LockedMailboxKit.takenTag]s of what the app already took before it
   /// locked: a copy of one is confirmed, never kept or told about again.
@@ -791,7 +803,8 @@ final class LockedReceiver {
 
   Future<void> stop() async {
     _running = false;
-    await _handOverPresence();
+    // The last write (if one runs) is on the disk before the app reads it.
+    await _keepPresence();
     await _alarm?.stop();
     _pollTimer?.cancel();
     _pollTimer = null;
@@ -1016,8 +1029,16 @@ final class LockedReceiver {
     }
   }
 
-  /// Notes the newest presence frame of a friend ([_presenceHeard]).
-  void _notePresenceHeard(String from, SignalTransportFrame frame) {
+  /// Done once the statuses heard so far are written down (tests).
+  @visibleForTesting
+  Future<void> get presenceKept => _presenceSnapshot.idle;
+
+  /// Notes the newest presence frame of a friend ([_presenceHeard]) and
+  /// writes them all down at once ([_keepPresence]).
+  Future<void> _notePresenceHeard(
+    String from,
+    SignalTransportFrame frame,
+  ) async {
     final SignalTransportFrame? had = _presenceHeard[from];
     if (had != null && had.receivedAtMillis > frame.receivedAtMillis) {
       return;
@@ -1026,33 +1047,25 @@ final class LockedReceiver {
       return;
     }
     _presenceHeard[from] = frame;
+    await _keepPresence();
   }
 
-  /// Puts the newest presence frame of each friend, heard within
-  /// [kPresenceRememberedFor], into the inbox: the app takes them with the
-  /// rest (at the time they came, so a status is aged as it would have
-  /// been) and shows its friends' statuses at once instead of "nieznany".
-  Future<void> _handOverPresence() async {
+  /// Writes the newest presence frame of each friend, heard within
+  /// [kPresenceRememberedFor], to [_presenceSnapshot] (with the time they
+  /// came, so a status is aged as it would have been): the app reads it
+  /// when it opens and shows its friends' statuses at once instead of
+  /// "nieznany". A small file, written only when a friend's status came,
+  /// while the phone is awake for that frame anyway.
+  Future<void> _keepPresence() {
     final int at = _now();
-    final List<SignalTransportFrame> frames = _presenceHeard.values
-        .where(
-          (SignalTransportFrame f) =>
-              at - f.receivedAtMillis <= kPresenceRememberedFor.inMilliseconds,
-        )
-        .toList();
-    _presenceHeard.clear();
-    for (final SignalTransportFrame frame in frames) {
-      try {
-        await _inbox.append(
-          encodeInboxFrame(frame),
-          sender: PeerShareCodec.normalizeAddress(frame.from),
-          stranger: false,
-        );
-      } on Object catch (error) {
-        logZenWarning('A status of a friend was not kept: $error');
-        return;
-      }
-    }
+    _presenceHeard.removeWhere(
+      (String _, SignalTransportFrame f) =>
+          at - f.receivedAtMillis > kPresenceRememberedFor.inMilliseconds,
+    );
+    return _presenceSnapshot.write(<Uint8List>[
+      for (final SignalTransportFrame frame in _presenceHeard.values)
+        encodeInboxFrame(frame),
+    ]);
   }
 
   Future<void> _pollMailboxes() async {
@@ -1119,7 +1132,8 @@ final class LockedReceiver {
     _alarm?.observe(frame);
     if (kind == BackgroundContactKind.friend &&
         (type == 'ping' || type == 'pong' || type == kPresenceAwayType)) {
-      _notePresenceHeard(from, frame);
+      // Written in the background: the answer below does not wait for it.
+      unawaited(_notePresenceHeard(from, frame));
     }
     if (type == 'ping') {
       final int at = _now();

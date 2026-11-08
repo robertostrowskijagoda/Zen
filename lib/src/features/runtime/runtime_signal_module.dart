@@ -15,6 +15,8 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -28,6 +30,31 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/version_gate.dart';
+
+/// The newest status of each friend the background service keeps while it
+/// runs (the locked receiver on Android and iPhone; [keptPresenceFrames]),
+/// read once the app is unlocked; empty where there is no such service or
+/// nothing was kept.
+typedef KeptPresenceReader = Future<List<SignalTransportFrame>> Function();
+
+final Provider<KeptPresenceReader> keptPresenceReaderProvider =
+    Provider<KeptPresenceReader>((Ref ref) {
+      return () async {
+        if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+          return const <SignalTransportFrame>[];
+        }
+        final Uint8List? masterKey = await ref
+            .read(appSecurityServiceProvider)
+            .currentEncryptionKey();
+        if (masterKey == null) {
+          return const <SignalTransportFrame>[];
+        }
+        return keptPresenceFrames(
+          vault: ref.read(backgroundVaultProvider),
+          masterKey: masterKey,
+        );
+      };
+    });
 
 final Provider<RuntimePresenceConfig> runtimePresenceConfigProvider =
     Provider<RuntimePresenceConfig>((Ref ref) {
@@ -314,6 +341,14 @@ final class RuntimeSignalModule extends ZenModule {
       (SocialHubState? previous, SocialHubState next) =>
           _onFriendsChanged(next),
     );
+    if (!_inService) {
+      // Not waiting for the node: friends' statuses as the background
+      // service knows them show as soon as the friends are read.
+      unawaitedLogged(
+        _takeKeptPresence(),
+        context: 'Reading the statuses the service kept failed',
+      );
+    }
     try {
       await transport.start();
     } catch (error, stackTrace) {
@@ -710,6 +745,38 @@ final class RuntimeSignalModule extends ZenModule {
     );
   }
 
+  /// The newest status of each friend the background service kept
+  /// ([keptPresenceReaderProvider]), taken once the stored friends are read
+  /// (the app is unlocked): as if each had just come, with the time it
+  /// came, but never answered. Its own node is not needed, so friends show
+  /// what the service knows the moment Zen opens instead of "nieznany"
+  /// until their answers to this run's pings come.
+  Future<void> _takeKeptPresence() async {
+    final SocialHubController hub = _ref.read(
+      socialHubControllerProvider.notifier,
+    );
+    await hub.whenHydrated;
+    if (!_live || _ref.read(socialHubControllerProvider).snapshotUnreadable) {
+      return;
+    }
+    final List<SignalTransportFrame> frames = await _ref.read(
+      keptPresenceReaderProvider,
+    )();
+    for (final SignalTransportFrame frame in frames) {
+      if (!_live) {
+        return;
+      }
+      final String from = PeerShareCodec.normalizeAddress(frame.from);
+      if (!_isAcceptedFriendAddress(from)) {
+        continue;
+      }
+      await _notePresence(hub, from, frame, kept: true);
+      if (frame.payload['type'] != kPresenceAwayType) {
+        await _notePeerVersion(hub, from, frame.payload);
+      }
+    }
+  }
+
   /// What a ping, pong or `away` from [from] says of their presence.
   /// A weak acquaintance's status is not shown here, as this person's is not
   /// sent to them ([presenceVisibleTo]): only whether they can be reached.
@@ -720,8 +787,9 @@ final class RuntimeSignalModule extends ZenModule {
   Future<void> _notePresence(
     SocialHubController hub,
     String from,
-    SignalTransportFrame frame,
-  ) {
+    SignalTransportFrame frame, {
+    bool kept = false,
+  }) {
     if (!_live) {
       return Future<void>.value();
     }
@@ -747,15 +815,19 @@ final class RuntimeSignalModule extends ZenModule {
       // Told before what this device heard from there already.
       return Future<void>.value();
     }
-    if (_heard.length >= 2000) {
-      _heard.clear();
+    if (!kept) {
+      // Heard in this run (kept by the service: before it, so the pings of
+      // the start still go to them).
+      if (_heard.length >= 2000) {
+        _heard.clear();
+      }
+      _heard[from] = (
+        state: now.report.presence,
+        at:
+            DateTime.now().millisecondsSinceEpoch -
+            (frame.receivedAtMillis - now.at),
+      );
     }
-    _heard[from] = (
-      state: now.report.presence,
-      at:
-          DateTime.now().millisecondsSinceEpoch -
-          (frame.receivedAtMillis - now.at),
-    );
     return hub.updatePeerPresence(
       peerAddress: from,
       report: now.report,

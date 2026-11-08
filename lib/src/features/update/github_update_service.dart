@@ -716,16 +716,38 @@ final class GithubUpdateService extends ChangeNotifier {
   /// against the release's `SHA256SUMS` and the author's signature (when
   /// [verifiesAuthorSignature]) and installs it.
   Future<void> update() async {
-    GithubRelease? release = newer;
+    final GithubRelease? release = newer;
     final String? name = installer.assetName;
     // iPhone, iPad and Flatpak install nothing Zen downloads: never there.
     if (release == null ||
         name == null ||
+        _updating ||
         installing ||
         _asking ||
         !_downloadsUpdates(installer.target)) {
       return;
     }
+    // From the very start: a second tap while the release's files are
+    // still asked for (before "Pobieram…" shows) started a second download
+    // into the same file, and the bar jumped between the two.
+    _updating = true;
+    _notify();
+    try {
+      await _update(release, name);
+    } finally {
+      _updating = false;
+      _notify();
+    }
+  }
+
+  /// Whether [update] runs (from the tap on, not only while downloading).
+  bool _updating = false;
+
+  /// Whether "Aktualizuj" was tapped and its work is not over: the button
+  /// waits.
+  bool get updating => _updating || installing;
+
+  Future<void> _update(GithubRelease release, String name) async {
     if (!release.detailed) {
       release = await _detailsOf(release);
     }
@@ -790,6 +812,10 @@ final class GithubUpdateService extends ChangeNotifier {
         file,
         maxBytes: size ?? kMaxGithubAssetBytes,
         onProgress: (int received) {
+          // Never back within one download.
+          if (received <= _received) {
+            return;
+          }
           _received = received;
           final int percent = size == null || size <= 0
               ? 0
