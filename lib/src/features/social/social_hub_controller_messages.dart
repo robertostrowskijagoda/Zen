@@ -18,7 +18,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       return '';
     }
     final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
-    final String messageId = 'outgoing-$timestamp-$peerAddress';
+    final String messageId = _directMessageId(timestamp, peerAddress);
     final bool requiresDeliveryAck = isRoutablePeerAddress(peerAddress);
     // Someone who is not a friend: within the limits, and
     // with this person's mini-profile. Throws [StrangerMessageRefused].
@@ -130,7 +130,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       return;
     }
     final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
-    final String messageId = 'outgoing-$timestamp-$peerAddress';
+    final String messageId = _directMessageId(timestamp, peerAddress);
     final bool requiresDeliveryAck = isRoutablePeerAddress(peerAddress);
     final String? resolvedMimeType = mimeType;
     final ChatMessageType resolvedType =

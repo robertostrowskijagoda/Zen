@@ -39,14 +39,24 @@ List<int> _seeds() {
 /// message.
 Future<void> _live(int seed) async {
   final Random r = Random(seed);
+  // D a computer in the tray (never locked), E an iPhone (it receives
+  // only while Zen is open: closing it takes it off the mesh), the rest
+  // Android phones.
   final FriendsWorld w = await FriendsWorld.create(
     _names,
     seed: seed,
     duplicateRate: r.nextBool() ? 0.05 : 0,
+    devices: const <String, SimDevice>{
+      'D': SimDevice.desktop,
+      'E': SimDevice.iphone,
+    },
   );
   final String group = await w.createGroup(w['A'], 'Ekipa', <FriendsPhone>[
     for (final String n in _names.skip(1)) w[n],
   ]);
+  // B's second phone: mail for B reaches both, and what it sends is B's.
+  await w.addDevice(w['B'], 'B2');
+  const List<String> devices = <String>[..._names, 'B2'];
   // What each member wrote to the group, in order.
   final Map<String, List<String>> toGroup = <String, List<String>>{};
   final List<String> log = <String>[];
@@ -58,9 +68,9 @@ Future<void> _live(int seed) async {
 
   for (int step = 0; step < 60; step++) {
     final int roll = r.nextInt(100);
-    final FriendsPhone p = w[_names[r.nextInt(_names.length)]];
+    final FriendsPhone p = w[devices[r.nextInt(devices.length)]];
     if (roll < 12) {
-      if (p.locked) {
+      if (p.locked || p.name == 'B2') {
         continue;
       }
       final String text = 's$seed-g${counter++} ${p.name}>grupa';
@@ -76,7 +86,7 @@ Future<void> _live(int seed) async {
       FriendsPhone to;
       do {
         to = w[_names[r.nextInt(_names.length)]];
-      } while (identical(to, p));
+      } while (to.name == _accountOf(p.name));
       final String text = 's$seed-m${counter++} ${p.name}>${to.name}';
       log.add('send $text');
       (sent[(p.name, to.name)] ??= <String>[]).add(text);
@@ -86,6 +96,15 @@ Future<void> _live(int seed) async {
       log.add('${p.name} ${on ? 'online' : 'offline'}');
       await w.setOnline(p, on);
     } else if (roll < 72) {
+      if (p.device == SimDevice.desktop) {
+        continue;
+      }
+      if (p.device == SimDevice.iphone) {
+        final bool on = !p.online;
+        log.add('${p.name} ${on ? 'opened' : 'closed'}');
+        await w.setOnline(p, on);
+        continue;
+      }
       log.add('${p.name} ${p.locked ? 'unlock' : 'lock'}');
       if (p.locked) {
         await w.unlock(p);
@@ -130,9 +149,13 @@ Future<void> _live(int seed) async {
 
   Future<bool> allThere() async {
     for (final MapEntry<(String, String), List<String>> e in sent.entries) {
-      final List<String> got = await w[e.key.$2].textsFrom(w[e.key.$1]);
-      if (got.length < e.value.length) {
-        return false;
+      for (final String device in _devicesOf(e.key.$2)) {
+        final List<String> got = await w[device].textsFrom(
+          w[_accountOf(e.key.$1)],
+        );
+        if (!e.value.every(got.contains)) {
+          return false;
+        }
       }
     }
     final int groupCount = toGroup.values.fold(
@@ -157,14 +180,18 @@ Future<void> _live(int seed) async {
   } on TestFailure catch (e) {
     final StringBuffer missing = StringBuffer();
     for (final MapEntry<(String, String), List<String>> en in sent.entries) {
-      final List<String> got = await w[en.key.$2].textsFrom(w[en.key.$1]);
-      for (final String text in en.value) {
-        if (!got.contains(text)) {
-          final ChatMessageDeliveryState? state = await w[en.key.$1].deliveryOf(
-            w[en.key.$2],
-            text,
-          );
-          missing.writeln('  missing "$text" (sender sees $state)');
+      for (final String device in _devicesOf(en.key.$2)) {
+        final List<String> got = await w[device].textsFrom(
+          w[_accountOf(en.key.$1)],
+        );
+        for (final String text in en.value) {
+          if (!got.contains(text)) {
+            final ChatMessageDeliveryState? state = await w[en.key.$1]
+                .deliveryOf(w[en.key.$2], text);
+            missing.writeln(
+              '  missing "$text" on $device (sender sees $state)',
+            );
+          }
         }
       }
     }
@@ -186,11 +213,13 @@ Future<void> _live(int seed) async {
   for (final MapEntry<(String, String), List<String>> e in sent.entries) {
     final FriendsPhone from = w[e.key.$1];
     final FriendsPhone to = w[e.key.$2];
-    expect(
-      await to.textsFrom(from),
-      e.value,
-      reason: '${from.name} to ${to.name}: each once and in order\n${story()}',
-    );
+    for (final String device in _devicesOf(to.name)) {
+      _expectOnceInOrder(
+        await w[device].textsFrom(w[_accountOf(from.name)]),
+        e.value,
+        '${from.name} to ${to.name}, on $device\n${story()}',
+      );
+    }
     for (final String text in e.value) {
       final ChatMessageDeliveryState? state = await from.deliveryOf(to, text);
       expect(
@@ -211,6 +240,13 @@ Future<void> _live(int seed) async {
     }
   }
 }
+
+/// The account a device belongs to (B2 is B's second phone).
+String _accountOf(String device) => device == 'B2' ? 'B' : device;
+
+/// The devices mail for [account] reaches.
+List<String> _devicesOf(String account) =>
+    account == 'B' ? const <String>['B', 'B2'] : <String>[account];
 
 /// [all] holds each of [texts] once, in their order (other senders' texts
 /// may come between them).

@@ -2189,7 +2189,7 @@ void main() {
       addTearDown(container.dispose);
       await transport.start();
 
-      await container
+      final String id = await container
           .read(socialHubControllerProvider.notifier)
           .sendLocalMessage(
             peerAddress: '200:1111:2222:3333:4444:5555:6666:7777',
@@ -2198,10 +2198,19 @@ void main() {
             sentAtMillis: 5,
           );
 
+      // The time, the friend, and a random part of its own.
+      expect(
+        id,
+        matches(
+          RegExp(
+            r'^outgoing-5-200:1111:2222:3333:4444:5555:6666:7777-[0-9a-f]{8}$',
+          ),
+        ),
+      );
       expect(transport.sentSignals, hasLength(1));
       expect(transport.sentSignals.single.payload, <String, dynamic>{
         'type': 'message',
-        'msgId': 'outgoing-5-200:1111:2222:3333:4444:5555:6666:7777',
+        'msgId': id,
         'text': 'Wrzucam build.',
         'createdAt': DateTime.fromMillisecondsSinceEpoch(
           5,
@@ -2496,12 +2505,15 @@ void main() {
       final Iterable<int> chunkIndexes = transport.sentSignals
           .where((signal) => signal.payload['type'] == 'message_chunk')
           .map((signal) => signal.payload['chunkIndex'] as int);
+      final String sentId = (await timelineStore.load(
+        '200:1111:2222:3333:4444:5555:6666:7777',
+      )).single.id;
       for (final int chunkIndex in chunkIndexes) {
         await controller.receiveSignal(
           ZenSignal(
             type: ZenSignalType.messageChunkAck,
             sender: '200:1111:2222:3333:4444:5555:6666:7777',
-            messageId: 'outgoing-22-200:1111:2222:3333:4444:5555:6666:7777',
+            messageId: sentId,
             chunkIndex: chunkIndex,
           ),
           receivedAtMillis: 30 + chunkIndex,
@@ -2580,8 +2592,10 @@ void main() {
             attachmentPath: payload.path,
             sentAtMillis: 42,
           );
-      const String messageId =
-          'outgoing-42-200:1111:2222:3333:4444:5555:6666:7777';
+      // The id the message got (its time, the friend, a random part).
+      final String messageId = (await timelineStore.load(
+        '200:1111:2222:3333:4444:5555:6666:7777',
+      )).single.id;
       final SocialHubController controller = container.read(
         socialHubControllerProvider.notifier,
       );
@@ -5110,10 +5124,10 @@ void main() {
     expect(messages.single.deliveryState, ChatMessageDeliveryState.sent);
 
     await controller.receiveSignal(
-      const ZenSignal(
+      ZenSignal(
         type: ZenSignalType.ack,
         sender: peerAddress,
-        messageId: 'outgoing-10-200:1111:2222:3333:4444:5555:6666:7777',
+        messageId: messages.single.id,
         content: 'message',
       ),
       receivedAtMillis: 11,

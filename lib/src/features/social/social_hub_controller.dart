@@ -294,8 +294,20 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// randomised messaging test, communication_soak_test.dart). An older
   /// Zen takes the id as it comes.
   String _groupMessageId(int timestamp, String groupId) =>
-      'grp-msg-$timestamp-$groupId-'
-      '${_idRandom.nextInt(1 << 32).toRadixString(16).padLeft(8, '0')}';
+      'grp-msg-$timestamp-$groupId-${_idSuffix()}';
+
+  /// The id of a new message of one's own to the friend [peerAddress],
+  /// sent at [timestamp]: with a random part too, as the devices of one
+  /// account each send to the same friend, into the one conversation the
+  /// friend has with the account. Two that sent within the same
+  /// millisecond made the same id, and the friend kept only one of the two
+  /// messages while both were marked delivered (seen in the randomised
+  /// messaging test, with a second phone).
+  String _directMessageId(int timestamp, String peerAddress) =>
+      'outgoing-$timestamp-$peerAddress-${_idSuffix()}';
+
+  static String _idSuffix() =>
+      _idRandom.nextInt(1 << 32).toRadixString(16).padLeft(8, '0');
 
   static final Random _idRandom = Random.secure();
   String? _openConversationAddress;
