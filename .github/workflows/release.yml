@@ -290,6 +290,16 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
+      # flutter_webrtc's CMake downloads libwebrtc once, from the release's
+      # download link, with no retry: on 1.16.1 GitHub answered that link
+      # with 504 for hours while the API's link served the same zip. Put
+      # in place beforehand, through either link, and checked against its
+      # pin before it is built in.
+      - name: libwebrtc (fetched with retries, checked against its pin)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tool/ci/fetch_libwebrtc.py windows-x64
+
       # Built on its own, with its output in the log; inside MSBuild a
       # failure says nothing about why, so it is skipped there.
       - name: Go bridge (x64)
@@ -393,6 +403,16 @@ jobs:
 
       - name: Packages
         run: flutter pub get --enforce-lockfile
+
+      # flutter_webrtc's CMake downloads libwebrtc once, from the release's
+      # download link, with no retry: on 1.16.1 GitHub answered that link
+      # with 504 for hours while the API's link served the same zip. Put
+      # in place beforehand, through either link, and checked against its
+      # pin before it is built in.
+      - name: libwebrtc (fetched with retries, checked against its pin)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tool/ci/fetch_libwebrtc.py windows-arm64
 
       # Built on its own, with its output in the log; inside MSBuild its
       # check fails on this runner without saying why, so it is skipped there.
@@ -499,6 +519,16 @@ jobs:
 
       - name: Packages
         run: flutter pub get --enforce-lockfile
+
+      # flutter_webrtc's CMake downloads libwebrtc once, from the release's
+      # download link, with no retry: on 1.16.1 GitHub answered that link
+      # with 504 for hours while the API's link served the same zip. Put
+      # in place beforehand, through either link, and checked against its
+      # pin before it is built in.
+      - name: libwebrtc (fetched with retries, checked against its pin)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tool/ci/fetch_libwebrtc.py linux-${{ matrix.arch }}
 
       - name: Build (the Go bridge builds itself)
         run: flutter build linux --release
