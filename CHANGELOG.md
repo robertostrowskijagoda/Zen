@@ -16,6 +16,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Tests**: a fresh word from one of a friend's devices does not hide Zen open on another, and one friend's word leaves the others' devices as they were; the store's file envelope (a damaged header or checksum does not open), a save that does not read back as written replaces nothing, a key with a `.` segment is refused, a key is there while any of its copies is, and the sweep of leftover temporary files walks at most once per its interval (the store is now a mutation testing target).
 - **Tests**: when the tests of a mutation target fail on the unchanged file, the mutation run now shows which test failed and why (it only said they failed).
 - **Tests**: a mention of you in a muted group or one that tells only of mentions still comes on a locked phone, a message with no text and nothing attached gives no preview, and only a phone's audio outputs are taken for where a call's sound can go (a Bluetooth microphone alone is no headset).
+- **Tests**: the alarm of the shared wake is inexact (Android may wake the phone once for several), work that runs alongside it is no longer active once cancelled, an address is written one way (the longest run of zero groups as "::"), what has a ":", "/" or "#" in it is not taken for a friend code, and the notes to oneself are read once, not again for every note.
 
 ## 1.16.2 — 09.11.2026
 
