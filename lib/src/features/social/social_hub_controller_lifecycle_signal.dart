@@ -834,10 +834,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     }
     if (signal.type == ZenSignalType.groupMessage &&
         (signal.messageId?.trim().isNotEmpty ?? false) &&
-        await _timelineHasMessage(
-          peerAddress: 'group:${signal.groupId}',
-          messageId: signal.messageId!.trim(),
-        )) {
+        await _incomingGroupMessageKey(signal) == null) {
+      // This sender's message with this id is here already. Another
+      // member's message with the same id is no copy of it.
       return;
     }
     // A group message that mentions this person says so (within limits).

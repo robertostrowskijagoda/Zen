@@ -257,14 +257,21 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           );
     bool unused = false;
     await _enqueueStateWork(() async {
+      final String? id = key.startsWith('group:')
+          ? await _syncedGroupMessageKey(key, message)
+          : message.id;
+      if (id == null) {
+        unused = stored != null;
+        return;
+      }
       await _upsertTimelineMessage(
         peerAddress: key,
-        messageId: message.id,
+        messageId: id,
         // Recovered or older history goes before what came since.
         byTime: true,
         build: (ChatMessage? existing) {
           if (existing == null) {
-            return withFile(message.copyWith(attachmentBytes: null));
+            return withFile(message.copyWith(id: id, attachmentBytes: null));
           }
           // Only fill in a file that was missing here.
           final bool missing =
@@ -289,6 +296,38 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     if (unused && storedPath != null) {
       await _mediaVault.delete(storedPath);
     }
+  }
+
+  /// The key a group message from another device of the account (or from
+  /// a copy of the account) goes under here: the key of the same author's
+  /// message with the same id when this device has it (each device keys a
+  /// message by the order it came in, [groupMessageSlot]), else its own
+  /// key, or the author's other key when that one holds someone else's
+  /// message. Null when it cannot be kept (an id too long for a second key).
+  Future<String?> _syncedGroupMessageKey(
+    String key,
+    ChatMessage message,
+  ) async {
+    if (message.isSystem) {
+      return message.id;
+    }
+    final String author = message.isOutgoing ? 'self' : message.sender;
+    final String wireId = groupMessageWireId(message.id);
+    final String alt = groupMessageLocalId(wireId, author);
+    final List<ChatMessage> thread = await _messageTimelineStore.load(key);
+    bool taken = false;
+    for (final ChatMessage m in thread) {
+      if (m.id == alt || (m.id == wireId && _sameGroupAuthor(m, author))) {
+        return m.id;
+      }
+      if (m.id == message.id) {
+        taken = true;
+      }
+    }
+    if (!taken) {
+      return message.id;
+    }
+    return alt.length <= kMaxSignalIdChars ? alt : null;
   }
 
   /// Friends and groups, for the account's other devices (sealed by the

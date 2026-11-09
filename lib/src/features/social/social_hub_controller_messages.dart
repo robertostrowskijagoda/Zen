@@ -998,15 +998,12 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
               return;
             }
           }
-          final String messageId =
-              signal.messageId ?? 'grp-in-$timestamp-${signal.sender}';
-          if (signal.messageId != null &&
-              await _timelineHasMessage(
-                peerAddress: 'group:${signal.groupId}',
-                messageId: messageId,
-              )) {
-            // The same message again (sent again after a retry, or both
-            // directly and from a mailbox): kept once.
+          // The same message again (sent again after a retry, or both
+          // directly and from a mailbox) is kept once: null.
+          final String? messageId = signal.messageId == null
+              ? 'grp-in-$timestamp-${signal.sender}'
+              : await _incomingGroupMessageKey(signal);
+          if (messageId == null) {
             return;
           }
           await _adoptDisappearTimerOf(signal, timestamp);

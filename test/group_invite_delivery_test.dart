@@ -1163,6 +1163,137 @@ void main() {
     );
   });
 
+  group('one message id, two senders', () {
+    const String id = 'grp-msg-1-g-deadbeef';
+    _Harness inGroup() => _Harness(
+      seed: SocialHubState.empty(lifecycle: _background).copyWith(
+        book: FriendshipBook.restore(
+          profiles: <String, FriendProfile>{
+            ada: _friend(ada, 'Ada'),
+            bob: _friend(bob, 'Bob'),
+          },
+        ),
+        groups: <String, GroupProfile>{
+          'g': GroupProfile(
+            id: 'g',
+            name: 'G',
+            createdById: cyd,
+            createdAtMillis: 0,
+            memberAddresses: <String>[ada, bob, cyd],
+          ),
+        },
+      ),
+    );
+    Map<String, dynamic> said(String text, {String messageId = id}) =>
+        <String, dynamic>{
+          'type': 'group_message',
+          'groupId': 'g',
+          'msgId': messageId,
+          'text': text,
+        };
+    Future<List<ChatMessage>> chat(_Harness h) async => (await h.timelines.load(
+      'group:g',
+    )).where((ChatMessage m) => !m.isSystem).toList();
+
+    test('a member who sends another\'s message id first hides nothing: both '
+        'messages stay, each with its sender', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('Bob: odwołane, nie przychodźcie'), at: 1000);
+      await h.deliver(bob, said('spotkanie o 18'), at: 1001);
+      final List<ChatMessage> t = await chat(h);
+      expect(
+        t.map((ChatMessage m) => '${m.sender}: ${m.text}'),
+        unorderedEquals(<String>[
+          '$ada: Bob: odwołane, nie przychodźcie',
+          '$bob: spotkanie o 18',
+        ]),
+      );
+      expect(t.map((ChatMessage m) => m.id).toSet(), hasLength(2));
+      expect(
+        t.firstWhere((ChatMessage m) => m.sender == bob).id,
+        groupMessageLocalId(id, bob),
+      );
+      expect(
+        h.notifications.activeNotifications.map(
+          (RuntimeSystemNotification n) => n.body,
+        ),
+        anyElement(contains('spotkanie o 18')),
+      );
+    });
+
+    test('the same message again, by any way, is still one', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('pierwsza'), at: 1000);
+      await h.deliver(bob, said('druga'), at: 1001);
+      final int alerts = h.notifications.audibleAlertCount;
+      final int shown = h.notifications.activeNotifications.length;
+      await h.deliver(bob, said('druga'), at: 1002);
+      await h.deliver(ada, said('pierwsza'), at: 1003);
+      expect(await chat(h), hasLength(2));
+      expect(h.notifications.audibleAlertCount, alerts);
+      expect(h.notifications.activeNotifications, hasLength(shown));
+      // The account's other device kept them the other way round.
+      await h.controller.importSyncedMessage(
+        'group:g',
+        ChatMessage(
+          id: id,
+          sender: bob,
+          text: 'druga',
+          sentAtMillis: 1001,
+          direction: ChatMessageDirection.incoming,
+        ),
+      );
+      await h.controller.importSyncedMessage(
+        'group:g',
+        ChatMessage(
+          id: groupMessageLocalId(id, ada),
+          sender: ada,
+          text: 'pierwsza',
+          sentAtMillis: 1000,
+          direction: ChatMessageDirection.incoming,
+        ),
+      );
+      final List<ChatMessage> t = await chat(h);
+      expect(t, hasLength(2));
+      expect(t.firstWhere((ChatMessage m) => m.sender == ada).text, 'pierwsza');
+      expect(t.firstWhere((ChatMessage m) => m.sender == bob).text, 'druga');
+    });
+
+    test('an edit, a deletion of one\'s own and an id coming back reach only '
+        'the sender\'s own message', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('podróbka'), at: 1000);
+      await h.deliver(bob, said('prawdziwa'), at: 1001);
+      await h.deliver(bob, <String, dynamic>{
+        'type': 'msg_edit',
+        'groupId': 'g',
+        'msgId': id,
+        'text': 'prawdziwa, poprawiona',
+        'at': 1002,
+      }, at: 1002);
+      await h.deliver(ada, <String, dynamic>{
+        'type': 'msg_delete',
+        'groupId': 'g',
+        'msgId': id,
+        'at': 1003,
+      }, at: 1003);
+      final List<ChatMessage> t = await chat(h);
+      final ChatMessage bobs = t.firstWhere((ChatMessage m) => m.sender == bob);
+      final ChatMessage adas = t.firstWhere((ChatMessage m) => m.sender == ada);
+      expect(bobs.text, 'prawdziwa, poprawiona');
+      expect(bobs.isDeleted, isFalse);
+      expect(adas.isDeleted, isTrue);
+      // A reaction to Bob's message goes out under the id everyone knows.
+      h.transport.sentSignals.clear();
+      await h.controller.reactToMessage(
+        conversationKey: 'group:g',
+        messageId: bobs.id,
+        emoji: '👍',
+      );
+      expect(h.sentTo(bob, 'msg_react').single['msgId'], id);
+    });
+  });
+
   group('snapshot', () {
     test('invite bookkeeping survives the binary snapshot', () async {
       final Directory tempDir = await Directory.systemTemp.createTemp(
