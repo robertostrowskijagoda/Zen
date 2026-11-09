@@ -206,5 +206,14 @@
     "tests": [
       "test/presence_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/core/storage/binary_store.dart",
+    "tests": [
+      "test/binary_store_test.dart",
+      "test/storage_crash_consistency_test.dart",
+      "test/storage_hardening_test.dart",
+      "test/format_tolerance_test.dart"
+    ]
   }
 ]
