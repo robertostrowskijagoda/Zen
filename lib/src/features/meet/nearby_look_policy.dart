@@ -13,14 +13,26 @@ const Duration kNearbyLookFor = Duration(seconds: 8);
 /// chosen.
 const Duration kNearbyLookMaxWait = Duration(minutes: 30);
 
+/// The round the longest wait is made a multiple of: the locked service's
+/// presence round (`kLockedPresenceRoundEvery`), which wakes the phone every
+/// 10 minutes anyway. A look whose wait is a multiple of it runs on the
+/// round's wakes; one of 15 minutes took a wake of its own at :15 and :45.
+const Duration kNearbyLookWaitRound = Duration(minutes: 10);
+
 /// The longest wait between looks in the locked service for looks chosen
-/// [every]: three times it, at most [kNearbyLookMaxWait], never shorter
-/// than [every] (5 min: up to 15; 2 min: up to 6; 10: up to 30; 30: 30).
+/// [every]: three times it, rounded up to a whole number of
+/// [kNearbyLookWaitRound], at most [kNearbyLookMaxWait], never shorter
+/// than [every] (5 min: up to 20; 2 min: up to 10; 10: up to 30; 15: 30;
+/// 30: 30).
 Duration nearbyLookMaxWait(Duration every) {
-  final Duration tripled = every * 3;
-  final Duration capped = tripled > kNearbyLookMaxWait
+  final int round = kNearbyLookWaitRound.inMilliseconds;
+  final int tripled = (every * 3).inMilliseconds;
+  final Duration rounded = Duration(
+    milliseconds: (tripled + round - 1) ~/ round * round,
+  );
+  final Duration capped = rounded > kNearbyLookMaxWait
       ? kNearbyLookMaxWait
-      : tripled;
+      : rounded;
   return capped < every ? every : capped;
 }
 
@@ -28,9 +40,9 @@ Duration nearbyLookMaxWait(Duration every) {
 /// waited [last]: [base] (the chosen period) when the look found someone
 /// new or the screen was on (the phone is in use, maybe on the move);
 /// otherwise twice [last], at most [max] ([nearbyLookMaxWait]). With 5
-/// minutes chosen and nobody new around: 5, 10, 15, 15… minutes, all
+/// minutes chosen and nobody new around: 5, 10, 20, 20… minutes, all
 /// multiples of the chosen period, so the looks keep sharing their wakes
-/// with the mailbox polls.
+/// with the mailbox polls and the presence rounds.
 Duration nextNearbyLookWait({
   required Duration last,
   required bool fresh,
@@ -110,7 +122,7 @@ const double kBleAdvertMilliamps = 0.1;
 /// typical phone, not a measurement: phones differ.
 ///
 /// An upper bound: with nobody new around, the locked service looks up to
-/// three times less often ([nextNearbyLookWait]); the look shares its wake
+/// four times less often by default ([nextNearbyLookWait]); the look shares its wake
 /// with the mailbox polls (`LockedReceiver`), which wake the phone anyway,
 /// and then adds only its window. In deep sleep (Doze) its alarm waits for
 /// Doze's own window and the look is skipped then. With Bluetooth off or no

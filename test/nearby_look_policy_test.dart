@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/meet/nearby_look_policy.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 
 Map<Object?, Object?> _state({
   bool supported = true,
@@ -96,20 +97,36 @@ void main() {
   });
 
   test('with nobody new the wait doubles up to three times the chosen one '
-      '(at most 30 min), and comes back at once', () {
+      'rounded up to the presence round (at most 30 min), and comes back at '
+      'once', () {
     const Duration five = Duration(minutes: 5);
-    expect(policy.longest, const Duration(minutes: 15));
-    expect(nearbyLookMaxWait(const Duration(minutes: 2)).inMinutes, 6);
+    expect(kNearbyLookWaitRound, kLockedPresenceRoundEvery);
+    expect(policy.longest, const Duration(minutes: 20));
+    expect(nearbyLookMaxWait(const Duration(minutes: 2)).inMinutes, 10);
     expect(nearbyLookMaxWait(const Duration(minutes: 10)).inMinutes, 30);
     expect(nearbyLookMaxWait(const Duration(minutes: 15)).inMinutes, 30);
     expect(nearbyLookMaxWait(const Duration(minutes: 30)).inMinutes, 30);
+    expect(nearbyLookMaxWait(const Duration(minutes: 45)).inMinutes, 45);
+    expect(
+      nearbyLookMaxWait(const Duration(minutes: 3, seconds: 20)).inMinutes,
+      10,
+      reason: 'exactly a round is not rounded further',
+    );
+    for (final int every in kNearbyLookEveryChoices) {
+      expect(
+        nearbyLookMaxWait(Duration(minutes: every)).inMinutes %
+            kLockedPresenceRoundEvery.inMinutes,
+        0,
+        reason: 'the longest wait rides the wakes of the presence round',
+      );
+    }
     Duration wait = five;
     final List<int> waits = <int>[];
     for (int i = 0; i < 4; i++) {
       wait = nextNearbyLookWait(last: wait, fresh: false, base: five);
       waits.add(wait.inMinutes);
     }
-    expect(waits, <int>[10, 15, 15, 15]);
+    expect(waits, <int>[10, 20, 20, 20]);
     // Each a multiple of the chosen period: the looks keep sharing wakes.
     for (final int w in waits) {
       expect(w % 5, 0);
@@ -124,14 +141,14 @@ void main() {
       ),
       five,
     );
-    // 2 minutes chosen: 2, 4, 6; 30 minutes: always 30.
+    // 2 minutes chosen: 2, 4, 8, 10; 30 minutes: always 30.
     expect(
       nextNearbyLookWait(
-        last: const Duration(minutes: 4),
+        last: const Duration(minutes: 8),
         fresh: false,
         base: const Duration(minutes: 2),
       ).inMinutes,
-      6,
+      10,
     );
     expect(
       nextNearbyLookWait(

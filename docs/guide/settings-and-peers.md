@@ -96,7 +96,8 @@ a day, counting that every look wakes the phone for a few seconds: about
 about 4 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
 visible nearby. These are estimates for a typical phone, and the most it
 costs: while Zen is locked and the looks find nobody new, they come less
-often (up to three times the chosen gap, at most 30 minutes apart) and go
+often (up to three times the chosen gap, rounded up to a whole ten
+minutes, at most 30 minutes apart) and go
 back to the chosen gap once someone new is seen or the screen is on. It
 skips its turn below 15 % battery, in battery saver and while the phone
 sleeps, unless it is charging.

@@ -736,7 +736,7 @@ void main() {
     await look();
     await look();
     await look();
-    expect(waits, <int>[10, 15, 15], reason: 'nobody around');
+    expect(waits, <int>[10, 20, 20], reason: 'nobody around');
     expect(bob.radio.scansStarted, 3, reason: 'each wake still looks');
 
     // Ania comes by: every 5 minutes again; still there, nobody new.
