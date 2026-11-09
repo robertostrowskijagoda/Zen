@@ -344,6 +344,16 @@ func TestHeldLocalLinksCloseAndTakeNoNewOnes(t *testing.T) {
 	waitForNoLinks(t, managerA, managerB)
 
 	managerA.release()
+	// B takes a new link from A once it let the old one (and the one A
+	// refused while held) go, as soon as their streams end; till then it
+	// is linked with A already.
+	deadline := time.Now().Add(10 * time.Second)
+	for managerB.hasLink(coreA.Address().String()) {
+		if time.Now().After(deadline) {
+			t.Fatal("B still holds a link whose stream ended")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err := link(); err != nil {
 		t.Fatal(err)
 	}
