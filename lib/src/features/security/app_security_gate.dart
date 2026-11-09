@@ -254,8 +254,8 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         ref.watch(accountSecureStepRequiredProvider) &&
         ref.watch(ledgerNodeEnabledProvider) &&
         !appSettings.accountSecureOffered;
-    // The whole app, lock screen included: Android keeps its window out of
-    // screenshots and the recent apps while the setting is on, and
+    // The whole app, lock screen included: any capture protection an older
+    // version left on the window is lifted (secure_screen.dart), and
     // every touch, click or mouse move restarts the idle lock.
     return SecureAppWindow(
       child: Listener(

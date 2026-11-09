@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -286,5 +288,49 @@ void main() {
     await tester.pump();
     expect(SecureWindow.lastApplied, isFalse);
     expect(find.text('tajne'), findsOneWidget);
+  });
+
+  testWidgets('while a screen with private content protects nothing, no '
+      'document says it does', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: SecureScreen(child: Text('tajne'))),
+    );
+    expect(SecureWindow.lastApplied, isFalse);
+
+    String normal(String text) =>
+        text.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    final List<File> documents = <File>[
+      File('README.md'),
+      File('docs/SECURITY_MODEL.md'),
+      File('docs/PRIVACY.md'),
+      File('docs/TERMS.md'),
+      ...Directory('docs/guide').listSync().whereType<File>().where(
+        (File f) => f.path.endsWith('.md'),
+      ),
+    ];
+    const List<String> claims = <String>[
+      'protected from screenshots',
+      'protected from screen recording',
+      'blocking screenshots',
+      'blocks screenshots',
+      'out of screenshots',
+      'out of the recent apps',
+      'no screenshots',
+      'chronione przed zrzutami',
+      'blokuje zrzuty',
+      'blokowanie zrzutów',
+    ];
+    for (final File document in documents) {
+      final String text = normal(document.readAsStringSync());
+      for (final String claim in claims) {
+        expect(text, isNot(contains(claim)), reason: document.path);
+      }
+    }
+    // What is true is said where the device's protection is described.
+    final String model = normal(
+      File('docs/SECURITY_MODEL.md').readAsStringSync(),
+    );
+    expect(model, contains('does not block screenshots'));
+    expect(model, contains('recent-apps preview'));
   });
 }

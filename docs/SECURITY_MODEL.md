@@ -213,10 +213,18 @@ friend list names it only as a hint, see above).
   deletes it.
 - **The locked phone (Android and iPhone).** A locked Zen keeps receiving
   without the master key; see "The locked phone" below.
-- **Screens.** The wallet and other sensitive screens are protected from
-  screenshots and screen recording (Android, Windows, macOS). Clipboard
-  copies of secrets (the account key, a transfer code) expire after 60
-  seconds; the invitation code is the public address and stays.
+- **Screens.** Zen does not block screenshots, screen recording or screen
+  sharing on any screen, the wallet and the account key included: since
+  1.15.1, by choice, people may capture what they see (a start lifts the
+  protection an older version left on the window). The system's
+  recent-apps preview keeps a picture of the last screen Zen showed, also
+  while Zen is locked; whoever holds the unlocked device can look at it
+  there. Clipboard copies of secrets (the account key, a transfer code)
+  are marked as sensitive where the system knows such a mark (Android 13
+  and later; on Windows they stay out of the clipboard history and the
+  cloud clipboard), and are cleared after 60 seconds, when Zen locks and
+  when the account is left or erased; the invitation code is the public
+  address and stays.
   Notifications show the sender and the start of a message by default; the
   first-run setup asks, and "Without sender and content" or "Sender only"
   can be chosen globally or per conversation.
