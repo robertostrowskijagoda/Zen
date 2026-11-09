@@ -239,6 +239,38 @@ const String _kHeartbeatEngineKey = 'engine';
 /// takes the node over.
 const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
 
+/// One wake of the parked service's watchdog: [probe] asks the app at once
+/// whether it still runs its node, and the wake ends as soon as [answered]
+/// completes (its heartbeat came) or after [wait]; whether it came. The
+/// app's heartbeat timer stood still while the phone slept, and a wake that
+/// waited for it held the phone a heartbeat's time and a second more on
+/// every wake (6 s a minute while the app is off screen); an app that runs
+/// its node answers a probe within moments.
+@visibleForTesting
+Future<bool> watchdogWakeAsks({
+  required void Function() probe,
+  required Future<void> answered,
+  Duration wait = kAndroidBackgroundProbeWait,
+}) async {
+  final Completer<bool> done = Completer<bool>();
+  final Timer timer = Timer(wait, () {
+    if (!done.isCompleted) {
+      done.complete(false);
+    }
+  });
+  unawaited(
+    answered.then<void>((_) {
+      if (!done.isCompleted) {
+        done.complete(true);
+      }
+    }, onError: (Object _) {}),
+  );
+  probe();
+  final bool heard = await done.future;
+  timer.cancel();
+  return heard;
+}
+
 /// How long the service waits to look again when the bridge refused its
 /// takeover for an app whose engine Android ended (the app's last word that
 /// it is on screen still held): a moment past the five seconds that word
@@ -2531,6 +2563,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   Stopwatch? _probe;
   Timer? _probeTimer;
 
+  /// Completes when a heartbeat comes during a watchdog wake.
+  Completer<void>? _heardOnWake;
+
   /// The node runs here because this service took it over (no heartbeat,
   /// or the app's engine went), not because the app asked: the app is told
   /// so with the acknowledgement, and lets go of a node it may still run.
@@ -2708,13 +2743,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       final Stopwatch? probe = _probe;
       if (probe == null) {
         _probe = Stopwatch()..start();
-        try {
-          FlutterForegroundTask.sendDataToMain(<String, Object?>{
-            'type': _kRuntimeProbeType,
-          });
-        } catch (error, stackTrace) {
-          logZenError('Probing the app failed', error, stackTrace);
-        }
+        _sendProbe();
         _probeTimer?.cancel();
         _probeTimer = Timer(kAndroidBackgroundProbeWait, _checkStandbyWatchdog);
         return;
@@ -2744,6 +2773,22 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       ..reset()
       ..start();
     _endProbe();
+    final Completer<void>? heard = _heardOnWake;
+    if (heard != null && !heard.isCompleted) {
+      heard.complete();
+    }
+  }
+
+  /// Asks the app whether it still runs its node (it answers with a
+  /// heartbeat).
+  void _sendProbe() {
+    try {
+      FlutterForegroundTask.sendDataToMain(<String, Object?>{
+        'type': _kRuntimeProbeType,
+      });
+    } catch (error, stackTrace) {
+      logZenError('Probing the app failed', error, stackTrace);
+    }
   }
 
   void _endProbe() {
@@ -2763,11 +2808,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         'watchdog',
         standbyWatchdogEvery(appOnScreen: _appOnScreen),
         _watchOnWake,
-        // The app's heartbeat, and a probe's answer when it is late.
-        hold:
-            kAndroidBackgroundHeartbeatInterval +
-            kAndroidBackgroundProbeWait +
-            const Duration(seconds: 3),
+        // The probe's answer, and a moment for a takeover it sets off.
+        hold: kAndroidBackgroundProbeWait + const Duration(seconds: 3),
         whileIdle: !_appOnScreen,
       );
     } else {
@@ -2776,14 +2818,35 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
   }
 
-  /// A watchdog wake: the app gets one heartbeat's time to report in (its
-  /// timers stood still while the phone slept, like the service's clock),
-  /// then the heartbeats are looked at and the phone may sleep again.
+  /// A watchdog wake: the app is asked at once ([watchdogWakeAsks]; its
+  /// heartbeat timer stood still while the phone slept, like the service's
+  /// clock), then the heartbeats are looked at and the phone may sleep
+  /// again. An app silent for long ([kAndroidBackgroundHeartbeatTimeout])
+  /// that did not answer this probe in its time is taken for gone now: the
+  /// probe the look would send is the one it did not answer.
   Future<void> _watchOnWake() async {
-    await Future<void>.delayed(
-      kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 1),
+    if (_destroyed) {
+      return;
+    }
+    final Completer<void> heard = _heardOnWake = Completer<void>();
+    final Stopwatch asked = Stopwatch()..start();
+    final bool answered = await watchdogWakeAsks(
+      probe: _sendProbe,
+      answered: heard.future,
     );
+    if (identical(_heardOnWake, heard)) {
+      _heardOnWake = null;
+    }
+    final Stopwatch? since = _sinceAppHeartbeat;
+    final bool silent =
+        since == null || since.elapsed >= kAndroidBackgroundHeartbeatTimeout;
+    if (!answered && silent && _probe == null) {
+      _probe = asked;
+    }
     _checkStandbyWatchdog();
+    if (identical(_probe, asked)) {
+      _endProbe();
+    }
   }
 
   @override

@@ -248,6 +248,47 @@ void main() {
     );
   });
 
+  test('a watchdog wake asks the app at once and ends as soon as its '
+      'heartbeat comes', () async {
+    final List<String> said = <String>[];
+    final Completer<void> heartbeat = Completer<void>();
+    final Stopwatch took = Stopwatch()..start();
+    final Future<bool> wake = watchdogWakeAsks(
+      probe: () => said.add('probe'),
+      answered: heartbeat.future,
+    );
+    expect(said, <String>['probe'], reason: 'before anything is waited for');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    heartbeat.complete();
+    expect(await wake, isTrue);
+    expect(
+      took.elapsed,
+      lessThan(kAndroidBackgroundProbeWait),
+      reason: 'not the time of a heartbeat and the wait of a probe after it',
+    );
+  });
+
+  test('a watchdog wake the app does not answer ends after the wait of '
+      'its probe', () async {
+    int probes = 0;
+    final Stopwatch took = Stopwatch()..start();
+    final bool heard = await watchdogWakeAsks(
+      probe: () => probes++,
+      answered: Completer<void>().future,
+      wait: const Duration(milliseconds: 80),
+    );
+    expect(heard, isFalse);
+    expect(probes, 1);
+    expect(
+      took.elapsed,
+      greaterThanOrEqualTo(const Duration(milliseconds: 80)),
+    );
+    expect(
+      kAndroidBackgroundProbeWait,
+      lessThan(kAndroidBackgroundHeartbeatInterval),
+    );
+  });
+
   test('long in the background the app drops to receive-only', () {
     final DateTime left = DateTime(2026, 10, 22, 12);
     expect(shouldDropToReceiveOnly(backgroundSince: null, now: left), isFalse);
