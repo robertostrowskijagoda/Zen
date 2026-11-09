@@ -194,6 +194,23 @@ friend list names it only as a hint, see above).
   asks nothing. Every password asked inside the unlocked app (the app
   password, the account password) counts with the lock screen's failed
   attempts and is refused while its wait runs.
+- **"Don't lock right after closing the app"** (with the lock after
+  leaving the app) keeps the master key for a start within the lock delay
+  after Zen was closed. It is kept encrypted under a new one-time key each
+  time Zen leaves the screen, and only that one-time key is sealed with
+  the delay: on Android by a Keystore key that opens only while the phone
+  is unlocked, which checks the delay, the boot and the screen lock
+  itself; on computers and the iPhone it lies in the system's secret store
+  with its end on the clock since boot, and only Zen checks that end. What
+  remains: until something deletes them, both entries are in the secret
+  store, so on a computer any program running as the same user can read
+  them, and with them the master key, while the delay runs and, if Zen is
+  not started again, after it too (as with "Never"). The next start
+  deletes both before the lock screen shows, used or not, the one-time key
+  first; so do locking by hand, coming back to Zen, a new password,
+  another lock mode or delay, and switching the option off. What 1.16.2
+  kept here is not used: the first start asks for the password and
+  deletes it.
 - **The locked phone (Android and iPhone).** A locked Zen keeps receiving
   without the master key; see "The locked phone" below.
 - **Screens.** The wallet and other sensitive screens are protected from
