@@ -89,10 +89,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     }
 
     if (removedAny) {
-      await _messageTimelineStore.save(
-        peerAddress,
-        List<ChatMessage>.unmodifiable(retained),
-      );
+      await _saveTimelineChanges(peerAddress, thread, retained);
       _bumpTimelineRevision();
     }
     _syncFriendPreviewFromTimeline(
@@ -130,7 +127,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     final ChatMessage message = thread[index];
     final List<ChatMessage> rest = List<ChatMessage>.of(thread)
       ..removeAt(index);
-    await _messageTimelineStore.save(key, List<ChatMessage>.unmodifiable(rest));
+    await _saveTimelineChanges(key, thread, rest);
     await _deleteManagedAttachmentIfPresent(message);
     if (!key.startsWith('group:')) {
       await _transferStore.deleteIncoming(key, message.id);
@@ -261,7 +258,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
       growable: false,
     );
     next[index] = next[index].copyWith(deliveryState: deliveryState);
-    await timelineStore.save(peerAddress, next);
+    await _saveTimelineChanges(peerAddress, thread, next);
     _bumpTimelineRevision();
   }
 

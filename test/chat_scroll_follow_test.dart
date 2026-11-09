@@ -183,6 +183,40 @@ Future<MemoryMessageTimelineStore> _pumpGroup(
 
 void main() {
   group('1:1 chat', () {
+    testWidgets('scrolled up, it stays when one\'s own newest message goes '
+        'and comes back (read again while it was being written): it was '
+        'taken for a new one and threw the reader to the bottom', (
+      WidgetTester tester,
+    ) async {
+      final MemoryMessageTimelineStore store = await _pumpDirect(tester);
+      final ChatMessage own = _message(100, outgoing: true);
+      await _addMessage(tester, store, _ada, own);
+      final ScrollPosition position = _position(tester);
+      position.jumpTo(
+        position.maxScrollExtent - 2 * position.viewportDimension,
+      );
+      await tester.pumpAndSettle();
+      final double pixels = _position(tester).pixels;
+
+      final List<ChatMessage> all = await store.load(_ada);
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(Scaffold).first),
+      );
+      for (int i = 0; i < 3; i++) {
+        await store.save(_ada, all.sublist(0, all.length - 1));
+        container.read(messageTimelineRevisionProvider.notifier).bump();
+        await tester.pumpAndSettle();
+        await store.save(_ada, all);
+        container.read(messageTimelineRevisionProvider.notifier).bump();
+        await tester.pumpAndSettle();
+      }
+      expect(_position(tester).pixels, closeTo(pixels, 1));
+
+      // A message of one's own that is really new still brings it down.
+      await _addMessage(tester, store, _ada, _message(101, outgoing: true));
+      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+    });
+
     testWidgets('opens at the newest message, also with long ones', (
       WidgetTester tester,
     ) async {

@@ -262,6 +262,20 @@ const List<Duration> _callTeardownRetryDelays = <Duration>[
 abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   bool _hydrationScheduled = false;
 
+  /// Writes what turned [before] (the conversation [key] as read a moment
+  /// ago) into [after], onto the conversation as it is now, in one step
+  /// ([applyTimelineChanges]): a message added to it meanwhile (one's own,
+  /// sent as a receipt for the one before came in) stays. Writing [after]
+  /// whole deleted it.
+  Future<void> _saveTimelineChanges(
+    String key,
+    List<ChatMessage> before,
+    List<ChatMessage> after,
+  ) => _messageTimelineStore.update(
+    key,
+    (List<ChatMessage> current) => applyTimelineChanges(current, before, after),
+  );
+
   /// The last send time given to a message of one's own, per conversation
   /// ([_outgoingStamp]).
   final Map<String, int> _lastOutgoingStamp = <String, int>{};

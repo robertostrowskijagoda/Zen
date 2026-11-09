@@ -155,6 +155,46 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
     }
   }
 
+  @override
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  ) async {
+    final List<ChatMessage> gone = <ChatMessage>[];
+    final bool changed = await delegate.update(peerAddress, (
+      List<ChatMessage> all,
+    ) {
+      final int now = _now();
+      // What the caller sees, as [load] shows it: no expired message.
+      final List<ChatMessage>? next = change(
+        List<ChatMessage>.unmodifiable(
+          all.where((ChatMessage m) => !m.isExpiredAt(now)),
+        ),
+      );
+      if (next == null) {
+        return null;
+      }
+      final Set<String> had = <String>{for (final ChatMessage m in all) m.id};
+      final List<ChatMessage> stamped = <ChatMessage>[
+        for (final ChatMessage m in next)
+          had.contains(m.id) ? m : _stamp(peerAddress, m),
+      ];
+      final Set<String> kept = <String>{
+        for (final ChatMessage m in stamped) m.id,
+      };
+      gone.addAll(
+        all.where(
+          (ChatMessage m) => !kept.contains(m.id) && m.isExpiredAt(now),
+        ),
+      );
+      return List<ChatMessage>.unmodifiable(stamped);
+    });
+    for (final ChatMessage m in gone) {
+      await _expired(peerAddress, m);
+    }
+    return changed;
+  }
+
   Future<void> _expired(String key, ChatMessage m) async {
     try {
       await onExpired?.call(key, m);

@@ -217,6 +217,43 @@ void main() {
     await secondSync.idle;
     expect(secondChats.files['m3'], <int>[9, 9]);
 
+    // A friend's file that came whole only to the first device (the pieces
+    // are acknowledged for the account as a whole): the second, which got
+    // its message without the file, gets the file from the first.
+    final ChatMessage fromBob = ChatMessage(
+      id: 'm4',
+      sender: b,
+      text: '',
+      sentAtMillis: 4000,
+      direction: ChatMessageDirection.incoming,
+      type: ChatMessageType.file,
+      fileName: 'plan.pdf',
+      mimeType: 'application/pdf',
+      attachmentSizeBytes: 3,
+    );
+    secondChats.chats[b] = <ChatMessage>[...?secondChats.chats[b], fromBob];
+    firstSync.onIncomingFile(
+      b,
+      fromBob.copyWith(attachmentBytes: Uint8List.fromList(<int>[4, 4, 4])),
+    );
+    await _settle(200);
+    await secondSync.idle;
+    expect(secondChats.files['m4'], <int>[4, 4, 4]);
+
+    // A device that has the file already does not fetch it again.
+    final int before = secondChats.files.length;
+    secondChats.chats[b] = <ChatMessage>[
+      ...?secondChats.chats[b],
+      fromBob.copyWith(id: 'm5', attachmentBytes: Uint8List.fromList(<int>[5])),
+    ];
+    firstSync.onIncomingFile(
+      b,
+      fromBob.copyWith(id: 'm5', attachmentBytes: Uint8List.fromList(<int>[5])),
+    );
+    await _settle(200);
+    await secondSync.idle;
+    expect(secondChats.files.length, before, reason: 'm5 was here already');
+
     // A friend removed on the first device goes on the second too.
     await first.publishForOwnDevices(kContactRemovedKind, <String, dynamic>{
       'a': b,
@@ -430,6 +467,48 @@ void main() {
         <int>[7, 7, 7],
       );
     });
+  });
+
+  test('the timeline store reports a file from a friend once it is whole here, '
+      'not before, and once', () async {
+    final SyncingMessageTimelineStore store = SyncingMessageTimelineStore(
+      MemoryMessageTimelineStore(),
+    );
+    final List<String> files = <String>[];
+    store.onNewIncomingFile = (String peer, ChatMessage m) => files.add(m.id);
+    final ChatMessage announced = ChatMessage(
+      id: 'f1',
+      sender: 'p',
+      text: '',
+      sentAtMillis: 1,
+      direction: ChatMessageDirection.incoming,
+      type: ChatMessageType.file,
+      fileName: 'a.bin',
+    );
+    await store.append('p', announced);
+    expect(files, isEmpty, reason: 'only announced, the pieces still come');
+    await store.update(
+      'p',
+      (List<ChatMessage> all) => <ChatMessage>[
+        announced.copyWith(attachmentPath: '/v/x.zmedia'),
+      ],
+    );
+    await store.save('p', <ChatMessage>[
+      announced.copyWith(attachmentPath: '/v/x.zmedia'),
+    ]);
+    expect(files, <String>['f1']);
+    // A friend's text is not reported.
+    await store.append(
+      'p',
+      ChatMessage(
+        id: 't',
+        sender: 'p',
+        text: 'hej',
+        sentAtMillis: 2,
+        direction: ChatMessageDirection.incoming,
+      ),
+    );
+    expect(files, <String>['f1']);
   });
 
   test(

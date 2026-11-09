@@ -406,7 +406,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     ref.read(messageTimelineStoreProvider),
   );
   if (timelines is SyncingMessageTimelineStore) {
-    timelines.onNewOutgoing = chatSync.onOutgoing;
+    timelines
+      ..onNewOutgoing = chatSync.onOutgoing
+      ..onNewIncomingFile = chatSync.onIncomingFile;
   }
   // Friends and groups are the same on every device of the account: each
   // change is saved (sealed) in the private space, and what another device
@@ -601,7 +603,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     unawaitedLogged(chatSync.stop(), context: 'Stopping shared conversations');
     if (timelines is SyncingMessageTimelineStore &&
         timelines.onNewOutgoing == chatSync.onOutgoing) {
-      timelines.onNewOutgoing = null;
+      timelines
+        ..onNewOutgoing = null
+        ..onNewIncomingFile = null;
     }
     final AccountDeviceDirectory? directory = holder.directory;
     if (directory is LedgerAccountDirectory &&

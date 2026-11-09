@@ -17,6 +17,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
@@ -24,6 +25,7 @@ import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
@@ -271,6 +273,10 @@ final class FriendsPhone implements RelayPeerSource {
   /// The phone's ledger, in a world made with `ledger: true`.
   LedgerNode? ledger;
 
+  /// The conversations shared with the account's other devices, in a world
+  /// with ledgers (as ledgerNodeProvider runs it).
+  DeviceChatSync? chatSync;
+
   final FriendsWorld world;
   final String name;
   final SimPhone sim;
@@ -458,7 +464,11 @@ final class FriendsPhone implements RelayPeerSource {
         socialSnapshotStoreProvider.overrideWithValue(
           MemorySocialSnapshotStore(_seed),
         ),
-        messageTimelineStoreProvider.overrideWithValue(timeline),
+        // As the app has it: the copies for the account's other devices
+        // are told about what is written (device_chat_sync.dart).
+        messageTimelineStoreProvider.overrideWithValue(
+          world.ledgers ? SyncingMessageTimelineStore(timeline) : timeline,
+        ),
         attachmentTransferStoreProvider.overrideWithValue(
           MemoryAttachmentTransferStore(),
         ),
@@ -546,6 +556,24 @@ final class FriendsPhone implements RelayPeerSource {
     };
     ledger = node;
     await node.start();
+    final DeviceChatSync sync = DeviceChatSync(
+      node: node,
+      target: _HubChats(this),
+      vault: container.read(mediaVaultProvider),
+      // Real time: a file that does not come is put on the waiting list
+      // soon, and tried again with the world's rounds.
+      fileWait: const Duration(seconds: 3),
+    );
+    chatSync = sync;
+    await sync.start();
+    final MessageTimelineStore chats = container.read(
+      messageTimelineStoreProvider,
+    );
+    if (chats is SyncingMessageTimelineStore) {
+      chats
+        ..onNewOutgoing = sync.onOutgoing
+        ..onNewIncomingFile = sync.onIncomingFile;
+    }
     _ledgerAccounts = LedgerAccountDirectory(
       node,
       () => <String>[
@@ -770,6 +798,7 @@ final class FriendsPhone implements RelayPeerSource {
       await side.receiver.stop();
       _locked = null;
     }
+    await chatSync?.stop();
     await ledger?.stop();
     await _appFrames.close();
     await transport.dispose();
@@ -995,11 +1024,16 @@ final class FriendsWorld {
     String name, {
     SimDevice device = SimDevice.android,
   }) async {
+    final Uint8List? key = owner.ledger?.identity.accountKey?.seed;
     final FriendsPhone p = await _add(
       name,
       device: device,
       account: _accountOf[owner.address]!,
       seed: _friendsOf(owner),
+      // With ledgers the new device holds the account's key, as a device
+      // linked in the app does (it had an account of its own, and the
+      // friends never took it for the owner's).
+      accountSeed: key == null ? null : Uint8List.fromList(key),
     );
     await settleMailboxes();
     return p;
@@ -1452,6 +1486,44 @@ final class FriendsWorld {
 }
 
 /// What a phone's ledger would know about accounts: the world's truth.
+/// What the account's other devices share, taken in by [phone]'s social
+/// hub (as ledger_providers.dart's `_HubChatTarget`).
+final class _HubChats implements ChatSyncTarget {
+  _HubChats(this.phone);
+
+  final FriendsPhone phone;
+
+  @override
+  List<String> conversationKeys() => phone.hub.conversationKeys();
+
+  @override
+  Future<List<ChatMessage>> conversationMessages(String key) =>
+      phone.hub.conversationMessages(key);
+
+  @override
+  Future<void> importSyncedMessage(
+    String key,
+    ChatMessage message, {
+    Uint8List? bytes,
+    String? storedPath,
+  }) => phone.hub.importSyncedMessage(
+    key,
+    message,
+    bytes: bytes,
+    storedPath: storedPath,
+  );
+
+  @override
+  Future<void> forgetFriendFromOtherDevice(
+    String address, {
+    int atMillis = 0,
+  }) => phone.hub.forgetFriendFromOtherDevice(address, atMillis: atMillis);
+
+  @override
+  Future<void> forgetGroupFromOtherDevice(String groupId) =>
+      phone.hub.forgetGroupFromOtherDevice(groupId);
+}
+
 final class _WorldAccounts implements AccountDeviceDirectory {
   _WorldAccounts(this.phone);
 

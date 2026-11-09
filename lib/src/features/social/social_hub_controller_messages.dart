@@ -1101,7 +1101,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     } else {
       next = <ChatMessage>[...thread, updated];
     }
-    await timelineStore.save(peerAddress, List<ChatMessage>.unmodifiable(next));
+    await _saveTimelineChanges(peerAddress, thread, next);
     _bumpTimelineRevision();
   }
 
@@ -1268,7 +1268,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     if (!changed) {
       return;
     }
-    await timelineStore.save(peerAddress, next);
+    await _saveTimelineChanges(peerAddress, thread, next);
     _bumpTimelineRevision();
   }
 

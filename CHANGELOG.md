@@ -10,6 +10,24 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.1 — 09.11.2026
+
+### What's new
+- [en] A chat no longer jumps back to the bottom while you scroll up, and a message sent just as your friend reads no longer disappears.
+- [en] A GIF sent as a file plays as a GIF, and a file to a friend with two devices reaches both.
+- [pl] Rozmowa nie odskakuje już na dół przy przewijaniu w górę, a wiadomość wysłana akurat, gdy znajomy czyta, nie znika.
+- [pl] GIF wysłany jako plik odtwarza się jako GIF, a plik do znajomego z dwoma urządzeniami dociera na oba.
+
+### Fixes and changes
+- **A chat no longer jumps back to the bottom while you scroll up**: one's own newest message that went and came back (the conversation read again while something wrote it, which the vanishing message below did again and again in one chat) was taken for a new one each time and brought the list down. Only one of one's own newer than anything shown before does it now. Each move of a chat's list that the reader did not make, of more than a little, goes into the technical log (`chat-scroll`, why and how far), so a list that still jumps can be told by its cause.
+- **A GIF sent as a file plays as a GIF**: a GIF that came as a file (picked as a file in an older Zen or on a computer, or sent as one past the limits there) is shown as the animated picture it is, when it is one within the limits. A GIF may have up to 2000 frames (was 400, which turned a GIF of a minute into a file); the pixels over all its frames stay limited as before.
+- **A file to a friend with two devices reaches both**: the file goes to every device of the friend's account, but its pieces are acknowledged for the account as a whole, so the transfer ended once one device had it all; the other showed the file without its content, and one that was offline when it came got nothing. The device that has a friend's file whole now passes it on to the account's other devices, as it does with its own messages (`DeviceChatSync.onIncomingFile`); a device that has it already does not fetch it again.
+- **A message sent as the friend's receipt or "pisze…" came no longer disappears**: a delivery or read mark, a file that finished coming, an edit, the clean-up of old messages and "Usuń z mojego urządzenia" each read the whole conversation, changed it and wrote it back whole. A message added in between (one's own, sent just as the friend's receipt for the one before came in, which is when their "pisze…" shows) was written over by the copy read before it, and was gone from the phone; the friend had it. Each of them now writes only what it changed, onto the conversation as it is at that moment, in one step with the conversation's other writes (`MessageTimelineStore.update`, `applyTimelineChanges`), in every store (the files, the disappearing messages, the copies for the account's other devices).
+- **A save on Windows no longer waits 10 seconds for a lock that was given back**: a save gives its file's lock back by deleting it, and Windows refuses to delete a file someone has open. Another isolate waiting for the lock reads it now and then to see whose it is; a release that met such a read was given up, the lock stayed behind, and that isolate's save waited 10 s for it. The release is now tried again a moment later while the lock is still its own. The test of waiting for another isolate's lock met the same refusal on CI.
+- **Tests**: a file of 2 KB and of 150 KB reaching a friend's second device, online and offline when it was sent, through the simulated ledgers (the simulated world now gives a second device the account's key, as linking does, and runs the account's shared conversations); a GIF arriving as a file shown as a GIF, and a GIF of 1500 frames played; scrolled up, a chat stays when one's own newest message goes and comes back.
+- **Tests**: the randomised messaging test sends files too, small enough for the message and in pieces, through outages, locks, splits and loss (60 lives).
+- **Tests**: a receipt coming in while the next message is sent, at sixteen moments from 0 to 30 ms after it, on a store with the few milliseconds of a phone's encrypted storage (each lost the second message before); what a change keeps of messages added, changed and deleted meanwhile.
+
 ## 1.16.0 — 08.11.2026
 
 ### What's new

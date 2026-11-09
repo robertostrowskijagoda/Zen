@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -235,9 +236,48 @@ void main() {
     ).write('relay/state', payload('six')).then((_) => saved = true);
     await Future<void>.delayed(const Duration(milliseconds: 500));
     expect(saved, isFalse);
-    lock.deleteSync();
+    // The service gives the lock back. The waiting save reads it now and
+    // then to see whose it is, and Windows refuses to delete a file that
+    // is being read: tried again a moment later, as a release does.
+    for (int attempt = 0; ; attempt++) {
+      try {
+        lock.deleteSync();
+        break;
+      } on FileSystemException {
+        if (attempt >= 50) {
+          rethrow;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 2));
+      }
+    }
+    final Stopwatch after = Stopwatch()..start();
     await save;
+    expect(after.elapsed, lessThan(const Duration(seconds: 2)));
     expect(text(await _plainStore(root).read('relay/state')), 'six');
+  });
+
+  test('a lock held open by someone reading it as the save ends is still '
+      'given back (Windows refuses to delete an open file): it was left '
+      "behind, and another isolate's next save waited 10 s for it", () async {
+    final FileBinaryStore store = _plainStore(root);
+    final File file = await store.write('relay/state', payload('one'));
+    final File lock = File('${file.path}.lock');
+    RandomAccessFile? reader;
+    FileBinaryStore.debugWriteStep = (String step, File _) {
+      if (step == FileBinaryStore.writeSteps.last) {
+        // Another isolate looks whose the lock is, right as it is given
+        // back, and is done with it a moment later.
+        reader = lock.openSync();
+        final RandomAccessFile open = reader!;
+        Timer(const Duration(milliseconds: 15), open.closeSync);
+      }
+    };
+    addTearDown(() => FileBinaryStore.debugWriteStep = null);
+    await store.write('relay/state', payload('two'));
+    FileBinaryStore.debugWriteStep = null;
+    expect(reader, isNotNull);
+    expect(lock.existsSync(), isFalse, reason: 'the lock given back');
+    expect(text(await store.read('relay/state')), 'two');
   });
 
   test('plain files saved by two isolates at once are always one whole '

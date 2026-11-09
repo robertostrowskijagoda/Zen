@@ -40,8 +40,11 @@ const int kMaxGifBytes = 12 * 1024 * 1024;
 /// The largest GIF canvas accepted, in pixels per side.
 const int kMaxGifSide = 2560;
 
-/// The most frames an accepted GIF may have.
-const int kMaxGifFrames = 400;
+/// The most frames an accepted GIF may have. The cost of playing one is
+/// bounded by [kMaxGifTotalPixels] (frames are decoded one at a time, at
+/// the size shown); 400 turned a common GIF of a minute (25 frames a
+/// second, a few hundred pixels a side) into a plain file.
+const int kMaxGifFrames = 2000;
 
 /// The most pixels an accepted GIF may have summed over all its frames
 /// (frames x canvas): bounds the memory and time of playing it.
@@ -160,6 +163,17 @@ Future<GuardedMedia> guardIncomingMedia(
         t('To nie było nagranie, więc zapisano je jako plik.'),
       );
     case MediaKind.file:
+      // A GIF that came as a file (picked as a file in an older Zen, or on
+      // a computer, or sent as one when it was over the limits there) is
+      // shown as the animated picture it is, when it is one within them.
+      if (isAcceptableGif(bytes)) {
+        return GuardedMedia(
+          bytes: bytes,
+          kind: MediaKind.image,
+          mimeType: 'image/gif',
+          fileName: _withExtension(name, 'gif'),
+        );
+      }
       return _asFile(bytes, name, null, mimeType: mimeType);
   }
 }

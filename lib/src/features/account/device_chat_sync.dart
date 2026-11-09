@@ -89,12 +89,21 @@ bool _fileReady(ChatMessage m) =>
     (m.attachmentPath?.trim().isNotEmpty ?? false);
 
 /// The timeline store, telling [onNewOutgoing] about every message this
-/// device sends (once it is complete: a file message once its file is in).
+/// device sends (once it is complete: a file message once its file is in),
+/// and [onNewIncomingFile] about every file from someone else once it is
+/// whole here.
 final class SyncingMessageTimelineStore implements MessageTimelineStore {
   SyncingMessageTimelineStore(this.delegate);
 
   final MessageTimelineStore delegate;
   void Function(String peer, ChatMessage message)? onNewOutgoing;
+
+  /// A friend's file came whole to this device. A file goes to every
+  /// device of the account, but its pieces are acknowledged for the
+  /// account as a whole: the transfer ends once one device has it all, and
+  /// a device that was offline gets nothing. The one that has it passes it
+  /// on ([DeviceChatSync.onIncomingFile]).
+  void Function(String peer, ChatMessage message)? onNewIncomingFile;
 
   /// Per conversation: ids of outgoing messages already known complete.
   final Map<String, Set<String>> _known = <String, Set<String>>{};
@@ -106,23 +115,37 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
     }
     final Set<String> ids = <String>{
       for (final ChatMessage m in await delegate.load(peer))
-        if (m.direction == ChatMessageDirection.outgoing &&
-            (!_hasFile(m) || _fileReady(m)))
-          m.id,
+        if (_reported(m) != null) m.id,
     };
     return _known[peer] ??= ids;
   }
 
+  /// Which callback [m] goes to once complete: one's own message (with its
+  /// file in), or a file from someone else that is whole; `null`: none.
+  void Function(String peer, ChatMessage message)? _reported(ChatMessage m) {
+    if (m.direction == ChatMessageDirection.outgoing) {
+      return !_hasFile(m) || _fileReady(m) ? (onNewOutgoing ?? _none) : null;
+    }
+    if (m.direction == ChatMessageDirection.incoming &&
+        _hasFile(m) &&
+        _fileReady(m) &&
+        !m.isDeleted) {
+      return onNewIncomingFile ?? _none;
+    }
+    return null;
+  }
+
+  static void _none(String peer, ChatMessage message) {}
+
   void _check(String peer, Set<String> known, Iterable<ChatMessage> messages) {
     for (final ChatMessage m in messages) {
-      if (m.direction != ChatMessageDirection.outgoing ||
-          known.contains(m.id) ||
-          (_hasFile(m) && !_fileReady(m))) {
+      final void Function(String, ChatMessage)? report = _reported(m);
+      if (report == null || known.contains(m.id)) {
         continue;
       }
       known.add(m.id);
       try {
-        onNewOutgoing?.call(peer, m);
+        report(peer, m);
       } on Object catch (error, stack) {
         logZenError('Message copies for other devices', error, stack);
       }
@@ -141,6 +164,25 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
     final Set<String> known = await _knownFor(peerAddress);
     await delegate.save(peerAddress, messages);
     _check(peerAddress, known, messages);
+  }
+
+  @override
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  ) async {
+    final Set<String> known = await _knownFor(peerAddress);
+    List<ChatMessage>? written;
+    final bool changed = await delegate.update(peerAddress, (
+      List<ChatMessage> all,
+    ) {
+      return written = change(all);
+    });
+    final List<ChatMessage>? done = written;
+    if (changed && done != null) {
+      _check(peerAddress, known, done);
+    }
+    return changed;
   }
 
   @override
@@ -318,6 +360,13 @@ final class DeviceChatSync {
     });
   }
 
+  /// A friend's file came whole to this device ([SyncingMessageTimelineStore
+  /// .onNewIncomingFile]): the account's other devices get it from here,
+  /// as one's own messages, also one that was offline when it came. One
+  /// that has it already does not fetch it again ([_importWithFile]).
+  void onIncomingFile(String key, ChatMessage message) =>
+      onOutgoing(key, message);
+
   /// A small file whole (a history bundle).
   Future<Uint8List?> _fetch(Object? refJson) async {
     final MediaRef? ref = mediaRefFromJson(refJson);
@@ -350,6 +399,11 @@ final class DeviceChatSync {
       await target.importSyncedMessage(key, m);
       return;
     }
+    if (await _hasFileHere(key, m.id)) {
+      // This device has the file already (it came here too): nothing to
+      // fetch.
+      return;
+    }
     if (policy != null && !await policy!.mayFetchNow()) {
       await target.importSyncedMessage(key, m);
       await _remember(key, m, refJson);
@@ -359,6 +413,16 @@ final class DeviceChatSync {
       await target.importSyncedMessage(key, m);
       await _remember(key, m, refJson, asked: node.siblingAddresses.isNotEmpty);
     }
+  }
+
+  /// Whether message [id] of [key] has its file on this device.
+  Future<bool> _hasFileHere(String key, String id) async {
+    for (final ChatMessage m in await target.conversationMessages(key)) {
+      if (m.id == id) {
+        return _fileReady(m);
+      }
+    }
+    return false;
   }
 
   /// Fetches [ref] from the account's devices and hands it over piece by
