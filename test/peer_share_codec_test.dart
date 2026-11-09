@@ -173,6 +173,8 @@ void main() {
       ('200:1:2:3:4:5:6:0', '200:1:2:3:4:5:6:0'),
       ('200:1:2:3:4:5:0:0', '200:1:2:3:4:5::'),
       ('200:0000:0:0::1', '200::1'),
+      // A group past FFFF is no address: left as it was typed.
+      ('200:10000::1', '200:10000::1'),
     ]) {
       expect(PeerShareCodec.normalizeAddress(given), canonical, reason: given);
     }

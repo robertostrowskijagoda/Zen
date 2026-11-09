@@ -55,6 +55,7 @@ void main() {
         final Map<String, dynamic> doc =
             jsonDecode(utf8.decode(bytes.sublist(at))) as Map<String, dynamic>;
         doc['disappear'] = <String, Object?>{'ada.ygg': 30, 'x': 'y', 'n': -5};
+        doc['mutedUntil'] = <String, Object?>{'ada.ygg': 9, 'bob.ygg': '9'};
         doc['groupNotifyAll'] = <String, Object?>{
           'group:g': true,
           'group:h': 'yes',
@@ -82,6 +83,7 @@ void main() {
 
         final SocialHubState loaded = (await store.load())!;
         expect(loaded.disappearingTimers, <String, int>{'ada.ygg': 30});
+        expect(loaded.mutedUntil, <String, int>{'ada.ygg': 9});
         expect(loaded.groupNotifyAll, <String, bool>{'group:g': true});
         expect(loaded.groups['g']!.pendingInviteIds, <String, String>{
           '200::a': 'inv-1',
