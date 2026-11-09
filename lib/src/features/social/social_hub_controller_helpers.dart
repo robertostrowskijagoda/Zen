@@ -1730,6 +1730,9 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
   if (status == FriendRelationshipStatus.blocked) {
     return false;
   }
+  if (_isManagedGroupMembershipSignal(signal)) {
+    return false;
+  }
   switch (signal.type) {
     case ZenSignalType.friendRequest:
     case ZenSignalType.groupInvite:
@@ -1960,9 +1963,30 @@ List<String> normalizedGroupMembers(Iterable<String> addresses) {
 /// ([SocialHubController.syncManagedGroups]: the pyramid's cell chats,
 /// worked out from the pyramid). Nobody's signal and no "add" in the app
 /// changes it: a cell member could otherwise bring anyone into the cell's
-/// chat on everybody's phone.
-bool isManagedGroup(GroupProfile group) =>
-    group.createdById.endsWith('-') && group.id.startsWith(group.createdById);
+/// chat on everybody's phone. Its id says so, whoever made a group under it.
+bool isManagedGroup(GroupProfile group) => isManagedGroupId(group.id);
+
+/// Id prefixes of the groups another feature keeps: the pyramid's cell
+/// chats (`kPyrCellGroupPrefix`).
+const List<String> kManagedGroupPrefixes = <String>['pyrcell-'];
+
+/// Whether [groupId] belongs to a group another feature keeps (see
+/// [kManagedGroupPrefixes]), whoever made the group under it.
+bool isManagedGroupId(String groupId) =>
+    kManagedGroupPrefixes.any(groupId.startsWith);
+
+/// An invitation, member-list sync, leave, update or invitation receipt for
+/// a managed group's id: nobody's to send, as only the feature that keeps
+/// the group makes or changes it ([SocialHubController.syncManagedGroups]).
+bool _isManagedGroupMembershipSignal(ZenSignal signal) =>
+    switch (signal.type) {
+      ZenSignalType.groupInvite ||
+      ZenSignalType.groupInviteAck ||
+      ZenSignalType.groupLeave ||
+      ZenSignalType.groupUpdate => true,
+      _ => false,
+    } &&
+    isManagedGroupId(signal.groupId ?? '');
 
 /// Membership test that tolerates the different spellings of one address.
 bool groupHasMember(GroupProfile group, String address) {

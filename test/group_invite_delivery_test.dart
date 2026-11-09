@@ -13,6 +13,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/pyramid/pyramid_cell_chat.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -489,6 +490,96 @@ void main() {
         expect(h.sentTo(cyd, 'group_invite'), isEmpty);
       },
     );
+
+    test('nobody can invite to a pyramid cell chat\'s id before the cell '
+        'forms', () async {
+      final _Harness h = _Harness();
+      expect(isManagedGroupId('${kPyrCellGroupPrefix}0123'), isTrue);
+      const String cellId = 'pyrcell-0123456789abcdef01234567';
+      await h.deliver(ada, _invite(cellId, <String>[ada]));
+      expect(h.state.groups, isNot(contains(cellId)));
+      expect(h.state.inbox, isEmpty);
+      expect(h.notifications.activeNotifications, isEmpty);
+    });
+
+    test('a cell chat replaces a group of its id it finds, creator and '
+        'members included', () async {
+      final String dan = PeerShareCodec.normalizeAddress('200::da7');
+      const String cellId = 'pyrcell-0123456789abcdef01234567';
+      // An invitation an older version took in under the id the cell's chat
+      // was going to have.
+      final _Harness h = _Harness(
+        seed: SocialHubState.empty(lifecycle: _focused).copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              ada: _friend(ada, 'Ada'),
+              bob: _friend(bob, 'Bob'),
+              cyd: _friend(cyd, 'Cyd'),
+            },
+          ),
+          groups: <String, GroupProfile>{
+            cellId: GroupProfile(
+              id: cellId,
+              name: 'Wyprawa',
+              createdById: ada,
+              createdAtMillis: 0,
+              memberAddresses: <String>[ada],
+              isInvitePending: true,
+            ),
+          },
+        ),
+      );
+      await h.controller.syncManagedGroups(
+        'pyrcell-',
+        <String, ({String name, List<String> members})>{
+          cellId: (name: 'Komórka', members: <String>[bob, cyd]),
+        },
+      );
+      final GroupProfile g = h.state.groups[cellId]!;
+      expect(g.isInvitePending, isFalse);
+      expect(g.createdById, 'pyrcell-');
+      expect(isManagedGroup(g), isTrue);
+      expect(g.memberAddresses, unorderedEquals(<String>[bob, cyd]));
+
+      await h.deliver(ada, _invite(cellId, <String>[ada, dan]), at: 2000);
+      expect(h.state.groups[cellId]!.memberAddresses, isNot(contains(dan)));
+      await h.deliver(ada, <String, dynamic>{
+        'type': 'group_leave',
+        'groupId': cellId,
+      }, at: 2001);
+      await h.deliver(bob, <String, dynamic>{
+        'type': 'group_leave',
+        'groupId': cellId,
+      }, at: 2002);
+      expect(
+        h.state.groups[cellId]!.memberAddresses,
+        unorderedEquals(<String>[bob, cyd]),
+      );
+
+      await h.deliver(bob, <String, dynamic>{
+        'type': 'group_message',
+        'groupId': cellId,
+        'msgId': 'bob-1',
+        'text': 'głosuję przeciw',
+        'senderName': 'Bob',
+      }, at: 3000);
+      await h.deliver(ada, <String, dynamic>{
+        'type': 'msg_delete',
+        'groupId': cellId,
+        'msgId': 'bob-1',
+        'at': 3001,
+      }, at: 3001);
+      final List<ChatMessage> t = await h.timelines.load('group:$cellId');
+      expect(
+        t.firstWhere((ChatMessage m) => m.id == 'bob-1').isDeleted,
+        isFalse,
+      );
+      h.transport.sentSignals.clear();
+      await h.controller.sendGroupMessage(groupId: cellId, text: 'tajne');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(h.sentTo(ada, 'group_message'), isEmpty);
+      expect(h.sentTo(dan, 'group_message'), isEmpty);
+    });
 
     test('someone leaving is a timeline note, not a notification', () async {
       final _Harness h = _Harness(

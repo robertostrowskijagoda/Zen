@@ -436,7 +436,12 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
             avatarPreset: item['avatar'] is String
                 ? item['avatar'] as String
                 : 'group_default',
-            createdById: item['by'] is String ? item['by'] as String : '',
+            // A cell chat's id is kept by the pyramid, never by a person.
+            createdById: isManagedGroupId(id)
+                ? kManagedGroupPrefixes.firstWhere(id.startsWith)
+                : item['by'] is String
+                ? item['by'] as String
+                : '',
             createdAtMillis: item['at'] is int ? item['at'] as int : 0,
             memberAddresses: members.whereType<String>().toList(),
             memberNames: names is Map
