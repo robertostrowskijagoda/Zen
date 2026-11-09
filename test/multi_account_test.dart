@@ -463,7 +463,15 @@ void main() {
         await File('${aHome.path}/x.bin').writeAsBytes(<int>[1, 2, 3]);
         ZenAccounts.activate(ZenAccountScope.defaultAccount);
         final int folders = (await accountFolders()).length;
-        final int entries = keychain.items.length;
+        final Set<String> entries = keychain.items.keys.toSet();
+        final Set<String> ofA = <String>{
+          for (final String key in <String>[
+            'zen_rewrite_one',
+            'zen_rewrite_two',
+            '\u0000keys',
+          ])
+            SecureStorageCredentialsStore.scopedSecretName(a.secret, key),
+        };
 
         await registry.wipeAccount(a);
 
@@ -485,8 +493,18 @@ void main() {
         );
         expect(await registry.find(b.id!), b);
         // A's two entries, its key list and the (now empty) list of listed
-        // accounts are gone; a decoy took its folder's place.
-        expect(keychain.items.length, entries - 4);
+        // accounts are gone; a decoy took its folder's place, with entries
+        // of its own like an account's.
+        expect(keychain.items.keys.toSet().intersection(ofA), isEmpty);
+        expect(
+          keychain.items.containsKey(ZenAccountRegistry.listedStorageKey),
+          isFalse,
+        );
+        final Set<String> added = keychain.items.keys.toSet().difference(
+          entries,
+        );
+        expect(added, isNotEmpty);
+        expect(added, everyElement(matches(RegExp(r'^zen_x_[0-9a-f]{40}$'))));
         expect((await accountFolders()).length, folders);
       },
     );

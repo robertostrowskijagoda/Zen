@@ -204,8 +204,17 @@ friend vouching for their key, is trust on first use.
   keystore entries and password. Folders are named by a keyed hash of the
   account ID; every device has 2 to 5 decoy folders from the first start,
   and a deleted account is replaced by a decoy, so the number of folders
-  stays the same. Keystore entries of extra accounts have hashed names. There
-  is no list of hidden accounts. An emergency wipe password erases its
+  stays the same. A decoy holds what an account's folder holds (the same
+  folders, file names and extensions, sizes of the same spread, random
+  content) and keystore entries of its own, as many as an account has;
+  some decoys are "used" now and then at a start, so their files change
+  as an account's in use do, the others stay as they were made, as an
+  unused account's. Decoys of earlier versions get this look at the next
+  start. Keystore entries of extra accounts have hashed names. There
+  is no list of hidden accounts. Listing the folders or the keystore's
+  entry names does not tell a hidden account from the decoys; reading
+  what is in the files or the keystore (full access to the device) still
+  can. An emergency wipe password erases its
   account silently. An account with **"Receive in background"** on (off by default
   for extra accounts) keeps its mesh node and a small receive kit under a
   separate background key, so the background service (Android) or the tray
