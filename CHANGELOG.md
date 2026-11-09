@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.1 — 09.11.2026
+
 ### What's new
 - [en] A chat no longer jumps back to the bottom while you scroll up, and a message sent just as your friend reads no longer disappears.
 - [en] A GIF sent as a file plays as a GIF, and a file to a friend with two devices reaches both.
