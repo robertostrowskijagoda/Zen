@@ -183,7 +183,9 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
         for (final ChatMessage m in stamped) m.id,
       };
       gone.addAll(
-        all.where((ChatMessage m) => !kept.contains(m.id) && m.isExpiredAt(now)),
+        all.where(
+          (ChatMessage m) => !kept.contains(m.id) && m.isExpiredAt(now),
+        ),
       );
       return List<ChatMessage>.unmodifiable(stamped);
     });

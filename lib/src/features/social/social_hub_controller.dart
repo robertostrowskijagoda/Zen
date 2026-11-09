@@ -273,8 +273,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     List<ChatMessage> after,
   ) => _messageTimelineStore.update(
     key,
-    (List<ChatMessage> current) =>
-        applyTimelineChanges(current, before, after),
+    (List<ChatMessage> current) => applyTimelineChanges(current, before, after),
   );
 
   /// The last send time given to a message of one's own, per conversation
