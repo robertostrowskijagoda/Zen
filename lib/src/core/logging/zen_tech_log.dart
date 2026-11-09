@@ -92,7 +92,11 @@ abstract final class ZenTechLog {
     bool? android,
   }) async {
     final File? log = ZenDiagnosticsLog.file;
-    if (kIsWeb || !(android ?? Platform.isAndroid) || log == null) {
+    if (kIsWeb ||
+        !(android ?? Platform.isAndroid) ||
+        log == null ||
+        // Left for a start whose lines are written.
+        ZenDiagnosticsLog.quiet) {
       return;
     }
     try {
@@ -167,7 +171,7 @@ abstract final class ZenTechLog {
   /// writes it, as [noteExits] does.
   static Future<void> noteGoCrash() async {
     final String? path = goCrashPath;
-    if (kIsWeb || path == null) {
+    if (kIsWeb || path == null || ZenDiagnosticsLog.quiet) {
       return;
     }
     try {

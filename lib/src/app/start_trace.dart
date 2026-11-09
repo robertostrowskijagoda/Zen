@@ -103,10 +103,12 @@ abstract final class ZenStartTrace {
   /// before). Once per process: later calls keep the first folder. The
   /// log of the start before is kept beside it (`.1`), and when it did not
   /// reach its first screen that is said in the diagnostics log.
-  static void attach(Directory folder) {
+  static void attach(Directory supportDirectory) {
     if (_file != null) {
       return;
     }
+    // The app's own folder, never an additional account's.
+    final Directory folder = diagnosticsLogFolder(supportDirectory);
     try {
       final File target = File(
         '${folder.path}${Platform.pathSeparator}'
@@ -192,11 +194,17 @@ abstract final class ZenStartTrace {
       'ms': _sinceBegin.elapsedMilliseconds,
       'result': 'ok',
     });
+    // After a quiet account's session, the log speaks again from here.
+    ZenDiagnosticsLog.startReached();
   }
 
   /// One line in the start log, written to disk before this returns
-  /// (once attached).
+  /// (once attached). Nothing while the log is quiet
+  /// ([ZenDiagnosticsLog.quiet]).
   static void note(String line) {
+    if (ZenDiagnosticsLog.quiet) {
+      return;
+    }
     final String entry =
         '${DateTime.now().toIso8601String()} [$logSource] '
         '${redactDiagnosticsText(line, privatePlaces: _privatePlaces)}\n';

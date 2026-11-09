@@ -274,10 +274,30 @@ Future<void> _leave(
 }
 
 /// Leaves the current account and opens [opening] (read from [ref] at
-/// once, like [leaveZenAccount]).
+/// once, like [leaveZenAccount]). For an account that is not on the list
+/// the diagnostics log goes quiet first ([ZenDiagnosticsLog.hush]): the
+/// current account stopping would tell that another one opened.
 Future<void> switchZenAccount(WidgetRef ref, ZenAccountOpening opening) async {
   final ZenAccountHost host = ref.read(zenAccountHostProvider);
-  await leaveZenAccount(ref);
+  final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
+  final ZenCore core = ref.read(zenCoreProvider);
+  final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+  final RuntimeSystemNotificationService notices = ref.read(
+    runtimeSystemNotificationServiceProvider,
+  );
+  final AppSecurityService security = ref.read(appSecurityServiceProvider);
+  host.begin();
+  final ZenAccountScope scope = opening.scope;
+  bool listed = false;
+  try {
+    listed = scope.isDefault || await registry.isListed(scope);
+  } on Object {
+    // In doubt: quiet.
+  }
+  if (!listed) {
+    ZenDiagnosticsLog.hush();
+  }
+  await _leave(host, core, runtime, notices, security);
   host.request(opening);
 }
 

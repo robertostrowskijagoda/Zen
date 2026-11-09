@@ -218,7 +218,10 @@ friend vouching for their key, is trust on first use.
   as an account's in use do, the others stay as they were made, as an
   unused account's. Decoys of earlier versions get this look at the next
   start. Keystore entries of extra accounts have hashed names. There
-  is no list of hidden accounts. Listing the folders or the keystore's
+  is no list of hidden accounts. While an account that is not on the
+  list is open, nothing goes into the device's diagnostics log (plain
+  text), its start and the way back to the default account included.
+  Listing the folders or the keystore's
   entry names does not tell a hidden account from the decoys; reading
   what is in the files or the keystore (full access to the device) still
   can. An emergency wipe password erases its
