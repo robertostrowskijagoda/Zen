@@ -147,14 +147,14 @@ void main() {
       WidgetTester tester,
     ) async {
       await _pumpDirect(tester);
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       expect(find.byKey(const Key(_jumpButton)), findsNothing);
 
       // Within a screen of the newest message: still no button.
-      await _scrollAway(tester, reversed: false, screens: 0.5);
+      await _scrollAway(tester, reversed: true, screens: 0.5);
       expect(find.byKey(const Key(_jumpButton)), findsNothing);
 
-      await _scrollAway(tester, reversed: false, screens: 2);
+      await _scrollAway(tester, reversed: true, screens: 2);
       expect(find.byKey(const Key(_jumpButton)), findsOneWidget);
       expect(find.byTooltip('Przewiń na sam dół'), findsOneWidget);
       expect(find.byKey(const Key(_jumpBadge)), findsNothing);
@@ -164,12 +164,12 @@ void main() {
       WidgetTester tester,
     ) async {
       await _pumpDirect(tester);
-      await _scrollAway(tester, reversed: false, screens: 3);
+      await _scrollAway(tester, reversed: true, screens: 3);
 
       await tester.tap(find.byKey(const Key(_jumpButton)));
       await tester.pumpAndSettle();
 
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       expect(find.byKey(const Key(_jumpButton)), findsNothing);
     });
 
@@ -177,15 +177,19 @@ void main() {
       WidgetTester tester,
     ) async {
       final MemoryMessageTimelineStore store = await _pumpDirect(tester);
-      await _scrollAway(tester, reversed: false, screens: 3);
-      final double pixels = _position(tester).pixels;
+      await _scrollAway(tester, reversed: true, screens: 3);
+      final double distance = _distanceFromNewest(tester, reversed: true);
 
       await _addMessage(tester, store, _ada, _message(100));
       await _addMessage(tester, store, _ada, _message(101));
       await _addMessage(tester, store, _ada, _message(102));
 
-      // The reader is not pulled down.
-      expect(_position(tester).pixels, pixels);
+      // The reader is not pulled down: the new ones go in below, the list
+      // as far from them as it was plus them.
+      expect(
+        _distanceFromNewest(tester, reversed: true),
+        greaterThan(distance),
+      );
       expect(find.byKey(const Key(_jumpBadge)), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
       // A 44 px target that says the count to a screen reader.
@@ -205,11 +209,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key(_jumpBadge)), findsNothing);
       expect(find.byKey(const Key(_jumpButton)), findsNothing);
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
 
       // At the end a new message is followed, not counted.
       await _addMessage(tester, store, _ada, _message(103));
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       expect(find.byKey(const Key(_jumpButton)), findsNothing);
     });
 
@@ -217,13 +221,13 @@ void main() {
       WidgetTester tester,
     ) async {
       final MemoryMessageTimelineStore store = await _pumpDirect(tester);
-      await _scrollAway(tester, reversed: false, screens: 3);
+      await _scrollAway(tester, reversed: true, screens: 3);
 
       await _addMessage(tester, store, _ada, _message(100, outgoing: true));
 
       expect(find.byKey(const Key(_jumpBadge)), findsNothing);
       // Sending takes the person to the message.
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
     });
   });
 

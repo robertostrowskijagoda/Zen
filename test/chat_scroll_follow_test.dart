@@ -181,8 +181,68 @@ Future<MemoryMessageTimelineStore> _pumpGroup(
   return store;
 }
 
+/// Scrolled up in the conversation [key] ([reversed]: the group chat), a
+/// message held by relays comes late and goes in off the screen on the side
+/// of the older messages (by its send time), then one there is deleted:
+/// what is read does not move.
+Future<void> _lateAndDeletedAbove(
+  WidgetTester tester,
+  MemoryMessageTimelineStore store,
+  String key, {
+  required bool reversed,
+}) async {
+  final ScrollPosition position = _position(tester);
+  position.jumpTo(2 * position.viewportDimension);
+  await tester.pumpAndSettle();
+  final Finder read = find.text('Wiadomość numer 20');
+  expect(read, findsOneWidget);
+  final double top = tester.getTopLeft(read).dy;
+
+  // Sent between 4 and 5, older than anything on the screen.
+  await _addMessage(
+    tester,
+    store,
+    key,
+    ChatMessage(
+      id: 'late',
+      sender: reversed ? 'bob.ygg' : _ada,
+      text: _long(1),
+      sentAtMillis: 1000000 + 4 * 1000 + 500,
+      direction: ChatMessageDirection.incoming,
+    ),
+  );
+  expect(
+    tester.getTopLeft(read).dy,
+    closeTo(top, 0.5),
+    reason: 'a late message above',
+  );
+
+  final ProviderContainer container = ProviderScope.containerOf(
+    tester.element(find.byType(Scaffold).first),
+  );
+  await store.save(key, <ChatMessage>[
+    for (final ChatMessage m in await store.load(key))
+      if (m.id != 'm-3') m,
+  ]);
+  container.read(messageTimelineRevisionProvider.notifier).bump();
+  await tester.pumpAndSettle();
+  expect(
+    tester.getTopLeft(read).dy,
+    closeTo(top, 0.5),
+    reason: 'a message above deleted',
+  );
+}
+
 void main() {
   group('1:1 chat', () {
+    testWidgets('scrolled up, what is read stays where it is when a late '
+        'message goes in among the older ones or one there is deleted', (
+      WidgetTester tester,
+    ) async {
+      final MemoryMessageTimelineStore store = await _pumpDirect(tester);
+      await _lateAndDeletedAbove(tester, store, _ada, reversed: true);
+    });
+
     testWidgets('scrolled up, it stays when one\'s own newest message goes '
         'and comes back (read again while it was being written): it was '
         'taken for a new one and threw the reader to the bottom', (
@@ -192,9 +252,7 @@ void main() {
       final ChatMessage own = _message(100, outgoing: true);
       await _addMessage(tester, store, _ada, own);
       final ScrollPosition position = _position(tester);
-      position.jumpTo(
-        position.maxScrollExtent - 2 * position.viewportDimension,
-      );
+      position.jumpTo(2 * position.viewportDimension);
       await tester.pumpAndSettle();
       final double pixels = _position(tester).pixels;
 
@@ -214,14 +272,14 @@ void main() {
 
       // A message of one's own that is really new still brings it down.
       await _addMessage(tester, store, _ada, _message(101, outgoing: true));
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
     });
 
     testWidgets('opens at the newest message, also with long ones', (
       WidgetTester tester,
     ) async {
       await _pumpDirect(tester, longMessages: true);
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       _expectShown(tester, 'Wiadomość numer 39');
     });
 
@@ -231,7 +289,7 @@ void main() {
       await _pumpDirect(tester, longMessages: true);
       await tester.tap(find.byKey(const Key('conversation-composer-field')));
       await _openKeyboard(tester);
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       _expectShown(tester, 'Wiadomość numer 39');
     });
 
@@ -240,7 +298,7 @@ void main() {
     ) async {
       final MemoryMessageTimelineStore store = await _pumpDirect(tester);
       await _addMessage(tester, store, _ada, _message(100, text: _long(100)));
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       expect(find.byKey(const Key('jump-to-latest-button')), findsNothing);
     });
 
@@ -248,9 +306,7 @@ void main() {
         'further up', (WidgetTester tester) async {
       await _pumpDirect(tester, longMessages: true);
       final ScrollPosition position = _position(tester);
-      position.jumpTo(
-        position.maxScrollExtent - 3 * position.viewportDimension,
-      );
+      position.jumpTo(3 * position.viewportDimension);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('jump-to-latest-button')), findsOneWidget);
 
@@ -263,7 +319,7 @@ void main() {
       await tester.tap(find.byKey(const Key('conversation-send-button')));
       await tester.pumpAndSettle();
 
-      expect(_distanceFromNewest(tester, reversed: false), lessThan(1));
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
       _expectShown(tester, 'Moja odpowiedź.');
       expect(find.byKey(const Key('jump-to-latest-button')), findsNothing);
     });
@@ -272,30 +328,39 @@ void main() {
         'the keyboard opens', (WidgetTester tester) async {
       final MemoryMessageTimelineStore store = await _pumpDirect(tester);
       final ScrollPosition position = _position(tester);
-      position.jumpTo(
-        position.maxScrollExtent - 2 * position.viewportDimension,
-      );
+      position.jumpTo(2 * position.viewportDimension);
       await tester.pumpAndSettle();
-      final double pixels = _position(tester).pixels;
       final double top = tester.getTopLeft(find.text('Wiadomość numer 20')).dy;
 
       await _addMessage(tester, store, _ada, _message(100));
       await _addMessage(tester, store, _ada, _message(101, text: _long(101)));
-      expect(_position(tester).pixels, pixels);
-      expect(find.byKey(const Key('jump-to-latest-badge')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('conversation-composer-field')));
-      await _openKeyboard(tester);
-      expect(_position(tester).pixels, pixels);
       expect(
         tester.getTopLeft(find.text('Wiadomość numer 20')).dy,
         closeTo(top, 0.5),
       );
+      expect(_distanceFromNewest(tester, reversed: true), greaterThan(100));
+      expect(find.byKey(const Key('jump-to-latest-badge')), findsOneWidget);
+
+      // The keyboard takes the bottom of the screen: the list, laid out
+      // from its bottom (as the group chat's), goes up with it and stays
+      // where it was scrolled to.
+      final double pixels = _position(tester).pixels;
+      await tester.tap(find.byKey(const Key('conversation-composer-field')));
+      await _openKeyboard(tester);
+      expect(_position(tester).pixels, pixels);
       expect(find.byKey(const Key('jump-to-latest-badge')), findsOneWidget);
     });
   });
 
   group('group chat', () {
+    testWidgets('scrolled up, what is read stays where it is when a late '
+        'message goes in among the older ones or one there is deleted', (
+      WidgetTester tester,
+    ) async {
+      final MemoryMessageTimelineStore store = await _pumpGroup(tester);
+      await _lateAndDeletedAbove(tester, store, _groupKey, reversed: true);
+    });
+
     testWidgets('scrolled up, it stays when one\'s own newest message goes '
         'and comes back: it was taken for a new one and threw the reader '
         'to the bottom', (WidgetTester tester) async {
