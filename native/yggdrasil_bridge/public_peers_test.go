@@ -87,6 +87,28 @@ func TestAndroidBootstrapPeersAreStableTLS(t *testing.T) {
 	}
 }
 
+// A phone falls back on QUIC (its own keepalive every 20 s keeps waking
+// the radio) and WebSocket peers only behind every TLS peer of its pool.
+func TestAPhonesReserveHasEveryTLSPeerBeforeQUICAndWebSocket(t *testing.T) {
+	sawOther := ""
+	tlsPeers := 0
+	for _, uri := range phonePeerCandidates(publicPeerPool) {
+		if peerScheme(uri) != "tls" {
+			if sawOther == "" {
+				sawOther = uri
+			}
+			continue
+		}
+		tlsPeers++
+		if sawOther != "" {
+			t.Fatalf("TLS peer %s comes after %s", uri, sawOther)
+		}
+	}
+	if tlsPeers == 0 || sawOther == "" {
+		t.Fatalf("the pool has %d TLS peers and other ones from %q", tlsPeers, sawOther)
+	}
+}
+
 func TestQuicPeersAreNeverProbedFirst(t *testing.T) {
 	peers := prioritizedPublicPeers()
 	for _, peer := range peers[:androidPeerProbeCandidateLimit] {

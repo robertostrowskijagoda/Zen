@@ -20,13 +20,22 @@ func TestAPhoneKeepsTheWholePoolInReserveBehindItsPicks(t *testing.T) {
 	for _, peer := range publicPeerPool {
 		stable[peer.uri] = peer.stable
 	}
+	// TLS first, then QUIC and WebSocket; in each, IPv6 literals last and
+	// stable before unstable.
 	seen := make(map[string]bool, len(candidates))
-	sawIPv6, sawUnstable := false, false
+	sawIPv6, sawUnstable, sawHeavy := false, false, false
 	for _, uri := range candidates[len(picks):] {
 		if seen[uri] || !isEncryptedPeerURI(uri) {
 			t.Fatalf("reserve peer %s twice or unencrypted", uri)
 		}
 		seen[uri] = true
+		if !lightPeer(uri) && !sawHeavy {
+			sawHeavy = true
+			sawIPv6, sawUnstable = false, false
+		}
+		if lightPeer(uri) && sawHeavy {
+			t.Fatalf("TLS peer %s comes after QUIC or WebSocket", uri)
+		}
 		v6 := peerHostIsIPv6Literal(uri)
 		if sawIPv6 && !v6 {
 			t.Fatalf("%s comes after an IPv6 literal", uri)
