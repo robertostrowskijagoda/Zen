@@ -23,6 +23,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Tests**: the alarm of the shared wake is inexact (Android may wake the phone once for several), work that runs alongside it is no longer active once cancelled, an address is written one way (the longest run of zero groups as "::"), what has a ":", "/" or "#" in it is not taken for a friend code, and the notes to oneself are read once, not again for every note.
 - **Tests**: entries of the wrong kind in a saved friend list (a timer that is no number, a notify-all that is no yes or no, an invitation id that is no text) are skipped one by one and the others kept; a test of the store expected the file name in lower case, as only Windows has it, and failed on Linux.
 - **Tests**: an edit of a message to nothing or past 64 KiB changes it on neither side, a mute that is no time in a saved friend list is skipped, and an address with a group past FFFF is not taken for one.
+- **Tests**: the test of local links on hold waits until both sides have let go of a closed or refused link before it links again; under load the next link came too early and was refused as a second one with the same device.
 
 ## 1.16.2 — 09.11.2026
 

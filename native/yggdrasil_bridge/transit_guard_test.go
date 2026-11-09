@@ -330,18 +330,43 @@ func TestHeldLocalLinksCloseAndTakeNoNewOnes(t *testing.T) {
 
 	managerA.hold("")
 	waitForPeer(t, coreA, coreB.PublicKey(), false)
+	// Each side forgets the link a moment after it closes: a new one
+	// before that is refused as a second link with the same device.
+	waitForNoLinks(t, managerA, managerB)
 	if managerA.mayLink(coreB.Address().String()) {
 		t.Fatal("no links while held")
 	}
 	if err := link(); err == nil {
 		t.Fatal("a held manager links with nobody")
 	}
+	// The other side took the refused link before it heard of the
+	// refusal.
+	waitForNoLinks(t, managerA, managerB)
 
 	managerA.release()
 	if err := link(); err != nil {
 		t.Fatal(err)
 	}
 	waitForPeer(t, coreA, coreB.PublicKey(), true)
+}
+
+// waitForNoLinks waits until none of [managers] keeps a link.
+func waitForNoLinks(t *testing.T, managers ...*localLinkManager) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		left := 0
+		for _, m := range managers {
+			m.mu.Lock()
+			left += len(m.links)
+			m.mu.Unlock()
+		}
+		if left == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the closed links are still kept")
 }
 
 // listeningCore is a node that takes peerings on a loopback port.
