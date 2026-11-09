@@ -1161,6 +1161,57 @@ void main() {
     },
   );
 
+  test('a change of the background accounts makes a running service open its '
+      'session again at once, so it reads the list anew', () async {
+    final List<String> events = <String>[];
+    int opened = 0;
+    final TaskHandler handler = buildAndroidBackgroundTaskHandlerForTesting(
+      notices: MemoryRuntimeSystemNotificationService(),
+      openSession: (AndroidBackgroundBootstrapPayload payload) async {
+        final int n = ++opened;
+        events.add('open $n');
+        return LockedReceiverSession.empty(
+          onDispose: () => events.add('end $n'),
+        );
+      },
+    );
+    Future<void> settle() async {
+      for (int i = 0; i < 40; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    // Nothing asked for yet: nothing to reload.
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    const AndroidBackgroundBootstrapPayload active =
+        AndroidBackgroundBootstrapPayload(settings: AppSettings());
+    // The first payload is the bootstrap; the next one is acted on.
+    handler.onReceiveData(active.toData());
+    handler.onReceiveData(active.toData());
+    await settle();
+    expect(events, <String>['open 1']);
+
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    await settle();
+    expect(events, <String>['open 1', 'end 1', 'open 2']);
+
+    // Parked, nothing runs: the next session reads the list anyway.
+    handler.onReceiveData(
+      active.withMode(AndroidBackgroundRuntimeMode.standby).toData(),
+    );
+    await settle();
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    await settle();
+    expect(events, <String>['open 1', 'end 1', 'open 2', 'end 2']);
+    await handler.onDestroy(DateTime.fromMillisecondsSinceEpoch(1), false);
+  });
+
   test(
     'the stop notice can be withdrawn once the service runs again',
     () async {
@@ -1277,6 +1328,11 @@ final class _FakeAndroidBackgroundServiceController
     }
     _running = false;
   }
+
+  int accountsChangedCount = 0;
+
+  @override
+  void accountsChanged() => accountsChangedCount += 1;
 }
 
 /// The bridge's providers over fakes: no real files, no real service, and

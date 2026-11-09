@@ -116,10 +116,15 @@ Future<void> _wipeAdditionalAccount(
   final ZenBackgroundAccounts background = ref.read(
     zenBackgroundAccountsProvider,
   );
+  final AndroidBackgroundServiceController service = ref.read(
+    androidBackgroundServiceControllerProvider,
+  );
   await leaveZenAccount(ref);
   try {
     // Off the background list while its key still marks it as real.
     await background.forget(account);
+    // The Android service stops its node at once, before the folder goes.
+    service.accountsChanged();
   } on Object catch (error, stackTrace) {
     logZenError('Leaving the background list failed', error, stackTrace);
   }

@@ -203,10 +203,7 @@ void main() {
       await tryAccountPassword(context, wrong);
     }
     expect(tried, UnlockThrottle.freeFailures);
-    final String? waiting = await tryAccountPassword(
-      context,
-      () async => true,
-    );
+    final String? waiting = await tryAccountPassword(context, () async => true);
     expect(waiting, 'Za dużo błędnych prób. Spróbuj ponownie za 0:30.');
   });
 
@@ -304,9 +301,9 @@ void main() {
       File('docs/SECURITY_MODEL.md'),
       File('docs/PRIVACY.md'),
       File('docs/TERMS.md'),
-      ...Directory('docs/guide').listSync().whereType<File>().where(
-        (File f) => f.path.endsWith('.md'),
-      ),
+      ...Directory(
+        'docs/guide',
+      ).listSync().whereType<File>().where((File f) => f.path.endsWith('.md')),
     ];
     const List<String> claims = <String>[
       'protected from screenshots',

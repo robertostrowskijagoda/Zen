@@ -19,6 +19,7 @@ import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
@@ -886,6 +887,8 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
       );
     }
     final bool done = await settings.setOn(account, value);
+    // The Android service reads the list again at once.
+    ref.read(androidBackgroundServiceControllerProvider).accountsChanged();
     if (zenDesktopBackgroundPlatform && !value) {
       await applyDesktopBackgroundSetting(
         account: account,

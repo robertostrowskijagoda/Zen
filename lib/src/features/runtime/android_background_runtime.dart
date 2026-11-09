@@ -183,6 +183,12 @@ const String _kModeAckTookKey = 'took';
 /// Android ended it.
 const String kAndroidBackgroundStopRequestType = 'zen.runtime.stop';
 
+/// Message the app sends once the list of accounts that receive in the
+/// background changed ("Odbieraj w tle" turned on or off, an account
+/// erased): the service opens its node session again at once, so it reads
+/// the list anew, instead of waiting for its accounts' own look every 30 s.
+const String kAndroidBackgroundAccountsChangedType = 'zen.runtime.accounts';
+
 /// Slot of the "Zen nie odbiera w tle" notice.
 const String kBackgroundRuntimeStoppedSlot = 'background-runtime-stopped';
 
@@ -611,6 +617,10 @@ abstract interface class AndroidBackgroundServiceController {
   });
 
   Future<void> stop();
+
+  /// Tells a running service that the accounts receiving in the background
+  /// changed ([kAndroidBackgroundAccountsChangedType]).
+  void accountsChanged();
 }
 
 final class NoopAndroidBackgroundServiceController
@@ -638,6 +648,9 @@ final class NoopAndroidBackgroundServiceController
 
   @override
   Future<void> stop() async {}
+
+  @override
+  void accountsChanged() {}
 }
 
 final class FlutterForegroundAndroidBackgroundServiceController
@@ -676,6 +689,24 @@ final class FlutterForegroundAndroidBackgroundServiceController
     } catch (error, stackTrace) {
       logZenError(
         'Sending the background runtime heartbeat failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  @override
+  void accountsChanged() {
+    if (!Platform.isAndroid || !_initialized) {
+      return;
+    }
+    try {
+      FlutterForegroundTask.sendDataToTask(<String, Object?>{
+        'type': kAndroidBackgroundAccountsChangedType,
+      });
+    } catch (error, stackTrace) {
+      logZenError(
+        'Telling the service about the background accounts failed',
         error,
         stackTrace,
       );
@@ -2172,7 +2203,8 @@ final class LockedReceiverSession {
     LockedReceiver this._receiver,
     this._nearby, {
     LockedOutbox? outbox,
-  }) : _outbox = outbox;
+  }) : _outbox = outbox,
+       _onDispose = null;
 
   /// No node of the default account ("Odbieraj w tle" off for it): only
   /// the other accounts' ([_also]), if any.
@@ -2180,7 +2212,20 @@ final class LockedReceiverSession {
     : _runtime = null,
       _receiver = null,
       _nearby = null,
-      _outbox = null;
+      _outbox = null,
+      _onDispose = null;
+
+  /// A session without any node, telling [onDispose] when it ends (tests).
+  @visibleForTesting
+  LockedReceiverSession.empty({void Function()? onDispose})
+    : _runtime = null,
+      _receiver = null,
+      _nearby = null,
+      _outbox = null,
+      _onDispose = onDispose;
+
+  /// Told when the session ends (tests).
+  final void Function()? _onDispose;
 
   final RuntimeNodeRuntime? _runtime;
   final LockedReceiver? _receiver;
@@ -2451,6 +2496,7 @@ final class LockedReceiverSession {
   Future<void> onPowerShortcut() async => _receiver?.onPowerShortcut();
 
   Future<void> dispose() async {
+    _onDispose?.call();
     final LockedReceiver? receiver = _receiver;
     if (receiver != null) {
       await _setShortcutOwner(false);
@@ -2519,17 +2565,37 @@ void _androidBackgroundRuntimeTaskEntryPoint() {
 
 /// The service's task handler with [notices] instead of the system
 /// notifications, so tests can see what the service tells the person.
+/// [openSession]: what opens the node session instead of
+/// [LockedReceiverSession.open].
 @visibleForTesting
 TaskHandler buildAndroidBackgroundTaskHandlerForTesting({
   required RuntimeSystemNotificationService notices,
+  Future<LockedReceiverSession?> Function(
+    AndroidBackgroundBootstrapPayload payload,
+  )?
+  openSession,
 }) {
-  return _ZenRewriteAndroidBackgroundTaskHandler(noticeService: () => notices);
+  return _ZenRewriteAndroidBackgroundTaskHandler(
+    noticeService: () => notices,
+    openSession: openSession,
+  );
 }
 
 final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   _ZenRewriteAndroidBackgroundTaskHandler({
     RuntimeSystemNotificationService Function()? noticeService,
-  }) : _noticeServiceFactory = noticeService;
+    Future<LockedReceiverSession?> Function(
+      AndroidBackgroundBootstrapPayload payload,
+    )?
+    openSession,
+  }) : _noticeServiceFactory = noticeService,
+       _openSession = openSession;
+
+  /// Opens the node session instead of [LockedReceiverSession.open] (tests).
+  final Future<LockedReceiverSession?> Function(
+    AndroidBackgroundBootstrapPayload payload,
+  )?
+  _openSession;
 
   final Completer<AndroidBackgroundBootstrapPayload> _bootstrapCompleter =
       Completer<AndroidBackgroundBootstrapPayload>();
@@ -2715,6 +2781,11 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       _stopRequestedByApp = true;
       return;
     }
+    if (data is Map<Object?, Object?> &&
+        data['type'] == kAndroidBackgroundAccountsChangedType) {
+      _reloadAccounts();
+      return;
+    }
     final AndroidBackgroundBootstrapPayload? payload =
         AndroidBackgroundBootstrapPayload.fromData(data);
     if (payload == null) {
@@ -2725,6 +2796,37 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       return;
     }
     _request(payload);
+  }
+
+  /// The accounts receiving in the background changed: a running session
+  /// ends and the mode asked for is reached again, so the session opened
+  /// then reads the list anew. Parked, nothing runs: the next session reads
+  /// it anyway.
+  void _reloadAccounts() {
+    final AndroidBackgroundBootstrapPayload? desired = _desired;
+    if (desired == null || _destroyed) {
+      return;
+    }
+    logZenMessage('The background accounts changed: the service reloads.');
+    _transitions = _transitions
+        .then((_) async {
+          final LockedReceiverSession? session = _session;
+          if (session == null || _destroyed) {
+            return;
+          }
+          _session = null;
+          unawaited(_nodeYields?.cancel());
+          _nodeYields = null;
+          await session.dispose();
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          logZenError(
+            'Ending the session for new background accounts failed',
+            error,
+            stackTrace,
+          );
+        });
+    _request(_desired ?? desired, tookOver: _tookOver);
   }
 
   /// Takes the node over when the app stops reporting in while parked.
@@ -3048,11 +3150,17 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       try {
         final RuntimeSystemNotificationService notices =
             await _readyNotices() ?? MemoryRuntimeSystemNotificationService();
-        session = await LockedReceiverSession.open(
-          payload,
-          notices: notices,
-          goneApp: _goneAppEngine,
-        );
+        final Future<LockedReceiverSession?> Function(
+          AndroidBackgroundBootstrapPayload payload,
+        )?
+        open = _openSession;
+        session = open != null
+            ? await open(payload)
+            : await LockedReceiverSession.open(
+                payload,
+                notices: notices,
+                goneApp: _goneAppEngine,
+              );
         if (session == null) {
           // The app never told what it may receive with (not unlocked since
           // it was installed or wiped): stand by rather than run a node
