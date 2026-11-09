@@ -10,6 +10,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] A conversation no longer jumps while you read further up when a late message comes in or one disappears.
+- [pl] Rozmowa nie przeskakuje już, gdy czytasz wyżej, a spóźniona wiadomość dochodzi albo któraś znika.
+
 ### Fixes and changes
 - **A chat no longer jumps while you read further up when a message comes late or goes away**: a message held by relays while the friend's phone was offline goes in by its send time, among the older ones, and a disappearing message expires there. A conversation's list was laid out from its oldest message, so each such change above the screen moved everything after it, also what was being read, by a message's height (the list cannot know the height of a message it has not built, and kept each bubble's place by its position, not by its message). The conversation's list is now laid out from the newest message, as the group chat's is: what changes among the older messages moves nothing on the screen, and each row keeps its place by its message (the gap between bubbles is in the row, not a row of its own, which stayed where it was while the messages moved). Scrolled up, the keyboard now takes the list up with it, as in a group chat.
 - **Tests**: scrolled up, in a conversation and a group chat, what is read stays where it is when a late message goes in among the older ones and when one there is deleted.
