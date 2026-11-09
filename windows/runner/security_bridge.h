@@ -19,6 +19,9 @@
 //   "zen/integrity"  check -> {rooted, reasons, debuggable, tampered,
 //       emulator}: a debugger attached, Frida's library loaded
 //       (device_integrity.dart).
+//   "zen/clipboard"  copySensitive({text}) -> bool
+//       Text on the clipboard kept out of the clipboard history, the cloud
+//       clipboard and clipboard monitors (secure_clipboard.dart).
 namespace security_bridge {
 
 void Register(flutter::BinaryMessenger* messenger,

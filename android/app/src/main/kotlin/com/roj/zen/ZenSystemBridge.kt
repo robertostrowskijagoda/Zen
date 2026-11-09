@@ -9,6 +9,8 @@ import android.media.AudioManager
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
@@ -18,6 +20,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.PersistableBundle
 import android.print.PageRange
 import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
@@ -77,6 +80,10 @@ import java.io.IOException
  * `copyOpenedFile` {uri} copies the content address into the cache's
  * `opened` folder, which keeps only the newest one, and answers
  * {path, name} (null when it cannot be read).
+ *
+ * Secrets copied from Zen (secure_clipboard.dart): `copySensitive` {text}
+ * puts the text on the clipboard marked as sensitive, so the system's
+ * clipboard preview and keyboards do not show or keep it; true when done.
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -223,6 +230,9 @@ object ZenSystemBridge {
                                 call.argument<String>("path") ?: "",
                                 call.argument<String>("name") ?: "Zen",
                             ),
+                        )
+                        "copySensitive" -> result.success(
+                            copySensitive(activity, call.argument<String>("text") ?: ""),
                         )
                         "copyOpenedFile" -> {
                             val uri = call.argument<String>("uri") ?: ""
@@ -677,6 +687,29 @@ object ZenSystemBridge {
      * Only https, and in a browser: Zen itself answers links to its own
      * GitHub page (invitations), so a plain VIEW could come straight back.
      */
+    /**
+     * Puts [text] on the clipboard with the mark Android 13 reads as
+     * sensitive (ClipDescription.EXTRA_IS_SENSITIVE); keyboards of older
+     * versions read the same key.
+     */
+    private fun copySensitive(context: Context, text: String): Boolean {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return false
+        val clip = ClipData.newPlainText("Zen", text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val sensitive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ClipDescription.EXTRA_IS_SENSITIVE
+            } else {
+                "android.content.extra.IS_SENSITIVE"
+            }
+            clip.description.extras = PersistableBundle().apply {
+                putBoolean(sensitive, true)
+            }
+        }
+        clipboard.setPrimaryClip(clip)
+        return true
+    }
+
     /**
      * Whether the phone is set to keep quiet: silent or vibrate mode, or
      * "Do not disturb" in any form. Zen's in-app sounds stay silent then.

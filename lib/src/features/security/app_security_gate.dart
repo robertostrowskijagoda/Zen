@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/legal_consent_stage.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
@@ -117,9 +118,19 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     _ => false,
   };
 
+  /// Whether the app was locked at the last change seen.
+  bool? _wasLocked;
+
   /// Locked, unlocked, a password set or the settings changed.
   void _onSecurityChanged() {
     final AppSecurityService? security = _security;
+    final bool? locked = security?.isLocked;
+    if (locked == true && _wasLocked == false) {
+      // However it was locked: a secret copied before does not stay on the
+      // clipboard.
+      unawaited(clearCopiedNow());
+    }
+    _wasLocked = locked ?? _wasLocked;
     if (security == null || !_locksByTime(security)) {
       _backgroundLockTimer?.cancel();
       _backgroundLockTimer = null;

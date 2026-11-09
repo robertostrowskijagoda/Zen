@@ -1,15 +1,20 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:zen/src/core/utils/desktop_opener.dart';
 
 /// How long text copied from the app stays in the system clipboard.
 const Duration kClipboardTtl = Duration(seconds: 60);
 
 /// Copies [text] and clears the clipboard after [ttl], unless something
 /// else was copied in the meantime. Codes, addresses and keys do not linger
-/// where other apps (or a spy) can read them. Every copy of such text in
-/// the app goes through here, never through `Clipboard.setData`.
+/// where other apps (or a spy) can read them: where the system can be told,
+/// the text is marked as a secret too (Android 13+ hides it from the
+/// clipboard preview and keyboards; Windows keeps it out of the clipboard
+/// history and the cloud clipboard). Every copy of such text in the app
+/// goes through here, never through `Clipboard.setData`.
 Future<void> copyWithExpiry(String text, {Duration ttl = kClipboardTtl}) =>
     ExpiringClipboard.instance.copy(text, ttl: ttl);
 
@@ -20,9 +25,35 @@ Future<void> copyWithExpiry(String text, {Duration ttl = kClipboardTtl}) =>
 Future<void> copyPublicText(String text) =>
     ExpiringClipboard.instance.copyPublic(text);
 
-/// Clears the clipboard now if it still holds what the app last copied
-/// (for example when the app locks).
+/// Clears the clipboard now if it still holds what the app last copied:
+/// when the app locks, and when the account is left or wiped.
 Future<void> clearCopiedNow() => ExpiringClipboard.instance.clearNow();
+
+/// Puts [text] on the system clipboard marked as a secret; false where
+/// this system has no such call (the plain clipboard is used then).
+Future<bool> writeMarkedSecret(String text) async {
+  if (kIsWeb) {
+    return false;
+  }
+  final MethodChannel? channel = switch (defaultTargetPlatform) {
+    TargetPlatform.android => const MethodChannel('zen/system'),
+    TargetPlatform.windows => const MethodChannel('zen/clipboard'),
+    _ => null,
+  };
+  if (channel == null) {
+    return false;
+  }
+  try {
+    return await channel.invokeMethod<bool>('copySensitive', <String, Object?>{
+          'text': text,
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
 
 /// The system clipboard as [ExpiringClipboard] uses it (replaceable in tests).
 abstract interface class ClipboardAccess {
@@ -55,16 +86,30 @@ final class _SystemClipboard implements ClipboardAccess {
 /// touch the clipboard then (Android 10+); the clearing is retried when the
 /// app is back in front.
 final class ExpiringClipboard with WidgetsBindingObserver {
+  /// [writeSensitive] puts a secret on the clipboard marked as one and
+  /// answers false where it cannot (then [access] writes it plainly); by
+  /// default the system's own call with the system clipboard ([access]
+  /// left out, outside `flutter test`, where no platform answers), none
+  /// otherwise.
   ExpiringClipboard({
-    ClipboardAccess access = const _SystemClipboard(),
+    ClipboardAccess? access,
     bool Function()? isInForeground,
-  }) : _access = access,
+    Future<bool> Function(String text)? writeSensitive,
+  }) : _access = access ?? const _SystemClipboard(),
+       _writeSensitive =
+           writeSensitive ??
+           (access == null && !runningUnderFlutterTest
+               ? writeMarkedSecret
+               : _cannotMark),
        _isInForeground = isInForeground ?? _bindingInForeground;
 
   static final ExpiringClipboard instance = ExpiringClipboard();
 
   final ClipboardAccess _access;
+  final Future<bool> Function(String text) _writeSensitive;
   final bool Function() _isInForeground;
+
+  static Future<bool> _cannotMark(String text) async => false;
 
   Timer? _timer;
   String? _pending;
@@ -80,7 +125,9 @@ final class ExpiringClipboard with WidgetsBindingObserver {
   String? get pendingText => _pending;
 
   Future<void> copy(String text, {Duration ttl = kClipboardTtl}) async {
-    await _access.write(text);
+    if (!await _writeSensitive(text)) {
+      await _access.write(text);
+    }
     _timer?.cancel();
     _pending = text;
     _deadline = DateTime.now().add(ttl);
@@ -104,12 +151,18 @@ final class ExpiringClipboard with WidgetsBindingObserver {
     _deadline = null;
   }
 
+  /// Clears it as if its time were up now: from the background (where a
+  /// phone hides the clipboard) it is cleared when the app is back.
   Future<void> clearNow() async {
     _timer?.cancel();
-    await _expire(force: true);
+    if (_pending == null) {
+      return;
+    }
+    _deadline = DateTime.now();
+    await _expire();
   }
 
-  Future<void> _expire({bool force = false}) async {
+  Future<void> _expire() async {
     final String? text = _pending;
     if (text == null) {
       return;
@@ -119,11 +172,11 @@ final class ExpiringClipboard with WidgetsBindingObserver {
       try {
         await _access.write('');
       } on PlatformException {
-        if (!force && !_isInForeground()) {
+        if (!_isInForeground()) {
           return;
         }
       }
-    } else if (now == null && !force && !_isInForeground()) {
+    } else if (now == null && !_isInForeground()) {
       // Cannot see it from the background: try again when we are back.
       return;
     }

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show MethodCall, MethodChannel;
 import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/zen_instance.dart';
@@ -427,6 +428,88 @@ void main() {
       expect(board.text, 'secret');
       expect(clip.pendingText, 'secret');
 
+      board.readable = true;
+      foreground = true;
+      clip.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(board.text, '');
+      expect(clip.pendingText, isNull);
+    });
+
+    test('a secret goes out marked as one where the system can mark it, '
+        'plainly where it cannot; public text never', () async {
+      final _FakeClipboard board = _FakeClipboard();
+      final List<String> marked = <String>[];
+      bool canMark = true;
+      final ExpiringClipboard clip = ExpiringClipboard(
+        access: board,
+        isInForeground: () => true,
+        writeSensitive: (String text) async {
+          if (!canMark) {
+            return false;
+          }
+          marked.add(text);
+          board.text = text;
+          return true;
+        },
+      );
+      await clip.copy('klucz');
+      expect(marked, <String>['klucz']);
+      expect(clip.pendingText, 'klucz');
+      canMark = false;
+      await clip.copy('kod');
+      expect(marked, <String>['klucz']);
+      expect(board.text, 'kod');
+      canMark = true;
+      await clip.copyPublic('zaproszenie');
+      expect(marked, <String>['klucz']);
+      expect(board.text, 'zaproszenie');
+      await clip.clearNow();
+    });
+
+    test('the system clipboard is asked to mark a secret as one', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final List<MethodCall> calls = <MethodCall>[];
+      final TestDefaultBinaryMessenger messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(const MethodChannel('zen/system'), (
+        MethodCall call,
+      ) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(
+          const MethodChannel('zen/system'),
+          null,
+        ),
+      );
+      final _FakeClipboard board = _FakeClipboard();
+      final ExpiringClipboard clip = ExpiringClipboard(
+        access: board,
+        isInForeground: () => true,
+        writeSensitive: writeMarkedSecret,
+      );
+      await clip.copy('klucz');
+      expect(board.text, isNull, reason: 'the system took it');
+      expect(calls.single.method, 'copySensitive');
+      expect(calls.single.arguments, <String, Object?>{'text': 'klucz'});
+    });
+
+    test('clearNow from the background waits for the app to come back, as '
+        'the timer does, instead of forgetting the secret', () async {
+      final _FakeClipboard board = _FakeClipboard();
+      bool foreground = true;
+      final ExpiringClipboard clip = ExpiringClipboard(
+        access: board,
+        isInForeground: () => foreground,
+      );
+      await clip.copy('klucz');
+      board.readable = false;
+      foreground = false;
+      await clip.clearNow();
+      expect(board.text, 'klucz');
+      expect(clip.pendingText, 'klucz');
       board.readable = true;
       foreground = true;
       clip.didChangeAppLifecycleState(AppLifecycleState.resumed);

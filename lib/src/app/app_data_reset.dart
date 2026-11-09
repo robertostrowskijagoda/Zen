@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
@@ -31,6 +32,8 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 /// the device stay as they are (see [performZenDeviceWipe]).
 Future<void> performZenLocalDataReset(WidgetRef ref) async {
   final ZenAccountScope account = ref.read(zenAccountProvider);
+  // A secret copied from it does not outlive it on the clipboard.
+  await clearCopiedNow();
   // Unsent texts held in memory must not be written back after the wipe.
   ref.read(composerDraftsProvider).forget();
   if (!account.isDefault) {
@@ -137,6 +140,8 @@ Future<void> _wipeAdditionalAccount(
 /// password do.
 Future<void> performZenDeviceWipe(WidgetRef ref) async {
   final ZenAccountScope account = ref.read(zenAccountProvider);
+  // A secret copied from it does not outlive it on the clipboard.
+  await clearCopiedNow();
   // Unsent texts held in memory must not be written back after the wipe.
   ref.read(composerDraftsProvider).forget();
   // A computer's tray nodes write into the folders about to go.

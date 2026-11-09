@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
@@ -270,6 +271,8 @@ Future<void> _leave(
       stackTrace,
     );
   }
+  // Nothing of this account stays on the clipboard either.
+  await clearCopiedNow();
   security.lock();
 }
 
