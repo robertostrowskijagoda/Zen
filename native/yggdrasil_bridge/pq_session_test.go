@@ -251,6 +251,82 @@ func TestPQSessionRefusesPlaintextTamperingAndReplay(t *testing.T) {
 	}
 }
 
+// A recorded first frame of a session opens nothing again once the
+// receiver let the session go, while the challenge it names is still kept:
+// the receiver remembers which sessions opened under each challenge.
+func TestPQAnOpeningFrameRecordedEarlierStartsNoSessionAgain(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, `{"type":"message","id":"m1","text":"pay 10"}`)
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 {
+		t.Fatalf("B got %q", got)
+	}
+	recorded := bytes.Clone(network.lastData(aIP).wire)
+	if recorded[len(pqMagic)+1]&pqFlagCiphertext == 0 {
+		t.Fatal("the first frame of a session carries its opening")
+	}
+	if _, ok := b.receive(aIP, recorded); ok {
+		t.Fatal("the frame was taken twice at once")
+	}
+	// A rotates its session every hour while it talks to B; B lets the
+	// first one go.
+	for range 3 {
+		network.advance(time.Hour+time.Second, nil)
+		mustSend(t, a, bIP, "later")
+		network.pump()
+		network.take(bIP)
+	}
+	if b.peers[aIP.String()].issuedChallenge(pqChallengeID(recorded[pqDataHeaderSize:pqDataHeaderSize+pqChallengeIDSize]), network.clock) == nil {
+		t.Fatal("the challenge must still be kept for this test to say anything")
+	}
+	before := network.sentBy(bIP)
+	if plain, ok := b.receive(aIP, recorded); ok {
+		t.Fatalf("a recorded opening frame was taken again after 3 h: %q", plain)
+	}
+	if network.sentBy(bIP) != before {
+		t.Fatal("B must not acknowledge a session it let go")
+	}
+	// A itself goes on as before.
+	mustSend(t, a, bIP, "still")
+	network.pump()
+	if got := network.take(bIP); len(got) != 1 || got[0] != "still" {
+		t.Fatalf("B got %q", got)
+	}
+}
+
+// A challenge starts only so many sessions; then the sender is given a
+// new one and goes on with it.
+func TestPQAChallengeStartsABoundedNumberOfSessions(t *testing.T) {
+	network := newPQTestNet(t)
+	a, aIP := network.add(1)
+	b, bIP := network.add(2)
+	mustSend(t, a, bIP, "hej")
+	network.pump()
+	network.take(bIP)
+	first := a.peers[bIP.String()].challenge.id
+	for index := range pqSessionsPerChallenge + 2 {
+		network.clock = network.clock.Add(time.Minute)
+		a.mu.Lock()
+		a.peers[bIP.String()].send = nil
+		a.mu.Unlock()
+		mustSend(t, a, bIP, fmt.Sprintf("s%d", index))
+		network.pump()
+		if got := network.take(bIP); len(got) != 1 {
+			t.Fatalf("session %d: B got %q", index, got)
+		}
+	}
+	if a.peers[bIP.String()].challenge.id == first {
+		t.Fatal("A must have been given a new challenge")
+	}
+	for _, issued := range b.peers[aIP.String()].issued {
+		if len(issued.opened) > pqSessionsPerChallenge {
+			t.Fatalf("%d sessions remembered for one challenge", len(issued.opened))
+		}
+	}
+}
+
 func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 	network := newPQTestNet(t)
 	a, aIP := network.add(1)

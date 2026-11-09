@@ -143,6 +143,9 @@ const (
 	// it must reach this node within that time) ...
 	pqChallengeKeep  = 6 * time.Hour
 	pqChallengesKept = 4
+	// Sessions one challenge starts at most (a sender starts one an hour,
+	// and anew after a restart); then the sender is given another.
+	pqSessionsPerChallenge = 32
 	// ... and the peer starts sessions with it only while it is younger
 	// than this, asking for a new one once it is older than
 	// pqChallengeRefresh (so a rotation never waits for one).
@@ -230,6 +233,10 @@ type pqChallenge struct {
 	// Given from the strangers' budget, which paid for the first session
 	// opened with it too (issued challenges only).
 	prepaid bool
+	// The sessions opened with it (issued challenges only): kept as long
+	// as the challenge, so an opening frame recorded earlier starts nothing
+	// again once its session is gone.
+	opened []pqSessionID
 }
 
 type pqSendSession struct {
@@ -1476,6 +1483,17 @@ func (e *pqEndpoint) openNewLocked(peer *pqPeer, id pqSessionID, opening []byte,
 		// the sender it claims): nobody gets a session without one.
 		return nil, e.unknownReplyLocked(peer, id, now), false
 	}
+	for _, opened := range challenge.opened {
+		if opened == id {
+			// Its session was here and is gone (too old, or newer ones
+			// took its place): a copy of its first frame, or a replay.
+			return nil, nil, false
+		}
+	}
+	if len(challenge.opened) >= pqSessionsPerChallenge {
+		// It started its share: the sender gets a new one.
+		return nil, e.unknownReplyLocked(peer, id, now), false
+	}
 	if !peer.allowNewSession(now) {
 		return nil, nil, false
 	}
@@ -1500,6 +1518,7 @@ func (e *pqEndpoint) openNewLocked(peer *pqPeer, id pqSessionID, opening []byte,
 	session.windowFor(kind).mark(counter)
 	session.lastUsed = now
 	session.lastAck = now
+	challenge.opened = append(challenge.opened, id)
 	peer.addReceiveSession(session, now)
 	e.firmPinLocked(peer, now)
 	return plain, pqControlFrame(pqKindAck, id), true
