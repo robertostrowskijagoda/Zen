@@ -42,7 +42,11 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   peer's own key, so a link that died silently is ended by the core's 3 s
   peer timeout and replaced while the phone is awake), a TLS-only
   subset first, the rest of the encrypted list
-  in reserve for the peers that stop answering; `phone_peers.go`: a link
+  in reserve for the peers that stop answering, every TLS peer before the
+  QUIC (a keepalive of its own every 20 s) and WebSocket ones, also in a
+  list the user made; a node with one peer takes QUIC or WebSocket only once
+  every TLS peer failed, and a TLS peer again every 15 min until one is up;
+  `phone_peers.go`: a link
   that goes down gets two stand-ins dialled in parallel at once, told by
   the core's "Disconnected" log line, a candidate not up within 8 s is
   replaced, the surplus goes once the target is up again, at most twice
@@ -207,19 +211,38 @@ is not sealed (no compatibility with older builds).
   the sender's record) and the sender starts a new session. Sessions
   rotate after 1 hour or 2^24 frames of either kind; a receiver keeps 4 per
   peer and opens at most 16 new ones (sessions and challenges) a minute per
-  peer; KEM work other nodes can cause is capped at 200/s (burst 400). A
-  receive session opens nothing after 2 hours; a forced pin (or a new key
-  record) drops every session made with the old key, both ways; a frame
-  carries the fingerprint of the key its session was made with
+  peer. KEM work other nodes can cause has two budgets: peers this node
+  writes to (it holds frames for them or made a session to them) and peers
+  whose key the app vouched for share 200/s (burst 400; a phone 40/s, burst
+  200); every other address shares 20/s (burst 40; a phone 4/s, burst 20),
+  so strangers asking for keys never hold up a friend's session. A challenge
+  given from the strangers' budget pays for the first session opened with
+  it as well. A frame of a session from an address the node has neither a
+  peer nor a pin for is answered with `N` "want" (at most 20/s in all), and
+  no peer is made for it. A receive session opens nothing after 2 hours; a
+  challenge starts at most 32 sessions (then the sender is given a new one)
+  and remembers their ids for as long as it is kept, so the recorded first
+  frame of a session that is gone starts nothing again. A forced pin (or a
+  new key record) drops every session made with the old key, both ways; a
+  frame carries the fingerprint of the key its session was made with
   (`senderKey`).
 - **Pins:** the device key is pinned per address on first sight; a record
-  with another key for a pinned address is refused. New pins come at most
-  120 a minute; at 16384 the pin seen longest ago makes room. The app keeps
-  the pins (sealed, `runtime/yggdrasil.pins`) and hands them back after a
-  restart (`YggPqPinsJson` / `YggPqSetPinsJson`). It also pins keys others
-  vouched for before any contact (3.3: hybrid-signed hellos and device
-  records, friends' friend lists); with `keep` a different pin stays and is
-  reported as a conflict. Every received signal carries the fingerprint
+  with another key for a pinned address is refused. New pins from records
+  come at most 120 a minute. A pin becomes firm once a session with the
+  device opened (either way) or when the app gave it; a device whose record
+  found no new pins left is pinned when its session opens (at most 120 a
+  minute too). At 16384 the pin seen longest ago among those that are not
+  firm makes room; a stranger's record never pushes out a firm one. The app
+  keeps the pins (sealed, `runtime/yggdrasil.pins`) and hands them back
+  after a restart (`YggPqPinsJson` / `YggPqSetPinsJson`). It also pins keys
+  a hybrid-signed hello or device record names before any contact (3.3);
+  with `keep` a different pin stays and is reported as a conflict, and such
+  a vouch never pushes out another pin (with the pins full it is kept as a
+  hint). Keys a friend's friend list names are only hints (`hint`, at most
+  8192): a hint never moves a pin or ends a session; the first record of the
+  device at that address decides (a hint it confirms is pinned at once, one
+  it contradicts is dropped), and a hint that names another key than the
+  pin is reported as a conflict. Every received signal carries the fingerprint
   (SHA-256 of the device public key, hex) of the sender's key
   (`SignalTransportFrame.senderKey`); `YggGetNodeInfo` gives the own one as
   `pqKey`.
@@ -232,10 +255,11 @@ is not sealed (no compatibility with older builds).
 - **Cost:** KEM operations only at session start, rotation and challenges,
   never per message; per frame one AEAD (~3.5 us for 1 KB seal + open; a
   1200-byte media packet ~4.6 us).
-- **Exempt:** the flat's doors (door nodes, `door_node.go`) keep plain
-  signals - they never run a session layer; door frames are flat frames
-  only, and knocks for mailbox doors are sealed by the app (`flat_seal`,
-  classical X25519).
+- **Doors:** the flat's doors (door nodes, `door_node.go`) run a session
+  layer of their own, with a device key from the door's node key: a door
+  takes sealed frames only, like the main node. Door frames are flat frames
+  only, and knocks for mailbox doors are sealed once more by the app
+  (`flat_seal`, classical X25519). A door keeps no pins across restarts.
 
 ### 1.6 Local links (`local_link*.go`, `lan_discovery.go`, `bluetooth_link*.go`) [P]
 
@@ -282,13 +306,20 @@ device keys, label `zen.local.v1`); a stranger has none.
   visible device answers such a beacon with one beacon sent straight back
   (at most every 5 s per address). A device with no devices to link with
   beacons only while it looks around.
-- **Handshake** (both ends, any stream): fresh X25519 keys, a selector
-  `HMAC(selKey, ephemeral key)[:8]` per candidate device shuffled with random
-  padding, session keys from HKDF over the X25519 result with the pair's
-  link key; then AES-256-GCM records. The first record is the sender's
-  Yggdrasil key, which must hash to the mesh address the secret was given
-  for. Yggdrasil then peers over the stream with that key pinned.
-  Classical X25519 only; what travels over it is sealed again by 1.5.
+- **Handshake** (both ends, any stream, `local_link_handshake.go`, version
+  2): fresh one-time keys, X25519 and an ML-KEM-768 encapsulation key, and a
+  selector `HMAC(selKey, one-time keys)[:8]` per candidate device shuffled
+  with random padding. Each side then encapsulates a secret to the other's
+  ML-KEM key; the stream keys come from HKDF over the X25519 result and both
+  ML-KEM secrets (the lower side's first), salt the pair's link key, info
+  both hellos and both ciphertexts. So the stream is hybrid post-quantum,
+  and the pair's secret is too once the devices paired (above). Then
+  AES-256-GCM records. The first record is the sender's Yggdrasil key, which
+  must hash to the mesh address the secret was given for. Yggdrasil then
+  peers over the stream with that key pinned; what travels over it is
+  sealed again by 1.5. The link counts the frames it carries for the device
+  at its other end (`local_link_traffic.go`); a stream that names a frame
+  longer than a node takes (1 MiB) is no longer counted.
 - Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source,
   beacon rate limits per sender and in all.
 
@@ -1271,10 +1302,11 @@ that carried the hello: a hello whose `k` is not the frame's `senderKey` is
 refused, the signed key is pinned (replacing the session's) when the hello
 is of the account known at that address, and the chat with that friend
 shows "The device key doesn't match." Device records (`device` in
-`acts`: {`address`, `name`, `pq`}) name the key too, and friend lists
-(`friend_list` items {`a`, `n`, `k`}) carry the keys friends proved, so
-friends' other devices and friends of friends are pinned before the first
-direct contact (1.5); `lg_keys` {`items`} gives audience
+`acts`: {`address`, `name`, `pq`}) name the key too, so friends' other
+devices are pinned before the first direct contact (1.5). Friend lists
+(`friend_list` items {`a`, `n`, `k`}) carry the keys friends proved; for
+the receiver they are hints only (1.5: the first record of the device
+itself decides, and a contradicting hint is reported); `lg_keys` {`items`} gives audience
 keys; `lg_sibling` {`own`, `levels`} syncs the account's own devices;
 `lg_bridges` {`items`: signed bridge announcements} passes known mesh bridges;
 `lg_reach` {`id`, `uri`} / `lg_reach_ok` {`id`, `ok`} ask a friend to test that a
@@ -1629,7 +1661,8 @@ From 1.12.0 on, older formats are kept readable (the rules are in
 - A broken (Ed25519) node key lets an attacker take traffic for that
   address (denial of service) but neither read it nor speak for the
   address to anyone who pinned its device key; first contact with no pin
-  and no vouching friend is trust on first use.
+  and no signed device record naming the key is trust on first use (a
+  friend's friend list gives only a hint).
 - Yggdrasil answers `debug_remoteGetPeers/Self/Tree` and NodeInfo to any
   node from `Core.ReadFrom`; Zen's packet loop reads below it
   (`readMeshTraffic`) and drops them unanswered, as the doors do, so a

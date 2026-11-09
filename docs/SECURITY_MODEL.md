@@ -95,12 +95,19 @@ computer could break. So Zen does not rely on it for identity:
   that device key.
 - The device key is **pinned** to the address at first contact and kept
   across restarts. A record signed with another key for the same address is
-  rejected.
+  rejected. A pin of a device that had a session with yours is never pushed
+  out by strangers' records, however many come, and a first contact is
+  pinned once its session opens even while strangers use up the new pins.
 - The ledger hello signs the address **together with** the device key's
   fingerprint (hybrid signature), so an address is bound to the hybrid
-  identity. Device entries in your log and friends' friend lists carry the
-  keys too, so a friend's other devices and friends of friends are pinned
-  before the first contact. A mismatch shows a warning in the chat.
+  identity. Device entries in your log carry the keys too, so a friend's
+  other devices are pinned before the first contact. A mismatch shows a
+  warning in the chat.
+- Friends' friend lists carry keys as well, but that is only a friend's
+  word: such a key is a hint. It never replaces or pushes out a pin, never
+  ends a session, and the first record the device itself signs decides; a
+  hint that contradicts a pin shows the warning. So a friend cannot cut you
+  off from anyone with lists of made-up keys.
 - A device the account cut off (lost or stolen) is cut off at friends too,
   once the revocation reaches them: its address gets no ledger traffic, no
   keys and no chat (messages go to the account's other devices, the chat
@@ -152,7 +159,8 @@ encryption falls back to DTLS-SRTP inside the relay layer.
 | The link to a public peer over `tcp://` or `ws://` | the peer offers nothing better | see which mesh keys you talk to (Zen picks only `tls://`, `quic://`, `wss://` itself; their TLS 1.3 uses X25519MLKEM768) |
 
 First contact with a stranger after a large quantum computer exists, with no
-friend vouching for their key, is trust on first use.
+signed device entry naming their key, is trust on first use (a friend's
+friend list names it only as a hint, see above).
 
 ## On the device
 
