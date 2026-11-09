@@ -1651,6 +1651,314 @@ void main() {
       expect(pinged(), <String>[_ada, _bob]);
       expect(last(transport, 'ping'), containsPair('state', 'foreground'));
     });
+
+    testWidgets('a friend "w tle" is pinged every other round, one online '
+        'every round; the first rounds and a change go to everyone', (
+      WidgetTester tester,
+    ) async {
+      final MemorySignalTransport transport = await pumpApp(
+        tester,
+        friends: adaAndBob,
+      );
+      // Ada's phone is locked (its service answers "w tle"); Bob has Zen
+      // open and pings this phone every round himself.
+      final List<String> rounds = <String>[];
+      int seen = 0;
+      Future<void> round({String ada = 'background'}) async {
+        final List<String> pinged = <String>[
+          for (final e in transport.sentSignals.skip(seen))
+            if (e.payload['type'] == 'ping') e.remoteAddress,
+        ]..sort();
+        seen = transport.sentSignals.length;
+        rounds.add(pinged.map((String a) => a == _ada ? 'A' : 'B').join());
+        await transport.injectIncoming(
+          from: _ada,
+          payload: <String, dynamic>{'type': 'pong', 'state': ada},
+        );
+        await transport.injectIncoming(
+          from: _bob,
+          payload: const <String, dynamic>{
+            'type': 'ping',
+            'state': 'foreground',
+          },
+        );
+        await tester.pump();
+        await tester.pump();
+      }
+
+      await round();
+      for (int i = 0; i < 5; i++) {
+        await tester.pump(kPresencePingInterval);
+        await tester.pump();
+        await round();
+      }
+      expect(rounds, <String>['AB', 'AB', 'B', 'AB', 'B', 'AB']);
+      // Ada opens Zen: her state changed, she is pinged on the next round
+      // and every round while she is online.
+      await tester.pump(kPresencePingInterval);
+      await tester.pump();
+      await round(ada: 'foreground');
+      for (int i = 0; i < 2; i++) {
+        await tester.pump(kPresencePingInterval);
+        await tester.pump();
+        await round(ada: 'foreground');
+      }
+      expect(rounds.skip(6), <String>['B', 'AB', 'AB']);
+      // Back on the screen after a while: everyone again.
+      leave(tester);
+      await tester.pump(const Duration(minutes: 5));
+      comeBack(tester);
+      await tester.pump();
+      await tester.pump();
+      await round();
+      await tester.pump(kPresencePingInterval);
+      await tester.pump();
+      await round();
+      expect(rounds.skip(9), <String>['AB', 'AB']);
+    });
+  });
+
+  group('pings on the screen to a locked friend', () {
+    /// [minutes] of Zen on this phone's screen with Ada's phone locked:
+    /// her service ([LockedReceiver]) answers the pings [cadence] sends her
+    /// (one round every kPresencePingInterval) and pings this phone itself
+    /// every kLockedPresenceRoundEvery. The first ping sent at or after
+    /// [loseAt] (minutes) is lost, or its answer ([loseAnswer]). Each minute
+    /// what she shows here: her state as aged by [presenceAt], and whether
+    /// she counts as reachable directly ([kPresenceOfflineAfter]).
+    Future<({List<(PeerPresence, bool)> shown, int pings, int pongs})> simulate(
+      PresencePingCadence cadence, {
+      int? loseAt,
+      bool loseAnswer = false,
+      int minutes = 120,
+    }) async {
+      int clock = _day;
+      final MemorySignalTransport air = MemorySignalTransport();
+      final LockedReceiver ada = _lockedFriendPhone(air, now: () => clock);
+      await ada.start();
+      cadence.begin(clock);
+      int? heardAt;
+      int pings = 0;
+      int pongs = 0;
+      bool lost = false;
+      final List<(PeerPresence, bool)> shown = <(PeerPresence, bool)>[];
+      for (int m = 0; m <= minutes; m++) {
+        clock = _day + m * _minute;
+        if (m > 0 && m % kLockedPresenceRoundEvery.inMinutes == 0) {
+          final int before = air.sentSignals.length;
+          await ada.presenceRoundForTest();
+          if (air.sentSignals.skip(before).any((e) => e.remoteAddress == _me)) {
+            heardAt = clock;
+          }
+        }
+        if (m % kPresencePingInterval.inMinutes == 0) {
+          final int? at = heardAt;
+          final List<String> due = cadence.round(
+            <String>[_ada],
+            nowMillis: clock,
+            heardOf: (_) =>
+                at == null ? null : (state: PeerPresence.background, at: at),
+            isFriend: (_) => true,
+          );
+          if (due.contains(_ada)) {
+            pings++;
+            final bool loseThis = !lost && loseAt != null && m >= loseAt;
+            lost = lost || loseThis;
+            if (!loseThis || loseAnswer) {
+              final int before = air.sentSignals.length;
+              await ada.handleFrame(
+                SignalTransportFrame(
+                  from: _me,
+                  payload: const <String, dynamic>{
+                    'type': 'ping',
+                    'state': 'foreground',
+                  },
+                  receivedAtMillis: clock,
+                ),
+              );
+              if (air.sentSignals
+                  .skip(before)
+                  .any((e) => e.payload['type'] == 'pong')) {
+                pongs++;
+                if (!loseThis) {
+                  heardAt = clock;
+                }
+              }
+            }
+          }
+        }
+        final int at = heardAt ?? 0;
+        shown.add((
+          presenceAt(
+            presence: PeerPresence.background,
+            presenceAtMillis: at,
+            nowMillis: clock,
+            foregroundFor: kPresenceForegroundFor,
+            backgroundFor: kPresenceBackgroundFor,
+          ),
+          clock - at < kPresenceOfflineAfter.inMilliseconds,
+        ));
+      }
+      await ada.stop();
+      return (shown: shown, pings: pings, pongs: pongs);
+    }
+
+    /// Every round to everyone, as before.
+    PresencePingCadence everyRound() =>
+        PresencePingCadence(fullRounds: 1 << 30);
+
+    test('a friend "w tle" gets half the pings and answers as often as when '
+        'pinged every round', () async {
+      final before = await simulate(everyRound());
+      final now = await simulate(PresencePingCadence());
+      // Her locked phone answered every other ping: every 4 minutes.
+      expect(before.pings, 61);
+      expect(before.pongs, 31);
+      expect(now.pings, 31, reason: 'two rounds to everyone, then every 4 min');
+      expect(now.pongs, 30);
+      expect(now.shown, before.shown);
+      expect(
+        now.shown,
+        everyElement((PeerPresence.background, true)),
+        reason: '"w tle" and reachable all the time',
+      );
+    });
+
+    test('with one ping or one answer lost at any moment she shows no worse '
+        'than when pinged every round', () async {
+      for (final bool loseAnswer in <bool>[false, true]) {
+        for (int loseAt = 0; loseAt <= 60; loseAt += 2) {
+          final before = await simulate(
+            everyRound(),
+            loseAt: loseAt,
+            loseAnswer: loseAnswer,
+            minutes: 80,
+          );
+          final now = await simulate(
+            PresencePingCadence(),
+            loseAt: loseAt,
+            loseAnswer: loseAnswer,
+            minutes: 80,
+          );
+          for (int m = 0; m < now.shown.length; m++) {
+            final (PeerPresence state, bool reachable) = now.shown[m];
+            expect(
+              state,
+              before.shown[m].$1,
+              reason: 'minute $m, lost at $loseAt (answer: $loseAnswer)',
+            );
+            if (m >= 4) {
+              // Heard from by then, however the first ping went.
+              expect(state, PeerPresence.background);
+            }
+            expect(
+              reachable || !before.shown[m].$2,
+              isTrue,
+              reason: 'minute $m, lost at $loseAt (answer: $loseAnswer)',
+            );
+          }
+        }
+      }
+    });
+
+    test('a friend not heard from for longer than "w tle" lasts is pinged '
+        'every third round, and seen within three rounds once back', () {
+      int clock = _day;
+      final PresencePingCadence cadence = PresencePingCadence()..begin(clock);
+      ({PeerPresence state, int at})? carol;
+      final List<int> pingedAt = <int>[];
+      for (int m = 0; m <= 60; m += 2) {
+        clock = _day + m * _minute;
+        final ({PeerPresence state, int at})? heard = carol;
+        final List<String> due = cadence.round(
+          <String>[_carol],
+          nowMillis: clock,
+          heardOf: (_) => heard,
+          isFriend: (_) => true,
+        );
+        if (due.isNotEmpty) {
+          pingedAt.add(m);
+          // Her phone is back from minute 40: she answers.
+          if (m >= 40) {
+            carol = (state: PeerPresence.background, at: clock);
+          }
+        }
+      }
+      // Every round while she could still show "w tle" (25 min), then
+      // every third.
+      expect(pingedAt.where((int m) => m < 40), <int>[
+        for (int m = 0; m <= 24; m += 2) m,
+        30,
+        36,
+      ]);
+      final int seen = pingedAt.firstWhere((int m) => m >= 40);
+      expect(seen - 40, lessThanOrEqualTo(3 * kPresencePingInterval.inMinutes));
+      // Heard again (a change): the next round too, then "w tle" every
+      // other round.
+      expect(pingedAt.where((int m) => m > seen), <int>[
+        for (int m = seen + 2; m <= 60; m += 4) m,
+      ]);
+    });
+
+    test('a friend online, one just heard from for the first time and one '
+        'whose state changed are pinged every round', () {
+      const int now = _day + _hour;
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.online, at: now - _minute),
+          stateAtLastPing: PeerPresence.online,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        1,
+      );
+      expect(
+        presencePingEvery(
+          heard: null,
+          stateAtLastPing: null,
+          silentSinceMillis: now - 10 * _minute,
+          nowMillis: now,
+        ),
+        1,
+      );
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.background, at: now - _minute),
+          stateAtLastPing: PeerPresence.online,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        1,
+      );
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.background, at: now - _minute),
+          stateAtLastPing: PeerPresence.background,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        2,
+      );
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.background, at: now - 26 * _minute),
+          stateAtLastPing: PeerPresence.background,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        3,
+      );
+      // A friend who shows nothing: every round, as before.
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.hidden, at: now - _minute),
+          stateAtLastPing: PeerPresence.hidden,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        1,
+      );
+    });
   });
 
   group('the locked service', () {
