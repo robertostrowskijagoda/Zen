@@ -23,6 +23,7 @@ import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -376,7 +377,12 @@ void main() {
         );
         await decayAt(_day + kPresenceForegroundFor.inMilliseconds + 1);
         expect(read().presence, PeerPresence.background);
+        // No longer counted as reachable directly, still shown "w tle": a
+        // sleeping phone's own round comes every 10 min.
         await decayAt(_day + kPresenceOfflineAfter.inMilliseconds);
+        expect(read().isOnline, isFalse);
+        expect(read().presence, PeerPresence.background);
+        await decayAt(_day + kPresenceBackgroundFor.inMilliseconds);
         expect(read().presence, PeerPresence.offline);
         expect(read().isOnline, isFalse);
         expect(read().lastOpenedAtMillis, _day - 30 * _minute);
@@ -1609,6 +1615,71 @@ void main() {
         ).pongFields(_ada, _day),
         <String, dynamic>{'state': 'background', 'sq': _day},
       );
+    });
+
+    test('it pings the friends who see its status every 10 min on its own '
+        'place on the beat, not only with the mailbox polls (which come '
+        'every half hour once nothing comes)', () async {
+      int clock = _day;
+      final MemorySignalTransport air = MemorySignalTransport();
+      final WakeBeat beat = WakeBeat();
+      addTearDown(beat.clear);
+      final LockedReceiver phone = LockedReceiver(
+        transport: air,
+        capability: BackgroundCapability.fromDraft(
+          BackgroundCapabilityDraft(
+            inboxPublicKey: Uint8List(32),
+            friends: const <String>{_me},
+          ),
+          backgroundKey: Uint8List.fromList(List<int>.filled(32, 7)),
+        ),
+        inbox: SealedInboxWriter(
+          file: File('${Directory.systemTemp.path}/zen-presence-round.inbox'),
+          recipientPublicKey: Uint8List(32),
+        ),
+        notices: MemoryRuntimeSystemNotificationService(),
+        presence: const LockedPresenceKit(shownTo: <String>{_me}),
+        mailboxPollInterval: Duration.zero,
+        beat: beat,
+        now: () => clock,
+      );
+      await phone.start();
+      addTearDown(phone.stop);
+      expect(beat.planned, contains('presence-round'));
+      int pings() => air.sentSignals
+          .where((e) => e.payload['type'] == 'ping' && e.remoteAddress == _me)
+          .length;
+
+      // The app pinged everyone as it left the screen: not again at once.
+      await phone.presenceRoundForTest();
+      expect(pings(), 0);
+      // A wake a little early still counts ...
+      clock += (kLockedPresenceRoundEvery * 0.8).inMilliseconds;
+      await phone.presenceRoundForTest();
+      expect(pings(), 1);
+      expect(air.sentSignals.last.payload['state'], 'background');
+      // ... but not one right after it.
+      clock += 2 * _minute;
+      await phone.presenceRoundForTest();
+      expect(pings(), 1);
+      clock += kLockedPresenceRoundEvery.inMilliseconds;
+      await phone.presenceRoundForTest();
+      expect(pings(), 2);
+
+      // Its own sign every round keeps it "w tle" for a friend it cannot
+      // answer between its wakes, also with one round lost to Doze.
+      expect(
+        presenceAt(
+          presence: PeerPresence.background,
+          presenceAtMillis: 0,
+          nowMillis: (kLockedPresenceRoundEvery * 2).inMilliseconds + _minute,
+          foregroundFor: kPresenceForegroundFor,
+          backgroundFor: kPresenceBackgroundFor,
+        ),
+        PeerPresence.background,
+      );
+      expect(kPresenceBackgroundFor, lessThan(kPresenceRememberedFor));
+      expect(kPresenceOfflineAfter, lessThan(kPresenceBackgroundFor));
     });
 
     test('a ping from a Zen that just started is answered at once, even '

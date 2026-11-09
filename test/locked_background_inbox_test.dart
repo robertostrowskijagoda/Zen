@@ -1185,10 +1185,13 @@ void main() {
           )
           .length;
       clock += const Duration(minutes: 5).inMilliseconds;
-      await receiver.pollOnWakeForTest();
+      await receiver.presenceRoundForTest();
       expect(pings(), 0, reason: 'the app pinged everyone as it locked');
+      // The polls do not ping: the round has its own place on the beat.
       clock += kLockedPresenceRoundEvery.inMilliseconds;
       await receiver.pollOnWakeForTest();
+      expect(pings(), 0);
+      await receiver.presenceRoundForTest();
       expect(pings(), 1);
       expect(transport.sentSignals.last.payload['state'], 'background');
       // Ada's answer, then an older one that came late, and Bob's from

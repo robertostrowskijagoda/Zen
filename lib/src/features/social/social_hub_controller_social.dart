@@ -1717,6 +1717,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     required bool reachable,
     Duration offlineAfter = kPresenceOfflineAfter,
     Duration foregroundFor = kPresenceForegroundFor,
+    Duration backgroundFor = kPresenceBackgroundFor,
     int? nowMillis,
   }) {
     return _enqueueStateWork(() async {
@@ -1730,6 +1731,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
                 nowMillis: timestamp,
                 offlineAfter: offlineAfter,
                 foregroundFor: foregroundFor,
+                backgroundFor: backgroundFor,
               )
             : friend,
       );
@@ -1743,6 +1745,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   Future<void> recheckStalePresence({
     required Duration offlineAfter,
     required Duration foregroundFor,
+    Duration backgroundFor = kPresenceBackgroundFor,
     int? nowMillis,
   }) {
     return _enqueueStateWork(() async {
@@ -1763,7 +1766,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           presenceAtMillis: confirmed,
           nowMillis: timestamp,
           foregroundFor: foregroundFor,
-          backgroundFor: offlineAfter,
+          backgroundFor: backgroundFor,
         );
         if (now == friend.presence) {
           return friend;
@@ -1773,6 +1776,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           nowMillis: timestamp,
           offlineAfter: offlineAfter,
           foregroundFor: foregroundFor,
+          backgroundFor: backgroundFor,
         );
       });
     });
@@ -1806,6 +1810,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     required int nowMillis,
     required Duration offlineAfter,
     required Duration foregroundFor,
+    required Duration backgroundFor,
   }) {
     final String key = PeerShareCodec.normalizeAddress(friend.address);
     return _rememberedPresence(
@@ -1813,6 +1818,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       nowMillis: nowMillis,
       foregroundFor: foregroundFor,
       offlineAfter: offlineAfter,
+      backgroundFor: backgroundFor,
       confirmedAtMillis: _presenceConfirmedAt[key] ?? 0,
       seenAtMillis: _presenceSeenAt[key] ?? 0,
       openedAtMillis: _openedAt[key] ?? 0,
@@ -1895,6 +1901,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   Future<void> decayPresence({
     required Duration offlineAfter,
     required Duration foregroundFor,
+    Duration backgroundFor = kPresenceBackgroundFor,
     bool settleUnchecked = false,
     int? nowMillis,
   }) {
@@ -1902,6 +1909,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       () => _decayPresence(
         offlineAfter: offlineAfter,
         foregroundFor: foregroundFor,
+        backgroundFor: backgroundFor,
         settleUnchecked: settleUnchecked,
         nowMillis: nowMillis,
       ),
@@ -1911,6 +1919,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   Future<void> _decayPresence({
     required Duration offlineAfter,
     required Duration foregroundFor,
+    required Duration backgroundFor,
     required bool settleUnchecked,
     int? nowMillis,
   }) async {
@@ -1941,7 +1950,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
               presenceAtMillis: confirmed,
               nowMillis: timestamp,
               foregroundFor: foregroundFor,
-              backgroundFor: offlineAfter,
+              backgroundFor: backgroundFor,
             );
       if (!unreachable && !settles && presence == friend.presence) {
         return friend;

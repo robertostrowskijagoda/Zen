@@ -191,7 +191,10 @@ const Duration kLockedPongEvery = Duration(minutes: 3, seconds: 30);
 const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 
 /// How often a locked phone asks the friends who see its status how they
-/// are (a `ping`, on the mailbox polls' wake), so the app knows their
+/// are (a `ping`, on a wake of the shared beat, whatever the mailbox polls
+/// do: those come every half hour once nothing comes, and friends whose
+/// pings could not reach this phone between its wakes saw it "poza
+/// siecią" for most of that), so the app knows their
 /// statuses at once when it opens: their answers, and the pings of friends
 /// with Zen open, are kept for the app as they come (the newest of each
 /// friend, [kPresenceRememberedFor] old at most). Under
@@ -716,6 +719,9 @@ final class LockedReceiver {
   int _doorFramesTotal = 0;
   BeatTimer? _pollTimer;
 
+  /// The presence round's place on the beat ([presenceRoundEvery]).
+  BeatTimer? _roundTimer;
+
   /// [keptCount] when the last poll went out.
   int _keptAtPoll = 0;
   Timer? _ringTimer;
@@ -795,6 +801,27 @@ final class LockedReceiver {
               whileIdle: true,
             );
     }
+    if (presenceRoundEvery > Duration.zero && _presence.shownTo.isNotEmpty) {
+      // Its own place on the beat, a multiple of the polls' first period:
+      // it shares their wakes and the others', and takes none while they
+      // come at least as often. Nobody to tell: no wake for it.
+      const Duration hold = Duration(seconds: 5);
+      final WakeBeat? beat = _beat;
+      _roundTimer = beat == null
+          ? ZenWake.beat(
+              'presence-round',
+              presenceRoundEvery,
+              _presenceRound,
+              hold: hold,
+            )
+          : beat.add(
+              'presence-round',
+              presenceRoundEvery,
+              _presenceRound,
+              hold: hold,
+              whileIdle: true,
+            );
+    }
     logZenMessage(
       'Locked receiver runs (no master key; '
       '${_capability.mailboxes.length} mailboxes).',
@@ -808,6 +835,8 @@ final class LockedReceiver {
     await _alarm?.stop();
     _pollTimer?.cancel();
     _pollTimer = null;
+    _roundTimer?.cancel();
+    _roundTimer = null;
     _ringTimer?.cancel();
     _ringTimer = null;
     _ringingFrom = null;
@@ -943,7 +972,6 @@ final class LockedReceiver {
     } on Object catch (error, stackTrace) {
       logZenError('Mailbox poll failed', error, stackTrace);
     }
-    await _presenceRound();
     if (_running) {
       await Future<void>.delayed(pollAnswerGrace);
     }
@@ -1006,11 +1034,17 @@ final class LockedReceiver {
   Future<void> pollMailboxes() => _pollMailboxes();
 
   /// Pings the friends who see this phone's status, at most every
-  /// [presenceRoundEvery] (the ping says "w tle", as a pong would).
+  /// [presenceRoundEvery] (the ping says "w tle", as a pong would). A wake
+  /// a little early (the beat runs work due soon on a wake that comes
+  /// anyway) still counts: skipped, the round would wait a whole period
+  /// more.
+  @visibleForTesting
+  Future<void> presenceRoundForTest() => _presenceRound();
+
   Future<void> _presenceRound() async {
     final int at = _now();
-    if (presenceRoundEvery <= Duration.zero ||
-        at - _presenceRoundAt < presenceRoundEvery.inMilliseconds) {
+    final int every = presenceRoundEvery.inMilliseconds;
+    if (every <= 0 || !_running || at - _presenceRoundAt < every * 3 ~/ 4) {
       return;
     }
     _presenceRoundAt = at;

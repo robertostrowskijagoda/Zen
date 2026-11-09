@@ -116,6 +116,10 @@ class _GroupConversationScreenState
 
   /// The newest message the chat was built with.
   String? _newestShownId;
+
+  /// When the newest message shown so far was sent: only one's own message
+  /// newer than it brings the list down.
+  int _newestShownAt = 0;
   final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
 
   /// Where the chat was scrolled to when the app was closed.
@@ -620,7 +624,7 @@ class _GroupConversationScreenState
         setState(() => _replyTo = null);
       }
       // Down to the newest message, where this one is about to appear.
-      _scrollController.showLatest();
+      _scrollController.showLatest(reason: 'send');
       await ref
           .read(socialHubControllerProvider.notifier)
           .sendGroupMessage(
@@ -1169,14 +1173,23 @@ class _GroupConversationScreenState
                               e.value: e.key,
                           };
                           // One's own new message is shown, also from
-                          // further up.
+                          // further up. One that was there before and comes
+                          // back as the newest (a newer one gone, the chat
+                          // read again while something wrote it) is not
+                          // new: it would throw a reader scrolled up back
+                          // to the bottom.
                           final String newest = messages.last.id;
+                          final int newestAt = messages.last.sentAtMillis;
                           if (_newestShownId != null &&
                               newest != _newestShownId &&
+                              newestAt > _newestShownAt &&
                               messages.last.isOutgoing) {
-                            _scrollController.showLatest();
+                            _scrollController.showLatest(reason: 'own-new');
                           }
                           _newestShownId = newest;
+                          if (newestAt > _newestShownAt) {
+                            _newestShownAt = newestAt;
+                          }
                           final String? jump = _pendingJump;
                           if (jump != null) {
                             // Opened from a mention's notification: at the

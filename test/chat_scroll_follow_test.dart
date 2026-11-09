@@ -296,6 +296,46 @@ void main() {
   });
 
   group('group chat', () {
+    testWidgets('scrolled up, it stays when one\'s own newest message goes '
+        'and comes back: it was taken for a new one and threw the reader '
+        'to the bottom', (WidgetTester tester) async {
+      final MemoryMessageTimelineStore store = await _pumpGroup(tester);
+      await _addMessage(
+        tester,
+        store,
+        _groupKey,
+        _message(100, outgoing: true),
+      );
+      final ScrollPosition position = _position(tester);
+      position.jumpTo(2 * position.viewportDimension);
+      await tester.pumpAndSettle();
+      final double pixels = _position(tester).pixels;
+
+      final List<ChatMessage> all = await store.load(_groupKey);
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(Scaffold).first),
+      );
+      for (int i = 0; i < 3; i++) {
+        await store.save(_groupKey, all.sublist(0, all.length - 1));
+        container.read(messageTimelineRevisionProvider.notifier).bump();
+        await tester.pumpAndSettle();
+        await store.save(_groupKey, all);
+        container.read(messageTimelineRevisionProvider.notifier).bump();
+        await tester.pumpAndSettle();
+      }
+      expect(_distanceFromNewest(tester, reversed: true), greaterThan(100));
+      expect(_position(tester).pixels, closeTo(pixels, 1));
+
+      // A message of one's own that is really new still brings it down.
+      await _addMessage(
+        tester,
+        store,
+        _groupKey,
+        _message(101, outgoing: true),
+      );
+      expect(_distanceFromNewest(tester, reversed: true), lessThan(1));
+    });
+
     testWidgets('the keyboard opening keeps it at the newest message', (
       WidgetTester tester,
     ) async {

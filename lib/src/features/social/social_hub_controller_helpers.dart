@@ -1644,6 +1644,7 @@ FriendProfile _rememberedPresence(
   required int nowMillis,
   Duration foregroundFor = kPresenceForegroundFor,
   Duration offlineAfter = kPresenceOfflineAfter,
+  Duration backgroundFor = kPresenceBackgroundFor,
   int confirmedAtMillis = 0,
   int seenAtMillis = 0,
   int openedAtMillis = 0,
@@ -1671,7 +1672,7 @@ FriendProfile _rememberedPresence(
     presenceAtMillis: confirmed,
     nowMillis: nowMillis,
     foregroundFor: foregroundFor,
-    backgroundFor: offlineAfter,
+    backgroundFor: backgroundFor,
   );
   // Online until the last confirmation: Zen was last open there then.
   final int opened =
