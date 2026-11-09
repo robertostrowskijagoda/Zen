@@ -470,6 +470,7 @@ void main() {
         passwordIterations: 10,
         resumeVault: vault ? device.vault() : null,
       );
+      await security.setPassword(password);
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -496,15 +497,20 @@ void main() {
 
     const Key toggle = Key('settings-lock-keep-after-close');
 
-    testWidgets('is off, says it is a risk, and turns the setting on', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('is off, says it is a risk, and turns the setting on once '
+        'the app password is given', (WidgetTester tester) async {
       final ProviderContainer container = await pump(tester);
       expect(find.byKey(toggle), findsOneWidget);
       expect(tester.widget<SwitchListTile>(find.byKey(toggle)).value, isFalse);
       expect(find.textContaining('To ryzyko'), findsOneWidget);
       await tester.tap(find.byKey(toggle));
-      await tester.pump();
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('sensitive-access-password')),
+        password,
+      );
+      await tester.tap(find.byKey(const Key('sensitive-access-confirm')));
+      await tester.pumpAndSettle();
       expect(
         container.read(appSettingsControllerProvider).keepUnlockedAfterClose,
         isTrue,

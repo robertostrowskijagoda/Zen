@@ -13,9 +13,35 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 
+/// How late a mode locks: the higher, the later.
+int _lateness(AppLockMode mode) => switch (mode) {
+  AppLockMode.background => 0,
+  AppLockMode.appClose => 1,
+  AppLockMode.systemRestart => 2,
+  AppLockMode.never => 3,
+};
+
+/// Whether [to] locks Zen later than [from] does: a later mode, a longer
+/// delay, or the key kept after closing where closing locked at once.
+bool locksLater(AppSettings from, AppSettings to) {
+  final int before = _lateness(from.lockMode);
+  final int after = _lateness(to.lockMode);
+  if (after != before) {
+    return after > before ||
+        (to.lockMode == AppLockMode.background && to.keepUnlockedAfterClose);
+  }
+  if (to.lockMode != AppLockMode.background) {
+    return false;
+  }
+  return to.backgroundLockDelaySeconds > from.backgroundLockDelaySeconds ||
+      (to.keepUnlockedAfterClose && !from.keepUnlockedAfterClose);
+}
+
 /// "Automatyczna blokada": when Zen locks itself, bound to the setting, with
 /// what "Nigdy" really means and the delay for "Po wyjściu z aplikacji".
-/// Asked in Ustawienia → Bezpieczeństwo and in the first-start setup.
+/// Asked in Ustawienia → Bezpieczeństwo and in the first-start setup. A
+/// choice that locks later than now ([locksLater]) asks who is there first
+/// ([confirmSensitiveAccess]); one that locks sooner does not.
 class LockModeSettingChoice extends ConsumerWidget {
   const LockModeSettingChoice({super.key});
 
@@ -30,9 +56,10 @@ class LockModeSettingChoice extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     AppSecurityService security, {
-    required AppLockMode current,
+    required AppSettings settings,
     required AppLockMode mode,
   }) async {
+    final AppLockMode current = settings.lockMode;
     // Read before any wait: the choice may be gone after the dialog.
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
@@ -54,10 +81,47 @@ class LockModeSettingChoice extends ConsumerWidget {
       if (!kept) {
         return;
       }
-    } else if (mode == current) {
+    } else if (mode == current ||
+        !await _mayLockLater(
+          context,
+          security,
+          from: settings,
+          to: settings.copyWith(lockMode: mode),
+        )) {
       return;
     }
     await controller.setLockMode(mode);
+  }
+
+  /// Before a change from [from] to [to]: true when it locks no later, or
+  /// the person confirmed it (nothing to ask without an app password).
+  static Future<bool> _mayLockLater(
+    BuildContext context,
+    AppSecurityService security, {
+    required AppSettings from,
+    required AppSettings to,
+  }) async {
+    if (!security.hasPassword || !locksLater(from, to)) {
+      return true;
+    }
+    return context.mounted &&
+        await confirmSensitiveAccess(
+          context,
+          reason: t('Wpisz hasło aplikacji, żeby to włączyć.'),
+        );
+  }
+
+  /// Applies [to] through [apply] once [_mayLockLater] lets it.
+  static Future<void> _change(
+    BuildContext context,
+    AppSecurityService security, {
+    required AppSettings from,
+    required AppSettings to,
+    required Future<void> Function() apply,
+  }) async {
+    if (await _mayLockLater(context, security, from: from, to: to)) {
+      await apply();
+    }
   }
 
   @override
@@ -107,7 +171,7 @@ class LockModeSettingChoice extends ConsumerWidget {
                       context,
                       ref,
                       security,
-                      current: settings.lockMode,
+                      settings: settings,
                       mode: mode,
                     ),
                   ),
@@ -181,7 +245,14 @@ class LockModeSettingChoice extends ConsumerWidget {
                     label: Text(label),
                     selected: settings.backgroundLockDelaySeconds == sec,
                     onSelected: (_) => unawaited(
-                      controller.setBackgroundLockDelaySeconds(sec),
+                      _change(
+                        context,
+                        security,
+                        from: settings,
+                        to: settings.copyWith(backgroundLockDelaySeconds: sec),
+                        apply: () =>
+                            controller.setBackgroundLockDelaySeconds(sec),
+                      ),
                     ),
                   ),
                 ),
@@ -213,8 +284,15 @@ class LockModeSettingChoice extends ConsumerWidget {
                   height: 1.35,
                 ),
               ),
-              onChanged: (bool on) =>
-                  unawaited(controller.setKeepUnlockedAfterClose(on)),
+              onChanged: (bool on) => unawaited(
+                _change(
+                  context,
+                  security,
+                  from: settings,
+                  to: settings.copyWith(keepUnlockedAfterClose: on),
+                  apply: () => controller.setKeepUnlockedAfterClose(on),
+                ),
+              ),
             ),
           ],
         ],

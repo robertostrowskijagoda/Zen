@@ -188,7 +188,12 @@ friend list names it only as a hint, see above).
   is gone). Only choosing "Never" again, with the password, makes a new
   copy: setting a password, unlocking or restoring settings never does.
   The password is still asked for before security settings change or
-  sensitive screens open.
+  sensitive screens open: for the lock, before any choice that locks
+  later than now (a later mode, a longer delay, keeping the key after
+  closing, "Never" on an additional account); a choice that locks sooner
+  asks nothing. Every password asked inside the unlocked app (the app
+  password, the account password) counts with the lock screen's failed
+  attempts and is refused while its wait runs.
 - **The locked phone (Android and iPhone).** A locked Zen keeps receiving
   without the master key; see "The locked phone" below.
 - **Screens.** The wallet and other sensitive screens are protected from
