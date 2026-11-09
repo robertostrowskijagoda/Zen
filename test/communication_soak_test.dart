@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -63,6 +64,9 @@ Future<void> _live(int seed) async {
   // What each sender sent each friend, in order.
   final Map<(String, String), List<String>> sent =
       <(String, String), List<String>>{};
+  // The files each sender sent each friend: name and size.
+  final Map<(String, String), List<(String, int)>> files =
+      <(String, String), List<(String, int)>>{};
   int counter = 0;
   bool split = false;
 
@@ -87,10 +91,26 @@ Future<void> _live(int seed) async {
       do {
         to = w[_names[r.nextInt(_names.length)]];
       } while (to.name == _accountOf(p.name));
-      final String text = 's$seed-m${counter++} ${p.name}>${to.name}';
-      log.add('send $text');
-      (sent[(p.name, to.name)] ??= <String>[]).add(text);
-      await w.send(p, to, text);
+      if (r.nextInt(5) == 0) {
+        // A file: small enough to go in the message, or in pieces.
+        final String name = 's$seed-f${counter++}.bin';
+        final int size = r.nextBool() ? 2000 : 150000;
+        log.add('file $name ($size B) ${p.name}>${to.name}');
+        (files[(p.name, to.name)] ??= <(String, int)>[]).add((name, size));
+        await p.hub.sendLocalAttachment(
+          peerAddress: to.address,
+          bytes: Uint8List(size)..fillRange(0, size, seed % 250),
+          fileName: name,
+          mimeType: 'application/octet-stream',
+          sentAtMillis: w.now,
+        );
+        await w.settle();
+      } else {
+        final String text = 's$seed-m${counter++} ${p.name}>${to.name}';
+        log.add('send $text');
+        (sent[(p.name, to.name)] ??= <String>[]).add(text);
+        await w.send(p, to, text);
+      }
     } else if (roll < 60) {
       final bool on = !p.online;
       log.add('${p.name} ${on ? 'online' : 'offline'}');
@@ -167,6 +187,24 @@ Future<void> _live(int seed) async {
         return false;
       }
     }
+    for (final MapEntry<(String, String), List<(String, int)>> e
+        in files.entries) {
+      // Only the device the sender writes to: a file to an account with
+      // two devices reaches the second one without its content, or not at
+      // all when it was offline (the transfer is acknowledged for the
+      // account as a whole). Known, see CHANGELOG 1.16.1.
+      for (final String device in <String>[e.key.$2]) {
+        final Map<String, int> got = await _filesFrom(
+          w[device],
+          w[_accountOf(e.key.$1)],
+        );
+        for (final (String name, int size) in e.value) {
+          if (got[name] != size) {
+            return false;
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -205,6 +243,20 @@ Future<void> _live(int seed) async {
         }
       }
     }
+    for (final MapEntry<(String, String), List<(String, int)>> en
+        in files.entries) {
+      for (final String device in <String>[en.key.$2]) {
+        final Map<String, int> got = await _filesFrom(
+          w[device],
+          w[_accountOf(en.key.$1)],
+        );
+        for (final (String name, int size) in en.value) {
+          if (got[name] != size) {
+            missing.writeln('  file "$name" on $device: ${got[name]} of $size');
+          }
+        }
+      }
+    }
     fail('${e.message}\n$missing${story()}');
   }
   // Time for repeats and late copies to show up, if any would.
@@ -239,6 +291,26 @@ Future<void> _live(int seed) async {
       );
     }
   }
+}
+
+/// The files from [from] in [phone]'s chat that are complete, by name:
+/// their size (a name twice counts as -1).
+Future<Map<String, int>> _filesFrom(
+  FriendsPhone phone,
+  FriendsPhone from,
+) async {
+  final Map<String, int> out = <String, int>{};
+  for (final ChatMessage m in await phone.thread(from)) {
+    final String? name = m.fileName;
+    if (m.direction != ChatMessageDirection.incoming || name == null) {
+      continue;
+    }
+    final int size =
+        m.attachmentBytes?.length ??
+        (m.attachmentPath != null ? (m.attachmentSizeBytes ?? 0) : 0);
+    out[name] = out.containsKey(name) ? -1 : size;
+  }
+  return out;
 }
 
 /// The account a device belongs to (B2 is B's second phone).
