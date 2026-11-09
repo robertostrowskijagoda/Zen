@@ -10,6 +10,16 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **A chat no longer jumps while you read further up when a message comes late or goes away**: a message held by relays while the friend's phone was offline goes in by its send time, among the older ones, and a disappearing message expires there. A conversation's list was laid out from its oldest message, so each such change above the screen moved everything after it, also what was being read, by a message's height (the list cannot know the height of a message it has not built, and kept each bubble's place by its position, not by its message). The conversation's list is now laid out from the newest message, as the group chat's is: what changes among the older messages moves nothing on the screen, and each row keeps its place by its message (the gap between bubbles is in the row, not a row of its own, which stayed where it was while the messages moved). Scrolled up, the keyboard now takes the list up with it, as in a group chat.
+- **Tests**: scrolled up, in a conversation and a group chat, what is read stays where it is when a late message goes in among the older ones and when one there is deleted.
+- **Tests**: a fresh word from one of a friend's devices does not hide Zen open on another, and one friend's word leaves the others' devices as they were; the store's file envelope (a damaged header or checksum does not open), a save that does not read back as written replaces nothing, a key with a `.` segment is refused, a key is there while any of its copies is, and the sweep of leftover temporary files walks at most once per its interval (the store is now a mutation testing target).
+- **Tests**: when the tests of a mutation target fail on the unchanged file, the mutation run now shows which test failed and why (it only said they failed).
+- **Tests**: a mention of you in a muted group or one that tells only of mentions still comes on a locked phone, a message with no text and nothing attached gives no preview, and only a phone's audio outputs are taken for where a call's sound can go (a Bluetooth microphone alone is no headset).
+- **Tests**: the alarm of the shared wake is inexact (Android may wake the phone once for several), work that runs alongside it is no longer active once cancelled, an address is written one way (the longest run of zero groups as "::"), what has a ":", "/" or "#" in it is not taken for a friend code, and the notes to oneself are read once, not again for every note.
+- **Tests**: entries of the wrong kind in a saved friend list (a timer that is no number, a notify-all that is no yes or no, an invitation id that is no text) are skipped one by one and the others kept; a test of the store expected the file name in lower case, as only Windows has it, and failed on Linux.
+- **Tests**: an edit of a message to nothing or past 64 KiB changes it on neither side, a mute that is no time in a saved friend list is skipped, and an address with a group past FFFF is not taken for one.
+
 ## 1.16.2 — 09.11.2026
 
 ### What's new

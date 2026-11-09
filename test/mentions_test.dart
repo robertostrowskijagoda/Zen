@@ -229,6 +229,18 @@ void main() {
       expect(signalMentions(signal!), <Mention>[_bob]);
       expect(signalMentionsYou(signal), isFalse);
       expect(signalNoticePreview(signal), 'Hej @Bob Nowak');
+
+      // A message with no text and no attachment has nothing to show.
+      final ZenSignal? bare = zenSignalFromTransportPayload(
+        sender: '200::A',
+        payload: <String, dynamic>{
+          'type': 'group_message',
+          'groupId': 'g',
+          'msgId': 'y',
+        },
+      );
+      expect(bare, isNotNull);
+      expect(signalNoticePreview(bare!), isNull);
     });
 
     test('the route of a mention opens the chat at the message', () {

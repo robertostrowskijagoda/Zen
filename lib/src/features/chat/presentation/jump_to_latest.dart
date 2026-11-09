@@ -34,7 +34,12 @@ void _logChatMove(String reason, double distance) {
 /// it change: a message coming in below it in a [reversed] list (the newest
 /// message at offset 0, the group chat), a picture above it decoded. A
 /// reversed list must keep its bubbles by key (`findChildIndexCallback`)
-/// for that, or each would take the place of the next one.
+/// for that, or each would take the place of the next one, and every row
+/// must be a message's (no separator rows: one stays at its index while
+/// the messages move, and may be the one kept in place). Both chats are
+/// reversed: in a list laid out from its oldest message, a message going in
+/// or out among the older ones (one that came late, one that expired) moves
+/// everything after it by a height the list does not know.
 class ChatScrollController extends ScrollController {
   ChatScrollController({this.reversed = false});
 

@@ -23,7 +23,9 @@
     "tests": [
       "test/locked_invitation_notice_test.dart",
       "test/notification_privacy_level_test.dart",
-      "test/notification_switches_test.dart"
+      "test/notification_switches_test.dart",
+      "test/mentions_test.dart",
+      "test/locked_background_inbox_test.dart"
     ]
   },
   {
@@ -205,6 +207,15 @@
     "file": "lib/src/domain/friends/peer_presence.dart",
     "tests": [
       "test/presence_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/core/storage/binary_store.dart",
+    "tests": [
+      "test/binary_store_test.dart",
+      "test/storage_crash_consistency_test.dart",
+      "test/storage_hardening_test.dart",
+      "test/format_tolerance_test.dart"
     ]
   }
 ]

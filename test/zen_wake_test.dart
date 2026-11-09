@@ -135,6 +135,8 @@ void main() {
     expect(wake.hold, const Duration(seconds: 15));
     // The poll must run in Doze too: so the shared wake does.
     expect(wake.whileIdle, isTrue);
+    // Inexact: Android may wake the phone once for this and others' alarms.
+    expect(wake.exact, isFalse);
     expect(ZenWake.plannedBeat, <String>['mailbox-poll', 'nearby-look']);
 
     now = 5 * 60 * 1000;
@@ -181,6 +183,9 @@ void main() {
     expect(ZenWake.plannedBeat, isNot(contains('link-check')));
 
     // The wake lets go only once the check is done too.
+    expect(check.isActive, isTrue);
+    check.cancel();
+    expect(check.isActive, isFalse);
     check.cancel();
     final Completer<void> slow = Completer<void>();
     final WakeTimer slowCheck = ZenWake.alongsideBeat(

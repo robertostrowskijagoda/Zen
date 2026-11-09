@@ -164,6 +164,34 @@ void main() {
     );
   });
 
+  test('an address is written one way: the longest run of zero groups, the '
+      'first of equal ones, as "::", a lone zero group kept', () {
+    for (final (String given, String canonical) in <(String, String)>[
+      ('200:0:0:0:0:0:0:1', '200::1'),
+      ('200:1:0:0:1:0:0:1', '200:1::1:0:0:1'),
+      ('200:0:0:1:0:0:0:1', '200:0:0:1::1'),
+      ('200:1:2:3:4:5:6:0', '200:1:2:3:4:5:6:0'),
+      ('200:1:2:3:4:5:0:0', '200:1:2:3:4:5::'),
+      ('200:0000:0:0::1', '200::1'),
+      // A group past FFFF is no address: left as it was typed.
+      ('200:10000::1', '200:10000::1'),
+    ]) {
+      expect(PeerShareCodec.normalizeAddress(given), canonical, reason: given);
+    }
+  });
+
+  test('what has a ":", "/" or "#" in it is not taken for a friend code', () {
+    expect(PeerShareCodec.normalizeManualInput('abcd'), 'ABCD');
+    // Taken as an address instead (an IPv6 one in capitals).
+    for (final String typed in <String>['ab/cd', 'ab#cd', 'ab:cd']) {
+      expect(
+        PeerShareCodec.normalizeManualInput(typed),
+        allOf(PeerShareCodec.normalizeAddress(typed), isNot('ABCD')),
+        reason: typed,
+      );
+    }
+  });
+
   test('normalizeAddress folds IPv6 case without touching fake ids', () {
     expect(
       PeerShareCodec.normalizeAddress('200:aaaa:bbbb:cccc:dddd:eeee:ffff:0001'),

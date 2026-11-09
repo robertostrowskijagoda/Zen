@@ -420,6 +420,18 @@ void main() {
     expect((await a.message(bob, original.id))!.reactions, isEmpty);
     expect((await b.message(alice, original.id))!.reactions, isEmpty);
 
+    // An edit to nothing (only spaces) or past 64 KiB changes nothing.
+    for (final String bad in <String>['   ', 'x' * (64 * 1024 + 1)]) {
+      await a.controller.editMessage(
+        conversationKey: bob,
+        messageId: original.id,
+        text: bad,
+      );
+      await mesh.settle();
+      expect((await a.message(bob, original.id))!.isEdited, isFalse);
+      expect((await b.message(alice, original.id))!.isEdited, isFalse);
+    }
+
     // Edit.
     await a.controller.editMessage(
       conversationKey: bob,

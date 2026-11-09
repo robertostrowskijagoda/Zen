@@ -202,6 +202,39 @@ void main() {
       expect(fresh.existsSync(), isTrue);
       expect(await store.read('state/x'), _bytes(10));
     });
+
+    test(
+      'the walk over the files runs at most once per its interval',
+      () async {
+        const Duration every = Duration(hours: 1);
+        final FileBinaryStore store = FileBinaryStore(
+          dir,
+          codec: BinaryCodec(compressor: _NoCompression()),
+        );
+        await store.write('state/x', _bytes(10));
+        File stale() => File('${dir.path}/state/x.zenbin.1.2.tmp')
+          ..writeAsBytesSync(<int>[1])
+          ..setLastModifiedSync(
+            DateTime.now().subtract(const Duration(hours: 3)),
+          );
+
+        stale();
+        expect(await store.sweepOrphanTemporaries(every: every), 1);
+        final File again = stale();
+        expect(
+          await store.sweepOrphanTemporaries(every: every),
+          0,
+          reason: 'walked a moment ago',
+        );
+        expect(again.existsSync(), isTrue);
+
+        File('${dir.path}${Platform.pathSeparator}.swept').setLastModifiedSync(
+          DateTime.now().subtract(const Duration(hours: 2)),
+        );
+        expect(await store.sweepOrphanTemporaries(every: every), 1);
+        expect(again.existsSync(), isFalse);
+      },
+    );
   });
 
   group('Windows data folder', () {

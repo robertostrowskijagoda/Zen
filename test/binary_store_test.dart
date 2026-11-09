@@ -68,6 +68,42 @@ void main() {
 
       await expectLater(() => codec.decode(encoded), throwsFormatException);
     });
+
+    test('a damaged header does not open', () async {
+      final BinaryCodec codec = BinaryCodec(compressor: RecordingCompressor());
+      final Uint8List encoded = await codec.encode(
+        Uint8List.fromList(<int>[9, 8, 7, 6, 5, 4]),
+      );
+      for (int index = 0; index < 4; index++) {
+        final Uint8List damaged = Uint8List.fromList(encoded);
+        damaged[index] ^= 0x20;
+        await expectLater(
+          () => codec.decode(damaged),
+          throwsFormatException,
+          reason: 'byte $index of the header',
+        );
+      }
+    });
+
+    test('a copy that does not match its checksum does not open', () async {
+      // Too small to compress: kept as it is, so only the checksum can
+      // tell a byte changed.
+      final BinaryCodec codec = BinaryCodec(compressor: RecordingCompressor());
+      final Uint8List encoded = await codec.encode(
+        Uint8List.fromList(<int>[1, 2, 3]),
+      );
+      expect(await codec.decode(encoded), <int>[1, 2, 3]);
+      final Uint8List body = Uint8List.fromList(encoded);
+      body[body.length - 1] ^= 0x01;
+      await expectLater(() => codec.decode(body), throwsFormatException);
+      final Uint8List sum = Uint8List.fromList(encoded);
+      sum[16] ^= 0x01;
+      await expectLater(
+        () => codec.decode(sum),
+        throwsFormatException,
+        reason: 'the checksum itself changed',
+      );
+    });
   });
 
   group('FileBinaryStore', () {
@@ -116,7 +152,10 @@ void main() {
           payload,
         );
 
-        expect(file.path, contains('%3a'));
+        // The ":" percent-encoded (Windows has its paths in lower case).
+        final String name = file.uri.pathSegments.last;
+        expect(name, contains(Platform.isWindows ? '%3a' : '%3A'));
+        expect(name, isNot(contains(':')));
         expect(
           await store.read('threads/200:1111:2222:3333:4444:5555:6666:7777'),
           payload,
@@ -166,10 +205,70 @@ void main() {
     });
 
     test('rejects traversal-style keys', () async {
-      await expectLater(
-        store.write('../escape', Uint8List.fromList(<int>[1])),
-        throwsFormatException,
+      for (final String key in <String>[
+        '../escape',
+        'a/../b',
+        'a/./b',
+        '.',
+        'a/..',
+      ]) {
+        await expectLater(
+          store.write(key, Uint8List.fromList(<int>[1])),
+          throwsFormatException,
+          reason: key,
+        );
+      }
+    });
+
+    test(
+      'a save that does not read back as written replaces nothing',
+      () async {
+        final Uint8List first = Uint8List.fromList(<int>[1, 2, 3, 4]);
+        await store.write('social/hub', first);
+        addTearDown(() => FileBinaryStore.debugWriteStep = null);
+        FileBinaryStore.debugWriteStep = (String step, File file) {
+          if (step == FileBinaryStore.writeSteps.first) {
+            // A disk that kept the length but changed a byte.
+            final Uint8List bytes = file.readAsBytesSync();
+            bytes[bytes.length - 1] ^= 0x01;
+            file.writeAsBytesSync(bytes, flush: true);
+          }
+        };
+
+        await expectLater(
+          store.write('social/hub', Uint8List.fromList(<int>[5, 6, 7, 8])),
+          throwsA(isA<FileSystemException>()),
+        );
+        FileBinaryStore.debugWriteStep = null;
+
+        expect(await store.read('social/hub'), first);
+        expect(
+          tempDirectory
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((File file) => file.path.endsWith('.tmp')),
+          isEmpty,
+          reason: 'the bad copy is not left behind',
+        );
+      },
+    );
+
+    test('a key is there while any of its copies is', () async {
+      expect(await store.exists('social/hub'), isFalse);
+      final File file = await store.write(
+        'social/hub',
+        Uint8List.fromList(<int>[1, 2, 3]),
       );
+      expect(await store.exists('social/hub'), isTrue);
+      await store.write('social/hub', Uint8List.fromList(<int>[4, 5, 6]));
+      await store.write('social/hub', Uint8List.fromList(<int>[7, 8, 9]));
+      await file.delete();
+      expect(await store.exists('social/hub'), isTrue, reason: '.bak');
+      await File('${file.path}.bak').delete();
+      expect(await File('${file.path}.bak2').exists(), isTrue);
+      expect(await store.exists('social/hub'), isTrue, reason: '.bak2');
+      await store.delete('social/hub');
+      expect(await store.exists('social/hub'), isFalse);
     });
 
     test('can encrypt stored payloads behind the security lock', () async {

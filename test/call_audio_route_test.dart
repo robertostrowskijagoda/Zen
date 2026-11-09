@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/features/calls/call_audio_route.dart';
 
 /// The phone's sound as the tests see it: what was asked, in order.
@@ -293,5 +294,18 @@ void main() {
         CallAudioOutput.earpiece,
       );
     });
+  });
+
+  test('only outputs are taken for outputs: a Bluetooth microphone alone '
+      'is no headset', () {
+    final List<MediaDeviceInfo> devices = <MediaDeviceInfo>[
+      MediaDeviceInfo(kind: 'audioinput', label: 'BT', deviceId: 'bluetooth'),
+      MediaDeviceInfo(kind: 'audiooutput', label: 'Ear', deviceId: 'earpiece'),
+      MediaDeviceInfo(kind: 'videoinput', label: 'Cam', deviceId: '1'),
+      MediaDeviceInfo(label: 'Unknown', deviceId: 'wired-headset'),
+      MediaDeviceInfo(kind: 'audiooutput', label: 'Spk', deviceId: 'speaker'),
+    ];
+    expect(callAudioOutputIds(devices), <String>['earpiece', 'speaker']);
+    expect(callHeadsetOutput(callAudioOutputIds(devices)), isNull);
   });
 }

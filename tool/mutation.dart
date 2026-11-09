@@ -119,8 +119,16 @@ Future<void> main(List<String> args) async {
     }
     final List<String> tests = (t['tests'] as List<dynamic>).cast<String>();
     stdout.writeln('== $file (${tests.join(', ')})');
-    if (!await _testsPass(tests, timeout)) {
+    final List<String> said = <String>[];
+    if (!await _testsPass(tests, timeout, output: said)) {
       stdout.writeln('   the tests fail on the unchanged file: skipped');
+      // What failed, or the run says nothing about why (a test that
+      // passes on Windows may fail on the Linux runner).
+      for (final String line in said.skip(
+        said.length > _failureLines ? said.length - _failureLines : 0,
+      )) {
+        stdout.writeln('   | $line');
+      }
       failedBaseline++;
       report.writeln('| `$file` | tests fail unchanged | — |');
       continue;
@@ -240,14 +248,47 @@ List<bool> _stringMask(String code) {
 /// with it. Stopped like this, the change counts as noticed.
 const int _testMemoryLimitMb = 2048;
 
-Future<bool> _testsPass(List<String> tests, int timeout) async {
+/// How many of the last lines of a failed run on the unchanged file are
+/// shown.
+const int _failureLines = 120;
+
+/// Whether [tests] pass; what they print goes to [output] when given
+/// (the last [_failureLines] lines kept).
+Future<bool> _testsPass(
+  List<String> tests,
+  int timeout, {
+  List<String>? output,
+}) async {
   final Process p = await Process.start(
     Platform.isWindows ? 'flutter.bat' : 'flutter',
     <String>['test', '--no-pub', '--reporter', 'failures-only', ...tests],
     runInShell: Platform.isWindows,
   );
-  unawaited(p.stdout.drain<void>());
-  unawaited(p.stderr.drain<void>());
+  void keep(String line) {
+    // The app's own log lines ([ZEN][WARN] …) would push the failure out.
+    if (line.startsWith('[ZEN]')) {
+      return;
+    }
+    output!.add(line);
+    if (output.length > _failureLines) {
+      output.removeAt(0);
+    }
+  }
+
+  final Future<void> out = output == null
+      ? p.stdout.drain<void>()
+      : p.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .forEach(keep);
+  final Future<void> err = output == null
+      ? p.stderr.drain<void>()
+      : p.stderr
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .forEach(keep);
+  unawaited(out);
+  unawaited(err);
   bool looking = false;
   final Timer watch = Timer.periodic(const Duration(seconds: 2), (_) async {
     if (looking) {

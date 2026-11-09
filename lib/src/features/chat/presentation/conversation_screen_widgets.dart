@@ -103,7 +103,7 @@ class _DaySeparator extends StatelessWidget {
 }
 
 class _TypingBubble extends StatelessWidget {
-  const _TypingBubble({super.key, required this.name});
+  const _TypingBubble({required this.name});
 
   final String name;
 

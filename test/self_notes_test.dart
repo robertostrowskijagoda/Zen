@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -101,4 +102,33 @@ void main() {
     expect(notes.notes.first.text, 'n1');
     expect(notes.notes, hasLength(kMaxSelfNotes));
   });
+
+  test('the stored notes are read once, not again for every note', () async {
+    final _CountingDisk disk = _CountingDisk();
+    final SelfNotesService notes = SelfNotesService(disk: disk);
+    await notes.add('mleko');
+    await notes.add('chleb');
+    final SelfNote? third = await notes.add('masło');
+    await notes.delete(third!.id);
+    expect(disk.reads, 1);
+    expect(notes.notes.map((SelfNote n) => n.text), <String>['mleko', 'chleb']);
+  });
+}
+
+/// A disk that counts its reads.
+final class _CountingDisk implements LedgerDisk {
+  final MemoryLedgerDisk _inner = MemoryLedgerDisk();
+  int reads = 0;
+
+  @override
+  Future<Uint8List?> read(String key) {
+    reads++;
+    return _inner.read(key);
+  }
+
+  @override
+  Future<void> write(String key, Uint8List data) => _inner.write(key, data);
+
+  @override
+  Future<void> delete(String key) => _inner.delete(key);
 }
