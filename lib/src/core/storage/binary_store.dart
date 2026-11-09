@@ -1136,11 +1136,41 @@ final class _FileWriteLock {
     }
   }
 
+  /// Windows refuses to delete a file someone has open, and another
+  /// isolate waiting for this lock reads it now and then to see whose it
+  /// is: a release that met such a read is tried again a moment later (a
+  /// read takes well under a millisecond). Given up, the lock stayed
+  /// behind and that isolate's save waited [waitAtMost] for it.
+  static const List<Duration> releaseRetries = <Duration>[
+    Duration(milliseconds: 1),
+    Duration(milliseconds: 5),
+    Duration(milliseconds: 20),
+    Duration(milliseconds: 50),
+    Duration(milliseconds: 100),
+  ];
+
   Future<void> release() async {
+    for (int attempt = 0; ; attempt++) {
+      try {
+        await _file.delete();
+        return;
+      } on FileSystemException {
+        if (attempt >= releaseRetries.length || !await _stillOurs()) {
+          // Gone, or taken over as stale meanwhile: nothing to give back.
+          return;
+        }
+        await Future<void>.delayed(releaseRetries[attempt]);
+      }
+    }
+  }
+
+  /// Whether the lock file is there and still names this isolate.
+  Future<bool> _stillOurs() async {
     try {
-      await _file.delete();
+      return (await _file.readAsString()).trim() == _owner;
     } on FileSystemException {
-      // Taken over as stale meanwhile; nothing to give back.
+      // Being read by someone else right now (Windows): still there.
+      return _file.existsSync();
     }
   }
 }
