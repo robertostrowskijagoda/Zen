@@ -150,7 +150,8 @@ const (
 	pqChallengeRefresh      = 2 * time.Hour
 	pqChallengeRefreshRetry = time.Minute
 	// KEM operations other nodes can make this node do (opening sessions
-	// and challenges, giving challenges), all peers together.
+	// and challenges, giving challenges), all known peers together (see
+	// knownLocked) ...
 	pqForeignKEMPerSecond = 200
 	pqForeignKEMBurst     = 400
 	// A phone does a fifth of that: each operation keeps it awake, so a
@@ -158,6 +159,19 @@ const (
 	// Friends opening sessions after a network change fit the burst.
 	pqPhoneForeignKEMPerSecond = 40
 	pqPhoneForeignKEMBurst     = 200
+	// ... and all other peers together: addresses cost nothing to make, so
+	// strangers asking over and over spend this budget, never the known
+	// peers'. A challenge given from it pays for the first session opened
+	// with it as well, so a first contact that got one gets its session.
+	pqStrangerKEMPerSecond      = 20
+	pqStrangerKEMBurst          = 40
+	pqPhoneStrangerKEMPerSecond = 4
+	pqPhoneStrangerKEMBurst     = 20
+	// Answers to frames of sessions from addresses this node has no peer
+	// for (it restarted: "ask for my record"), all of them together; no
+	// peer is made for such a frame.
+	pqUnknownRepliesPerSecond = 20
+	pqUnknownRepliesBurst     = 40
 	// Addresses whose device key is pinned. New pins from records come at
 	// most pqNewPinsPerMinute (strangers' addresses cost nothing to make);
 	// when the pins are full, the one seen longest ago among those no
@@ -179,6 +193,8 @@ type pqPin struct {
 	// More than a record backs it: a session with the device opened here,
 	// or the app gave it (kept from an earlier run, or vouched for).
 	firm bool
+	// The app vouched for it (a hybrid-signed device record or hello).
+	vouched bool
 }
 
 // maxSignalWireBytes is the longest signal text on the wire: the largest
@@ -211,6 +227,9 @@ type pqChallenge struct {
 	id     pqChallengeID
 	secret []byte
 	at     time.Time
+	// Given from the strangers' budget, which paid for the first session
+	// opened with it too (issued challenges only).
+	prepaid bool
 }
 
 type pqSendSession struct {
@@ -284,6 +303,8 @@ type pqPeer struct {
 	sessionsMinute time.Time
 	sessionsCount  int
 	lastUsed       time.Time
+	// This node made a session to the peer's key (the app wrote to it).
+	wrote bool
 }
 
 // pqBucket is a token bucket.
@@ -293,16 +314,21 @@ type pqBucket struct {
 }
 
 func (b *pqBucket) allow(now time.Time, rate, burst float64) bool {
+	return b.take(now, rate, burst, 1)
+}
+
+// take takes n tokens at once, or none.
+func (b *pqBucket) take(now time.Time, rate, burst, n float64) bool {
 	if b.at.IsZero() {
 		b.tokens = burst
 	} else if elapsed := now.Sub(b.at).Seconds(); elapsed > 0 {
 		b.tokens = min(burst, b.tokens+elapsed*rate)
 	}
 	b.at = now
-	if b.tokens < 1 {
+	if b.tokens < n {
 		return false
 	}
-	b.tokens--
+	b.tokens -= n
 	return true
 }
 
@@ -326,6 +352,11 @@ type pqEndpoint struct {
 	pendingBytes int
 	sentBytes    int
 	foreignKEM   pqBucket
+	strangerKEM  pqBucket
+	// Answers to frames from addresses with no peer (open).
+	unknownReplies pqBucket
+	// The node runs on a phone (smaller KEM budgets).
+	phone bool
 	// Sends a signal text (already sealed, or a control message) to a peer.
 	write func(destination net.IP, wire []byte) error
 	// Tells the mesh writer a peer holds no session of this node's (it
@@ -364,6 +395,7 @@ func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, 
 		peers:       make(map[string]*pqPeer),
 		pins:        make(map[string]*pqPin),
 		hints:       make(map[string]*pqPin),
+		phone:       isPhoneOS(),
 		write:       write,
 		now:         time.Now,
 		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
@@ -456,11 +488,31 @@ func (e *pqEndpoint) evictPeerLocked() {
 	}
 }
 
-func (e *pqEndpoint) allowForeignKEMLocked(now time.Time) bool {
-	if isPhoneOS() {
-		return e.foreignKEM.allow(now, pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst)
+// knownLocked tells whether peer's KEM work comes from the known peers'
+// budget: this node writes to it (holds frames for it, or made a session to
+// it), or the app vouched for its key. Neither costs a stranger less than
+// a friend's word or this node's own choice to talk to it.
+func (e *pqEndpoint) knownLocked(peer *pqPeer) bool {
+	if len(peer.pending) > 0 || peer.wrote {
+		return true
 	}
-	return e.foreignKEM.allow(now, pqForeignKEMPerSecond, pqForeignKEMBurst)
+	pin := e.pins[peer.ip.String()]
+	return pin != nil && pin.vouched && peer.publicKey != nil && pin.fingerprint == peer.fingerprint
+}
+
+// allowForeignKEMLocked takes n KEM operations peer makes this node do from
+// the budget it belongs to.
+func (e *pqEndpoint) allowForeignKEMLocked(peer *pqPeer, n float64, now time.Time) bool {
+	switch known := e.knownLocked(peer); {
+	case known && e.phone:
+		return e.foreignKEM.take(now, pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst, n)
+	case known:
+		return e.foreignKEM.take(now, pqForeignKEMPerSecond, pqForeignKEMBurst, n)
+	case e.phone:
+		return e.strangerKEM.take(now, pqPhoneStrangerKEMPerSecond, pqPhoneStrangerKEMBurst, n)
+	default:
+		return e.strangerKEM.take(now, pqStrangerKEMPerSecond, pqStrangerKEMBurst, n)
+	}
 }
 
 // openingFrame appends the opening part (challenge id, ciphertext).
@@ -523,7 +575,16 @@ func pqUnknownFrame(id pqSessionID, want bool, challenge *pqChallengeID, ciphert
 // without the peer's key or over the KEM budget.
 func (e *pqEndpoint) issueChallengeLocked(peer *pqPeer, now time.Time) (pqChallengeID, []byte, bool) {
 	var id pqChallengeID
-	if peer.publicKey == nil || !e.allowForeignKEMLocked(now) {
+	if peer.publicKey == nil {
+		return id, nil, false
+	}
+	// A stranger's challenge pays for its first session as well.
+	prepaid := !e.knownLocked(peer)
+	cost := 1.0
+	if prepaid {
+		cost = 2
+	}
+	if !e.allowForeignKEMLocked(peer, cost, now) {
 		return id, nil, false
 	}
 	if _, err := rand.Read(id[:]); err != nil {
@@ -542,7 +603,7 @@ func (e *pqEndpoint) issueChallengeLocked(peer *pqPeer, now time.Time) (pqChalle
 	if len(kept) >= pqChallengesKept {
 		kept = kept[len(kept)-pqChallengesKept+1:]
 	}
-	peer.issued = append(kept, pqChallenge{id: id, secret: secret, at: now})
+	peer.issued = append(kept, pqChallenge{id: id, secret: secret, at: now, prepaid: prepaid})
 	return id, ciphertext, true
 }
 
@@ -559,7 +620,7 @@ func (peer *pqPeer) issuedChallenge(id pqChallengeID, now time.Time) *pqChalleng
 // takeChallengeLocked opens a challenge source gave this node and keeps it
 // as the newest.
 func (e *pqEndpoint) takeChallengeLocked(peer *pqPeer, opening []byte, now time.Time) {
-	if len(opening) != pqOpeningSize || !peer.allowNewSession(now) || !e.allowForeignKEMLocked(now) {
+	if len(opening) != pqOpeningSize || !peer.allowNewSession(now) || !e.allowForeignKEMLocked(peer, 1, now) {
 		return
 	}
 	var id pqChallengeID
@@ -629,6 +690,7 @@ func (e *pqEndpoint) sendSessionLocked(peer *pqPeer, now time.Time) (*pqSendSess
 		created:    now,
 	}
 	peer.send = session
+	peer.wrote = true
 	return session, nil
 }
 
@@ -1136,6 +1198,7 @@ func (e *pqEndpoint) resetPeerKeyLocked(peer *pqPeer) {
 	peer.publicKey = nil
 	peer.fingerprint = [sha256.Size]byte{}
 	peer.send = nil
+	peer.wrote = false
 	peer.receive = nil
 	peer.issued = nil
 	peer.challenge = nil
@@ -1340,6 +1403,20 @@ func (e *pqEndpoint) open(source net.IP, wire []byte, kind byte) ([]byte, [sha25
 
 	e.mu.Lock()
 	now := e.now()
+	if e.peers[source.String()] == nil && e.pins[source.String()] == nil {
+		// Nothing is known of the address: no session of its can open, and
+		// no peer is made for it (that would push out a quiet friend's).
+		// It is asked for its record, as after a restart.
+		var reply []byte
+		if e.unknownReplies.allow(now, pqUnknownRepliesPerSecond, pqUnknownRepliesBurst) {
+			reply = pqUnknownFrame(id, true, nil, nil)
+		}
+		e.mu.Unlock()
+		if reply != nil {
+			_ = e.write(source, reply)
+		}
+		return nil, none, false
+	}
 	peer := e.peerLocked(source, now)
 	session := peer.receiveSession(id)
 	if session == nil {
@@ -1399,7 +1476,12 @@ func (e *pqEndpoint) openNewLocked(peer *pqPeer, id pqSessionID, opening []byte,
 		// the sender it claims): nobody gets a session without one.
 		return nil, e.unknownReplyLocked(peer, id, now), false
 	}
-	if !peer.allowNewSession(now) || !e.allowForeignKEMLocked(now) {
+	if !peer.allowNewSession(now) {
+		return nil, nil, false
+	}
+	if challenge.prepaid {
+		challenge.prepaid = false
+	} else if !e.allowForeignKEMLocked(peer, 1, now) {
 		return nil, nil, false
 	}
 	secret, err := pqDecapsulate(e.key, opening[pqChallengeIDSize:], pqSessionInfoFor(peer.ip, e.local, id))
@@ -1582,7 +1664,8 @@ func (e *pqEndpoint) importPins(pins map[string]string, keep bool) (int, map[str
 			e.makeRoomForPinLocked(true)
 		}
 		delete(e.hints, key)
-		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: now, firm: true}
+		vouched := keep || (ok && existing.vouched && existing.fingerprint == fingerprint)
+		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: now, firm: true, vouched: vouched}
 		if peer := e.peers[key]; peer != nil && peer.publicKey != nil && peer.fingerprint != fingerprint {
 			e.resetPeerKeyLocked(peer)
 		}

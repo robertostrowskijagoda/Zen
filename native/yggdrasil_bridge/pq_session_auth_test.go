@@ -296,6 +296,92 @@ func TestPQBucketLimitsForeignKEMWork(t *testing.T) {
 	}
 }
 
+// Strangers asking for keys from addresses made for it, each as often as
+// it may, spend a budget of their own: the friends this node writes to and
+// the ones the app vouched for still start their sessions. Data frames
+// from addresses nothing is known of leave no trace. On a computer and on
+// a phone.
+func TestPQStrangersAskingForKeysNeverHoldUpAFriendsSession(t *testing.T) {
+	for _, phone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("phone %v", phone), func(t *testing.T) {
+			network := newPQTestNet(t)
+			victim, victimIP := network.add(1)
+			victim.phone = phone
+			friend, friendIP := network.add(2)
+			vouched, vouchedIP := network.add(3)
+			victim.importPins(map[string]string{vouchedIP.String(): vouched.ownFingerprint()}, true)
+			rate, burst := pqForeignKEMPerSecond, pqForeignKEMBurst
+			if phone {
+				rate, burst = pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst
+			}
+			devicePublic := pqPublicKeyOfEndpoint(t, victim)
+			type stranger struct {
+				ip    net.IP
+				frame []byte
+			}
+			strangers := make([]stranger, burst)
+			for index := range strangers {
+				ip, frame := pqStrangerRecord(t, devicePublic)
+				frame[len(pqMagic)+1] = pqFlagWant
+				strangers[index] = stranger{ip: ip, frame: frame}
+			}
+			ask := func(n int) {
+				for _, s := range strangers[:n] {
+					victim.receive(s.ip, s.frame)
+				}
+				network.queue = nil // the answers go to the strangers
+			}
+
+			if !talkBothWays(network, friend, friendIP, victim, victimIP) {
+				t.Fatal("the friend and the victim must talk")
+			}
+			mustSend(t, vouched, victimIP, "first")
+			network.pump()
+			if got := network.take(victimIP); len(got) != 1 {
+				t.Fatalf("victim got %q from the vouched one", got)
+			}
+			peers := len(victim.peers)
+
+			// An hour later the sessions rotate while strangers ask, each
+			// once a second, as many as would use up the whole budget.
+			network.advance(time.Hour+time.Second, nil)
+			ask(burst)
+			fromFriend, fromVouched := 0, 0
+			for range 30 {
+				network.clock = network.clock.Add(time.Second)
+				ask(rate)
+				mustSend(t, friend, victimIP, "after")
+				network.pump()
+				fromFriend += len(network.take(victimIP))
+				mustSend(t, vouched, victimIP, "after")
+				network.pump()
+				fromVouched += len(network.take(victimIP))
+			}
+			if fromFriend != 30 || fromVouched != 30 {
+				t.Fatalf("delivered %d of the friend's and %d of the vouched one's 30 frames", fromFriend, fromVouched)
+			}
+
+			// Data frames from addresses with no record: no peer is made for
+			// them, so none of the friends' is pushed out.
+			junk := make([]byte, pqDataHeaderSize+32)
+			copy(junk, pqMagic)
+			junk[len(pqMagic)] = pqKindData
+			for index := range pqMaxPeers + 100 {
+				ip := make(net.IP, net.IPv6len)
+				ip[0] = 0x02
+				ip[1] = 0x77
+				ip[14], ip[15] = byte(index>>8), byte(index)
+				victim.receive(ip, junk)
+			}
+			network.queue = nil
+			if len(victim.peers) != peers+len(strangers) ||
+				victim.peers[friendIP.String()] == nil || victim.peers[vouchedIP.String()] == nil {
+				t.Fatalf("%d peers, want %d", len(victim.peers), peers+len(strangers))
+			}
+		})
+	}
+}
+
 func TestPQPinsComeSlowlyAndTheOldestMakesRoom(t *testing.T) {
 	network := newPQTestNet(t)
 	b, bIP := network.add(2)
@@ -309,14 +395,15 @@ func TestPQPinsComeSlowlyAndTheOldestMakesRoom(t *testing.T) {
 	if len(b.pins) != pqNewPinsPerMinute {
 		t.Fatalf("%d pins after a burst, want %d", len(b.pins), pqNewPinsPerMinute)
 	}
-	// Strangers who go as far as a session each are pinned no faster.
+	// Strangers who go as far as a session each are pinned no faster
+	// (and no more of them get one than their KEM budget allows).
 	for fill := byte(10); fill < 10+pqNewPinsPerMinute+20; fill++ {
 		stranger, _ := network.add(fill)
 		_ = stranger.send(bIP, []byte("x"))
 	}
 	network.pump()
-	if len(b.pins) != 2*pqNewPinsPerMinute {
-		t.Fatalf("%d pins after a burst of sessions, want %d", len(b.pins), 2*pqNewPinsPerMinute)
+	if sessions := len(network.take(bIP)); len(b.pins) != pqNewPinsPerMinute+min(sessions, pqNewPinsPerMinute) {
+		t.Fatalf("%d pins after %d sessions of strangers", len(b.pins), sessions)
 	}
 
 	// Full: the pin seen longest ago goes, the others stay.
