@@ -53,7 +53,9 @@ import (
 // Device keys are pinned per address on first sight (pins): a record with
 // another key for a pinned address is refused, so a broken node key cannot
 // swap in a key of its own either. The app keeps the pins across restarts
-// (YggPqPinsJson / YggPqSetPinsJson).
+// (YggPqPinsJson / YggPqSetPinsJson) and pins keys a hybrid-signed device
+// record or hello names; keys a friend's friend list names are only hints
+// (importHints), which the device's own record confirms or overrules.
 //
 // Wire (signals: the signal text before fragmentation; media: the payload
 // of a relay packet):
@@ -162,6 +164,10 @@ const (
 	// them takes hours and evicts nobody this node talks to meanwhile.
 	pqMaxPins          = 16384
 	pqNewPinsPerMinute = 120
+	// Device keys someone else names for an address (hints): a friend's
+	// friend list, or a vouch that found the pins full. At most this many;
+	// a new one makes room by dropping the hint given longest ago.
+	pqMaxHints = 8192
 )
 
 // pqPin is the device key fingerprint pinned for an address.
@@ -304,7 +310,10 @@ type pqEndpoint struct {
 	fingerprint [sha256.Size]byte
 	peers       map[string]*pqPeer
 	// Device key fingerprints by address (see pins above).
-	pins         map[string]*pqPin
+	pins map[string]*pqPin
+	// Device key fingerprints others named for addresses not pinned (see
+	// importHints): never a pin until the device's own record agrees.
+	hints        map[string]*pqPin
 	newPins      pqBucket
 	pendingBytes int
 	sentBytes    int
@@ -346,6 +355,7 @@ func newPQEndpoint(nodeKey ed25519.PrivateKey, local net.IP, write func(net.IP, 
 		fingerprint: sha256.Sum256(publicKey),
 		peers:       make(map[string]*pqPeer),
 		pins:        make(map[string]*pqPin),
+		hints:       make(map[string]*pqPin),
 		write:       write,
 		now:         time.Now,
 		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
@@ -1024,16 +1034,26 @@ func (e *pqEndpoint) receiveMedia(source net.IP, wire []byte) ([]byte, bool) {
 }
 
 // acceptRecordLocked takes a verified record of source unless its address
-// is pinned to another key; a key seen for the first time is pinned.
+// is pinned to another key; a key seen for the first time is pinned. A
+// hint for the address goes either way: the record of the device itself
+// decides, and a hint it confirms is pinned at once.
 func (e *pqEndpoint) acceptRecordLocked(source net.IP, publicKey []byte, now time.Time) (*pqPeer, bool) {
 	fingerprint := sha256.Sum256(publicKey)
 	address := source.String()
+	hint := e.hints[address]
+	delete(e.hints, address)
 	if pinned, ok := e.pins[address]; ok {
 		if pinned.fingerprint != fingerprint {
 			return nil, false
 		}
 		pinned.seen = now
+	} else if hint != nil && hint.fingerprint == fingerprint {
+		e.makeRoomForPinLocked()
+		e.pins[address] = &pqPin{fingerprint: fingerprint, seen: now}
 	} else if e.newPins.allow(now, float64(pqNewPinsPerMinute)/60, pqNewPinsPerMinute) {
+		if hint != nil {
+			debugf("[ZEN-GO] pq: %s signed another device key than it was named with\n", source)
+		}
 		e.makeRoomForPinLocked()
 		e.pins[address] = &pqPin{fingerprint: fingerprint, seen: now}
 	}
@@ -1465,42 +1485,107 @@ func (e *pqEndpoint) pinsSnapshot() map[string]string {
 	return pins
 }
 
+// pqPinEntry reads one entry the app hands over: a mesh node address and a
+// device key fingerprint (hex).
+func pqPinEntry(address, value string) (string, [sha256.Size]byte, bool) {
+	var fingerprint [sha256.Size]byte
+	ip := net.ParseIP(address)
+	decoded, err := hex.DecodeString(value)
+	if ip == nil || ip.To4() != nil || !isYggNodeAddress(ip) || err != nil || len(decoded) != sha256.Size {
+		return "", fingerprint, false
+	}
+	copy(fingerprint[:], decoded)
+	return ip.String(), fingerprint, true
+}
+
 // importPins adds pins: kept from an earlier run, or vouched for by the
-// app (a friend's device key from a hybrid-signed record or hello). They
-// win over a key this run merely saw. With keep, a pin already there that
+// app (a device key from a hybrid-signed record or hello). They win over
+// a key this run merely saw. With keep (a vouch), a pin already there that
 // names another key stays, and the address is returned among the
 // conflicts (address -> the pinned fingerprint): two sources disagree
-// about who is at that address, and the app warns. Malformed entries are
-// skipped; the count taken is returned.
+// about who is at that address, and the app warns; a vouch never pushes
+// out another pin either: with the pins full it is kept as a hint.
+// Malformed entries are skipped; the count taken is returned.
 func (e *pqEndpoint) importPins(pins map[string]string, keep bool) (int, map[string]string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	now := e.now()
 	taken := 0
 	conflicts := map[string]string{}
 	for address, value := range pins {
-		ip := net.ParseIP(address)
-		decoded, err := hex.DecodeString(value)
-		if ip == nil || ip.To4() != nil || !isYggNodeAddress(ip) || err != nil || len(decoded) != sha256.Size {
+		key, fingerprint, valid := pqPinEntry(address, value)
+		if !valid {
 			continue
 		}
-		var fingerprint [sha256.Size]byte
-		copy(fingerprint[:], decoded)
-		key := ip.String()
 		existing, ok := e.pins[key]
 		if ok && keep && existing.fingerprint != fingerprint {
 			conflicts[key] = hex.EncodeToString(existing.fingerprint[:])
 			continue
 		}
+		if !ok && keep && len(e.pins) >= pqMaxPins {
+			e.addHintLocked(key, fingerprint, now)
+			taken++
+			continue
+		}
 		if !ok {
 			e.makeRoomForPinLocked()
 		}
-		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: e.now()}
+		delete(e.hints, key)
+		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: now}
 		if peer := e.peers[key]; peer != nil && peer.publicKey != nil && peer.fingerprint != fingerprint {
 			e.resetPeerKeyLocked(peer)
 		}
 		taken++
 	}
 	return taken, conflicts
+}
+
+// importHints keeps device keys someone else names for addresses (a
+// friend's friend list): hearsay, so a hint never moves a pin, never ends a
+// session, and becomes a pin only when the record of the device at that
+// address names the same key (acceptRecordLocked). A hint for a pinned
+// address that names another key is returned among the conflicts, as in
+// importPins. Malformed entries are skipped; the count kept is returned.
+func (e *pqEndpoint) importHints(hints map[string]string) (int, map[string]string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := e.now()
+	taken := 0
+	conflicts := map[string]string{}
+	for address, value := range hints {
+		key, fingerprint, valid := pqPinEntry(address, value)
+		if !valid {
+			continue
+		}
+		if pinned, ok := e.pins[key]; ok {
+			if pinned.fingerprint != fingerprint {
+				conflicts[key] = hex.EncodeToString(pinned.fingerprint[:])
+			}
+			continue
+		}
+		e.addHintLocked(key, fingerprint, now)
+		taken++
+	}
+	return taken, conflicts
+}
+
+// addHintLocked keeps a hint for address, dropping the one given longest
+// ago when the hints are full.
+func (e *pqEndpoint) addHintLocked(address string, fingerprint [sha256.Size]byte, now time.Time) {
+	if e.hints == nil {
+		e.hints = make(map[string]*pqPin)
+	}
+	if _, ok := e.hints[address]; !ok && len(e.hints) >= pqMaxHints {
+		var oldestKey string
+		var oldest *pqPin
+		for key, hint := range e.hints {
+			if oldest == nil || hint.seen.Before(oldest.seen) {
+				oldestKey, oldest = key, hint
+			}
+		}
+		delete(e.hints, oldestKey)
+	}
+	e.hints[address] = &pqPin{fingerprint: fingerprint, seen: now}
 }
 
 // pqReplay remembers which of the last pqReplayWindow counters came.

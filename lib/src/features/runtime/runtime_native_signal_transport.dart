@@ -309,6 +309,7 @@ final class RuntimeNodeSession {
     this.localLinks,
     this.sessionKey = '',
     this.pinSessionKeys,
+    this.hintSessionKeys,
     this.setOnScreen,
   });
 
@@ -351,6 +352,12 @@ final class RuntimeNodeSession {
   /// the pinned fingerprint).
   final Map<String, String> Function(Map<String, String> pins, bool keep)?
   pinSessionKeys;
+
+  /// Hands the bridge device keys (address → fingerprint) that only someone
+  /// else names (a friend's friend list): hints, which never move a pin.
+  /// Returns the pins they contradict (address → the pinned fingerprint).
+  final Map<String, String> Function(Map<String, String> hints)?
+  hintSessionKeys;
 
   /// Tells the bridge whether the app that runs the node is on screen
   /// (node_identity.go).
@@ -790,10 +797,15 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   final Set<String> _extraPeers = <String>{};
 
   /// Device keys others vouched for (address → fingerprint): friends'
-  /// hybrid-signed device records and hellos, friends' friend lists. Kept
-  /// so they are pinned again after the node restarts.
+  /// hybrid-signed device records and hellos. Kept so they are pinned
+  /// again after the node restarts.
   final Map<String, String> _vouchedKeys = <String, String>{};
   static const int _maxVouchedKeys = 20000;
+
+  /// Device keys only friends' friend lists name, kept the same way and
+  /// handed to the bridge as hints; the oldest go first.
+  final Map<String, String> _hintedKeys = <String, String>{};
+  static const int _maxHintedKeys = 8192;
   final StreamController<String> _keyConflicts =
       StreamController<String>.broadcast();
   final Set<String> _reportedConflicts = <String>{};
@@ -807,13 +819,22 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// once per run.
   Stream<String> get sessionKeyConflicts => _keyConflicts.stream;
 
-  /// Pins [keys] (address → device key fingerprint) in the bridge before
-  /// any contact, so someone holding only an address's broken node key is
-  /// refused even on first contact. With [force] (a hybrid-signed hello
-  /// of a known friend contradicts the session) the key replaces whatever
-  /// was pinned; otherwise a different pin stays and is reported on
-  /// [sessionKeyConflicts]. Safe to call before the node is up.
-  void vouchSessionKeys(Map<String, String> keys, {bool force = false}) {
+  /// Hands [keys] (address → device key fingerprint) to the bridge. Who
+  /// says so decides how far they count:
+  ///
+  /// * [force] left out: only someone's word, a friend's friend list. The
+  ///   keys are hints: they never move a pin or end a session, and the
+  ///   device's own signed record decides on first contact.
+  /// * [force] false: a hybrid-signed device record or hello names them.
+  ///   They are pinned before any contact, so someone holding only an
+  ///   address's broken node key is refused even on first contact; a
+  ///   different pin already there stays.
+  /// * [force] true: a hybrid-signed hello of a known friend contradicts
+  ///   the session; the key replaces whatever was pinned.
+  ///
+  /// A key that contradicts a pin is reported on [sessionKeyConflicts].
+  /// Safe to call before the node is up.
+  void vouchSessionKeys(Map<String, String> keys, {bool? force}) {
     final Map<String, String> pins = <String, String>{};
     keys.forEach((String address, String key) {
       final String normalized = PeerShareCodec.normalizeAddress(address);
@@ -821,14 +842,32 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       if (normalized.isEmpty || fingerprint.length != 64) {
         return;
       }
+      if (force == null) {
+        if (_vouchedKeys.containsKey(normalized)) {
+          return;
+        }
+        _hintedKeys.remove(normalized);
+        if (_hintedKeys.length >= _maxHintedKeys) {
+          _hintedKeys.remove(_hintedKeys.keys.first);
+        }
+        _hintedKeys[normalized] = fingerprint;
+        pins[normalized] = fingerprint;
+        return;
+      }
       if (!_vouchedKeys.containsKey(normalized) &&
           _vouchedKeys.length >= _maxVouchedKeys) {
         return;
       }
+      _hintedKeys.remove(normalized);
       _vouchedKeys[normalized] = fingerprint;
       pins[normalized] = fingerprint;
     });
-    if (pins.isNotEmpty) {
+    if (pins.isEmpty) {
+      return;
+    }
+    if (force == null) {
+      _hintNow(pins);
+    } else {
       _pinNow(pins, keep: !force);
     }
   }
@@ -840,14 +879,31 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       return;
     }
     try {
-      for (final String address in pin(pins, keep).keys) {
-        final String normalized = PeerShareCodec.normalizeAddress(address);
-        if (_reportedConflicts.add(normalized) && !_keyConflicts.isClosed) {
-          _keyConflicts.add(normalized);
-        }
-      }
+      _reportConflicts(pin(pins, keep).keys);
     } on Object catch (error) {
       logZenWarning('Device keys were not pinned: $error');
+    }
+  }
+
+  void _hintNow(Map<String, String> hints) {
+    final Map<String, String> Function(Map<String, String>)? hint =
+        _session?.hintSessionKeys;
+    if (hint == null) {
+      return;
+    }
+    try {
+      _reportConflicts(hint(hints).keys);
+    } on Object catch (error) {
+      logZenWarning('Device key hints were not handed over: $error');
+    }
+  }
+
+  void _reportConflicts(Iterable<String> addresses) {
+    for (final String address in addresses) {
+      final String normalized = PeerShareCodec.normalizeAddress(address);
+      if (_reportedConflicts.add(normalized) && !_keyConflicts.isClosed) {
+        _keyConflicts.add(normalized);
+      }
     }
   }
 
@@ -1432,6 +1488,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         if (_vouchedKeys.isNotEmpty) {
           _pinNow(Map<String, String>.of(_vouchedKeys), keep: true);
         }
+        if (_hintedKeys.isNotEmpty) {
+          _hintNow(Map<String, String>.of(_hintedKeys));
+        }
         _applyDoorNow();
         _applyMailboxDoorsNow();
         _applyLocalLinksNow();
@@ -1850,6 +1909,12 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
             jsonEncode(<String, Object?>{'pins': pins, 'keep': keep}),
           ),
         ),
+    hintSessionKeys: (Map<String, String> hints) => sessionKeyConflictsFrom(
+      bridge.setPqPins(
+        handle,
+        jsonEncode(<String, Object?>{'pins': hints, 'hint': true}),
+      ),
+    ),
     setOnScreen: (bool onScreen) => bridge.setNodeOnScreen(handle, onScreen),
   );
 }

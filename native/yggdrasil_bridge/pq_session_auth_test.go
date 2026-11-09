@@ -362,6 +362,117 @@ func TestPQVouchedPinsGuardFirstContactAndReportConflicts(t *testing.T) {
 	}
 }
 
+// pqJunkPins are n pins of addresses nobody has, with keys nobody holds.
+func pqJunkPins(n int, salt string) map[string]string {
+	pins := make(map[string]string, n)
+	for index := range n {
+		fingerprint := sha256.Sum256(fmt.Appendf(nil, "%s-%d", salt, index))
+		pins[fmt.Sprintf("201:%x::%x", index>>16, index&0xffff)] = hex.EncodeToString(fingerprint[:])
+	}
+	return pins
+}
+
+// talkBothWays reports whether a text gets from a to b and one back.
+func talkBothWays(network *pqTestNet, a *pqEndpoint, aIP net.IP, b *pqEndpoint, bIP net.IP) bool {
+	_ = a.send(bIP, []byte("there"))
+	network.pump()
+	there := network.take(bIP)
+	_ = b.send(aIP, []byte("back"))
+	network.pump()
+	back := network.take(aIP)
+	return len(there) == 1 && len(back) == 1
+}
+
+// Whatever the app vouches for, and however much of it, the pin of a
+// contact this device made itself stays, and so does the session.
+func TestPQVouchedKeysNeverPushOutAPinOfThisDevicesOwnContact(t *testing.T) {
+	network := newPQTestNet(t)
+	friend, friendIP := network.add(1)
+	victim, victimIP := network.add(2)
+	if !talkBothWays(network, friend, friendIP, victim, victimIP) {
+		t.Fatal("the two must talk")
+	}
+	network.clock = network.clock.Add(time.Hour)
+	victim.importPins(pqJunkPins(pqMaxPins, "junk"), true)
+	if victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatal("vouched keys pushed out the pin of a contact")
+	}
+	bogus := sha256.Sum256([]byte("chosen by someone else"))
+	taken, conflicts := victim.importPins(map[string]string{friendIP.String(): hex.EncodeToString(bogus[:])}, true)
+	if taken != 0 || conflicts[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatalf("taken %d, conflicts %v", taken, conflicts)
+	}
+	if victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatal("a vouch moved the pin of a contact")
+	}
+	if !talkBothWays(network, friend, friendIP, victim, victimIP) {
+		t.Fatal("after the vouches the two must still talk")
+	}
+	// The vouched keys that found no room are kept as hints, a bounded few.
+	if len(victim.pins) > pqMaxPins || len(victim.hints) > pqMaxHints {
+		t.Fatalf("%d pins, %d hints", len(victim.pins), len(victim.hints))
+	}
+}
+
+// Keys a friend's friend list names are hints: they never move a pin or
+// end a session, and the first record the device at that address signs
+// decides; a hint that names another key than the pin is reported.
+func TestPQAFriendsListOnlyHintsAndTheDeviceItselfDecides(t *testing.T) {
+	network := newPQTestNet(t)
+	friend, friendIP := network.add(1)
+	victim, victimIP := network.add(2)
+	stranger, strangerIP := network.add(3)
+	if !talkBothWays(network, friend, friendIP, victim, victimIP) {
+		t.Fatal("the two must talk")
+	}
+	network.clock = network.clock.Add(time.Hour)
+
+	// A flood of hints, then hints that lie about a contact and about a
+	// device this one has not met yet.
+	victim.importHints(pqJunkPins(pqMaxHints+2000, "junk"))
+	if len(victim.hints) > pqMaxHints || victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatalf("%d hints; the contact's pin must stay", len(victim.hints))
+	}
+	bogus := sha256.Sum256([]byte("chosen by someone else"))
+	lies := map[string]string{
+		friendIP.String():   hex.EncodeToString(bogus[:]),
+		strangerIP.String(): hex.EncodeToString(bogus[:]),
+	}
+	_, conflicts := victim.importHints(lies)
+	if conflicts[friendIP.String()] != friend.ownFingerprint() || len(conflicts) != 1 {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	if victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() ||
+		victim.peerFingerprint(friendIP) != friend.ownFingerprint() {
+		t.Fatal("a hint moved a pin or a session's key")
+	}
+	if !talkBothWays(network, friend, friendIP, victim, victimIP) {
+		t.Fatal("after the hints the two must still talk")
+	}
+	if !talkBothWays(network, stranger, strangerIP, victim, victimIP) {
+		t.Fatal("a hint must not keep the device itself out")
+	}
+	if victim.pinsSnapshot()[strangerIP.String()] != stranger.ownFingerprint() {
+		t.Fatal("the device's own record must be pinned")
+	}
+	if _, conflicts := victim.importHints(lies); conflicts[strangerIP.String()] != stranger.ownFingerprint() {
+		t.Fatalf("the lie must now be reported: %v", conflicts)
+	}
+	// A hint the device's record confirms is pinned even with no new pins
+	// left this minute.
+	other, otherIP := network.add(4)
+	victim.importHints(map[string]string{otherIP.String(): other.ownFingerprint()})
+	victim.mu.Lock()
+	victim.newPins = pqBucket{at: network.clock}
+	victim.mu.Unlock()
+	if !talkBothWays(network, other, otherIP, victim, victimIP) {
+		t.Fatal("the hinted device must get through")
+	}
+	if victim.pinsSnapshot()[otherIP.String()] != other.ownFingerprint() {
+		t.Fatal("a confirmed hint must be pinned")
+	}
+}
+
 // An impostor with A's node key spoke to B first, so its key was pinned on
 // first sight. When the app pins A's real key over it (a hello signed by
 // A's hybrid device key named another key), the impostor's open session
