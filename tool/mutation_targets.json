@@ -23,7 +23,9 @@
     "tests": [
       "test/locked_invitation_notice_test.dart",
       "test/notification_privacy_level_test.dart",
-      "test/notification_switches_test.dart"
+      "test/notification_switches_test.dart",
+      "test/mentions_test.dart",
+      "test/locked_background_inbox_test.dart"
     ]
   },
   {

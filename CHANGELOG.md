@@ -15,6 +15,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Tests**: scrolled up, in a conversation and a group chat, what is read stays where it is when a late message goes in among the older ones and when one there is deleted.
 - **Tests**: a fresh word from one of a friend's devices does not hide Zen open on another, and one friend's word leaves the others' devices as they were; the store's file envelope (a damaged header or checksum does not open), a save that does not read back as written replaces nothing, a key with a `.` segment is refused, a key is there while any of its copies is, and the sweep of leftover temporary files walks at most once per its interval (the store is now a mutation testing target).
 - **Tests**: when the tests of a mutation target fail on the unchanged file, the mutation run now shows which test failed and why (it only said they failed).
+- **Tests**: a mention of you in a muted group or one that tells only of mentions still comes on a locked phone, a message with no text and nothing attached gives no preview, and only a phone's audio outputs are taken for where a call's sound can go (a Bluetooth microphone alone is no headset).
 
 ## 1.16.2 — 09.11.2026
 

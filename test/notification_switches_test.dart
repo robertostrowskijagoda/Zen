@@ -15,6 +15,7 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -968,5 +969,30 @@ void main() {
       kit.quietChat(from: ola, payload: inGroup('all'), nowMillis: now),
       isFalse,
     );
+    // A mention of this device comes, in a mentions-only group and in a
+    // muted one.
+    Map<String, dynamic> mentioning(String id) => <String, dynamic>{
+      ...inGroup(id),
+      'text': 'Hej <@0>',
+      kMentionsKey: <Object?>[
+        const Mention(address: '200::1', name: 'Ja').toJson(),
+      ],
+    };
+    final LockedNoticeKit muting = LockedNoticeKit(
+      mutedChats: <String, int>{'group:muted': now + 3600000},
+      groupNotifyAll: const <String, bool>{'group:muted': true},
+      self: '200::1',
+    );
+    expect(
+      muting.quietChat(from: ola, payload: inGroup('muted'), nowMillis: now),
+      isTrue,
+    );
+    for (final String id in <String>['g', 'muted']) {
+      expect(
+        muting.quietChat(from: ola, payload: mentioning(id), nowMillis: now),
+        isFalse,
+        reason: id,
+      );
+    }
   });
 }

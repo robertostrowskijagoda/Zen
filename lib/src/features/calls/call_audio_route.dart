@@ -11,6 +11,14 @@ const List<String> kCallHeadsetOutputs = <String>['bluetooth', 'wired-headset'];
 /// The phone's own earpiece, as flutter_webrtc names it on Android.
 const String kCallEarpieceOutput = 'earpiece';
 
+/// The ids of the audio outputs among [devices]: a microphone has an id
+/// too (on Android a Bluetooth one is "bluetooth" as well), and taken for an
+/// output it would send the call to a headset that only listens.
+List<String> callAudioOutputIds(Iterable<MediaDeviceInfo> devices) => <String>[
+  for (final MediaDeviceInfo d in devices)
+    if (d.kind == 'audiooutput') d.deviceId,
+];
+
 /// The headset [outputs] (audio output ids) offer, best first, or `null`.
 String? callHeadsetOutput(Iterable<String> outputs) {
   final Set<String> ids = outputs.toSet();
@@ -87,11 +95,8 @@ final class _WebRtcAudioDevice implements CallAudioDevice {
   bool get ios => Platform.isIOS;
 
   @override
-  Future<List<String>> outputs() async => <String>[
-    for (final MediaDeviceInfo d
-        in await navigator.mediaDevices.enumerateDevices())
-      if (d.kind == 'audiooutput') d.deviceId,
-  ];
+  Future<List<String>> outputs() async =>
+      callAudioOutputIds(await navigator.mediaDevices.enumerateDevices());
 
   @override
   Future<void> setSpeakerphoneOn(bool on) => Helper.setSpeakerphoneOn(on);
