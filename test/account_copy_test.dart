@@ -154,7 +154,7 @@ void main() {
     );
     addTearDown(target.dispose);
 
-    final String digits = await target.hello();
+    final String digits = (await target.hello())!;
     await _settle();
     // Asked on the old device, with the same digits; nothing sent yet.
     expect(s.state, AccountCopySendState.asked);
@@ -199,11 +199,26 @@ void main() {
     expect(reads, isNotEmpty);
     expect(reads, everyElement(lessThanOrEqualTo(kAccountCopyBlockBytes)));
     expect(s.state, AccountCopySendState.done);
-    // Everything after the greeting is sealed: no file bytes in clear.
+    // Everything after the greeting's fresh value is sealed: no file
+    // bytes in clear.
     for (final ({String remoteAddress, Map<String, dynamic> payload}) x
         in old.sentSignals) {
+      if (x.payload['type'] == AccountCopyMessages.nonce) {
+        expect(x.payload.keys, unorderedEquals(<String>['type', 'r']));
+        continue;
+      }
       expect(x.payload.keys, everyElement(isIn(<String>['type', 'c'])));
     }
+    // The new device's key went out only after the old device answered its
+    // commitment.
+    final List<Object?> order = <Object?>[
+      for (final ({String remoteAddress, Map<String, dynamic> payload}) x
+          in fresh.sentSignals)
+        x.payload['type'],
+    ];
+    expect(order.first, AccountCopyMessages.hello);
+    expect(order[1], AccountCopyMessages.key);
+    expect(fresh.sentSignals.first.payload.containsKey('e'), isFalse);
   });
 
   test('a greeting without the code\'s token is ignored', () async {
@@ -219,31 +234,149 @@ void main() {
       ),
       staging: AccountImportStaging(MemoryLedgerDisk()),
       deviceName: 'Obcy',
+      answerTimeout: const Duration(milliseconds: 200),
     );
     addTearDown(stranger.dispose);
-    await stranger.hello();
+    await expectLater(stranger.hello(), throwsA(isA<TimeoutException>()));
     await _settle();
     expect(s.state, AccountCopySendState.waiting);
     expect(s.request, isNull);
   });
 
-  test('"To nie ja" on the old device: the new one hears no', () async {
+  test('a device that saw the code and greets first cannot pick its key '
+      'after the fact: it is bound to its commitment, and the new device '
+      'shows no digits to aim at', () async {
     final AccountCopySource s = source();
     addTearDown(s.dispose);
     final AccountCopyTicket ticket = await s.open();
+    final _Link evil = await _device('200::e', net);
+    final List<Map<String, dynamic>> heard = <Map<String, dynamic>>[];
+    final StreamSubscription<SignalTransportFrame> listening = evil.frames
+        .listen((SignalTransportFrame f) => heard.add(f.payload));
+    addTearDown(listening.cancel);
+    // It saw the code (the token too) and greets first, committed to one
+    // key.
+    final Uint8List committed = Uint8List.fromList(List<int>.filled(32, 7));
+    final Uint8List commitment = await accountCopyCommitment(committed);
+    await evil.send(
+      remoteAddress: old.address,
+      payload: <String, dynamic>{
+        'type': AccountCopyMessages.hello,
+        'v': kAccountCopyVersion,
+        'c': base64Url.encode(commitment),
+        'm': base64Url.encode(
+          await accountCopyHelloTag(ticket.token, commitment),
+        ),
+        'n': 'Obcy',
+      },
+    );
+    await _settle();
+    expect(
+      heard.map((Map<String, dynamic> p) => p['type']),
+      contains(AccountCopyMessages.nonce),
+    );
+    // The real new device comes second: no answer, so no digits on its
+    // screen for anyone to read and aim at.
     final AccountCopyTarget target = AccountCopyTarget(
       transport: fresh,
       ticket: ticket,
       staging: AccountImportStaging(MemoryLedgerDisk()),
       deviceName: 'Laptop',
+      answerTimeout: const Duration(milliseconds: 200),
     );
     addTearDown(target.dispose);
-    await target.hello();
+    await expectLater(target.hello(), throwsA(isA<TimeoutException>()));
+    // Any other key than the committed one opens nothing on the old device.
+    await evil.send(
+      remoteAddress: old.address,
+      payload: <String, dynamic>{
+        'type': AccountCopyMessages.key,
+        'e': base64Url.encode(List<int>.filled(32, 9)),
+      },
+    );
     await _settle();
-    final Future<AccountCopyOffer?> offered = target.offer();
-    await s.deny();
-    expect(await offered, isNull);
-    expect(s.state, AccountCopySendState.failed);
+    expect(s.request, isNull);
+    expect(s.state, AccountCopySendState.waiting);
+  });
+
+  test('between this version and 1.16.2 the move ends with "update first" '
+      'on the side that can say it, never half way', () async {
+    // A code of 1.16.2 is read here (the same fields) ...
+    final String code116 =
+        '$kAccountCopyTicketPrefix${base64Url.encode(utf8.encode(jsonEncode(<String, dynamic>{'v': 1, 'app': '1.16.2', 'a': old.address, 'k': base64Url.encode(List<int>.filled(32, 1)), 't': base64Url.encode(List<int>.filled(16, 2))})))}';
+    final AccountCopyTicket? ticket116 = AccountCopyTicket.parse(code116);
+    expect(ticket116, isNotNull);
+    expect(AccountCopyTicket.otherVersion(code116), isNull);
+    // ... and 1.16.2 answers this version's greeting with "no, version",
+    // as its code does for any greeting not of version 1.
+    final StreamSubscription<SignalTransportFrame> old116 = old.frames.listen((
+      SignalTransportFrame f,
+    ) {
+      if (f.payload['type'] == AccountCopyMessages.hello &&
+          f.payload['v'] != 1) {
+        unawaited(
+          old.send(
+            remoteAddress: f.from,
+            payload: <String, dynamic>{
+              'type': AccountCopyMessages.no,
+              'why': 'version',
+              'app': '1.16.2',
+            },
+          ),
+        );
+      }
+    });
+    addTearDown(old116.cancel);
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final AccountCopyTarget target = AccountCopyTarget(
+      transport: fresh,
+      ticket: ticket116!,
+      staging: AccountImportStaging(disk),
+      deviceName: 'Laptop',
+      answerTimeout: const Duration(seconds: 2),
+    );
+    addTearDown(target.dispose);
+    expect(await target.hello(), isNull);
+    expect(await target.offer(), isNull);
+    expect(target.versionMismatch, '1.16.2');
+    expect(disk.files, isEmpty);
+    await old116.cancel();
+
+    // This version's code read by 1.16.2: it reads version 1 only, so it
+    // finds another version in it (what its screen turns into "update").
+    final AccountCopySource s = source();
+    addTearDown(s.dispose);
+    final AccountCopyTicket ticket = await s.open();
+    final Map<String, dynamic> json =
+        jsonDecode(
+              utf8.decode(
+                base64Url.decode(
+                  ticket.encode().substring(kAccountCopyTicketPrefix.length),
+                ),
+              ),
+            )
+            as Map<String, dynamic>;
+    expect(json['v'], isNot(1));
+    expect(json['app'], isNotNull);
+
+    // A 1.16.2 greeting (its key in the clear) is answered with "no,
+    // version", never taken.
+    await fresh.send(
+      remoteAddress: old.address,
+      payload: <String, dynamic>{
+        'type': AccountCopyMessages.hello,
+        'v': 1,
+        'e': base64Url.encode(List<int>.filled(32, 4)),
+        'm': base64Url.encode(List<int>.filled(16, 5)),
+        'n': 'Stary',
+      },
+    );
+    await _settle();
+    final Map<String, dynamic> no = old.sentSignals.last.payload;
+    expect(no['type'], AccountCopyMessages.no);
+    expect(no['why'], 'version');
+    expect(s.request, isNull);
+    expect(s.state, AccountCopySendState.waiting);
   });
 
   test('a transfer cut short goes on where it stopped', () async {

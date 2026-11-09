@@ -781,7 +781,16 @@ Unknown `type`, or a type the parser does not map, yields no signal
   hello of another protocol version; both sides show "the other device has
   another version of Zen". Moving an account: the transfer code carries
   `app`; a hello of another version is answered `acx_no {why: "version",
-  app}`.
+  app}`. Since version 2 of the move (`account_copy.dart`) the new device
+  greets with a commitment to its one-time key (`acx_hello {v: 2, c, m,
+  n}`), the old device answers the first greeting carrying the code's
+  token with a fresh random value (`acx_nonce {r}`), and only then does
+  the new device reveal its key (`acx_key {e}`); the 6 digits depend on
+  that value, so a device that saw the code cannot pick its key after
+  learning what the other screen shows. A code of version 1 (Zen 1.16.x)
+  is still read; such a device answers the version 2 greeting with
+  `acx_no {why: "version"}`, and 1.16.x finds a version 2 code to be of
+  another version: either way the screen says to update first.
 
 ### 2.14 Circle copy (`cbk_*`) [V]
 

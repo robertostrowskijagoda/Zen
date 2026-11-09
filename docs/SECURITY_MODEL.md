@@ -306,10 +306,14 @@ friend list names it only as a hint, see above).
   file.
 - **Moving the account to another device.** The device with the account
   shows a one-time QR code: its address, a one-time X25519 key and a
-  random 128-bit token. The new device answers with its own one-time key
-  and an HMAC of it under the token, so only a device that saw the screen
-  can ask; both screens show six digits from the shared key, and nothing
-  leaves until the person taps "Allow" on the old device. Everything after
+  random 128-bit token. The new device answers with a commitment to its
+  own one-time key and an HMAC of it under the token, so only a device
+  that saw the screen can ask; the old device answers the first such
+  greeting with a fresh random value, and only then does the new device
+  reveal its key. Both screens show six digits from the shared key and
+  that value, so whoever saw the code and greets first is bound to the
+  key it committed to and cannot grind one to match the other screen.
+  Nothing leaves until the person taps "Allow" on the old device. Everything after
   that (the account key, the list of contents, the files in blocks of
   192 KB, each file checked by its SHA-256) is sealed with
   ChaCha20-Poly1305 under that key, inside the post-quantum session every

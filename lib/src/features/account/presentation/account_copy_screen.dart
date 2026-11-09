@@ -389,7 +389,7 @@ class _AccountCopyReceiveScreenState
     });
     try {
       await node.start();
-      final String digits = await target.hello();
+      final String? digits = await target.hello();
       if (!mounted) {
         return;
       }
