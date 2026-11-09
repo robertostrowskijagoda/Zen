@@ -736,6 +736,12 @@ abstract class AppSecurityService extends ChangeNotifier {
 
   Future<bool> matchesPanicPassword(String password);
 
+  /// Does the work a wrong [password] costs this lock (the emergency wipe
+  /// password's check and the unlock: the same reads, two derivations of
+  /// the same cost) and changes nothing: for an account ID that is not on
+  /// this device, which then answers no sooner than a wrong password does.
+  Future<void> spendWrongPasswordWork(String password) async {}
+
   /// Whether biometric unlock can be offered (hardware vault present and a
   /// sealed key stored).
   Future<bool> canUnlockWithBiometrics();
@@ -1267,6 +1273,24 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
           securityVerifyDigest(derivedKey),
           securityBytesFromHex(hashHex),
         );
+  }
+
+  @override
+  Future<void> spendWrongPasswordWork(String password) async {
+    for (final String key in const <String>[
+      appSecurityPasswordHashStorageKey,
+      appSecurityPanicPasswordHashStorageKey,
+      appSecurityPanicSaltStorageKey,
+      appSecurityPanicKdfStorageKey,
+      appSecuritySaltStorageKey,
+      appSecurityPasswordKdfStorageKey,
+      appSecurityWrappedMasterKeyStorageKey,
+    ]) {
+      await _credentialsStore.read(key);
+    }
+    for (int pass = 0; pass < 2; pass++) {
+      await derivePasswordKey(password, randomSecurityBytes(32), cost: _cost);
+    }
   }
 
   @override

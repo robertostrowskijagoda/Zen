@@ -9,6 +9,7 @@ import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
@@ -320,6 +321,55 @@ void main() {
         expect(await registry.find(b.id!), b);
       },
     );
+
+    test('an ID that is not on this device costs the same work as a wrong '
+        'password and gets the same answer', () async {
+      final ZenAccountScope a = await registry.create();
+      final AppSecurityService own = securityFor(a);
+      await own.initialize(settings: const AppSettings());
+      await own.setPassword('haslo-konta-a');
+      await own.setPanicPassword('alarm-alarm');
+      final List<PasswordCost> costs = <PasswordCost>[];
+      debugOnPasswordDerivation = costs.add;
+      addTearDown(() => debugOnPasswordDerivation = null);
+
+      Future<List<PasswordCost>> attempt(
+        String typed, {
+        ZenAccountScope current = ZenAccountScope.defaultAccount,
+      }) async {
+        costs.clear();
+        final ZenAccountUnlockResult result = await unlockOtherZenAccount(
+          typed: typed,
+          password: 'zle-haslo-123',
+          current: current,
+          registry: registry,
+          security: securityFor,
+        );
+        expect(result.outcome, ZenAccountUnlock.refused);
+        expect(result.security, isNull);
+        return List<PasswordCost>.of(costs);
+      }
+
+      final List<PasswordCost> wrongPassword = await attempt(a.id!);
+      expect(wrongPassword, hasLength(2));
+      expect(await attempt(newAccountId(Random(99))), wrongPassword);
+      expect(await attempt('nie-id'), wrongPassword);
+      // The account open now is not opened again, at the same cost.
+      expect(await attempt(a.id!, current: a), wrongPassword);
+      expect(await registry.find(a.id!), a);
+
+      costs.clear();
+      final ZenAccountUnlockResult right = await unlockOtherZenAccount(
+        typed: formatAccountId(a.id!),
+        password: 'haslo-konta-a',
+        current: ZenAccountScope.defaultAccount,
+        registry: registry,
+        security: securityFor,
+      );
+      expect(right.outcome, ZenAccountUnlock.opened);
+      expect(right.scope, a);
+      expect(costs, hasLength(2));
+    });
 
     test('an account whose first start was cut short opens to set a '
         'password', () async {

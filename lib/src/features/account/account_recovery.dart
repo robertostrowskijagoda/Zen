@@ -106,6 +106,11 @@ const List<PasswordCost> kAcceptedRecoveryCosts = <PasswordCost>[
 /// Minimum length of the account password.
 const int kMinAccountPasswordLength = 8;
 
+/// For tests: hears the cost of every [derivePasswordKey] (how much work an
+/// answer took).
+@visibleForTesting
+void Function(PasswordCost cost)? debugOnPasswordDerivation;
+
 /// 32-byte key from [password] (Argon2id, off the UI thread). Tiny costs
 /// (tests) run in place.
 Future<Uint8List> derivePasswordKey(
@@ -113,6 +118,7 @@ Future<Uint8List> derivePasswordKey(
   Uint8List salt, {
   PasswordCost cost = const PasswordCost(),
 }) {
+  debugOnPasswordDerivation?.call(cost);
   Future<Uint8List> derive() async {
     final Argon2id kdf = Argon2id(
       parallelism: cost.parallelism,

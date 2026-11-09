@@ -355,26 +355,20 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       }
       return;
     }
-    final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
-    final ZenListedAccount? picked = _picked;
-    final ZenAccountScope? scope = picked != null
-        ? await registry.scopeOf(picked)
-        : await registry.find(_id.text);
-    ZenAccountUnlockResult result = const ZenAccountUnlockResult(
-      ZenAccountUnlock.refused,
+    // A wrong ID costs what a wrong password does, and reads the same.
+    final ZenAccountUnlockResult result = await unlockOtherZenAccount(
+      typed: _id.text,
+      listed: _picked,
+      password: password,
+      current: ref.read(zenAccountProvider),
+      registry: ref.read(zenAccountRegistryProvider),
+      security: ref.read(zenAccountSecurityFactoryProvider),
     );
-    if (scope != null && scope != ref.read(zenAccountProvider)) {
-      result = await unlockZenAccount(
-        scope,
-        password,
-        registry: registry,
-        security: ref.read(zenAccountSecurityFactoryProvider),
-      );
-    }
     if (!mounted) {
       return;
     }
     final AppSecurityService? security = result.security;
+    final ZenAccountScope? scope = result.scope;
     if (result.outcome == ZenAccountUnlock.opened && scope != null) {
       await throttle.clear();
       if (!mounted) {
