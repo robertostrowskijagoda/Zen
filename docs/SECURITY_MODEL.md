@@ -159,7 +159,10 @@ friend vouching for their key, is trust on first use.
 - **Storage encryption.** A random 256-bit master key encrypts data and files
   (AES-256-GCM; per-purpose keys derived with HMAC-SHA256). It is wrapped by
   a key from your password: **Argon2id**, 19 MiB, 2 passes. Failed attempts
-  are throttled and remembered across restarts. File names are hidden.
+  are throttled and remembered across restarts. A wrong password costs
+  the same work whether an emergency wipe password is set or not, and a
+  wrong account ID at "Inne konto" the same as a wrong password. File
+  names are hidden.
 - **Biometric unlock** keeps a copy of the master key wrapped by a key that
   never leaves the security hardware: Android Keystore (StrongBox when
   present), the TPM on Windows (with Windows Hello), the Secure Enclave on

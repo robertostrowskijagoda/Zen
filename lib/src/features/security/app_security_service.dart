@@ -52,6 +52,12 @@ const String appSecurityPanicPasswordHashStorageKey =
     'zen_rewrite_panic_password_hash';
 const String appSecurityPanicSaltStorageKey = 'zen_rewrite_panic_salt';
 
+/// A salt (hex) every account keeps whether it has an emergency wipe
+/// password or not: without one, a password is checked against it anyway,
+/// so a wrong password costs the same work either way.
+const String appSecurityPanicStandInSaltStorageKey =
+    'zen_rewrite_panic_stand_in_salt';
+
 /// The master key sealed by [PlatformKeyVault] (base64), for biometric
 /// unlock.
 const String appSecuritySealedBiometricTokenStorageKey =
@@ -1016,9 +1022,70 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   @override
   bool get hasPanicPassword => _hasPanicPassword;
 
+  /// The stand-in salt (made with the account, or at the first start of
+  /// an account an earlier version made: every account gets one, with an
+  /// emergency wipe password or without).
+  Future<void> _ensurePanicStandIn() async {
+    try {
+      if (await _credentialsStore.read(appSecurityPanicStandInSaltStorageKey) ==
+          null) {
+        await _credentialsStore.write(
+          appSecurityPanicStandInSaltStorageKey,
+          securityHexFromBytes(randomSecurityBytes(32)),
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Keeping the stand-in salt failed', error, stackTrace);
+    }
+  }
+
+  /// A derivation of [password] with [salt] whose result is not used: the
+  /// cost [kdfKey] records, else the password's, else today's.
+  Future<void> _spendDerivation(
+    String password,
+    Uint8List salt,
+    String kdfKey,
+  ) async {
+    PasswordCost cost = _cost;
+    for (final String key in <String>[
+      kdfKey,
+      appSecurityPasswordKdfStorageKey,
+    ]) {
+      final String? kdf = await _credentialsStore.read(key);
+      if (kdf == null) {
+        continue;
+      }
+      try {
+        final Object? json = jsonDecode(kdf);
+        final PasswordCost? recorded = json is Map && json['a'] == 'argon2id'
+            ? PasswordCost.fromJson(json)
+            : null;
+        if (recorded != null) {
+          cost = recorded;
+          break;
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+    await derivePasswordKey(password, salt, cost: cost);
+  }
+
+  static Uint8List _saltOrRandom(String? hex) {
+    if (hex != null && hex.length == 64) {
+      try {
+        return securityBytesFromHex(hex);
+      } on FormatException {
+        // Read as missing.
+      }
+    }
+    return randomSecurityBytes(32);
+  }
+
   @override
   Future<void> initialize({required AppSettings settings}) async {
     _applySettingsState(settings);
+    await _ensurePanicStandIn();
     _hasPassword =
         await _credentialsStore.read(appSecurityPasswordHashStorageKey) != null;
     _hasPanicPassword =
@@ -1260,7 +1327,17 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     final String? hashHex = await _credentialsStore.read(
       appSecurityPanicPasswordHashStorageKey,
     );
+    final String? standInHex = await _credentialsStore.read(
+      appSecurityPanicStandInSaltStorageKey,
+    );
     if (saltHex == null || hashHex == null) {
+      // None set: the same derivation against the stand-in salt, so the
+      // wait tells nothing.
+      await _spendDerivation(
+        password,
+        _saltOrRandom(standInHex),
+        appSecurityPanicKdfStorageKey,
+      );
       return false;
     }
     final Uint8List? derivedKey = await _derive(
@@ -1281,6 +1358,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       appSecurityPasswordHashStorageKey,
       appSecurityPanicPasswordHashStorageKey,
       appSecurityPanicSaltStorageKey,
+      appSecurityPanicStandInSaltStorageKey,
       appSecurityPanicKdfStorageKey,
       appSecuritySaltStorageKey,
       appSecurityPasswordKdfStorageKey,
@@ -1820,6 +1898,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityPanicPasswordHashStorageKey,
     appSecurityPanicSaltStorageKey,
     appSecurityPanicKdfStorageKey,
+    appSecurityPanicStandInSaltStorageKey,
     appSecurityMasterKeyFingerprintStorageKey,
     appSecurityBiometricUnlockChoiceStorageKey,
     appSecurityGuardedSettingsStorageKey,
@@ -1869,6 +1948,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       securityHexFromBytes(masterKey),
     );
     await _ensureMasterFingerprint(masterKey);
+    await _ensurePanicStandIn();
     _hasPassword = false;
     _hasPanicPassword = false;
     _isLocked = false;

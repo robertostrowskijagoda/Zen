@@ -66,6 +66,7 @@ const List<String> _baseSecrets = <String>[
   appSecurityWrappedMasterKeyStorageKey,
   appSecurityMasterKeyFingerprintStorageKey,
   appSecurityGuardedSettingsStorageKey,
+  appSecurityPanicStandInSaltStorageKey,
 ];
 
 /// Folders and secret-store entries that look like an additional account's
