@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"net/url"
@@ -466,4 +467,60 @@ func TestAPhoneBetweenTwoPeersStopsCarryingTheirTraffic(t *testing.T) {
 	node.sampleTrafficAt(held.Add(transitHoldBase))
 	waitForPeer(t, node.core, coreA.PublicKey(), true)
 	waitForPeer(t, node.core, coreB.PublicKey(), true)
+}
+
+// A phone that only receives (the locked receiver) is offered two peers
+// that have no other way to each other, the way a locked phone with two
+// public peers stood between two parts of the mesh and carried strangers'
+// traffic for hours (1-6 KB/s, under the guard's limits). It dials one of
+// them only, so it is nobody's shortcut: from the start nothing that A
+// sends to B goes through it, with no guard and no hold.
+func TestAPhoneThatOnlyReceivesIsNobodysShortcut(t *testing.T) {
+	coreA, uriA := listeningCore(t)
+	coreB, uriB := listeningCore(t)
+	keeper := newPhonePeerKeeper([]string{uriA, uriB}, phonePeerTarget(phoneExtraAccountPeerCount))
+	node := testNode(t, nil)
+	node.phonePeers = keeper
+	node.swapPublicPeers(nil, keeper.dialled)
+	if len(keeper.dialled) != 1 || keeper.dialled[0] != uriA {
+		t.Fatalf("a phone that only receives dials one peer, got %v", keeper.dialled)
+	}
+	waitForPeer(t, node.core, coreA.PublicKey(), true)
+
+	var received atomic.Uint64
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			if _, _, err := coreA.ReadFrom(buf); err != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, _, err := coreB.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			received.Add(uint64(n))
+		}
+	}()
+	payload := make([]byte, 1200)
+	toB := iwt.Addr(coreB.PublicKey())
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for range 16 {
+			_, _ = coreA.WriteTo(payload, toB)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := received.Load(); got != 0 {
+		t.Fatalf("%d bytes from A reached B through a phone that only receives", got)
+	}
+	for _, info := range node.core.GetPeers() {
+		if info.Up && bytes.Equal(info.Key, coreB.PublicKey()) {
+			t.Fatal("the phone linked to the second peer as well")
+		}
+	}
 }

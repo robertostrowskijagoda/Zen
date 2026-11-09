@@ -36,7 +36,11 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   (`PeerShareCodec.inviteCodeForAddress` / `addressFromInviteCode` [P]). Links:
   `zen://c/CODE` and `https://robertostrowskijagoda.github.io/Zen/#CODE`.
 - Peering: a built-in list of public peers (`public_peers.go`; a phone
-  dials 4 at once, 2 while it only receives in the background, a TLS-only
+  dials 4 at once, 1 while it only receives in the background (with two
+  it can be the shortest way between them and carry strangers' transit;
+  `link_check.go`: on every wake of the app's beat a path lookup for each
+  peer's own key, so a link that died silently is ended by the core's 3 s
+  peer timeout and replaced while the phone is awake), a TLS-only
   subset first, the rest of the encrypted list
   in reserve for the peers that stop answering; `phone_peers.go`: a link
   that goes down gets two stand-ins dialled in parallel at once, told by

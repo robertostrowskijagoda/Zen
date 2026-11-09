@@ -13,12 +13,18 @@ import (
 // advice for end nodes is two or three peers. A phone dials phonePeerCount
 // of its pool (its picks first, then the rest of the public pool in
 // reserve: phonePeerCandidates); a node that only receives in the
-// background dials phoneExtraAccountPeerCount. The rest of the pool waits:
-// a dialled peer that goes down or does not come up is replaced by the next
-// candidates within seconds (peerRotation), so two peers are enough.
+// background dials phoneExtraAccountPeerCount: one. A node with two
+// peerings can become the shortest way between them, and strangers' traffic
+// then passes through it (traffic_meter.go): a locked phone with two public
+// peers carried 1-6 KB/s of it, in and out, for seven hours, under the
+// transit guard's limits (made for data, not for the radio), and lost a
+// third of its battery in a day. With one peering a node is nobody's
+// shortcut. The rest of the pool waits: a dialled peer that goes down or
+// does not come up is replaced by the next candidates within seconds
+// (peerRotation), a lone peer at once.
 const (
 	phonePeerCount             = 4
-	phoneExtraAccountPeerCount = 2
+	phoneExtraAccountPeerCount = 1
 	maxPhonePeerTarget         = 8
 	// How often a phone looks whether its dialled peers are up, besides
 	// each time one of its links comes up or goes down (peerEventLogger).
@@ -271,6 +277,13 @@ func (r *peerRotation) check(now time.Time, dialled []string, up func(string) bo
 		if r.offlineSince.IsZero() {
 			r.offlineSince = now
 			r.nextWave = now.Add(phonePeerOfflineFirst)
+			if r.target == 1 && len(dropped) > 0 {
+				// The one peer of a node that only receives went down: most
+				// likely that peer, not the network (a network that goes
+				// takes every link). Its stand-ins go out now, while the
+				// packet that ended the link keeps the phone awake.
+				r.nextWave = now
+			}
 			r.waves = 0
 		}
 		if now.Before(r.nextWave) {
@@ -280,6 +293,11 @@ func (r *peerRotation) check(now time.Time, dialled []string, up func(string) bo
 		r.waves++
 		r.lastRedial = now
 		wave = true
+		if missing > 0 && r.target == 1 {
+			// A node with one peer dials two candidates a wave, as one with
+			// two does: a dead one does not cost it a wave.
+			missing++
+		}
 	} else {
 		r.offlineSince = time.Time{}
 		r.waves = 0

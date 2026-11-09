@@ -23,6 +23,7 @@ void main() {
 
   tearDown(() async {
     FileBinaryStore.debugWriteStep = null;
+    resetAtomicFileForTest();
     try {
       await root.delete(recursive: true);
     } on FileSystemException {
@@ -274,6 +275,81 @@ void main() {
       jsonDecode(File(path).readAsStringSync()),
       isA<Map<String, dynamic>>(),
     );
+    expect(
+      root.listSync().where((FileSystemEntity e) => e.path.endsWith('.tmp')),
+      isEmpty,
+    );
+  });
+
+  test('a move refused again and again (a reader holding the file on '
+      'Windows, a busy machine) still saves in one move: until then the '
+      'file holds the whole old save, never an empty or half one', () async {
+    final File file = File('${root.path}${Platform.pathSeparator}lang.json');
+    await writeFileAtomically(file, utf8.encode('{"v":"old"}'));
+    // Twelve refusals: the old save gave up after five.
+    atomicRenameBudget = const Duration(seconds: 10);
+    int tries = 0;
+    final List<String> seen = <String>[];
+    atomicRename = (File temporary, String path) async {
+      tries++;
+      if (tries <= 12) {
+        seen.add(File(path).readAsStringSync());
+        throw const FileSystemException('in use', '', OSError('denied', 5));
+      }
+      await temporary.rename(path);
+    };
+    await writeFileAtomically(file, utf8.encode('{"v":"new"}'));
+    expect(tries, 13, reason: 'kept trying the move');
+    expect(seen, everyElement('{"v":"old"}'));
+    expect(file.readAsStringSync(), '{"v":"new"}');
+    expect(
+      root.listSync().where((FileSystemEntity e) => e.path.endsWith('.tmp')),
+      isEmpty,
+    );
+  });
+
+  test('a file held open for longer than a quarter of a second keeps its '
+      'whole old save until it is let go, then gets the new one', () async {
+    final File file = File('${root.path}${Platform.pathSeparator}kit.json');
+    await writeFileAtomically(file, utf8.encode('old'));
+    final RandomAccessFile held = await file.open();
+    bool done = false;
+    final Future<void> save = writeFileAtomically(
+      file,
+      utf8.encode('new'),
+    ).then((_) => done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    // Windows refuses to move over an open file; elsewhere the move goes
+    // through at once and the reader keeps the old one it opened.
+    expect(file.readAsStringSync(), Platform.isWindows ? 'old' : 'new');
+    expect(done, !Platform.isWindows);
+    await held.close();
+    await save;
+    expect(file.readAsStringSync(), 'new');
+  });
+
+  test('a save into folders not made yet makes them, however deep', () async {
+    final String sep = Platform.pathSeparator;
+    final File file = File('${root.path}${sep}accounts${sep}a1${sep}kits.json');
+    await writeFileAtomically(file, utf8.encode('kit'));
+    expect(file.readAsStringSync(), 'kit');
+  });
+
+  test('a file held for longer than the wait is written in place, with '
+      'nothing lost or left behind', () async {
+    final File file = File('${root.path}${Platform.pathSeparator}u.json');
+    await writeFileAtomically(file, utf8.encode('old'));
+    atomicRenameBudget = const Duration(milliseconds: 150);
+    int tries = 0;
+    atomicRename = (File temporary, String path) async {
+      tries++;
+      throw const FileSystemException('in use', '', OSError('denied', 5));
+    };
+    final Stopwatch took = Stopwatch()..start();
+    await writeFileAtomically(file, utf8.encode('new'));
+    expect(took.elapsed, greaterThanOrEqualTo(atomicRenameBudget));
+    expect(tries, greaterThan(1));
+    expect(file.readAsStringSync(), 'new');
     expect(
       root.listSync().where((FileSystemEntity e) => e.path.endsWith('.tmp')),
       isEmpty,

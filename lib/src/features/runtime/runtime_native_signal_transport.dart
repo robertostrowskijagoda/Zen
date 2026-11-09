@@ -23,6 +23,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_waiter.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 typedef SignalTransportBootstrap = Future<SignalTransport> Function();
@@ -1792,6 +1793,16 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     _sampled(startResult),
   );
   final SignalPayloadCompressor doorCompressor = ZstdSignalPayloadCompressor();
+  // A node that only receives has one public peer: whether its link still
+  // answers is checked on every wake the phone has anyway.
+  final WakeTimer? linkCheck = config.peerTarget == kReceiveOnlyPeerTarget
+      ? checkLinksOnWakes(
+          () => runNodeCallOffThread<Map<String, dynamic>>(
+            () => YggdrasilBridgeFfi.load().checkLinks(handle),
+            what: 'link check',
+          ),
+        )
+      : null;
   return RuntimeNodeSession(
     transport: ManagedSignalTransport(
       delegate: YggdrasilSignalTransport(
@@ -1806,6 +1817,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         fallbackPollInterval: config.fallbackPollInterval,
       ),
       onStop: () async {
+        linkCheck?.cancel();
         await pins.stop();
         await stopNodeOffThread(handle);
         ZenTechLog.nodeStopped(handle);
@@ -2240,16 +2252,51 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
   }
 }
 
+/// How long a wake stays held for the link check at most: the bridge's own
+/// limits (an answer within 3.5 s, a stand-in up within 12 s) and a little
+/// more.
+const Duration kLinkCheckHold = Duration(seconds: 20);
+
+/// Checks on every wake of the shared beat, whatever work the wake is for
+/// ([ZenWake.alongsideBeat]; [beat] in tests), that the links of a node
+/// that only receives still answer: [check] is the bridge's check
+/// (link_check.go). With one public peer, a link that died without a word
+/// (a mobile network that forgot the connection, a server gone off the
+/// network) left the phone unreachable until its next mailbox poll, up to
+/// half an hour later: now until its next wake (about a quarter of an
+/// hour), and the stand-in is up before the phone sleeps again. The phone
+/// stays awake for the check ([kLinkCheckHold] at most): a link that is
+/// there answers within a second or so.
+WakeTimer checkLinksOnWakes(
+  Future<Map<String, dynamic>> Function() check, {
+  WakeBeat? beat,
+}) {
+  Future<void> tick() => ZenWake.holdWhile(
+    () async {
+      final Map<String, dynamic> found = await check();
+      if (((found['dropped'] as num?) ?? 0) > 0) {
+        ZenTechLog.event('link-check', found);
+      }
+    },
+    tag: 'link-check',
+    limit: kLinkCheckHold,
+  );
+  return beat == null
+      ? ZenWake.alongsideBeat('link-check', tick)
+      : beat.alongside('link-check', tick);
+}
+
 /// How many public peers a phone node dials while it only receives: the
 /// locked receiver of the default account and the extra accounts' nodes in
-/// the background service. Every peer passes on the tree's signed updates
-/// (each node renews its own every few minutes) and each of them is
-/// answered, so on a locked phone the peers are what wakes the radio most
-/// (about a thousand small packets an hour each way with four); two halve
-/// that and are what Yggdrasil advises for end nodes. A peer whose link
-/// goes down is replaced within seconds by the next of the pool
-/// (phone_peers.go). The app on screen dials the bridge's own number (four).
-const int kReceiveOnlyPeerTarget = 2;
+/// the background service. One: a node with two peerings can become the
+/// shortest way between them, and strangers' traffic on the mesh then
+/// passes through the phone (a locked phone with two public peers carried
+/// 1-6 KB/s of it, in and out, for seven hours, and lost a third of its
+/// battery in a day). With one it is nobody's shortcut, and the tree's
+/// updates come over one link only. A peer whose link goes down is
+/// replaced at once by the next of the pool (phone_peers.go). The app on
+/// screen dials the bridge's own number (four).
+const int kReceiveOnlyPeerTarget = 1;
 
 final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({

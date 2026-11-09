@@ -5,9 +5,10 @@
 # down with a test. It informs and never blocks: its job is to say how much
 # the tests would notice, not to gate a pull request.
 #
-# On every pull request to main (beside CI, about 20 minutes on its own
-# runner), once a week on main and by hand (Actions -> Mutation testing ->
-# Run workflow). Each run picks other changes (the seed is the run's
+# On every pull request to main (beside CI; the targets are split over
+# three runners, about 15 minutes each: on one runner the list grew past its
+# 45-minute limit), once a week on main and by hand (Actions -> Mutation
+# testing -> Run workflow). Each run picks other changes (the seed is the run's
 # number), so over time all of them are tried. Read-only token, no secret.
 name: Mutation testing
 
@@ -30,9 +31,13 @@ env:
 
 jobs:
   mutation:
-    name: Mutation testing
+    name: Mutation testing (${{ matrix.shard }} of 3)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,4 +55,5 @@ jobs:
       - name: Mutants
         run: >-
           dart run tool/mutation.dart --max 10 --seed ${{ github.run_number }}
+          --shard ${{ matrix.shard }}/3
           --summary "$GITHUB_STEP_SUMMARY"

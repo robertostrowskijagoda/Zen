@@ -6,7 +6,6 @@ import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/features/media/media_vault.dart';
-import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -78,8 +77,3 @@ class PeerAvatar extends ConsumerWidget {
     );
   }
 }
-
-/// What someone shows about themselves: the mini-profile, with
-/// "Profil", "Wiadomość" or "Dodaj", and "Obserwuj".
-Future<void> showPeerProfileSheet(BuildContext context, String address) =>
-    showMiniProfile(context, address);

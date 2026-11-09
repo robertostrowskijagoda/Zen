@@ -271,6 +271,9 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _pqPins = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
         'YggPqPinsJson',
       ),
+      _checkLinks = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
+        'YggCheckLinksJson',
+      ),
       _setPqPins = library
           .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
             'YggPqSetPinsJson',
@@ -308,6 +311,7 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(Pointer<Utf8>) _probePeers;
   final Pointer<Utf8> Function() _publicPeerStates;
   final Pointer<Utf8> Function(int) _pqPins;
+  final Pointer<Utf8> Function(int) _checkLinks;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _setPqPins;
 
   static YggdrasilBridgeFfi load() {
@@ -569,6 +573,13 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   @override
   Map<String, dynamic> publicPeerStates() =>
       _extractMap(_readEnvelope(_publicPeerStates()));
+
+  /// Probes the links of the phone node [handle] that are up, so one that
+  /// died without a word is replaced while the phone is awake
+  /// (link_check.go): `{probed, answered, dropped, up, ms}`. Blocks for up
+  /// to about 16 s: call it off the isolate's thread.
+  Map<String, dynamic> checkLinks(int handle) =>
+      _extractMap(_readEnvelope(_checkLinks(handle)));
 
   @override
   Map<String, dynamic> pqPins(int handle) =>

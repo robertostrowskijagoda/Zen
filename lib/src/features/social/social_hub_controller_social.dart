@@ -2385,7 +2385,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   /// the text really names. With [poll] it is that poll (its text is the
   /// poll's, `chat_poll.dart`).
   @override
-  Future<void> sendGroupMessage({
+  Future<String> sendGroupMessage({
     required String groupId,
     required String text,
     ChatReply? replyTo,
@@ -2401,13 +2401,13 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
-      return;
+      return '';
     }
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
-    final String messageId = 'grp-msg-$timestamp-$groupId';
+    final int timestamp = _outgoingStamp('group:$groupId', sentAtMillis);
+    final String messageId = _groupMessageId(timestamp, groupId);
     // Someone outside the group is never mentioned: such a text goes with
     // plain names.
     final bool members = usedMentions(
@@ -2463,6 +2463,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         if (location != null) kLocationKey: location.toJson(),
       },
     );
+    return messageId;
   }
 
   Future<void> _dismissRemovedAlerts(

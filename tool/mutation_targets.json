@@ -182,5 +182,23 @@
     "tests": [
       "test/pebble_hosting_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/core/storage/atomic_file.dart",
+    "tests": [
+      "test/storage_crash_consistency_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/zen_wake.dart",
+    "tests": [
+      "test/zen_wake_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/profile/presentation/profile_photo_viewer.dart",
+    "tests": [
+      "test/profile_photo_and_chat_header_test.dart"
+    ]
   }
 ]

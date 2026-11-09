@@ -44,6 +44,7 @@ import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_edit_dialog.dart';
+import 'package:zen/src/features/profile/presentation/profile_photo_viewer.dart';
 import 'package:zen/src/features/profile/presentation/status_sheet.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/profile_gallery.dart';
@@ -62,9 +63,18 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// status is set from the top bar.
 class ProfileScreen extends ConsumerStatefulWidget {
   /// Own profile when [address] is null, a friend's otherwise.
-  const ProfileScreen({super.key, this.address, this.focusPostId});
+  const ProfileScreen({
+    super.key,
+    this.address,
+    this.focusPostId,
+    this.fromConversation = false,
+  });
 
   final String? address;
+
+  /// Opened from the conversation with [address] (its header): "Wiadomość"
+  /// goes back to it instead of opening it a second time on top.
+  final bool fromConversation;
 
   /// A post to bring into view and mark for a moment (likes or comments
   /// under one's own post, from a notification).
@@ -388,13 +398,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         posts.any((FeedPost p) => p.id == widget.focusPostId)) {
       unawaited(_seekFocused());
     }
+    // The photo opens on the whole screen when tapped (the public profile's
+    // photo does it itself, once downloaded).
     final Widget avatar;
     if (_isOwn) {
-      avatar = const OwnAvatar(size: 92);
+      avatar = ZoomableProfilePhoto(
+        image: peerAvatarImage(me.avatarPath),
+        child: const OwnAvatar(size: 92),
+      );
     } else if (friend == null && view?.avatar != null && node != null) {
       avatar = _LedgerAvatar(node: node, ref: view!.avatar!);
     } else {
-      avatar = PeerAvatar(address: other, name: name, size: 92);
+      avatar = ZoomableProfilePhoto(
+        image: peerAvatarImage(peer?.avatarPath),
+        child: PeerAvatar(address: other, name: name, size: 92),
+      );
     }
     // The cover: your own file, or the one in their profile entry.
     final LedgerProfile? card = !_isOwn && node != null && account != null
@@ -758,9 +776,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         if (friend?.status == FriendRelationshipStatus.accepted)
                           FilledButton.icon(
                             key: const Key('profile-message'),
-                            onPressed: () => unawaited(
-                              openConversationWith(context, other, name),
-                            ),
+                            onPressed: () => widget.fromConversation
+                                ? Navigator.of(context).pop()
+                                : unawaited(
+                                    openConversationWith(context, other, name),
+                                  ),
                             icon: const Icon(
                               Icons.chat_bubble_rounded,
                               size: 18,
@@ -1707,12 +1727,20 @@ class _LedgerAvatarState extends State<_LedgerAvatar> {
   @override
   Widget build(BuildContext context) {
     final Uint8List? bytes = _bytes;
+    final ImageProvider? photo = bytes == null ? null : MemoryImage(bytes);
+    return ZoomableProfilePhoto(
+      image: photo,
+      child: _ledgerCircle(context, photo),
+    );
+  }
+
+  Widget _ledgerCircle(BuildContext context, ImageProvider? photo) {
     return CircleAvatar(
       key: const Key('profile-ledger-avatar'),
       radius: 46,
-      backgroundImage: bytes == null ? null : MemoryImage(bytes),
+      backgroundImage: photo,
       backgroundColor: ZenColors.of(context).surfaceSunk,
-      child: bytes == null
+      child: photo == null
           ? Icon(
               Icons.person_rounded,
               size: 40,

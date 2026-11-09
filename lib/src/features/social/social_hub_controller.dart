@@ -261,6 +261,55 @@ const List<Duration> _callTeardownRetryDelays = <Duration>[
 
 abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   bool _hydrationScheduled = false;
+
+  /// The last send time given to a message of one's own, per conversation
+  /// ([_outgoingStamp]).
+  final Map<String, int> _lastOutgoingStamp = <String, int>{};
+
+  /// The send time of a new message of one's own in [conversationKey] (a
+  /// friend's address, or `group:<id>`): [requested] (or now), moved a
+  /// millisecond past the conversation's last one when it is not later.
+  /// A message's id is made of it (`outgoing-<ms>-<friend>`,
+  /// `grp-msg-<ms>-<group>`): two messages sent within one millisecond (a
+  /// text and a photo shared together, scheduled messages due at once, two
+  /// sent while offline) had the same id, and the second took the first
+  /// one's place, here and at the friend's, whose delivery mark then
+  /// covered both: one of them never arrived while its sender saw it
+  /// delivered.
+  int _outgoingStamp(String conversationKey, [int? requested]) {
+    int stamp = requested ?? DateTime.now().millisecondsSinceEpoch;
+    final int? last = _lastOutgoingStamp[conversationKey];
+    if (last != null && stamp <= last) {
+      stamp = last + 1;
+    }
+    _lastOutgoingStamp[conversationKey] = stamp;
+    return stamp;
+  }
+
+  /// The id of a new message of one's own to the group [groupId], sent at
+  /// [timestamp]: with a random part, as members send to the group from
+  /// phones of their own, and two who wrote within the same millisecond
+  /// had the same id. Each phone then kept its own message and took the
+  /// other one for a copy of it: neither reached the other (seen in the
+  /// randomised messaging test, communication_soak_test.dart). An older
+  /// Zen takes the id as it comes.
+  String _groupMessageId(int timestamp, String groupId) =>
+      'grp-msg-$timestamp-$groupId-${_idSuffix()}';
+
+  /// The id of a new message of one's own to the friend [peerAddress],
+  /// sent at [timestamp]: with a random part too, as the devices of one
+  /// account each send to the same friend, into the one conversation the
+  /// friend has with the account. Two that sent within the same
+  /// millisecond made the same id, and the friend kept only one of the two
+  /// messages while both were marked delivered (seen in the randomised
+  /// messaging test, with a second phone).
+  String _directMessageId(int timestamp, String peerAddress) =>
+      'outgoing-$timestamp-$peerAddress-${_idSuffix()}';
+
+  static String _idSuffix() =>
+      _idRandom.nextInt(1 << 32).toRadixString(16).padLeft(8, '0');
+
+  static final Random _idRandom = Random.secure();
   String? _openConversationAddress;
 
   /// Group whose chat is on screen right now, if any.
@@ -1555,8 +1604,9 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   });
 
   /// Chat messages (`social_hub_controller_messages.dart`), group messages
-  /// (`social_hub_controller_social.dart`): also used to forward.
-  Future<void> sendLocalMessage({
+  /// (`social_hub_controller_social.dart`): also used to forward. Each
+  /// returns the new message's id ('' when nothing was sent).
+  Future<String> sendLocalMessage({
     required String peerAddress,
     required String text,
     String? displayName,
@@ -1580,7 +1630,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     bool forwarded = false,
   });
 
-  Future<void> sendGroupMessage({
+  Future<String> sendGroupMessage({
     required String groupId,
     required String text,
     ChatReply? replyTo,
