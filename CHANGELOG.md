@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.3 — 09.11.2026
+
 ### What's new
 - [en] A conversation no longer jumps while you read further up when a late message comes in or one disappears.
 - [pl] Rozmowa nie przeskakuje już, gdy czytasz wyżej, a spóźniona wiadomość dochodzi albo któraś znika.
