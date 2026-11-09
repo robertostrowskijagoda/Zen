@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/runtime/bluetooth_local_links.dart';
 import 'package:zen/src/features/runtime/bluez_le.dart';
@@ -454,6 +455,68 @@ void main() {
       expect(events.last, <Object?, Object?>{'type': 'radio', 'on': false});
       await radio.stop();
       expect(go.calls.last, 'YggBtLinkStopJson');
+    });
+
+    test('the bridge is asked twice a second only while a dial waits or '
+        'links just did something, otherwise every 5 s', () {
+      fakeAsync((FakeAsync async) {
+        final _Go go = _Go()
+          ..answers['YggBtLinkStartJson'] = <String, dynamic>{'channel': 3}
+          ..answers['YggBtLinkDialJson'] = <String, dynamic>{'id': 'd1'}
+          ..answers['YggBtLinkPollJson'] = <String, dynamic>{'listening': true};
+        final GoBluetoothRadio radio = GoBluetoothRadio(go: go);
+        int polls() =>
+            go.calls.where((String c) => c == 'YggBtLinkPollJson').length;
+        int since = 0;
+        int pollsFor(Duration d) {
+          since = polls();
+          async.elapse(d);
+          return polls() - since;
+        }
+
+        radio.start();
+        async.flushMicrotasks();
+        // Just started: a friend may dial in any moment.
+        expect(pollsFor(const Duration(seconds: 30)), 60);
+        // Nothing happens: every 5 s.
+        expect(pollsFor(const Duration(minutes: 1)), 12);
+
+        // A dial waits for its outcome: twice a second again at once.
+        bool? dialled;
+        radio
+            .connect(
+              'AA:BB:CC:DD:EE:FF',
+              LocalLinkEndpoint(id: 'e1', port: 40001, token: Uint8List(16)),
+              classic: true,
+            )
+            .then((bool ok) => dialled = ok);
+        async.flushMicrotasks();
+        expect(pollsFor(const Duration(seconds: 10)), 20);
+        go.answers['YggBtLinkPollJson'] = <String, dynamic>{
+          'listening': true,
+          'dials': <String, String>{'d1': 'ok'},
+        };
+        async.elapse(const Duration(milliseconds: 500));
+        async.flushMicrotasks();
+        expect(dialled, isTrue);
+        go.answers['YggBtLinkPollJson'] = <String, dynamic>{'listening': true};
+        // A short while after it, then idle again.
+        expect(pollsFor(const Duration(seconds: 30)), 60);
+        expect(pollsFor(const Duration(minutes: 1)), 12);
+
+        // A stream comes in on an idle poll: the next ones come quickly.
+        go.answers['YggBtLinkPollJson'] = <String, dynamic>{
+          'listening': true,
+          'incoming': <String>['in1'],
+        };
+        async.elapse(const Duration(seconds: 5));
+        go.answers['YggBtLinkPollJson'] = <String, dynamic>{'listening': true};
+        expect(pollsFor(const Duration(seconds: 10)), 20);
+
+        radio.stop();
+        async.flushMicrotasks();
+        expect(pollsFor(const Duration(minutes: 1)), 0);
+      });
     });
   });
 }
