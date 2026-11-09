@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -19,6 +20,75 @@ import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
   group('FileSocialSnapshotStore', () {
+    test(
+      'an entry of the wrong kind is skipped, the others are kept',
+      () async {
+        final Directory tempDir = await Directory.systemTemp.createTemp(
+          'zen-social-store-odd-',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final FileBinaryStore files = FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        );
+        final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+          store: files,
+        );
+        await store.save(
+          SocialHubState.empty().copyWith(
+            groups: const <String, GroupProfile>{
+              'g': GroupProfile(
+                id: 'g',
+                name: 'G',
+                createdById: 'self',
+                createdAtMillis: 0,
+                memberAddresses: <String>['self'],
+                pendingInviteIds: <String, String>{'200::a': 'inv-1'},
+              ),
+            },
+          ),
+        );
+        // The JSON document is the snapshot's last string: written over
+        // with entries a damaged or foreign file could hold.
+        final Uint8List bytes = (await files.read('social/hub'))!;
+        final int at = _lastJsonAt(bytes);
+        final Map<String, dynamic> doc =
+            jsonDecode(utf8.decode(bytes.sublist(at))) as Map<String, dynamic>;
+        doc['disappear'] = <String, Object?>{'ada.ygg': 30, 'x': 'y', 'n': -5};
+        doc['groupNotifyAll'] = <String, Object?>{
+          'group:g': true,
+          'group:h': 'yes',
+        };
+        doc['groups'] = <String, Object?>{
+          'g': <String, Object?>{
+            'pendingInviteIds': <String, Object?>{
+              '200::a': 'inv-1',
+              '200::b': 7,
+            },
+            'receivedInviteIds': <Object?>[],
+          },
+        };
+        final Uint8List json = utf8.encode(jsonEncode(doc));
+        await files.write(
+          'social/hub',
+          Uint8List.fromList(<int>[
+            ...bytes.sublist(0, at - 4),
+            ...(ByteData(
+              4,
+            )..setUint32(0, json.length, Endian.little)).buffer.asUint8List(),
+            ...json,
+          ]),
+        );
+
+        final SocialHubState loaded = (await store.load())!;
+        expect(loaded.disappearingTimers, <String, int>{'ada.ygg': 30});
+        expect(loaded.groupNotifyAll, <String, bool>{'group:g': true});
+        expect(loaded.groups['g']!.pendingInviteIds, <String, String>{
+          '200::a': 'inv-1',
+        });
+      },
+    );
+
     test('keeps the friendship records and their clock', () async {
       final Directory tempDir = await Directory.systemTemp.createTemp(
         'zen-social-store-records-',
@@ -311,4 +381,17 @@ final class _PassThroughCompressor implements BinaryCompressor {
 
   @override
   Future<Uint8List?> decompress(Uint8List input) async => input;
+}
+
+/// Where the JSON document at the end of a snapshot starts: the string
+/// whose length (the four bytes before it) reaches the end.
+int _lastJsonAt(Uint8List bytes) {
+  final ByteData data = ByteData.sublistView(bytes);
+  for (int at = 4; at < bytes.length; at++) {
+    if (bytes[at] == 0x7B &&
+        data.getUint32(at - 4, Endian.little) == bytes.length - at) {
+      return at;
+    }
+  }
+  throw StateError('no JSON document');
 }

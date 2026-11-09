@@ -152,7 +152,10 @@ void main() {
           payload,
         );
 
-        expect(file.path, contains('%3a'));
+        // The ":" percent-encoded (Windows has its paths in lower case).
+        final String name = file.uri.pathSegments.last;
+        expect(name, contains(Platform.isWindows ? '%3a' : '%3A'));
+        expect(name, isNot(contains(':')));
         expect(
           await store.read('threads/200:1111:2222:3333:4444:5555:6666:7777'),
           payload,
