@@ -102,6 +102,7 @@ _boot({
   RuntimeNotificationCenter? center,
   MemorySocialSnapshotStore? snapshots,
   SocialHubState? seed,
+  IncomingCallCard? callCard,
 }) {
   final MemoryRuntimeSystemNotificationService shade =
       MemoryRuntimeSystemNotificationService();
@@ -134,6 +135,8 @@ _boot({
       ),
       if (center != null)
         runtimeNotificationCenterProvider.overrideWithValue(center),
+      if (callCard != null)
+        incomingCallCardProvider.overrideWithValue(callCard),
       socialHubSeedProvider.overrideWithValue(
         seed ?? _seed(lifecycle, own: own),
       ),
@@ -155,7 +158,77 @@ Future<RuntimeSystemNotification> _shown(
   return shade.activeNotifications.single;
 }
 
+/// The names the card of a call from Ada ringing in the background shows.
+Future<List<String>> _callCardNames({
+  required NotificationPrivacy global,
+  Map<String, NotificationPrivacy> own = const <String, NotificationPrivacy>{},
+}) async {
+  final List<String> names = <String>[];
+  final (:container, :shade) = _boot(
+    global: global,
+    own: own,
+    callCard:
+        ({
+          required String displayName,
+          required bool isVideo,
+          required String peerAddress,
+          required String acceptRouteKey,
+        }) async {
+          names.add(displayName);
+          return true;
+        },
+  );
+  await container
+      .read(socialHubControllerProvider.notifier)
+      .receiveSignal(
+        const ZenSignal(
+          type: ZenSignalType.callInvite,
+          sender: _ada,
+          displayName: 'Ada',
+          callId: 'call-1',
+          content: 'audio',
+        ),
+        receivedAtMillis: 1000,
+      );
+  return names;
+}
+
 void main() {
+  group('the card of a ringing call over the lock screen', () {
+    test('names the caller unless the level keeps names off', () async {
+      expect(
+        await _callCardNames(global: NotificationPrivacy.senderOnly),
+        allOf(isNotEmpty, everyElement('Ada')),
+      );
+      final List<String> hidden = await _callCardNames(
+        global: NotificationPrivacy.generic,
+      );
+      expect(hidden, isNotEmpty);
+      expect(hidden, everyElement('Połączenie przychodzące'));
+    });
+
+    test('the conversation\'s own level counts, as for its messages', () async {
+      expect(
+        await _callCardNames(
+          global: NotificationPrivacy.senderAndContent,
+          own: const <String, NotificationPrivacy>{
+            _ada: NotificationPrivacy.generic,
+          },
+        ),
+        everyElement('Połączenie przychodzące'),
+      );
+      expect(
+        await _callCardNames(
+          global: NotificationPrivacy.generic,
+          own: const <String, NotificationPrivacy>{
+            _ada: NotificationPrivacy.senderAndContent,
+          },
+        ),
+        allOf(isNotEmpty, everyElement('Ada')),
+      );
+    });
+  });
+
   group('a chat message\'s notification', () {
     test('"Nadawca i treść" (the default): who and what', () async {
       expect(

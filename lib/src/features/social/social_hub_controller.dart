@@ -144,6 +144,19 @@ final Provider<Duration> callOfferWaitTimeoutProvider = Provider<Duration>((
 final Provider<Future<bool> Function()> deviceLockedProbeProvider =
     Provider<Future<bool> Function()>((Ref ref) => isDeviceLocked);
 
+/// Shows the native card of a ringing call over other apps and the lock
+/// screen (call_platform_channel.dart; replaced in tests).
+typedef IncomingCallCard =
+    Future<bool> Function({
+      required String displayName,
+      required bool isVideo,
+      required String peerAddress,
+      required String acceptRouteKey,
+    });
+
+final Provider<IncomingCallCard> incomingCallCardProvider =
+    Provider<IncomingCallCard>((Ref ref) => showIncomingCallPopup);
+
 final Provider<Duration> callRingingWaitTimeoutProvider = Provider<Duration>((
   Ref ref,
 ) {
@@ -757,8 +770,8 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       // MainActivity forward is what made the whole messenger pop up.
       await setRingingCallWindowActive(false);
       final String acceptToken = await _ensureCallAcceptToken(session);
-      await showIncomingCallPopup(
-        displayName: session.displayName,
+      await ref.read(incomingCallCardProvider)(
+        displayName: _callCardName(session),
         isVideo: session.kind == CallInviteKind.video,
         peerAddress: session.peerAddress,
         // The card's "Odbierz" opens the app on this route. Its token is the
@@ -776,6 +789,25 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     await setRingingCallWindowActive(false);
     await hideIncomingCallPopup();
+  }
+
+  /// Who calls, as the card over the lock screen may say it: the caller's
+  /// name, unless the notification level of the conversation (its own, or
+  /// the general one) keeps names off notifications — as the locked
+  /// receiver's card does.
+  String _callCardName(CallSession session) {
+    final String? groupId = session.groupId;
+    final String key = groupId != null && groupId.isNotEmpty
+        ? 'group:$groupId'
+        : session.peerAddress;
+    final NotificationPrivacy level = state.notificationPrivacyFor(
+      key,
+      global: _appSettings.privacyFor(NoticeKind.call),
+    );
+    return level == NotificationPrivacy.generic ||
+            session.displayName.trim().isEmpty
+        ? t('Połączenie przychodzące')
+        : session.displayName;
   }
 
   /// The accept token of the ringing [session], created (and stored, so the
