@@ -289,6 +289,34 @@ void main() {
     );
   });
 
+  test('the service hears its repeat event only while parked beside the '
+      'app, and its other options stay as they were', () {
+    final ForegroundTaskOptions parked = androidBackgroundTaskOptions(
+      parked: true,
+    );
+    final ForegroundTaskOptions owning = androidBackgroundTaskOptions(
+      parked: false,
+    );
+    expect(parked.eventAction.type, ForegroundTaskEventType.repeat);
+    expect(
+      parked.eventAction.interval,
+      kAndroidBackgroundHeartbeatInterval.inMilliseconds,
+    );
+    expect(owning.eventAction.type, ForegroundTaskEventType.nothing);
+    for (final ForegroundTaskOptions o in <ForegroundTaskOptions>[
+      parked,
+      owning,
+    ]) {
+      expect(o.autoRunOnBoot, isTrue);
+      expect(o.autoRunOnMyPackageReplaced, isTrue);
+      expect(o.allowWakeLock, isFalse);
+      expect(o.allowWifiLock, isFalse);
+    }
+    final Map<String, dynamic> a = parked.toJson()..remove('taskEventAction');
+    final Map<String, dynamic> b = owning.toJson()..remove('taskEventAction');
+    expect(a, b);
+  });
+
   test('long in the background the app drops to receive-only', () {
     final DateTime left = DateTime(2026, 10, 22, 12);
     expect(shouldDropToReceiveOnly(backgroundSince: null, now: left), isFalse);

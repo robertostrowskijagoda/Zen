@@ -239,6 +239,30 @@ const String _kHeartbeatEngineKey = 'engine';
 /// takes the node over.
 const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
 
+/// The foreground service's options. Its repeat event, every
+/// [kAndroidBackgroundHeartbeatInterval], drives the watchdog that looks at
+/// the app's heartbeats while the service is [parked] beside the app; while
+/// the service runs the node itself the watchdog has nothing to look at,
+/// and the event (a turn of the service's isolate every 5 s while the phone
+/// is awake) is off ([ForegroundTaskEventAction.nothing]). The plugin
+/// changes it on the running service without starting its task again.
+ForegroundTaskOptions androidBackgroundTaskOptions({required bool parked}) =>
+    ForegroundTaskOptions(
+      eventAction: parked
+          ? ForegroundTaskEventAction.repeat(
+              kAndroidBackgroundHeartbeatInterval.inMilliseconds,
+            )
+          : ForegroundTaskEventAction.nothing(),
+      autoRunOnBoot: true,
+      autoRunOnMyPackageReplaced: true,
+      // No lock for the whole life of the service: with the screen off the
+      // phone sleeps. Alarms wake it for the work that comes back and a
+      // signal wakes it by itself; each holds it awake briefly
+      // (zen_wake.dart, ZenPower.kt). Only a call holds it longer.
+      allowWakeLock: false,
+      allowWifiLock: false,
+    );
+
 /// One wake of the parked service's watchdog: [probe] asks the app at once
 /// whether it still runs its node, and the wake ends as soon as [answered]
 /// completes (its heartbeat came) or after [wait]; whether it came. The
@@ -688,20 +712,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
         showNotification: false,
         playSound: false,
       ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        // Drives the standby watchdog in the task isolate.
-        eventAction: ForegroundTaskEventAction.repeat(
-          kAndroidBackgroundHeartbeatInterval.inMilliseconds,
-        ),
-        autoRunOnBoot: true,
-        autoRunOnMyPackageReplaced: true,
-        // No lock for the whole life of the service: with the screen off the
-        // phone sleeps. Alarms wake it for the work that comes back and a
-        // signal wakes it by itself; each holds it awake briefly
-        // (zen_wake.dart, ZenPower.kt). Only a call holds it longer.
-        allowWakeLock: false,
-        allowWifiLock: false,
-      ),
+      foregroundTaskOptions: androidBackgroundTaskOptions(parked: true),
     );
     // Notifications and the rest are asked for on the permissions screen
     // (first start and Ustawienia), never on their own at startup.
@@ -3171,6 +3182,10 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
     try {
       await FlutterForegroundTask.updateService(
+        // The repeat event only while parked.
+        foregroundTaskOptions: androidBackgroundTaskOptions(
+          parked: mode == AndroidBackgroundRuntimeMode.standby,
+        ),
         notificationTitle: 'Zen',
         notificationText: _backgroundServiceNotificationText(null, mode: mode),
         notificationIcon: const NotificationIcon(
