@@ -7,6 +7,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
+import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/films/presentation/film_camera.dart';
@@ -20,6 +22,7 @@ import 'package:zen/src/features/pebbles/presentation/pebble_collect_flow.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/social/qr_frame_decoder.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -305,5 +308,45 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  test('the pebbles ask on the wake beat only while the core runs: no wake '
+      'of their own while Zen is locked', () async {
+    addTearDown(ZenWake.resetForTest);
+    final PebbleStore store = PebbleStore(MemoryLedgerDisk());
+    final PebbleService service = PebbleService(
+      store: store,
+      hosting: PebbleHosting(
+        transport: MemorySignalTransport(),
+        store: store,
+        peers: _NoPeers(),
+        accountKey: () => null,
+        serveCollected: () => true,
+      ),
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [pebbleServiceProvider.overrideWithValue(service)],
+    );
+    addTearDown(container.dispose);
+    final Provider<List<ZenModule>> modules = Provider<List<ZenModule>>(
+      zenAppModules,
+    );
+    final ZenModule pebbles = container
+        .read(modules)
+        .singleWhere((ZenModule m) => m.id == 'pebbles');
+    expect(ZenWake.plannedBeat, isNot(contains('pebbles')));
+    await pebbles.start();
+    expect(ZenWake.plannedBeat, contains('pebbles'));
+    await pebbles.stop();
+    expect(ZenWake.plannedBeat, isNot(contains('pebbles')));
+    // Unlocked again: back on the beat, once.
+    await pebbles.start();
+    await pebbles.start();
+    expect(
+      ZenWake.plannedBeat.where((String w) => w == 'pebbles'),
+      hasLength(1),
+    );
+    await service.stop();
+    expect(ZenWake.plannedBeat, isNot(contains('pebbles')));
   });
 }

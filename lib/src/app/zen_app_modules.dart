@@ -69,6 +69,14 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(relayQuietWatchProvider);
     },
   ),
+  ServicesModule(
+    id: 'pebbles',
+    // Designs still missing and keepers who did not answer, asked again on
+    // the wake beat while the core runs; while Zen is locked the service
+    // holds the node and nothing could be asked.
+    start: () => ref.read(pebbleServiceProvider)?.beatOn(),
+    stop: () => ref.read(pebbleServiceProvider)?.beatOff(),
+  ),
   // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct.
   LocalLinksModule(ref),
   ServicesModule(
@@ -172,9 +180,11 @@ final class ServicesModule extends ZenModule {
     required this.id,
     required void Function() start,
     this.feature,
+    void Function()? stop,
     void Function()? resume,
     void Function(int minute)? minute,
   }) : _start = start,
+       _stop = stop,
        _resume = resume,
        _minute = minute;
 
@@ -185,6 +195,9 @@ final class ServicesModule extends ZenModule {
   final ZenFeature? feature;
 
   final void Function() _start;
+
+  /// What does not outlive the core (its wakes); the services stay.
+  final void Function()? _stop;
   final void Function()? _resume;
   final void Function(int minute)? _minute;
   bool _running = false;
@@ -199,6 +212,7 @@ final class ServicesModule extends ZenModule {
   void stop() {
     // The services stay with the container; only the duties stop.
     _running = false;
+    _stop?.call();
   }
 
   @override

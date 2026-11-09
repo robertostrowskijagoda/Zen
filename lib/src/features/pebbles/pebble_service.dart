@@ -187,6 +187,11 @@ PebbleProfile? readPebbleProfile(LedgerNode node, String account) {
   return e == null ? null : pebbleProfileFromBody(node.bodyOf(e));
 }
 
+/// How often the pebbles ask again for designs still missing and keepers
+/// who did not answer, on the wake beat while the app's core runs: a
+/// multiple of the beat's other periods, so it rides their wakes.
+const Duration kPebblesBeatEvery = Duration(minutes: 15);
+
 /// The pebbles of this account: its store, the hosting protocol, and the
 /// "Kamyczki" part of the profile (written when the collection changes,
 /// taken in from the account's other devices).
@@ -202,6 +207,23 @@ final class PebbleService {
   QuietTimer? _profileTimer;
   StreamSubscription<LogEntry>? _added;
   bool _publishing = false;
+
+  /// Designs still missing, keepers who did not answer: asked again on the
+  /// wake beat ([beatOn]) while the app's core runs. Not while Zen is
+  /// locked: the background service holds the node then and the asking
+  /// could reach nobody, so the beat would only wake the phone for nothing.
+  BeatTimer? _beat;
+
+  /// Puts the asking on the wake beat (once).
+  void beatOn() {
+    _beat ??= ZenWake.beat('pebbles', kPebblesBeatEvery, hosting.tick);
+  }
+
+  /// Takes the asking off the beat.
+  void beatOff() {
+    _beat?.cancel();
+    _beat = null;
+  }
 
   Future<void> start() async {
     await hosting.start();
@@ -231,6 +253,7 @@ final class PebbleService {
   }
 
   Future<void> stop() async {
+    beatOff();
     final QuietTimer? timer = _profileTimer;
     if (timer != null) {
       store.removeListener(timer.nudge);
@@ -522,12 +545,6 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
       node.start().then((_) => service.start()),
       context: 'Starting the pebbles failed',
     );
-    // Designs still missing, keepers who did not answer: on the wake beat.
-    final BeatTimer beat = ZenWake.beat(
-      'pebbles',
-      const Duration(minutes: 15),
-      hosting.tick,
-    );
     // A pebble published while there was nobody to ask: new friends are
     // asked to keep it as soon as they come, not on the next beat.
     ref.listen<int>(
@@ -544,7 +561,6 @@ final Provider<PebbleService?> pebbleServiceProvider = Provider<PebbleService?>(
       },
     );
     ref.onDispose(() {
-      beat.cancel();
       unawaitedLogged(
         service.stop().whenComplete(store.dispose),
         context: 'Stopping the pebbles',
