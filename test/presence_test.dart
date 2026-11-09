@@ -165,16 +165,97 @@ void main() {
     ({PresenceReport report, int at})? note(
       PresenceDevices devices,
       PresenceReport report, {
+      String friend = _ada,
       String device = _ada,
       required int at,
     }) => devices.note(
-      friend: _ada,
+      friend: friend,
       device: device,
       report: report,
       atMillis: at,
       foregroundFor: kPresenceForegroundFor,
-      backgroundFor: kPresenceOfflineAfter,
+      backgroundFor: kPresenceBackgroundFor,
     );
+
+    test('Zen opened on one device shows "online" over another device '
+        'still fresh "w tle"', () {
+      const String laptop = '200:1111:2222:3333:4444:5555:6666:aaaa';
+      final PresenceDevices devices = PresenceDevices();
+      // The phone in the pocket said "w tle" a minute ago ...
+      note(devices, said(PeerPresence.background, _day), at: _day);
+      // ... and Zen comes on the computer's screen: online, its word.
+      final ({PresenceReport report, int at}) now = note(
+        devices,
+        said(PeerPresence.online, _day + _minute),
+        device: laptop,
+        at: _day + _minute,
+      )!;
+      expect(now.report.presence, PeerPresence.online);
+      expect(now.at, _day + _minute);
+      // A phone about to stop receiving does not hide the computer in the
+      // tray either.
+      final PresenceDevices other = PresenceDevices();
+      note(
+        other,
+        said(PeerPresence.background, _day),
+        device: laptop,
+        at: _day,
+      );
+      expect(
+        note(
+          other,
+          said(PeerPresence.offline, _day + _minute),
+          at: _day + _minute,
+        )!.report.presence,
+        PeerPresence.background,
+      );
+    });
+
+    test('what one friend\'s devices told is kept apart from the others, '
+        'and only so many friends are kept', () {
+      const String laptop = '200:1111:2222:3333:4444:5555:6666:aaaa';
+      const String bob = '200:9999:2222:3333:4444:5555:6666:bbbb';
+      final PresenceDevices devices = PresenceDevices();
+      note(devices, said(PeerPresence.online, _day), device: laptop, at: _day);
+      // Another friend's word ...
+      note(
+        devices,
+        said(PeerPresence.background, _day + 1000),
+        friend: bob,
+        device: bob,
+        at: _day + 1000,
+      );
+      // ... leaves Ada's computer as it was: her phone's "w tle" does not
+      // hide it.
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background, _day + 2000),
+          at: _day + 2000,
+        )!.report.presence,
+        PeerPresence.online,
+      );
+      // Past the most friends kept, what was kept goes (memory stays
+      // bounded); a friend's next word is taken as it comes.
+      for (int i = 0; i < PresenceDevices.maxFriends; i++) {
+        note(
+          devices,
+          said(PeerPresence.background, _day + 3000),
+          friend: 'friend $i',
+          device: 'friend $i',
+          at: _day + 3000,
+        );
+      }
+      expect(
+        note(
+          devices,
+          said(PeerPresence.background, _day + 4000),
+          at: _day + 4000,
+        )!.report.presence,
+        PeerPresence.background,
+        reason: 'the computer\'s "online" was let go with the rest',
+      );
+    });
 
     test('a stale "online" that comes after the "w tle" told later is not '
         'taken', () {
@@ -273,12 +354,12 @@ void main() {
       presenceAtMillis: 1000,
       nowMillis: 1000 + age,
       foregroundFor: kPresenceForegroundFor,
-      backgroundFor: kPresenceOfflineAfter,
+      backgroundFor: kPresenceBackgroundFor,
     );
 
     test('"online" expires quickly, "w tle" lasts longer', () {
       final int fg = kPresenceForegroundFor.inMilliseconds;
-      final int bg = kPresenceOfflineAfter.inMilliseconds;
+      final int bg = kPresenceBackgroundFor.inMilliseconds;
       expect(at(PeerPresence.online, fg - 1), PeerPresence.online);
       expect(at(PeerPresence.online, fg), PeerPresence.offline);
       expect(at(PeerPresence.background, fg), PeerPresence.background);
