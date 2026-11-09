@@ -158,10 +158,12 @@ const (
 	// Friends opening sessions after a network change fit the burst.
 	pqPhoneForeignKEMPerSecond = 40
 	pqPhoneForeignKEMBurst     = 200
-	// Addresses whose device key is pinned. New pins come at most
-	// pqNewPinsPerMinute (strangers' addresses cost nothing to make); when
-	// the pins are full, the one seen longest ago makes room, so filling
-	// them takes hours and evicts nobody this node talks to meanwhile.
+	// Addresses whose device key is pinned. New pins from records come at
+	// most pqNewPinsPerMinute (strangers' addresses cost nothing to make);
+	// when the pins are full, the one seen longest ago among those no
+	// session ever followed makes room. A pin whose device had a session
+	// here, or that the app gave, is never pushed out by a stranger's
+	// record, and a session pins its device even with no new pins left.
 	pqMaxPins          = 16384
 	pqNewPinsPerMinute = 120
 	// Device keys someone else names for an address (hints): a friend's
@@ -174,6 +176,9 @@ const (
 type pqPin struct {
 	fingerprint [sha256.Size]byte
 	seen        time.Time
+	// More than a record backs it: a session with the device opened here,
+	// or the app gave it (kept from an earlier run, or vouched for).
+	firm bool
 }
 
 // maxSignalWireBytes is the longest signal text on the wire: the largest
@@ -313,8 +318,11 @@ type pqEndpoint struct {
 	pins map[string]*pqPin
 	// Device key fingerprints others named for addresses not pinned (see
 	// importHints): never a pin until the device's own record agrees.
-	hints        map[string]*pqPin
-	newPins      pqBucket
+	hints   map[string]*pqPin
+	newPins pqBucket
+	// New pins of devices a session opened with, whose records found no
+	// new pins left (firmPinLocked).
+	sessionPins  pqBucket
 	pendingBytes int
 	sentBytes    int
 	foreignKEM   pqBucket
@@ -1047,15 +1055,15 @@ func (e *pqEndpoint) acceptRecordLocked(source net.IP, publicKey []byte, now tim
 			return nil, false
 		}
 		pinned.seen = now
-	} else if hint != nil && hint.fingerprint == fingerprint {
-		e.makeRoomForPinLocked()
-		e.pins[address] = &pqPin{fingerprint: fingerprint, seen: now}
-	} else if e.newPins.allow(now, float64(pqNewPinsPerMinute)/60, pqNewPinsPerMinute) {
-		if hint != nil {
+	} else {
+		confirmed := hint != nil && hint.fingerprint == fingerprint
+		if hint != nil && !confirmed {
 			debugf("[ZEN-GO] pq: %s signed another device key than it was named with\n", source)
 		}
-		e.makeRoomForPinLocked()
-		e.pins[address] = &pqPin{fingerprint: fingerprint, seen: now}
+		if (confirmed || e.newPins.allow(now, float64(pqNewPinsPerMinute)/60, pqNewPinsPerMinute)) &&
+			e.makeRoomForPinLocked(false) {
+			e.pins[address] = &pqPin{fingerprint: fingerprint, seen: now}
+		}
 	}
 	peer := e.peerLocked(source, now)
 	if !bytes.Equal(peer.publicKey, publicKey) {
@@ -1066,20 +1074,59 @@ func (e *pqEndpoint) acceptRecordLocked(source net.IP, publicKey []byte, now tim
 	return peer, true
 }
 
-// makeRoomForPinLocked drops the pin seen longest ago when the pins are
-// full.
-func (e *pqEndpoint) makeRoomForPinLocked() {
-	if len(e.pins) < pqMaxPins {
+// firmPinLocked marks peer's pin firm once a session with the device that
+// holds its key opened (this node took one, or the peer took this node's):
+// pinned now if the record was not (no new pins were left), unless the
+// pins are full of firm ones.
+func (e *pqEndpoint) firmPinLocked(peer *pqPeer, now time.Time) {
+	if peer.publicKey == nil {
 		return
 	}
-	var oldestKey string
-	var oldest *pqPin
+	address := peer.ip.String()
+	if pinned, ok := e.pins[address]; ok {
+		if pinned.fingerprint == peer.fingerprint {
+			pinned.firm = true
+			pinned.seen = now
+		}
+		return
+	}
+	// A stranger can open sessions too, at the price of KEM work: these
+	// pins come no faster than the ones from records.
+	if e.sessionPins.allow(now, float64(pqNewPinsPerMinute)/60, pqNewPinsPerMinute) &&
+		e.makeRoomForPinLocked(false) {
+		delete(e.hints, address)
+		e.pins[address] = &pqPin{fingerprint: peer.fingerprint, seen: now, firm: true}
+	}
+}
+
+// makeRoomForPinLocked makes room for one more pin when the pins are full:
+// the pin seen longest ago among those that are not firm goes. Only for a
+// pin the app gives (firm) does a firm one go when nothing else can.
+// Reports whether there is room.
+func (e *pqEndpoint) makeRoomForPinLocked(firm bool) bool {
+	if len(e.pins) < pqMaxPins {
+		return true
+	}
+	var oldestKey, oldestFirmKey string
+	var oldest, oldestFirm *pqPin
 	for key, pin := range e.pins {
-		if oldest == nil || pin.seen.Before(oldest.seen) {
+		if pin.firm {
+			if oldestFirm == nil || pin.seen.Before(oldestFirm.seen) {
+				oldestFirmKey, oldestFirm = key, pin
+			}
+		} else if oldest == nil || pin.seen.Before(oldest.seen) {
 			oldestKey, oldest = key, pin
 		}
 	}
-	delete(e.pins, oldestKey)
+	switch {
+	case oldest != nil:
+		delete(e.pins, oldestKey)
+	case firm && oldestFirm != nil:
+		delete(e.pins, oldestFirmKey)
+	default:
+		return false
+	}
+	return true
 }
 
 // resetPeerKeyLocked forgets everything made with peer's device key: the
@@ -1189,6 +1236,9 @@ func (e *pqEndpoint) receiveAck(source net.IP, body []byte) {
 		return
 	}
 	// Known: frames go without the opening.
+	if !peer.send.acked {
+		e.firmPinLocked(peer, e.now())
+	}
 	peer.send.acked = true
 }
 
@@ -1369,6 +1419,7 @@ func (e *pqEndpoint) openNewLocked(peer *pqPeer, id pqSessionID, opening []byte,
 	session.lastUsed = now
 	session.lastAck = now
 	peer.addReceiveSession(session, now)
+	e.firmPinLocked(peer, now)
 	return plain, pqControlFrame(pqKindAck, id), true
 }
 
@@ -1528,10 +1579,10 @@ func (e *pqEndpoint) importPins(pins map[string]string, keep bool) (int, map[str
 			continue
 		}
 		if !ok {
-			e.makeRoomForPinLocked()
+			e.makeRoomForPinLocked(true)
 		}
 		delete(e.hints, key)
-		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: now}
+		e.pins[key] = &pqPin{fingerprint: fingerprint, seen: now, firm: true}
 		if peer := e.peers[key]; peer != nil && peer.publicKey != nil && peer.fingerprint != fingerprint {
 			e.resetPeerKeyLocked(peer)
 		}

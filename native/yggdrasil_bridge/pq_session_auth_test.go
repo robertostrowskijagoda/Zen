@@ -299,14 +299,24 @@ func TestPQBucketLimitsForeignKEMWork(t *testing.T) {
 func TestPQPinsComeSlowlyAndTheOldestMakesRoom(t *testing.T) {
 	network := newPQTestNet(t)
 	b, bIP := network.add(2)
-	// A burst of strangers: only pqNewPinsPerMinute of them are pinned.
+	// A burst of strangers' records: only pqNewPinsPerMinute of them are
+	// pinned.
+	devicePublic := pqPublicKeyOfEndpoint(t, b)
+	for range pqNewPinsPerMinute + 20 {
+		ip, frame := pqStrangerRecord(t, devicePublic)
+		b.receive(ip, frame)
+	}
+	if len(b.pins) != pqNewPinsPerMinute {
+		t.Fatalf("%d pins after a burst, want %d", len(b.pins), pqNewPinsPerMinute)
+	}
+	// Strangers who go as far as a session each are pinned no faster.
 	for fill := byte(10); fill < 10+pqNewPinsPerMinute+20; fill++ {
 		stranger, _ := network.add(fill)
 		_ = stranger.send(bIP, []byte("x"))
 	}
 	network.pump()
-	if len(b.pins) != pqNewPinsPerMinute {
-		t.Fatalf("%d pins after a burst, want %d", len(b.pins), pqNewPinsPerMinute)
+	if len(b.pins) != 2*pqNewPinsPerMinute {
+		t.Fatalf("%d pins after a burst of sessions, want %d", len(b.pins), 2*pqNewPinsPerMinute)
 	}
 
 	// Full: the pin seen longest ago goes, the others stay.
@@ -324,6 +334,100 @@ func TestPQPinsComeSlowlyAndTheOldestMakesRoom(t *testing.T) {
 	network.pump()
 	if len(b.pins) != pqMaxPins || b.pins["200::1"] != nil || b.pins[friendIP.String()] == nil {
 		t.Fatal("the oldest pin must make room for a new one")
+	}
+}
+
+// pqStrangerRecord is a key record ('K', nothing asked) of a node key made
+// just now: what anyone can send from an address that costs nothing.
+func pqStrangerRecord(t *testing.T, devicePublic []byte) (net.IP, []byte) {
+	t.Helper()
+	_, nodeKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := pqBuildRecord(nodeKey, devicePublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := net.ParseIP(meshAddressForKey(nodeKey.Public().(ed25519.PublicKey)))
+	return ip, append(append([]byte(pqMagic), pqKindKeys, 0), record...)
+}
+
+// Strangers' records use up the new pins of the minute; a friend who
+// writes for the first time meanwhile is still pinned once its session
+// opens.
+func TestPQAFirstContactIsPinnedWhenStrangersUsedUpTheNewPins(t *testing.T) {
+	network := newPQTestNet(t)
+	victim, victimIP := network.add(1)
+	friend, friendIP := network.add(2)
+	devicePublic := pqPublicKeyOfEndpoint(t, victim)
+	for range pqNewPinsPerMinute + 5 {
+		ip, frame := pqStrangerRecord(t, devicePublic)
+		victim.receive(ip, frame)
+	}
+	if len(victim.pins) != pqNewPinsPerMinute {
+		t.Fatalf("%d pins after the strangers", len(victim.pins))
+	}
+	mustSend(t, friend, victimIP, "hej")
+	network.pump()
+	if got := network.take(victimIP); len(got) != 1 {
+		t.Fatalf("victim got %q", got)
+	}
+	if victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatal("a first contact whose session opened must be pinned")
+	}
+	// Nor does it wait for the next minute when this node writes first.
+	other, otherIP := network.add(3)
+	mustSend(t, victim, otherIP, "hej")
+	network.pump()
+	if got := network.take(otherIP); len(got) != 1 {
+		t.Fatalf("other got %q", got)
+	}
+	if victim.pinsSnapshot()[otherIP.String()] != other.ownFingerprint() {
+		t.Fatal("a contact this node wrote to must be pinned once it took the session")
+	}
+}
+
+// With the pins full, strangers' records push out only pins of addresses
+// that never had a session here: a friend quiet for hours keeps its pin,
+// and a holder of its broken node key is still refused.
+func TestPQStrangersNeverPushOutThePinOfAPeerThatHadASession(t *testing.T) {
+	network := newPQTestNet(t)
+	victim, victimIP := network.add(1)
+	friend, friendIP := network.add(2)
+	mustSend(t, friend, victimIP, "hej")
+	network.pump()
+	network.take(victimIP)
+
+	// Hours of strangers' records later: the pins are full, the friend's
+	// the oldest of them.
+	network.clock = network.clock.Add(3 * time.Hour)
+	victim.mu.Lock()
+	for index := range pqMaxPins - len(victim.pins) {
+		victim.pins[fmt.Sprintf("201:1::%x", index+1)] = &pqPin{seen: network.clock.Add(time.Duration(index) * time.Millisecond)}
+	}
+	victim.mu.Unlock()
+	devicePublic := pqPublicKeyOfEndpoint(t, victim)
+	for range 2 * pqNewPinsPerMinute {
+		network.clock = network.clock.Add(time.Minute / pqNewPinsPerMinute)
+		ip, frame := pqStrangerRecord(t, devicePublic)
+		victim.receive(ip, frame)
+	}
+	if len(victim.pins) != pqMaxPins || victim.pins["201:1::1"] != nil {
+		t.Fatal("strangers' pins must make room among themselves")
+	}
+	if victim.pinsSnapshot()[friendIP.String()] != friend.ownFingerprint() {
+		t.Fatal("a stranger's record pushed out the pin of a peer that had a session")
+	}
+	nodeKey, _ := pqTestNode(t, 2)
+	impostor := network.pqImpostor(nodeKey, friendIP)
+	before := network.sentBy(victimIP)
+	if err := impostor.send(victimIP, []byte("ja")); err != nil {
+		t.Fatal(err)
+	}
+	network.pump()
+	if network.sentBy(victimIP) != before || len(network.take(victimIP)) != 0 {
+		t.Fatal("the impostor must still be refused")
 	}
 }
 
