@@ -541,8 +541,12 @@ final class _Treasury {
     }
     bool changed = false;
     for (final PyramidRecord op in ops) {
-      // Evidence (not counting yet) only for a treasurer.
-      if (keeper || PyrLedger.isFinal(op, s)) {
+      // Evidence (not counting yet) only for a treasurer; anybody else
+      // keeps what counts by the rules every phone counts by (signed by
+      // most treasurers of its time, dated within their time, nothing an
+      // honest treasurer refuses whoever signed it).
+      if (keeper ||
+          (PyrLedger.isFinal(op, s) && PyrLedger.breaks(op, s) == null)) {
         changed = ledger.merge(op) || changed;
       }
     }
