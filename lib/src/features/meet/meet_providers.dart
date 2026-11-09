@@ -121,6 +121,10 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
       ref.read(ledgerNodeProvider)?.sessionKeyOf(a);
   service.onVouchedKeys = (Map<String, String> keys) =>
       ref.read(runtimeNodeRuntimeProvider).vouchSessionKeys(keys);
+  service.ownDevices = () {
+    final LedgerNode? node = ref.read(ledgerNodeProvider);
+    return node != null && node.isReady ? node.siblingAddresses : <String>[];
+  };
   unawaitedLogged(
     service.reload().then((_) async {
       // Before the friends are read there is nothing to send (and an empty
