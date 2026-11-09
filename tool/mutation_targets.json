@@ -200,5 +200,11 @@
     "tests": [
       "test/profile_photo_and_chat_header_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/domain/friends/peer_presence.dart",
+    "tests": [
+      "test/presence_test.dart"
+    ]
   }
 ]

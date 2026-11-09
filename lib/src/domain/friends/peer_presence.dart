@@ -35,15 +35,25 @@ enum PresenceDoubt { unchecked, noNetwork }
 /// come.
 const Duration kPresenceRememberedFor = Duration(minutes: 30);
 
-/// A friend "w tle" with no sign of life for this long counts as offline
-/// (and no longer reachable directly). A phone in the background never
-/// pings; it only answers this phone's pings, which go out only while Zen
-/// is on this screen, every kPresencePingInterval (2 min), and a locked
-/// phone answers one contact at most every kLockedPongEvery (3.5 min): the
-/// first ping after a quiet while at once, then every other one, so an
-/// answer comes every 4 min. Twice that and a bit, so one lost answer is
-/// not "offline".
+/// A friend "w tle" with no sign of life for this long is no longer
+/// counted as reachable directly (posts then go through their mailboxes).
+/// A locked phone answers this phone's pings, which go out only while Zen
+/// is on this screen, every kPresencePingInterval (2 min), one contact at
+/// most every kLockedPongEvery (3.5 min): the first ping after a quiet
+/// while at once, then every other one, so an answer comes every 4 min.
+/// Twice that and a bit, so one lost answer does not count.
 const Duration kPresenceOfflineAfter = Duration(minutes: 10);
+
+/// A friend "w tle" with no sign of life for this long shows as offline.
+/// Longer than [kPresenceOfflineAfter]: a sleeping phone is not always
+/// reachable between its own wakes (a link the mobile network dropped is
+/// found out on the next one), and then its only sign is the ping it sends
+/// its friends itself every kLockedPresenceRoundEvery (10 min, on a wake
+/// the phone has anyway, which Doze may put off by a few minutes). Shown
+/// for as long as the answers, a friend whose service runs flipped to
+/// "poza siecią" for most of each round. Two rounds and a bit, so one
+/// round lost does not show either; under [kPresenceRememberedFor].
+const Duration kPresenceBackgroundFor = Duration(minutes: 25);
 
 /// A friend "online" with no new sign for this long counts as offline. A
 /// friend on the screen pings every kPresencePingInterval and answers this

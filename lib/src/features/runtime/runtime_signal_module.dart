@@ -139,11 +139,17 @@ final class RuntimePresenceConfig {
     this.pingInterval = kPresencePingInterval,
     this.offlineAfter = kPresenceOfflineAfter,
     this.foregroundFor = kPresenceForegroundFor,
+    this.backgroundFor = kPresenceBackgroundFor,
   });
 
   final Duration pingInterval;
+
+  /// Without a sign this long a friend is not counted as reachable.
   final Duration offlineAfter;
   final Duration foregroundFor;
+
+  /// Without a sign this long a friend "w tle" shows as offline.
+  final Duration backgroundFor;
 }
 
 /// Whether this device stops receiving once Zen leaves the screen: an
@@ -507,6 +513,7 @@ final class RuntimeSignalModule extends ZenModule {
               .recheckStalePresence(
                 offlineAfter: config.offlineAfter,
                 foregroundFor: config.foregroundFor,
+                backgroundFor: config.backgroundFor,
               ),
           context: 'Rechecking stale presence failed',
         );
@@ -568,6 +575,7 @@ final class RuntimeSignalModule extends ZenModule {
           reachable: true,
           offlineAfter: config.offlineAfter,
           foregroundFor: config.foregroundFor,
+          backgroundFor: config.backgroundFor,
         ),
         context: 'Presence back on the network failed',
       );
@@ -809,7 +817,7 @@ final class RuntimeSignalModule extends ZenModule {
       report: report,
       atMillis: frame.receivedAtMillis,
       foregroundFor: config.foregroundFor,
-      backgroundFor: config.offlineAfter,
+      backgroundFor: config.backgroundFor,
     );
     if (now == null) {
       // Told before what this device heard from there already.
@@ -1273,6 +1281,7 @@ final class RuntimeSignalModule extends ZenModule {
         .decayPresence(
           offlineAfter: config.offlineAfter,
           foregroundFor: config.foregroundFor,
+          backgroundFor: config.backgroundFor,
           settleUnchecked: settleUnchecked,
         );
   }

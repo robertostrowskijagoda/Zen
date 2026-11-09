@@ -325,9 +325,14 @@ The receiver shows *online* for `"foreground"`, *in the background* for
 `"background"`, and *offline* for `"asleep"` or when the state expires:
 *online* after 5 min without a new frame (`kPresenceForegroundFor`: a
 friend on the screen pings every 2 min and answers at once, and says
-`away` when it leaves), *in the background* after 10 min
-(`kPresenceOfflineAfter`: a locked phone answers every 4 min, as it
-answers one contact at most every 3 min 30 s). The receiver keeps the last
+`away` when it leaves), *in the background* after 25 min
+(`kPresenceBackgroundFor`: a locked phone answers every 4 min, as it
+answers one contact at most every 3 min 30 s, but a sleeping phone is not
+always reachable between its own wakes, so it also pings the friends who
+see its status every 10 min itself, `kLockedPresenceRoundEvery`; two
+rounds and a bit). After 10 min without a frame (`kPresenceOfflineAfter`)
+the friend no longer counts as reachable directly, and what goes to them
+waits in their mailboxes. The receiver keeps the last
 opening (receive time minus `lo`) and shows it while the friend is not
 online. A locked Android phone takes `state` and `lo` for its pongs from a
 presence kit the app writes, sealed with the background key, whenever Zen

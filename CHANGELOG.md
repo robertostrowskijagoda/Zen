@@ -10,6 +10,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **Friends whose Zen runs in the background no longer show "poza siecią" for most of the time**: a locked phone told its friends it was there ("w tle") only on the wake of its mailbox polls, which come every half hour once nothing comes, and a friend in the background showed as offline 10 minutes after their last sign. A sleeping phone is not always reachable between its own wakes (a link the mobile network dropped is found out on the next one), so for a friend whose phone could not answer the pings, its own sign was the only one, and they showed "poza siecią" for twenty minutes of every thirty. The locked phone now tells it every 10 minutes on its own place on the shared beat (with the other work of a wake, none of its own while the beat comes as often; none at all when nobody sees its status), and a friend "w tle" shows as offline after 25 minutes without a sign, two rounds and a bit. Whether they count as reachable directly (posts then go through their mailboxes) still goes by the 10 minutes of the answers (`kPresenceBackgroundFor`, `kPresenceOfflineAfter`).
+- **A group chat no longer jumps back to the bottom when one's own newest message comes back**: the same as the conversation's fix in 1.16.1, for groups (only one of one's own newer than anything shown brings the list down).
+
 ## 1.16.1 — 09.11.2026
 
 ### What's new
