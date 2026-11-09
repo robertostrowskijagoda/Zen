@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.2 — 09.11.2026
+
 ### What's new
 - [en] Friends whose Zen runs in the background show "in the background", not offline, while their phone sleeps.
 - [en] A chat no longer jumps back to the bottom while you scroll up, and a message sent just as your friend reads no longer disappears.
