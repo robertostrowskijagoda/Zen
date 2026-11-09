@@ -10,6 +10,10 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **A message sent as the friend's receipt or "pisze…" came no longer disappears**: a delivery or read mark, a file that finished coming, an edit, the clean-up of old messages and "Usuń z mojego urządzenia" each read the whole conversation, changed it and wrote it back whole. A message added in between (one's own, sent just as the friend's receipt for the one before came in, which is when their "pisze…" shows) was written over by the copy read before it, and was gone from the phone; the friend had it. Each of them now writes only what it changed, onto the conversation as it is at that moment, in one step with the conversation's other writes (`MessageTimelineStore.update`, `applyTimelineChanges`), in every store (the files, the disappearing messages, the copies for the account's other devices).
+- **Tests**: a receipt coming in while the next message is sent, at sixteen moments from 0 to 30 ms after it, on a store with the few milliseconds of a phone's encrypted storage (each lost the second message before); what a change keeps of messages added, changed and deleted meanwhile.
+
 ## 1.16.0 — 08.11.2026
 
 ### What's new

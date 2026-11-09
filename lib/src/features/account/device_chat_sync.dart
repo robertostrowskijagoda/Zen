@@ -144,6 +144,25 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
   }
 
   @override
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  ) async {
+    final Set<String> known = await _knownFor(peerAddress);
+    List<ChatMessage>? written;
+    final bool changed = await delegate.update(peerAddress, (
+      List<ChatMessage> all,
+    ) {
+      return written = change(all);
+    });
+    final List<ChatMessage>? done = written;
+    if (changed && done != null) {
+      _check(peerAddress, known, done);
+    }
+    return changed;
+  }
+
+  @override
   Future<List<ChatMessage>> load(String peerAddress) =>
       delegate.load(peerAddress);
 }

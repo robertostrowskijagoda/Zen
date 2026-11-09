@@ -33,6 +33,51 @@ abstract interface class MessageTimelineStore {
   Future<void> save(String peerAddress, List<ChatMessage> messages);
 
   Future<void> append(String peerAddress, ChatMessage message);
+
+  /// Changes the conversation [peerAddress] in one step: [change] gets it
+  /// as it is now and returns what it becomes (`null`: nothing changes),
+  /// and no other write to it comes between the two. Returns whether it
+  /// changed. (A [load] followed by a [save] lets a message added in
+  /// between be written over: [applyTimelineChanges].)
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  );
+}
+
+/// [current] (a conversation as it is now) with what turned [before] into
+/// [after] (the same conversation as someone read it earlier, and what they
+/// made of it): the messages [after] no longer has are taken out, those it
+/// changed are put in their place, and those it added go in by their send
+/// time. Everything else of [current] stays, above all the messages added
+/// to it since [before] was read: a "delivered" or "read" mark written
+/// from a copy read a moment before deleted the message sent meanwhile.
+List<ChatMessage> applyTimelineChanges(
+  List<ChatMessage> current,
+  List<ChatMessage> before,
+  List<ChatMessage> after,
+) {
+  final Map<String, ChatMessage> was = <String, ChatMessage>{
+    for (final ChatMessage m in before) m.id: m,
+  };
+  final Map<String, ChatMessage> now = <String, ChatMessage>{
+    for (final ChatMessage m in after) m.id: m,
+  };
+  final Set<String> here = <String>{for (final ChatMessage m in current) m.id};
+  List<ChatMessage> out = <ChatMessage>[
+    for (final ChatMessage m in current)
+      if (!was.containsKey(m.id) || now.containsKey(m.id))
+        // Changed by the caller: its version; otherwise as it is now.
+        !was.containsKey(m.id) || identical(was[m.id], now[m.id])
+            ? m
+            : now[m.id]!,
+  ];
+  for (final ChatMessage m in after) {
+    if (!was.containsKey(m.id) && !here.contains(m.id)) {
+      out = insertChronologically(out, m);
+    }
+  }
+  return List<ChatMessage>.unmodifiable(out);
 }
 
 /// Messages in one stored piece of a conversation.
@@ -194,6 +239,27 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
         return;
       }
       await _commit(key, await _open(key), messages);
+    });
+  }
+
+  @override
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  ) {
+    final String key = _keyFor(peerAddress);
+    return _serial(key, () async {
+      final _Thread thread = await _open(key);
+      final List<ChatMessage>? next = change(thread.all);
+      if (next == null) {
+        return false;
+      }
+      if (next.isEmpty) {
+        await _clear(key);
+      } else {
+        await _commit(key, thread, next);
+      }
+      return true;
     });
   }
 
@@ -1060,6 +1126,27 @@ final class MemoryMessageTimelineStore implements MessageTimelineStore {
       return;
     }
     _threads[peerAddress] = List<ChatMessage>.from(messages, growable: false);
+  }
+
+  @override
+  Future<bool> update(
+    String peerAddress,
+    List<ChatMessage>? Function(List<ChatMessage> messages) change,
+  ) async {
+    final List<ChatMessage>? next = change(
+      List<ChatMessage>.unmodifiable(
+        _threads[peerAddress] ?? const <ChatMessage>[],
+      ),
+    );
+    if (next == null) {
+      return false;
+    }
+    if (next.isEmpty) {
+      _threads.remove(peerAddress);
+    } else {
+      _threads[peerAddress] = List<ChatMessage>.from(next, growable: false);
+    }
+    return true;
   }
 }
 

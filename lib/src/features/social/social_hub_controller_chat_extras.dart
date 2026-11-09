@@ -958,7 +958,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     }
     final List<ChatMessage> updated = List<ChatMessage>.of(thread);
     updated[index] = next;
-    await _messageTimelineStore.save(key, updated);
+    await _saveTimelineChanges(key, thread, updated);
     _bumpTimelineRevision();
     return true;
   }
@@ -984,7 +984,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       }
     }
     if (changed) {
-      await _messageTimelineStore.save(key, updated);
+      await _saveTimelineChanges(key, thread, updated);
       _bumpTimelineRevision();
     }
   }
