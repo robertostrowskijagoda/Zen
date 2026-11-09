@@ -157,6 +157,40 @@ final class UnlockThrottle {
   }
 }
 
+/// What one try of a password came to: [right], or the wait it left
+/// ([wait] zero: just wrong).
+typedef PasswordTry = ({bool right, Duration wait});
+
+/// One try of a password inside the unlocked app (a confirmation before a
+/// sensitive place or a security setting), counted with the lock screen's
+/// attempts in [throttle]: while a wait is on [check] is not even run, a
+/// wrong password counts (and may start a wait), the right one clears the
+/// count when [clears] (the app password; another password proves less).
+Future<PasswordTry> tryPassword(
+  UnlockThrottle throttle,
+  Future<bool> Function() check, {
+  bool clears = true,
+}) async {
+  final Duration left = await throttle.remaining();
+  if (left > Duration.zero) {
+    return (right: false, wait: left);
+  }
+  if (await check()) {
+    if (clears) {
+      await throttle.clear();
+    }
+    return (right: true, wait: Duration.zero);
+  }
+  return (right: false, wait: await throttle.recordFailure());
+}
+
+/// A wait as the lock screen shows it: "0:30", rounded up to the second.
+String formatUnlockWait(Duration wait) {
+  final int seconds = wait.inSeconds + (wait.inMilliseconds % 1000 > 0 ? 1 : 0);
+  final String rest = (seconds % 60).toString().padLeft(2, '0');
+  return '${seconds ~/ 60}:$rest';
+}
+
 /// The lock screen's attempt counter, kept next to the credentials of the
 /// current [appSecurityServiceProvider]. Tests override it to set the clock.
 final Provider<UnlockThrottle> unlockThrottleProvider =

@@ -118,7 +118,7 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
       context,
       node,
       t('Dodaj drugie urządzenie lub przenieś konto'),
-      wrong: () => setState(() => _message = t('Złe hasło konta.')),
+      wrong: (String why) => setState(() => _message = why),
     )) {
       return;
     }

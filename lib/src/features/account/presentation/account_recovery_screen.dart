@@ -187,8 +187,16 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     }
     checkAccountPassword(_password.text);
     final LedgerIdentity identity = node.identity;
-    if (identity.hasPassword && !await identity.unlock(_password.text)) {
-      return t('Konto ma już inne hasło. Najpierw podaj obecne.');
+    if (identity.hasPassword) {
+      final String password = _password.text;
+      final String? problem = await tryAccountPassword(
+        context,
+        () => identity.unlock(password),
+        wrong: t('Konto ma już inne hasło. Najpierw podaj obecne.'),
+      );
+      if (problem != null) {
+        return problem;
+      }
     }
     final List<String> helpers = _helpers();
     if (checkRecoveryCircle(helpers, minimum: kRecoveryCircleMinimum) ==

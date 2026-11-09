@@ -5,6 +5,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
 
 /// "12 KB", "3,4 MB", "1,2 GB".
 String accountCopySize(int bytes) {
@@ -19,25 +20,29 @@ String accountCopySize(int bytes) {
 }
 
 /// The account key, unlocked (asking for the account password when it has
-/// one). Null when it stays locked; [wrong] hears a wrong password.
+/// one). False when it stays locked; [wrong] hears what to say about a
+/// wrong password (or the wait after too many, [tryAccountPassword]).
 Future<bool> unlockAccountKey(
   BuildContext context,
   LedgerNode node,
   String why, {
-  void Function()? wrong,
+  void Function(String message)? wrong,
 }) async {
   if (node.identity.accountKey != null) {
     return true;
   }
   final String? password = await askAccountPassword(context, why);
-  if (password == null) {
+  if (password == null || !context.mounted) {
     return false;
   }
-  final bool ok = await node.identity.unlock(password);
-  if (!ok) {
-    wrong?.call();
+  final String? problem = await tryAccountPassword(
+    context,
+    () => node.identity.unlock(password),
+  );
+  if (problem != null) {
+    wrong?.call(problem);
   }
-  return ok;
+  return problem == null;
 }
 
 /// Why a copy was not taken in, in words; null when it was.

@@ -127,20 +127,24 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
       _busy = true;
       _message = null;
     });
-    final bool ok = await node.identity.unlock(_password.text);
+    final String password = _password.text;
+    final String? problem = await tryAccountPassword(
+      context,
+      () => node.identity.unlock(password),
+    );
     if (!mounted) {
       return;
     }
     final LedgerKeyPair? key = node.identity.accountKey;
     setState(() {
       _busy = false;
-      if (ok && key != null) {
+      if (problem == null && key != null) {
         _weUnlocked = true;
         _needPassword = false;
         _seed = key.seed;
         _password.clear();
       } else {
-        _message = t('Złe hasło konta.');
+        _message = problem ?? t('Złe hasło konta.');
       }
     });
   }

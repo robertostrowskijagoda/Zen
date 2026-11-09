@@ -759,6 +759,109 @@ void main() {
       await _tearDown(tester);
     });
 
+    testWidgets('the password asked in the security settings counts with the '
+        'lock screen: during its wait even the right one opens nothing', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() async {
+        await security.setPassword('sekret12');
+        // Five wrong guesses a moment ago: a wait of 30 s is on.
+        await security.credentialsStore.write(
+          appSecurityUnlockFailuresStorageKey,
+          '5;30000',
+        );
+      });
+      await _pumpApp(tester, security: security);
+      await openSecurity(tester);
+
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-change-password-button')),
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings-current-password-field')),
+        'sekret12',
+      );
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-current-password-confirm')),
+      );
+      expect(
+        find.byKey(const Key('settings-current-password-dialog')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Za dużo błędnych prób.'), findsOneWidget);
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+
+      await tapAndSettle(tester, never);
+      await tester.enterText(field, 'sekret12');
+      await tapAndSettle(tester, confirm);
+      expect(dialog, findsOneWidget);
+      expect(find.textContaining('Za dużo błędnych prób.'), findsOneWidget);
+      expect(security.keepsNeverLockKey, isFalse);
+      expect(
+        await tester.runAsync(
+          () => security.credentialsStore.read(
+            appSecurityUnlockFailuresStorageKey,
+          ),
+        ),
+        startsWith('5;'),
+      );
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+      await _tearDown(tester);
+    });
+
+    testWidgets('a wrong password in the security settings is one more '
+        'failed attempt for the lock screen', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() => security.setPassword('sekret12'));
+      await _pumpApp(tester, security: security);
+      await openSecurity(tester);
+      await tapAndSettle(tester, never);
+      await tester.enterText(field, 'zle-haslo');
+      await tapAndSettle(tester, confirm);
+      expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-change-password-button')),
+      );
+      await tester.enterText(
+        find.byKey(const Key('settings-current-password-field')),
+        'zle-haslo',
+      );
+      await tapAndSettle(
+        tester,
+        find.byKey(const Key('settings-current-password-confirm')),
+      );
+      expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+      expect(
+        await tester.runAsync(
+          () => security.credentialsStore.read(
+            appSecurityUnlockFailuresStorageKey,
+          ),
+        ),
+        startsWith('2;'),
+      );
+      await tester.tap(find.text('Anuluj'));
+      await _route(tester);
+      await _tearDown(tester);
+    });
+
     testWidgets('with nothing kept the note names the catch: the password '
         'still opens the data after a restart', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(420, 900);

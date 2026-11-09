@@ -7,6 +7,8 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
@@ -35,6 +37,7 @@ class LockModeSettingChoice extends ConsumerWidget {
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
     );
+    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
     final bool keepsKey =
         mode == AppLockMode.never &&
         security.hasPassword &&
@@ -45,7 +48,7 @@ class LockModeSettingChoice extends ConsumerWidget {
           await showDialog<bool>(
             context: context,
             builder: (BuildContext dialogContext) =>
-                _NeverLockDialog(security: security),
+                _NeverLockDialog(security: security, throttle: throttle),
           ) ??
           false;
       if (!kept) {
@@ -244,9 +247,12 @@ class LockModeSettingChoice extends ConsumerWidget {
 /// the password, which unwraps the data key for the system's secret store.
 /// Pops `true` once the key is kept.
 class _NeverLockDialog extends StatefulWidget {
-  const _NeverLockDialog({required this.security});
+  const _NeverLockDialog({required this.security, required this.throttle});
 
   final AppSecurityService security;
+
+  /// The lock screen's attempts, which this password counts with.
+  final UnlockThrottle throttle;
 
   @override
   State<_NeverLockDialog> createState() => _NeverLockDialogState();
@@ -273,7 +279,13 @@ class _NeverLockDialogState extends State<_NeverLockDialog> {
       _error = null;
     });
     final String password = _controller.text;
-    final bool kept = await widget.security.keepMasterKeyForNeverLock(password);
+    final PasswordTry outcome = await tryPassword(
+      widget.throttle,
+      () => widget.security.verifyPassword(password),
+    );
+    final bool kept =
+        outcome.right &&
+        await widget.security.keepMasterKeyForNeverLock(password);
     if (!mounted) {
       return;
     }
@@ -281,17 +293,12 @@ class _NeverLockDialogState extends State<_NeverLockDialog> {
       Navigator.of(context).pop(true);
       return;
     }
-    // Told apart only when it failed: the right password and a secret store
-    // that refused the key.
-    final bool right = await widget.security.verifyPassword(password);
-    if (!mounted) {
-      return;
-    }
     setState(() {
       _busy = false;
-      _error = right
+      // The right password and a secret store that refused the key.
+      _error = outcome.right
           ? t('Nie udało się zapisać klucza. Spróbuj ponownie.')
-          : t('Nieprawidłowe hasło.');
+          : passwordTryError(outcome, t('Nieprawidłowe hasło.'));
     });
   }
 

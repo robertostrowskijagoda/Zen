@@ -25,6 +25,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -502,13 +503,6 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     });
   }
 
-  static String _formatWait(Duration wait) {
-    final int seconds =
-        wait.inSeconds + (wait.inMilliseconds % 1000 > 0 ? 1 : 0);
-    final String rest = (seconds % 60).toString().padLeft(2, '0');
-    return '${seconds ~/ 60}:$rest';
-  }
-
   /// Erases this device and lets the gate carry on to a fresh start. The
   /// lock screen stays up until it is done ([_AppSecurityGateState._wiping]).
   Future<bool> _wipe() async {
@@ -740,9 +734,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               const SizedBox(height: 10),
               _GateError(
                 key: const Key('app-unlock-wait-message'),
-                text: t('Za dużo błędnych prób. Spróbuj ponownie za {time}.', {
-                  'time': _formatWait(_wait),
-                }),
+                text: passwordWaitText(_wait),
               ),
             ] else if (_errorText != null) ...<Widget>[
               const SizedBox(height: 10),

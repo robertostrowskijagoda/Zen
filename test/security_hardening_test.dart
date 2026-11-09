@@ -7,6 +7,7 @@ import 'package:zen/src/features/security/device_integrity.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 void main() {
@@ -91,6 +92,120 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('sensitive-access-dialog')), findsNothing);
     expect(results, <bool>[true, true]);
+  });
+
+  testWidgets('wrong passwords at a sensitive place count with the lock '
+      'screen, and during the wait even the right one is not tried', (
+    WidgetTester tester,
+  ) async {
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      passwordIterations: 10,
+    );
+    await security.initialize(settings: const AppSettings());
+    await security.setPassword('sekret123');
+    Duration steady = Duration.zero;
+    final UnlockThrottle throttle = UnlockThrottle(
+      security.credentialsStore,
+      monotonic: () => steady,
+    );
+    final List<bool> results = <bool>[];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSecurityServiceProvider.overrideWithValue(security),
+          unlockThrottleProvider.overrideWithValue(throttle),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () async => results.add(
+                await confirmSensitiveAccess(context, reason: 'Sprawdzam'),
+              ),
+              child: const Text('otwórz'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('otwórz'));
+    await tester.pumpAndSettle();
+    Future<void> attempt(String password) async {
+      await tester.enterText(
+        find.byKey(const Key('sensitive-access-password')),
+        password,
+      );
+      await tester.tap(find.byKey(const Key('sensitive-access-confirm')));
+      await tester.pumpAndSettle();
+    }
+
+    for (int i = 0; i < UnlockThrottle.freeFailures; i++) {
+      await attempt('zle-haslo-$i');
+    }
+    // The fifth wrong one started the lock screen's wait, in its words.
+    expect(
+      await security.credentialsStore.read(appSecurityUnlockFailuresStorageKey),
+      startsWith('5;'),
+    );
+    expect(
+      find.text('Za dużo błędnych prób. Spróbuj ponownie za 0:30.'),
+      findsOneWidget,
+    );
+    await attempt('sekret123');
+    expect(results, isEmpty);
+    expect(find.textContaining('Za dużo błędnych prób.'), findsOneWidget);
+    expect(
+      await security.credentialsStore.read(appSecurityUnlockFailuresStorageKey),
+      startsWith('5;'),
+    );
+
+    // After the wait the right one opens and clears the count.
+    steady += const Duration(seconds: 31);
+    await attempt('sekret123');
+    expect(results, <bool>[true]);
+    expect(
+      await security.credentialsStore.read(appSecurityUnlockFailuresStorageKey),
+      isNull,
+    );
+  });
+
+  testWidgets('wrong account passwords count with the lock screen too; a '
+      'right one clears nothing', (WidgetTester tester) async {
+    final MemorySecurityCredentialsStore store =
+        MemorySecurityCredentialsStore();
+    final UnlockThrottle throttle = UnlockThrottle(
+      store,
+      monotonic: () => Duration.zero,
+    );
+    late BuildContext context;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [unlockThrottleProvider.overrideWithValue(throttle)],
+        child: Builder(
+          builder: (BuildContext c) {
+            context = c;
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    int tried = 0;
+    Future<bool> wrong() async {
+      tried++;
+      return false;
+    }
+
+    expect(await tryAccountPassword(context, wrong), 'Złe hasło konta.');
+    expect(await tryAccountPassword(context, () async => true), isNull);
+    expect(await store.read(appSecurityUnlockFailuresStorageKey), '1;0');
+    for (int i = 1; i < UnlockThrottle.freeFailures; i++) {
+      await tryAccountPassword(context, wrong);
+    }
+    expect(tried, UnlockThrottle.freeFailures);
+    final String? waiting = await tryAccountPassword(
+      context,
+      () async => true,
+    );
+    expect(waiting, 'Za dużo błędnych prób. Spróbuj ponownie za 0:30.');
   });
 
   testWidgets('biometrics confirm when the key is sealed in hardware', (
