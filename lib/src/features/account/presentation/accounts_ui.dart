@@ -344,18 +344,9 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       _busy = true;
       _error = null;
     });
-    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
-    final Duration wait = await throttle.remaining();
-    if (wait > Duration.zero) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = t('Za dużo błędnych prób. Spróbuj ponownie później.');
-        });
-      }
-      return;
-    }
-    // A wrong ID costs what a wrong password does, and reads the same.
+    // A wrong ID costs what a wrong password does, and reads the same; the
+    // device's own count of guesses here (no unlock clears it) holds them
+    // off.
     final ZenAccountUnlockResult result = await unlockOtherZenAccount(
       typed: _id.text,
       listed: _picked,
@@ -363,17 +354,21 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       current: ref.read(zenAccountProvider),
       registry: ref.read(zenAccountRegistryProvider),
       security: ref.read(zenAccountSecurityFactoryProvider),
+      throttle: ref.read(otherAccountThrottleProvider),
     );
     if (!mounted) {
+      return;
+    }
+    if (result.outcome == ZenAccountUnlock.throttled) {
+      setState(() {
+        _busy = false;
+        _error = t('Za dużo błędnych prób. Spróbuj ponownie później.');
+      });
       return;
     }
     final AppSecurityService? security = result.security;
     final ZenAccountScope? scope = result.scope;
     if (result.outcome == ZenAccountUnlock.opened && scope != null) {
-      await throttle.clear();
-      if (!mounted) {
-        return;
-      }
       _password.clear();
       await switchZenAccount(
         ref,
@@ -382,7 +377,6 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       return;
     }
     // A wrong ID, a wrong password and a panic password read the same.
-    await throttle.recordFailure();
     if (result.outcome == ZenAccountUnlock.wiped) {
       ref.invalidate(zenListedAccountsProvider);
       await _loadListed();

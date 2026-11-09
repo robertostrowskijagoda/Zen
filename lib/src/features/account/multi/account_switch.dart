@@ -13,6 +13,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/security/resume_session.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// What the app opens next: the account and, when its password was already
@@ -105,6 +106,10 @@ enum ZenAccountUnlock {
 
   /// The account's panic password: the account was wiped, silently.
   wiped,
+
+  /// Too many wrong guesses lately: nothing was tried
+  /// ([UnlockThrottle.otherAccounts]).
+  throttled,
 }
 
 /// The outcome of [unlockZenAccount].
@@ -126,7 +131,10 @@ final class ZenAccountUnlockResult {
 /// on this device, and the account open now ([current]), are refused
 /// after the work a wrong password costs
 /// ([AppSecurityService.spendWrongPasswordWork]) with the same answer: the
-/// wait does not tell whether an ID exists.
+/// wait does not tell whether an ID exists. With [throttle] nothing is
+/// tried while a wait is on, and every refusal (a wrong ID, a wrong
+/// password, the panic password) counts; an account opened clears
+/// nothing.
 Future<ZenAccountUnlockResult> unlockOtherZenAccount({
   String typed = '',
   ZenListedAccount? listed,
@@ -134,7 +142,33 @@ Future<ZenAccountUnlockResult> unlockOtherZenAccount({
   required ZenAccountScope current,
   required ZenAccountRegistry registry,
   ZenAccountSecurityFactory security = defaultZenAccountSecurity,
+  UnlockThrottle? throttle,
 }) async {
+  if (throttle != null && await throttle.remaining() > Duration.zero) {
+    return const ZenAccountUnlockResult(ZenAccountUnlock.throttled);
+  }
+  final ZenAccountUnlockResult result = await _unlockOther(
+    typed,
+    listed,
+    password,
+    current,
+    registry,
+    security,
+  );
+  if (result.outcome != ZenAccountUnlock.opened) {
+    await throttle?.recordFailure();
+  }
+  return result;
+}
+
+Future<ZenAccountUnlockResult> _unlockOther(
+  String typed,
+  ZenListedAccount? listed,
+  String password,
+  ZenAccountScope current,
+  ZenAccountRegistry registry,
+  ZenAccountSecurityFactory security,
+) async {
   final ZenAccountScope? scope = listed != null
       ? await registry.scopeOf(listed)
       : await registry.find(typed);

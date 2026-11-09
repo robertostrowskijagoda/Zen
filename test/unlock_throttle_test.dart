@@ -10,8 +10,7 @@ void main() {
   late DateTime now;
   late Duration steady;
 
-  UnlockThrottle throttle() =>
-      UnlockThrottle(store, now: () => now, monotonic: () => steady);
+  UnlockThrottle throttle() => UnlockThrottle(store, monotonic: () => steady);
 
   /// Time that really passes: both clocks move.
   void pass(Duration time) {
@@ -105,6 +104,58 @@ void main() {
     expect(await counter.remaining(), const Duration(seconds: 20));
     pass(const Duration(seconds: 20));
     expect(await counter.remaining(), Duration.zero);
+  });
+
+  test('a restart with the clock set forward keeps the whole wait', () async {
+    final UnlockThrottle first = throttle();
+    for (int i = 0; i < 12; i++) {
+      await first.recordFailure();
+    }
+    expect(await first.remaining(), UnlockThrottle.maxDelay);
+    // A restart (a new counter, its monotonic clock from zero) an hour
+    // later by the system clock.
+    now = now.add(const Duration(hours: 1));
+    steady = Duration.zero;
+    final UnlockThrottle restarted = throttle();
+    expect(await restarted.remaining(), UnlockThrottle.maxDelay);
+    pass(const Duration(minutes: 10));
+    expect(await restarted.remaining(), const Duration(minutes: 20));
+  });
+
+  test('after a restart the wait left at the last look starts again in '
+      'full, whichever way the clock was moved', () async {
+    final UnlockThrottle counter = throttle();
+    for (int i = 0; i < 5; i++) {
+      await counter.recordFailure();
+    }
+    pass(const Duration(seconds: 12));
+    expect(await counter.remaining(), const Duration(seconds: 18));
+    for (final Duration moved in <Duration>[
+      const Duration(days: -1),
+      const Duration(days: 2),
+    ]) {
+      now = now.add(moved);
+      steady = Duration.zero;
+      final UnlockThrottle restarted = throttle();
+      expect(await restarted.remaining(), const Duration(seconds: 18));
+      pass(const Duration(seconds: 8));
+      expect(await restarted.remaining(), const Duration(seconds: 10));
+      // The next restart goes on from there.
+      steady = Duration.zero;
+      expect(await throttle().remaining(), const Duration(seconds: 10));
+      pass(const Duration(seconds: 10));
+      expect(await throttle().remaining(), const Duration(seconds: 10));
+      await store.write(appSecurityUnlockFailuresStorageKey, '5;18000');
+    }
+  });
+
+  test('a count an earlier version kept keeps its whole wait', () async {
+    await store.write(
+      appSecurityUnlockFailuresStorageKey,
+      '6:${now.millisecondsSinceEpoch}',
+    );
+    now = now.add(const Duration(days: 3));
+    expect(await throttle().remaining(), const Duration(seconds: 60));
   });
 
   test('there is no lock-out: any wait ends', () async {

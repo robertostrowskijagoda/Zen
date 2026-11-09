@@ -113,8 +113,9 @@ const String appSecurityGuardedSettingsStorageKey =
 /// settings file.
 const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 
-/// Failed lock-screen password attempts and when the last one happened
-/// (`<count>:<epoch ms>`), see `UnlockThrottle`.
+/// Failed lock-screen password attempts and the wait still left
+/// (`<count>;<ms>`; earlier versions kept `<count>:<epoch ms>`), see
+/// `UnlockThrottle`.
 const String appSecurityUnlockFailuresStorageKey =
     'zen_rewrite_unlock_failures';
 

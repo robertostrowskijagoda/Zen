@@ -16,6 +16,7 @@ import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// Several accounts on one device: separate folders and secrets, hidden
@@ -369,6 +370,61 @@ void main() {
       expect(right.outcome, ZenAccountUnlock.opened);
       expect(right.scope, a);
       expect(costs, hasLength(2));
+    });
+
+    test('guesses at another account are counted for the device, apart '
+        'from the lock screen, and no unlock clears the count', () async {
+      final ZenAccountScope a = await registry.create();
+      final AppSecurityService own = securityFor(a);
+      await own.initialize(settings: const AppSettings());
+      await own.setPassword('haslo-konta-a');
+      Duration steady = Duration.zero;
+      final UnlockThrottle guesses = UnlockThrottle.otherAccounts(
+        store: secrets.forDevice(),
+        monotonic: () => steady,
+      );
+      final UnlockThrottle lockScreen = UnlockThrottle(
+        secrets.forAccount(null),
+        monotonic: () => steady,
+      );
+
+      Future<ZenAccountUnlock> attempt(String typed, String password) async =>
+          (await unlockOtherZenAccount(
+            typed: typed,
+            password: password,
+            current: ZenAccountScope.defaultAccount,
+            registry: registry,
+            security: securityFor,
+            throttle: guesses,
+          )).outcome;
+
+      for (int i = 0; i < UnlockThrottle.freeFailures; i++) {
+        expect(
+          await attempt(newAccountId(Random(i)), 'zgadywane'),
+          ZenAccountUnlock.refused,
+        );
+      }
+      // The right password waits too, and the lock screen's own count
+      // (cleared by unlocking the default account) is another one.
+      expect(await attempt(a.id!, 'haslo-konta-a'), ZenAccountUnlock.throttled);
+      await lockScreen.recordFailure();
+      await lockScreen.clear();
+      expect(await guesses.remaining(), UnlockThrottle.baseDelay);
+      // The device's entry names no account.
+      expect(
+        keychain.items.keys,
+        contains(UnlockThrottle.otherAccountsStorageKey),
+      );
+
+      steady += UnlockThrottle.baseDelay;
+      expect(await attempt(a.id!, 'haslo-konta-a'), ZenAccountUnlock.opened);
+      // Opening an account cleared nothing: the next wrong guess waits
+      // longer at once.
+      expect(
+        await attempt(newAccountId(Random(50)), 'zgadywane'),
+        ZenAccountUnlock.refused,
+      );
+      expect(await guesses.remaining(), UnlockThrottle.baseDelay * 2);
     });
 
     test('an account whose first start was cut short opens to set a '

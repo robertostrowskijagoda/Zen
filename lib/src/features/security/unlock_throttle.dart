@@ -2,33 +2,48 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
-/// Slows down password guessing on the lock screen: the number of
-/// failed attempts lives in the secure storage, so restarting the app does
-/// not reset it, and from the fifth failure on every further one makes the
-/// wait twice as long, up to [maxDelay]. There is never a permanent
-/// lock-out: "Nie pamiętam hasła" (erasing this device) is the way out.
+/// Slows down password guessing: the number of failed attempts lives in
+/// the secure storage, so restarting the app does not reset it, and from
+/// the fifth failure on every further one makes the wait twice as long, up
+/// to [maxDelay]. There is never a permanent lock-out: "Nie pamiętam hasła"
+/// (erasing this device) is the way out.
 ///
-/// The wait is counted with the wall clock (the only thing that survives a
-/// restart) and, while the app keeps running, also with a monotonic clock:
-/// the shorter of the two counts, so moving the system clock forward does
-/// not end a wait early, and moving it back never shortens it.
+/// What is kept is the wait still left, not a moment on the wall clock:
+/// while the app runs it is counted down on a monotonic clock (moving the
+/// system clock either way changes nothing), and after a restart the wait
+/// left at the last look starts again in full.
 final class UnlockThrottle {
   UnlockThrottle(
     this._store, {
-    DateTime Function()? now,
     Duration Function()? monotonic,
-  }) : _now = now ?? DateTime.now,
-       _monotonic = monotonic ?? _processClock();
+    this.storageKey = appSecurityUnlockFailuresStorageKey,
+  }) : _monotonic = monotonic ?? _processClock();
+
+  /// The guesses at "Inne konto": one count for the device (its own entry
+  /// in the secret store, whatever account is open), which no unlock
+  /// clears, so knowing one account's password buys no free guesses at
+  /// another.
+  UnlockThrottle.otherAccounts({
+    AppSecurityCredentialsStore store =
+        const SecureStorageCredentialsStore.device(),
+    Duration Function()? monotonic,
+  }) : this(store, monotonic: monotonic, storageKey: otherAccountsStorageKey);
 
   final AppSecurityCredentialsStore _store;
-  final DateTime Function() _now;
   final Duration Function() _monotonic;
 
-  /// When the last failure of this run was counted, on the monotonic clock,
-  /// and the failure count it made (so a count written by someone else is
-  /// not mistaken for it).
-  Duration? _monoAt;
-  int _monoFailures = 0;
+  /// The entry the count is kept in.
+  final String storageKey;
+
+  /// The device's entry of the guesses at "Inne konto".
+  static const String otherAccountsStorageKey =
+      'zen_rewrite_other_account_failures';
+
+  /// When this run first looked at the count, on the monotonic clock, and
+  /// the count and the wait left it saw then.
+  Duration? _since;
+  int _failures = -1;
+  Duration _leftThen = Duration.zero;
 
   static Duration Function() _processClock() {
     final Stopwatch watch = Stopwatch()..start();
@@ -58,78 +73,87 @@ final class UnlockThrottle {
   }
 
   /// How much of the wait after the last failure is still left (zero:
-  /// the password may be tried).
+  /// the password may be tried). The first look after a restart starts
+  /// the wait left before it again; what is left is kept at every look.
   Future<Duration> remaining() async {
-    final ({int failures, DateTime? at}) state = await _read();
-    final Duration wait = delayAfter(state.failures);
-    final DateTime? at = state.at;
-    if (wait == Duration.zero || at == null) {
-      return Duration.zero;
+    final ({int failures, Duration left}) state = await _read();
+    final Duration? since = _since;
+    if (since == null || _failures != state.failures) {
+      // Not counted in this run yet (a restart, or a count written by
+      // someone else): from now, in full.
+      _since = _monotonic();
+      _failures = state.failures;
+      _leftThen = state.left;
+      return state.left;
     }
-    Duration elapsed = _now().difference(at);
-    final Duration? since = _monoAt;
-    if (since != null && _monoFailures == state.failures) {
-      final Duration steady = _monotonic() - since;
-      if (steady < elapsed) {
-        elapsed = steady;
-      }
+    Duration left = _leftThen - (_monotonic() - since);
+    if (left.isNegative) {
+      left = Duration.zero;
     }
-    if (elapsed.isNegative) {
-      // The clock was set back: the wait counts in full.
-      return wait;
+    if (left < state.left - const Duration(seconds: 1) ||
+        (left == Duration.zero && state.left > Duration.zero)) {
+      await _write(state.failures, left);
     }
-    final Duration left = wait - elapsed;
-    return left.isNegative ? Duration.zero : left;
+    return left;
   }
 
   /// Counts one more failed attempt; returns the wait it starts.
   Future<Duration> recordFailure() async {
-    final ({int failures, DateTime? at}) state = await _read();
+    final ({int failures, Duration left}) state = await _read();
     final int failures = state.failures + 1;
-    _monoAt = _monotonic();
-    _monoFailures = failures;
-    try {
-      await _store.write(
-        appSecurityUnlockFailuresStorageKey,
-        '$failures:${_now().millisecondsSinceEpoch}',
-      );
-    } on Object catch (error, stackTrace) {
-      logZenError('Saving the failed attempts failed', error, stackTrace);
-    }
-    return delayAfter(failures);
+    final Duration wait = delayAfter(failures);
+    _since = _monotonic();
+    _failures = failures;
+    _leftThen = wait;
+    await _write(failures, wait);
+    return wait;
   }
 
   /// The right password (or the fingerprint) was given.
   Future<void> clear() async {
-    _monoAt = null;
+    _since = null;
+    _failures = -1;
     try {
-      await _store.delete(appSecurityUnlockFailuresStorageKey);
+      await _store.delete(storageKey);
     } on Object catch (error, stackTrace) {
       logZenError('Clearing the failed attempts failed', error, stackTrace);
     }
   }
 
-  Future<({int failures, DateTime? at})> _read() async {
+  Future<void> _write(int failures, Duration left) async {
+    try {
+      await _store.write(storageKey, '$failures;${left.inMilliseconds}');
+    } on Object catch (error, stackTrace) {
+      logZenError('Saving the failed attempts failed', error, stackTrace);
+    }
+  }
+
+  /// The count and the wait left: `<count>;<ms left>`, or as earlier
+  /// versions kept it, `<count>:<epoch ms>` (the whole wait is left then).
+  Future<({int failures, Duration left})> _read() async {
     final String? stored;
     try {
-      stored = await _store.read(appSecurityUnlockFailuresStorageKey);
+      stored = await _store.read(storageKey);
     } on Object catch (error, stackTrace) {
       logZenError('Reading the failed attempts failed', error, stackTrace);
-      return (failures: 0, at: null);
+      return (failures: 0, left: Duration.zero);
     }
     if (stored == null) {
-      return (failures: 0, at: null);
+      return (failures: 0, left: Duration.zero);
     }
-    final List<String> parts = stored.split(':');
+    final bool earlier = !stored.contains(';');
+    final List<String> parts = stored.split(earlier ? ':' : ';');
     final int? failures = int.tryParse(parts.first);
-    final int? millis = parts.length == 2 ? int.tryParse(parts[1]) : null;
-    if (failures == null || failures < 0 || millis == null) {
-      return (failures: 0, at: null);
+    final int? second = parts.length == 2 ? int.tryParse(parts[1]) : null;
+    if (failures == null || failures < 0 || second == null || second < 0) {
+      return (failures: 0, left: Duration.zero);
     }
-    return (
-      failures: failures,
-      at: DateTime.fromMillisecondsSinceEpoch(millis),
-    );
+    final Duration wait = delayAfter(failures);
+    if (earlier) {
+      return (failures: failures, left: wait);
+    }
+    final Duration left = Duration(milliseconds: second);
+    return (failures: failures, left: left > wait ? wait : left);
   }
 }
 
@@ -141,3 +165,7 @@ final Provider<UnlockThrottle> unlockThrottleProvider =
         ref.watch(appSecurityServiceProvider).credentialsStore,
       ),
     );
+
+/// The count of guesses at "Inne konto" ([UnlockThrottle.otherAccounts]).
+final Provider<UnlockThrottle> otherAccountThrottleProvider =
+    Provider<UnlockThrottle>((Ref ref) => UnlockThrottle.otherAccounts());
