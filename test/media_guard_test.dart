@@ -62,6 +62,45 @@ void main() {
       expect(img.decodeGif(g.bytes)!.numFrames, 2);
     });
 
+    test('a GIF that came as a file (an older Zen, a computer) is shown as '
+        'the animated picture it is', () async {
+      final Uint8List gif = _twoFrameGif();
+      final GuardedMedia g = await guardIncomingMedia(
+        gif,
+        declared: MediaKind.file,
+        mimeType: 'application/octet-stream',
+        fileName: 'taniec.gif',
+      );
+      expect(g.kind, MediaKind.image);
+      expect(g.mimeType, 'image/gif');
+      expect(g.fileName, 'taniec.gif');
+      expect(g.bytes, gif);
+      // A broken one stays a file.
+      final GuardedMedia cut = await guardIncomingMedia(
+        Uint8List.sublistView(gif, 0, gif.length - 5),
+        declared: MediaKind.file,
+        fileName: 'taniec.gif',
+      );
+      expect(cut.kind, MediaKind.file);
+    });
+
+    test('a GIF of a minute (1500 small frames) plays; past the frame or '
+        'pixel limits it does not', () {
+      Uint8List frames(int count, int side) {
+        final img.Image first = img.Image(width: side, height: side)
+          ..frameDuration = 40;
+        for (int i = 1; i < count; i++) {
+          first.addFrame(
+            img.Image(width: side, height: side)..frameDuration = 40,
+          );
+        }
+        return img.encodeGif(first);
+      }
+
+      expect(isAcceptableGif(frames(1500, 8)), isTrue, reason: 'was 400');
+      expect(isAcceptableGif(frames(kMaxGifFrames + 1, 4)), isFalse);
+    });
+
     test('a truncated GIF becomes a plain file', () async {
       final Uint8List gif = _twoFrameGif();
       final Uint8List cut = Uint8List.sublistView(gif, 0, gif.length - 5);

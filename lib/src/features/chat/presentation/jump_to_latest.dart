@@ -6,6 +6,21 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
+
+/// A move of a chat's list that the reader did not make, of [distance]
+/// pixels, for the technical log (`chat-scroll`), so a list that keeps
+/// jumping away from where it was scrolled can be told by why. Small moves
+/// (a bubble measured, the keyboard) are not written down.
+void _logChatMove(String reason, double distance) {
+  if (distance.abs() < 120) {
+    return;
+  }
+  ZenTechLog.event('chat-scroll', <String, Object?>{
+    'why': reason,
+    'px': distance.round(),
+  });
+}
 
 /// The controller of a conversation's list. While the list is at its
 /// newest message it stays there, in the same frame, whatever changes its
@@ -33,13 +48,15 @@ class ChatScrollController extends ScrollController {
   /// Shows the newest message and stays with it: at once where the list
   /// is laid out, and again after the frame being built (which may add the
   /// message).
-  void showLatest() {
+  void showLatest({String reason = 'show-latest'}) {
     _following = true;
-    _jumpToLatest();
-    SchedulerBinding.instance.addPostFrameCallback((_) => _jumpToLatest());
+    _jumpToLatest(reason);
+    SchedulerBinding.instance.addPostFrameCallback(
+      (_) => _jumpToLatest(reason),
+    );
   }
 
-  void _jumpToLatest() {
+  void _jumpToLatest([String reason = 'show-latest']) {
     if (!_following ||
         SchedulerBinding.instance.schedulerPhase ==
             SchedulerPhase.persistentCallbacks) {
@@ -51,6 +68,7 @@ class ChatScrollController extends ScrollController {
             ? position.minScrollExtent
             : position.maxScrollExtent;
         if (position.pixels != latest) {
+          _logChatMove(reason, latest - position.pixels);
           position.jumpTo(latest);
         }
       }
@@ -114,12 +132,15 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
 
   /// Puts the list at [latest] while it follows the newest message and the
   /// user is not scrolling it; `false` when the layout has to run again.
-  bool _keepLatest(double latest) {
+  bool _keepLatest(double latest, {bool log = true}) {
     if (!owner._following || _userScrolling) {
       return true;
     }
     if (nearEqual(pixels, latest, Tolerance.defaultTolerance.distance)) {
       return true;
+    }
+    if (log) {
+      _logChatMove('follow', latest - pixels);
     }
     correctPixels(latest);
     return false;
@@ -146,6 +167,7 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
     if (nearEqual(moved, 0, Tolerance.defaultTolerance.distance)) {
       return true;
     }
+    _logChatMove('keep-place', moved);
     correctPixels(
       (pixels + moved).clamp(minScrollExtent, maxScrollExtent).toDouble(),
     );
@@ -221,7 +243,7 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
       return false;
     }
     if (first) {
-      return _keepLatest(_latest(minScrollExtent, maxScrollExtent));
+      return _keepLatest(_latest(minScrollExtent, maxScrollExtent), log: false);
     }
     if (!_keepPlace()) {
       return false;

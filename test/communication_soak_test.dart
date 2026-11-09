@@ -189,10 +189,9 @@ Future<void> _live(int seed) async {
     }
     for (final MapEntry<(String, String), List<(String, int)>> e
         in files.entries) {
-      // Only the device the sender writes to: a file to an account with
-      // two devices reaches the second one without its content, or not at
-      // all when it was offline (the transfer is acknowledged for the
-      // account as a whole). Known, see CHANGELOG 1.16.1.
+      // Only the device the sender writes to: the second device gets the
+      // file from the first through the ledger (account_devices_files_test),
+      // which this world runs without.
       for (final String device in <String>[e.key.$2]) {
         final Map<String, int> got = await _filesFrom(
           w[device],

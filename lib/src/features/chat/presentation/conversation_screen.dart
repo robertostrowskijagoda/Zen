@@ -143,6 +143,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   /// The newest message the list was built with.
   String? _newestShownId;
+
+  /// The send time of the newest message shown so far: only one of one's
+  /// own newer than it brings the list down ([_scheduleScrollToBottom]).
+  int _newestShownAt = 0;
   DateTime? _lastTypingSentAt;
 
   /// The message the next one replies to (shown over the composer).
@@ -1159,7 +1163,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         widget.title;
     _composerController.clear();
     // Down to the newest message, where this one is about to appear.
-    _scrollController.showLatest();
+    _scrollController.showLatest(reason: 'send');
     final ChatReply? replyTo = _replyTo;
     if (replyTo != null) {
       setState(() => _replyTo = null);
@@ -1456,12 +1460,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final bool first = _lastRenderedMessageCount < 0;
     _lastRenderedMessageCount = thread.length;
     final String? newest = thread.lastOrNull?.id;
+    // One's own message newer than anything shown before (sent from here
+    // in another way than the send button, or from another device). A
+    // message that was there before and comes back (the conversation read
+    // again while something wrote it, a copy that came late) is not new:
+    // taking it for one brought the list down each time, and a reader
+    // scrolling up was thrown back to the bottom.
+    final int newestAt = thread.lastOrNull?.sentAtMillis ?? 0;
     final bool ownNew =
         !first &&
         newest != null &&
         newest != _newestShownId &&
+        newestAt > _newestShownAt &&
         thread.last.isOutgoing;
     _newestShownId = newest;
+    if (newestAt > _newestShownAt) {
+      _newestShownAt = newestAt;
+    }
     if (first) {
       if (widget.initialMessageId != null) {
         // Opened at a message: the place remembered from before gives way.
@@ -1490,7 +1505,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
     if (ownNew) {
-      _scrollController.showLatest();
+      _scrollController.showLatest(reason: 'own-new');
     }
   }
 }
