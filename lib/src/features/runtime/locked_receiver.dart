@@ -1035,16 +1035,25 @@ final class LockedReceiver {
 
   /// Pings the friends who see this phone's status, at most every
   /// [presenceRoundEvery] (the ping says "w tle", as a pong would). A wake
-  /// a little early (the beat runs work due soon on a wake that comes
-  /// anyway) still counts: skipped, the round would wait a whole period
-  /// more.
+  /// early by as much as the beat may run it early ([wakeBeatEarly]: work
+  /// due soon on a wake that comes anyway), and [_roundClockSlack] more,
+  /// still counts: skipped, the round would wait a whole period more, and
+  /// the friends would hear nothing for up to two rounds.
   @visibleForTesting
   Future<void> presenceRoundForTest() => _presenceRound();
+
+  /// The beat reads its clock for a wake a moment before the round reads
+  /// its own, and the works before it on the wake take their moment too.
+  static const Duration _roundClockSlack = Duration(seconds: 1);
 
   Future<void> _presenceRound() async {
     final int at = _now();
     final int every = presenceRoundEvery.inMilliseconds;
-    if (every <= 0 || !_running || at - _presenceRoundAt < every * 3 ~/ 4) {
+    final int soonest =
+        every -
+        wakeBeatEarly(presenceRoundEvery).inMilliseconds -
+        _roundClockSlack.inMilliseconds;
+    if (every <= 0 || !_running || at - _presenceRoundAt < soonest) {
       return;
     }
     _presenceRoundAt = at;

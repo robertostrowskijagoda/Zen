@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -1763,6 +1764,73 @@ void main() {
       expect(kPresenceOfflineAfter, lessThan(kPresenceBackgroundFor));
     });
 
+    test('a round the beat runs early on the wake of another work is sent, '
+        'so no round is lost to the early runs of the beat', () async {
+      int clock = _day;
+      final _Alarms alarms = _Alarms();
+      ZenWake.platform = alarms;
+      ZenWake.nowMillis = () => clock;
+      addTearDown(() {
+        ZenWake.platform = const TimerWakePlatform();
+        ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
+      });
+      final MemorySignalTransport air = MemorySignalTransport();
+      final WakeBeat beat = WakeBeat();
+      addTearDown(beat.clear);
+      final LockedReceiver phone = LockedReceiver(
+        transport: air,
+        capability: BackgroundCapability.fromDraft(
+          BackgroundCapabilityDraft(
+            inboxPublicKey: Uint8List(32),
+            friends: const <String>{_me},
+          ),
+          backgroundKey: Uint8List.fromList(List<int>.filled(32, 7)),
+        ),
+        inbox: SealedInboxWriter(
+          file: File('${Directory.systemTemp.path}/zen-presence-early.inbox'),
+          recipientPublicKey: Uint8List(32),
+        ),
+        notices: MemoryRuntimeSystemNotificationService(),
+        presence: const LockedPresenceKit(shownTo: <String>{_me}),
+        mailboxPollInterval: Duration.zero,
+        beat: beat,
+        now: () => clock,
+      );
+      await phone.start();
+      addTearDown(phone.stop);
+      // Another work with a wake every 7 minutes: the round, due at 10,
+      // runs 3 minutes early on its wake rather than wake the phone itself.
+      beat.add(
+        'other',
+        const Duration(minutes: 7),
+        () async {},
+        hold: const Duration(seconds: 5),
+        whileIdle: true,
+      );
+      final List<int> pingedAt = <int>[];
+      int seen = 0;
+      for (int wake = 0; wake < 20; wake++) {
+        expect(alarms.live, hasLength(1));
+        final _Alarm next = alarms.live.single;
+        clock += next.delay.inMilliseconds;
+        await next.ring();
+        final bool pinged = air.sentSignals
+            .skip(seen)
+            .any((e) => e.payload['type'] == 'ping');
+        seen = air.sentSignals.length;
+        if (pinged) {
+          pingedAt.add(clock);
+        }
+      }
+      expect(pingedAt.first - _day, 7 * _minute, reason: 'the first wake');
+      for (int i = 1; i < pingedAt.length; i++) {
+        expect(
+          pingedAt[i] - pingedAt[i - 1],
+          lessThanOrEqualTo(kLockedPresenceRoundEvery.inMilliseconds),
+        );
+      }
+    });
+
     test('a ping from a Zen that just started is answered at once, even '
         'right after an answer, but at most every 20 s', () async {
       int clock = _day;
@@ -2279,4 +2347,58 @@ final class _PassThroughCompressor implements BinaryCompressor {
 
   @override
   Future<Uint8List?> decompress(Uint8List input) async => input;
+}
+
+final class _Alarm implements WakeTimer {
+  _Alarm(this.delay, this.fire);
+
+  final Duration delay;
+  final FutureOr<void> Function() fire;
+  bool _spent = false;
+
+  @override
+  bool get isActive => !_spent;
+
+  /// The alarm goes off (spent then, as on the phone).
+  Future<void> ring() async {
+    _spent = true;
+    await fire();
+  }
+
+  @override
+  void cancel() => _spent = true;
+}
+
+/// The phone's alarms, rung by the test.
+final class _Alarms implements ZenWakePlatform {
+  final List<_Alarm> _all = <_Alarm>[];
+
+  List<_Alarm> get live =>
+      _all.where((_Alarm a) => a.isActive).toList(growable: false);
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) {
+    final _Alarm alarm = _Alarm(delay, fire);
+    _all.add(alarm);
+    return alarm;
+  }
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {}
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {}
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
 }
