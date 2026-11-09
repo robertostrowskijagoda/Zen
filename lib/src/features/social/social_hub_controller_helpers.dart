@@ -2018,15 +2018,6 @@ String? groupMessageSlot(
 /// chat on everybody's phone. Its id says so, whoever made a group under it.
 bool isManagedGroup(GroupProfile group) => isManagedGroupId(group.id);
 
-/// Id prefixes of the groups another feature keeps: the pyramid's cell
-/// chats (`kPyrCellGroupPrefix`).
-const List<String> kManagedGroupPrefixes = <String>['pyrcell-'];
-
-/// Whether [groupId] belongs to a group another feature keeps (see
-/// [kManagedGroupPrefixes]), whoever made the group under it.
-bool isManagedGroupId(String groupId) =>
-    kManagedGroupPrefixes.any(groupId.startsWith);
-
 /// An invitation, member-list sync, leave, update or invitation receipt for
 /// a managed group's id: nobody's to send, as only the feature that keeps
 /// the group makes or changes it ([SocialHubController.syncManagedGroups]).

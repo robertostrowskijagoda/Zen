@@ -1651,6 +1651,11 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
+      if (type == 'group_invite' && isManagedGroupId('${payload['groupId']}')) {
+        // A group another feature keeps (a pyramid cell's chat): nobody
+        // invites to it, and the app drops this after unlock.
+        return;
+      }
       if (switch (type) {
         'friend_request' => PeerShareCodec.fromStaleCode(
           _noticeKit.inviteToken,

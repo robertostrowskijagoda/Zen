@@ -1007,6 +1007,23 @@ void main() {
         expect(notice.silent, isTrue);
       });
 
+      test('an invitation to the id of a pyramid cell chat tells of nothing: '
+          'nobody invites to one', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: names);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          'groupId': 'pyrcell-0123456789abcdef01234567',
+          'name': 'x',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          'groupId': 'grp-1',
+          'name': 'x',
+        });
+        expect(notices.activeNotifications, hasLength(1));
+      });
+
       test('a ringing call is not made quiet by the sounds switch', () async {
         await startReceiver(
           await publishFor(_masterKey()),

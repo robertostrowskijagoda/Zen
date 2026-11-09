@@ -196,3 +196,12 @@ final class GroupProfile {
       'awaitingMembersFrom': awaitingMembersFrom,
   };
 }
+
+/// Id prefixes of the groups another feature keeps: the pyramid's cell
+/// chats (`kPyrCellGroupPrefix`).
+const List<String> kManagedGroupPrefixes = <String>['pyrcell-'];
+
+/// Whether [groupId] belongs to a group another feature keeps (see
+/// [kManagedGroupPrefixes]), whoever made the group under it.
+bool isManagedGroupId(String groupId) =>
+    kManagedGroupPrefixes.any(groupId.startsWith);
