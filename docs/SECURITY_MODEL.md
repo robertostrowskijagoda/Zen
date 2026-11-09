@@ -215,7 +215,8 @@ friend vouching for their key, is trust on first use.
   entry names does not tell a hidden account from the decoys; reading
   what is in the files or the keystore (full access to the device) still
   can. An emergency wipe password erases its
-  account silently. An account with **"Receive in background"** on (off by default
+  account silently, with its place in the background list and the node
+  that received for it. An account with **"Receive in background"** on (off by default
   for extra accounts) keeps its mesh node and a small receive kit under a
   separate background key, so the background service (Android) or the tray
   (computers) runs it without the password; someone with full access to the

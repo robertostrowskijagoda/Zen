@@ -9,6 +9,7 @@ import 'package:zen/src/core/storage/atomic_file.dart';
 import 'package:zen/src/features/account/multi/account_decoys.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
@@ -294,14 +295,26 @@ final class ZenAccountRegistry {
     await setListed(scope, listed: true, name: name);
   }
 
-  /// Wipes the additional account [scope] from this device: every entry
-  /// it has in the secret store (the keys first), its folder, its place in
-  /// the list. A decoy takes the folder's place, so the count of folders
-  /// does not change.
+  /// Wipes the additional account [scope] from this device: its place in
+  /// the background list and the node it runs there in this isolate (a
+  /// computer's tray; the Android service's stops by itself once the keys
+  /// are gone, [BackgroundAccountWatch]), every entry it has in the secret
+  /// store (the keys first), its folder, its place in the list. A decoy
+  /// takes the folder's place, so the count of folders does not change.
   Future<void> wipeAccount(ZenAccountScope scope) async {
     if (scope.isDefault) {
       throw ArgumentError.value(scope, 'scope', 'Not an additional account');
     }
+    try {
+      await ZenBackgroundAccounts(
+        registry: this,
+        secrets: _secrets,
+      ).forget(scope);
+    } on Object catch (error, stackTrace) {
+      logZenError('Leaving the background list failed', error, stackTrace);
+    }
+    // Before its folder goes: a running node would write it back.
+    await BackgroundAccountRuns.stop(scope.folder!);
     try {
       // The files it exported first, while its own list still names them.
       await ExportedFilesIndex(

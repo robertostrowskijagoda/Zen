@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -200,11 +201,20 @@ final class ZenBackgroundAccounts {
     return true;
   }
 
-  /// Forgets [scope] (its account was wiped).
+  /// Forgets [scope] (its account is being wiped): no entry, padding
+  /// included, points at its folder any more.
   Future<void> forget(ZenAccountScope scope) async {
-    if (!scope.isDefault && await isOn(scope)) {
-      await setOn(scope, false);
+    if (scope.isDefault) {
+      return;
     }
+    final _Stored stored = await _read();
+    if (!stored.entries.any((ZenBackgroundAccount a) => a.matches(scope))) {
+      return;
+    }
+    await _write(stored.defaultOn, <ZenBackgroundAccount>[
+      for (final ZenBackgroundAccount a in stored.entries)
+        if (!a.matches(scope) && await _isReal(a)) a,
+    ], avoid: scope.folder);
   }
 
   /// A real entry: its account keeps a background key under its secret
@@ -238,10 +248,14 @@ final class ZenBackgroundAccounts {
     }
   }
 
-  Future<void> _write(bool defaultOn, List<ZenBackgroundAccount> real) async {
+  Future<void> _write(
+    bool defaultOn,
+    List<ZenBackgroundAccount> real, {
+    String? avoid,
+  }) async {
     final List<ZenBackgroundAccount> all = <ZenBackgroundAccount>[
       ...real,
-      ...await _padding(slots - real.length, real),
+      ...await _padding(slots - real.length, real, avoid: avoid),
     ]..shuffle(_random);
     await _secrets.write(
       storageKey,
@@ -258,8 +272,9 @@ final class ZenBackgroundAccounts {
   /// secrets.
   Future<List<ZenBackgroundAccount>> _padding(
     int count,
-    List<ZenBackgroundAccount> real,
-  ) async {
+    List<ZenBackgroundAccount> real, {
+    String? avoid,
+  }) async {
     final List<String> folders = <String>[];
     try {
       final Directory dir = await _registry.accountsDirectory();
@@ -270,6 +285,7 @@ final class ZenBackgroundAccounts {
               .last;
           if (e is Directory &&
               RegExp(r'^[0-9a-f]{32}$').hasMatch(name) &&
+              name != avoid &&
               !real.any((ZenBackgroundAccount a) => a.folder == name)) {
             folders.add(name);
           }
@@ -383,17 +399,141 @@ final class GenericAccountNotices implements RuntimeSystemNotificationService {
   Future<void> clear() async {}
 }
 
+/// What runs in the background for additional accounts in this isolate (a
+/// computer's tray, the Android service), by the account's folder: so a
+/// wipe stops the account's node before its folder goes.
+abstract final class BackgroundAccountRuns {
+  static final Map<String, Set<Future<void> Function()>> _stops =
+      <String, Set<Future<void> Function()>>{};
+
+  /// [stop] ends what runs for the account in [folder].
+  static void add(String folder, Future<void> Function() stop) {
+    _stops.putIfAbsent(folder, () => <Future<void> Function()>{}).add(stop);
+  }
+
+  static void remove(String folder, Future<void> Function() stop) {
+    final Set<Future<void> Function()>? stops = _stops[folder];
+    stops?.remove(stop);
+    if (stops != null && stops.isEmpty) {
+      _stops.remove(folder);
+    }
+  }
+
+  /// Stops what runs in this isolate for the account in [folder].
+  static Future<void> stop(String folder) async {
+    final List<Future<void> Function()> stops = <Future<void> Function()>[
+      ...?_stops.remove(folder),
+    ];
+    for (final Future<void> Function() stop in stops) {
+      try {
+        await stop();
+      } on Object catch (error, stackTrace) {
+        logZenError('Stopping a background account failed', error, stackTrace);
+      }
+    }
+  }
+}
+
+/// Watches, while an additional account's node runs without the app (the
+/// Android service runs in another isolate than the app's), whether the
+/// account is still there: its background key gone means it was wiped
+/// (the keys go first) or its "Odbieraj w tle" turned off. The node then
+/// stops ([onGone]); a folder the node made again after the wipe (no data,
+/// no settings: only what the node writes) goes too, so the number of
+/// folders stays what it was.
+final class BackgroundAccountWatch {
+  BackgroundAccountWatch({
+    required this.folder,
+    required AppSecurityCredentialsStore credentials,
+    required this.onGone,
+    this.every = const Duration(seconds: 30),
+  }) : _credentials = credentials;
+
+  final Directory folder;
+  final AppSecurityCredentialsStore _credentials;
+  final Future<void> Function() onGone;
+  final Duration every;
+  Timer? _timer;
+  bool _checking = false;
+
+  void start() {
+    _timer ??= Timer.periodic(every, (_) => unawaited(check()));
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// Whether the account is gone (and then its node is stopped).
+  Future<bool> check() async {
+    if (_checking || _timer == null) {
+      return false;
+    }
+    _checking = true;
+    try {
+      final String? key = await _credentials.read(
+        appSecurityBackgroundKeyStorageKey,
+      );
+      if (key != null) {
+        return false;
+      }
+      stop();
+      await onGone();
+      await _removeIfOnlyTheNodes();
+      return true;
+    } on Object catch (error, stackTrace) {
+      logZenError('Checking a background account failed', error, stackTrace);
+      return false;
+    } finally {
+      _checking = false;
+    }
+  }
+
+  Future<void> _removeIfOnlyTheNodes() async {
+    if (!await folder.exists()) {
+      return;
+    }
+    final String separator = Platform.pathSeparator;
+    for (final String kept in <String>['settings', 'data']) {
+      if (await Directory('${folder.path}$separator$kept').exists()) {
+        return;
+      }
+    }
+    try {
+      await folder.delete(recursive: true);
+    } on FileSystemException catch (error) {
+      logZenWarning('Removing what a stopped node left failed: $error');
+    }
+  }
+}
+
 /// An additional account's receive-only node, run without its password:
 /// the node under its background key, the sealed inbox, the doors of its
 /// door kit and its outbox kit — what the default account's locked
 /// receiver does, without the nearby radio and the alarm (one radio, one
 /// alarm shortcut: the default account's).
 final class BackgroundAccountNode {
-  BackgroundAccountNode._(this._runtime, this._receiver, this._outbox);
+  BackgroundAccountNode._(
+    this._runtime,
+    this._receiver,
+    this._outbox, {
+    this.folder,
+    this.watch,
+  });
 
   final RuntimeNodeRuntime _runtime;
   final LockedReceiver _receiver;
   final LockedOutbox? _outbox;
+
+  /// The additional account's folder name (`null`: the default account's
+  /// node, a computer's while its window is locked).
+  final String? folder;
+
+  /// Stops the node once the account is gone ([BackgroundAccountWatch]).
+  final BackgroundAccountWatch? watch;
+
+  bool _stopped = false;
 
   /// `null` when [account]'s folder holds no background capability under
   /// its secret (padding, or an account never opened since it was turned
@@ -419,6 +559,7 @@ final class BackgroundAccountNode {
       notices: notices,
       waitTimeout: waitTimeout,
       goneApp: goneApp,
+      accountFolder: account.folder,
     );
   }
 
@@ -426,12 +567,16 @@ final class BackgroundAccountNode {
   /// [credentials] reads (a computer's default account while its window is
   /// locked, too). [goneApp]: the app engine Android ended (0 for none),
   /// whose node the bridge gives this one at once (node_identity.go).
+  /// [accountFolder]: an additional account's folder name, whose node a
+  /// wipe of the account stops ([BackgroundAccountRuns],
+  /// [BackgroundAccountWatch]).
   static Future<BackgroundAccountNode?> openAt({
     required Directory support,
     required AppSecurityCredentialsStore credentials,
     required RuntimeSystemNotificationService notices,
     Duration waitTimeout = const Duration(seconds: 30),
     int goneApp = 0,
+    String? accountFolder,
   }) async {
     Future<Directory> folder() async => support;
     final FileBackgroundVault vault = FileBackgroundVault(
@@ -488,7 +633,8 @@ final class BackgroundAccountNode {
       file: await vault.inboxFile(),
       recipientPublicKey: capability.inboxPublicKey,
     );
-    return BackgroundAccountNode._(
+    late final BackgroundAccountNode node;
+    node = BackgroundAccountNode._(
       runtime,
       LockedReceiver(
         transport: runtime,
@@ -503,7 +649,16 @@ final class BackgroundAccountNode {
       outboxKit == null || outboxKit.items.isEmpty
           ? null
           : LockedOutbox(transport: runtime, kit: outboxKit),
+      folder: accountFolder,
+      watch: accountFolder == null
+          ? null
+          : BackgroundAccountWatch(
+              folder: support,
+              credentials: credentials,
+              onGone: () => node.stop(),
+            ),
     );
+    return node;
   }
 
   /// Opens every additional account of [list] that has something to
@@ -553,11 +708,26 @@ final class BackgroundAccountNode {
   SignalTransport get transport => _runtime;
 
   Future<void> start() async {
+    final String? folder = this.folder;
+    if (folder != null) {
+      BackgroundAccountRuns.add(folder, stop);
+    }
+    watch?.start();
     await _receiver.start();
     await _outbox?.start();
   }
 
+  /// Stops the node (once; a second call does nothing).
   Future<void> stop() async {
+    if (_stopped) {
+      return;
+    }
+    _stopped = true;
+    watch?.stop();
+    final String? folder = this.folder;
+    if (folder != null) {
+      BackgroundAccountRuns.remove(folder, stop);
+    }
     await _outbox?.stop();
     await _receiver.stop();
     _runtime.dispose();
