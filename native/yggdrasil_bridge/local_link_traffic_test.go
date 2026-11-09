@@ -107,6 +107,42 @@ func TestAStreamThatIsNotALinkIsNotCounted(t *testing.T) {
 	}
 }
 
+// The linked device chooses what the stream carries: a frame length no
+// real frame has (bit 63 set, or past what a node takes from a peer) stops
+// the counting and nothing else.
+func TestALengthNoFrameHasStopsTheCountingAndNothingElse(t *testing.T) {
+	huge := binary.AppendUvarint(nil, 1<<63)
+	tooLong := binary.AppendUvarint(nil, linkFrameMax+1)
+	for name, length := range map[string][]byte{"bit 63": huge, "past the most a node takes": tooLong} {
+		var forwarded atomic.Uint64
+		scanner := newLinkFrameScanner(testNodeKey(t), testNodeKey(t), false, &forwarded, nil)
+		stream := append(linkMeta(0), length...)
+		stream = append(stream, linkFrameTraffic, 1, 2, 3)
+		var panicked any
+		func() {
+			defer func() { panicked = recover() }()
+			if n, err := scanner.Write(stream); n != len(stream) || err != nil {
+				t.Fatalf("%s: wrote %d of %d: %v", name, n, len(stream), err)
+			}
+		}()
+		if panicked != nil {
+			t.Fatalf("%s: the scanner panicked: %v", name, panicked)
+		}
+		if !scanner.broken || forwarded.Load() != 0 {
+			t.Fatalf("%s: the stream is no link any more, nothing counted", name)
+		}
+	}
+	// The longest frame a node takes is still read.
+	var forwarded atomic.Uint64
+	scanner := newLinkFrameScanner(testNodeKey(t), testNodeKey(t), false, &forwarded, nil)
+	scanner.Write(linkMeta(0))
+	scanner.Write(linkFrame(4, make([]byte, linkFrameMax-1)))
+	scanner.Write(linkFrame(1, nil))
+	if scanner.broken {
+		t.Fatal("a frame of the most a node takes is a frame")
+	}
+}
+
 func TestAFriendsOwnTrafficIsNoTransit(t *testing.T) {
 	before := trafficTotals{}
 	after := trafficTotals{peerRx: 3 << 20, peerTx: 3 << 20, friend: 3 << 20}

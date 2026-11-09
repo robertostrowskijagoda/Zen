@@ -447,14 +447,17 @@ func (m *localLinkManager) serveLink(link *localLink, listener net.Listener, str
 	m.mu.Unlock()
 	fromOther := newLinkFrameScanner(self, link.key, false, forwarded, &link.talked)
 	toOther := newLinkFrameScanner(self, link.key, true, forwarded, &link.talked)
+	// A panic in either direction ends the link, not the app.
 	done := make(chan struct{}, 2)
 	go func() {
+		defer func() { done <- struct{}{} }()
+		defer survive("local link " + link.id + " in")
 		_, _ = io.Copy(node, io.TeeReader(stream, fromOther))
-		done <- struct{}{}
 	}()
 	go func() {
+		defer func() { done <- struct{}{} }()
+		defer survive("local link " + link.id + " out")
 		_, _ = io.Copy(stream, io.TeeReader(node, toOther))
-		done <- struct{}{}
 	}()
 	select {
 	case <-done:
