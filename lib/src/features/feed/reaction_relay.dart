@@ -28,7 +28,11 @@ import 'package:zen/src/features/social/mentions.dart';
 /// [kReactionsPageKind] entries (older versions ignore them and show the
 /// first page). The author's decisions about the thread (hidden comments,
 /// blocked people: `thread_moderation.dart`) travel with page 0 as `hid`
-/// and `blk`, so resharers further away can apply them to their circles.
+/// and `blk`, so resharers further away can apply them to their circles
+/// before they write their own bundle. A reader takes `hid`, `blk` and the
+/// totals `nl` and `nc` only from the bundle of the post's author: any
+/// other bundle is signed by the friend who wrote it, not by the author, and
+/// proves only that friend's word.
 const String kReactionsKind = 'rx';
 
 /// Entry kind of a further page of a bundle (`pg` ≥ 1).
@@ -192,12 +196,14 @@ final class PostReactions {
   final List<BundleLike> likes;
   final List<BundleComment> comments;
 
-  /// How many there are in all, as the writer knew (at least as many as
-  /// listed).
+  /// How many there are in all, as the writer claims (at least as many as
+  /// listed). A claim, not a count: a reader trusts it only from the post's
+  /// author.
   final int likeTotal;
   final int commentTotal;
 
-  /// What the author decided about the thread, as passed on.
+  /// What the author decided about the thread, as passed on: binding only
+  /// when the writer is the author.
   final ThreadModeration moderation;
 }
 

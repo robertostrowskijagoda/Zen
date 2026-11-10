@@ -550,8 +550,9 @@ final class FeedPost {
   final int? _likeTotal;
   final int? _commentTotal;
 
-  /// How many like it in all: at least [likers], more when a bundle said
-  /// there are more than it carried.
+  /// How many like it in all: at least [likers], more when the post's author
+  /// said in her own bundle that there are more than it listed (a total any
+  /// other friend's bundle claims is not taken).
   int get likeTotal => _likeTotal ?? likers.length;
 
   /// How many of [likes] are verified ([FeedLiker.verified]).
@@ -1068,6 +1069,10 @@ List<FeedPost> buildFeed(
   final Map<String, ThreadModeration> passedOn = <String, ThreadModeration>{};
   final Map<String, int> likeTotals = <String, int>{};
   final Map<String, int> commentTotals = <String, int>{};
+  // Who wrote each post, as its signed entry says.
+  final Map<String, String> authorOf = <String, String>{
+    for (final FeedPost p in posts) p.id: p.account,
+  };
   void addComment(String post, FeedComment c) {
     if (commentIds.add(c.id)) {
       (comments[post] ??= <FeedComment>[]).add(c);
@@ -1123,7 +1128,19 @@ List<FeedPost> buildFeed(
   // circle is ignored (they speak for themselves, through their own acts
   // collected above), and everyone else is shown as relayed by the friend
   // whose bundle it was - never as if they were a friend themselves.
-  void mergeBundles(Iterable<LogEntry> acts, {String? relayedBy}) {
+  //
+  // A bundle is signed by the friend who wrote it and by nobody else, so it
+  // proves what that friend says and not what the post's author decided:
+  // the hidden comments and blocked people it carries (`hid`, `blk`) and
+  // the totals it claims (`nl`, `nc`) count only when [writer] is the post's
+  // own author. Anyone else's bundle adds the reactions it lists and
+  // nothing more: no relay can hide other people's reactions or make a post
+  // look as if it had more than this phone can count.
+  void mergeBundles(
+    Iterable<LogEntry> acts, {
+    String? relayedBy,
+    String? writer,
+  }) {
     String relayedLabel(String name) {
       final String shown = name.trim().isEmpty
           ? t('Znajomy znajomego')
@@ -1136,11 +1153,16 @@ List<FeedPost> buildFeed(
     for (final MapEntry<String, PostReactions> b in readBundles(acts).entries) {
       final String post = b.key;
       final PostReactions r = b.value;
-      passedOn[post] = (passedOn[post] ?? ThreadModeration.none).merge(
-        r.moderation,
-      );
-      likeTotals[post] = math.max(likeTotals[post] ?? 0, r.likeTotal);
-      commentTotals[post] = math.max(commentTotals[post] ?? 0, r.commentTotal);
+      if (writer != null && authorOf[post] == writer) {
+        passedOn[post] = (passedOn[post] ?? ThreadModeration.none).merge(
+          r.moderation,
+        );
+        likeTotals[post] = math.max(likeTotals[post] ?? 0, r.likeTotal);
+        commentTotals[post] = math.max(
+          commentTotals[post] ?? 0,
+          r.commentTotal,
+        );
+      }
       for (final BundleLike l in r.likes) {
         if (friendNames.containsKey(l.account)) {
           continue;
@@ -1182,10 +1204,13 @@ List<FeedPost> buildFeed(
     mergeBundles(
       node.entriesOf(spaceKind: 'acts', ofAccount: account),
       relayedBy: friendNames[account],
+      writer: account,
     );
   }
   // This account's own bundles pass on what other people's bundles said;
-  // who said it to us first is no longer known.
+  // who said it to us first is no longer known. They vouch for nothing but
+  // the reactions they list (this account's own decisions about its own
+  // posts come from its signed entries).
   mergeBundles(myActs);
   for (final List<FeedComment> list in comments.values) {
     list.sort((FeedComment a, FeedComment b) => a.millis.compareTo(b.millis));

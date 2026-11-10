@@ -43,6 +43,8 @@ void main() {
   final String ada = PeerShareCodec.normalizeAddress('200::a');
   final String bob = PeerShareCodec.normalizeAddress('200::b');
   final String cel = PeerShareCodec.normalizeAddress('200::c');
+  final String dan = PeerShareCodec.normalizeAddress('200::d');
+  final String eve = PeerShareCodec.normalizeAddress('200::e');
   late Map<String, _Linked> nodes;
 
   Future<LedgerNode> make(String address, List<String> friends) async {
@@ -238,6 +240,126 @@ void main() {
     expect(likeSummary(onCela), 'Lubią to: Bob i 250 innych osób');
     // Old readers: page 0 alone still reads as before.
     expect(readBundle(bobs[post.id]!)!.likes, hasLength(kMaxBundleLikers));
+  });
+
+  test('only the author\'s bundle moderates relayed reactions', () async {
+    // Ada wrote the post; Bob and Eve reshared it; Cela is a friend of Bob
+    // and Eve only, Dan a friend of Ada and Eve.
+    final LedgerNode a = await make(ada, <String>[bob, eve, dan]);
+    final LedgerNode b = await make(bob, <String>[ada, cel]);
+    final LedgerNode e = await make(eve, <String>[ada, cel, dan]);
+    final LedgerNode c = await make(cel, <String>[bob, eve]);
+    final LedgerNode d = await make(dan, <String>[ada, eve]);
+    final LogEntry post = await a.publish(kPostKind, newPostBody('Hej'));
+    await _settle();
+    await b.publish(kReshareKind, reshareBody(post));
+    await e.publish(kReshareKind, reshareBody(post));
+    await _settle();
+
+    // Eve passes on a like and a comment from Dee, a stranger to Cela.
+    await e.publish(kReactionsKind, <String, dynamic>{
+      'post': post.id,
+      'likes': <Map<String, dynamic>>[
+        <String, dynamic>{'a': 'dee-account', 'n': 'Dee'},
+      ],
+      'comments': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 'dee-comment',
+          'a': 'dee-account',
+          'n': 'Dee',
+          't': 'Pięknie',
+          'at': 5,
+        },
+      ],
+    }, spaceKind: 'acts');
+    // Bob is not the author, yet his bundle names Dee as blocked and her
+    // comment as hidden.
+    await b.publish(kReactionsKind, <String, dynamic>{
+      'post': post.id,
+      'likes': <Map<String, dynamic>>[],
+      'comments': <Map<String, dynamic>>[],
+      'hid': <String>['dee-comment'],
+      'blk': <String>['dee-account'],
+    }, spaceKind: 'acts');
+    await _settle();
+
+    final ReshareCache cache = ReshareCache();
+    await cache.checkAll(<LogEntry>[
+      ...c.entriesOf(ofAccount: b.account),
+      ...c.entriesOf(ofAccount: e.account),
+    ]);
+    final FeedPost onCela = postOn(c, post.id, reshares: cache);
+    expect(onCela.likes.map((FeedLiker l) => l.account), <String>[
+      'dee-account',
+    ]);
+    expect(onCela.comments.map((FeedComment x) => x.id), <String>[
+      'dee-comment',
+    ]);
+
+    // The author's own bundle does moderate what friends relay, for a
+    // reader who gets it from Ada herself.
+    await a.publish(kReactionsKind, <String, dynamic>{
+      'post': post.id,
+      'likes': <Map<String, dynamic>>[],
+      'comments': <Map<String, dynamic>>[],
+      'hid': <String>['dee-comment'],
+      'blk': <String>['dee-account'],
+    }, spaceKind: 'acts');
+    await _settle();
+    final FeedPost onDan = postOn(d, post.id);
+    expect(onDan.likes, isEmpty);
+    expect(onDan.comments, isEmpty);
+  });
+
+  test('a relayed total is never more than the author vouches for', () async {
+    final LedgerNode a = await make(ada, <String>[bob, cel]);
+    final LedgerNode b = await make(bob, <String>[ada, cel]);
+    final LedgerNode c = await make(cel, <String>[ada, bob]);
+    final LogEntry post = await a.publish(kPostKind, newPostBody('Hej'));
+    await _settle();
+    await b.publish(kReshareKind, reshareBody(post));
+    await _settle();
+
+    // Bob (not the author) claims a hundred million likes and comments
+    // while listing one of each.
+    await b.publish(kReactionsKind, <String, dynamic>{
+      'post': post.id,
+      'likes': <Map<String, dynamic>>[
+        <String, dynamic>{'a': 'dee-account', 'n': 'Dee'},
+      ],
+      'comments': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 'dee-comment',
+          'a': 'dee-account',
+          'n': 'Dee',
+          't': 'Pięknie',
+          'at': 5,
+        },
+      ],
+      'nl': 99999999,
+      'nc': 99999999,
+    }, spaceKind: 'acts');
+    await _settle();
+
+    FeedPost onCela = postOn(c, post.id);
+    expect(onCela.likes, hasLength(1));
+    expect(onCela.likeTotal, 1);
+    expect(onCela.commentTotal, 1);
+    expect(likeSummary(onCela), 'Lubi to 1 osoba');
+
+    // What the author's own bundle says about her post is her word: more
+    // than it lists.
+    await a.publish(kReactionsKind, <String, dynamic>{
+      'post': post.id,
+      'likes': <Map<String, dynamic>>[],
+      'comments': <Map<String, dynamic>>[],
+      'nl': 40,
+      'nc': 7,
+    }, spaceKind: 'acts');
+    await _settle();
+    onCela = postOn(c, post.id);
+    expect(onCela.likeTotal, 40);
+    expect(onCela.commentTotal, 7);
   });
 
   test('a removed post disappears for friends of a resharer too', () async {
