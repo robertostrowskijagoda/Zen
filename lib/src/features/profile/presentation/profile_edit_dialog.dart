@@ -9,7 +9,6 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
@@ -346,16 +345,11 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
           t('To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).'),
         );
       }
-      // Everything else Zen owns lives in the support directory; Documents can
-      // be redirected (OneDrive & co.) and is not a safe home for app data.
-      final Directory storageDir = await ZenInstance.supportDirectory();
-
       // Strict security validation: magic bytes, size limits, dangerous payloads.
+      // The staged copy is plain, so it goes to the private temporary media
+      // folder, never the account folder; saving seals it into the vault.
       final String sanitizedPath =
-          await AvatarSanitizer.validateAndStoreAvatarBytes(
-            rawBytes: framed,
-            storageDir: storageDir,
-          );
+          await AvatarSanitizer.validateAndStoreAvatarBytes(rawBytes: framed);
       final String? previousStaged = _stagedAvatarPath;
       if (previousStaged != null && previousStaged != sanitizedPath) {
         await AvatarSanitizer.cleanupOldAvatar(previousStaged);
@@ -441,11 +435,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
         }
         return;
       }
-      final String path = await storeCoverBytes(
-        bytes: picked,
-        storageDir: await ZenInstance.supportDirectory(),
-        region: region,
-      );
+      final String path = await storeCoverBytes(bytes: picked, region: region);
       final String? previous = _stagedCoverPath;
       if (previous != null) {
         await deleteCoverImage(previous);

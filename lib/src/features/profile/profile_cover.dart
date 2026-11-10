@@ -6,6 +6,8 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart'
+    show mediaTemporaryDirectory;
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 
@@ -90,12 +92,13 @@ Uint8List? makeCoverImage(Uint8List bytes, {CropRegion? region}) {
   return img.encodeJpg(scaled, quality: 82);
 }
 
-/// Prepares the picked file at [sourcePath] and stores it in [storageDir];
-/// returns the new path. Throws [FormatException] with a message for the
+/// Prepares the picked file at [sourcePath] and stages it as a plain file in
+/// the private temporary media folder ([stagePlainProfileImage]); returns the
+/// new path. Throws [FormatException] with a message for the
 /// user when the file is not a usable picture.
 Future<String> storeCoverImage({
   required String sourcePath,
-  required Directory storageDir,
+  Future<Directory> Function() folder = mediaTemporaryDirectory,
   CropRegion? region,
 }) async {
   final File source = File(sourcePath);
@@ -108,7 +111,7 @@ Future<String> storeCoverImage({
   }
   return storeCoverBytes(
     bytes: await source.readAsBytes(),
-    storageDir: storageDir,
+    folder: folder,
     region: region,
   );
 }
@@ -117,7 +120,7 @@ Future<String> storeCoverImage({
 /// or the keyboard).
 Future<String> storeCoverBytes({
   required Uint8List bytes,
-  required Directory storageDir,
+  Future<Directory> Function() folder = mediaTemporaryDirectory,
   CropRegion? region,
 }) async {
   if (bytes.length > kMaxCoverSourceBytes) {
@@ -133,16 +136,14 @@ Future<String> storeCoverBytes({
       t('To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).'),
     );
   }
-  final Directory dir = Directory(
-    '${storageDir.path}${Platform.pathSeparator}profile',
-  )..createSync(recursive: true);
-  final File out = File(
-    '${dir.path}${Platform.pathSeparator}'
-    'cover_${DateTime.now().millisecondsSinceEpoch}'
-    '.${looksLikeGif(cover) ? 'gif' : 'jpg'}',
+  // Never under the account folder: the only plain copy is in the private
+  // temporary media folder, which every start empties.
+  return stagePlainProfileImage(
+    cover,
+    prefix: 'cover_',
+    extension: looksLikeGif(cover) ? '.gif' : '.jpg',
+    folder: folder,
   );
-  await out.writeAsBytes(cover, flush: true);
-  return out.path;
 }
 
 Uint8List? _makeCover((Uint8List, CropRegion?) job) =>

@@ -134,7 +134,7 @@ void main() {
     expect(
       await AvatarSanitizer.validateAndStoreAvatarBytes(
         rawBytes: webp,
-        storageDir: dir,
+        folder: () async => dir,
       ),
       endsWith('.webp'),
     );
@@ -142,7 +142,7 @@ void main() {
     expect(
       await AvatarSanitizer.validateAndStoreAvatarBytes(
         rawBytes: img.encodeGif(frame),
-        storageDir: dir,
+        folder: () async => dir,
       ),
       endsWith('.gif'),
     );
