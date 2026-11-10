@@ -10,6 +10,14 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Security fixes: a nearby device can no longer crash Zen, and nobody can cut you off from your contacts or get around the wait after wrong passwords.
+- [en] A locked phone wakes less often, so Zen uses less battery.
+- [en] Making the lock weaker now asks for your password, and a copied key leaves the clipboard when Zen locks.
+- [pl] Poprawki bezpieczeństwa: urządzenie w pobliżu nie zawiesi już Zen, nikt nie odetnie cię od znajomych ani nie ominie czekania po złych hasłach.
+- [pl] Zablokowany telefon budzi się rzadziej, więc Zen zużywa mniej baterii.
+- [pl] Osłabienie blokady wymaga teraz hasła, a skopiowany klucz znika ze schowka, gdy Zen się blokuje.
+
 ### Fixes and changes
 - **A friend can no longer cut you off from your contacts with made-up keys**: the device keys a friend's friend list named were pinned for any address, without limit, and pushed out real pins once the table was full, so a contact's real key was refused for good, also after a restart. A friend's list now vouches for at most one list of people, never for your own friends or devices, and in the bridge such keys are only hints: they never replace or push out a pin or end a session, and the device's own signed record decides.
 - **A nearby linked device can no longer crash Zen**: 17 bytes over a local link (same Wi-Fi, Wi-Fi Direct, Bluetooth) made a negative frame length and ended the app or the background service, again at every reconnect. A length no frame has now only stops the counting of that stream, and a panic in a link's copying ends that link alone.
