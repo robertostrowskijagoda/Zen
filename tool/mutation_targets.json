@@ -253,5 +253,41 @@
     "tests": [
       "test/pyramid_ledger_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/app/app_data_reset.dart",
+    "tests": [
+      "test/app_data_reset_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/app/start_trace.dart",
+    "tests": [
+      "test/start_trace_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/account_copy.dart",
+    "tests": [
+      "test/account_copy_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/multi/background_accounts.dart",
+    "tests": [
+      "test/background_accounts_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/runtime_native_signal_transport.dart",
+    "tests": [
+      "test/runtime_native_signal_transport_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/security/app_security_service.dart",
+    "tests": [
+      "test/app_security_service_test.dart"
+    ]
   }
 ]
