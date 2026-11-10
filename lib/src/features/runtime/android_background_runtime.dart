@@ -1770,6 +1770,16 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       _handoffActive = false;
       ZenTechLog.handover('app', ok: true, took: restore.elapsed);
+      // The service wrote what it heard of friends last as it stopped; an
+      // unlock started the core before that, so it is read again.
+      for (final ZenModule module in ref.read(zenCoreProvider).modules) {
+        if (module is RuntimeSignalModule) {
+          unawaitedLogged(
+            module.takeKeptPresence(),
+            context: 'Taking the statuses the service kept failed',
+          );
+        }
+      }
       // What the service took in and handed out as a mailbox for friends.
       await _mailboxKitWriter?.takeHeld();
       if (!mounted) {

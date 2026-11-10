@@ -8,10 +8,12 @@ import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/logging/zen_tech_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
@@ -872,13 +874,30 @@ final class RuntimeSignalModule extends ZenModule {
     );
   }
 
+  /// The Android service let go of the node: what it heard last is in
+  /// `presence.zbox` now (it writes it as it stops), while the core may have
+  /// read the file before, as Zen was unlocked (the core starts at once,
+  /// the service is parked after it): the statuses it kept are taken again
+  /// ([_takeKeptPresence]). Nothing when the core does not run (it reads
+  /// them as it starts).
+  Future<void> takeKeptPresence() {
+    if (!_running || _inService) {
+      return Future<void>.value();
+    }
+    return _takeKeptPresence(afterHandBack: true);
+  }
+
   /// The newest status of each friend the background service kept
   /// ([keptPresenceReaderProvider]), taken once the stored friends are read
-  /// (the app is unlocked): as if each had just come, with the time it
-  /// came, but never answered. Its own node is not needed, so friends show
-  /// what the service knows the moment Zen opens instead of "nieznany"
-  /// until their answers to this run's pings come.
-  Future<void> _takeKeptPresence() async {
+  /// (the app is unlocked): with the time it came, as what it is worth by
+  /// now ([presenceAt]: "w tle" heard 40 minutes ago is offline), never
+  /// over a newer one this app knows ([SocialHubController.presenceKnownAt]:
+  /// a file from an earlier run of the service, or read before an answer
+  /// came), and never answered. A friend's other device is taken as the
+  /// friend, as the account routing hands it over. Its own node is not
+  /// needed, so friends show what the service knows the moment Zen opens
+  /// instead of "nieznany" until their answers to this run's pings come.
+  Future<void> _takeKeptPresence({bool afterHandBack = false}) async {
     final SocialHubController hub = _ref.read(
       socialHubControllerProvider.notifier,
     );
@@ -889,19 +908,89 @@ final class RuntimeSignalModule extends ZenModule {
     final List<SignalTransportFrame> frames = await _ref.read(
       keptPresenceReaderProvider,
     )();
-    for (final SignalTransportFrame frame in frames) {
+    final AccountDeviceDirectory? directory = _ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    final RuntimePresenceConfig config = _ref.read(
+      runtimePresenceConfigProvider,
+    );
+    // Taken; of them shown as what they are worth now (expired); left out
+    // as older than what this app knows.
+    int taken = 0;
+    int aged = 0;
+    int older = 0;
+    for (final SignalTransportFrame read in frames) {
       if (!_live) {
         return;
+      }
+      final SignalTransportFrame? frame = _asFriendFrame(read, directory);
+      if (frame == null) {
+        continue;
       }
       final String from = PeerShareCodec.normalizeAddress(frame.from);
       if (!_isAcceptedFriendAddress(from)) {
         continue;
+      }
+      if (frame.receivedAtMillis <= hub.presenceKnownAt(from)) {
+        older += 1;
+        continue;
+      }
+      taken += 1;
+      final PeerPresence said = PresenceReport.fromPayload(
+        frame.payload,
+      ).presence;
+      if (presenceAt(
+            presence: said,
+            presenceAtMillis: frame.receivedAtMillis,
+            nowMillis: DateTime.now().millisecondsSinceEpoch,
+            foregroundFor: config.foregroundFor,
+            backgroundFor: config.backgroundFor,
+          ) !=
+          said) {
+        aged += 1;
       }
       await _notePresence(hub, from, frame, kept: true);
       if (frame.payload['type'] != kPresenceAwayType) {
         await _notePeerVersion(hub, from, frame.payload);
       }
     }
+    ZenTechLog.event('presence-kept', <String, Object?>{
+      'at': afterHandBack ? 'handback' : 'start',
+      'n': frames.length,
+      'taken': taken,
+      'aged': aged,
+      'older': older,
+    });
+  }
+
+  /// [frame] as the account routing hands it over: from the address the
+  /// app knows the friend by, [SignalTransportFrame.device] naming the
+  /// device that sent it, when it came from a friend's other device (the
+  /// locked service hears each device at its own address); `null` from a
+  /// device its owner unlinked.
+  static SignalTransportFrame? _asFriendFrame(
+    SignalTransportFrame frame,
+    AccountDeviceDirectory? directory,
+  ) {
+    if (directory == null || directory.ownAccount.isEmpty) {
+      return frame;
+    }
+    if (directory.unlinkedAccountOf(frame.from) != null) {
+      return null;
+    }
+    final String? account = directory.accountOf(frame.from);
+    final String? contact = account == null || account == directory.ownAccount
+        ? null
+        : directory.contactAddressOf(account);
+    if (contact == null || PeerShareCodec.addressesEqual(contact, frame.from)) {
+      return frame;
+    }
+    return SignalTransportFrame(
+      from: contact,
+      payload: frame.payload,
+      receivedAtMillis: frame.receivedAtMillis,
+      device: frame.from,
+    );
   }
 
   /// What a ping, pong or `away` from [from] says of their presence.
@@ -942,7 +1031,28 @@ final class RuntimeSignalModule extends ZenModule {
       // Told before what this device heard from there already.
       return Future<void>.value();
     }
-    if (!kept) {
+    PresenceReport shown = now.report;
+    bool reachable = now.report.reachable;
+    if (kept) {
+      // Heard a while ago: what it is worth by now, as if it had been heard
+      // then and nothing since (the decay of a running app has it so).
+      final int age = DateTime.now().millisecondsSinceEpoch - now.at;
+      final PeerPresence worth = presenceAt(
+        presence: shown.presence,
+        presenceAtMillis: now.at,
+        nowMillis: DateTime.now().millisecondsSinceEpoch,
+        foregroundFor: config.foregroundFor,
+        backgroundFor: config.backgroundFor,
+      );
+      if (worth != shown.presence) {
+        shown = PresenceReport(
+          presence: worth,
+          openedAgo: shown.openedAgo,
+          sentAtMillis: shown.sentAtMillis,
+        );
+      }
+      reachable = reachable && age < config.offlineAfter.inMilliseconds;
+    } else {
       // Heard in this run (kept by the service: before it, so the pings of
       // the start still go to them).
       if (_heard.length >= 2000) {
@@ -957,9 +1067,10 @@ final class RuntimeSignalModule extends ZenModule {
     }
     return hub.updatePeerPresence(
       peerAddress: from,
-      report: now.report,
-      reachable: now.report.reachable,
+      report: shown,
+      reachable: reachable,
       observedAtMillis: now.at,
+      onlyIfNewer: kept,
     );
   }
 

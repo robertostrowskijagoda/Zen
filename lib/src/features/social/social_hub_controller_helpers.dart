@@ -1717,6 +1717,31 @@ FriendshipBook _withRememberedPresence(
   },
 );
 
+/// [stored] (the friends read back from the store) with each friend's
+/// presence as [known] (memory, with its latest confirmations) has it when
+/// memory's was confirmed later: the state, its time, whether they are
+/// reachable and when last seen, and the last opening that goes with it.
+/// The rest of each friend is the stored one.
+FriendshipBook _withNewerPresence(
+  FriendshipBook stored,
+  FriendshipBook known,
+) => stored.editAll((FriendProfile friend) {
+  final FriendProfile? mine = known.profileOf(friend.address);
+  if (mine == null || mine.presenceAtMillis <= friend.presenceAtMillis) {
+    return friend;
+  }
+  return friend.copyWith(
+    isOnline: mine.isOnline,
+    lastPresenceAtMillis: max(
+      mine.lastPresenceAtMillis,
+      friend.lastPresenceAtMillis,
+    ),
+    presence: mine.presence,
+    presenceAtMillis: mine.presenceAtMillis,
+    lastOpenedAtMillis: mine.lastOpenedAtMillis,
+  );
+});
+
 /// Friend gate: every signal arriving over the mesh must come from a peer
 /// with a relationship that authorizes that signal type. The mesh itself
 /// authenticates senders (address = identity key) and encrypts payloads

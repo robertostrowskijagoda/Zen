@@ -223,16 +223,29 @@ const int kLockedSilentRoundEvery = 3;
 /// first frame, another state, another last opening) is written at once.
 /// The app reads the file when it opens and ages each status from its
 /// frame: a friend "w tle" shows as such for [kPresenceBackgroundFor]
-/// (25 min) from it, so a frame a few minutes older than the newest costs
-/// them at most that much of it (the app asks every friend as it opens),
-/// while the friend's pings and pongs (every few minutes each) mostly go
-/// unwritten. What waits for the next write is written on the first frame
+/// (25 min) from it, so a frame older than the newest (by up to a round:
+/// the round's first word opens the write, [kKeptPresenceStaleAfter])
+/// costs them at most that much of it (the app reads the file again once
+/// the receiver stopped and wrote the newest, and asks every friend as it
+/// opens), while the friend's pings and pongs (every few minutes each)
+/// mostly go unwritten. What waits for the next write is written on the first frame
 /// or presence round once the time is up, and when the receiver stops; if
 /// the service is killed meanwhile, only the age of unchanged statuses is
 /// lost: the file shows them from frames older than the newest by this
 /// much and the wait for that frame or round (at most a round), never a
 /// wrong state.
 const Duration kKeptPresenceRefreshEvery = Duration(minutes: 5);
+
+/// A friend's frame in `presence.zbox` this much older than a newer one of
+/// theirs is written at once, whenever the file was last written: the app
+/// shows "w tle" for [kPresenceBackgroundFor] (25 min) from the written
+/// frame, and their next word comes a round later
+/// ([kLockedPresenceRoundEvery]). The file's write a round opens comes on
+/// the first friend's word of the round, the others' words of it wait for
+/// the next round's, so a written frame is up to two rounds old; once a
+/// round with a friend is lost, three, and they showed offline when Zen
+/// opened although their phone answers. Only then: one write more.
+const Duration kKeptPresenceStaleAfter = Duration(minutes: 15);
 
 /// The same for a friend online, who counts as offline 5 minutes after
 /// their last frame (kPresenceForegroundFor) and pings every 2 while Zen is
@@ -1337,21 +1350,25 @@ final class LockedReceiver {
   /// How soon after the last write [frame], saying what [written] says, is
   /// to be written: once the written one is [kKeptPresenceRefreshEvery]
   /// old, that long (an online friend's [kKeptPresenceOnlineRefreshEvery]);
-  /// `null` while it is younger. A friend's frames come every few minutes;
-  /// each write seals the whole file anew and waits for the disk.
+  /// `null` while it is younger; at once when the written one is
+  /// [kKeptPresenceStaleAfter] old (not online). A friend's frames come
+  /// every few minutes; each write seals the whole file anew and waits for
+  /// the disk.
   static Duration? _presenceRefresh(
     SignalTransportFrame written,
     SignalTransportFrame frame,
   ) {
-    final Duration refresh =
+    final bool online =
         PresenceReport.fromPayload(frame.payload).presence ==
-            PeerPresence.online
+        PeerPresence.online;
+    final int age = frame.receivedAtMillis - written.receivedAtMillis;
+    if (!online && age >= kKeptPresenceStaleAfter.inMilliseconds) {
+      return Duration.zero;
+    }
+    final Duration refresh = online
         ? kKeptPresenceOnlineRefreshEvery
         : kKeptPresenceRefreshEvery;
-    return frame.receivedAtMillis - written.receivedAtMillis >=
-            refresh.inMilliseconds
-        ? refresh
-        : null;
+    return age >= refresh.inMilliseconds ? refresh : null;
   }
 
   /// Writes the newest presence frame of each friend, heard within

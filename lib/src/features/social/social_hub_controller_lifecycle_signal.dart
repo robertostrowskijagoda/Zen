@@ -323,6 +323,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   }
 
   Future<void> _hydrateFromStore({bool fromUnlock = false}) async {
+    // Read once already in this run (the app takes the node back from the
+    // Android service): what memory heard since is newer than the store.
+    final bool reread = _snapshotLoaded;
     final SocialHubState? persisted;
     try {
       // Bounded: everything the hub does waits behind this read (the work
@@ -378,9 +381,19 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         lifecycle: state.lifecycle,
         // What each friend showed last is remembered: shown as it stands
         // now when it was confirmed lately, "status nieznany" otherwise
-        // until they answer (or the answers had time to come).
+        // until they answer (or the answers had time to come). Read again,
+        // a status memory has newer (what the background service kept, an
+        // answer that came meanwhile) stays: the store holds the one from
+        // before the lock, and every friend heard from since would show
+        // what that is worth now ("poza siecią" after an hour) until they
+        // answer again.
         book: _withRememberedPresence(
-          persisted.book,
+          reread
+              ? _withNewerPresence(
+                  persisted.book,
+                  _withConfirmedPresence(state).book,
+                )
+              : persisted.book,
           nowMillis: DateTime.now().millisecondsSinceEpoch,
         ),
         groups: _canonicalizeGroups(persisted.groups),

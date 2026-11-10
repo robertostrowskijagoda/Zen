@@ -1618,12 +1618,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   /// A `ping`, `pong` or `away` from [peerAddress] ([report]: what it said
   /// about their presence). A ping or pong also says they can be reached
   /// directly now ([reachable]); an "away" from a device about to stop
-  /// receiving says the opposite.
+  /// receiving says the opposite. [onlyIfNewer]: a word heard earlier and
+  /// kept (the background service's `presence.zbox`), taken only when it is
+  /// newer than what is known of them already ([presenceKnownAt]), so an
+  /// older file never undoes a newer status.
   Future<void> updatePeerPresence({
     required String peerAddress,
     required PresenceReport report,
     bool reachable = true,
     int? observedAtMillis,
+    bool onlyIfNewer = false,
   }) {
     return _enqueueStateWork(
       () => _updatePeerPresence(
@@ -1631,8 +1635,25 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         report: report,
         reachable: reachable && report.reachable,
         observedAtMillis: observedAtMillis,
+        onlyIfNewer: onlyIfNewer,
       ),
     );
+  }
+
+  /// When [peerAddress]'s presence was last confirmed, as far as this app
+  /// knows (0: never); a time ahead of the clock (the clock was set back)
+  /// counts as 0, so nothing is held back by it.
+  int presenceKnownAt(String peerAddress) {
+    final FriendProfile? friend = state.friendByAddress(peerAddress);
+    if (friend == null) {
+      return 0;
+    }
+    final int known = max(
+      friend.presenceAtMillis,
+      _presenceConfirmedAt[PeerShareCodec.normalizeAddress(friend.address)] ??
+          0,
+    );
+    return known <= DateTime.now().millisecondsSinceEpoch ? known : 0;
   }
 
   Future<void> _updatePeerPresence({
@@ -1640,7 +1661,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     required PresenceReport report,
     required bool reachable,
     int? observedAtMillis,
+    bool onlyIfNewer = false,
   }) async {
+    if (onlyIfNewer &&
+        (observedAtMillis ?? 0) <= presenceKnownAt(peerAddress)) {
+      return;
+    }
     if (reachable) {
       // A pong is the most reliable "this peer is up right now" we get.
       unawaitedLogged(
