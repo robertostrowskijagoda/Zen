@@ -97,7 +97,8 @@ final class SelfNotesService extends ChangeNotifier {
         }
       }
     } on Object catch (error) {
-      logZenWarning('Reading the notes failed: $error');
+      // The kind of error only: its text can quote what was being read.
+      logZenWarning('Reading the notes failed: ${error.runtimeType}');
     }
     _notes = read;
     _loaded = true;
