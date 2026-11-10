@@ -189,7 +189,8 @@ key, so every release must be signed with this key.
    fails the test.
 2. `git switch -c release-1.12.0` (from a clean, up-to-date `main`), then
    `dart run tool/release.dart prepare 1.12.0`. It runs
-   `dart format`, `flutter analyze`, `flutter test` and `go test`
+   `dart format`, `flutter analyze`, `flutter test`, `go test`, the tests
+   of the CI checks (`tool/ci/test_*.py`) and the link check
    (`--skip-checks` skips them when CI already ran them on this commit),
    checks that `release.yml` makes every file the app updates from under
    exactly the names the app asks for (`tool/release_contract.dart`; also
