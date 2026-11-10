@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.4 — 10.11.2026
+
 ### What's new
 - [en] Security fixes: a nearby device can no longer crash Zen, and nobody can cut you off from your contacts or get around the wait after wrong passwords.
 - [en] A locked phone wakes less often, so Zen uses less battery.
