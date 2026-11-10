@@ -150,6 +150,8 @@ const List<String> _keys = <String>[
   kPollKey,
   kLocationKey,
   kChangeAuthorKey,
+  kGroupAddedKey,
+  kGroupLeftKey,
 ];
 
 /// The messages of friends the frames aim at (by id).

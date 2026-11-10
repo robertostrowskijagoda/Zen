@@ -446,6 +446,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           final Object? pending = value['pendingInviteIds'];
           final Object? received = value['receivedInviteIds'];
           groups[group.id] = group.copyWith(
+            departedAt: groupMembershipStampsFromJson(value['departedAt']),
+            addedAt: groupMembershipStampsFromJson(value['addedAt']),
             pendingInviteIds: pending is Map
                 ? <String, String>{
                     for (final MapEntry<dynamic, dynamic> e in pending.entries)
@@ -698,10 +700,16 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         'groups': <String, dynamic>{
           for (final GroupProfile group in state.groups.values)
             if (group.pendingInviteIds.isNotEmpty ||
-                group.receivedInviteIds.isNotEmpty)
+                group.receivedInviteIds.isNotEmpty ||
+                group.departedAt.isNotEmpty ||
+                group.addedAt.isNotEmpty)
               group.id: <String, dynamic>{
                 'pendingInviteIds': group.pendingInviteIds,
                 'receivedInviteIds': group.receivedInviteIds,
+                // Who left and who was added by name, and when: what keeps a
+                // member list a step behind from undoing a leave.
+                if (group.departedAt.isNotEmpty) 'departedAt': group.departedAt,
+                if (group.addedAt.isNotEmpty) 'addedAt': group.addedAt,
               },
         },
         if (state.book.records.isNotEmpty)

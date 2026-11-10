@@ -2198,7 +2198,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         groupHasMember(current, member)) {
       return;
     }
+    final int now = DateTime.now().millisecondsSinceEpoch;
     final GroupProfile updated = current.copyWith(
+      // Added by name now: a new invitation, whoever left before, and a
+      // late copy of an older leave takes nobody out.
+      departedAt: _withoutGroupStamp(current.departedAt, member),
+      addedAt: _withGroupStamp(current.addedAt, member, now),
       memberAddresses: normalizedGroupMembers(<String>[
         ...current.memberAddresses,
         member,
@@ -2220,12 +2225,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     state = state.copyWith(groups: groups);
     await _persistState();
 
-    final Map<String, dynamic> sync = _groupInvitePayload(updated);
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    // The update names the newcomer, stamped now, and lists nobody but the
+    // adder and the newcomer: this device's list may be a step behind (it
+    // was offline when someone left), and a member who left must not come
+    // back on anyone's phone with it - not on a Zen before 1.16.5 either,
+    // which merges whatever list comes.
+    final Map<String, dynamic> sync = <String, dynamic>{
+      ..._groupInvitePayload(updated),
+      'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr, member],
+      kGroupAddedKey: member,
+      'at': now,
+    };
     // The newcomer gets the invite; everyone already in the group gets the
-    // same payload as a member-list update (they merge it without any inbox
-    // entry). Without that, the others dropped the newcomer's messages as
-    // coming from a stranger.
+    // update (they merge it without any inbox entry). Without that, the
+    // others dropped the newcomer's messages as coming from a stranger.
     for (final String recipient in updated.memberAddresses) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(recipient, localAddr)) {
@@ -2352,7 +2366,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       unawaitedLogged(
         _sendFriendLifecycleSignal(
           peerAddress: senderAddress,
-          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
+          payload: <String, dynamic>{
+            'type': 'group_leave',
+            'groupId': groupId,
+            'at': DateTime.now().millisecondsSinceEpoch,
+          },
         ),
         context: 'send group leave to $senderAddress',
       );
@@ -2420,16 +2438,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    // Stamped with this phone's clock: the same time on every member's
+    // phone, so an invitation made after it (and only such) brings this
+    // person back (`_groupAfterLeave`).
+    final Map<String, dynamic> leave = <String, dynamic>{
+      'type': 'group_leave',
+      'groupId': groupId,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    };
     for (final String member in removed.memberAddresses) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(member, localAddr)) {
         continue;
       }
       unawaitedLogged(
-        _sendFriendLifecycleSignal(
-          peerAddress: member,
-          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
-        ),
+        _sendFriendLifecycleSignal(peerAddress: member, payload: leave),
         context: 'broadcast group leave to $member',
       );
     }

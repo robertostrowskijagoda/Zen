@@ -5,6 +5,16 @@ import 'package:flutter/foundation.dart';
 /// peer from stuffing a group (and the snapshot) with endless addresses.
 const int kMaxGroupMemberCount = 256;
 
+/// The key of a `group_invite` member-list update that names the one
+/// person its sender adds (its `at`: when, by the adder's clock). Taken by
+/// itself even when the rest of the sender's list is a step behind.
+const String kGroupAddedKey = 'added';
+
+/// The key of the members' list sent to someone who just joined that
+/// tells who left the group and when (address to time, by the leavers'
+/// clocks): the newcomer never heard those leaves.
+const String kGroupLeftKey = 'left';
+
 @immutable
 final class GroupProfile {
   const GroupProfile({
@@ -25,6 +35,8 @@ final class GroupProfile {
     this.receivedInviteIds = const <String>[],
     this.inviteMemberNames = const <String>[],
     this.awaitingMembersFrom = '',
+    this.departedAt = const <String, int>{},
+    this.addedAt = const <String, int>{},
   });
 
   factory GroupProfile.fromJson(Map<String, dynamic> json) {
@@ -74,6 +86,8 @@ final class GroupProfile {
               .toList() ??
           const <String>[],
       awaitingMembersFrom: (json['awaitingMembersFrom'] as String?) ?? '',
+      departedAt: groupMembershipStampsFromJson(json['departedAt']),
+      addedAt: groupMembershipStampsFromJson(json['addedAt']),
     );
   }
 
@@ -125,6 +139,20 @@ final class GroupProfile {
   /// leave this device in a group of two.
   final String awaitingMembersFrom;
 
+  /// Who left the group, and when (by address; the leaver's own clock when
+  /// its `group_leave` said, else when the leave arrived here). A member
+  /// list from anyone (a member a step behind, the creator offline at the
+  /// time, a Zen of before 1.16.5) never brings such an address back; only
+  /// an addition stamped later ([addedAt]) does. At most
+  /// [kMaxGroupMemberCount] entries, the newest.
+  final Map<String, int> departedAt;
+
+  /// Who was added by name, and when (the adder's clock): a leave stamped
+  /// earlier than that is an older one and takes nobody out. An address is
+  /// in this map or in [departedAt], never in both. At most
+  /// [kMaxGroupMemberCount] entries, the newest.
+  final Map<String, int> addedAt;
+
   /// While an invitation is pending: the named members, the inviter and
   /// this person.
   int get memberCount => isInvitePending && inviteMemberNames.isNotEmpty
@@ -151,6 +179,8 @@ final class GroupProfile {
     List<String>? receivedInviteIds,
     List<String>? inviteMemberNames,
     String? awaitingMembersFrom,
+    Map<String, int>? departedAt,
+    Map<String, int>? addedAt,
   }) {
     return GroupProfile(
       id: id ?? this.id,
@@ -171,6 +201,8 @@ final class GroupProfile {
       receivedInviteIds: receivedInviteIds ?? this.receivedInviteIds,
       inviteMemberNames: inviteMemberNames ?? this.inviteMemberNames,
       awaitingMembersFrom: awaitingMembersFrom ?? this.awaitingMembersFrom,
+      departedAt: departedAt ?? this.departedAt,
+      addedAt: addedAt ?? this.addedAt,
     );
   }
 
@@ -194,7 +226,46 @@ final class GroupProfile {
     if (inviteMemberNames.isNotEmpty) 'inviteMemberNames': inviteMemberNames,
     if (awaitingMembersFrom.isNotEmpty)
       'awaitingMembersFrom': awaitingMembersFrom,
+    if (departedAt.isNotEmpty) 'departedAt': departedAt,
+    if (addedAt.isNotEmpty) 'addedAt': addedAt,
   };
+}
+
+/// [stamps] cut to the [kMaxGroupMemberCount] newest: a group's record of
+/// who left or was added stays bounded however many come and go.
+Map<String, int> boundedGroupMembershipStamps(Map<String, int> stamps) {
+  if (stamps.length <= kMaxGroupMemberCount) {
+    return stamps;
+  }
+  final List<MapEntry<String, int>> newestFirst = stamps.entries.toList()
+    ..sort(
+      (MapEntry<String, int> a, MapEntry<String, int> b) =>
+          b.value.compareTo(a.value),
+    );
+  return <String, int>{
+    for (final MapEntry<String, int> e in newestFirst.take(
+      kMaxGroupMemberCount,
+    ))
+      e.key: e.value,
+  };
+}
+
+/// [GroupProfile.departedAt] or [GroupProfile.addedAt] as stored: only
+/// addresses with a positive time, bounded.
+Map<String, int> groupMembershipStampsFromJson(Object? value) {
+  if (value is! Map) {
+    return const <String, int>{};
+  }
+  final Map<String, int> stamps = <String, int>{
+    for (final MapEntry<dynamic, dynamic> e in value.entries)
+      if (e.key is String &&
+          (e.key as String).isNotEmpty &&
+          e.value is num &&
+          (e.value as num) > 0 &&
+          (e.value as num) <= 9007199254740991)
+        e.key as String: (e.value as num).toInt(),
+  };
+  return boundedGroupMembershipStamps(stamps);
 }
 
 /// Id prefixes of the groups another feature keeps: the pyramid's cell

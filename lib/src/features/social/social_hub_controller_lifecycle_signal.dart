@@ -529,7 +529,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       }
       if (signal.type == ZenSignalType.groupInviteAck) {
         // They joined: now they get every member's address (the invitation
-        // named the members but gave no address but ours).
+        // named the members but gave no address but ours), and who left
+        // before them, so no other member's list a step behind brings
+        // anyone of those into theirs.
         final GroupProfile? joined = state.groups[signal.groupId ?? ''];
         if (signal.content == kGroupJoinedAck &&
             joined != null &&
@@ -537,7 +539,10 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           unawaitedLogged(
             _sendFriendLifecycleSignal(
               peerAddress: signal.sender,
-              payload: _groupInvitePayload(joined),
+              payload: <String, dynamic>{
+                ..._groupInvitePayload(joined),
+                ..._groupDeparturesPayload(joined),
+              },
             ),
             context: 'Sending the members to who joined failed',
           );
@@ -552,6 +557,44 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         context: 'Syncing group invites after a signal failed',
       );
     });
+  }
+
+  /// When each member still writing into a group this device left was
+  /// last told so, by `groupId|address` ([_answerTrafficOfLeftGroup]).
+  final Map<String, int> _leftGroupToldAt = <String, int>{};
+
+  /// A message of a group this device left or declined, from someone who
+  /// still counts it as a member: their phone never got the leave (it was
+  /// away longer than mailboxes keep mail, or it joined after the leave
+  /// from a member's list a step behind, and the leaver never knew it).
+  /// It is told once more - at most every six hours per member and group,
+  /// to no blocked person, and only for a group this device was in or was
+  /// invited to (nobody learns from an unknown group id that this device
+  /// is online). The leave counts there because it comes from this device
+  /// itself: nobody else's word takes a member out of a list.
+  void _answerTrafficOfLeftGroup(ZenSignal signal, int timestamp) {
+    final String groupId = signal.groupId ?? '';
+    if (groupId.isEmpty ||
+        state.groups.containsKey(groupId) ||
+        !state.rejectedGroupIds.contains(groupId) ||
+        state.friendByAddress(signal.sender)?.status ==
+            FriendRelationshipStatus.blocked) {
+      return;
+    }
+    const int every = 6 * 60 * 60 * 1000;
+    _leftGroupToldAt.removeWhere(
+      (String _, int at) => (timestamp - at).abs() >= every,
+    );
+    final String key = '$groupId|${signal.sender}';
+    if (_leftGroupToldAt.containsKey(key) || _leftGroupToldAt.length >= 256) {
+      return;
+    }
+    _leftGroupToldAt[key] = timestamp;
+    _replyToGroupSignal(
+      peerAddress: signal.sender,
+      type: 'group_leave',
+      groupId: groupId,
+    );
   }
 
   /// Shows in the group's chat whom an ordinary member (not the creator)
@@ -665,6 +708,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     if (await _handleStrangerChatSignal(signal, timestamp)) {
       return;
     }
+    if (signal.type == ZenSignalType.groupMessage) {
+      _answerTrafficOfLeftGroup(signal, timestamp);
+    }
     if (!_isSignalAllowedFromPeer(state, signal)) {
       // Dropped without a word: an answer would tell anyone probing an
       // address that the device is online right there.
@@ -714,6 +760,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       // (see `_sendFriendLifecycleSignal`). The first copy did all the work;
       // every further copy used to raise the same notification again.
       return;
+    }
+    if (signal.type == ZenSignalType.groupLeave) {
+      final GroupProfile? left = state.groups[signal.groupId ?? ''];
+      if (left != null && _isStaleGroupLeave(left, signal, timestamp)) {
+        // A late copy of a leave its sender took back by joining again
+        // (`_groupAfterLeave`): no note that they left, nothing changes.
+        return;
+      }
     }
     if (signal.type == ZenSignalType.groupInvite) {
       final String? gid = signal.groupId;
@@ -767,36 +821,39 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           final String localAddr = ref
               .read(runtimeNodeSnapshotProvider)
               .localAddress;
-          // Only the creator may extend the list freely; any other member
-          // brings in one person at a time (see `_groupMembersAfterInvite`).
-          final List<String> updatedMembers =
-              _groupMembersAfterInvite(
-                existing,
-                signal,
-                selfAddress: localAddr,
-              ) ??
-              existing.memberAddresses;
           final String? inviteId = signal.inviteId;
           final bool newInvitation =
               existing.isInvitePending &&
               inviteId != null &&
               !existing.receivedInviteIds.contains(inviteId);
-          // The inviter's list of the members, asked for after joining.
+          // The inviter's list of the members, asked for after joining (an
+          // update that adds someone is not that list).
           final bool membersCame =
               inviteId == null &&
+              _groupInviteNewcomerOf(signal) == null &&
               existing.awaitingMembersFrom.isNotEmpty &&
               PeerShareCodec.addressesEqual(
                 existing.awaitingMembersFrom,
                 signal.sender,
               );
-          if (updatedMembers.length != existing.memberAddresses.length ||
+          // Only the creator may extend the list freely; any other member
+          // brings in one person at a time, and nobody's list brings back
+          // someone who left (see `_groupAfterInvite`).
+          final GroupProfile updated =
+              _groupAfterInvite(
+                existing,
+                signal,
+                selfAddress: localAddr,
+                takeDepartures: membersCame,
+              ) ??
+              existing;
+          if (!_sameGroupMembership(updated, existing) ||
               newInvitation ||
               membersCame) {
             final Map<String, GroupProfile> groups =
                 Map<String, GroupProfile>.from(state.groups);
-            groups[gid] = existing.copyWith(
+            groups[gid] = updated.copyWith(
               awaitingMembersFrom: membersCame ? '' : null,
-              memberAddresses: updatedMembers,
               receivedInviteIds: newInvitation
                   ? <String>[...existing.receivedInviteIds, inviteId]
                   : null,
@@ -806,7 +863,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             if (!fromCreator && !existing.isInvitePending) {
               await _noteGroupMembersAdded(
                 before: existing,
-                after: updatedMembers,
+                after: updated.memberAddresses,
                 signal: signal,
                 localAddress: localAddr,
                 timestamp: timestamp,

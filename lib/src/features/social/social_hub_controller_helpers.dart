@@ -214,31 +214,32 @@ SocialHubState _applySignal(
       final GroupProfile? existingGroup = current.groups[groupId];
       if (existingGroup != null) {
         // Already a member of this group: merge what the sender may add (see
-        // `_groupMembersAfterInvite`), never re-add the invite to the inbox.
+        // `_groupAfterInvite`), never re-add the invite to the inbox.
         // Anyone outside the group who learned the id adds nothing.
-        final List<String>? updatedMembers = _groupMembersAfterInvite(
-          existingGroup,
-          signal,
-        );
-        // The inviter's list of the members, asked for after joining.
-        final bool membersCame =
-            updatedMembers != null &&
+        // The inviter's list of the members, asked for after joining (an
+        // update that adds someone is not that list).
+        final bool awaited =
             signal.inviteId == null &&
+            _groupInviteNewcomerOf(signal) == null &&
             existingGroup.awaitingMembersFrom.isNotEmpty &&
             PeerShareCodec.addressesEqual(
               existingGroup.awaitingMembersFrom,
               signal.sender,
             );
-        if (updatedMembers == null ||
-            (updatedMembers.length == existingGroup.memberAddresses.length &&
-                !membersCame)) {
+        final GroupProfile? updated = _groupAfterInvite(
+          existingGroup,
+          signal,
+          takeDepartures: awaited,
+        );
+        final bool membersCame = updated != null && awaited;
+        if (updated == null ||
+            (_sameGroupMembership(updated, existingGroup) && !membersCame)) {
           return current;
         }
         final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
           current.groups,
         );
-        groups[groupId] = existingGroup.copyWith(
-          memberAddresses: updatedMembers,
+        groups[groupId] = updated.copyWith(
           awaitingMembersFrom: membersCame ? '' : null,
         );
         return current.copyWith(groups: groups);
@@ -357,25 +358,10 @@ SocialHubState _applySignal(
       );
       final GroupProfile? existing = groups[groupId];
       if (existing != null) {
-        final List<String> updated = existing.memberAddresses
-            .where(
-              (String m) => !PeerShareCodec.addressesEqual(m, signal.sender),
-            )
-            .toList();
-        final List<String> pending = existing.pendingInviteAddresses
-            .where(
-              (String m) => !PeerShareCodec.addressesEqual(m, signal.sender),
-            )
-            .toList();
-        groups[groupId] = existing.copyWith(
-          memberAddresses: updated,
-          pendingInviteAddresses: pending,
-          pendingInviteIds: <String, String>{
-            for (final MapEntry<String, String> e
-                in existing.pendingInviteIds.entries)
-              if (!PeerShareCodec.addressesEqual(e.key, signal.sender))
-                e.key: e.value,
-          },
+        groups[groupId] = _groupAfterLeave(
+          existing,
+          signal.sender,
+          _groupStampOf(signal.sentAtMillis) ?? receivedAtMillis,
         );
       }
       return current.copyWith(groups: groups);
@@ -2144,53 +2130,242 @@ bool groupHasMember(GroupProfile group, String address) {
   );
 }
 
-/// The member list of [group] - a group this device already has - after a
-/// `group_invite` (an invitation or a member-list sync) from its sender, or
-/// null when that signal may not change it.
+/// How far ahead of this phone's clock a time a member gives for a leave
+/// or an addition may lie: as much leeway as an edit gets. A later one
+/// counts as this moment plus the leeway, so nobody can stamp a change
+/// that no real one could ever follow.
+const int _kGroupStampLeewayMillis = 60 * 60 * 1000;
+
+/// A time a peer gave for a change of a group's members (its own clock),
+/// or null when it gave none usable.
+int? _groupStampOf(int? at) {
+  if (at == null || at <= 0) {
+    return null;
+  }
+  final int latest =
+      DateTime.now().millisecondsSinceEpoch + _kGroupStampLeewayMillis;
+  return at > latest ? latest : at;
+}
+
+/// The time [stamps] hold for [address] (any spelling of it), or null.
+int? _groupStampFor(Map<String, int> stamps, String address) {
+  final int? exact = stamps[address];
+  if (exact != null) {
+    return exact;
+  }
+  for (final MapEntry<String, int> e in stamps.entries) {
+    if (PeerShareCodec.addressesEqual(e.key, address)) {
+      return e.value;
+    }
+  }
+  return null;
+}
+
+/// [stamps] without [address] (any spelling of it).
+Map<String, int> _withoutGroupStamp(Map<String, int> stamps, String address) {
+  if (_groupStampFor(stamps, address) == null) {
+    return stamps;
+  }
+  return <String, int>{
+    for (final MapEntry<String, int> e in stamps.entries)
+      if (!PeerShareCodec.addressesEqual(e.key, address)) e.key: e.value,
+  };
+}
+
+/// [stamps] with [address] at [at], or at the later time it had already;
+/// bounded ([boundedGroupMembershipStamps]).
+Map<String, int> _withGroupStamp(
+  Map<String, int> stamps,
+  String address,
+  int at,
+) {
+  final int? had = _groupStampFor(stamps, address);
+  return boundedGroupMembershipStamps(<String, int>{
+    ..._withoutGroupStamp(stamps, address),
+    PeerShareCodec.normalizeAddress(address): had != null && had > at
+        ? had
+        : at,
+  });
+}
+
+/// The one address a `group_invite` member-list update says its sender
+/// adds ([kGroupAddedKey]), or null (an invitation, the members' list for
+/// someone who joined, or an update from a Zen before 1.16.5).
+String? _groupInviteNewcomerOf(ZenSignal signal) =>
+    switch (signal.chatExtras?[kGroupAddedKey]) {
+      final String address when address.isNotEmpty => address,
+      _ => null,
+    };
+
+/// Who left the group and when, as the members' list for someone who just
+/// joined tells it ([kGroupLeftKey]).
+Map<String, int> _groupInviteDeparturesOf(ZenSignal signal) {
+  final Object? left = signal.chatExtras?[kGroupLeftKey];
+  if (left is! Map) {
+    return const <String, int>{};
+  }
+  return <String, int>{
+    for (final MapEntry<dynamic, dynamic> e in left.entries)
+      if (e.key is String && e.value is int) e.key as String: e.value as int,
+  };
+}
+
+/// Who left [group] and when, for the members' list sent to someone who
+/// just joined ([kGroupLeftKey]).
+Map<String, dynamic> _groupDeparturesPayload(GroupProfile group) =>
+    <String, dynamic>{
+      if (group.departedAt.isNotEmpty)
+        kGroupLeftKey: Map<String, int>.of(group.departedAt),
+    };
+
+/// Whether [a] and [b] say the same of a group's members: the same list,
+/// the same leaves and additions on record.
+bool _sameGroupMembership(GroupProfile a, GroupProfile b) =>
+    listEquals(a.memberAddresses, b.memberAddresses) &&
+    mapEquals(a.departedAt, b.departedAt) &&
+    mapEquals(a.addedAt, b.addedAt);
+
+/// [group] after its member [leaver] left at [at] (the leaver's own clock,
+/// else when the leave arrived): out of the members and the invitations
+/// waiting for an answer, and on record as gone, so no list a step behind
+/// brings them back. A leave stamped before the leaver was last added by
+/// name is an older one (it arrived late, or a copy of it did) and changes
+/// nothing. Only the leaver's own `group_leave` comes here: nobody can
+/// record someone else's leave.
+GroupProfile _groupAfterLeave(GroupProfile group, String leaver, int at) {
+  final int? added = _groupStampFor(group.addedAt, leaver);
+  if (added != null && added > at) {
+    return group;
+  }
+  bool stays(String m) => !PeerShareCodec.addressesEqual(m, leaver);
+  return group.copyWith(
+    memberAddresses: group.memberAddresses.where(stays).toList(),
+    pendingInviteAddresses: group.pendingInviteAddresses.where(stays).toList(),
+    pendingInviteIds: <String, String>{
+      for (final MapEntry<String, String> e in group.pendingInviteIds.entries)
+        if (stays(e.key)) e.key: e.value,
+    },
+    departedAt: _withGroupStamp(group.departedAt, leaver, at),
+    addedAt: _withoutGroupStamp(group.addedAt, leaver),
+  );
+}
+
+/// Whether [signal], a `group_leave`, is older than the last time its
+/// sender was added to [group] by name: a late copy of a leave the person
+/// took back by joining again.
+bool _isStaleGroupLeave(
+  GroupProfile group,
+  ZenSignal signal,
+  int receivedAtMillis,
+) {
+  final int? added = _groupStampFor(group.addedAt, signal.sender);
+  return added != null &&
+      added > (_groupStampOf(signal.sentAtMillis) ?? receivedAtMillis);
+}
+
+/// [group] - a group this device already has - after a `group_invite` (an
+/// invitation or a member-list update) from its sender, or null when that
+/// signal may not change it.
 ///
 /// The creator, as this device recorded it (whoever brought this device
-/// in), speaks for the group: its list is merged as it comes. Any other
-/// member brings in at most one address per signal: adding someone in the
-/// app adds one person, and the sync that follows names exactly one address
-/// the others have not seen yet. A list with more unknown addresses from an
-/// ordinary member is no addition anyone made in the app - it could pull
-/// any number of strangers into everyone's group traffic and presence - so
-/// it changes nothing. Neither does anything from outside the group.
-/// [selfAddress] (this device; may be unknown) never counts as unknown.
-List<String>? _groupMembersAfterInvite(
+/// in), speaks for the group: every address of its list is taken. Any
+/// other member brings in one person per signal: the one its update names
+/// ([kGroupAddedKey]), or from a Zen before 1.16.5, the one address its
+/// list has that this device has not seen - a list with more such
+/// addresses is no addition anyone made in the app (it could pull any
+/// number of strangers into everyone's group traffic and presence), so
+/// none of them is taken. Nothing from outside the group, nor from a
+/// creator who left it, changes anything.
+///
+/// Nobody's list brings back someone who left ([GroupProfile.departedAt]):
+/// a list carries no time, and a member a step behind (offline when the
+/// leave went out) still lists them. Only an addition by name stamped
+/// later than the leave does: a new invitation of that person.
+///
+/// [takeDepartures]: this is the members' list this device waited for
+/// after joining (from the inviter, whose list it takes whole anyway), so
+/// the leaves it tells of are taken too ([kGroupLeftKey]); anyone else's
+/// word on who left is never taken - a member could otherwise put anyone
+/// out of the group on everybody's phone.
+/// [selfAddress] (this device; may be unknown) never counts as someone
+/// unknown, and no leave told of takes it out.
+GroupProfile? _groupAfterInvite(
   GroupProfile group,
   ZenSignal signal, {
   String selfAddress = '',
+  bool takeDepartures = false,
 }) {
   if (isManagedGroup(group)) {
     return null;
   }
-  final bool fromCreator = PeerShareCodec.addressesEqual(
-    group.createdById,
-    signal.sender,
-  );
+  bool isSelf(String address) =>
+      selfAddress.isNotEmpty &&
+      PeerShareCodec.addressesEqual(address, selfAddress);
+  final bool fromCreator =
+      PeerShareCodec.addressesEqual(group.createdById, signal.sender) &&
+      _groupStampFor(group.departedAt, signal.sender) == null;
   if (!fromCreator && !groupHasMember(group, signal.sender)) {
     return null;
+  }
+  Map<String, int> departed = group.departedAt;
+  Map<String, int> added = group.addedAt;
+  List<String> members = group.memberAddresses;
+  if (takeDepartures) {
+    _groupInviteDeparturesOf(signal).forEach((String address, int raw) {
+      final int? at = _groupStampOf(raw);
+      final int? addedAt = _groupStampFor(added, address);
+      if (at == null ||
+          isSelf(address) ||
+          PeerShareCodec.addressesEqual(address, signal.sender) ||
+          (addedAt != null && addedAt > at)) {
+        return;
+      }
+      departed = _withGroupStamp(departed, address, at);
+      added = _withoutGroupStamp(added, address);
+      members = members
+          .where((String m) => !PeerShareCodec.addressesEqual(m, address))
+          .toList();
+    });
+  }
+  final List<String> taken = <String>[];
+  final String? newcomer = _groupInviteNewcomerOf(signal);
+  if (newcomer != null && !isSelf(newcomer)) {
+    final int? at = _groupStampOf(signal.sentAtMillis);
+    final int? left = _groupStampFor(departed, newcomer);
+    // An addition stamped after the leave is a new invitation; one without
+    // a time can prove nothing against a leave.
+    if (left == null || (at != null && at > left)) {
+      taken.add(newcomer);
+      departed = _withoutGroupStamp(departed, newcomer);
+      if (at != null) {
+        added = _withGroupStamp(added, newcomer, at);
+      }
+    }
   }
   final List<String> incoming = normalizedGroupMembers(<String>[
     signal.sender,
     ...?signal.memberAddresses,
   ]);
-  if (!fromCreator) {
-    final int unknown = incoming
-        .where(
-          (String address) =>
-              !groupHasMember(group, address) &&
-              (selfAddress.isEmpty ||
-                  !PeerShareCodec.addressesEqual(address, selfAddress)),
-        )
-        .length;
-    if (unknown > 1) {
-      return null;
-    }
+  final List<String> unknown = <String>[
+    for (final String address in incoming)
+      if (!groupHasMember(group, address) &&
+          !isSelf(address) &&
+          _groupStampFor(departed, address) == null &&
+          (newcomer == null ||
+              !PeerShareCodec.addressesEqual(address, newcomer)))
+        address,
+  ];
+  // This device in the sender's list is no stranger to anyone.
+  taken.addAll(incoming.where(isSelf));
+  if (fromCreator || (newcomer == null && unknown.length <= 1)) {
+    taken.addAll(unknown);
   }
-  return cappedGroupMembers(
-    normalizedGroupMembers(<String>[...group.memberAddresses, ...incoming]),
+  return group.copyWith(
+    memberAddresses: cappedGroupMembers(
+      normalizedGroupMembers(<String>[...members, ...taken]),
+    ),
+    departedAt: departed,
+    addedAt: added,
   );
 }
 

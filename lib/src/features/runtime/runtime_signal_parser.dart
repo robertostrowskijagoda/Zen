@@ -320,6 +320,12 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         avatarPreset: _readString(payload['avatarPreset']),
         displayName: _readName(payload['senderName']),
         inviteId: _readString(payload['inviteId']),
+        // A member-list update that names the one person it adds, stamped
+        // with the adder's clock; the members' list for someone who just
+        // joined also tells who left and when (see
+        // [kGroupAddedKey], [kGroupLeftKey]).
+        sentAtMillis: _readInt(payload['at']),
+        chatExtras: _readGroupMembershipExtras(payload),
       );
     case 'group_invite_ack':
       if (_readString(payload['groupId']) == null) {
@@ -424,6 +430,8 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         type: ZenSignalType.groupLeave,
         sender: sender,
         groupId: _readString(payload['groupId']),
+        // When the leaver left, by its own clock (absent before 1.16.5).
+        sentAtMillis: _readInt(payload['at']),
       );
     case 'profile_update':
       return ZenSignal(
@@ -472,6 +480,39 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
     default:
       return null;
   }
+}
+
+/// What a `group_invite` carries about single members, kept in
+/// [ZenSignal.chatExtras] under the same keys: the one address a
+/// member-list update adds ([kGroupAddedKey]), and who left the group and
+/// when ([kGroupLeftKey], an address-to-time map, at most
+/// [kMaxGroupMemberCount] entries). `null` when it carries neither (a Zen
+/// before 1.16.5 sends neither).
+Map<String, dynamic>? _readGroupMembershipExtras(Map<String, dynamic> payload) {
+  final String? added = _readString(payload[kGroupAddedKey]);
+  final Object? left = payload[kGroupLeftKey];
+  final Map<String, int> departures = <String, int>{};
+  if (left is Map) {
+    for (final MapEntry<dynamic, dynamic> e in left.entries) {
+      if (departures.length >= kMaxGroupMemberCount) {
+        break;
+      }
+      final String? address = _readString(e.key);
+      final int? at = _readInt(e.value);
+      if (address != null &&
+          address.length <= kMaxSignalIdChars &&
+          at != null &&
+          at > 0) {
+        departures[PeerShareCodec.normalizeAddress(address)] = at;
+      }
+    }
+  }
+  final Map<String, dynamic> out = <String, dynamic>{
+    if (added != null && added.length <= kMaxSignalIdChars)
+      kGroupAddedKey: PeerShareCodec.normalizeAddress(added),
+    if (departures.isNotEmpty) kGroupLeftKey: departures,
+  };
+  return out.isEmpty ? null : out;
 }
 
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
