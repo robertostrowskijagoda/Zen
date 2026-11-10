@@ -256,13 +256,6 @@ const int _maxStrangerAlertSendersPerWindow = 10;
 
 const int _maxTrackedStrangerIdentities = 4096;
 
-/// Window of the limit on mention notifications from one person.
-const Duration _mentionAlertWindow = Duration(minutes: 10);
-
-/// Group messages of one sender per window that may say they mention this
-/// person; past it they notify like any other message.
-const int kMaxMentionAlertsPerSender = 5;
-
 /// How long reading the stored snapshot (friends, groups, the inbox) may
 /// take at start before it counts as unreadable.
 const Duration kSnapshotReadTimeout = Duration(seconds: 45);
@@ -487,48 +480,24 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     return true;
   }
 
-  /// When each sender's recent mentions of this person were announced.
-  final Map<String, List<int>> _mentionAlertTimes = <String, List<int>>{};
+  /// The recent mention notices of each sender.
+  final MentionAlerts _mentionAlerts = MentionAlerts();
+
+  /// What the rules shared with the locked receiver ([incomingAlertOf])
+  /// read here: this state, the settings and this device's address.
+  AlertFacts get _alertFacts => _HubAlertFacts(
+    state,
+    settings: _appSettings,
+    self: ref.read(runtimeNodeSnapshotProvider).localAddress,
+  );
 
   /// [signal] marked as mentioning this person ([kMentionsYouKey]) when it
-  /// is a group message whose text names this device, from a member of a
-  /// group this device is in, and its sender is still within
-  /// [kMaxMentionAlertsPerSender]. Anything else comes back unchanged.
-  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) {
-    if (signal.type != ZenSignalType.groupMessage) {
-      return signal;
-    }
-    final GroupProfile? group = state.groups[signal.groupId ?? ''];
-    final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
-    if (group == null ||
-        group.isInvitePending ||
-        self.isEmpty ||
-        PeerShareCodec.addressesEqual(signal.sender, self) ||
-        !(groupHasMember(group, signal.sender) ||
-            PeerShareCodec.addressesEqual(group.createdById, signal.sender)) ||
-        !mentionsAnyOf(
-          signal.content ?? '',
-          signalMentions(signal),
-          addresses: <String>[self],
-        )) {
-      return signal;
-    }
-    final int windowStart = nowMillis - _mentionAlertWindow.inMilliseconds;
-    final String key = PeerShareCodec.identityKeyForAddress(signal.sender);
-    final List<int> times = _mentionAlertTimes[key] ??= <int>[];
-    times.removeWhere((int at) => at < windowStart);
-    if (times.length >= kMaxMentionAlertsPerSender) {
-      return signal;
-    }
-    times.add(nowMillis);
-    while (_mentionAlertTimes.length > _maxTrackedStrangerIdentities) {
-      _mentionAlertTimes.remove(_mentionAlertTimes.keys.first);
-    }
-    return signal.withChatExtras(<String, dynamic>{
-      ...?signal.chatExtras,
-      kMentionsYouKey: true,
-    });
-  }
+  /// is a group message whose text names this device, from someone who
+  /// speaks in a group this device is in, and its sender is still within
+  /// [kMaxMentionAlertsPerSender] ([withMentionOfSelf], which the locked
+  /// receiver applies too). Anything else comes back unchanged.
+  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) =>
+      withMentionOfSelf(signal, _alertFacts, _mentionAlerts, nowMillis);
 
   /// When each (group, peer) invite was last re-sent from here.
   final Map<String, int> _groupInviteResentAtMillis = <String, int>{};
@@ -715,26 +684,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// Whether a chat message [about] makes no notification: its
   /// conversation is muted, or it is a group's message in a group that
-  /// tells only of mentions. A mention of this person always comes.
-  bool _quietChat(ZenSignal about, RuntimeSystemNotification notification) {
-    if (about.type != ZenSignalType.message &&
-        about.type != ZenSignalType.groupMessage) {
-      return false;
-    }
-    if (notification.kind == NoticeKind.mention ||
-        about.chatExtras?[kMentionsYouKey] == true) {
-      return false;
-    }
-    final String key = conversationKeyOfSignal(about);
-    if (state.isMuted(key, DateTime.now().millisecondsSinceEpoch)) {
-      return true;
-    }
-    return about.type == ZenSignalType.groupMessage &&
-        !state.groupNotifiesAll(
-          key,
-          mentionsOnly: _appSettings.groupMentionsOnly,
-        );
-  }
+  /// tells only of mentions. A mention of this person always comes
+  /// ([chatIsQuiet], as on the locked phone).
+  bool _quietChat(ZenSignal about, RuntimeSystemNotification notification) =>
+      notification.kind != NoticeKind.mention &&
+      chatIsQuiet(about, _alertFacts, DateTime.now().millisecondsSinceEpoch);
 
   Future<void> _syncRingingCallWindow() async {
     final CallSession? session = state.activeCall;

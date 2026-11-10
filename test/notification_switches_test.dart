@@ -9,6 +9,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -926,6 +927,27 @@ void main() {
       'msgId': 'm-$id',
       'text': 'Hej!',
     };
+    // Quiet as the shared rules have it: marked as a mention first (only
+    // from someone who speaks in that group), then muted or mentions-only.
+    bool quietChat(
+      LockedNoticeKit kit, {
+      required String from,
+      required Map<String, dynamic> payload,
+      required int nowMillis,
+    }) {
+      final AlertFacts facts = kit.alertFacts(isFriend: (String _) => true);
+      final ZenSignal signal = withMentionOfSelf(
+        zenSignalFromTransportPayload(
+          sender: PeerShareCodec.normalizeAddress(from),
+          payload: payload,
+        )!,
+        facts,
+        MentionAlerts(),
+        nowMillis,
+      );
+      return chatIsQuiet(signal, facts, nowMillis);
+    }
+
     final LockedNoticeKit kit = LockedNoticeKit.fromJson(
       LockedNoticeKit(
         mutedChats: <String, int>{
@@ -937,7 +959,8 @@ void main() {
     )!;
     expect(kit.groupMentionsOnly, isTrue);
     expect(
-      kit.quietChat(
+      quietChat(
+        kit,
         from: ola,
         payload: const <String, dynamic>{
           'type': 'message',
@@ -950,7 +973,8 @@ void main() {
     );
     // After the mute it comes again.
     expect(
-      kit.quietChat(
+      quietChat(
+        kit,
         from: ola,
         payload: const <String, dynamic>{
           'type': 'message',
@@ -962,15 +986,15 @@ void main() {
       isFalse,
     );
     expect(
-      kit.quietChat(from: ola, payload: inGroup('g'), nowMillis: now),
+      quietChat(kit, from: ola, payload: inGroup('g'), nowMillis: now),
       isTrue,
     );
     expect(
-      kit.quietChat(from: ola, payload: inGroup('all'), nowMillis: now),
+      quietChat(kit, from: ola, payload: inGroup('all'), nowMillis: now),
       isFalse,
     );
-    // A mention of this device comes, in a mentions-only group and in a
-    // muted one.
+    // A mention of this device from someone in the group comes, in a
+    // mentions-only group and in a muted one.
     Map<String, dynamic> mentioning(String id) => <String, dynamic>{
       ...inGroup(id),
       'text': 'Hej <@0>',
@@ -978,20 +1002,44 @@ void main() {
         const Mention(address: '200::1', name: 'Ja').toJson(),
       ],
     };
-    final LockedNoticeKit muting = LockedNoticeKit(
-      mutedChats: <String, int>{'group:muted': now + 3600000},
-      groupNotifyAll: const <String, bool>{'group:muted': true},
-      self: '200::1',
-    );
+    final LockedNoticeKit muting = LockedNoticeKit.fromJson(
+      LockedNoticeKit(
+        mutedChats: <String, int>{'group:muted': now + 3600000},
+        groupNotifyAll: const <String, bool>{'group:muted': true},
+        self: '200::1',
+        memberTags: <String>{
+          for (final String id in <String>['g', 'muted'])
+            LockedNoticeKit.memberTag(groupConversationKey(id), ola),
+        },
+      ).toJson(),
+    )!;
     expect(
-      muting.quietChat(from: ola, payload: inGroup('muted'), nowMillis: now),
+      quietChat(muting, from: ola, payload: inGroup('muted'), nowMillis: now),
       isTrue,
     );
     for (final String id in <String>['g', 'muted']) {
       expect(
-        muting.quietChat(from: ola, payload: mentioning(id), nowMillis: now),
+        quietChat(muting, from: ola, payload: mentioning(id), nowMillis: now),
         isFalse,
         reason: id,
+      );
+    }
+    // From anyone else, or to a group this phone is not in, a "mention"
+    // gets past neither the mute nor the mentions-only group.
+    for (final (String, String) other in <(String, String)>[
+      ('200::2', 'g'),
+      ('200::2', 'muted'),
+      (ola, 'made-up'),
+    ]) {
+      expect(
+        quietChat(
+          muting,
+          from: other.$1,
+          payload: mentioning(other.$2),
+          nowMillis: now,
+        ),
+        isTrue,
+        reason: '$other',
       );
     }
   });

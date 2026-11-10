@@ -1250,11 +1250,8 @@ RuntimeSystemNotification _systemNotificationFromEntry({
     contentRedacted: chat != null,
     // What the notification switches of the settings see.
     kind: switch (signal.type) {
-      ZenSignalType.message => NoticeKind.message,
-      ZenSignalType.groupMessage =>
-        signalMentionsYou(signal)
-            ? NoticeKind.mention
-            : NoticeKind.groupMessage,
+      ZenSignalType.message ||
+      ZenSignalType.groupMessage => chatNoticeKind(signal),
       ZenSignalType.friendRequest ||
       ZenSignalType.friendAccept ||
       ZenSignalType.groupInvite => NoticeKind.invitation,
@@ -1735,6 +1732,11 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
   if (_isManagedGroupMembershipSignal(signal)) {
     return false;
   }
+  if (signal.type == ZenSignalType.callInvite ||
+      signal.type == ZenSignalType.groupCallInvite) {
+    // Who may ring this phone: the rule the locked receiver keeps too.
+    return callInviteAdmitted(signal, _HubAlertFacts(hubState));
+  }
   switch (signal.type) {
     case ZenSignalType.friendRequest:
     case ZenSignalType.groupInvite:
@@ -2030,6 +2032,49 @@ bool _isManagedGroupMembershipSignal(ZenSignal signal) =>
       _ => false,
     } &&
     isManagedGroupId(signal.groupId ?? '');
+
+/// What the rules shared with the locked receiver ([incomingAlertOf]) read
+/// in the app: friends and joined groups from [state], the switches from
+/// [settings], this device's address [self].
+final class _HubAlertFacts implements AlertFacts {
+  _HubAlertFacts(
+    this.state, {
+    this.settings = const AppSettings(),
+    this.self = '',
+  });
+
+  final SocialHubState state;
+  final AppSettings settings;
+
+  @override
+  final String self;
+
+  @override
+  bool isFriend(String address) =>
+      state.friendByAddress(address)?.status ==
+      FriendRelationshipStatus.accepted;
+
+  @override
+  bool speaksIn(String groupId, String address) {
+    final GroupProfile? group = state.groups[groupId];
+    return group != null &&
+        !group.isInvitePending &&
+        (groupHasMember(group, address) ||
+            PeerShareCodec.addressesEqual(group.createdById, address));
+  }
+
+  @override
+  bool mutes(NoticeKind kind) => settings.mutes(kind);
+
+  @override
+  bool chatMuted(String key, int nowMillis) => state.isMuted(key, nowMillis);
+
+  @override
+  bool groupNotifiesAll(String groupKey) => state.groupNotifiesAll(
+    groupKey,
+    mentionsOnly: settings.groupMentionsOnly,
+  );
+}
 
 /// Membership test that tolerates the different spellings of one address.
 bool groupHasMember(GroupProfile group, String address) {

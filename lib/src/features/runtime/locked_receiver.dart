@@ -21,6 +21,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -644,6 +645,26 @@ final class LockedReceiver {
   /// What a message's notice may say (without a kit: only that it came).
   final LockedNoticeKit _noticeKit;
 
+  /// What decides whether a call rings and a chat message is told about,
+  /// by the app's own rules ([incomingAlertOf]): who is a friend from the
+  /// capability, the rest from the notice kit. Without a kit only friends'
+  /// calls and messages count.
+  late final AlertFacts _alertFacts = _noticeKit.alertFacts(
+    isFriend: (String address) =>
+        _capability.kindOf(address) == BackgroundContactKind.friend,
+  );
+
+  /// The mention notices of this run, per sender, as the app limits them.
+  final MentionAlerts _mentionAlerts = MentionAlerts();
+
+  /// The signal [payload] from [from] is, read as the app reads it; `null`
+  /// for what the app would not take in either.
+  ZenSignal? _signalOf(String from, Map<String, dynamic> payload) =>
+      zenSignalFromTransportPayload(
+        sender: PeerShareCodec.normalizeAddress(from),
+        payload: payload,
+      );
+
   /// What a pong may say about this phone (without a kit: only that it
   /// answers).
   final LockedPresenceKit _presence;
@@ -1262,7 +1283,7 @@ final class LockedReceiver {
     }
     if (_isRealTime(type)) {
       if (contact) {
-        await _followRing(from, type);
+        await _followRing(from, type, frame.payload);
       }
       return;
     }
@@ -1594,32 +1615,36 @@ final class LockedReceiver {
       return;
     }
     if (_messageTypes.contains(type)) {
-      final bool inGroup = type == 'group_message';
-      if (kind == BackgroundContactKind.stranger ||
-          (!inGroup && kind != BackgroundContactKind.friend)) {
-        // Someone this person did not name: a removed friend, a group
-        // member outside the group's chat, a stranger. The app lets in
-        // none of it as a chat (a stranger's message is told about after
-        // unlock, as one from outside friends); a notice "Nowa wiadomość"
-        // with nobody behind it is all it could say here.
+      final ZenSignal? read = _signalOf(from, payload);
+      if (read == null) {
+        // Nothing the app would take in as a chat message.
         return;
       }
-      if (_noticeKit.quietChat(
-        from: from,
-        payload: payload,
-        nowMillis: _now(),
-      )) {
-        // Muted ("Wycisz…"), or a mentions-only group and no mention.
+      // Marked as a mention of this person only as the app marks it: from
+      // someone who speaks in that group, within the limit per sender.
+      final ZenSignal signal = withMentionOfSelf(
+        read,
+        _alertFacts,
+        _mentionAlerts,
+        _now(),
+      );
+      if (incomingAlertOf(signal, _alertFacts, nowMillis: _now()) !=
+          IncomingAlert.notice) {
+        // By the app's rules: someone this person did not name (a removed
+        // friend, a group member outside the group's chat, a stranger: a
+        // stranger's message is told about after unlock, as one from
+        // outside friends), a group not joined, a muted conversation
+        // ("Wycisz…"), a mentions-only group and no mention, or a switch
+        // that is off.
         return;
       }
+      final bool inGroup = signal.type == ZenSignalType.groupMessage;
       final NoticeText text = _noticeKit.messageNotice(
         from: from,
         payload: payload,
         genericBody: t('Odblokuj Zen, żeby przeczytać.'),
       );
-      final String key = inGroup
-          ? groupConversationKey('${payload['groupId']}')
-          : PeerShareCodec.normalizeAddress(from);
+      final String key = conversationKeyOfSignal(signal);
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedMessageSlot-${_now()}',
@@ -1627,7 +1652,7 @@ final class LockedReceiver {
           body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
-          kind: _noticeKit.messageKind(from: from, payload: payload),
+          kind: chatNoticeKind(signal),
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMessageSlot,
           contentRedacted: true,
@@ -1651,9 +1676,16 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
-      if (type == 'group_invite' && isManagedGroupId('${payload['groupId']}')) {
+      final ZenSignal? social = _signalOf(from, payload);
+      if (social == null) {
+        // Nothing the app would take in (an invitation to no group).
+        return;
+      }
+      if (type == 'group_invite' && isManagedGroupId(social.groupId ?? '')) {
         // A group another feature keeps (a pyramid cell's chat): nobody
-        // invites to it, and the app drops this after unlock.
+        // invites to it, and the app drops this after unlock. The id as
+        // the app reads it (trimmed), never the raw one: " pyrcell-…" is
+        // the same cell.
         return;
       }
       if (switch (type) {
@@ -1705,9 +1737,22 @@ final class LockedReceiver {
   }
 
   /// A ring keeps the call notice up; it ends with the caller's own end or
-  /// once the invites stop, and leaves a "missed call" behind.
-  Future<void> _followRing(String from, String type) async {
+  /// once the invites stop, and leaves a "missed call" behind. Only a call
+  /// the app would ring for rings here ([callRings]): from a friend, a
+  /// group call from someone in that joined group, and not with
+  /// "Połączenia" switched off (then no ring, no card, no notice).
+  Future<void> _followRing(
+    String from,
+    String type,
+    Map<String, dynamic> payload,
+  ) async {
     if (_ringTypes.contains(type)) {
+      final ZenSignal? call = _signalOf(from, payload);
+      if (call == null ||
+          incomingAlertOf(call, _alertFacts, nowMillis: _now()) !=
+              IncomingAlert.ring) {
+        return;
+      }
       final bool fresh = _ringingFrom == null;
       _ringingFrom = from;
       // Awake while it rings: the ring ends (and "missed call" shows) when

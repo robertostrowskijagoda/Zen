@@ -7,6 +7,8 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart'
+    show kMaxMentionAlertsPerSender;
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';

@@ -28,6 +28,7 @@ import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -883,18 +884,19 @@ void main() {
       test(
         'a group message names only members, never by the name they sent',
         () async {
-          // Not a member of the group: only that something came.
-          RuntimeSystemNotification notice = await noticeFor(
-            kit(),
-            _bob,
-            <String, dynamic>{...inGroup, '_rid': 'p3', 'senderName': 'Ada'},
-          );
-          expect(notice.title, 'Nowa wiadomość');
-          expect('${notice.title} ${notice.body}', isNot(contains('Ada')));
-          expect('${notice.title} ${notice.body}', isNot(contains('Kto')));
+          // Not a member of the group: the app drops it, so no notice
+          // either (it is kept for the app all the same).
+          await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+          await receive(_bob, <String, dynamic>{
+            ...inGroup,
+            '_rid': 'p3',
+            'senderName': 'Ada',
+          });
+          expect(notices.activeNotifications, isEmpty);
+          expect(receiver.keptCount, 1);
           await receiver.stop();
           // A member the kit has no name for: never the name it chose.
-          notice = await noticeFor(
+          final RuntimeSystemNotification notice = await noticeFor(
             LockedNoticeKit(
               names: const <String, String>{'group:g1': 'Ekipa', _ada: 'Ada'},
               members: names.members,
@@ -994,9 +996,24 @@ void main() {
           sounds: false,
         );
         await startReceiver(await publishFor(_masterKey()), noticeKit: muted);
+        final List<bool> rings = <bool>[];
+        final List<String> cards = <String>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        receiver.showCallCard = (String from) async => cards.add(from);
         await receive(_member, inGroup);
         await receive(_bob, const <String, dynamic>{'type': 'friend_request'});
         await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        expect(notices.activeNotifications, isEmpty);
+        // "Połączenia" off: the phone does not ring and shows no call card
+        // either, as the app with Zen in the background; nor a missed call
+        // once the invites stop.
+        expect(rings, isEmpty);
+        expect(cards, isEmpty);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'call_end',
+          'callId': 'c',
+        });
+        expect(rings, isEmpty);
         expect(notices.activeNotifications, isEmpty);
 
         // A message from a person still comes, without a sound.
@@ -1005,6 +1022,137 @@ void main() {
             notices.activeNotifications.single;
         expect(notice.kind, NoticeKind.message);
         expect(notice.silent, isTrue);
+      });
+
+      test('only a call the app rings for rings: a friend\'s, a group call '
+          'from someone in that joined group', () async {
+        final LockedNoticeKit groups = LockedNoticeKit(
+          memberTags: <String>{
+            LockedNoticeKit.memberTag('group:g1', _member),
+            LockedNoticeKit.memberTag('group:g1', _ada),
+          },
+        );
+        await startReceiver(await publishFor(_masterKey()), noticeKit: groups);
+        final List<bool> rings = <bool>[];
+        final List<String> cards = <String>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        receiver.showCallCard = (String from) async => cards.add(from);
+        // A group member who is no friend, calling alone; a group call to
+        // a group this phone is not in; one without the ids the app needs.
+        await receive(_member, const <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c1',
+        });
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': 'made-up',
+          'callId': 'c2',
+        });
+        await receive(_ada, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': 'g1',
+        });
+        expect(rings, isEmpty);
+        expect(cards, isEmpty);
+        expect(notices.activeNotifications, isEmpty);
+
+        // A group call in a group it is in rings, from any member.
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': ' g1 ',
+          'callId': 'c3',
+        });
+        expect(rings, <bool>[true]);
+        expect(cards, <String>[_member]);
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_leave',
+          'groupId': 'g1',
+          'callId': 'c3',
+        });
+        expect(rings, <bool>[true, false]);
+
+        // And a friend's call, as before.
+        await receive(_bob, const <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c4',
+        });
+        expect(rings, <bool>[true, false, true]);
+        expect(cards, <String>[_member, _bob]);
+      });
+
+      test('a mention gets past a mute only from someone in that group, and '
+          'only a few times per sender', () async {
+        const String self = '200::1';
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        Map<String, dynamic> mentioning(String rid, String groupId) =>
+            <String, dynamic>{
+              'type': 'group_message',
+              '_rid': rid,
+              'groupId': groupId,
+              'msgId': rid,
+              'text': 'Hej <@0>',
+              kMentionsKey: <Object?>[
+                const Mention(address: self, name: 'Ty').toJson(),
+              ],
+            };
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: LockedNoticeKit(
+            self: self,
+            mutedChats: <String, int>{
+              _ada: now + 3600000,
+              'group:g1': now + 3600000,
+            },
+            memberTags: <String>{
+              LockedNoticeKit.memberTag('group:g1', _member),
+            },
+          ),
+          // Every notice is counted, none folded into the one before.
+          noticeThrottle: Duration.zero,
+        );
+        // A muted friend: her message is quiet, and so is a "mention" in a
+        // group she made up or one she is not in.
+        await receive(_ada, <String, dynamic>{
+          'type': 'message',
+          '_rid': 'm1',
+          'text': 'hej',
+        });
+        for (int i = 0; i < 3; i++) {
+          await receive(_ada, mentioning('a$i', 'made-up-$i'));
+          await receive(_ada, mentioning('b$i', 'g1'));
+        }
+        expect(notices.activeNotifications, isEmpty);
+
+        // A member of the muted group mentioning this phone: told, within
+        // the app's limit per sender; past it the mute holds.
+        for (int i = 0; i < kMaxMentionAlertsPerSender + 2; i++) {
+          await receive(_member, mentioning('c$i', 'g1'));
+        }
+        expect(notices.audibleAlertCount, kMaxMentionAlertsPerSender);
+        expect(notices.activeNotifications.single.kind, NoticeKind.mention);
+      });
+
+      test('an invitation to a cell chat\'s id is dropped however the id is '
+          'padded, as the app reads it', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: names);
+        for (final String id in <String>[
+          ' pyrcell-0123456789abcdef01234567',
+          'pyrcell-0123456789abcdef01234567\t',
+        ]) {
+          await receive(_bob, <String, dynamic>{
+            'type': 'group_invite',
+            '_rid': 'i$id',
+            'groupId': id,
+            'groupName': 'Komorka',
+          });
+        }
+        // Nor an invitation to no group at all.
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          '_rid': 'i-none',
+          'groupId': '  ',
+        });
+        expect(notices.activeNotifications, isEmpty);
       });
 
       test('an invitation to the id of a pyramid cell chat tells of nothing: '
