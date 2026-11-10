@@ -166,6 +166,7 @@ final class RelayConfig {
     this.maxBlobCopies = 3,
     this.maxSplitPayloadBytes = 1536 * 1024,
     this.splitPartChars = 30000,
+    this.goneDeviceAfter = const Duration(days: 7),
   });
 
   /// How many friends hold this device's mail.
@@ -356,6 +357,16 @@ final class RelayConfig {
 
   /// Characters of the payload's JSON per part (one envelope each).
   final int splitPartChars;
+
+  /// A friend's device not heard from for this long, while another device
+  /// of the same friend was, is taken for gone (the phone they moved away
+  /// from, one Zen was removed from): what waits for it and what is held
+  /// for it of what the app sends by itself goes, and nothing more of that
+  /// is queued for it until it is heard from again. What a person sent
+  /// (`relayIsPersonalPayload`) still waits for it as for any device that
+  /// is away. A friend who is away with all their devices is never
+  /// affected.
+  final Duration goneDeviceAfter;
 }
 
 /// Snapshot for the settings screen.
@@ -397,10 +408,14 @@ final class RelayOverview {
   /// automatically (or chosen by hand): the person should pick another.
   final List<RelayQuietMailbox> quiet;
 
-  /// Messages from here still waiting for their recipient.
+  /// Messages, attachments and invitations from here that have not reached
+  /// their recipient yet, once per message and person (see
+  /// `RelayEngine._waitingCount`); receipts, statuses and the like the app
+  /// sends by itself are not counted.
   final int outboxCount;
 
-  /// Messages held here on behalf of friends.
+  /// Envelopes held here on behalf of friends, and for how many people
+  /// (a friend with two devices is one).
   final int heldEnvelopeCount;
   final int heldForPeerCount;
   final String publicKeyFingerprint;
@@ -631,6 +646,74 @@ const Set<String> kFirstContactTypes = <String>{
   'friend_accept',
 };
 
+/// The kind of [payload] when it is one where only the newest to a device
+/// matters, `null` otherwise. Each of these carries the whole of what it
+/// says (the sender's profile, friend list, nearby keys, status, "open to
+/// meet", the newest message read in a conversation, the receipts owed to
+/// a sender), so an older one still on its way says nothing the newer one
+/// does not: it is dropped from the queue when a newer one is queued, and
+/// the recipient's mailboxes drop their copy when the newer one is handed
+/// in ([RelayEnvelope.replace]). Without this a friend who was away for
+/// two weeks had one of each per day waiting for them, here and in every
+/// mailbox of theirs.
+String? relayReplaceKeyOf(Map<String, dynamic> payload) {
+  final Object? type = payload['type'];
+  switch (type) {
+    case 'profile_update':
+    case 'friend_list':
+    case 'nearby_key':
+    case 'intent':
+    case 'graph_open':
+    case kRelayReceiptType:
+      return type as String;
+    case 'message_read':
+      // The receipt names the newest message read: it covers the older ones
+      // of the same conversation.
+      final Object? group = payload['groupId'];
+      return group is String && group.isNotEmpty
+          ? 'message_read|$group'
+          : 'message_read';
+  }
+  return null;
+}
+
+/// Whether [payload] is something a person sent to a person: a message,
+/// an attachment, an invitation, a call notice ([kRelayNoticeTypes]), a
+/// reaction, edit or deletion of a message, the disappearing timer, or the
+/// sender's profile (only the newest waits, and nothing sends it again by
+/// itself). A friend's device taken for gone still gets these, as any
+/// device that is away does: it may be a laptop opened every other week,
+/// and the copy between an account's own devices is a single datagram.
+/// Everything else is the app talking to itself (posts pushed ahead of the
+/// ledger's sync, "open to meet", friend lists, nearby keys, statuses,
+/// receipts, pyramid records), and each of those catches up when the
+/// device is back: the ledger syncs, the hello digests ask for the friend
+/// list, keys and status again, "open to meet" goes daily.
+bool relayIsPersonalPayload(Map<String, dynamic> payload) {
+  final Object? type = payload['type'];
+  return kRelayNoticeTypes.contains(type) ||
+      _personalPayloadTypes.contains(type) ||
+      (type == kBlobManifestType &&
+          payload['k'] == RelayBlobKind.attachment.wire);
+}
+
+const Set<String> _personalPayloadTypes = <String>{
+  'msg_react',
+  'msg_edit',
+  'msg_delete',
+  'disappear_timer',
+  'profile_update',
+};
+
+/// Payload kinds that are worth less after a while than the general
+/// [RelayConfig.messageTtl]: posts and likes pushed to a friend who is
+/// offline also come with the ledger's own sync once both are online, and
+/// "open to meet" goes to every friend again each day.
+const Map<String, Duration> _shortLivedPayloadTypes = <String, Duration>{
+  'lg_push': Duration(days: 7),
+  'graph_open': Duration(days: 2),
+};
+
 /// Key marking a payload as reliable: `rly_ack` echoes it back.
 const String kReliableIdKey = '_rid';
 
@@ -669,6 +752,13 @@ const int _maxReliableIdLength = 128;
 /// x: expiry, d: piece of its JSON}`. Only ever deposited, never sent
 /// directly (the whole payload is).
 const String kRelayPartType = 'zpart';
+
+/// A receipt for payloads taken from a mailbox while their sender did not
+/// answer: `{ids: reliable ids}`, from the device that took them, queued for
+/// the sender's mailboxes (see `RelayEngine._oweReceipt`). The relay layer's
+/// own, never handed to the app; a Zen before 1.16.5 opens it, confirms it
+/// and ignores it.
+const String kRelayReceiptType = 'zrcpt';
 
 /// Most parts one payload is cut into.
 const int kMaxRelayParts = 64;
@@ -943,6 +1033,23 @@ final class RelayEngine {
       _active = true;
       _noteOwnClass(state);
       _refreshRelaySet(state);
+      // What lapsed, was replaced or can no longer arrive while this device
+      // was locked or off goes now, before anything counts or is tried
+      // again (the queue of an older version included).
+      final int waitingBefore = state.outbox.length;
+      _expire(state, _now());
+      final ({int waiting, int held, bool changed}) tidied = await _tidy(
+        state,
+        _now(),
+      );
+      final int lapsed = waitingBefore - tidied.waiting - state.outbox.length;
+      if (lapsed + tidied.waiting + tidied.held > 0) {
+        logZenMessage(
+          'Relay tidy: $lapsed waiting expired, ${tidied.waiting} waiting '
+          'and ${tidied.held} held dropped (replaced by newer, for devices '
+          'taken for gone, for former friends).',
+        );
+      }
       // A new start of the node (an app start, a restart after the network
       // changed): whatever waits is tried again on the next tick instead of
       // at the end of its backoff.
@@ -1062,10 +1169,21 @@ final class RelayEngine {
     int now,
   ) async {
     final String rid = (payload[kReliableIdKey] as String?) ?? _newReliableId();
+    if (state.goneDevices.containsKey(to) &&
+        payload['type'] != kRelayPartType &&
+        !relayIsPersonalPayload(payload)) {
+      // A friend's device taken for gone gets only what a person sent (see
+      // [relayIsPersonalPayload]): the rest would wait two weeks here and
+      // in its mailboxes, and catches up by itself once it is back.
+      return rid;
+    }
     final Object? ttl = payload[kReliableTtlKey];
-    final int life = ttl is int && ttl > 0
-        ? min(ttl, config.messageTtl.inMilliseconds)
-        : config.messageTtl.inMilliseconds;
+    final int life = min(
+      ttl is int && ttl > 0
+          ? min(ttl, config.messageTtl.inMilliseconds)
+          : config.messageTtl.inMilliseconds,
+      _lifeOf(payload['type']),
+    );
     final Map<String, dynamic> wire = Map<String, dynamic>.from(payload)
       ..remove(kSendOnceKey)
       ..remove(kReliableTtlKey)
@@ -1089,6 +1207,10 @@ final class RelayEngine {
       expiresAtMillis: now + life,
       relayable: relayable,
     );
+    final String? replaces = relayReplaceKeyOf(wire);
+    if (replaces != null) {
+      await _dropReplaced(state, to, replaces);
+    }
     if (_isPart(fresh)) {
       // A part is only for the mailboxes: the whole payload goes directly.
       state.outbox[rid] = fresh.copyWith(
@@ -1107,6 +1229,91 @@ final class RelayEngine {
 
   static bool _isPart(RelayOutboxEntry entry) =>
       entry.payload['type'] == kRelayPartType;
+
+  /// How long a payload of [type] is kept for delivery at most.
+  int _lifeOf(Object? type) => min(
+    config.messageTtl.inMilliseconds,
+    _shortLivedPayloadTypes[type]?.inMilliseconds ??
+        config.messageTtl.inMilliseconds,
+  );
+
+  /// When [entry] is dropped undelivered: its own expiry, or sooner for a
+  /// kind that is worth less after a while (an entry queued by an older
+  /// version still has the longer one).
+  int _expiryOf(RelayOutboxEntry entry) => min(
+    entry.expiresAtMillis,
+    entry.createdAtMillis + _lifeOf(entry.payload['type']),
+  );
+
+  /// Drops what still waits for [to] of the kind [key] (see
+  /// [relayReplaceKeyOf]): a newer one is being queued. Returns how many.
+  Future<int> _dropReplaced(RelayState state, String to, String key) async {
+    int dropped = 0;
+    for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
+      if (entry.recipient == to &&
+          !_isPart(entry) &&
+          relayReplaceKeyOf(entry.payload) == key) {
+        await _dropEntry(state, entry);
+        dropped++;
+      }
+    }
+    return dropped;
+  }
+
+  /// Drops [entry] undelivered, with its parts, its blob and the copy this
+  /// device holds as one of its recipient's mailboxes (remembered as gone,
+  /// so a fellow mailbox catching up drops its copy too and does not bring
+  /// this one back).
+  Future<void> _dropEntry(RelayState state, RelayOutboxEntry entry) async {
+    state.outbox.remove(entry.rid);
+    _sealed.remove(entry.rid);
+    _unsent.removeWhere((RelayOutboxEntry e) => e.rid == entry.rid);
+    for (final String part in entry.partRids) {
+      state.outbox.remove(part);
+      _sealed.remove(part);
+    }
+    _dropDelivered(
+      state,
+      recipient: entry.recipient,
+      ids: <String>[entry.rid, ...entry.partRids],
+    );
+    final String? blobId = entry.blobId;
+    final RelayBlobOut? blob = blobId == null ? null : state.outBlobs[blobId];
+    if (blob != null) {
+      state.outbox.remove(blob.manifestRid);
+      await _dropOutBlob(state, blob);
+    }
+  }
+
+  /// Older entries of a kind where only the newest matters, queued before
+  /// a newer one replaced them (by a version that did not replace): the
+  /// newest of each kind per recipient stays. Returns how many went.
+  Future<int> _collapseReplaced(RelayState state) async {
+    final Map<String, RelayOutboxEntry> newest = <String, RelayOutboxEntry>{};
+    final List<RelayOutboxEntry> older = <RelayOutboxEntry>[];
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      final String? key = _isPart(entry)
+          ? null
+          : relayReplaceKeyOf(entry.payload);
+      if (key == null) {
+        continue;
+      }
+      final String slot = '${entry.recipient}|$key';
+      final RelayOutboxEntry? known = newest[slot];
+      if (known == null) {
+        newest[slot] = entry;
+      } else if (entry.createdAtMillis > known.createdAtMillis) {
+        newest[slot] = entry;
+        older.add(known);
+      } else {
+        older.add(entry);
+      }
+    }
+    for (final RelayOutboxEntry entry in older) {
+      await _dropEntry(state, entry);
+    }
+    return older.length;
+  }
 
   /// Size of each queued payload, measured once.
   static final Expando<int> _payloadBytes = Expando<int>('payloadBytes');
@@ -1279,9 +1486,7 @@ final class RelayEngine {
       }
       final List<RelayOutboxEntry> pending =
           state.outbox.values
-              .where(
-                (RelayOutboxEntry e) => e.relayable && e.expiresAtMillis > now,
-              )
+              .where((RelayOutboxEntry e) => e.relayable && _expiryOf(e) > now)
               .toList()
             ..sort(
               (RelayOutboxEntry a, RelayOutboxEntry b) =>
@@ -1313,7 +1518,7 @@ final class RelayEngine {
             id: entry.rid,
             recipient: entry.recipient,
             envelope: envelope,
-            expiresAtMillis: entry.expiresAtMillis,
+            expiresAtMillis: _expiryOf(entry),
             mailboxes:
                 (_isPart(entry)
                         ? mailboxes.take(config.maxBlobCopies)
@@ -1801,7 +2006,9 @@ final class RelayEngine {
       }
       _lastFrameAtMillis = arrivedAt;
       // Anything at all from a friend's device answers what it was asked.
-      _heardFrom(state, from, arrivedAt);
+      if (_heardFrom(state, from, arrivedAt)) {
+        changed = true;
+      }
       if (type.startsWith('rly_')) {
         changed = await _handleProtocolFrame(
           state,
@@ -1850,6 +2057,7 @@ final class RelayEngine {
           ..clear()
           ..addAll(kept);
       }
+      changed = await _settleByReceipts(state, forward) || changed;
       changed = await _onPeerSeen(state, from) || changed;
       if (changed) {
         await _save(state);
@@ -1903,43 +2111,7 @@ final class RelayEngine {
       case 'rly_ack':
         final RelayOutboxEntry? entry = state.outbox[payload['rid']];
         if (entry != null && entry.recipient == from) {
-          state.outbox.remove(entry.rid);
-          _sealed.remove(entry.rid);
-          // Arrived after all: whatever was about to be said about it is stale.
-          state.deliveryReports.removeWhere(
-            (RelayDeliveryReport r) => r.rid == entry.rid,
-          );
-          _reportedDirectOnly.remove(entry.rid);
-          _settleTracked(state, entry, delivered: true, now: _now());
-          // Our own copy as one of the recipient's mailboxes is not needed
-          // any more either; remembered as delivered, so a co-relay's late
-          // copy is not taken in again.
-          _dropDelivered(
-            state,
-            recipient: entry.recipient,
-            ids: <String>[entry.rid],
-          );
-          final String? blobId = entry.blobId;
-          if (blobId != null) {
-            // Its copy for the mailboxes is not needed any more.
-            final RelayBlobOut? blob = state.outBlobs[blobId];
-            if (blob != null) {
-              state.outbox.remove(blob.manifestRid);
-              await _dropOutBlob(state, blob);
-            }
-          }
-          if (entry.partRids.isNotEmpty) {
-            // Nor are its parts, here or in our own mailbox for it.
-            for (final String part in entry.partRids) {
-              state.outbox.remove(part);
-              _sealed.remove(part);
-            }
-            _dropDelivered(
-              state,
-              recipient: entry.recipient,
-              ids: entry.partRids,
-            );
-          }
+          await _delivered(state, entry);
           return true;
         }
         return false;
@@ -1955,6 +2127,14 @@ final class RelayEngine {
             entry.depositedTo.contains(from) ||
             !(state.peers[entry.recipient]?.relays.contains(from) ?? false)) {
           return false;
+        }
+        if (entry.payload['type'] == kRelayReceiptType) {
+          // A receipt is done once one of the sender's mailboxes holds it.
+          // Not delivered: a copy this device holds as one of them stays,
+          // and no receipt of it goes to the fellow mailboxes.
+          state.outbox.remove(entry.rid);
+          _sealed.remove(entry.rid);
+          return true;
         }
         state.outbox[entry.rid] = entry.copyWith(
           depositedTo: <String>[...entry.depositedTo, from],
@@ -2017,6 +2197,143 @@ final class RelayEngine {
       default:
         return false;
     }
+  }
+
+  /// [entry] reached its recipient: it leaves the queue, with its parts,
+  /// its blob and this device's own copy as one of the recipient's
+  /// mailboxes.
+  Future<void> _delivered(RelayState state, RelayOutboxEntry entry) async {
+    state.outbox.remove(entry.rid);
+    _sealed.remove(entry.rid);
+    // Arrived after all: whatever was about to be said about it is stale.
+    state.deliveryReports.removeWhere(
+      (RelayDeliveryReport r) => r.rid == entry.rid,
+    );
+    _reportedDirectOnly.remove(entry.rid);
+    _settleTracked(state, entry, delivered: true, now: _now());
+    // Our own copy as one of the recipient's mailboxes is not needed any
+    // more either; remembered as delivered, so a co-relay's late copy is
+    // not taken in again.
+    _dropDelivered(state, recipient: entry.recipient, ids: <String>[entry.rid]);
+    final String? blobId = entry.blobId;
+    if (blobId != null) {
+      // Its copy for the mailboxes is not needed any more.
+      final RelayBlobOut? blob = state.outBlobs[blobId];
+      if (blob != null) {
+        state.outbox.remove(blob.manifestRid);
+        await _dropOutBlob(state, blob);
+      }
+    }
+    if (entry.partRids.isNotEmpty) {
+      // Nor are its parts, here or in our own mailbox for it.
+      for (final String part in entry.partRids) {
+        state.outbox.remove(part);
+        _sealed.remove(part);
+      }
+      _dropDelivered(state, recipient: entry.recipient, ids: entry.partRids);
+    }
+  }
+
+  /// Receipts among [forward], taken out of it: what a device says it got
+  /// has reached it, whatever became of the `rly_ack` it sent when it took
+  /// the payload from a mailbox. That one goes straight to this device and
+  /// is lost while this device is away; the payload then stayed in "Czeka
+  /// na doręczenie" (and was tried again and again) until both happened to
+  /// be online together, or two weeks.
+  ///
+  /// * [kRelayReceiptType]: the ids a device took from its mailboxes while
+  ///   this one did not answer (see [_oweReceipt]).
+  /// * A chat receipt (`message_ack`, `message_read`) names the message.
+  ///
+  /// Both come sealed by their sender when they come from a mailbox, or
+  /// from its mesh address, so they are believed only for what was sent
+  /// to that very device.
+  Future<bool> _settleByReceipts(
+    RelayState state,
+    List<SignalTransportFrame> forward,
+  ) async {
+    bool changed = false;
+    final List<SignalTransportFrame> kept = <SignalTransportFrame>[];
+    for (final SignalTransportFrame frame in forward) {
+      final Object? type = frame.payload['type'];
+      final String by = PeerShareCodec.normalizeAddress(frame.from);
+      if (type == kRelayReceiptType) {
+        for (final String rid in _stringList(
+          frame.payload['ids'],
+          limit: config.maxIdsPerFrame,
+        )) {
+          final RelayOutboxEntry? entry = state.outbox[rid];
+          if (entry != null && entry.recipient == by) {
+            await _delivered(state, entry);
+            changed = true;
+          }
+        }
+        continue; // the relay layer's own
+      }
+      kept.add(frame);
+      final Object? messageId = frame.payload['msgId'];
+      if ((type != 'message_ack' && type != 'message_read') ||
+          messageId is! String ||
+          messageId.isEmpty) {
+        continue;
+      }
+      for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
+        if (entry.recipient == by &&
+            entry.payload['type'] == _chatMessageType &&
+            entry.payload['msgId'] == messageId) {
+          await _delivered(state, entry);
+          changed = true;
+        }
+      }
+    }
+    if (kept.length != forward.length) {
+      forward
+        ..clear()
+        ..addAll(kept);
+    }
+    return changed;
+  }
+
+  /// [ids] from [sender] were taken from a mailbox while [sender] did not
+  /// answer: their `rly_ack`s are likely lost. One receipt
+  /// ([kRelayReceiptType]) carries them to [sender]'s mailboxes; it is
+  /// done as soon as one mailbox holds it (or [sender] confirms it), and a
+  /// receipt still waiting takes the new ids in (it replaces the older one
+  /// here and in the mailboxes). Only for a sender whose key and mailboxes
+  /// are known.
+  Future<void> _oweReceipt(
+    RelayState state,
+    String sender,
+    List<String> ids,
+    int now,
+  ) async {
+    final RelayPeerInfo? info = state.peers[sender];
+    if (ids.isEmpty ||
+        info == null ||
+        info.keys == null ||
+        !info.relays.any((String r) => r != _self && r != sender) ||
+        !_isContact(sender)) {
+      return;
+    }
+    final List<String> all = <String>[];
+    for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
+      if (entry.recipient == sender &&
+          entry.payload['type'] == kRelayReceiptType) {
+        all.addAll(_stringList(entry.payload['ids']));
+      }
+    }
+    for (final String id in ids) {
+      if (!all.contains(id)) {
+        all.add(id);
+      }
+    }
+    await _enqueue(state, sender, <String, dynamic>{
+      'type': kRelayReceiptType,
+      // The newest are the ones still waiting at the sender.
+      'ids': all.length > config.maxIdsPerFrame
+          ? all.sublist(all.length - config.maxIdsPerFrame)
+          : all,
+    }, now);
   }
 
   // ---------------------------------------------------------------------------
@@ -2365,12 +2682,38 @@ final class RelayEngine {
     if (state.tombstones.containsKey('$recipient|${envelope.id}')) {
       return false; // already delivered; the ack stops the depositor
     }
+    if (envelope.automatic == true &&
+        state.goneDevices.containsKey(recipient)) {
+      // The app talking to a device taken for gone: the ack stops the
+      // depositor, nothing is held (a message is, as for any device away).
+      return false;
+    }
     final Map<String, Map<String, dynamic>> held = state.mailbox.putIfAbsent(
       recipient,
       () => <String, Map<String, dynamic>>{},
     );
     if (held.containsKey(envelope.id)) {
       return false;
+    }
+    final List<String>? replaced = _replacedBy(
+      held,
+      envelope,
+      fromSender: from == claimedSender,
+    );
+    if (replaced == null) {
+      if (held.isEmpty) {
+        state.mailbox.remove(recipient);
+      }
+      return false; // a newer one of the same kind is held already
+    }
+    for (final String old in replaced) {
+      final Map<String, dynamic>? gone = held.remove(old);
+      if (gone != null) {
+        state.tombstones['$recipient|$old'] = min(
+          _holdUntil(gone),
+          now + config.messageTtl.inMilliseconds,
+        );
+      }
     }
     held[envelope.id] = <String, dynamic>{
       ...envelope.toJson(),
@@ -2393,6 +2736,39 @@ final class RelayEngine {
     // offline phone): try handing it over straight away.
     await _pushMail(state, recipient);
     return true;
+  }
+
+  /// [envelope] against what [held] keeps of the same sender with the same
+  /// [RelayEnvelope.replace] tag: `null` when a newer one is held already
+  /// (the older is not taken), otherwise the ids of the older ones it
+  /// replaces. Only the sender itself replaces ([fromSender]): a fellow
+  /// mailbox catching up only ever adds, so it cannot make this one drop
+  /// anybody's mail.
+  static List<String>? _replacedBy(
+    Map<String, Map<String, dynamic>> held,
+    RelayEnvelope envelope, {
+    required bool fromSender,
+  }) {
+    final String? tag = envelope.replace;
+    if (tag == null) {
+      return const <String>[];
+    }
+    final String sender = PeerShareCodec.normalizeAddress(envelope.sender);
+    final List<String> older = <String>[];
+    for (final MapEntry<String, Map<String, dynamic>> e in held.entries) {
+      final Object? from = e.value['s'];
+      if (e.value['rp'] != tag ||
+          from is! String ||
+          PeerShareCodec.normalizeAddress(from) != sender) {
+        continue;
+      }
+      final int created = (e.value['c'] as num?)?.toInt() ?? 0;
+      if (created >= envelope.createdAtMillis) {
+        return null;
+      }
+      older.add(e.key);
+    }
+    return fromSender ? older : const <String>[];
   }
 
   /// Whether [token] proves that [recipient] announced itself to [sender]
@@ -2811,6 +3187,8 @@ final class RelayEngine {
     }
     final int now = _now();
     final List<String> handled = <String>[];
+    // Taken now, per sender: the receipts a sender who is away may need.
+    final Map<String, List<String>> taken = <String, List<String>>{};
     bool changed = false;
     for (final Object? item in items.take(config.maxIdsPerFrame)) {
       final RelayEnvelope? envelope = RelayEnvelope.tryParse(item);
@@ -2877,6 +3255,17 @@ final class RelayEngine {
         'type': 'rly_ack',
         'rid': envelope.id,
       });
+      if (inner['type'] != kRelayReceiptType) {
+        (taken[sender] ??= <String>[]).add(envelope.id);
+      }
+    }
+    for (final MapEntry<String, List<String>> e in taken.entries) {
+      // The sender did not answer lately: the acknowledgement above is
+      // most likely lost. A receipt waits for it in its mailboxes.
+      if (e.key != relay && !_answering(e.key, now)) {
+        await _oweReceipt(state, e.key, e.value, now);
+        changed = true;
+      }
     }
     if (handled.isNotEmpty) {
       await _sendQuietly(relay, <String, dynamic>{
@@ -3105,7 +3494,7 @@ final class RelayEngine {
       if (_forgetFormerContacts(state)) {
         changed = true;
       }
-      if (await _dropForUnlinkedDevices(state)) {
+      if ((await _tidy(state, now)).changed) {
         changed = true;
       }
       if (_noteOwnClass(state)) {
@@ -3191,7 +3580,7 @@ final class RelayEngine {
     // Dropped unacknowledged after the retention window: the chat must not go
     // on showing such a message as sent.
     final List<RelayOutboxEntry> lapsed = state.outbox.values
-        .where((RelayOutboxEntry e) => e.expiresAtMillis <= now)
+        .where((RelayOutboxEntry e) => _expiryOf(e) <= now)
         .toList(growable: false);
     for (final RelayOutboxEntry entry in lapsed) {
       state.outbox.remove(entry.rid);
@@ -3754,7 +4143,31 @@ final class RelayEngine {
       expiresAtMillis: entry.expiresAtMillis,
       box: box,
       notice: kRelayNoticeTypes.contains(entry.payload['type']),
+      automatic: !_isPart(entry) && !relayIsPersonalPayload(entry.payload),
+      replace: switch (relayReplaceKeyOf(entry.payload)) {
+        final String key when !_isPart(entry) => _replaceTag(
+          identity,
+          recipient: entry.recipient,
+          key: key,
+        ),
+        _ => null,
+      },
     );
+  }
+
+  /// The [RelayEnvelope.replace] tag of this device's payloads of the kind
+  /// [key] to [recipient]: the same for each, made with this device's key,
+  /// so nobody else can make a mailbox drop them.
+  static String _replaceTag(
+    RelayIdentity identity, {
+    required String recipient,
+    required String key,
+  }) {
+    final List<int> mac = crypto.Hmac(
+      crypto.sha256,
+      identity.privateKey,
+    ).convert(utf8.encode('zen.relay.replace.v1|$recipient|$key')).bytes;
+    return base64Url.encode(mac.sublist(0, 12));
   }
 
   // ---------------------------------------------------------------------------
@@ -3882,6 +4295,150 @@ final class RelayEngine {
       }
     }
     return changed;
+  }
+
+  /// Takes friends' devices for gone ([RelayState.goneDevices]): a device
+  /// not heard from for [RelayConfig.goneDeviceAfter] while another device
+  /// of the same friend was heard from within it — and one this device
+  /// either heard from once, or has had something waiting for (or held)
+  /// that long, so that a device just linked and never met is not taken
+  /// for gone. A friend whose devices are all silent is away, not gone:
+  /// none of theirs is. Forgets the devices that are no friend's any more.
+  bool _noteGoneDevices(RelayState state, int now) {
+    if (!_peers.isReady) {
+      return false;
+    }
+    final int after = config.goneDeviceAfter.inMilliseconds;
+    final Set<String> devices = <String>{};
+    bool changed = false;
+    for (final RelayFriend friend in _acceptedFriends()) {
+      final List<String> all = friend.allAddresses.toList(growable: false);
+      devices.addAll(all);
+      if (all.length < 2) {
+        continue;
+      }
+      int heard(String device) => state.reach[device]?.heardAtMillis ?? 0;
+      final int newest = all.map(heard).reduce(max);
+      if (newest <= 0 || now - newest >= after) {
+        continue;
+      }
+      for (final String device in all) {
+        final int last = heard(device);
+        if (state.goneDevices.containsKey(device) || now - last < after) {
+          continue;
+        }
+        final int waiting = _oldestFor(state, device);
+        if (last > 0 || (waiting > 0 && now - waiting >= after)) {
+          state.goneDevices[device] = now;
+          changed = true;
+          logZenMessage(
+            "A friend's device has been silent for "
+            '${(now - (last > 0 ? last : waiting)) ~/ Duration.millisecondsPerDay}'
+            ' days while another device of theirs answers: taken for gone, '
+            'only messages and invitations wait or are held for it.',
+          );
+        }
+      }
+    }
+    final int before = state.goneDevices.length;
+    state.goneDevices.removeWhere((String d, int _) => !devices.contains(d));
+    return changed || before != state.goneDevices.length;
+  }
+
+  /// When the oldest of what waits here for [device], or is held here for
+  /// it, was queued or handed in (0: nothing).
+  int _oldestFor(RelayState state, String device) {
+    int oldest = 0;
+    void note(int at) {
+      if (at > 0 && (oldest == 0 || at < oldest)) {
+        oldest = at;
+      }
+    }
+
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      if (entry.recipient == device) {
+        note(entry.createdAtMillis);
+      }
+    }
+    for (final Map<String, dynamic> envelope
+        in state.mailbox[device]?.values ??
+            const Iterable<Map<String, dynamic>>.empty()) {
+      note(((envelope['ha'] as num?) ?? (envelope['c'] as num?) ?? 0).toInt());
+    }
+    return oldest;
+  }
+
+  /// Drops what the app queued for devices taken for gone and what is held
+  /// for them that says it is the app's own ([RelayEnvelope.automatic]),
+  /// keeping what a person sent ([relayIsPersonalPayload]); and the mail
+  /// held for anyone who is no friend's device any more (a friend removed
+  /// or blocked, a device unlinked): nobody collects it, and it was held,
+  /// and counted in "Przechowujesz dla znajomych", for two weeks.
+  Future<bool> _dropForGoneDevices(RelayState state) async {
+    if (!_peers.isReady) {
+      return false;
+    }
+    bool changed = false;
+    for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
+      if (state.goneDevices.containsKey(entry.recipient) &&
+          state.outbox.containsKey(entry.rid) &&
+          !_isPart(entry) &&
+          !relayIsPersonalPayload(entry.payload)) {
+        await _dropEntry(state, entry);
+        changed = true;
+      }
+    }
+    for (final String recipient in state.mailbox.keys.toList()) {
+      final Map<String, Map<String, dynamic>> held = state.mailbox[recipient]!;
+      if (!_isAcceptedFriend(recipient)) {
+        state.mailbox.remove(recipient);
+        _lastPushedAt.remove(recipient);
+        changed = true;
+      } else if (state.goneDevices.containsKey(recipient)) {
+        final int before = held.length;
+        held.removeWhere(
+          (String _, Map<String, dynamic> envelope) => envelope['a'] == 1,
+        );
+        if (held.length != before) {
+          changed = true;
+          if (held.isEmpty) {
+            state.mailbox.remove(recipient);
+            _lastPushedAt.remove(recipient);
+          }
+        }
+      }
+    }
+    return changed;
+  }
+
+  /// The queue and the held mail kept to what can still arrive (see
+  /// [_collapseReplaced], [_noteGoneDevices], [_dropForGoneDevices],
+  /// [_dropForUnlinkedDevices]); how much of each went, for the log.
+  Future<({int waiting, int held, bool changed})> _tidy(
+    RelayState state,
+    int now,
+  ) async {
+    int heldCount() => state.mailbox.values.fold<int>(
+      0,
+      (int sum, Map<String, Map<String, dynamic>> m) => sum + m.length,
+    );
+    final int waitingBefore = state.outbox.length;
+    final int heldBefore = heldCount();
+    bool changed = await _collapseReplaced(state) > 0;
+    if (_noteGoneDevices(state, now)) {
+      changed = true;
+    }
+    if (await _dropForUnlinkedDevices(state)) {
+      changed = true;
+    }
+    if (await _dropForGoneDevices(state)) {
+      changed = true;
+    }
+    return (
+      waiting: waitingBefore - state.outbox.length,
+      held: heldBefore - heldCount(),
+      changed: changed,
+    );
   }
 
   /// Turns sharing this device's key and mailboxes with group members who are
@@ -4174,18 +4731,50 @@ final class RelayEngine {
         mailboxes.candidates,
       ),
       quiet: List<RelayQuietMailbox>.unmodifiable(mailboxes.quiet),
-      outboxCount: state.outbox.length,
+      outboxCount: _waitingCount(state),
       heldEnvelopeCount: state.mailbox.values.fold<int>(
         0,
         (int sum, Map<String, Map<String, dynamic>> held) => sum + held.length,
       ),
-      heldForPeerCount: state.mailbox.length,
+      heldForPeerCount: <String>{
+        for (final String recipient in state.mailbox.keys) _personOf(recipient),
+      }.length,
       publicKeyFingerprint: _fingerprint(state.identity?.publicKey),
       shareWithGroups: state.shareWithGroups,
       blobQuotaBytes: _blobQuota(state),
       heldBlobBytes: _heldBlobBytes(state),
       outgoingBlobCount: state.outBlobs.length,
     );
+  }
+
+  /// "Czeka na doręczenie": what the person sent that has not reached its
+  /// recipient yet (chat and group messages, attachments, invitations, call
+  /// notices: [kRelayNoticeTypes]), once per message and person however
+  /// many devices of theirs it goes to and however many parts it was cut
+  /// into, and not once the person has it on one of their devices. What
+  /// the app sends by itself (receipts, profiles, statuses, posts pushed to
+  /// friends) is not counted: those are the relay layer's business, and the
+  /// log line tells about them ([relayBacklogSummary]).
+  int _waitingCount(RelayState state) {
+    final Set<String> waiting = <String>{};
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      final Object? type = entry.payload['type'];
+      final bool counted =
+          kRelayNoticeTypes.contains(type) ||
+          (type == kBlobManifestType &&
+              entry.payload['k'] == RelayBlobKind.attachment.wire);
+      if (!counted) {
+        continue;
+      }
+      final String person = _personOf(entry.recipient);
+      final Object? id = entry.payload['msgId'];
+      final String what = id is String && id.isNotEmpty ? id : entry.rid;
+      if (state.tracked[what]?.delivered.contains(person) ?? false) {
+        continue; // it reached another device of theirs
+      }
+      waiting.add('$what|$person');
+    }
+    return waiting.length;
   }
 
   static String _fingerprint(Uint8List? key) {
@@ -4251,8 +4840,9 @@ final class RelayEngine {
 /// One line for the diagnostics log about what waits in [state]'s outbox
 /// and what this device holds for others: counts by payload type, by how
 /// old, how many recipients (and how many of them announced themselves,
-/// so are known to the relay), and the held mail by age. No address, no
-/// content.
+/// so are known to the relay), the held mail by age and how much of it is
+/// messages or invitations, and how many friends' devices are taken for
+/// gone. No address, no content.
 String relayBacklogSummary(RelayState state, int now) {
   String age(int createdAt) {
     final int hours = (now - createdAt) ~/ (3600 * 1000);
@@ -4284,9 +4874,17 @@ String relayBacklogSummary(RelayState state, int now) {
   }
   final Map<String, int> heldAges = <String, int>{};
   int held = 0;
+  int heldNotices = 0;
+  int heldReplaceable = 0;
   for (final Map<String, Map<String, dynamic>> mail in state.mailbox.values) {
     for (final Map<String, dynamic> envelope in mail.values) {
       held++;
+      if (envelope['k'] == 1) {
+        heldNotices++;
+      }
+      if (envelope['rp'] != null) {
+        heldReplaceable++;
+      }
       final int? at = (envelope['c'] as num?)?.toInt();
       final String a = at == null ? '?' : age(at);
       heldAges[a] = (heldAges[a] ?? 0) + 1;
@@ -4308,5 +4906,7 @@ String relayBacklogSummary(RelayState state, int now) {
       '(${recipients.length} recipients, $unannounced not announced, '
       '$parts parts; types ${counts(types)}; ages ${counts(ages)}), '
       '$held held for ${state.mailbox.length} '
-      '(ages ${counts(heldAges)}).';
+      '(ages ${counts(heldAges)}; $heldNotices messages or invitations, '
+      '$heldReplaceable replaceable), '
+      '${state.goneDevices.length} devices of friends taken for gone.';
 }

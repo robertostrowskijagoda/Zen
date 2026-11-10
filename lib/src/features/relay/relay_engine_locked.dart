@@ -435,6 +435,26 @@ final class LockedMailbox {
     if (held.containsKey(envelope.id)) {
       return false;
     }
+    final List<String>? replaced = RelayEngine._replacedBy(
+      held,
+      envelope,
+      fromSender: from == sender,
+    );
+    if (replaced == null) {
+      if (held.isEmpty) {
+        _held.remove(recipient);
+      }
+      return false; // a newer one of the same kind is held already
+    }
+    for (final String old in replaced) {
+      final Map<String, dynamic>? gone = held.remove(old);
+      if (gone != null) {
+        _tombstones['$recipient|$old'] = min(
+          RelayEngine._holdUntil(gone),
+          now + config.messageTtl.inMilliseconds,
+        );
+      }
+    }
     held[envelope.id] = <String, dynamic>{
       ...envelope.toJson(),
       if (tokenValid) 'tk': token,
