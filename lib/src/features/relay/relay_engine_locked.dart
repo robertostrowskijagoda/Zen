@@ -28,6 +28,11 @@ part of 'relay_engine.dart';
 /// Tags of payloads this device already took, at most, in a kit.
 const int kLockedMailboxMaxTaken = 1500;
 
+/// The longest a change to the held mail waits for the write while more
+/// frames queue up behind it: a burst makes one write, but a stream that
+/// never lets the queue drain still reaches the disk this often.
+const Duration kLockedMailboxWriteMaxWait = Duration(seconds: 5);
+
 /// What a mailbox needs to know about one friend it serves.
 @immutable
 final class LockedMailboxPeer {
@@ -209,7 +214,8 @@ final class LockedMailboxKit {
 
 /// This device's mailbox for friends, run by the locked Android service from
 /// a [LockedMailboxKit] (see the top of this file). Takes the frames
-/// [dutyTypes] lists; [save] gets the held kit after every change.
+/// [dutyTypes] lists; [save] gets the held kit after a change, once for a
+/// burst of frames (see [handle]).
 final class LockedMailbox {
   LockedMailbox({
     required SignalTransport transport,
@@ -258,6 +264,15 @@ final class LockedMailbox {
   /// One frame at a time, and one write after another.
   Future<void> _queue = Future<void>.value();
 
+  /// Frames handed to [handle] and not yet done (the one running included).
+  int _waiting = 0;
+
+  /// The held mail changed and the stored kit does not say so yet.
+  bool _unsaved = false;
+
+  /// When the oldest change not yet stored was made.
+  int _unsavedSince = 0;
+
   /// Envelopes held for [recipient] (tests, logs).
   Iterable<String> heldFor(String recipient) =>
       _held[recipient]?.keys ?? const <String>[];
@@ -282,16 +297,43 @@ final class LockedMailbox {
   );
 
   /// Handles one duty frame (see [dutyTypes]); anything else is ignored.
+  ///
+  /// The kit is written after a change that is real (a frame that changes
+  /// nothing writes nothing), and once for frames that are waiting behind
+  /// each other: a fellow mailbox catching up sends a deposit per envelope,
+  /// and the whole kit need not go to the disk for each. The frame that
+  /// ends such a burst writes it before its future completes, so the kit is
+  /// stored when the last frame has been handled (nothing waits on a timer,
+  /// and nothing is left to flush when the service stops). The stored kit
+  /// lags the held mail only while frames are still queued, and never more
+  /// than [kLockedMailboxWriteMaxWait]: a copy that is lost to a crash in
+  /// that time is one the sender's other mailboxes hold as well, and the
+  /// mailboxes' catch-up (`rly_sync`) brings it back; a receipt that is
+  /// lost only makes the mail be handed out once more, which the recipient
+  /// drops as one it has. A failed write is tried again with the next
+  /// change.
   Future<void> handle(SignalTransportFrame frame) {
     final Completer<void> done = Completer<void>();
+    _waiting++;
     _queue = _queue.then((_) async {
       try {
         if (await _handle(frame)) {
+          if (!_unsaved) {
+            _unsavedSince = _now();
+          }
+          _unsaved = true;
+        }
+        final bool lastOfBurst = _waiting <= 1;
+        final bool overdue =
+            _now() - _unsavedSince >= kLockedMailboxWriteMaxWait.inMilliseconds;
+        if (_unsaved && (lastOfBurst || overdue)) {
           await _save(kit);
+          _unsaved = false;
         }
       } on Object catch (error, stackTrace) {
         logZenError('A mailbox duty failed while locked', error, stackTrace);
       } finally {
+        _waiting--;
         done.complete();
       }
     });
