@@ -2040,12 +2040,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   // A node that only receives has one public peer: whether its link still
   // answers is checked on every wake the phone has anyway.
   final WakeTimer? linkCheck = config.peerTarget == kReceiveOnlyPeerTarget
-      ? checkLinksOnWakes(
-          () => runNodeCallOffThread<Map<String, dynamic>>(
-            () => YggdrasilBridgeFfi.load().checkLinks(handle),
-            what: 'link check',
-          ),
-        )
+      ? checkLinksOnWakes(() => checkNodeLinksOffThread(handle))
       : null;
   return RuntimeNodeSession(
     transport: ManagedSignalTransport(
@@ -2396,6 +2391,23 @@ Future<Map<String, dynamic>> _startNodeInHelper(String configJson) =>
       () => YggdrasilBridgeFfi.load().startNode(configJson),
       debugName: 'zen-node-start',
     );
+
+/// Asks the bridge whether the links of the node [handle] still answer, off
+/// this isolate's thread. In a function of its own: the closure sent to the
+/// helper isolate must hold nothing but the handle. Written inside the
+/// function that starts the session it carried that function's whole
+/// context along (the pin keeper and its futures), which no isolate
+/// takes, so every check failed before it began.
+Future<Map<String, dynamic>> checkNodeLinksOffThread(
+  int handle, {
+  Map<String, dynamic> Function(int handle) check = _checkLinksInBridge,
+}) => runNodeCallOffThread<Map<String, dynamic>>(
+  () => check(handle),
+  what: 'link check',
+);
+
+Map<String, dynamic> _checkLinksInBridge(int handle) =>
+    YggdrasilBridgeFfi.load().checkLinks(handle);
 
 /// Stops the node [handle] in the bridge off this isolate's thread.
 Future<void> stopNodeOffThread(
