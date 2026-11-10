@@ -153,6 +153,18 @@
   <img class="hero-icon" src="zen-icon.png" width="88" height="88" alt="Zen">
   <h1 id="title" data-i="heroTitle">Your people. No company in between.</h1>
   <p id="lead" class="lead" data-i="lead">Zen is a private social network for people who know each other: chats, calls and posts go straight between friends’ devices, encrypted. No servers of its own, no ads, no algorithm.</p>
+  <!-- The app itself beside the promise on a wide screen (a phone shows it
+       under the download); the gallery below describes the same pictures. -->
+  <figure class="hero-shots" aria-hidden="true">
+    <picture class="back">
+      <source media="(prefers-color-scheme: dark)" srcset="shots/en/chats-dark.webp">
+      <img src="shots/en/chats-light.webp" width="1080" height="2340" loading="lazy" decoding="async" alt="The chat list: a group and conversations with friends, their photos, unread counts and who is online." data-ia="sha_chats">
+    </picture>
+    <picture class="front">
+      <source media="(prefers-color-scheme: dark)" srcset="shots/en/conversation-dark.webp">
+      <img src="shots/en/conversation-light.webp" width="1080" height="2340" loading="lazy" decoding="async" alt="A conversation with a photo, a voice message, emoji reactions and the delivery ticks." data-ia="sha_conversation">
+    </picture>
+  </figure>
 </div>
 <main>
   <a id="open" class="btn primary open hidden" href="#"><svg class="ico" aria-hidden="true"><use href="#i-open"/></svg><span data-i="open">Open in Zen</span></a>
@@ -166,9 +178,6 @@
     <h2 id="getTitle" class="hidden" data-i="getTitle">Get Zen</h2>
     <div class="stack">
       <a id="android" class="btn primary big block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlAndroid">Download for Android</span></a>
-      <p id="otherAndroid" class="hint other"><span data-i="otherPhones">Other phones:</span>
-        <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk">armeabi-v7a</a>
-        <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk">x86_64</a></p>
       <a id="windows" class="btn primary big block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlWindows">Download for Windows</span></a>
       <a id="linux" class="btn primary big block" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span data-i="dlLinux">Download for Linux</span></a>
       <a id="iphone" class="btn primary big block" href="install/iphone/"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg><span data-i="instIphone">Install on iPhone</span></a>
@@ -185,7 +194,18 @@
         <option value="linux">Linux</option>
       </select><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></label>
       <a class="more-install" href="install/" data-i="moreInstall">All install options and help</a></p>
-    <p id="have" class="hint"><span data-i="haveZen">Already have Zen?</span> <a id="openApp" href="#" data-i="open">Open in Zen</a></p>
+    <div class="get-foot">
+      <p id="have" class="hint"><span data-i="haveZen">Already have Zen?</span> <a id="openApp" href="#" data-i="open">Open in Zen</a></p>
+      <details id="otherAndroid" class="hint other"><summary><span data-i="otherPhones">Other phones:</span></summary>
+        <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk">armeabi-v7a</a>
+        <a class="chip" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk">x86_64</a></details>
+    </div>
+    <figure class="get-shot" aria-hidden="true">
+      <picture class="peek">
+        <source media="(prefers-color-scheme: dark)" srcset="shots/en/conversation-dark.webp">
+        <img src="shots/en/conversation-light.webp" width="1080" height="2340" loading="lazy" decoding="async" alt="A conversation with a photo, a voice message, emoji reactions and the delivery ticks." data-ia="sha_conversation">
+      </picture>
+    </figure>
   </section>
 
   <section class="sec" id="how" aria-labelledby="howTitle">
@@ -363,6 +383,7 @@
   // downloads under their heading. The home page leads with the download
   // and keeps "Open in Zen" as a small link for those who have the app.
   if (code) {
+    document.body.classList.add("inv");
     $("open").classList.remove("hidden");
     $("getTitle").classList.remove("hidden");
     $("have").classList.add("hidden");
@@ -375,10 +396,13 @@
     if (noApp) { $("noapp").classList.remove("hidden"); }
   }
   Zen.systemButtons();
-  // The reasons show two lines each; a tap (or Enter) shows the whole text.
-  // Only the look is shortened: a screen reader reads everything.
+  // On a phone the reasons show two lines each and a mark that there is
+  // more; a tap (or Enter) shows the whole text. A wider screen has room
+  // for all of it. Only the look is shortened: a screen reader reads
+  // everything.
+  var narrow = !!window.matchMedia && window.matchMedia("(max-width: 559px)").matches;
   Array.prototype.forEach.call(document.querySelectorAll(".adv > li.feat"), function (li, i) {
-    if (i === 0) { return; }
+    if (i === 0 || !narrow) { return; }
     li.classList.add("fold");
     li.tabIndex = 0;
     function flip() { li.classList.toggle("open"); }
