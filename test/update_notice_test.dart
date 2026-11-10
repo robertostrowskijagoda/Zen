@@ -743,6 +743,221 @@ void main() {
       await check.checkIfDue();
       expect(asked, 2);
     });
+
+    group('after failed asks', () {
+      const int tenMinutes = 10 * 60 * 1000;
+      const int outageEnd = 13 * _hour;
+
+      // The check on [store]; [asks] gets the time of each ask (the first
+      // request of a look at GitHub).
+      BackgroundUpdateCheck check(
+        UpdateNoticeStore store,
+        bool Function() reachable,
+        List<int> asks,
+      ) => BackgroundUpdateCheck(
+        notices: () async => _Notices(),
+        store: store,
+        now: () => now,
+        currentVersion: '1.11.0',
+        fetchJson: (Uri uri) async {
+          if (uri == kGithubLatestReleaseUri) {
+            asks.add(now);
+          }
+          if (!reachable()) {
+            throw const SocketException('offline');
+          }
+          return _releaseJson('v1.11.0');
+        },
+      );
+
+      List<int> minutes(Iterable<int> asks, int start) =>
+          asks.map((int at) => (at - start) ~/ 60000).toList();
+
+      test('wait twice as long after each, up to 4 hours; GitHub reached '
+          'again: the next due ask answers and the period is back', () async {
+        final int start = now;
+        final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+        final List<int> asks = <int>[];
+        bool reachable = false;
+        final BackgroundUpdateCheck c = check(store, () => reachable, asks);
+
+        // A locked phone: a wake every 10 minutes, and the work runs on
+        // each of them.
+        while (now < start + outageEnd) {
+          await c.checkIfDue();
+          now += tenMinutes;
+        }
+        // 15, 30, 60, 120 and then 240 minutes apart (the wake that
+        // follows): 7 asks in 13 hours, not one at each of the 78 wakes.
+        expect(minutes(asks, start), <int>[0, 20, 50, 110, 230, 470, 710]);
+        expect(store.state.failures, 7);
+        expect(store.state.checkedAtMillis, isNull);
+
+        // Reached again at 13 hours: nothing is asked before the wait is
+        // over (950 minutes), then one ask answers.
+        reachable = true;
+        while (asks.length == 7) {
+          await c.checkIfDue();
+          now += tenMinutes;
+        }
+        expect(minutes(asks, start).last, 950);
+        expect(store.state.failures, 0);
+        expect(store.state.checkedAtMillis, asks.last);
+
+        // The period is the normal one again: asked every 20 minutes (the
+        // first wake after the quarter of an hour).
+        for (int i = 0; i < 5; i++) {
+          await c.checkIfDue();
+          now += tenMinutes;
+        }
+        expect(minutes(asks, start).skip(7), <int>[950, 970, 990]);
+        expect(store.state.failures, 0);
+      });
+
+      test('a restart of the process between failures keeps the wait, '
+          'through the file', () async {
+        final Directory dir = Directory.systemTemp.createTempSync('zen_wait_');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final int start = now;
+        final List<int> asks = <int>[];
+        while (now < start + 5 * _hour) {
+          // A new process on every wake: nothing is remembered but the file.
+          final BackgroundUpdateCheck c = check(
+            FileUpdateNoticeStore(directory: () async => dir),
+            () => false,
+            asks,
+          );
+          await c.checkIfDue();
+          now += tenMinutes;
+        }
+        expect(minutes(asks, start), <int>[0, 20, 50, 110, 230]);
+        final UpdateNoticeState kept = await FileUpdateNoticeStore(
+          directory: () async => dir,
+        ).read();
+        expect(kept.failures, 5);
+        expect(kept.failedAtMillis, start + 230 * 60000);
+      });
+
+      test('a clock set back does not hold the check for ever', () async {
+        final int start = now;
+        final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+        final List<int> asks = <int>[];
+        bool reachable = false;
+        final BackgroundUpdateCheck c = check(store, () => reachable, asks);
+        // Five failures in a row: the wait is now 4 hours.
+        while (asks.length < 5) {
+          await c.checkIfDue();
+          now += tenMinutes;
+        }
+        expect(store.state.failedAtMillis, asks.last);
+
+        // The clock is set back two days: the last failure lies in the
+        // future, so the check asks at once, instead of in two days.
+        now = start - 48 * _hour;
+        await c.checkIfDue();
+        expect(asks, hasLength(6));
+        expect(asks.last, now);
+        expect(store.state.failedAtMillis, now);
+
+        // That failure counts from the new time: the wait is kept again
+        // and over after 4 hours.
+        now += 4 * _hour - 1;
+        await c.checkIfDue();
+        expect(asks, hasLength(6));
+        now += 1;
+        reachable = true;
+        await c.checkIfDue();
+        expect(asks, hasLength(7));
+        expect(store.state.failures, 0);
+      });
+
+      test('only the beat waits: a check the person starts in the app asks '
+          'at once', () async {
+        final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore(
+          UpdateNoticeState(
+            failedAtMillis: now,
+            error: 'GitHub unreachable',
+            failures: 6,
+          ),
+        );
+        final List<int> asks = <int>[];
+        await check(store, () => true, asks).checkIfDue();
+        expect(asks, isEmpty);
+
+        final GithubUpdateService app = GithubUpdateService(
+          installer: _Installer(),
+          fetchJson: (Uri uri) async {
+            asks.add(now);
+            return _releaseJson('v1.11.0');
+          },
+          noticeStore: store,
+          notifications: _Notices(),
+          currentVersion: '1.11.0',
+        );
+        addTearDown(app.dispose);
+        await app.check();
+        expect(asks, isNotEmpty);
+        expect(store.state.failures, 0);
+      });
+
+      test('the wait: the period after the first, doubled, capped', () {
+        const Duration every = Duration(minutes: 15);
+        const Duration cap = Duration(hours: 4);
+        Duration wait(int failures) => backgroundUpdateRetryWait(
+          failures: failures,
+          every: every,
+          atMost: cap,
+        );
+        expect(wait(0), Duration.zero);
+        expect(wait(1), every);
+        expect(wait(2), const Duration(minutes: 30));
+        expect(wait(3), const Duration(minutes: 60));
+        expect(wait(4), const Duration(minutes: 120));
+        expect(wait(5), cap);
+        expect(wait(kUpdateNoticeFailuresMax), cap);
+        // A cap below the period never makes the wait shorter than it.
+        expect(
+          backgroundUpdateRetryWait(
+            failures: 3,
+            every: const Duration(hours: 2),
+            atMost: const Duration(hours: 1),
+          ),
+          const Duration(hours: 2),
+        );
+      });
+
+      test('the count is kept with the state and ended by an answer', () async {
+        final MemoryUpdateNoticeStore store = MemoryUpdateNoticeStore();
+        await store.update(
+          (UpdateNoticeState s) => s.failed(at: 5, error: 'a'),
+        );
+        await store.update(
+          (UpdateNoticeState s) => s.failed(at: 6, error: 'b'),
+        );
+        expect(store.state.failures, 2);
+        final UpdateNoticeState reread = UpdateNoticeState.fromJson(
+          jsonDecode(jsonEncode(store.state.toJson())),
+        );
+        expect(reread, store.state);
+        // A file Zen did not write: out of range is clamped.
+        expect(
+          UpdateNoticeState.fromJson(<String, Object?>{'failures': -3}),
+          const UpdateNoticeState(),
+        );
+        expect(
+          UpdateNoticeState.fromJson(<String, Object?>{
+            'failures': 1 << 40,
+          }).failures,
+          kUpdateNoticeFailuresMax,
+        );
+        await store.update(
+          (UpdateNoticeState s) => s.copyWith(notifiedVersion: '1.12.0'),
+        );
+        expect(store.state.failures, 2);
+        await store.update((UpdateNoticeState s) => s.answered(at: 7));
+        expect(store.state.failures, 0);
+      });
+    });
   });
 
   group('a newer release after one already announced', () {

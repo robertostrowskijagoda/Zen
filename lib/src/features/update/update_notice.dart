@@ -45,6 +45,11 @@ const String kUpdateNoticeSlot = 'app-update';
 /// error of a request to GitHub).
 const String kUpdateNoticeFileName = 'update_check.json';
 
+/// The most failed asks in a row that [UpdateNoticeState.failures] counts:
+/// far past the point where the wait between asks stops growing, and a
+/// number that cannot overflow what is computed from it.
+const int kUpdateNoticeFailuresMax = 32;
+
 /// What the app and the Android background service share about the look
 /// at GitHub, so that together they ask no more often than needed and tell
 /// the person about a version once.
@@ -58,6 +63,7 @@ final class UpdateNoticeState {
     this.failedAtMillis,
     this.error,
     this.retryAtMillis,
+    this.failures = 0,
   });
 
   static UpdateNoticeState fromJson(Object? json) {
@@ -76,6 +82,8 @@ final class UpdateNoticeState {
           ? updateNoticeErrorText(error)
           : null,
       retryAtMillis: millis(json['retryAt']),
+      failures:
+          millis(json['failures'])?.clamp(0, kUpdateNoticeFailuresMax) ?? 0,
     );
   }
 
@@ -102,6 +110,13 @@ final class UpdateNoticeState {
   /// for after its rate limit. Cleared by an answer.
   final int? retryAtMillis;
 
+  /// How many asks failed in a row since the last answer, whoever asked
+  /// (at most [kUpdateNoticeFailuresMax]); the Android background service
+  /// waits longer after each one ([backgroundUpdateCheckDue]). Cleared by an
+  /// answer. Kept here, with the time of the last ask, so a process the
+  /// system restarts on its next wake still knows how long to wait.
+  final int failures;
+
   UpdateNoticeState copyWith({
     int? checkedAtMillis,
     String? newestVersion,
@@ -116,11 +131,13 @@ final class UpdateNoticeState {
       failedAtMillis: failedAtMillis,
       error: error,
       retryAtMillis: retryAtMillis,
+      failures: failures,
     );
   }
 
   /// A check got an answer at [at]: [newest] is the release newer than
-  /// this build it named (null: none, which forgets an earlier one).
+  /// this build it named (null: none, which forgets an earlier one). Ends
+  /// the run of failed asks.
   UpdateNoticeState answered({required int at, String? newest}) {
     return UpdateNoticeState(
       checkedAtMillis: at,
@@ -133,7 +150,7 @@ final class UpdateNoticeState {
   }
 
   /// A check failed at [at] with [error]; [retryAt]: not again before then
-  /// (GitHub's rate limit).
+  /// (GitHub's rate limit). One more failed ask in a row ([failures]).
   UpdateNoticeState failed({
     required int at,
     required Object error,
@@ -147,6 +164,9 @@ final class UpdateNoticeState {
       failedAtMillis: at,
       error: updateNoticeErrorText(error),
       retryAtMillis: retryAt,
+      failures: failures < kUpdateNoticeFailuresMax
+          ? failures + 1
+          : kUpdateNoticeFailuresMax,
     );
   }
 
@@ -163,6 +183,7 @@ final class UpdateNoticeState {
       failedAtMillis: failedAtMillis,
       error: error,
       retryAtMillis: retryAtMillis,
+      failures: failures,
     );
   }
 
@@ -174,6 +195,7 @@ final class UpdateNoticeState {
     'failedAt': ?failedAtMillis,
     'error': ?error,
     'retryAt': ?retryAtMillis,
+    if (failures > 0) 'failures': failures,
   };
 
   @override
@@ -185,7 +207,8 @@ final class UpdateNoticeState {
       other.dismissedVersion == dismissedVersion &&
       other.failedAtMillis == failedAtMillis &&
       other.error == error &&
-      other.retryAtMillis == retryAtMillis;
+      other.retryAtMillis == retryAtMillis &&
+      other.failures == failures;
 
   @override
   int get hashCode => Object.hash(
@@ -196,6 +219,7 @@ final class UpdateNoticeState {
     failedAtMillis,
     error,
     retryAtMillis,
+    failures,
   );
 
   static String? _version(Object? value) =>
