@@ -23,6 +23,10 @@ const int _maxEditChars = 64 * 1024;
 /// [kChatEditWindow].
 const Duration _editClockSkew = Duration(hours: 1);
 
+/// The key of a group's `msg_react` and `msg_delete` that names the
+/// author of the message they mean (the parser's `kChangeAuthorKey`).
+const String _changeAuthorKey = 'author';
+
 /// [message] with the reply, forwarding, mentions and poll [signal]
 /// carries.
 ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
@@ -96,6 +100,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       return;
     }
     String sent = '';
+    String? author;
     final bool changed = await _changeTimelineMessage(
       conversationKey,
       messageId,
@@ -117,6 +122,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
           next['self'] = chosen;
           sent = chosen;
         }
+        author = _changeAuthorOf(conversationKey, m);
         return m.copyWith(reactions: next);
       },
     );
@@ -128,8 +134,24 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         'type': 'msg_react',
         'msgId': messageId,
         'emoji': sent,
+        _changeAuthorKey: ?author,
       });
     }
+  }
+
+  /// The author of [m] as the members of the group [conversationKey] know
+  /// it (this device's address for one's own message), sent with a
+  /// reaction to it or its deletion: members choose message ids themselves,
+  /// so one id can belong to messages of two members, and only the author
+  /// tells which one is meant. `null` in a one-to-one chat.
+  String? _changeAuthorOf(String conversationKey, ChatMessage m) {
+    if (_groupOfKey(conversationKey) == null) {
+      return null;
+    }
+    final String author = m.isOutgoing
+        ? ref.read(runtimeNodeSnapshotProvider).localAddress
+        : m.sender;
+    return author.isEmpty ? null : PeerShareCodec.normalizeAddress(author);
   }
 
   // ---------------------------------------------------------------------------
@@ -341,6 +363,8 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       'type': 'msg_delete',
       'msgId': messageId,
       'at': now,
+      if (removed != null)
+        _changeAuthorKey: ?_changeAuthorOf(conversationKey, removed),
     });
   }
 
@@ -623,32 +647,43 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         } on FormatException catch (error) {
           logZenWarning('A group file was refused: ${error.message}');
         }
-      } else if (media is Map) {
-        pending = <String, dynamic>{
-          ...Map<String, dynamic>.from(media),
-          'src': signal.sender,
-        };
+      } else {
+        // Only the reference's known fields, never the map as it came.
+        final Map<String, dynamic>? reference = chatMediaRefFromJson(media);
+        if (reference != null) {
+          pending = <String, dynamic>{...reference, 'src': signal.sender};
+        }
       }
     }
+    final ChatMessage message = _withSignalExtras(
+      ChatMessage(
+        id: messageId,
+        sender: signal.sender,
+        text: signal.content ?? '',
+        sentAtMillis: _effectiveSentAt(signal, timestamp),
+        direction: ChatMessageDirection.incoming,
+        type: stored?.type ?? type ?? ChatMessageType.text,
+        attachmentPath: stored?.path,
+        fileName: stored?.fileName ?? signal.fileName,
+        mimeType: stored?.mimeType ?? signal.mimeType,
+        attachmentSizeBytes: stored?.sizeBytes ?? signal.attachmentSizeBytes,
+        durationMs: signal.durationMs,
+        pendingMedia: pending,
+      ),
+      signal,
+    );
+    final ChatReply? reply = message.reply;
     await _messageTimelineStore.append(
       key,
-      _withSignalExtras(
-        ChatMessage(
-          id: messageId,
-          sender: signal.sender,
-          text: signal.content ?? '',
-          sentAtMillis: _effectiveSentAt(signal, timestamp),
-          direction: ChatMessageDirection.incoming,
-          type: stored?.type ?? type ?? ChatMessageType.text,
-          attachmentPath: stored?.path,
-          fileName: stored?.fileName ?? signal.fileName,
-          mimeType: stored?.mimeType ?? signal.mimeType,
-          attachmentSizeBytes: stored?.sizeBytes ?? signal.attachmentSizeBytes,
-          durationMs: signal.durationMs,
-          pendingMedia: pending,
-        ),
-        signal,
-      ),
+      reply == null
+          ? message
+          : message.copyWith(
+              reply: _localGroupReply(
+                await _messageTimelineStore.load(key),
+                reply,
+                signal.sender,
+              ),
+            ),
     );
     _bumpTimelineRevision();
     if (pending != null) {
@@ -763,18 +798,19 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     final String key = inGroup
         ? 'group:$groupId'
         : (state.friendByAddress(signal.sender)?.address ?? signal.sender);
-    // An edit or a deletion of the sender's own message with this id: kept
-    // under its own key when another member's message holds the id
-    // ([groupMessageLocalId]).
-    final String own = groupMessageLocalId(wireId, signal.sender);
-    final String messageId =
-        inGroup &&
-            signal.type != ZenSignalType.messageReaction &&
-            (await _messageTimelineStore.load(
-              key,
-            )).any((ChatMessage m) => m.id == own)
-        ? own
+    final Object? author = signal.chatExtras?[_changeAuthorKey];
+    final String? messageId = inGroup
+        ? _groupChangeTarget(
+            await _messageTimelineStore.load(key),
+            wireId,
+            type: signal.type,
+            sender: signal.sender,
+            author: author is String && author.isNotEmpty ? author : null,
+          )
         : wireId;
+    if (messageId == null) {
+      return;
+    }
     bool wrote(ChatMessage m) =>
         !m.isOutgoing &&
         !m.isSystem &&
@@ -872,13 +908,37 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       return;
     }
     final Object? groupId = payload['groupId'];
-    final String key = groupId is String && groupId.isNotEmpty
+    final bool inGroup = groupId is String && groupId.isNotEmpty;
+    final String key = inGroup
         ? 'group:$groupId'
         : (state.friendByAddress(peerAddress)?.address ?? peerAddress);
     final int now = DateTime.now().millisecondsSinceEpoch;
     ChatMessage? removed;
+    String? target;
     await _enqueueStateWork(() async {
-      await _changeTimelineMessage(key, id, (ChatMessage m) {
+      // In a group the change names the message by the id the members know
+      // (and by its author): here it may be kept under another key.
+      final Object? author = payload[_changeAuthorKey];
+      final String? messageId = inGroup
+          ? _groupChangeTarget(
+              await _messageTimelineStore.load(key),
+              id,
+              type: switch (payload['type']) {
+                'msg_react' => ZenSignalType.messageReaction,
+                'msg_edit' => ZenSignalType.messageEdit,
+                _ => ZenSignalType.messageDelete,
+              },
+              sender: 'self',
+              author: author is String && author.trim().isNotEmpty
+                  ? PeerShareCodec.normalizeAddress(author)
+                  : null,
+            )
+          : id;
+      if (messageId == null) {
+        return;
+      }
+      target = messageId;
+      await _changeTimelineMessage(key, messageId, (ChatMessage m) {
         switch (payload['type']) {
           case 'msg_react':
             final Object? emoji = payload['emoji'];
@@ -936,10 +996,105 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       });
     });
     final ChatMessage? gone = removed;
-    if (gone != null) {
+    final String? goneId = target;
+    if (gone != null && goneId != null) {
       await _deleteManagedAttachmentIfPresent(gone);
-      await _forgetQuotesOf(key, id);
+      await _forgetQuotesOf(key, goneId);
     }
+  }
+
+  /// The messages of [thread] that came with the id [wireId], under it or
+  /// under the key of their author ([groupMessageLocalId]).
+  List<ChatMessage> _holdersOf(
+    List<ChatMessage> thread,
+    String wireId,
+  ) => <ChatMessage>[
+    for (final ChatMessage m in thread)
+      if (!m.isSystem && (m.id == wireId || groupMessageWireId(m.id) == wireId))
+        m,
+  ];
+
+  /// The key in a group's [thread] of the message a reaction, an edit or a
+  /// deletion ([type]) from [sender] ('self': another device of this
+  /// account) means, by [wireId] — the id the members know it by — or null
+  /// when that cannot be told. Members choose message ids themselves, so
+  /// one id can belong to messages of two members; a change naming the
+  /// [author] of its message reaches only that author's message. Without
+  /// one (a Zen before the author was sent): an edit or a deletion reaches
+  /// the sender's own message; a reaction, or a deletion by the group's
+  /// creator, only a message whose id no other message here holds — never
+  /// a guess between two.
+  String? _groupChangeTarget(
+    List<ChatMessage> thread,
+    String wireId, {
+    required ZenSignalType type,
+    required String sender,
+    String? author,
+  }) {
+    final List<ChatMessage> holders = _holdersOf(thread, wireId);
+    if (author != null && type != ZenSignalType.messageEdit) {
+      final List<ChatMessage> by = <ChatMessage>[
+        for (final ChatMessage m in holders)
+          if (_sameGroupAuthor(m, author)) m,
+      ];
+      return by.length == 1 ? by.single.id : null;
+    }
+    if (type != ZenSignalType.messageReaction) {
+      final List<ChatMessage> mine = <ChatMessage>[
+        for (final ChatMessage m in holders)
+          if (sender == 'self'
+              ? m.isOutgoing
+              : !m.isOutgoing &&
+                    PeerShareCodec.addressesEqual(m.sender, sender))
+            m,
+      ];
+      if (mine.isNotEmpty || type == ZenSignalType.messageEdit) {
+        return mine.length == 1 ? mine.single.id : null;
+      }
+    }
+    return holders.length == 1 ? holders.single.id : null;
+  }
+
+  /// [reply] (in a group message from [replier]) pointing at the message
+  /// here it quotes. The quote names the original by its key on the
+  /// replier's phone and by its author ('self': the replier); the bare id
+  /// can belong to another member's message here, whose text and name the
+  /// quote would then show and jump to. An original not here yet gets the
+  /// key it will be kept under ([groupMessageSlot]).
+  ChatReply _localGroupReply(
+    List<ChatMessage> thread,
+    ChatReply reply,
+    String replier,
+  ) {
+    final String wireId = groupMessageWireId(reply.messageId);
+    final String said = reply.sender.trim();
+    final String? author = said.isEmpty
+        ? null
+        : PeerShareCodec.normalizeAddress(said == 'self' ? replier : said);
+    final List<ChatMessage> holders = _holdersOf(thread, wireId);
+    if (author == null) {
+      return holders.length == 1
+          ? ChatReply(
+              messageId: holders.single.id,
+              sender: reply.sender,
+              text: reply.text,
+            )
+          : reply;
+    }
+    final bool own = _isOwnDeviceAddress(author);
+    final ChatMessage? original = holders
+        .where((ChatMessage m) => _sameGroupAuthor(m, author))
+        .firstOrNull;
+    final String alt = groupMessageLocalId(wireId, author);
+    return ChatReply(
+      messageId:
+          original?.id ??
+          (holders.isEmpty || own || alt.length > kMaxSignalIdChars
+              ? wireId
+              : alt),
+      sender: own ? 'self' : author,
+      text: reply.text,
+    );
   }
 
   // ---------------------------------------------------------------------------
