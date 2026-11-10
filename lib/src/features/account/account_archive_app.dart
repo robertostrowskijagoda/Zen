@@ -27,6 +27,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
@@ -205,12 +206,21 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
   }) async {
     // Conversations and friends go into what is already loaded.
     await _hub.whenHydrated;
-    final int total = 8 + archive.messageCount;
+    final int total = 9 + archive.messageCount;
     int done = 0;
     void step() => progress(++done, total);
     final Map<String, Object?> s = archive.sections;
     int files = 0;
     int bytes = 0;
+
+    // The passwords: merged with those here (a deletion here stays, nothing
+    // here is written over), on a new device and on one that has the
+    // account alike.
+    final Object? passwords = s[CircleBackupSections.passwords];
+    if (passwords != null) {
+      await ref.read(passwordVaultServiceProvider).mergeCopy(passwords);
+    }
+    step();
 
     if (s[CircleBackupSections.settings] is Map<String, dynamic> && !merge) {
       final AppSettingsController controller = ref.read(

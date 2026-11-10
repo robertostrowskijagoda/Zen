@@ -28,6 +28,8 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/household_sync.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/passwords/password_vault_sync.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
@@ -580,6 +582,7 @@ final class AccountDevicesKeeper {
   AccountStateSync? _sync;
   OwnMediaKeeper? _media;
   HouseholdSyncDomain? _household;
+  PasswordVaultSyncDomain? _passwords;
   final List<_PokedDomain> _domains = <_PokedDomain>[];
   final List<void Function()> _unlisten = <void Function()>[];
 
@@ -667,6 +670,12 @@ final class AccountDevicesKeeper {
       notes.load,
     );
     _listen(notes, notesDomain);
+    // The passwords: the same entries on every device, merged version by
+    // version (password_vault_service.dart).
+    final PasswordVaultSyncDomain passwords = PasswordVaultSyncDomain(
+      ref.read(passwordVaultServiceProvider),
+    );
+    _passwords = passwords;
     // The hand-picked mailboxes (where store-and-forward runs).
     final RelayEngine? relay = ref.read(relayEngineProvider);
     final RelayMailboxSyncDomain? mailboxes = relay == null
@@ -698,7 +707,7 @@ final class AccountDevicesKeeper {
     final AccountStateSync sync = AccountStateSync(
       channel: LedgerAccountSyncChannel(node),
       disk: disk,
-      domains: <AccountSyncDomain>[..._domains, household],
+      domains: <AccountSyncDomain>[..._domains, household, passwords],
       // Locked: the stores do not open (nothing to scan until the unlock).
       mayRead: () async => await security.currentEncryptionKey() != null,
     );
@@ -726,6 +735,8 @@ final class AccountDevicesKeeper {
     }
     await _household?.close();
     _household = null;
+    await _passwords?.close();
+    _passwords = null;
   }
 }
 

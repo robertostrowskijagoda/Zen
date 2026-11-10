@@ -256,6 +256,11 @@ final class _Unit {
 /// it.
 const Duration kAccountSyncScanEvery = Duration(minutes: 15);
 
+/// Most bytes of units (plain JSON) in one change sent to the other
+/// devices: sealed (base64, a third more), signed (several KiB) and framed,
+/// it stays under the 64 KiB an entry of the account's log may have.
+const int kAccountSyncPartBytes = 24 * 1024;
+
 /// Keeps [domains] the same on the account's devices through [channel];
 /// its own bookkeeping lives on [disk].
 final class AccountStateSync {
@@ -512,8 +517,7 @@ final class AccountStateSync {
         continue;
       }
       dirty = true;
-      if (!channel.hasOtherDevices ||
-          !await channel.publish(<String, dynamic>{'d': d.id, 'u': delta})) {
+      if (!channel.hasOtherDevices || !await _publishUnits(d.id, delta)) {
         _unsent.add(d.id);
       } else {
         published++;
@@ -568,12 +572,54 @@ final class AccountStateSync {
               'v': units[u.key],
             },
       };
-      if (await channel.publish(<String, dynamic>{'d': d.id, 'u': all})) {
+      if (await _publishUnits(d.id, all)) {
         published++;
         _unsent.remove(d.id);
       }
     }
     await _save();
+  }
+
+  /// Sends [units] of the state [domain], in as many changes as it takes
+  /// for each to stay well under the largest entry the account's log
+  /// carries (`kMaxEntryBytes`, with sealing and signatures on top): a
+  /// large state (every password of the vault, sent to a newly linked
+  /// device) would otherwise be one entry the other devices refuse, sent
+  /// again and refused for ever. Each part is a change on its own: a
+  /// device takes it as it comes, an older build too. False when a part
+  /// did not go out (it is all sent again later).
+  Future<bool> _publishUnits(String domain, Map<String, Object?> units) async {
+    final List<Map<String, Object?>> parts = <Map<String, Object?>>[];
+    Map<String, Object?> part = <String, Object?>{};
+    int size = 0;
+    for (final MapEntry<String, Object?> u in units.entries) {
+      final int bytes = utf8
+          .encode(jsonEncode(<String, Object?>{u.key: u.value}))
+          .length;
+      if (part.isNotEmpty && size + bytes > kAccountSyncPartBytes) {
+        parts.add(part);
+        part = <String, Object?>{};
+        size = 0;
+      }
+      part[u.key] = u.value;
+      size += bytes;
+    }
+    if (part.isNotEmpty || parts.isEmpty) {
+      parts.add(part);
+    }
+    bool all = true;
+    for (final Map<String, Object?> p in parts) {
+      try {
+        if (!await channel.publish(<String, dynamic>{'d': domain, 'u': p})) {
+          all = false;
+        }
+      } on Object catch (error) {
+        // One part refused does not stop the others, nor the other states.
+        logZenWarning('Account state $domain not sent: ${error.runtimeType}');
+        all = false;
+      }
+    }
+    return all;
   }
 
   /// Takes a change another device sent.

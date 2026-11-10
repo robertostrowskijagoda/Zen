@@ -20,6 +20,8 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -160,11 +162,15 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
           }
         },
       );
+      // A password added, changed or deleted: a fresh copy soon.
+      final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+      vault.edits.addListener(service.changed);
       unawaitedLogged(
         node.start().then((_) => service.start()),
         context: 'Starting the circle backup failed',
       );
       ref.onDispose(() {
+        vault.edits.removeListener(service.changed);
         unawaitedLogged(
           service.stop().whenComplete(service.dispose),
           context: 'Stopping the circle backup',
@@ -197,6 +203,19 @@ final class AppCircleBackupData implements CircleBackupData {
     final int? balance = me == null || !pyramid.isMember
         ? null
         : pyramid.balance;
+    // The passwords, padded so the holders cannot tell how many there are.
+    // Unreadable now (locked, damaged): no copy rather than one without
+    // them.
+    final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+    final Map<String, Object?>? vaultSection;
+    try {
+      vaultSection = await vault.exportForCopy();
+    } on PasswordVaultException catch (error) {
+      throw CircleBackupNotNow(error.error.name);
+    }
+    if (vault.damaged) {
+      throw const CircleBackupNotNow('passwords');
+    }
     final Map<String, List<Map<String, dynamic>>> conversations =
         <String, List<Map<String, dynamic>>>{};
     if (chats) {
@@ -229,6 +248,8 @@ final class AppCircleBackupData implements CircleBackupData {
         CircleBackupSections.dating: _datingWithoutPhotos(
           ref.read(datingServiceProvider).me,
         ),
+        if (vaultSection != null)
+          CircleBackupSections.passwords: padPasswordSection(vaultSection),
         if (balance != null)
           CircleBackupSections.wallet: <String, Object>{
             'key': me!,
@@ -245,9 +266,17 @@ final class AppCircleBackupData implements CircleBackupData {
     CircleBackupContent content,
     void Function(int done, int total) progress,
   ) async {
-    final int total = 7 + content.messageCount;
+    final int total = 8 + content.messageCount;
     int done = 0;
     void step() => progress(++done, total);
+    // The passwords first: merged with any written here since (never over
+    // them). Locked, this throws before anything else is taken, and the
+    // whole copy is taken again at the next try.
+    final Object? passwords = content.sections[CircleBackupSections.passwords];
+    if (passwords != null) {
+      await ref.read(passwordVaultServiceProvider).mergeCopy(passwords);
+    }
+    step();
     final Object? settings = content.sections[CircleBackupSections.settings];
     if (settings is Map<String, dynamic>) {
       // Not as they were (unlike a backup file of the whole app): the

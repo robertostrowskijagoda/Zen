@@ -12,9 +12,9 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 ///
 /// What is in it: the profile (without photos), friends and groups with
 /// their levels, the settings, the pyramid state this person keeps (votes,
-/// private data, the power key of the head), a wallet statement, and —
-/// unless turned off — the text of the conversations (no photos, videos or
-/// files: ids, times, authors, text).
+/// private data, the power key of the head), a wallet statement, the
+/// passwords, and — unless turned off — the text of the conversations (no
+/// photos, videos or files: ids, times, authors, text).
 ///
 /// How it is kept: every piece of it (a section, one month of one
 /// conversation) is split into chunks of at most [kCircleBackupChunkBytes],
@@ -52,6 +52,11 @@ abstract final class CircleBackupSections {
 
   /// The dating profile and its settings, without photos.
   static const String dating = 'dating';
+
+  /// The passwords (the stored vault, `kPasswordVaultKey`): in the copy
+  /// with friends padded to hide how many there are, in a copy of the
+  /// account with its key. Taken back by merging, never over what is here.
+  static const String passwords = 'passwords';
 }
 
 /// What a copy holds, in plain JSON.

@@ -313,6 +313,9 @@ const List<_Name> _names = <_Name>[
     max: 24000,
     background: true,
   ),
+  // The passwords (from 1.16.5): a few hand-made entries to an imported
+  // export of hundreds (random passwords do not compress).
+  _Name('passwords/vault', used: 0.15, min: 160, max: 60000),
 ];
 
 /// What `account/sync/<id>` is kept for (account_state_sync_app.dart).

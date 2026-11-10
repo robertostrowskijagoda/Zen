@@ -63,9 +63,23 @@ final class CircleBackupIdentity {
   final DeviceCertificate certificate;
 }
 
+/// Thrown by [CircleBackupData.collect] when a part of the copy cannot be
+/// read now (Zen is locked, its store does not open): no copy is made
+/// then, so the holders keep the last whole one instead of one without
+/// that part. Tried again at the next tick.
+final class CircleBackupNotNow implements Exception {
+  const CircleBackupNotNow(this.why);
+
+  final String why;
+
+  @override
+  String toString() => 'CircleBackupNotNow($why)';
+}
+
 /// What the copy is made of and where it goes back to (the app's stores).
 abstract interface class CircleBackupData {
-  /// The account's data now; conversation text only when [chats].
+  /// The account's data now; conversation text only when [chats]. Throws
+  /// [CircleBackupNotNow] when a part cannot be read now.
   Future<CircleBackupContent> collect({required bool chats});
 
   /// Puts [content] back; [progress] counts what is done.
@@ -330,9 +344,12 @@ final class CircleBackupService {
       }
       return;
     }
-    final CircleBackupContent content = await data.collect(
-      chats: status.value.includeChats,
-    );
+    final CircleBackupContent content;
+    try {
+      content = await data.collect(chats: status.value.includeChats);
+    } on CircleBackupNotNow {
+      return;
+    }
     final CircleBackupBuild build = await buildCircleBackup(
       content: content,
       account: id.account,
