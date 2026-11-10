@@ -3799,12 +3799,18 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _copy() async {
-    await copyWithExpiry(_contents ?? '');
+    final bool copied = await copyWithExpiry(_contents ?? '');
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(t('Skopiowano dziennik do schowka.'))),
+      SnackBar(
+        content: Text(
+          copied
+              ? t('Skopiowano dziennik do schowka.')
+              : t('Nie udało się. Spróbuj jeszcze raz.'),
+        ),
+      ),
     );
   }
 
