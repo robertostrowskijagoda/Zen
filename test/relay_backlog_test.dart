@@ -594,6 +594,25 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 20)));
 
   group('kinds where only the newest matters', () {
+    test('the kinds a real phone piled up are among them: friend lists, '
+        'nearby keys, gate terms, profiles', () {
+      // A phone on 1.16.4 with ten friends had 804 frames waiting: 488
+      // friend lists, 228 nearby keys, 43 gate terms, 17 profiles.
+      for (final String type in <String>[
+        'friend_list',
+        'nearby_key',
+        'intro_gate',
+        'profile_update',
+      ]) {
+        expect(
+          relayReplaceKeyOf(<String, dynamic>{'type': type}),
+          type,
+          reason: type,
+        );
+      }
+      expect(relayReplaceKeyOf(<String, dynamic>{'type': 'message'}), isNull);
+    });
+
     test('a newer profile replaces the older one in the queue and in the '
         "friend's mailboxes; the friend gets the newest only", () async {
       final _World w = await _circle(<String, int>{

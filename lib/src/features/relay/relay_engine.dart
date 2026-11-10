@@ -664,6 +664,8 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
     case 'nearby_key':
     case 'intent':
     case 'graph_open':
+    // A friend's terms at this person's gates: each send carries them all.
+    case 'intro_gate':
     case kRelayReceiptType:
       return type as String;
     case 'message_read':
