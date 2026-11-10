@@ -158,4 +158,20 @@ void main() {
       reason: 'the mark is on the clip before it goes to the clipboard',
     );
   });
+
+  test('the clipboard is emptied without reading it first, so it works '
+      'from the background', () {
+    final String system = _source('ZenSystemBridge.kt');
+    expect(system, contains('"clearSensitive" ->'));
+    final String clear = _function(system, 'private fun clearSensitive');
+    expect(clear, contains('Build.VERSION_CODES.P'));
+    expect(
+      clear.indexOf('Build.VERSION_CODES.P'),
+      lessThan(clear.indexOf('clearPrimaryClip()')),
+      reason: 'clearPrimaryClip exists from Android 9 on',
+    );
+    expect(clear, contains('setPrimaryClip(ClipData.newPlainText("", ""))'));
+    expect(clear, isNot(contains('getPrimaryClip')));
+    expect(clear, isNot(contains('primaryClip ')));
+  });
 }

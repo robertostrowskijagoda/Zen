@@ -259,6 +259,25 @@ void SetClipboardDword(const wchar_t* name, DWORD value) {
   GlobalFree(data);
 }
 
+// Opens the clipboard for [owner]. Another program may hold it open for a
+// moment (a clipboard manager reading it, a remote desktop session): it is
+// tried again for about a third of a second before giving up.
+bool OpenClipboardPatiently(HWND owner) {
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (OpenClipboard(owner)) return true;
+    Sleep(30);
+  }
+  return false;
+}
+
+// Empties the clipboard; nothing goes to the clipboard history.
+bool ClearClipboard(HWND owner) {
+  if (!OpenClipboardPatiently(owner)) return false;
+  const BOOL emptied = EmptyClipboard();
+  CloseClipboard();
+  return emptied != FALSE;
+}
+
 // Puts [utf8] on the clipboard as text that stays out of the clipboard
 // history (Win+V), the cloud clipboard and clipboard monitors.
 bool CopySensitive(HWND owner, const std::string& utf8) {
@@ -281,7 +300,9 @@ bool CopySensitive(HWND owner, const std::string& utf8) {
   }
   buffer[length] = L'\0';
   GlobalUnlock(text);
-  if (!OpenClipboard(owner)) {
+  // On failure the Dart side does not fall back to the plain clipboard
+  // (whose text the history and the cloud clipboard keep): the copy fails.
+  if (!OpenClipboardPatiently(owner)) {
     GlobalFree(text);
     return false;
   }
@@ -355,6 +376,11 @@ void Register(flutter::BinaryMessenger* messenger,
   g_clipboard_channel->SetMethodCallHandler(
       [](const flutter::MethodCall<EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+        if (call.method_name() == "clearSensitive") {
+          HWND hwnd = g_window ? g_window() : nullptr;
+          result->Success(EncodableValue(ClearClipboard(hwnd)));
+          return;
+        }
         if (call.method_name() != "copySensitive") {
           result->NotImplemented();
           return;

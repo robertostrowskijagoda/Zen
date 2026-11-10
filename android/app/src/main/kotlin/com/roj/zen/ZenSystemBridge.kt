@@ -84,6 +84,8 @@ import java.io.IOException
  * Secrets copied from Zen (secure_clipboard.dart): `copySensitive` {text}
  * puts the text on the clipboard marked as sensitive, so the system's
  * clipboard preview and keyboards do not show or keep it; true when done.
+ * `clearSensitive` empties the clipboard, from the background too; true
+ * when done.
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -234,6 +236,7 @@ object ZenSystemBridge {
                         "copySensitive" -> result.success(
                             copySensitive(activity, call.argument<String>("text") ?: ""),
                         )
+                        "clearSensitive" -> result.success(clearSensitive(activity))
                         "copyOpenedFile" -> {
                             val uri = call.argument<String>("uri") ?: ""
                             val context = activity.applicationContext
@@ -707,6 +710,23 @@ object ZenSystemBridge {
             }
         }
         clipboard.setPrimaryClip(clip)
+        return true
+    }
+
+    /**
+     * Empties the clipboard. Android 10+ does not let an app in the
+     * background read the clipboard but does let it write there, so this
+     * works while Zen is left, which is when it locks. Android 9+ has a call
+     * for it; before, an empty text takes the place of the secret.
+     */
+    private fun clearSensitive(context: Context): Boolean {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            clipboard.clearPrimaryClip()
+        } else {
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        }
         return true
     }
 
