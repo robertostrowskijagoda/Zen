@@ -28,7 +28,9 @@ const Duration kGithubCheckEvery = Duration(minutes: 15);
 /// repository's redirect first, which has no rate limit (latest_release.dart).
 /// With the beat ([kUpdateBeatAtMost]) a new version is told within about
 /// half an hour while Zen is closed (it was up to an hour with 30 and 30),
-/// later only when Doze holds the wakes back.
+/// later only when Doze holds the wakes back or after asks that failed (the
+/// service then waits longer each time, up to four hours:
+/// backgroundUpdateCheckDue).
 const Duration kBackgroundGithubCheckEvery = Duration(minutes: 15);
 
 /// The longest error text [UpdateNoticeState.error] keeps.

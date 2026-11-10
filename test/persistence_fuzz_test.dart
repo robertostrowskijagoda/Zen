@@ -270,6 +270,9 @@ void main() {
           (UpdateNoticeState s) => const UpdateNoticeState(
             checkedAtMillis: 1,
             notifiedVersion: '1.13.1',
+            failedAtMillis: 2,
+            error: 'offline',
+            failures: 3,
           ),
         ),
         () async {
