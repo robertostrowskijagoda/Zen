@@ -309,6 +309,11 @@ final class FriendsPhone implements RelayPeerSource {
   /// kit ("Nadawca i treść" unless a test sets another).
   NotificationPrivacy noticePrivacy = NotificationPrivacy.senderAndContent;
 
+  /// What a copy from another device of the account does here; null: what
+  /// the app does with it (`recordMirroredSend`). A test may stand in for
+  /// an older version of the app.
+  MirroredSend? mirrored;
+
   String get address => sim.address;
 
   bool get online => sim.online;
@@ -635,6 +640,19 @@ final class FriendsPhone implements RelayPeerSource {
       final Object? type = next.payload['type'];
       if (type == 'ping' || type == 'pong') {
         await _onPresence(from, next);
+        continue;
+      }
+      if (type == kMirrorType) {
+        // What another device of this account sent: only such a device may
+        // say "I sent this" (as AccountRoutingTransport has it).
+        final Object? to = next.payload['to'];
+        final Object? p = next.payload['p'];
+        if (accounts.ownAccount.isNotEmpty &&
+            accounts.accountOf(next.from) == accounts.ownAccount &&
+            to is String &&
+            p is Map<String, dynamic>) {
+          await (mirrored ?? hub.recordMirroredSend)(to, p);
+        }
         continue;
       }
       final ZenSignal? signal = zenSignalFromTransportPayload(

@@ -1212,8 +1212,11 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
   }
 
-  /// After the conversation's other delivery changes, so neither writes
-  /// over the other ([_editDeliveryOf]).
+  /// The friend's receipt: they read one's message [messageId]. After the
+  /// conversation's other delivery changes, so neither writes over the
+  /// other ([_editDeliveryOf]). Only for a receipt that came from the
+  /// friend; this person reading the friend's messages is
+  /// [_markIncomingReadUpTo].
   Future<void> _markMessageRead({
     required String peerAddress,
     required String messageId,
@@ -1240,7 +1243,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final int index = thread.indexWhere(
       (ChatMessage message) => message.id == messageId,
     );
-    if (index < 0) {
+    // A receipt names a message this person sent: one naming a message of
+    // the friend's says nothing about what they read.
+    if (index < 0 || !thread[index].isOutgoing) {
       return;
     }
     // The receipt names the newest message they read: every one this person
@@ -1305,11 +1310,203 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       logZenError('Sending read receipt failed', error, stackTrace);
       return;
     }
-    await _markMessageRead(
+    // Every message of the friend's up to the one named is read now, so the
+    // next opening finds nothing unread and sends no further receipt.
+    await _markIncomingReadUpTo(
       peerAddress: peerAddress,
       messageId: lastUnreadIncoming.id,
       readAtMillis: readAtMillis ?? DateTime.now().millisecondsSinceEpoch,
     );
+  }
+
+  /// This person read the conversation with [peerAddress] up to the
+  /// friend's message [messageId] (here, or on another device of the
+  /// account): it and every message of the friend's before it are read.
+  /// One's own messages stay as they are: only the friend's receipt says
+  /// they were read ([_markMessageRead]); marking them here showed
+  /// "Przeczytano" under messages the friend never opened. Returns the ids
+  /// of the friend's messages read by now, or null when [messageId] is no
+  /// message of the friend's here.
+  Future<Set<String>?> _markIncomingReadUpTo({
+    required String peerAddress,
+    required String messageId,
+    required int readAtMillis,
+  }) async {
+    Set<String>? read;
+    await _editDeliveryOf(peerAddress, () async {
+      read = await _markIncomingReadUpToNow(
+        peerAddress: peerAddress,
+        messageId: messageId,
+        readAtMillis: readAtMillis,
+      );
+    });
+    return read;
+  }
+
+  Future<Set<String>?> _markIncomingReadUpToNow({
+    required String peerAddress,
+    required String messageId,
+    required int readAtMillis,
+  }) async {
+    if (!ref.mounted) {
+      return null;
+    }
+    bool friends(ChatMessage m) => m.direction == ChatMessageDirection.incoming;
+    final List<ChatMessage> thread = await _messageTimelineStore.load(
+      peerAddress,
+    );
+    final int index = thread.indexWhere(
+      (ChatMessage message) => message.id == messageId,
+    );
+    if (index < 0 || !friends(thread[index])) {
+      return null;
+    }
+    // What came before it here, or was written before it (another device of
+    // the account may have got the friend's messages in another order).
+    final int upTo = thread[index].sentAtMillis;
+    final List<ChatMessage> next = List<ChatMessage>.from(
+      thread,
+      growable: false,
+    );
+    bool changed = false;
+    for (int i = 0; i < next.length; i++) {
+      final ChatMessage m = next[i];
+      if (friends(m) &&
+          m.readAtMillis == null &&
+          (i <= index || m.sentAtMillis <= upTo)) {
+        next[i] = m.copyWith(readAtMillis: readAtMillis);
+        changed = true;
+      }
+    }
+    if (changed) {
+      await _saveTimelineChanges(peerAddress, thread, next);
+      _bumpTimelineRevision();
+    }
+    return <String>{
+      for (final ChatMessage m in next)
+        if (friends(m) && m.readAtMillis != null) m.id,
+    };
+  }
+
+  /// Another device of this account read the conversation with
+  /// [peerAddress] up to the friend's message `msgId` and sent the friend
+  /// its receipt: here it is read up to there too, its unread count drops
+  /// and, once nothing in it is unread, its notification goes. Nothing is
+  /// sent from here (the friend has the receipt already).
+  @override
+  Future<void> _applyReadFromOtherDevice(
+    String peerAddress,
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? id = payload['msgId'];
+    if (id is! String || id.trim().isEmpty) {
+      return;
+    }
+    await _enqueueStateWork(() async {
+      final FriendProfile? friend = state.friendByAddress(
+        PeerShareCodec.normalizeAddress(peerAddress),
+      );
+      if (friend == null) {
+        return;
+      }
+      final String peer = friend.address;
+      final Set<String>? read = await _markIncomingReadUpTo(
+        peerAddress: peer,
+        messageId: id.trim(),
+        readAtMillis: DateTime.now().millisecondsSinceEpoch,
+      );
+      if (read == null || !ref.mounted) {
+        return;
+      }
+      // The friend's messages that came while this app was in the
+      // background wait in the queue to be counted as unread once it is on
+      // screen: the ones read on the other device are not counted. They
+      // still name the last message in the chat list.
+      bool fromFriend(QueuedSignal q) =>
+          q.signal.type == ZenSignalType.message &&
+          PeerShareCodec.addressesEqual(q.signal.sender, peer);
+      final List<QueuedSignal> queue = await _queueStore.load();
+      final List<QueuedSignal> readQueued = <QueuedSignal>[
+        for (final QueuedSignal q in queue)
+          if (fromFriend(q) && read.contains(_incomingMessageIdOf(q.signal))) q,
+      ];
+      final Set<String> unreadQueued = <String>{
+        for (final QueuedSignal q in queue)
+          if (fromFriend(q) && !read.contains(_incomingMessageIdOf(q.signal)))
+            _incomingMessageIdOf(q.signal),
+      };
+      List<QueuedSignal> rest = queue;
+      if (readQueued.isNotEmpty) {
+        final Set<String> gone = <String>{
+          for (final QueuedSignal q in readQueued) q.id,
+        };
+        rest = <QueuedSignal>[
+          for (final QueuedSignal q in queue)
+            if (!gone.contains(q.id)) q,
+        ];
+        await _queueStore.save(rest);
+      }
+      // Still unread and already counted: the friend's messages here that
+      // are neither read nor waiting in the queue.
+      final int unread = (await _messageTimelineStore.load(peer))
+          .where(
+            (ChatMessage m) =>
+                m.direction == ChatMessageDirection.incoming &&
+                m.readAtMillis == null &&
+                !unreadQueued.contains(m.id),
+          )
+          .length;
+      final QueuedSignal? newest = readQueued.isEmpty
+          ? null
+          : readQueued.reduce(
+              (QueuedSignal a, QueuedSignal b) =>
+                  b.receivedAtMillis >= a.receivedAtMillis ? b : a,
+            );
+      final bool nothingUnread = unread == 0 && unreadQueued.isEmpty;
+      final InboxEntry? alert = nothingUnread
+          ? state.backgroundAlerts
+                .where(
+                  (InboxEntry e) =>
+                      _backgroundAlertDedupKeyForEntry(e) == 'message:$peer',
+                )
+                .firstOrNull
+          : null;
+      state = state.copyWith(
+        book: state.book.edit(
+          peer,
+          (FriendProfile f) => f.copyWith(
+            unreadCount: f.unreadCount < unread ? f.unreadCount : unread,
+            lastMessagePreview: newest == null
+                ? null
+                : _clipText(
+                    chatPreviewLine(
+                      newest.signal.content ?? t('Nowa wiadomość'),
+                      type: newest.signal.messageType,
+                      fileName: newest.signal.fileName,
+                      mimeType: newest.signal.mimeType,
+                    ),
+                    kMaxStoredPreviewChars,
+                  ),
+            lastActivityLabel: newest == null
+                ? null
+                : activityStamp(newest.receivedAtMillis),
+          ),
+        ),
+        backgroundAlerts: alert == null
+            ? null
+            : state.backgroundAlerts
+                  .where((InboxEntry e) => e.id != alert.id)
+                  .toList(growable: false),
+        pendingSignalCount: readQueued.isEmpty ? null : rest.length,
+      );
+      await _persistState();
+      if (nothingUnread) {
+        await _systemNotifications.dismissSlot('message:$peer');
+        if (alert != null) {
+          await _systemNotifications.dismiss(alert.id);
+        }
+      }
+    });
   }
 
   @override

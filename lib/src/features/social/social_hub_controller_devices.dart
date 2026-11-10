@@ -62,6 +62,11 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       await _applyMirroredChatChange(peerAddress, payload);
       return;
     }
+    if (type == 'message_read') {
+      // The receipt it sent the friend: the conversation was read there.
+      await _applyReadFromOtherDevice(peerAddress, payload);
+      return;
+    }
     if (type != 'message') {
       return;
     }

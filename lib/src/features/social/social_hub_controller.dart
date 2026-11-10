@@ -1715,6 +1715,13 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     Map<String, dynamic> payload,
   );
 
+  /// A conversation read on another device of this account
+  /// (`social_hub_controller_messages.dart`).
+  Future<void> _applyReadFromOtherDevice(
+    String peerAddress,
+    Map<String, dynamic> payload,
+  );
+
   Future<void> _sendCallSignal({
     required String remoteAddress,
     required String type,

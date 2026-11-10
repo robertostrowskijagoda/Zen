@@ -41,14 +41,18 @@ const String kMirrorType = 'acct_mirror';
 /// What is copied to the account's other devices: text messages, the
 /// disappearing-messages timer (those messages never go into the ledger's
 /// lasting copies, so this live copy is how the other devices see them),
-/// and reactions, edits and deletions of messages (1:1 and groups), so the
-/// conversation looks the same on each.
+/// reactions, edits and deletions of messages (1:1 and groups), so the
+/// conversation looks the same on each, and the read receipt sent to a
+/// friend, so a chat read on one device is read (and its notification gone)
+/// on the others. A device of an older version drops a copy of a type it
+/// does not know.
 const Set<String> kMirroredTypes = <String>{
   'message',
   'disappear_timer',
   'msg_react',
   'msg_edit',
   'msg_delete',
+  'message_read',
 };
 
 /// Whether [payload] is copied to the account's other devices.
