@@ -385,7 +385,14 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
           'i połączenia nadal przychodzą.',
         ),
       ),
-      const ZenCard(child: LockModeSettingChoice()),
+      // A first start chooses its lock for the first time, right after the
+      // password: no question. The setup back after an update, or opened
+      // from Ustawienia, changes a lock that is set: the question stays.
+      ZenCard(
+        child: LockModeSettingChoice(
+          confirmsLaterLock: !widget.firstStart || _afterUpdate,
+        ),
+      ),
     ],
     _SetupStep.notifications => <Widget>[
       ZenHero(

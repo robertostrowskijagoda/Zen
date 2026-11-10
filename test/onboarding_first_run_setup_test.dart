@@ -624,6 +624,70 @@ void main() {
     expect(find.byKey(const Key('app-unlock-password-field')), findsNothing);
   });
 
+  testWidgets('a first start with an app password chooses a later lock '
+      'without being asked for it; the setup back after an update asks', (
+    WidgetTester tester,
+  ) async {
+    _tallScreen(tester);
+    final Finder question = find.byKey(const Key('sensitive-access-dialog'));
+    Future<LocalAppSecurityService> securityFor(AppSettings settings) async {
+      final LocalAppSecurityService security = LocalAppSecurityService(
+        credentialsStore: MemorySecurityCredentialsStore(),
+        passwordIterations: 10,
+      );
+      await tester.runAsync(() async {
+        await security.initialize(settings: settings);
+        await security.setPassword('haslo-do-testu');
+      });
+      return security;
+    }
+
+    List overrides(
+      MemoryAppSettingsStore store,
+      AppSecurityService security,
+      AppSettings initial,
+    ) => [
+      appSettingsStoreProvider.overrideWithValue(store),
+      appSettingsInitialStateProvider.overrideWithValue(initial),
+      appSettingsHydrationEnabledProvider.overrideWithValue(false),
+      appSecurityServiceProvider.overrideWithValue(security),
+      firstRunSetupRequiredProvider.overrideWithValue(true),
+      permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+      gateDefaultsProvider.overrideWithValue(_Gates()),
+    ];
+
+    // The first start, right after the password: no question.
+    const AppSettings fresh = AppSettings();
+    final MemoryAppSettingsStore first = MemoryAppSettingsStore(fresh);
+    await tester.pumpWidget(
+      _gatedApp(overrides: overrides(first, await securityFor(fresh), fresh)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-welcome')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-lock-mode-systemRestart')));
+    await tester.pumpAndSettle();
+    expect(question, findsNothing);
+    expect((await first.load())!.lockMode, AppLockMode.systemRestart);
+
+    // The setup back after an update changes a lock that is set: it asks.
+    await tester.pumpWidget(const SizedBox.shrink());
+    const AppSettings existing = AppSettings(permissionsSetupDone: true);
+    final MemoryAppSettingsStore older = MemoryAppSettingsStore(existing);
+    await tester.pumpWidget(
+      _gatedApp(
+        overrides: overrides(older, await securityFor(existing), existing),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('first-run-update-note')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-lock-mode-systemRestart')));
+    await tester.pumpAndSettle();
+    expect(question, findsOneWidget);
+    await tester.tap(find.text('Anuluj'));
+    await tester.pumpAndSettle();
+    expect((await older.load())!.lockMode, existing.lockMode);
+  });
+
   testWidgets('it can be skipped: the defaults stay', (
     WidgetTester tester,
   ) async {
