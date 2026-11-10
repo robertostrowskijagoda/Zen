@@ -181,6 +181,94 @@ final class _World {
 }
 
 void main() {
+  test('a notice kit of 1.16.4 (no word on who speaks in which group) '
+      'leaves group messages and group calls to the capability until the '
+      'app writes a new kit; a kit of today, with no group at all, stays '
+      'quiet for a group nobody joined', () {
+    final String ada = PeerShareCodec.normalizeAddress('200::ada');
+    final String bob = PeerShareCodec.normalizeAddress('200::b0b');
+    final String eve = PeerShareCodec.normalizeAddress('200::e5e');
+    final String me = PeerShareCodec.normalizeAddress('200::5e1f');
+    ZenSignal signal(String from, String type) => zenSignalFromTransportPayload(
+      sender: from,
+      payload: <String, dynamic>{
+        'type': type,
+        'groupId': 'group-1-2',
+        'msgId': 'm1',
+        'text': 'hej',
+        'callId': 'gc-1',
+        'kind': 'audio',
+      },
+    )!;
+    // Ada is a friend, Bob a member of a joined group, Eve nobody.
+    AlertFacts factsOf(LockedNoticeKit kit) => kit.alertFacts(
+      isFriend: (String a) => a == ada,
+      inJoinedGroup: (String a) => a == ada || a == bob,
+    );
+    const int now = 1700000000000;
+
+    // As 1.16.4 wrote it at the level "generic": no members, no tags.
+    final LockedNoticeKit old = LockedNoticeKit.fromJson(<String, dynamic>{
+      'v': 1,
+      'p': 'generic',
+      'me': me,
+      'gm': false,
+    })!;
+    expect(old.speakersKnown, isFalse);
+    final AlertFacts before = factsOf(old);
+    for (final String member in <String>[ada, bob]) {
+      expect(
+        incomingAlertOf(
+          signal(member, 'group_message'),
+          before,
+          nowMillis: now,
+        ),
+        IncomingAlert.notice,
+        reason: member,
+      );
+      expect(
+        incomingAlertOf(
+          signal(member, 'group_call_invite'),
+          before,
+          nowMillis: now,
+        ),
+        IncomingAlert.ring,
+        reason: member,
+      );
+    }
+    expect(
+      incomingAlertOf(signal(eve, 'group_call_invite'), before, nowMillis: now),
+      isNot(IncomingAlert.ring),
+    );
+
+    // A kit of today round the same phone, no group joined: its word
+    // counts, and the capability's does not.
+    final LockedNoticeKit today = LockedNoticeKit.fromJson(
+      const LockedNoticeKit(
+        privacy: NotificationPrivacy.generic,
+        groupMentionsOnly: false,
+      ).toJson(),
+    )!;
+    expect(today.speakersKnown, isTrue);
+    final AlertFacts after = factsOf(today);
+    for (final String member in <String>[ada, bob]) {
+      expect(
+        incomingAlertOf(signal(member, 'group_message'), after, nowMillis: now),
+        isNot(IncomingAlert.notice),
+        reason: member,
+      );
+      expect(
+        incomingAlertOf(
+          signal(member, 'group_call_invite'),
+          after,
+          nowMillis: now,
+        ),
+        isNot(IncomingAlert.ring),
+        reason: member,
+      );
+    }
+  });
+
   group('AppSettings', () {
     test('every kind is on at first, far friends\' posts too', () {
       const AppSettings settings = AppSettings();

@@ -673,10 +673,16 @@ final class LockedReceiver {
   /// What decides whether a call rings and a chat message is told about,
   /// by the app's own rules ([incomingAlertOf]): who is a friend from the
   /// capability, the rest from the notice kit. Without a kit only friends'
-  /// calls and messages count.
+  /// calls and messages count; with a kit of before 1.16.5, which does not
+  /// say who speaks in which group, the capability's friends and group
+  /// members do, as they did then.
   late final AlertFacts _alertFacts = _noticeKit.alertFacts(
     isFriend: (String address) =>
         _capability.kindOf(address) == BackgroundContactKind.friend,
+    inJoinedGroup: (String address) => switch (_capability.kindOf(address)) {
+      BackgroundContactKind.friend || BackgroundContactKind.groupMember => true,
+      _ => false,
+    },
   );
 
   /// The mention notices of this run, per sender, as the app limits them.

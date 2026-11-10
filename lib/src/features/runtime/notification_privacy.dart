@@ -471,6 +471,7 @@ final class LockedNoticeKit {
     this.groupMentionsOnly = true,
     this.self = '',
     this.memberTags = const <String>{},
+    this.speakersKnown = true,
   });
 
   /// Conversations muted for a while (`SocialHubState.mutedUntil`).
@@ -496,6 +497,15 @@ final class LockedNoticeKit {
   /// written before 1.16.5 have none, and then only [members] count.
   final Set<String> memberTags;
 
+  /// Whether this kit says who speaks in the joined groups ([memberTags]).
+  /// A kit written before 1.16.5 does not (it lists the members only of
+  /// groups whose level shows the sender): until the app is unlocked once
+  /// and writes a new one, the locked receiver takes the word of the
+  /// background capability instead, as 1.16.4 did (a friend, or a member
+  /// of some joined group), so nobody's group calls and messages go quiet
+  /// over an update.
+  final bool speakersKnown;
+
   /// The tag of [address] as one who speaks in the group chat [groupKey]
   /// ([groupConversationKey]).
   static String memberTag(String groupKey, String address) => crypto.sha256
@@ -518,9 +528,13 @@ final class LockedNoticeKit {
 
   /// The facts the locked receiver decides with ([incomingAlertOf]): the
   /// kit's, and who is a friend ([isFriend], from the background
-  /// capability).
-  AlertFacts alertFacts({required bool Function(String address) isFriend}) =>
-      _KitAlertFacts(this, isFriend);
+  /// capability). [inJoinedGroup] (the capability's word that an address
+  /// is a friend or a member of some joined group) counts only for a kit
+  /// that does not say who speaks where ([speakersKnown]).
+  AlertFacts alertFacts({
+    required bool Function(String address) isFriend,
+    bool Function(String address)? inJoinedGroup,
+  }) => _KitAlertFacts(this, isFriend, inJoinedGroup);
 
   /// The kinds of news with a level of their own
   /// (`AppSettings.noticePrivacy`): a conversation's own level comes first,
@@ -720,7 +734,9 @@ final class LockedNoticeKit {
     if (groupNotifyAll.isNotEmpty) 'ga': groupNotifyAll,
     if (!groupMentionsOnly) 'gm': false,
     if (self.isNotEmpty) 'me': self,
-    if (memberTags.isNotEmpty) 'gt': memberTags.toList(growable: false),
+    // Always there, empty too: its presence says the kit knows who speaks
+    // where ([speakersKnown]).
+    'gt': memberTags.toList(growable: false),
     if (kindLevels.isNotEmpty)
       'k': <String, String>{
         for (final MapEntry<NoticeKind, NotificationPrivacy> e
@@ -835,6 +851,7 @@ final class LockedNoticeKit {
           for (final Object? tag in gt.take(maxEntries))
             if (tag is String && _tagPattern.hasMatch(tag)) tag,
       },
+      speakersKnown: json['gt'] is List,
       kindLevels: <NoticeKind, NotificationPrivacy>{
         if (json['k'] case final Map<dynamic, dynamic> k)
           for (final MapEntry<dynamic, dynamic> e in k.entries)
@@ -850,10 +867,11 @@ final class LockedNoticeKit {
 
 /// [LockedNoticeKit.alertFacts]: what the locked receiver knows.
 final class _KitAlertFacts implements AlertFacts {
-  _KitAlertFacts(this._kit, this._isFriend);
+  _KitAlertFacts(this._kit, this._isFriend, this._inJoinedGroup);
 
   final LockedNoticeKit _kit;
   final bool Function(String address) _isFriend;
+  final bool Function(String address)? _inJoinedGroup;
 
   @override
   bool isFriend(String address) =>
@@ -861,7 +879,10 @@ final class _KitAlertFacts implements AlertFacts {
 
   @override
   bool speaksIn(String groupId, String address) =>
-      _kit.speaksIn(groupId, address);
+      _kit.speaksIn(groupId, address) ||
+      (!_kit.speakersKnown &&
+          (_inJoinedGroup?.call(PeerShareCodec.normalizeAddress(address)) ??
+              false));
 
   @override
   String get self => _kit.self;
