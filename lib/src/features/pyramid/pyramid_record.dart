@@ -122,6 +122,19 @@ abstract final class PyrT {
   static const String appeal = 'appeal';
   static const String appealAnswer = 'appans';
 
+  /// The seal of a treasurers' era ([PyrSeal]): signed by most of the
+  /// treasurers who came after it, it fixes who the era's treasurers were,
+  /// from when to when, and which private operations dated in it count.
+  /// Nothing dated in a sealed era changes it any more: an operation it
+  /// does not list counts nowhere, a change of the tree dated into it
+  /// folds after the seals.
+  static const String seal = 'seal';
+
+  /// The close of a cell vote that ended by time: signed by most of the
+  /// vote's ring, it lists the votes that count. A vote it does not list
+  /// counts nowhere, whenever and however it comes.
+  static const String voteClose = 'vclose';
+
   /// Kinds published through a friend outside the cell, so the first phone
   /// to show them is not the author's: the anonymous request and the vote
   /// (signed by a one-time key on the cell's ballot).
@@ -141,6 +154,38 @@ abstract final class PyrT {
     emitRule,
     suit,
     appeal,
+  };
+
+  /// Kinds a phone folds at the time it first saw them when they came late
+  /// ([kPyrLateMs]), not at their own: [timed], the changes of the tree
+  /// that touch the treasurers' levels (the service notes only those late:
+  /// one dated back would otherwise move a past set of treasurers and undo
+  /// a payment that counted), and the cell vote's cards and votes (one
+  /// dated back into a vote that ended would turn it around). The seals of
+  /// the treasurers' eras and the closes of cell votes then fix the same
+  /// on every phone, also on one that was not there.
+  static const Set<String> foldedLate = <String>{
+    ...timed,
+    admit,
+    swap,
+    leave,
+    fill,
+    absent,
+    remove,
+    migrate,
+    ballot,
+    vote,
+  };
+
+  /// Kinds that change who sits where: what may move the treasurers.
+  static const Set<String> tree = <String>{
+    admit,
+    swap,
+    leave,
+    fill,
+    absent,
+    remove,
+    migrate,
   };
 
   /// Kinds whose signatures carry their ML-DSA keys (the keyed form,

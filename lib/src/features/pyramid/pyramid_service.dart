@@ -758,9 +758,9 @@ final class PyramidService extends ChangeNotifier {
   /// asking, so late approvals never publish a record dated in the past.
   final Map<String, int> _consent = <String, int>{};
 
-  /// Records of [PyrT.timed] this phone first saw late (id → when seen,
-  /// [kPyrLateMs]): their waits and limits count from then here
-  /// ([PyramidState.fold]).
+  /// Records of [PyrT.foldedLate] this phone first saw late (id → when
+  /// seen, [kPyrLateMs]): their waits and limits count from then here, and
+  /// they fold then ([PyramidState.fold]).
   final Map<String, int> _late = <String, int>{};
 
   /// When this run of the app took each record in (those read from disk
@@ -1689,11 +1689,13 @@ final class PyramidService extends ChangeNotifier {
     final int t = _now();
     final PyramidRecord? had = _records[r.id];
     if (had == null &&
-        PyrT.timed.contains(r.type) &&
+        _foldsLate(r) &&
         r.at < _keptBefore(t - kPyrLateMs) - kPyrLateMs) {
       // Dated well before records this phone already had for a while:
       // late — back-dated past its wait, or held back. Its wait counts from
-      // now here.
+      // now here; a change of the treasurers, a vote's card or vote folds
+      // now here (a past set of treasurers, a vote that ended, stays as it
+      // was).
       _late[r.id] = max(t, r.at);
     }
     _keptAt.putIfAbsent(r.id, () => t);
@@ -1714,6 +1716,19 @@ final class PyramidService extends ChangeNotifier {
       _mine.remove(id);
       _mineNeed.remove(id);
     }
+  }
+
+  /// Whether [r] folds at the time this phone saw it when it comes late
+  /// ([PyrT.foldedLate]): a change of the tree only where it may change the
+  /// treasurers.
+  bool _foldsLate(PyramidRecord r) {
+    if (!PyrT.foldedLate.contains(r.type)) {
+      return false;
+    }
+    if (!PyrT.tree.contains(r.type)) {
+      return true;
+    }
+    return _state?.touchesTreasurers(r) ?? true;
   }
 
   /// Records whose signatures name ML-DSA keys this phone does not hold
@@ -3604,6 +3619,9 @@ final class PyramidService extends ChangeNotifier {
     if (r == null ||
         vp == null ||
         mp == null ||
+        // Only while the referendum runs: a vote taken after it ended
+        // would move a count already sent up.
+        _now() > r.end + kPyrMaxSkewMs ||
         !s.eligible(r, voter) ||
         opt < 0 ||
         opt >= r.options.length) {
@@ -3781,6 +3799,9 @@ final class PyramidService extends ChangeNotifier {
         'seq': _treasury.nextSeq(payer),
         'memo': memo,
         'cond': ?cond,
+        // A secret of the parties and the treasurers: the id a public seal
+        // lists cannot be worked out from a guess at the payment.
+        'nc': _newId(24),
       },
     ).signedBy(me);
     await _treasury.toTreasurers(order);
@@ -3843,6 +3864,7 @@ final class PyramidService extends ChangeNotifier {
         'x': transferId,
         'ok': ok,
         if (ok && next != null) 'next': next,
+        'nc': _newId(24),
       },
     ).signedBy(me);
     await _treasury.toTreasurers(r);
@@ -7489,6 +7511,10 @@ final class PyramidService extends ChangeNotifier {
     if (identity != null) {
       await _cardDuties(s, identity);
     }
+    final LedgerKeyPair? signer = _signer;
+    if (signer != null) {
+      await _closeDuties(s, signer);
+    }
     final int t = _now();
     _consent.removeWhere((String _, int until) => until <= t);
     // The private money: the KEM key published, orders resent, the
@@ -7537,6 +7563,56 @@ final class PyramidService extends ChangeNotifier {
         need: 1,
       );
     }
+  }
+
+  /// Closes each cell vote this person is in the ring of, once it ended by
+  /// time ([PyrT.voteClose]): the votes that had come here, signed by the
+  /// app itself. Members who saw the same votes sign the same record, and
+  /// their signatures meet in it as it goes round; a vote dated back into
+  /// the vote afterwards is then refused on every phone.
+  Future<void> _closeDuties(PyramidState s, LedgerKeyPair me) async {
+    final int t = _now();
+    for (final PyrElection e in s.elections.values.toList()) {
+      if (!e.closed ||
+          e.close != null ||
+          e.allVoted ||
+          !e.ring.contains(me.id) ||
+          t < e.deadline + kPyrMaxSkewMs ||
+          t > e.deadline + kPyrMaxOrderAgeMs) {
+        continue;
+      }
+      final PyramidRecord bare = PyramidRecord(
+        body: <String, dynamic>{
+          't': PyrT.voteClose,
+          'py': s.id,
+          'at': e.deadline,
+          'by': List<String>.of(e.ring)..sort(),
+          'elect': e.id,
+          'votes': e.voteIds.values.toList()..sort(),
+        },
+      );
+      await _signOnce('vclose|${e.id}', bare, me);
+    }
+  }
+
+  /// Signs [bare] (adding to the signatures already here) and takes it
+  /// in, unless this account already signed another record for [slot]:
+  /// one seal of an era, one close of a vote — two would contradict each
+  /// other.
+  Future<void> _signOnce(
+    String slot,
+    PyramidRecord bare,
+    LedgerKeyPair me,
+  ) async {
+    final String? done = _signedOrders[slot];
+    final PyramidRecord? had = _records[bare.id];
+    if ((done != null && done != bare.id) ||
+        (had?.sigs.containsKey(me.id) ?? false)) {
+      return;
+    }
+    _signedOrders[slot] = bare.id;
+    await _save();
+    await ingest(await (had ?? bare).signedBy(me));
   }
 
   /// The power key's part of the duties. The head now at the top makes a

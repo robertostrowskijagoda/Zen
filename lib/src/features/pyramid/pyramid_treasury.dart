@@ -20,6 +20,16 @@ const int kPyrLedgerFrameBytes = 900 * 1024;
 /// id).
 const int kPyrStatementOps = 50;
 
+/// How long after an era of the treasurers ended its seal is signed: the
+/// treasurers' ledgers meet in between ([kPyrLedgerSyncEveryMs]), so they
+/// list the same operations.
+const int kPyrSealWaitMs = 3600 * 1000;
+
+/// How long after offering its ledger to the other treasurers a treasurer
+/// waits before it signs a seal: what it missed (back from being away)
+/// comes first.
+const int kPyrSealSyncedMs = 10 * 60 * 1000;
+
 /// Kinds of the sealed messages ([PyramidTypes.priv]).
 abstract final class _Priv {
   /// An order or a settlement for a treasurer to sign.
@@ -290,16 +300,26 @@ final class _Treasury {
     return me != null && s != null && s.treasurers.contains(me);
   }
 
+  /// Whether this phone keeps the whole ledger: a treasurer's, or one's
+  /// who was until lately ([kPyrHandoverMs]).
+  bool _keeps(PyramidState s) {
+    final String? me = pyr.myKey;
+    return me != null &&
+        (s.treasurers.contains(me) || pyr._now() < treasurerUntil);
+  }
+
   /// The ledger as this phone has it (computed again only when the ledger,
-  /// the statements or the pyramid changed).
+  /// the statements or the pyramid changed). A whole ledger is also
+  /// checked for the numbers and the money ([PyrLedger.compute]).
   PyrLedgerView view(PyramidState s) {
-    final Object key = (s, s.revision, _rev);
+    final bool whole = _keeps(s);
+    final Object key = (s, s.revision, _rev, whole);
     final PyrLedgerView? had = _view;
     if (had != null && _viewKey == key) {
       return had;
     }
     _viewKey = key;
-    return _view = ledger.compute(s);
+    return _view = ledger.compute(s, whole: whole);
   }
 
   /// The statement most treasurers agree on, if any.
@@ -1071,5 +1091,49 @@ final class _Treasury {
       await askStatements();
     }
     await syncDuty();
+    await _sealDuty();
+  }
+
+  // ---- seals of the eras ----
+
+  /// Seals the oldest era of the treasurers that ended ([PyrT.seal]), when
+  /// this person is one of the treasurers after it and keeps the whole
+  /// ledger, [kPyrSealWaitMs] after the era's end and [kPyrSealSyncedMs]
+  /// after this phone last offered its ledger to the others: the
+  /// operations dated in it that count here. The app signs by itself;
+  /// treasurers whose ledgers agree sign the same record, and their
+  /// signatures meet in it as it goes round. Never two different seals for
+  /// one era, on any of the account's devices: that would be proof of
+  /// cheating.
+  Future<void> _sealDuty() async {
+    final PyramidState? s = pyr.state;
+    final LedgerKeyPair? me = pyr._signer;
+    if (s == null || me == null || !_keeps(s)) {
+      return;
+    }
+    final PyrEraToSeal? era = s.unsealedEra;
+    final int now = pyr._now();
+    if (era == null ||
+        !era.next.contains(me.id) ||
+        now < era.to + kPyrSealWaitMs ||
+        syncedAt <= era.to ||
+        now - syncedAt < kPyrSealSyncedMs) {
+      return;
+    }
+    final PyrLedgerView v = view(s);
+    final PyramidRecord bare = PyramidRecord(
+      body: PyrSeal.body(
+        pyramid: s.id,
+        n: era.n,
+        prev: era.prev,
+        from: era.from,
+        to: era.to,
+        set: era.set,
+        next: era.next,
+        ops: ledger.countedBetween(v, era.from, era.to),
+        changes: era.changes,
+      ),
+    );
+    await pyr._signOnce('seal|${era.n}|${era.prev}', bare, me);
   }
 }
