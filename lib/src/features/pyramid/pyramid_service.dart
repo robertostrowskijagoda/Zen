@@ -673,8 +673,9 @@ final class PyramidService extends ChangeNotifier {
   final Map<String, int> myVotes = <String, int>{};
   final Map<String, String> _tallySent = <String, String>{};
 
-  /// Slots this person signed as a treasurer (one operation each; shared
-  /// with the person's other devices), and own orders and settlements
+  /// Slots this person signed as a treasurer (the latest operation each:
+  /// another only once the one before could no longer count; shared with
+  /// the person's other devices), and own orders and settlements
   /// waiting for the treasurers.
   final Map<String, String> _signedOrders = <String, String>{};
   final Map<String, PyramidRecord> _payments = <String, PyramidRecord>{};
@@ -3797,7 +3798,8 @@ final class PyramidService extends ChangeNotifier {
         'to': to,
         'amount': amount,
         'seq': _treasury.nextSeq(payer),
-        'memo': memo,
+        // Within what a treasurer keeps ([kPyrMaxOpBytes]).
+        'memo': _cut(memo, 500),
         'cond': ?cond,
         // A secret of the parties and the treasurers: the id a public seal
         // lists cannot be worked out from a guess at the payment.
@@ -3824,8 +3826,11 @@ final class PyramidService extends ChangeNotifier {
       if (r.type == PyrT.transfer) r,
   ];
 
-  /// Stops sending order [id] (the treasurers who signed it keep their
-  /// signature: its number stays taken only if most of them did).
+  /// Stops sending order [id]. The treasurers who signed it keep their
+  /// signature, and it may still count if most of them did; the next order
+  /// takes the same number, and those who signed this one sign the next
+  /// too once this one can no longer count — enough of the others signed
+  /// later orders for the number instead ([PyrLedger.passed]).
   void cancelPending(String id) {
     _payments.remove(id);
     _resentAt.remove(id);
@@ -6571,7 +6576,7 @@ final class PyramidService extends ChangeNotifier {
         final PyramidState? s = state;
         if (s != null &&
             s.members.values.any((PyrMember m) => _n(m.addr) == from)) {
-          await _treasury.onFrame(p);
+          await _treasury.onFrame(p, from: from);
         }
       case PyramidTypes.report:
         await _onReport(from, p);

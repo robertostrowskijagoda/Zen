@@ -400,13 +400,13 @@ final class _Treasury {
   }
 
   /// A treasurer checks an order against its own ledger and signs it (once
-  /// per slot), keeping its signature as evidence; the signature goes back
-  /// to whoever signed the order.
+  /// per slot, [_consider]), keeping its signature as evidence; the
+  /// signature goes back to whoever signed the order.
   Future<void> _onOrder(Map<String, dynamic> json) async {
     final LedgerKeyPair? me = pyr._identity;
     final PyramidState? s = pyr.state;
     final PyramidRecord? raw = PyramidRecord.fromJson(json['r']);
-    if (me == null || s == null || raw == null) {
+    if (me == null || s == null || raw == null || !PyrLedger.fits(raw)) {
       return;
     }
     if (!s.treasurersAt(raw.at).contains(me.id) ||
@@ -414,9 +414,25 @@ final class _Treasury {
       return;
     }
     final PyramidRecord? op = await checked(raw, s);
-    if (op == null) {
-      return;
+    if (op != null) {
+      await _consider(op, s, me);
     }
+  }
+
+  /// Signs [op] when an honest treasurer may: one operation per slot,
+  /// and another only when it is later than the one signed and that one
+  /// can no longer count ([PyrLedger.passed]: its era sealed without it,
+  /// or enough of its era's treasurers signed later ones instead) — so a
+  /// number left split between orders, cancelled or dropped or sent by
+  /// two devices at once, goes to the latest, while an order that counts
+  /// or still can is never left behind. An order refused for its slot is
+  /// kept as evidence when a treasurer of its time signed it: it is what
+  /// shows the next one the way.
+  Future<void> _consider(
+    PyramidRecord op,
+    PyramidState s,
+    LedgerKeyPair me,
+  ) async {
     final int now = pyr._now();
     final String payer = op.type == PyrT.transfer ? op.str('from') : '';
     final List<int> times = <int>[
@@ -426,11 +442,22 @@ final class _Treasury {
     final String slot = PyrLedger.slotOf(op);
     final String? already = pyr._signedOrders[slot];
     if (already != null && already != op.id) {
-      return;
+      final PyramidRecord? had = ledger.ops[already];
+      if (had == null ||
+          !PyrLedger.isLater(op, had) ||
+          !PyrLedger.passed(had, <PyramidRecord>[
+            ...ledger.inSlot(slot),
+            op,
+          ], s)) {
+        if (_evidence(op, s) && ledger.merge(op)) {
+          await save();
+        }
+        return;
+      }
     }
     // The same order again (its signature lost on the way) is signed
     // again, not counted twice.
-    if (already == null &&
+    if (already != op.id &&
         PyrLedger.problem(op, s, view(s), now, signedToday: times.length) !=
             null) {
       return;
@@ -533,8 +560,8 @@ final class _Treasury {
     }
   }
 
-  /// Operations that count, or evidence: a treasurer keeps them all, anybody
-  /// else only a set that concerns them. A payment to this person is told.
+  /// Operations that count: a treasurer keeps them all, anybody else only
+  /// a set that concerns them. A payment to this person is told.
   Future<void> _onDone(Map<String, dynamic> json) async {
     final PyramidState? s = pyr.state;
     final String? me = pyr.myKey;
@@ -561,12 +588,12 @@ final class _Treasury {
     }
     bool changed = false;
     for (final PyramidRecord op in ops) {
-      // Evidence (not counting yet) only for a treasurer; anybody else
-      // keeps what counts by the rules every phone counts by (signed by
-      // most treasurers of its time, dated within their time, nothing an
-      // honest treasurer refuses whoever signed it).
-      if (keeper ||
-          (PyrLedger.isFinal(op, s) && PyrLedger.breaks(op, s) == null)) {
+      // What counts by the rules every phone counts by (signed by most
+      // treasurers of its time, dated within their time, nothing an honest
+      // treasurer refuses whoever signed it), on a treasurer's phone too:
+      // anybody can send this, and evidence comes only from the treasurers
+      // themselves ([_onOps], [_consider]).
+      if (PyrLedger.isFinal(op, s) && PyrLedger.breaks(op, s) == null) {
         changed = ledger.merge(op) || changed;
       }
     }
@@ -796,7 +823,9 @@ final class _Treasury {
       for (final Object? x in ops.take(kPyrStatementOps)) {
         final PyramidRecord? raw = PyramidRecord.fromJson(x);
         final PyramidRecord? op = raw == null ? null : await checked(raw, s);
-        if (op != null && PyrLedger.isFinal(op, s)) {
+        if (op != null &&
+            PyrLedger.isFinal(op, s) &&
+            PyrLedger.breaks(op, s) == null) {
           ledger.merge(op);
         }
       }
@@ -860,6 +889,7 @@ final class _Treasury {
       return;
     }
     syncedAt = now;
+    await _tidy(s);
     final Map<String, String> d = digest();
     for (final String k in s.treasurers) {
       if (k != me) {
@@ -886,10 +916,18 @@ final class _Treasury {
     }.where((String b) => mine[b] != d[b] && b.length <= 2).toList()..sort();
   }
 
+  /// Whether [f], named in a sync request as the one who asks, is the
+  /// member whose device sent it ([from]): the ledger goes only to who
+  /// asked for it, never where somebody else points it.
+  bool _sentBy(PyramidState s, String f, String? from) =>
+      from != null &&
+      pyr._n(s.members[f]?.addr ?? '') == from &&
+      from.isNotEmpty;
+
   /// Another treasurer's digest: a current treasurer gets what differs
   /// from here, and is asked for theirs; anybody else (a former treasurer
   /// handing over) is only asked.
-  Future<void> _onDigest(Map<String, dynamic> json) async {
+  Future<void> _onDigest(Map<String, dynamic> json, String? from) async {
     final PyramidState? s = pyr.state;
     final String? me = pyr.myKey;
     final Object? f = json['f'];
@@ -899,9 +937,11 @@ final class _Treasury {
         f is! String ||
         d is! Map ||
         f == me ||
-        !s.treasurers.contains(me)) {
+        !s.treasurers.contains(me) ||
+        !_sentBy(s, f, from)) {
       return;
     }
+    await _tidy(s);
     final List<String> differ = _differing(d);
     if (differ.isEmpty) {
       return;
@@ -912,9 +952,10 @@ final class _Treasury {
     }
   }
 
-  /// Asked for buckets: sent only to a treasurer now (or, by one who
-  /// stopped being one, to the new ones — that is the handover).
-  Future<void> _onWant(Map<String, dynamic> json) async {
+  /// Asked for buckets: sent only to a treasurer now who asked itself (or,
+  /// by one who stopped being one, to the new ones — that is the
+  /// handover).
+  Future<void> _onWant(Map<String, dynamic> json, String? from) async {
     final PyramidState? s = pyr.state;
     final String? me = pyr.myKey;
     final Object? f = json['f'];
@@ -923,7 +964,8 @@ final class _Treasury {
         me == null ||
         f is! String ||
         b is! List ||
-        !s.treasurers.contains(f)) {
+        !s.treasurers.contains(f) ||
+        !_sentBy(s, f, from)) {
       return;
     }
     final bool keeper =
@@ -974,9 +1016,97 @@ final class _Treasury {
     );
   }
 
+  /// Whether [op] (its signatures checked) is worth a place in a whole
+  /// ledger as evidence, whether it counts or not: within
+  /// [kPyrMaxOpBytes], dated within the treasurers' time (not before the
+  /// first era, not ahead of this clock), and signed by a treasurer of its
+  /// time — what only treasurers make. How many of one payer's that do
+  /// not count are kept is bounded by [_tidy].
+  bool _evidence(PyramidRecord op, PyramidState s) =>
+      PyrLedger.fits(op) &&
+      s.treasurerEras.isNotEmpty &&
+      op.at >= s.treasurerEras.first.$1 &&
+      op.at <= pyr._now() + kPyrMaxSkewMs &&
+      op.tsigs.keys.any(s.treasurersAt(op.at).contains);
+
+  /// The ledger's last tidy: the ledger's revision and the pyramid's.
+  Object? _tidied;
+
+  /// Keeps a whole ledger to what [_evidence] admits, and of each payer's
+  /// operations that do not count only the newest
+  /// [kPyrMaxEvidencePerPayer] — the same rules on every treasurer's
+  /// phone, so their ledgers meet; what came in before them (or another
+  /// way) goes. Signs, as [_consider] would, a later order for a slot
+  /// this treasurer signed whose earlier one can no longer count: a
+  /// number split between devices or orders frees itself when the
+  /// ledgers meet, without waiting for the payer to send again.
+  Future<void> _tidy(PyramidState s) async {
+    if (!_keeps(s)) {
+      return;
+    }
+    final Object key = (s, s.revision, _rev);
+    if (_tidied == key) {
+      return;
+    }
+    final PyrLedgerView v = view(s);
+    final Map<String, List<PyramidRecord>> waiting =
+        <String, List<PyramidRecord>>{};
+    final Set<String> drop = <String>{};
+    for (final PyramidRecord op in ledger.ops.values) {
+      if (v.counted.contains(op.id)) {
+        continue;
+      }
+      if (!_evidence(op, s)) {
+        drop.add(op.id);
+        continue;
+      }
+      (waiting[PyrLedger.payerOf(op)] ??= <PyramidRecord>[]).add(op);
+    }
+    for (final List<PyramidRecord> l in waiting.values) {
+      if (l.length > kPyrMaxEvidencePerPayer) {
+        l.sort(
+          (PyramidRecord a, PyramidRecord b) =>
+              PyrLedger.isLater(a, b) ? -1 : 1,
+        );
+        drop.addAll(<String>[
+          for (final PyramidRecord op in l.skip(kPyrMaxEvidencePerPayer)) op.id,
+        ]);
+      }
+    }
+    if (drop.isNotEmpty) {
+      ledger.ops.removeWhere((String id, PyramidRecord _) => drop.contains(id));
+      await save();
+      pyr._changed();
+    }
+    _tidied = (s, s.revision, _rev);
+    final LedgerKeyPair? me = pyr._identity;
+    if (me == null || !s.treasurers.contains(me.id)) {
+      return;
+    }
+    // The latest operation of each slot this treasurer signed another one
+    // for.
+    final Map<String, PyramidRecord> latest = <String, PyramidRecord>{};
+    for (final PyramidRecord op in ledger.ops.values) {
+      final String slot = PyrLedger.slotOf(op);
+      final String? mine = pyr._signedOrders[slot];
+      final PyramidRecord? had = latest[slot];
+      if (mine != null &&
+          mine != op.id &&
+          !v.counted.contains(op.id) &&
+          s.treasurersAt(op.at).contains(me.id) &&
+          (had == null || PyrLedger.isLater(op, had))) {
+        latest[slot] = op;
+      }
+    }
+    for (final PyramidRecord op in latest.values) {
+      await _consider(op, s, me);
+    }
+  }
+
   /// Part of another treasurer's ledger: operations whose payer's
-  /// signature holds, with the treasurer signatures that hold (evidence
-  /// counts too), and notes that open their commitment.
+  /// signature holds, with the treasurer signatures that hold, that
+  /// [_evidence] admits (evidence counts too), and notes that open their
+  /// commitment.
   Future<void> _onOps(Map<String, dynamic> json) async {
     final PyramidState? s = pyr.state;
     final String? me = pyr.myKey;
@@ -990,8 +1120,10 @@ final class _Treasury {
     if (ops is List) {
       for (final Object? x in ops) {
         final PyramidRecord? raw = PyramidRecord.fromJson(x);
-        final PyramidRecord? op = raw == null ? null : await checked(raw, s);
-        if (op != null && op.tsigs.keys.any(s.treasurersAt(op.at).contains)) {
+        final PyramidRecord? op = raw == null || !PyrLedger.fits(raw)
+            ? null
+            : await checked(raw, s);
+        if (op != null && _evidence(op, s)) {
           changed = ledger.merge(op) || changed;
         }
       }
@@ -1008,19 +1140,22 @@ final class _Treasury {
     if (changed) {
       await save();
       pyr._changed();
+      await _tidy(s);
     }
   }
 
   // ---- receiving ----
 
-  Future<void> onFrame(Map<String, dynamic> p) async {
+  /// A sealed frame from the device at [from] (a normalized address).
+  Future<void> onFrame(Map<String, dynamic> p, {required String from}) async {
     final Map<String, dynamic>? json = await open(p);
     if (json != null) {
-      await _handle(json);
+      await _handle(json, from: from);
     }
   }
 
-  Future<void> _handle(Map<String, dynamic> json) async {
+  /// [json] from the device at [from]; null: from this phone itself.
+  Future<void> _handle(Map<String, dynamic> json, {String? from}) async {
     switch (json['k']) {
       case _Priv.order:
         await _onOrder(json);
@@ -1035,9 +1170,9 @@ final class _Treasury {
       case _Priv.statement:
         await _onStatement(json);
       case _Priv.digest:
-        await _onDigest(json);
+        await _onDigest(json, from);
       case _Priv.want:
-        await _onWant(json);
+        await _onWant(json, from);
       case _Priv.ops:
         await _onOps(json);
     }
@@ -1069,11 +1204,17 @@ final class _Treasury {
       );
     }
     // Orders and settlements still waiting go out again as they are (every
-    // half hour), until they count, are a week old, or the treasurers
-    // changed since (the new ones sign none from before).
+    // half hour), until they count, are a week old, the treasurers changed
+    // since (the new ones sign none from before), or their number or
+    // payment went to another one (sent from another device of the
+    // account).
+    final PyrLedgerView v = view(s);
     for (final PyramidRecord r in pyr._payments.values.toList()) {
       final PyramidRecord? kept = ledger.ops[r.id];
+      final String? took = v.slots[PyrLedger.slotOf(r)];
       if ((kept != null && PyrLedger.isFinal(kept, s)) ||
+          (took != null && took != r.id) ||
+          (r.type == PyrT.transfer && r.integer('seq') < nextSeq(me)) ||
           now - r.at > kPyrMaxOrderAgeMs ||
           r.at < s.treasurerEraStart) {
         pyr._payments.remove(r.id);

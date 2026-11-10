@@ -7,10 +7,13 @@
 /// public log. A treasurer signs it only against its own copy of the
 /// private ledger (the next number of the account, the money there, the
 /// daily limit, fresh) and never two operations for one slot (the
-/// account's number, or one settlement per payment). An operation counts
-/// once most of the treasurers of its time signed it ([PyrLedger.isFinal]):
-/// two majorities share an honest treasurer, so as long as most of them
-/// are honest nothing is spent twice.
+/// account's number, or one settlement per payment) — but for a later one
+/// once the one it signed can no longer count ([PyrLedger.passed]), so a
+/// number split between orders that none of them can reach a majority
+/// with is not lost. An operation counts once most of the treasurers of
+/// its time signed it ([PyrLedger.isFinal]): two majorities share a
+/// treasurer, so nothing is spent twice unless a treasurer signs two
+/// operations for one slot, which is proof against it.
 ///
 /// A time is never a source of power by itself: once an era of the
 /// treasurers ended, most of the next era's treasurers seal it
@@ -49,6 +52,18 @@ const int kPyrMaxHoldMs = 30 * 24 * 3600 * 1000;
 
 /// At most this many intermediaries pass one announcement on.
 const int kMaxAdHops = 5;
+
+/// The largest body of a private operation (an order's memo is cut far
+/// below it): anything bigger is nobody's payment, only weight.
+const int kPyrMaxOpBytes = 4 * 1024;
+
+/// The highest number an account's order may take: far more orders than
+/// a lifetime makes, and far below where the next number would wrap.
+const int kPyrMaxSeq = 1 << 40;
+
+/// How many operations of one payer that do not count (evidence: orders
+/// still waiting, or split) a treasurer keeps: the newest.
+const int kPyrMaxEvidencePerPayer = 32;
 
 /// The commitment to who gets emission [to], with [salt]: public in the
 /// emission record, opened by its note ([PyrEmitNote]).
@@ -213,6 +228,13 @@ final class PyrLedgerView {
       balances[key] = (balances[key] ?? 0) + amount;
     }
   }
+
+  /// Whether adding [amount] to [key] keeps the balance within
+  /// ±[kPyrMaxBalance] (so no sum of balances wraps around).
+  bool _fits(String key, int amount) {
+    final int b = balanceOf(key) + amount;
+    return b <= kPyrMaxBalance && b >= -kPyrMaxBalance;
+  }
 }
 
 /// The private ledger a phone keeps: operations with the treasurer
@@ -227,6 +249,72 @@ final class PyrLedger {
   static String slotOf(PyramidRecord op) => op.type == PyrT.settle
       ? 'x|${op.str('x')}'
       : '${op.str('from')}|${op.integer('seq')}';
+
+  /// Whose money [op] moves: the payer of an order, the one who signed a
+  /// settlement.
+  static String payerOf(PyramidRecord op) => op.type == PyrT.transfer
+      ? op.str('from')
+      : (op.signers.isEmpty ? '' : op.signers.first);
+
+  /// Whether [op]'s body stays within [kPyrMaxOpBytes].
+  static bool fits(PyramidRecord op) {
+    try {
+      return op.signedBytes.length <= kPyrMaxOpBytes;
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Whether [b] comes after [a] among the operations for one slot: by
+  /// time, then by id (the same order on every phone).
+  static bool isLater(PyramidRecord b, PyramidRecord a) {
+    final int c = b.at.compareTo(a.at);
+    return c != 0 ? c > 0 : b.id.compareTo(a.id) > 0;
+  }
+
+  /// Whether [x] can no longer count, judged from [slot] (the operations
+  /// for its slot known here): its era was sealed without it, or more of
+  /// its era's treasurers than it can do without — at least n − m + 1 of
+  /// n, m the majority — signed later operations for the slot and not
+  /// [x]. An honest treasurer signs one operation per slot, and another
+  /// only when it is later and the one it signed can no longer count; so
+  /// those treasurers never sign [x], and [x] never reaches a majority
+  /// while no treasurer signs two operations for one slot (which is
+  /// proof against it, [PyrLedgerView.cheaters]). With [strict] (judging
+  /// who signed two), an era's seal leaves [x] behind only when it had
+  /// fewer than most of its era's signatures: a treasurer of back then
+  /// who signs an operation dated into a sealed era is still caught.
+  static bool passed(
+    PyramidRecord x,
+    Iterable<PyramidRecord> slot,
+    PyramidState s, {
+    bool strict = false,
+  }) {
+    final PyrSeal? seal = s.sealAt(x.at);
+    if (seal != null &&
+        !seal.ops.contains(x.id) &&
+        (!strict ||
+            x.tsigs.keys.where(seal.set.contains).length <
+                seal.set.length ~/ 2 + 1)) {
+      return true;
+    }
+    final List<String> t = s.treasurersAt(x.at);
+    if (t.isEmpty) {
+      return false;
+    }
+    final Set<String> moved = <String>{
+      for (final PyramidRecord y in slot)
+        if (y.id != x.id && slotOf(y) == slotOf(x) && isLater(y, x))
+          ...y.tsigs.keys.where(t.contains),
+    }..removeAll(x.tsigs.keys);
+    return moved.length >= t.length - (t.length ~/ 2 + 1) + 1;
+  }
+
+  /// The operations here for [slot].
+  List<PyramidRecord> inSlot(String slot) => <PyramidRecord>[
+    for (final PyramidRecord op in ops.values)
+      if (slotOf(op) == slot) op,
+  ];
 
   /// Whether [op] counts: dated in a sealed era, the era's seal lists it
   /// (an operation it does not list was signed after the era ended, by
@@ -261,7 +349,10 @@ final class PyrLedger {
       return 'zlecenie sprzed skarbników';
     }
     if (op.type != PyrT.transfer) {
-      return op.type == PyrT.settle ? null : 'nie przelew';
+      if (op.type != PyrT.settle) {
+        return 'nie przelew';
+      }
+      return fits(op) ? null : 'zły przelew';
     }
     final String from = op.str('from');
     final String to = op.str('to');
@@ -275,7 +366,9 @@ final class PyrLedger {
         !s.memberAt(to, op.at) ||
         amount <= 0 ||
         amount > kPyrMaxAmount ||
-        op.integer('seq') < 1) {
+        op.integer('seq') < 1 ||
+        op.integer('seq') > kPyrMaxSeq ||
+        !fits(op)) {
       return 'zły przelew';
     }
     final Object? cond = op.body['cond'];
@@ -434,17 +527,27 @@ final class PyrLedger {
   }) {
     final PyrLedgerView v = PyrLedgerView();
     // Two operations for one slot, both signed by one treasurer: evidence,
-    // whether they counted or not.
+    // whether they counted or not — unless the earlier one could no longer
+    // count by what is here ([passed]): then signing the later one was
+    // what an honest treasurer does to free the number.
     final Map<String, List<PyramidRecord>> bySlot =
         <String, List<PyramidRecord>>{};
     for (final PyramidRecord op in ops.values) {
       (bySlot[slotOf(op)] ??= <PyramidRecord>[]).add(op);
     }
     for (final List<PyramidRecord> same in bySlot.values) {
+      if (same.length < 2) {
+        continue;
+      }
+      same.sort(
+        (PyramidRecord a, PyramidRecord b) =>
+            isLater(a, b) ? 1 : (isLater(b, a) ? -1 : 0),
+      );
       for (int i = 0; i < same.length; i++) {
+        final bool left = passed(same[i], same, s, strict: true);
         for (int j = i + 1; j < same.length; j++) {
           for (final String t in same[i].tsigs.keys) {
-            if (same[j].tsigs.containsKey(t)) {
+            if (same[j].tsigs.containsKey(t) && !left) {
               (v.cheaters[t] ??= <String>[]).addAll(<String>[
                 same[i].id,
                 same[j].id,
@@ -469,11 +572,28 @@ final class PyrLedger {
           return t != 0 ? t : a.id.compareTo(b.id);
         });
     // Emissions are credited in time with the operations: an order spends
-    // only money there at its time.
+    // only money there at its time. All the money there is never passes
+    // [kPyrMaxBalance] (counted from the public emissions, the same on
+    // every phone): no balance, and no sum of them, can wrap around.
+    int supply = 0;
+    final Set<String> within = <String>{};
+    for (final PyrEmission e
+        in s.emissions.values.toList()..sort((PyrEmission a, PyrEmission b) {
+          final int c = a.effectiveAt.compareTo(b.effectiveAt);
+          return c != 0 ? c : a.id.compareTo(b.id);
+        })) {
+      if (e.done &&
+          !e.vetoed &&
+          e.amount > 0 &&
+          supply + e.amount <= kPyrMaxBalance) {
+        supply += e.amount;
+        within.add(e.id);
+      }
+    }
     final List<(PyrEmission, PyrEmitNote)> emitted =
         <(PyrEmission, PyrEmitNote)>[
           for (final PyrEmission e in s.emissions.values)
-            if (notes[e.rc] case final PyrEmitNote n when e.done && !e.vetoed)
+            if (notes[e.rc] case final PyrEmitNote n when within.contains(e.id))
               (e, n),
         ]..sort(((PyrEmission, PyrEmitNote) a, (PyrEmission, PyrEmitNote) b) {
           final int c = a.$1.effectiveAt.compareTo(b.$1.effectiveAt);
@@ -510,7 +630,8 @@ final class PyrLedger {
         // stands.
         continue;
       }
-      final String? why = breaks(op, s) ?? _covered(v, op, s, whole);
+      final String? why =
+          breaks(op, s) ?? _covered(v, op, s, whole) ?? _inRange(v, op);
       if (why != null) {
         // Only a dishonest majority gets it this far: it takes no slot.
         v.broken[op.id] = why;
@@ -566,6 +687,21 @@ final class PyrLedger {
       return 'za mało środków';
     }
     return null;
+  }
+
+  /// Why order [op] would take a balance in [v] past ±[kPyrMaxBalance],
+  /// or null. Only a dishonest majority gets that far (all the money there
+  /// is stays below it): it counts nowhere rather than wrap a balance
+  /// around.
+  static String? _inRange(PyrLedgerView v, PyramidRecord op) {
+    if (op.type != PyrT.transfer) {
+      return null;
+    }
+    final int amount = op.integer('amount');
+    return v._fits(op.str('from'), -amount) &&
+            (op.body['cond'] != null || v._fits(op.str('to'), amount))
+        ? null
+        : 'saldo poza zakresem';
   }
 
   void _order(PyrLedgerView v, PyramidRecord op, Set<String> skip) {
@@ -639,7 +775,13 @@ final class PyrLedger {
     if (e == null || e.settled != null || op.at < e.at) {
       return;
     }
-    final String? why = _settleBreaks(op, e, s);
+    final bool ok = op.body['ok'] == true;
+    final int keep = ok ? (e.isChain ? min(e.share, e.amount) : e.amount) : 0;
+    final String? why =
+        _settleBreaks(op, e, s) ??
+        (v._fits(e.from, e.amount - keep) && v._fits(e.to, keep)
+            ? null
+            : 'saldo poza zakresem');
     if (why != null) {
       v.broken[op.id] = why;
       return;
@@ -647,7 +789,6 @@ final class PyrLedger {
     v
       ..slots[slotOf(op)] = op.id
       ..counted.add(op.id);
-    final bool ok = op.body['ok'] == true;
     e.settled = ok;
     if (!ok) {
       v
@@ -665,7 +806,6 @@ final class PyrLedger {
         );
       return;
     }
-    final int keep = e.isChain ? min(e.share, e.amount) : e.amount;
     v
       .._add(e.to, keep, skip, op.id)
       ..entries.add(
@@ -731,7 +871,8 @@ final class PyrLedger {
   /// [PyrParams.xferLimit] — by the orders' own times and by the
   /// [signedToday] orders of the payer this treasurer signed in the last
   /// day by its own clock (an order dated back does not escape it); both
-  /// sides members.
+  /// sides members. A payer takes a conditional payment back only once
+  /// this treasurer no longer signs its acceptance.
   static String? problem(
     PyramidRecord op,
     PyramidState s,
@@ -748,6 +889,9 @@ final class PyrLedger {
     if (op.pyramid != s.id) {
       return 'inna piramida';
     }
+    if (!fits(op)) {
+      return 'za duża operacja';
+    }
     if (op.type == PyrT.transfer) {
       final String from = op.str('from');
       final String to = op.str('to');
@@ -763,11 +907,15 @@ final class PyrLedger {
           amount > kPyrMaxAmount) {
         return 'zły przelew';
       }
-      if (op.integer('seq') != v.seqOf(from) + 1) {
+      if (op.integer('seq') != v.seqOf(from) + 1 ||
+          op.integer('seq') > kPyrMaxSeq) {
         return 'zły numer kolejny';
       }
       if (v.balanceOf(from) < amount) {
         return 'za mało środków';
+      }
+      if (!v._fits(to, amount)) {
+        return 'saldo poza zakresem';
       }
       if (max(v.ordersInDay(from, op.at), signedToday) >= s.params.xferLimit) {
         return 'limit przelewów na dzień';
@@ -808,6 +956,11 @@ final class PyrLedger {
     }
     if (ok && now > e.until + kPyrMaxSkewMs) {
       return 'za późno na przyjęcie';
+    }
+    // The payer takes it back only once this treasurer no longer signs an
+    // acceptance: the two never race for its signature.
+    if (!byCond && now <= e.until + kPyrMaxSkewMs) {
+      return 'za wcześnie na zwrot';
     }
     final String next = op.str('next');
     if (next.isNotEmpty && (!s.isMember(next) || !s.memberAt(next, op.at))) {
@@ -915,6 +1068,14 @@ final class PyrStatement {
         json['ids'] is! List ||
         json['by'] is! String ||
         json['sig'] is! String) {
+      return null;
+    }
+    // A treasurer's whole ledger never holds more than all the money there
+    // is, nor a number past the highest: anything else would only wrap a
+    // sum around.
+    final int bal = json['bal'] as int;
+    final int seq = json['seq'] as int;
+    if (bal < 0 || bal > kPyrMaxBalance || seq < 0 || seq > kPyrMaxSeq) {
       return null;
     }
     return PyrStatement(
