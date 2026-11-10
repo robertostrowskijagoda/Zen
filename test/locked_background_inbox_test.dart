@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/unmetered_network.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -629,13 +630,20 @@ void main() {
         ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
       });
 
+      /// How often the receiver asked the node for a link.
+      int looks = 0;
+
       /// Starts the receiver; the node tells [links] in turn whether it has
-      /// a link (the last one stays).
+      /// a link (the last one stays). [network]: whether the phone is on
+      /// any network at all.
       Future<void> start(
         List<bool> answers, {
         Duration relinkWait = const Duration(seconds: 10),
+        Duration relinkStep = const Duration(milliseconds: 5),
+        bool network = true,
       }) async {
         links = List<bool>.of(answers);
+        looks = 0;
         final BackgroundCapability capability = await publishFor(_masterKey());
         transport = MemorySignalTransport();
         notices = MemoryRuntimeSystemNotificationService();
@@ -648,10 +656,13 @@ void main() {
           ),
           notices: notices,
           pollAnswerGrace: const Duration(milliseconds: 100),
-          relinkStep: const Duration(milliseconds: 5),
+          relinkStep: relinkStep,
           relinkWait: relinkWait,
-          meshLinked: () async =>
-              links.length > 1 ? links.removeAt(0) : links.single,
+          meshLinked: () async {
+            looks++;
+            return links.length > 1 ? links.removeAt(0) : links.single;
+          },
+          onNetwork: () async => network,
         );
         await receiver.start();
       }
@@ -706,6 +717,72 @@ void main() {
           false,
         ], relinkWait: const Duration(milliseconds: 50));
         expect(await wakeAndCount(), 1);
+      });
+
+      test('on no network at all the wake does not wait for a link', () async {
+        // The wait as on a phone (10 s, a look every 0.5 s), in short.
+        const Duration wait = Duration(milliseconds: 200);
+        const Duration step = Duration(milliseconds: 10);
+        // On a network without a link (the node redials): it looks for one
+        // until the wait is over, the phone held awake meanwhile.
+        await start(<bool>[false], relinkWait: wait, relinkStep: step);
+        expect(await wakeAndCount(), 1);
+        // Up to 1 + wait / step; fewer when a busy machine is slow.
+        expect(looks, greaterThan(2));
+        await receiver.stop();
+        // Flight mode, no signal: no link can come; the wake ends at once
+        // (before, it waited as above: 10 s held awake on each such wake).
+        await start(
+          <bool>[false],
+          relinkWait: wait,
+          relinkStep: step,
+          network: false,
+        );
+        expect(await wakeAndCount(), 1);
+        expect(looks, 1, reason: 'only the look before the poll');
+      });
+
+      test('the network is told by the interfaces\' addresses: a loopback or '
+          'link-local one alone is none', () async {
+        NetInterfaceInfo iface(String name, List<String> addresses) =>
+            NetInterfaceInfo(name, <InternetAddress>[
+              for (final String a in addresses) InternetAddress(a),
+            ]);
+        Future<bool> on(List<NetInterfaceInfo> list) =>
+            onAnyNetwork(lister: () async => list);
+        expect(await on(<NetInterfaceInfo>[]), isFalse);
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('lo', <String>['127.0.0.1', '::1']),
+            iface('wlan0', <String>['fe80::1']),
+            iface('dummy0', <String>['fe80::2']),
+          ]),
+          isFalse,
+        );
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('rmnet_data0', <String>['10.12.0.7']),
+          ]),
+          isTrue,
+        );
+        // Wi-Fi Direct's group has an address of its own.
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('p2p-wlan0-0', <String>['192.168.49.1']),
+          ]),
+          isTrue,
+        );
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('wlan0', <String>['2001:db8::5']),
+          ]),
+          isTrue,
+        );
+        // A list that cannot be read: as if on a network (it waits).
+        expect(
+          await onAnyNetwork(lister: () async => throw StateError('no list')),
+          isTrue,
+        );
       });
     });
 

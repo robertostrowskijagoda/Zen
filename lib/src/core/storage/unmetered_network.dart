@@ -20,6 +20,22 @@ Future<List<NetInterfaceInfo>> _systemInterfaces() async {
   ];
 }
 
+/// Whether [i] holds an address other devices can reach it at (not the
+/// loopback, not a link-local one every interface has).
+bool _hasAddress(NetInterfaceInfo i) =>
+    i.addresses.any((InternetAddress a) => !a.isLoopback && !a.isLinkLocal);
+
+/// Whether the device is on any network at all: an interface the system
+/// lists ([lister], by default all of them) holds a reachable address.
+/// When the list cannot be read, it counts as on a network.
+Future<bool> onAnyNetwork({NetInterfaceLister? lister}) async {
+  try {
+    return (await (lister ?? _systemInterfaces)()).any(_hasAddress);
+  } on Object {
+    return true;
+  }
+}
+
 /// Whether the phone is on Wi-Fi (or a cable) rather than mobile data, for
 /// the "media only on Wi-Fi" setting. There is no plugin for this in the
 /// app, so it is read from the interfaces the system lists: a mobile-data
@@ -85,10 +101,7 @@ final class UnmeteredNetwork {
     bool cellular = false;
     bool unmetered = false;
     for (final NetInterfaceInfo i in interfaces) {
-      final bool hasAddress = i.addresses.any(
-        (InternetAddress a) => !a.isLoopback && !a.isLinkLocal,
-      );
-      if (!hasAddress) {
+      if (!_hasAddress(i)) {
         continue;
       }
       final String name = i.name.toLowerCase();

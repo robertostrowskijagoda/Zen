@@ -78,18 +78,22 @@ const int kPresenceFullRounds = 2;
 
 /// How many rounds of pings ([kPresencePingInterval] apart) a friend waits
 /// for the next one once the first rounds on the screen are over: every
-/// round for a friend online, one not heard from yet, one whose state
-/// changed since their last ping ([stateAtLastPing]) and one whose state
-/// says nothing; every second round (4 min) for a friend "w tle", whose
-/// locked phone answers one contact at most every kLockedPongEvery (3 min
-/// 30 s), so a ping in between only woke it for nothing; every third round
-/// (6 min) for a friend not heard from for longer than "w tle" lasts
+/// round for a friend online, one not heard from yet and one whose state
+/// changed since their last ping ([stateAtLastPing]); every second round
+/// (4 min) for a friend "w tle", whose locked phone answers one contact at
+/// most every kLockedPongEvery (3 min 30 s), so a ping in between only woke
+/// it for nothing, and for one whose state says nothing (they keep it from
+/// this person: the ping learns only that they answer); every third round
+/// (6 min) for a friend whose phone said it is about to stop receiving
+/// ("asleep": an iPhone that iOS suspends, which hears nothing then), and
+/// for one not heard from for longer than "w tle" lasts
 /// ([kPresenceBackgroundFor]: shown offline by then), counted from
 /// [silentSinceMillis] when nothing came from them in this run. A friend "w
 /// tle" answers every ping that comes 4 min apart, as often as before, and
 /// tells it itself every kLockedPresenceRoundEvery as well: one ping or
 /// answer lost leaves 8 min without a word, under kPresenceOfflineAfter
-/// and far under kPresenceBackgroundFor.
+/// and far under kPresenceBackgroundFor. Whatever the cadence, a friend's
+/// own pings are answered as before.
 int presencePingEvery({
   required ({PeerPresence state, int at})? heard,
   required PeerPresence? stateAtLastPing,
@@ -103,7 +107,11 @@ int presencePingEvery({
   if (heard == null || heard.state != stateAtLastPing) {
     return 1;
   }
-  return heard.state == PeerPresence.background ? 2 : 1;
+  return switch (heard.state) {
+    PeerPresence.background || PeerPresence.hidden => 2,
+    PeerPresence.offline => 3,
+    _ => 1,
+  };
 }
 
 /// Which of the targets each round of pings on the screen goes to: all of
