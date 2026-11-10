@@ -1309,6 +1309,52 @@ void main() {
     ChatMessage of(List<ChatMessage> t, String who) =>
         t.firstWhere((ChatMessage m) => m.sender == who);
 
+    test('a key another member\'s message took before 1.16.4 does not make '
+        'the real author\'s message a copy of it', () async {
+      final _Harness h = inGroup();
+      final String bobsKey = groupMessageLocalId(id, bob);
+      // Before 1.16.4 every id was kept as it came: Ada could send one that
+      // is the key Bob's message would later need.
+      await h.timelines.save('group:g', <ChatMessage>[
+        ChatMessage(
+          id: bobsKey,
+          sender: ada,
+          text: 'zajęte z góry',
+          sentAtMillis: 900,
+          direction: ChatMessageDirection.incoming,
+        ),
+      ]);
+      await h.deliver(ada, said('pierwsza'), at: 1000);
+      await h.deliver(bob, said('spotkanie o 18'), at: 1001);
+      List<ChatMessage> t = await chat(h);
+      expect(
+        t.map((ChatMessage m) => '${m.sender}: ${m.text}'),
+        unorderedEquals(<String>[
+          '$ada: zajęte z góry',
+          '$ada: pierwsza',
+          '$bob: spotkanie o 18',
+        ]),
+      );
+      expect(t.map((ChatMessage m) => m.id).toSet(), hasLength(3));
+      final ChatMessage bobs = of(t, bob);
+      expect(groupMessageWireId(bobs.id), id);
+      // A true late copy of Bob's message is still one.
+      await h.deliver(bob, said('spotkanie o 18'), at: 1002);
+      await h.deliver(ada, said('pierwsza'), at: 1003);
+      t = await chat(h);
+      expect(t, hasLength(3));
+      // A reaction naming Bob reaches his message, wherever it is kept.
+      await h.deliver(cyd, change('msg_react', author: bob), at: 1004);
+      t = await chat(h);
+      expect(of(t, bob).reactions, <String, String>{cyd: '👍'});
+      expect(
+        t
+            .where((ChatMessage m) => m.sender == ada)
+            .expand((ChatMessage m) => m.reactions.keys),
+        isEmpty,
+      );
+    });
+
     test('the creator\'s deletion names the author of its message and reaches '
         'that one, whichever holds the bare id here', () async {
       for (final bool squatFirst in <bool>[false, true]) {

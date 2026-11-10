@@ -1986,31 +1986,64 @@ String groupMessageWireId(String localId) {
 /// author's message with it goes under [groupMessageLocalId]. An id that
 /// already looks like such a key never takes a bare slot, so nobody can
 /// take another's key in advance.
+///
+/// Only the same author's message under the id or under one of the
+/// author's keys makes it a copy. A key held by another author's message is
+/// no copy but a conflict: before 1.16.4 every id was kept as it came, so a
+/// member could have sent the very key another's message would need; the
+/// message then goes under the author's next key ([_groupMessageKey]).
 String? groupMessageSlot(
   List<ChatMessage> thread,
   String wireId,
   String author,
   bool Function(ChatMessage message) byAuthor,
 ) {
-  final String alt = groupMessageLocalId(wireId, author);
-  ChatMessage? bare;
+  // The keys that read back to this id: held, and held by this author.
+  final Set<String> held = <String>{};
+  final Set<String> own = <String>{};
   for (final ChatMessage m in thread) {
-    if (m.id == alt) {
-      return null;
-    }
-    if (m.id == wireId) {
-      bare = m;
-    }
-  }
-  if (!wireId.contains(_altIdMark)) {
-    if (bare == null) {
-      return wireId;
-    }
-    if (byAuthor(bare)) {
-      return null;
+    if (m.id == wireId || groupMessageWireId(m.id) == wireId) {
+      held.add(m.id);
+      if (byAuthor(m)) {
+        own.add(m.id);
+      }
     }
   }
-  return alt.length <= kMaxSignalIdChars ? alt : null;
+  if (own.contains(wireId)) {
+    return null;
+  }
+  // Each of the author's keys is the id with a mark, so each one held is
+  // one of [held]: among one more than that many keys one is free. Every
+  // key up to there is looked at, as the author's message may sit past a
+  // free one (a message before it disappeared).
+  String? free;
+  for (int n = 0; n <= held.length; n++) {
+    final String key = _groupMessageKey(wireId, author, n);
+    if (own.contains(key)) {
+      return null;
+    }
+    if (!held.contains(key)) {
+      free ??= key;
+    }
+  }
+  if (!wireId.contains(_altIdMark) && !held.contains(wireId)) {
+    return wireId;
+  }
+  return free != null && free.length <= kMaxSignalIdChars ? free : null;
+}
+
+/// The [n]th key of a group message with the id [wireId] by [author]: the
+/// first is [groupMessageLocalId], each next one is for when the one before
+/// is held by another author's message. All of them are [wireId] with a
+/// mark and a part of the same length, so [groupMessageWireId] reads the id
+/// back from any of them.
+String _groupMessageKey(String wireId, String author, int n) {
+  if (n == 0) {
+    return groupMessageLocalId(wireId, author);
+  }
+  final String who = PeerShareCodec.normalizeAddress(author);
+  return '$wireId$_altIdMark'
+      '${sha256Hex(utf8.encode('$who$_altIdMark$n')).substring(0, 16)}';
 }
 
 /// Whether another feature keeps [group]'s member list
