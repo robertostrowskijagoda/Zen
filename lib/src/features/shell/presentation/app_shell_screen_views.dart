@@ -982,6 +982,22 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                 icon: const Icon(Icons.checklist_rounded),
                 label: Text(t('Ponownie przeprowadź konfigurację')),
               ),
+              // The passwords: their own row right here. The top bar has no
+              // room for another button on a 320 dp phone (its connection
+              // status would be cut in most languages).
+              _SettingsGroup(
+                title: '',
+                tiles: <Widget>[
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-passwords'),
+                    icon: Icons.key_rounded,
+                    tone: ZenTone.privacy,
+                    title: t('Hasła'),
+                    subtitle: t('Loginy i hasła do stron i aplikacji'),
+                    onTap: () => unawaited(PasswordVaultScreen.open(context)),
+                  ),
+                ],
+              ),
               // Inviting someone and the app's own page come next.
               _SettingsGroup(
                 title: '',

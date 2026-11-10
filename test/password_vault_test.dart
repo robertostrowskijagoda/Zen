@@ -758,12 +758,17 @@ void main() {
       expect(text, isNot(contains('features/passwords/')), reason: path);
       expect(text, isNot(contains(kPasswordVaultKey)), reason: path);
     }
-    for (final FileSystemEntity f in Directory(
+    // The screens too: a password leaves them only through the vault.
+    for (final File f in Directory(
       'lib/src/features/passwords',
-    ).listSync()) {
-      final String text = (f as File).readAsStringSync();
+    ).listSync(recursive: true).whereType<File>()) {
+      final String text = f.readAsStringSync();
       expect(text, isNot(contains('Clipboard.setData')), reason: f.path);
       expect(text, isNot(contains('print(')), reason: f.path);
+      // Text selected on a screen is copied with the plain clipboard,
+      // which is never cleared.
+      expect(text, isNot(contains('SelectionArea(')), reason: f.path);
+      expect(text, isNot(contains('SelectableText')), reason: f.path);
     }
     // The store key is written only by the vault (sync and copies go
     // through it).

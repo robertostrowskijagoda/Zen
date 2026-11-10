@@ -16,6 +16,10 @@ import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/about/presentation/legal_consent_stage.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/passwords/presentation/password_entry_screen.dart';
+import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -115,6 +119,40 @@ final List<TextFitScreen> textFitScreens = <TextFitScreen>[
           pumpTextFitHost(tester, InstallGuideScreen(initial: system)),
     ),
   TextFitScreen(
+    'passwords: empty',
+    open: (WidgetTester tester) => pumpTextFitHost(
+      tester,
+      const PasswordVaultScreen(),
+      overrides: [
+        passwordVaultServiceProvider.overrideWithValue(
+          PasswordVaultService(disk: MemoryLedgerDisk()),
+        ),
+      ],
+    ),
+  ),
+  TextFitScreen(
+    'passwords: the list',
+    open: (WidgetTester tester) async {
+      final PasswordVaultService vault = await textFitPasswords(tester);
+      await pumpTextFitHost(
+        tester,
+        const PasswordVaultScreen(),
+        overrides: [passwordVaultServiceProvider.overrideWithValue(vault)],
+      );
+    },
+  ),
+  TextFitScreen(
+    'passwords: an entry with earlier passwords',
+    open: (WidgetTester tester) async {
+      final PasswordVaultService vault = await textFitPasswords(tester);
+      await pumpTextFitHost(
+        tester,
+        PasswordEntryScreen(entryId: vault.entries.first.id),
+        overrides: [passwordVaultServiceProvider.overrideWithValue(vault)],
+      );
+    },
+  ),
+  TextFitScreen(
     'first start: the documents',
     open: (WidgetTester tester) => pumpTextFitHost(
       tester,
@@ -186,6 +224,42 @@ Future<void> pumpShellForFit(WidgetTester tester) => pumpTextFitHost(
     ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
   ],
 );
+
+/// A vault of a few passwords, the first with two earlier ones.
+Future<PasswordVaultService> textFitPasswords(WidgetTester tester) async {
+  final PasswordVaultService vault = PasswordVaultService(
+    disk: MemoryLedgerDisk(),
+  );
+  await tester.runAsync(() async {
+    final PasswordEntry first = await vault.add(
+      const PasswordFields(
+        name: 'Bank',
+        login: 'ania.kowalska@example.com',
+        password: 'pierwsze-haslo',
+        address: 'https://bank.example.com/login',
+        note: 'PIN w sejfie',
+      ),
+    );
+    for (final String p in <String>['drugie-haslo', 'trzecie-haslo']) {
+      await vault.edit(
+        first.id,
+        PasswordFields(
+          name: first.name,
+          login: first.login,
+          password: p,
+          address: first.address,
+          note: first.note,
+        ),
+      );
+    }
+    for (final String name in <String>['Poczta', 'Sklep', 'Urząd']) {
+      await vault.add(
+        PasswordFields(name: name, login: 'ania', password: 'haslo-$name'),
+      );
+    }
+  });
+  return vault;
+}
 
 Future<void> pumpAboutForFit(WidgetTester tester) => pumpTextFitHost(
   tester,

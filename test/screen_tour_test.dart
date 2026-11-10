@@ -38,6 +38,7 @@ const List<String> _railIds = <String>[
 /// The settings' pages, as listed; the links out (GitHub, Discord) leave
 /// the app and are not walked.
 const List<String> _settingsIds = <String>[
+  'passwords', //
   'invite', 'about', 'account', 'accounts', 'devices', 'security', //
   'appearance', 'notifications', 'muted-post-authors', 'contact', //
   'delivery', 'network', 'public-peers', 'nearby-look', 'permissions', //
@@ -164,6 +165,7 @@ void main() {
           }
         }
         // Most of the pages are there on every screen.
+        expect(walked, contains('passwords'));
         expect(
           walked.length,
           greaterThanOrEqualTo(15),

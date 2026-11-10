@@ -332,6 +332,18 @@ final class PasswordVaultService extends ChangeNotifier {
     return _copy(e.login);
   }
 
+  /// Puts the earlier password [versionKey] of the entry [id] (one of its
+  /// [PasswordEntry.history]) on the clipboard, the same way.
+  Future<bool> copyPreviousPassword(String id, String versionKey) async {
+    for (final PasswordHistoryItem h
+        in entry(id)?.history ?? const <PasswordHistoryItem>[]) {
+      if (h.versionKey == versionKey && h.password.isNotEmpty) {
+        return _copy(h.password);
+      }
+    }
+    return false;
+  }
+
   /// Takes the passwords of an export ([bytes] of a CSV file: Chrome, Edge,
   /// Firefox, Bitwarden, KeePass, KeePassXC or any file whose header names
   /// its columns). Each row becomes a new entry, unless one with the same

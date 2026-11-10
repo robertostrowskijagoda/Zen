@@ -22,6 +22,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 /// The rows of the settings list, top to bottom.
 const List<String> _rows = <String>[
   'settings-rerun-setup',
+  'settings-nav-passwords',
   'settings-nav-invite',
   'settings-nav-about',
   'settings-lock-now-button',
