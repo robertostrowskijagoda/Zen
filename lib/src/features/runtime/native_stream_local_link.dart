@@ -75,6 +75,14 @@ abstract interface class NativeLinkRadio {
   Stream<Map<Object?, Object?>> get events;
 }
 
+/// A radio that polls its streams slowly while nothing is going on, and
+/// quickly while one is expected ([GoBluetoothRadio]).
+abstract interface class IncomingStreamHint {
+  /// A friend's device that is not linked yet was seen nearby: a stream
+  /// from it is likely to follow, so look for it quickly for a while.
+  void expectIncomingStream();
+}
+
 /// A radio behind a platform channel: [name] for the calls, `[name]/events`
 /// for the events (ZenBluetoothLinkBridge.kt, ZenLocalLinksBridge.swift).
 final class MethodChannelLinkRadio implements NativeLinkRadio {
@@ -530,8 +538,14 @@ final class NativeStreamLocalLink extends LocalLink {
       return;
     }
     if (!_matches(api, advert)) {
-      // A stranger, or a friend linked already.
+      // A stranger, or a friend linked already: nothing to look for.
       return;
+    }
+    final Object radio = _radio;
+    if (radio is IncomingStreamHint && !_dialing.contains(device)) {
+      // The friend may be dialling this device: a dial of its own keeps the
+      // radio quick without it.
+      radio.expectIncomingStream();
     }
     final DateTime now = _now();
     final DateTime? last = _tried[device];

@@ -119,13 +119,16 @@ final class _FfiGoBluetoothApi implements GoBluetoothApi {
 ///
 /// The bridge is asked every [pollEvery] while a dial waits for its outcome
 /// and for [busyFor] after the links did something (the start, a dial, a
-/// stream that came, a friend's device seen nearby: a stream from them
-/// is likely to follow), and every [idlePollEvery] otherwise: a computer
+/// stream that came, a friend's device seen nearby that is not linked yet,
+/// which the links tell by [expectIncomingStream]: a stream from them is
+/// likely to follow; a Zen device of a stranger, or of a friend linked
+/// already, seen again and again, is not such a sign), and every
+/// [idlePollEvery] otherwise: a computer
 /// in the tray asked twice a second for good. An incoming stream waits 15 s
 /// in the bridge for its answer (btIncomingWait, bluetooth_link.go), so
 /// one that comes while idle is answered within 5 s, and the polls after it
 /// are quick again.
-final class GoBluetoothRadio implements NativeLinkRadio {
+final class GoBluetoothRadio implements NativeLinkRadio, IncomingStreamHint {
   GoBluetoothRadio({
     GoBluetoothApi? go,
     BluezLe? le,
@@ -270,23 +273,32 @@ final class GoBluetoothRadio implements NativeLinkRadio {
 
   @override
   Future<void> scan(Duration window) async {
-    await _le?.scan(window, (String device, List<int> data) {
-      final ({int psm, List<int> advert})? seen = parseZenLinkManufacturerData(
-        data,
-      );
-      if (seen == null || !_started) {
-        return;
-      }
-      _noteActivity();
-      _events.add(<Object?, Object?>{
-        'type': 'seen',
-        'device': device,
-        'advert': _hex(seen.advert),
-        'psm': seen.psm,
-        'connectable': seen.psm != 0,
-      });
+    await _le?.scan(window, noteAdvert);
+  }
+
+  /// An advert's manufacturer data [data] was seen from [device]. Only
+  /// reported: whether it is a friend worth looking for quickly is for the
+  /// links to tell ([expectIncomingStream]), not for every Zen device in
+  /// reach to decide by being there.
+  @visibleForTesting
+  void noteAdvert(String device, List<int> data) {
+    final ({int psm, List<int> advert})? seen = parseZenLinkManufacturerData(
+      data,
+    );
+    if (seen == null || !_started) {
+      return;
+    }
+    _events.add(<Object?, Object?>{
+      'type': 'seen',
+      'device': device,
+      'advert': _hex(seen.advert),
+      'psm': seen.psm,
+      'connectable': seen.psm != 0,
     });
   }
+
+  @override
+  void expectIncomingStream() => _noteActivity();
 
   @override
   Future<List<String>> pairedDevices() async {
