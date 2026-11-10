@@ -77,11 +77,14 @@ abstract interface class NodeSignalBridge
   /// standby}}` (read from memory, no network).
   Map<String, dynamic> publicPeerStates();
 
-  /// The device keys the node pinned per address: `{pins: {address:
-  /// fingerprint}, own}` (pq_session.go).
+  /// The device keys the node pinned per address, with their kind, and who
+  /// is known: `{pins: {address: fingerprint}, firm, vouched, seen, known,
+  /// conflicts, own}` (pq_exports.go).
   Map<String, dynamic> pqPins(int handle);
 
-  /// Adds pins kept from an earlier run: [pinsJson] `{pins: {...}}`.
+  /// Hands the node pins kept from an earlier run (`restore`), keys its
+  /// devices proved (`keep`), hints, or the known addresses: [pinsJson] as
+  /// YggPqSetPinsJson takes it (pq_exports.go).
   Map<String, dynamic> setPqPins(int handle, String pinsJson);
 }
 

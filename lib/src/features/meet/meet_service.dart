@@ -210,21 +210,24 @@ final class MeetService extends ChangeNotifier {
   /// it before they ever talk (pq_session.go pins it).
   String? Function(String address)? sessionKeyOf;
 
-  /// Device keys a friend's friend list names (address → fingerprint): the
-  /// app pins them in the bridge (set by the app). Only new or changed
-  /// keys, never for this device's friends or own devices.
-  void Function(Map<String, String> keys)? onVouchedKeys;
+  /// Device keys [friend]'s friend lists name (address → fingerprint), all
+  /// of them each time they change: the app hands them to the bridge as
+  /// hints from that friend, which go when the friend does (set by the
+  /// app). Never for this device's friends or own devices.
+  void Function(String friend, Map<String, String> keys)? onVouchedKeys;
 
   /// This account's other devices (set by the app): their keys come from
   /// their own signed hellos, never from a friend's list.
   Iterable<String> Function()? ownDevices;
 
-  /// What each friend's lists vouched for in this run (friend → address →
-  /// key). A pin cannot be taken back, so a friend names at most
-  /// [kMaxFriendListEntries] addresses in all: later lists may change those
-  /// keys but add nobody past that.
-  final Map<String, Map<String, String>> _vouchedBy =
-      <String, Map<String, String>>{};
+  /// What each friend's lists vouched for (friend → address → key), kept
+  /// in the store ([vouchedKey]) so the cap holds across restarts: a friend
+  /// names at most [kMaxFriendListEntries] addresses in all, later lists
+  /// may change those keys but add nobody past that.
+  Future<Map<String, Map<String, String>>>? _vouchedBy;
+
+  /// Where [_vouchedBy] is kept.
+  static const String vouchedKey = 'meet/vouched';
 
   /// The alarm key while it is read ([alarmKey]).
   LedgerKeyPair? _alarmKeyPair;
@@ -636,7 +639,7 @@ final class MeetService extends ChangeNotifier {
     list
       ..remove(from)
       ..removeWhere((String a, String _) => host.isSelf(a));
-    _vouch(from, keys, list);
+    await _vouch(from, keys, list);
     final Object? d = payload['d'];
     final String digest = d is String && d.length <= 64 && d.isNotEmpty
         ? d
@@ -645,17 +648,35 @@ final class MeetService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Passes on the keys [from]'s list names for people it lists: only new
-  /// or changed ones, none for this device's friends or own devices (their
-  /// signed hellos pin those), and none for addresses past [from]'s share.
-  void _vouch(String from, Map<String, String> keys, Map<String, String> list) {
-    if (keys.isEmpty || onVouchedKeys == null) {
+  /// Passes on the keys [from]'s list names for people it lists, when new
+  /// or changed ones came: none for this device's friends or own devices
+  /// (their signed hellos pin those), and none for addresses past [from]'s
+  /// share.
+  Future<void> _vouch(
+    String from,
+    Map<String, String> keys,
+    Map<String, String> list,
+  ) async {
+    if (onVouchedKeys == null) {
+      return;
+    }
+    final Map<String, Map<String, String>> vouchedBy = await _loadVouched();
+    // What friends removed since named is theirs no more.
+    final int friendsBefore = vouchedBy.length;
+    vouchedBy.removeWhere(
+      (String friend, Map<String, String> _) => !host.isFriend(friend),
+    );
+    final bool pruned = vouchedBy.length != friendsBefore;
+    if (keys.isEmpty) {
+      if (pruned) {
+        await _saveVouched(vouchedBy);
+      }
       return;
     }
     final Set<String> own = <String>{
       for (final String a in ownDevices?.call() ?? const <String>[]) _key(a),
     };
-    final Map<String, String> before = _vouchedBy.putIfAbsent(
+    final Map<String, String> before = vouchedBy.putIfAbsent(
       from,
       () => <String, String>{},
     );
@@ -675,8 +696,70 @@ final class MeetService extends ChangeNotifier {
       before[address] = key;
       fresh[address] = key;
     });
+    if (before.isEmpty) {
+      vouchedBy.remove(from);
+    }
+    if (fresh.isNotEmpty || pruned) {
+      await _saveVouched(vouchedBy);
+    }
     if (fresh.isNotEmpty) {
-      onVouchedKeys!(fresh);
+      onVouchedKeys?.call(from, Map<String, String>.of(before));
+    }
+  }
+
+  /// [_vouchedBy], read once; what friends vouched for before goes to the
+  /// app again then (the bridge forgot it with the last run).
+  Future<Map<String, Map<String, String>>> _loadVouched() =>
+      _vouchedBy ??= () async {
+        final Map<String, Map<String, String>> vouchedBy =
+            <String, Map<String, String>>{};
+        try {
+          final Uint8List? raw = await store.disk.read(vouchedKey);
+          final Object? json = raw == null
+              ? null
+              : jsonDecode(utf8.decode(raw));
+          if (json is Map) {
+            for (final MapEntry<Object?, Object?> friend in json.entries) {
+              final Object? keys = friend.value;
+              if (friend.key is! String || keys is! Map) {
+                continue;
+              }
+              final Map<String, String> valid = <String, String>{
+                for (final MapEntry<Object?, Object?> e in keys.entries)
+                  if (e.key is String &&
+                      e.value is String &&
+                      _sessionKeyPattern.hasMatch(e.value as String))
+                    e.key as String: e.value as String,
+              };
+              if (valid.isNotEmpty) {
+                vouchedBy[friend.key as String] = <String, String>{
+                  for (final MapEntry<String, String> e in valid.entries.take(
+                    kMaxFriendListEntries,
+                  ))
+                    e.key: e.value,
+                };
+              }
+            }
+          }
+        } on Object catch (error, stack) {
+          logZenError('Klucze z list znajomych', error, stack);
+        }
+        vouchedBy.forEach((String friend, Map<String, String> keys) {
+          if (host.isFriend(friend)) {
+            onVouchedKeys?.call(friend, Map<String, String>.of(keys));
+          }
+        });
+        return vouchedBy;
+      }();
+
+  Future<void> _saveVouched(Map<String, Map<String, String>> vouchedBy) async {
+    try {
+      await store.disk.write(
+        vouchedKey,
+        Uint8List.fromList(utf8.encode(jsonEncode(vouchedBy))),
+      );
+    } on Object catch (error, stack) {
+      logZenError('Klucze z list znajomych', error, stack);
     }
   }
 

@@ -116,7 +116,7 @@ const List<_Name> _names = <_Name>[
     first: 0.15,
     used: 0.6,
     min: 90,
-    max: 3200,
+    max: 9000,
   ),
   _Name(
     'runtime/public_peers.json',
@@ -161,6 +161,7 @@ const List<_Name> _names = <_Name>[
   _Name('meet/events', used: 0.15, min: 90, max: 5000),
   _Name('meet/food', used: 0.05, min: 90, max: 3000),
   _Name('meet/circles', used: 0.15, min: 90, max: 4000),
+  _Name('meet/vouched', used: 0.3, min: 90, max: 6000),
   _Name('pebbles/index', used: 0.1, min: 90, max: 2000),
   _Name('pebbles/door', used: 0.1, min: 90, max: 200),
   _Name('pebbles/profile_hash', used: 0.1, min: 90, max: 200),

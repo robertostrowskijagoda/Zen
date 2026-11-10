@@ -297,10 +297,10 @@ func TestPQBucketLimitsForeignKEMWork(t *testing.T) {
 }
 
 // Strangers asking for keys from addresses made for it, each as often as
-// it may, spend a budget of their own: the friends this node writes to and
-// the ones the app vouched for still start their sessions. Data frames
-// from addresses nothing is known of leave no trace. On a computer and on
-// a phone.
+// it may, spend a budget of their own: the peers the app names as known
+// (its friends, this person's devices) still start their sessions. Data
+// frames from addresses nothing is known of leave no trace. On a computer
+// and on a phone.
 func TestPQStrangersAskingForKeysNeverHoldUpAFriendsSession(t *testing.T) {
 	for _, phone := range []bool{false, true} {
 		t.Run(fmt.Sprintf("phone %v", phone), func(t *testing.T) {
@@ -310,6 +310,7 @@ func TestPQStrangersAskingForKeysNeverHoldUpAFriendsSession(t *testing.T) {
 			friend, friendIP := network.add(2)
 			vouched, vouchedIP := network.add(3)
 			victim.importPins(map[string]string{vouchedIP.String(): vouched.ownFingerprint()}, true)
+			victim.setKnown([]string{friendIP.String(), vouchedIP.String()})
 			rate, burst := pqForeignKEMPerSecond, pqForeignKEMBurst
 			if phone {
 				rate, burst = pqPhoneForeignKEMPerSecond, pqPhoneForeignKEMBurst
@@ -408,11 +409,12 @@ func TestPQPinsComeSlowlyAndTheOldestMakesRoom(t *testing.T) {
 
 	// Full: the pin seen longest ago goes, the others stay.
 	b.mu.Lock()
-	b.pins = make(map[string]*pqPin, pqMaxPins)
-	for index := range pqMaxPins {
-		address := fmt.Sprintf("200::%x", index+1)
-		b.pins[address] = &pqPin{seen: network.clock.Add(time.Duration(index) * time.Second)}
+	for address := range b.pins {
+		b.removePinLocked(address)
 	}
+	pqFillPins(b, "200::%x", pqMaxPins, func(index int) time.Time {
+		return network.clock.Add(time.Duration(index) * time.Second)
+	})
 	b.mu.Unlock()
 	network.clock = network.clock.Add(time.Hour)
 	_, friendIP := pqTestNode(t, 250)
@@ -490,9 +492,9 @@ func TestPQStrangersNeverPushOutThePinOfAPeerThatHadASession(t *testing.T) {
 	// the oldest of them.
 	network.clock = network.clock.Add(3 * time.Hour)
 	victim.mu.Lock()
-	for index := range pqMaxPins - len(victim.pins) {
-		victim.pins[fmt.Sprintf("201:1::%x", index+1)] = &pqPin{seen: network.clock.Add(time.Duration(index) * time.Millisecond)}
-	}
+	pqFillPins(victim, "201:1::%x", pqMaxPins-len(victim.pins), func(index int) time.Time {
+		return network.clock.Add(time.Duration(index) * time.Millisecond)
+	})
 	victim.mu.Unlock()
 	devicePublic := pqPublicKeyOfEndpoint(t, victim)
 	for range 2 * pqNewPinsPerMinute {
@@ -550,6 +552,15 @@ func TestPQVouchedPinsGuardFirstContactAndReportConflicts(t *testing.T) {
 	}
 	if b.pinsSnapshot()[aIP.String()] != a.ownFingerprint() {
 		t.Fatal("a conflicting vouch must not move the pin")
+	}
+}
+
+// pqFillPins pins n addresses made from format (index+1 in hex) loosely,
+// the one at index seen at at(index), as records of nobody would have
+// (e.mu held).
+func pqFillPins(e *pqEndpoint, format string, n int, at func(int) time.Time) {
+	for index := range n {
+		e.setPinLocked(fmt.Sprintf(format, index+1), &pqPin{seen: at(index)})
 	}
 }
 

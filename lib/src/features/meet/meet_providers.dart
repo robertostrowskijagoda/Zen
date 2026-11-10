@@ -116,11 +116,11 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
     return node != null && node.isReady ? node.accountOf(a) : null;
   };
   // Friends' device keys travel in the friend list; those of friends'
-  // friends are pinned before the first contact.
+  // friends are hints before the first contact, from that friend.
   service.sessionKeyOf = (String a) =>
       ref.read(ledgerNodeProvider)?.sessionKeyOf(a);
-  service.onVouchedKeys = (Map<String, String> keys) =>
-      ref.read(runtimeNodeRuntimeProvider).vouchSessionKeys(keys);
+  service.onVouchedKeys = (String friend, Map<String, String> keys) =>
+      ref.read(runtimeNodeRuntimeProvider).replaceSessionKeyHints(friend, keys);
   service.ownDevices = () {
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     return node != null && node.isReady ? node.siblingAddresses : <String>[];

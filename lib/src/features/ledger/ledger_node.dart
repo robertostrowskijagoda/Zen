@@ -136,7 +136,14 @@ final class _DeviceRef {
 /// is at [address]. The address is greeted; it becomes a device only when
 /// a hello from there is signed by [device].
 final class _DeviceHint {
-  _DeviceHint(this.account, this.device, this.name, this.at, this.address);
+  _DeviceHint(
+    this.account,
+    this.device,
+    this.name,
+    this.at,
+    this.address, [
+    this.pq,
+  ]);
 
   final String account;
   final String device;
@@ -147,6 +154,10 @@ final class _DeviceHint {
 
   /// Normalised mesh address it names.
   final String address;
+
+  /// The post-quantum device key it names (fingerprint), if any: only the
+  /// account's word until the device proves it.
+  final String? pq;
 }
 
 /// Spaces of a friend's account this device keeps and follows. `private`
@@ -316,19 +327,26 @@ final class LedgerNode {
   /// session layer (pq_session.go) to this device's hybrid key.
   final String Function()? localSessionKey;
 
-  /// Pins device keys (address → fingerprint) in the bridge: keys proven
-  /// by hybrid-signed hellos and named by friends' signed device records.
-  /// With `force` the key replaces a different pin (a known friend's
-  /// signed hello contradicts the session it came over).
+  /// Pins device keys (address → fingerprint) in the bridge: keys a hello
+  /// signed by the device's hybrid key proves. With `force` the key
+  /// replaces a different pin (a known friend's signed hello contradicts
+  /// the session it came over).
   void Function(Map<String, String> keys, {bool force})? onSessionKeys;
+
+  /// The device keys [account]'s unproven device records name now
+  /// (address → fingerprint, its whole word): hints for the bridge, never
+  /// pins. A record is the account's word, not the device's: a friend
+  /// could name anyone's address with a key of its own choice, so the
+  /// device's own record decides, and the hints go with the friend.
+  void Function(String account, Map<String, String> keys)? onSessionKeyHints;
 
   /// A hello signed by [address]'s device names another device key than
   /// the session it came over: someone else holds that address's node key.
   /// The hello is refused; the app warns in the chat.
   void Function(String address)? onDeviceKeyMismatch;
 
-  /// Device keys proven or named per address (normalised), for the friend
-  /// list ([sessionKeyOf]). In memory: hellos and records bring them back.
+  /// Device keys proven per address (normalised), for the friend list
+  /// ([sessionKeyOf]). In memory: hellos bring them back.
   final Map<String, String> _sessionKeys = <String, String>{};
   static const int _maxSessionKeys = 5000;
 
@@ -336,7 +354,7 @@ final class LedgerNode {
   final Map<String, int> _keyWarnedAt = <String, int>{};
 
   /// The device key [address] proved in a hello signed by its hybrid
-  /// device key (or a friend's signed device record names), or null.
+  /// device key, or null (a device record's word is not passed on).
   String? sessionKeyOf(String address) =>
       _sessionKeys[PeerShareCodec.normalizeAddress(address)];
 
@@ -1600,6 +1618,7 @@ final class LedgerNode {
         : _DeviceRef(acc, device, name, 0);
     if (claim != null) {
       _deviceHints.remove(device);
+      _handDeviceHints(acc);
       // It moved there: the addresses it had before are stale.
       _devices.removeWhere(
         (String a, _DeviceRef r) => r.device == device && a != n,
@@ -1638,14 +1657,13 @@ final class LedgerNode {
     if (n == _ownAddress) {
       return;
     }
-    // The device key it names: signed (hybrid) by the device, in a space of
-    // this account or a friend's. Pinned before any contact; a different
-    // pin already there stays and is reported.
-    final Object? pq = e.body['pq'];
-    if (pq is String && _sessionKeyPattern.hasMatch(pq)) {
-      _rememberSessionKey(n, pq);
-      onSessionKeys?.call(<String, String>{n: pq});
-    }
+    // The device key it names is the account's word about an address it
+    // may not hold: a hint for the bridge with the claim (below), never a
+    // pin, so a made-up key keeps nobody out.
+    final Object? rawPq = e.body['pq'];
+    final String? pq = rawPq is String && _sessionKeyPattern.hasMatch(rawPq)
+        ? rawPq
+        : null;
     // Only the newest record of a device counts (it may have moved).
     for (final _DeviceRef r in _devices.values) {
       if (r.device == e.device && r.at > e.hlc.millis) {
@@ -1665,7 +1683,9 @@ final class LedgerNode {
       }
       // Proven to be at this address already: only the name changes (and
       // whatever address it claimed before is stale).
-      _deviceHints.remove(e.device);
+      if (_deviceHints.remove(e.device) != null) {
+        _handDeviceHints(e.account);
+      }
       _devices[n] = _DeviceRef(e.account, e.device, name, e.hlc.millis);
       _devices.removeWhere(
         (String a, _DeviceRef r) => r.device == e.device && a != n,
@@ -1682,8 +1702,10 @@ final class LedgerNode {
       name,
       e.hlc.millis,
       n,
+      pq,
     );
     _capHints(e.account);
+    _handDeviceHints(e.account);
     // Its proven hello may be here already (sent before its account was a
     // friend's, e.g. as a group member): enough now.
     final _DeviceRef? seen = _strangerDevices[n];
@@ -1715,6 +1737,23 @@ final class LedgerNode {
     }
   }
 
+  /// Tells the bridge the device keys [acc]'s unproven claims name now
+  /// ([onSessionKeyHints]): at most [_maxHintsPerAccount], however many
+  /// devices the account certifies.
+  void _handDeviceHints(String acc) {
+    final void Function(String, Map<String, String>)? hand = onSessionKeyHints;
+    if (hand == null) {
+      return;
+    }
+    hand(acc, <String, String>{
+      for (final _DeviceHint h in _deviceHints.values)
+        if (h.account == acc &&
+            h.pq != null &&
+            !store.directory.isRevoked(h.account, h.device))
+          h.address: h.pq!,
+    });
+  }
+
   /// Says (in this account's `acts`) at which address this device is,
   /// when that changed.
   Future<void> publishOwnDevice() async {
@@ -1743,7 +1782,8 @@ final class LedgerNode {
       return;
     }
     // Not [publish]: this also runs while starting. The post-quantum
-    // device key goes along: friends pin it before they ever talk here.
+    // device key goes along: friends hold it as a hint before they ever
+    // talk here, which this device's own record then confirms.
     await author.append(
       accountSpace('acts', account),
       kDeviceRecordKind,
