@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 
 /// How long one confirmation opens the sensitive places.
 const Duration kSensitiveAccessGrace = Duration(seconds: 60);
@@ -44,9 +45,44 @@ final Provider<SensitiveAccessClock> sensitiveAccessClockProvider =
       return clock;
     });
 
+/// The lock screen's words for the wait after too many wrong passwords.
+String passwordWaitText(Duration wait) => t(
+  'Za dużo błędnych prób. Spróbuj ponownie za {time}.',
+  {'time': formatUnlockWait(wait)},
+);
+
+/// The words under a password field after [outcome] of [tryPassword]: the
+/// wait when one is on, otherwise [wrong].
+String passwordTryError(PasswordTry outcome, String wrong) =>
+    outcome.wait > Duration.zero ? passwordWaitText(outcome.wait) : wrong;
+
+/// Another password of the account (the one of the account key) tried by
+/// [unlock], counted with the lock screen's attempts; a right one clears
+/// nothing. Null when it was right, otherwise the words for the field:
+/// the wait, or [wrong] (by default "Złe hasło konta.").
+Future<String?> tryAccountPassword(
+  BuildContext context,
+  Future<bool> Function() unlock, {
+  String? wrong,
+}) async {
+  final UnlockThrottle throttle = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(unlockThrottleProvider);
+  final PasswordTry outcome = await tryPassword(
+    throttle,
+    unlock,
+    clears: false,
+  );
+  return outcome.right
+      ? null
+      : passwordTryError(outcome, wrong ?? t('Złe hasło konta.'));
+}
+
 /// Asks again before a sensitive place opens (account and recovery, devices,
 /// call recordings): biometrics when the key is sealed in hardware, the app
-/// password otherwise. Without an app password there is nothing to ask for.
+/// password otherwise, counted with the lock screen's attempts
+/// ([tryPassword]). Without an app password there is nothing to ask for.
 Future<bool> confirmSensitiveAccess(
   BuildContext context, {
   required String reason,
@@ -78,8 +114,11 @@ Future<bool> confirmSensitiveAccess(
   final bool ok =
       await showDialog<bool>(
         context: context,
-        builder: (BuildContext context) =>
-            _ConfirmPasswordDialog(security: security, reason: reason),
+        builder: (BuildContext context) => _ConfirmPasswordDialog(
+          security: security,
+          throttle: container.read(unlockThrottleProvider),
+          reason: reason,
+        ),
       ) ??
       false;
   if (ok) {
@@ -89,9 +128,14 @@ Future<bool> confirmSensitiveAccess(
 }
 
 class _ConfirmPasswordDialog extends StatefulWidget {
-  const _ConfirmPasswordDialog({required this.security, required this.reason});
+  const _ConfirmPasswordDialog({
+    required this.security,
+    required this.throttle,
+    required this.reason,
+  });
 
   final AppSecurityService security;
+  final UnlockThrottle throttle;
   final String reason;
 
   @override
@@ -118,17 +162,21 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
       _busy = true;
       _error = null;
     });
-    final bool ok = await widget.security.verifyPassword(_controller.text);
+    final String password = _controller.text;
+    final PasswordTry outcome = await tryPassword(
+      widget.throttle,
+      () => widget.security.verifyPassword(password),
+    );
     if (!mounted) {
       return;
     }
-    if (ok) {
+    if (outcome.right) {
       Navigator.of(context).pop(true);
       return;
     }
     setState(() {
       _busy = false;
-      _error = t('Nieprawidłowe hasło.');
+      _error = passwordTryError(outcome, t('Nieprawidłowe hasło.'));
     });
   }
 

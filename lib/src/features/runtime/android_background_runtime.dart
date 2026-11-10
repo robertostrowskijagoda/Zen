@@ -183,6 +183,12 @@ const String _kModeAckTookKey = 'took';
 /// Android ended it.
 const String kAndroidBackgroundStopRequestType = 'zen.runtime.stop';
 
+/// Message the app sends once the list of accounts that receive in the
+/// background changed ("Odbieraj w tle" turned on or off, an account
+/// erased): the service opens its node session again at once, so it reads
+/// the list anew, instead of waiting for its accounts' own look every 30 s.
+const String kAndroidBackgroundAccountsChangedType = 'zen.runtime.accounts';
+
 /// Slot of the "Zen nie odbiera w tle" notice.
 const String kBackgroundRuntimeStoppedSlot = 'background-runtime-stopped';
 
@@ -238,6 +244,62 @@ const String _kHeartbeatEngineKey = 'engine';
 /// How long the parked service waits for an answer to its probe before it
 /// takes the node over.
 const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
+
+/// The foreground service's options. Its repeat event, every
+/// [kAndroidBackgroundHeartbeatInterval], drives the watchdog that looks at
+/// the app's heartbeats while the service is [parked] beside the app; while
+/// the service runs the node itself the watchdog has nothing to look at,
+/// and the event (a turn of the service's isolate every 5 s while the phone
+/// is awake) is off ([ForegroundTaskEventAction.nothing]). The plugin
+/// changes it on the running service without starting its task again.
+ForegroundTaskOptions androidBackgroundTaskOptions({required bool parked}) =>
+    ForegroundTaskOptions(
+      eventAction: parked
+          ? ForegroundTaskEventAction.repeat(
+              kAndroidBackgroundHeartbeatInterval.inMilliseconds,
+            )
+          : ForegroundTaskEventAction.nothing(),
+      autoRunOnBoot: true,
+      autoRunOnMyPackageReplaced: true,
+      // No lock for the whole life of the service: with the screen off the
+      // phone sleeps. Alarms wake it for the work that comes back and a
+      // signal wakes it by itself; each holds it awake briefly
+      // (zen_wake.dart, ZenPower.kt). Only a call holds it longer.
+      allowWakeLock: false,
+      allowWifiLock: false,
+    );
+
+/// One wake of the parked service's watchdog: [probe] asks the app at once
+/// whether it still runs its node, and the wake ends as soon as [answered]
+/// completes (its heartbeat came) or after [wait]; whether it came. The
+/// app's heartbeat timer stood still while the phone slept, and a wake that
+/// waited for it held the phone a heartbeat's time and a second more on
+/// every wake (6 s a minute while the app is off screen); an app that runs
+/// its node answers a probe within moments.
+@visibleForTesting
+Future<bool> watchdogWakeAsks({
+  required void Function() probe,
+  required Future<void> answered,
+  Duration wait = kAndroidBackgroundProbeWait,
+}) async {
+  final Completer<bool> done = Completer<bool>();
+  final Timer timer = Timer(wait, () {
+    if (!done.isCompleted) {
+      done.complete(false);
+    }
+  });
+  unawaited(
+    answered.then<void>((_) {
+      if (!done.isCompleted) {
+        done.complete(true);
+      }
+    }, onError: (Object _) {}),
+  );
+  probe();
+  final bool heard = await done.future;
+  timer.cancel();
+  return heard;
+}
 
 /// How long the service waits to look again when the bridge refused its
 /// takeover for an app whose engine Android ended (the app's last word that
@@ -555,6 +617,10 @@ abstract interface class AndroidBackgroundServiceController {
   });
 
   Future<void> stop();
+
+  /// Tells a running service that the accounts receiving in the background
+  /// changed ([kAndroidBackgroundAccountsChangedType]).
+  void accountsChanged();
 }
 
 final class NoopAndroidBackgroundServiceController
@@ -582,6 +648,9 @@ final class NoopAndroidBackgroundServiceController
 
   @override
   Future<void> stop() async {}
+
+  @override
+  void accountsChanged() {}
 }
 
 final class FlutterForegroundAndroidBackgroundServiceController
@@ -627,6 +696,24 @@ final class FlutterForegroundAndroidBackgroundServiceController
   }
 
   @override
+  void accountsChanged() {
+    if (!Platform.isAndroid || !_initialized) {
+      return;
+    }
+    try {
+      FlutterForegroundTask.sendDataToTask(<String, Object?>{
+        'type': kAndroidBackgroundAccountsChangedType,
+      });
+    } catch (error, stackTrace) {
+      logZenError(
+        'Telling the service about the background accounts failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  @override
   Future<void> initialize() async {
     if (_initialized || !Platform.isAndroid) {
       return;
@@ -656,20 +743,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
         showNotification: false,
         playSound: false,
       ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        // Drives the standby watchdog in the task isolate.
-        eventAction: ForegroundTaskEventAction.repeat(
-          kAndroidBackgroundHeartbeatInterval.inMilliseconds,
-        ),
-        autoRunOnBoot: true,
-        autoRunOnMyPackageReplaced: true,
-        // No lock for the whole life of the service: with the screen off the
-        // phone sleeps. Alarms wake it for the work that comes back and a
-        // signal wakes it by itself; each holds it awake briefly
-        // (zen_wake.dart, ZenPower.kt). Only a call holds it longer.
-        allowWakeLock: false,
-        allowWifiLock: false,
-      ),
+      foregroundTaskOptions: androidBackgroundTaskOptions(parked: true),
     );
     // Notifications and the rest are asked for on the permissions screen
     // (first start and Ustawienia), never on their own at startup.
@@ -2129,7 +2203,8 @@ final class LockedReceiverSession {
     LockedReceiver this._receiver,
     this._nearby, {
     LockedOutbox? outbox,
-  }) : _outbox = outbox;
+  }) : _outbox = outbox,
+       _onDispose = null;
 
   /// No node of the default account ("Odbieraj w tle" off for it): only
   /// the other accounts' ([_also]), if any.
@@ -2137,7 +2212,20 @@ final class LockedReceiverSession {
     : _runtime = null,
       _receiver = null,
       _nearby = null,
-      _outbox = null;
+      _outbox = null,
+      _onDispose = null;
+
+  /// A session without any node, telling [onDispose] when it ends (tests).
+  @visibleForTesting
+  LockedReceiverSession.empty({void Function()? onDispose})
+    : _runtime = null,
+      _receiver = null,
+      _nearby = null,
+      _outbox = null,
+      _onDispose = onDispose;
+
+  /// Told when the session ends (tests).
+  final void Function()? _onDispose;
 
   final RuntimeNodeRuntime? _runtime;
   final LockedReceiver? _receiver;
@@ -2408,6 +2496,7 @@ final class LockedReceiverSession {
   Future<void> onPowerShortcut() async => _receiver?.onPowerShortcut();
 
   Future<void> dispose() async {
+    _onDispose?.call();
     final LockedReceiver? receiver = _receiver;
     if (receiver != null) {
       await _setShortcutOwner(false);
@@ -2476,17 +2565,37 @@ void _androidBackgroundRuntimeTaskEntryPoint() {
 
 /// The service's task handler with [notices] instead of the system
 /// notifications, so tests can see what the service tells the person.
+/// [openSession]: what opens the node session instead of
+/// [LockedReceiverSession.open].
 @visibleForTesting
 TaskHandler buildAndroidBackgroundTaskHandlerForTesting({
   required RuntimeSystemNotificationService notices,
+  Future<LockedReceiverSession?> Function(
+    AndroidBackgroundBootstrapPayload payload,
+  )?
+  openSession,
 }) {
-  return _ZenRewriteAndroidBackgroundTaskHandler(noticeService: () => notices);
+  return _ZenRewriteAndroidBackgroundTaskHandler(
+    noticeService: () => notices,
+    openSession: openSession,
+  );
 }
 
 final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   _ZenRewriteAndroidBackgroundTaskHandler({
     RuntimeSystemNotificationService Function()? noticeService,
-  }) : _noticeServiceFactory = noticeService;
+    Future<LockedReceiverSession?> Function(
+      AndroidBackgroundBootstrapPayload payload,
+    )?
+    openSession,
+  }) : _noticeServiceFactory = noticeService,
+       _openSession = openSession;
+
+  /// Opens the node session instead of [LockedReceiverSession.open] (tests).
+  final Future<LockedReceiverSession?> Function(
+    AndroidBackgroundBootstrapPayload payload,
+  )?
+  _openSession;
 
   final Completer<AndroidBackgroundBootstrapPayload> _bootstrapCompleter =
       Completer<AndroidBackgroundBootstrapPayload>();
@@ -2530,6 +2639,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// answer.
   Stopwatch? _probe;
   Timer? _probeTimer;
+
+  /// Completes when a heartbeat comes during a watchdog wake.
+  Completer<void>? _heardOnWake;
 
   /// The node runs here because this service took it over (no heartbeat,
   /// or the app's engine went), not because the app asked: the app is told
@@ -2669,6 +2781,11 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       _stopRequestedByApp = true;
       return;
     }
+    if (data is Map<Object?, Object?> &&
+        data['type'] == kAndroidBackgroundAccountsChangedType) {
+      _reloadAccounts();
+      return;
+    }
     final AndroidBackgroundBootstrapPayload? payload =
         AndroidBackgroundBootstrapPayload.fromData(data);
     if (payload == null) {
@@ -2679,6 +2796,37 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       return;
     }
     _request(payload);
+  }
+
+  /// The accounts receiving in the background changed: a running session
+  /// ends and the mode asked for is reached again, so the session opened
+  /// then reads the list anew. Parked, nothing runs: the next session reads
+  /// it anyway.
+  void _reloadAccounts() {
+    final AndroidBackgroundBootstrapPayload? desired = _desired;
+    if (desired == null || _destroyed) {
+      return;
+    }
+    logZenMessage('The background accounts changed: the service reloads.');
+    _transitions = _transitions
+        .then((_) async {
+          final LockedReceiverSession? session = _session;
+          if (session == null || _destroyed) {
+            return;
+          }
+          _session = null;
+          unawaited(_nodeYields?.cancel());
+          _nodeYields = null;
+          await session.dispose();
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          logZenError(
+            'Ending the session for new background accounts failed',
+            error,
+            stackTrace,
+          );
+        });
+    _request(_desired ?? desired, tookOver: _tookOver);
   }
 
   /// Takes the node over when the app stops reporting in while parked.
@@ -2708,13 +2856,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       final Stopwatch? probe = _probe;
       if (probe == null) {
         _probe = Stopwatch()..start();
-        try {
-          FlutterForegroundTask.sendDataToMain(<String, Object?>{
-            'type': _kRuntimeProbeType,
-          });
-        } catch (error, stackTrace) {
-          logZenError('Probing the app failed', error, stackTrace);
-        }
+        _sendProbe();
         _probeTimer?.cancel();
         _probeTimer = Timer(kAndroidBackgroundProbeWait, _checkStandbyWatchdog);
         return;
@@ -2744,6 +2886,22 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       ..reset()
       ..start();
     _endProbe();
+    final Completer<void>? heard = _heardOnWake;
+    if (heard != null && !heard.isCompleted) {
+      heard.complete();
+    }
+  }
+
+  /// Asks the app whether it still runs its node (it answers with a
+  /// heartbeat).
+  void _sendProbe() {
+    try {
+      FlutterForegroundTask.sendDataToMain(<String, Object?>{
+        'type': _kRuntimeProbeType,
+      });
+    } catch (error, stackTrace) {
+      logZenError('Probing the app failed', error, stackTrace);
+    }
   }
 
   void _endProbe() {
@@ -2763,11 +2921,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         'watchdog',
         standbyWatchdogEvery(appOnScreen: _appOnScreen),
         _watchOnWake,
-        // The app's heartbeat, and a probe's answer when it is late.
-        hold:
-            kAndroidBackgroundHeartbeatInterval +
-            kAndroidBackgroundProbeWait +
-            const Duration(seconds: 3),
+        // The probe's answer, and a moment for a takeover it sets off.
+        hold: kAndroidBackgroundProbeWait + const Duration(seconds: 3),
         whileIdle: !_appOnScreen,
       );
     } else {
@@ -2776,14 +2931,35 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
   }
 
-  /// A watchdog wake: the app gets one heartbeat's time to report in (its
-  /// timers stood still while the phone slept, like the service's clock),
-  /// then the heartbeats are looked at and the phone may sleep again.
+  /// A watchdog wake: the app is asked at once ([watchdogWakeAsks]; its
+  /// heartbeat timer stood still while the phone slept, like the service's
+  /// clock), then the heartbeats are looked at and the phone may sleep
+  /// again. An app silent for long ([kAndroidBackgroundHeartbeatTimeout])
+  /// that did not answer this probe in its time is taken for gone now: the
+  /// probe the look would send is the one it did not answer.
   Future<void> _watchOnWake() async {
-    await Future<void>.delayed(
-      kAndroidBackgroundHeartbeatInterval + const Duration(seconds: 1),
+    if (_destroyed) {
+      return;
+    }
+    final Completer<void> heard = _heardOnWake = Completer<void>();
+    final Stopwatch asked = Stopwatch()..start();
+    final bool answered = await watchdogWakeAsks(
+      probe: _sendProbe,
+      answered: heard.future,
     );
+    if (identical(_heardOnWake, heard)) {
+      _heardOnWake = null;
+    }
+    final Stopwatch? since = _sinceAppHeartbeat;
+    final bool silent =
+        since == null || since.elapsed >= kAndroidBackgroundHeartbeatTimeout;
+    if (!answered && silent && _probe == null) {
+      _probe = asked;
+    }
     _checkStandbyWatchdog();
+    if (identical(_probe, asked)) {
+      _endProbe();
+    }
   }
 
   @override
@@ -2974,11 +3150,17 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       try {
         final RuntimeSystemNotificationService notices =
             await _readyNotices() ?? MemoryRuntimeSystemNotificationService();
-        session = await LockedReceiverSession.open(
-          payload,
-          notices: notices,
-          goneApp: _goneAppEngine,
-        );
+        final Future<LockedReceiverSession?> Function(
+          AndroidBackgroundBootstrapPayload payload,
+        )?
+        open = _openSession;
+        session = open != null
+            ? await open(payload)
+            : await LockedReceiverSession.open(
+                payload,
+                notices: notices,
+                goneApp: _goneAppEngine,
+              );
         if (session == null) {
           // The app never told what it may receive with (not unlocked since
           // it was installed or wiped): stand by rather than run a node
@@ -3108,6 +3290,10 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
     try {
       await FlutterForegroundTask.updateService(
+        // The repeat event only while parked.
+        foregroundTaskOptions: androidBackgroundTaskOptions(
+          parked: mode == AndroidBackgroundRuntimeMode.standby,
+        ),
         notificationTitle: 'Zen',
         notificationText: _backgroundServiceNotificationText(null, mode: mode),
         notificationIcon: const NotificationIcon(

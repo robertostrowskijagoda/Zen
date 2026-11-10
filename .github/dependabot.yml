@@ -54,3 +54,9 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # 0.6 is window_manager rebuilt on nativeapi: a new native core for
+      # every desktop platform, with the API Zen uses moved to a deprecated
+      # bridge. Moving to it is a change of its own, not a weekly update.
+      - dependency-name: window_manager
+        versions: ['>=0.6.0']

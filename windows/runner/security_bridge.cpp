@@ -29,6 +29,7 @@ constexpr uint8_t kTpm = 'T';
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_window_channel;
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_vault_channel;
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_integrity_channel;
+std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_clipboard_channel;
 std::function<HWND()> g_window;
 
 const std::vector<uint8_t>* BytesArg(const flutter::MethodCall<EncodableValue>& call,
@@ -240,6 +241,63 @@ EncodableMap Integrity() {
   };
 }
 
+// ---- clipboard -------------------------------------------------------
+
+// Adds the registered clipboard format [name] holding the DWORD [value]
+// to the clipboard that is open now.
+void SetClipboardDword(const wchar_t* name, DWORD value) {
+  UINT format = RegisterClipboardFormatW(name);
+  if (!format) return;
+  HGLOBAL data = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+  if (!data) return;
+  auto* slot = static_cast<DWORD*>(GlobalLock(data));
+  if (slot) {
+    *slot = value;
+    GlobalUnlock(data);
+    if (SetClipboardData(format, data)) return;  // the clipboard owns it
+  }
+  GlobalFree(data);
+}
+
+// Puts [utf8] on the clipboard as text that stays out of the clipboard
+// history (Win+V), the cloud clipboard and clipboard monitors.
+bool CopySensitive(HWND owner, const std::string& utf8) {
+  int length = 0;
+  if (!utf8.empty()) {
+    length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                 static_cast<int>(utf8.size()), nullptr, 0);
+    if (length <= 0) return false;
+  }
+  HGLOBAL text = GlobalAlloc(GMEM_MOVEABLE, (length + 1) * sizeof(wchar_t));
+  if (!text) return false;
+  auto* buffer = static_cast<wchar_t*>(GlobalLock(text));
+  if (!buffer) {
+    GlobalFree(text);
+    return false;
+  }
+  if (length > 0) {
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                        buffer, length);
+  }
+  buffer[length] = L'\0';
+  GlobalUnlock(text);
+  if (!OpenClipboard(owner)) {
+    GlobalFree(text);
+    return false;
+  }
+  EmptyClipboard();
+  if (!SetClipboardData(CF_UNICODETEXT, text)) {
+    CloseClipboard();
+    GlobalFree(text);
+    return false;
+  }
+  SetClipboardDword(L"CanIncludeInClipboardHistory", 0);
+  SetClipboardDword(L"CanUploadToCloudClipboard", 0);
+  SetClipboardDword(L"ExcludeClipboardContentFromMonitorProcessing", 0);
+  CloseClipboard();
+  return true;
+}
+
 }  // namespace
 
 void Register(flutter::BinaryMessenger* messenger,
@@ -289,6 +347,26 @@ void Register(flutter::BinaryMessenger* messenger,
           return;
         }
         result->Success(EncodableValue(Integrity()));
+      });
+  g_clipboard_channel =
+      std::make_unique<flutter::MethodChannel<EncodableValue>>(
+          messenger, "zen/clipboard",
+          &flutter::StandardMethodCodec::GetInstance());
+  g_clipboard_channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+        if (call.method_name() != "copySensitive") {
+          result->NotImplemented();
+          return;
+        }
+        const std::string* text = nullptr;
+        if (const auto* args = std::get_if<EncodableMap>(call.arguments())) {
+          auto it = args->find(EncodableValue("text"));
+          if (it != args->end()) text = std::get_if<std::string>(&it->second);
+        }
+        HWND hwnd = g_window ? g_window() : nullptr;
+        result->Success(
+            EncodableValue(text != nullptr && CopySensitive(hwnd, *text)));
       });
 }
 

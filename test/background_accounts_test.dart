@@ -5,10 +5,13 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
 
 /// "Odbieraj w tle" per account: on for the default account, off for the
 /// others until turned on; the list the background service reads names no
@@ -108,6 +111,94 @@ void main() {
     await background.setOn(c, true);
     expect(await background.isOn(c), isTrue);
     expect(await background.isOn(b), isFalse);
+  });
+
+  test('the emergency wipe password of an account that receives in the '
+      'background takes it off the list and stops its node at once', () async {
+    await registry.prepare();
+    final ZenAccountScope a = await registry.create();
+    final AppSecurityService security = LocalAppSecurityService(
+      credentialsStore: secrets.forAccount(a.secret),
+      passwordIterations: 10,
+      keyVault: const SharedKeyVault(NoKeyVault()),
+    );
+    await security.initialize(settings: const AppSettings());
+    await security.setPassword('haslo-konta-a');
+    await security.setPanicPassword('alarm-alarm');
+    await opened(a);
+    expect(await background.setOn(a, true), isTrue);
+    final Directory accounts = await registry.accountsDirectory();
+    final int folders = accounts.listSync().whereType<Directory>().length;
+    int stopped = 0;
+    BackgroundAccountRuns.add(a.folder!, () async => stopped++);
+
+    final ZenAccountUnlockResult result = await unlockZenAccount(
+      a,
+      'alarm-alarm',
+      registry: registry,
+      security: (ZenAccountScope s) => LocalAppSecurityService(
+        credentialsStore: secrets.forAccount(s.secret),
+        passwordIterations: 10,
+        keyVault: const SharedKeyVault(NoKeyVault()),
+      ),
+    );
+
+    expect(result.outcome, ZenAccountUnlock.wiped);
+    expect(stopped, 1);
+    expect(await background.isOn(a), isFalse);
+    expect(
+      (stored()['a'] as List<dynamic>).where(
+        (Object? e) => (e! as Map<dynamic, dynamic>)['f'] == a.folder,
+      ),
+      isEmpty,
+    );
+    expect(await Directory('${accounts.path}/${a.folder}').exists(), isFalse);
+    expect(accounts.listSync().whereType<Directory>(), hasLength(folders));
+  });
+
+  test('a node whose account is gone stops by itself and takes away what '
+      'it wrote again; an account turned off keeps its folder', () async {
+    final ZenAccountScope a = await registry.create();
+    await opened(a);
+    final Directory folder = Directory(
+      '${(await registry.accountsDirectory()).path}/${a.folder}',
+    );
+    int stopped = 0;
+    final BackgroundAccountWatch watch = BackgroundAccountWatch(
+      folder: folder,
+      credentials: secrets.forAccount(a.secret),
+      onGone: () async => stopped++,
+      every: const Duration(hours: 1),
+    )..start();
+    expect(await watch.check(), isFalse);
+    expect(stopped, 0);
+
+    // Wiped (keys first, then the folder), and the node wrote into its
+    // inbox once more before it noticed.
+    await secrets.forAccount(a.secret).deleteAccountEntries();
+    await File('${folder.path}/background/inbox.zbox').create(recursive: true);
+    expect(await watch.check(), isTrue);
+    expect(stopped, 1);
+    expect(await folder.exists(), isFalse);
+
+    // "Odbieraj w tle" turned off: the node stops, the account stays.
+    final ZenAccountScope b = await registry.create();
+    await opened(b);
+    final Directory home = Directory(
+      '${(await registry.accountsDirectory()).path}/${b.folder}',
+    );
+    await File('${home.path}/data/user_profile.zenbin').create(recursive: true);
+    final BackgroundAccountWatch other = BackgroundAccountWatch(
+      folder: home,
+      credentials: secrets.forAccount(b.secret),
+      onGone: () async => stopped++,
+    )..start();
+    await secrets
+        .forAccount(b.secret)
+        .delete(appSecurityBackgroundKeyStorageKey);
+    expect(await other.check(), isTrue);
+    expect(stopped, 2);
+    expect(await home.exists(), isTrue);
   });
 
   test('the default account can be turned off, and on again', () async {

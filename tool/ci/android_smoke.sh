@@ -102,7 +102,15 @@ case "$mode" in
     node=$(grep ' ./runtime/yggdrasil.config.json$' before.txt | cut -d ' ' -f 1 || true)
     run_start_test --dart-define=ZEN_OLD_NODE_CONFIG_SHA="$node"
     files_of_app > after.txt
+    # The decoy folders of 1.16.3 and earlier (random <24 hex>.bin files in
+    # an account folder's settings and data, nothing else) are planted
+    # again in an account's look when Zen starts (account_decoys.dart,
+    # hasEarlierLook); no account ever has such a file.
     missing=$(cut -d ' ' -f 2- before.txt | while read -r f; do
+      if echo "$f" |
+        grep -qE '^\./accounts/[0-9a-f]{32}/(settings|data)/[0-9a-f]{24}\.bin$'; then
+        continue
+      fi
       grep -q " $f\$" after.txt || echo "$f"
     done)
     if [ -n "$missing" ]; then

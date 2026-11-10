@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // Random input for everything the bridge reads from the network or a
@@ -142,6 +145,77 @@ func FuzzParseDNSQuestion(f *testing.F) {
 		}
 		if question.end > len(data) || len(question.name) > 255 {
 			t.Fatalf("end %d of %d, name of %d", question.end, len(data), len(question.name))
+		}
+	})
+}
+
+// What a linked device sends over the link, in pieces of any size: the
+// scanner takes it all and never stops the stream; a frame counts once its
+// head came, and no frame is longer than a node takes.
+func FuzzLinkFrameScanner(f *testing.F) {
+	self := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	other := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	other[0] = 1
+	stream := append([]byte("meta\x00\x00"), 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01, 0x09)
+	f.Add(stream, byte(3))
+	traffic := append([]byte("meta\x00\x00"), 0x4a, linkFrameTraffic, 3, 0, 7, 0)
+	traffic = append(traffic, other...)
+	traffic = append(traffic, self...)
+	f.Add(traffic, byte(7))
+	f.Fuzz(func(t *testing.T, data []byte, piece byte) {
+		var forwarded atomic.Uint64
+		var talked atomic.Int64
+		for _, outbound := range []bool{false, true} {
+			scanner := newLinkFrameScanner(self, other, outbound, &forwarded, &talked)
+			rest := data
+			for len(rest) > 0 {
+				n := min(len(rest), 1+int(piece)%64)
+				if written, err := scanner.Write(rest[:n]); written != n || err != nil {
+					t.Fatalf("wrote %d of %d: %v", written, n, err)
+				}
+				rest = rest[n:]
+			}
+		}
+		if frames := uint64(len(data)/2 + 1); forwarded.Load() > 2*frames*(linkFrameMax+10) {
+			t.Fatalf("counted %d bytes of %d", forwarded.Load(), len(data))
+		}
+	})
+}
+
+// A call's first datagrams from a local socket and from the peer, and
+// adverts anyone nearby sends.
+func FuzzRelayAdmissionAndLocalAdverts(f *testing.F) {
+	f.Add([]byte{0x00, 0x01, 0x00, 0x08, 0x21, 0x12, 0xA4, 0x42, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x00, 0x06, 0x00, 0x03, 'a', ':', 'b', 0})
+	f.Add(make([]byte, 40))
+	f.Add(lanBeacon(lanBeaconFields{
+		advert: make([]byte, localLinkAdvertHeader+localLinkMinBloomBytes),
+		port:   4242,
+	}))
+	peer, err := newLocalPeer("200::1", "0000000000000000000000000000000000000000000000000000000000000001", false)
+	if err != nil {
+		f.Fatal(err)
+	}
+	peers := []localPeer{peer}
+	now := time.Unix(1_800_000_000, 0)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if name, ok := stunBindingRequestUsername(data); ok {
+			if len(name) == 0 || len(name) > stunMaxUsernameBytes {
+				t.Fatalf("a username of %d bytes", len(name))
+			}
+			if swapped, ok := swappedICEUsername(name); ok {
+				if back, ok := swappedICEUsername(swapped); !ok || back != name {
+					t.Fatalf("%q swapped twice is %q", name, back)
+				}
+			}
+		}
+		var admission relayAdmission
+		admission.learnFromPeer(data)
+		admission.judgeFirstDatagram(data)
+		if len(matchLocalAdvert(peers, data, now)) > len(peers) {
+			t.Fatal("more matches than peers")
+		}
+		if fields, ok := parseLanBeacon(data); ok {
+			matchLocalAdvert(peers, fields.advert, now)
 		}
 	})
 }

@@ -5,7 +5,10 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart';
+import 'package:zen/src/features/security/app_security_crypto.dart';
 
 /// Cross-desktop single-instance lock.
 ///
@@ -18,12 +21,21 @@ import 'package:zen/src/core/logging/zen_log.dart';
 /// The lock is loopback-only (never reachable from the network) and every
 /// exchange is guarded by a handshake so an unrelated program sitting on the
 /// same port cannot be mistaken for a Zen instance — and vice versa.
+///
+/// Loopback is shared by every user of the computer, so every request
+/// carries this session's secret: random, new at every claim of the lock,
+/// in a file of the app's own data folder that only this user can read
+/// ([secretFileName]). A request without it is not answered and changes
+/// nothing (another user cannot make this Zen open a file).
 abstract final class ZenSingleInstance {
   /// Fixed loopback port for the lock. Not a network service: bound to
   /// 127.0.0.1 only.
   static const int lockPort = 47821;
 
-  static const String _hello = 'ZEN-SINGLE-INSTANCE/1';
+  static const String _hello = 'ZEN-SINGLE-INSTANCE/2';
+
+  /// The file of the session's secret, in the app's own data folder.
+  static const String secretFileName = 'single_instance.key';
   static const String _activate = 'ACTIVATE';
   static const String _ack = 'ACK';
 
@@ -33,6 +45,9 @@ abstract final class ZenSingleInstance {
   static StreamSubscription<Socket>? _subscription;
   static Future<void> Function()? _onActivateRequested;
   static Future<void> Function(String path)? _onOpenRequested;
+
+  /// This session's secret while the lock is held.
+  static String? _secret;
 
   /// True on the platforms where the lock applies (desktop only — Android and
   /// iOS already guarantee a single process per app).
@@ -52,32 +67,94 @@ abstract final class ZenSingleInstance {
     _onOpenRequested = handler;
   }
 
-  /// The activation request, with the file a launch was started with
-  /// ([open], base64url of its UTF-8 path, so spaces stay inside one word).
+  /// The activation request with the session's [secret], and the file a
+  /// launch was started with ([open], base64url of its UTF-8 path, so
+  /// spaces stay inside one word).
   @visibleForTesting
-  static String activationRequest({String? open}) => open == null
-      ? '$_hello $_activate'
-      : '$_hello $_activate ${base64Url.encode(utf8.encode(open))}';
+  static String activationRequest({required String secret, String? open}) =>
+      open == null
+      ? '$_hello $_activate $secret'
+      : '$_hello $_activate $secret ${base64Url.encode(utf8.encode(open))}';
 
-  /// Reads [request]: `null` when it is not an activation request, else
-  /// the file it carries (an empty string for none).
+  /// Reads [request]: `null` when it is not an activation request carrying
+  /// [secret], else the file it carries (an empty string for none).
   @visibleForTesting
-  static String? parseActivationRequest(String request) {
+  static String? parseActivationRequest(
+    String request, {
+    required String secret,
+  }) {
     final List<String> words = request.trim().split(' ');
-    if (words.length < 2 ||
-        words.length > 3 ||
+    if (words.length < 3 ||
+        words.length > 4 ||
         words[0] != _hello ||
-        words[1] != _activate) {
+        words[1] != _activate ||
+        secret.isEmpty ||
+        !_sameSecret(words[2], secret)) {
       return null;
     }
-    if (words.length == 2) {
+    if (words.length == 3) {
       return '';
     }
     try {
-      return utf8.decode(base64Url.decode(words[2]));
+      return utf8.decode(base64Url.decode(words[3]));
     } on FormatException {
       // Activation still; the file is unreadable.
       return '';
+    }
+  }
+
+  /// [a] and [b] compared in time that does not depend on where they
+  /// differ.
+  static bool _sameSecret(String a, String b) {
+    final List<int> x = utf8.encode(a);
+    final List<int> y = utf8.encode(b);
+    int difference = x.length ^ y.length;
+    for (int i = 0; i < y.length; i++) {
+      difference |= (i < x.length ? x[i] : 0) ^ y[i];
+    }
+    return difference == 0;
+  }
+
+  /// The file of the session's secret of this user's Zen.
+  static Future<File> _defaultSecretFile() async {
+    final Directory dir = await ZenInstance.instanceDirectory();
+    return File('${dir.path}${Platform.pathSeparator}$secretFileName');
+  }
+
+  /// A new secret for this session, written where only this user reads it
+  /// (on Linux and macOS the file is made `0600` before the secret goes
+  /// in; on Windows the folder is the user's own).
+  static Future<void> _newSecret(Future<File> Function() secretFile) async {
+    final String secret = securityHexFromBytes(randomSecurityBytes(32));
+    _secret = secret;
+    try {
+      final File file = await secretFile();
+      await file.parent.create(recursive: true);
+      await file.writeAsString('', flush: true);
+      if ((Platform.isLinux || Platform.isMacOS) &&
+          !posixChmod(file.path, kOwnerOnlyFileMode)) {
+        await file.delete();
+        throw StateError('The single instance secret could not be private.');
+      }
+      await file.writeAsString(secret, flush: true);
+    } on Object catch (error, stackTrace) {
+      // Nothing can ask this instance for anything then; a second launch
+      // starts as it would beside an unrelated program.
+      logZenError(
+        'Writing the single instance secret failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  /// The secret of the running instance, as this user can read it.
+  static Future<String?> _readSecret(Future<File> Function() secretFile) async {
+    try {
+      final String secret = (await (await secretFile()).readAsString()).trim();
+      return RegExp(r'^[0-9a-f]{64}$').hasMatch(secret) ? secret : null;
+    } on Object {
+      return null;
     }
   }
 
@@ -87,18 +164,25 @@ abstract final class ZenSingleInstance {
   /// need for one). Returns `false` when another Zen instance is already
   /// running — the caller should quit immediately.
   ///
-  /// [port] exists for tests; production always uses [lockPort]. [open]:
-  /// the file this launch was started with, handed to the running instance.
-  static Future<bool> acquire({int port = lockPort, String? open}) async {
+  /// [port] and [secretFile] exist for tests; production always uses
+  /// [lockPort] and [secretFileName] in the app's own folder. [open]: the
+  /// file this launch was started with, handed to the running instance.
+  static Future<bool> acquire({
+    int port = lockPort,
+    String? open,
+    Future<File> Function()? secretFile,
+  }) async {
     if (!isSupported || _server != null) {
       return true;
     }
+    final Future<File> Function() secretAt = secretFile ?? _defaultSecretFile;
     try {
       final ServerSocket server = await ServerSocket.bind(
         InternetAddress.loopbackIPv4,
         port,
       );
       _server = server;
+      await _newSecret(secretAt);
       _subscription = server.listen(
         _handleConnection,
         onError: (Object error, StackTrace stackTrace) {
@@ -114,11 +198,22 @@ abstract final class ZenSingleInstance {
         stackTrace,
       );
     }
-    // The port is taken. Probing the owner.
-    final bool ownedByZen = await _requestActivationFromRunningInstance(
+    // The port is taken. Probing the owner; once more a moment later, for
+    // an instance that has only just claimed the port and is still
+    // writing its secret.
+    bool ownedByZen = await _requestActivationFromRunningInstance(
       port,
       open,
+      secretAt,
     );
+    if (!ownedByZen) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      ownedByZen = await _requestActivationFromRunningInstance(
+        port,
+        open,
+        secretAt,
+      );
+    }
     if (!ownedByZen && Platform.isWindows && port == lockPort) {
       // The port was busy, but whatever was on the port did NOT complete
       // the Zen handshake (or answered without a window). Only hung copies
@@ -132,6 +227,7 @@ abstract final class ZenSingleInstance {
           port,
         );
         _server = server;
+        await _newSecret(secretAt);
         _subscription = server.listen(
           _handleConnection,
           onError: (Object error, StackTrace stackTrace) {
@@ -273,6 +369,7 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
     final ServerSocket? server = _server;
     _subscription = null;
     _server = null;
+    _secret = null;
     try {
       await subscription?.cancel();
       await server?.close();
@@ -297,10 +394,12 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
   static Future<void> _handleConnection(Socket socket) async {
     try {
       final String? request = await _readHandshakeLine(socket);
-      final String? open = request == null
+      final String? secret = _secret;
+      final String? open = request == null || secret == null
           ? null
-          : parseActivationRequest(request);
+          : parseActivationRequest(request, secret: secret);
       if (open == null) {
+        // Not this user's Zen (or no request at all): no answer.
         return;
       }
       socket.write('$_hello $_ack\n');
@@ -332,7 +431,12 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
   static Future<bool> _requestActivationFromRunningInstance(
     int port,
     String? open,
+    Future<File> Function() secretFile,
   ) async {
+    final String? secret = await _readSecret(secretFile);
+    if (secret == null) {
+      return false;
+    }
     Socket? socket;
     try {
       socket = await Socket.connect(
@@ -340,7 +444,7 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
         port,
         timeout: _handshakeTimeout,
       );
-      socket.write('${activationRequest(open: open)}\n');
+      socket.write('${activationRequest(secret: secret, open: open)}\n');
       await socket.flush();
       final String? response = await _readHandshakeLine(socket);
       final bool acknowledged = response?.trim() == '$_hello $_ack';

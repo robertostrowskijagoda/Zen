@@ -326,6 +326,14 @@ final class _AlarmWakeTimer implements WakeTimer {
   }
 }
 
+/// How much before it is due the shared beat may run a work of period
+/// [every], on another work's wake, rather than wake the phone for it
+/// alone: a third of the period, so works whose periods are multiples of
+/// one another settle on the same wakes. Work that minds how long it has
+/// been since it last ran takes a run this early as on time, or it loses
+/// the run and waits a whole period more.
+Duration wakeBeatEarly(Duration every) => every ~/ 3;
+
 /// Work on the shared beat ([ZenWake.beat]); how often it comes may change.
 abstract interface class BeatTimer implements WakeTimer {
   /// How long it waits between runs now.
@@ -362,10 +370,8 @@ final class _BeatWork implements BeatTimer {
   @override
   Duration get every => _every;
 
-  /// It may run up to this much before it is due, on another work's wake,
-  /// rather than wake the phone on its own: so works whose periods are
-  /// multiples of one another settle on the same wakes.
-  int get slackMs => _every.inMilliseconds ~/ 3;
+  /// It may run up to this much before it is due ([wakeBeatEarly]).
+  int get slackMs => wakeBeatEarly(_every).inMilliseconds;
 
   @override
   bool get isActive => !_cancelled;

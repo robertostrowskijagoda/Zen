@@ -2092,6 +2092,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         state.groups,
       );
       bool changed = false;
+      final List<String> unjoined = <String>[];
       for (final String id in groups.keys.toList()) {
         if (id.startsWith(prefix) && !wanted.containsKey(id)) {
           groups.remove(id);
@@ -2107,7 +2108,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           normalizedGroupMembers(e.value.members),
         );
         final GroupProfile? had = groups[e.key];
-        if (had == null) {
+        // Someone else's group under this id (an invitation taken in before
+        // such ids were refused) is no cell chat: it gives way entirely,
+        // its creator and members too.
+        final bool foreign =
+            had != null && (had.createdById != prefix || had.isInvitePending);
+        if (foreign && had.isInvitePending) {
+          unjoined.add(e.key);
+        }
+        if (had == null || foreign) {
           groups[e.key] = GroupProfile(
             id: e.key,
             name: e.value.name,
@@ -2121,18 +2130,30 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           );
           changed = true;
         } else if (had.name != e.value.name ||
-            had.isInvitePending ||
             !listEquals(had.memberAddresses, members)) {
           groups[e.key] = had.copyWith(
             name: e.value.name,
             memberAddresses: members,
-            isInvitePending: false,
           );
           changed = true;
         }
       }
       if (changed) {
-        state = state.copyWith(groups: groups);
+        state = state.copyWith(
+          groups: groups,
+          // Its invitation goes with it.
+          inbox: state.inbox
+              .where(
+                (InboxEntry entry) =>
+                    entry.type != InboxEntryType.groupInvite ||
+                    !unjoined.contains(_groupIdOfRouteKey(entry.routeKey)),
+              )
+              .toList(growable: false),
+        );
+        // What was said before joining was said in that other group.
+        for (final String id in unjoined) {
+          await _messageTimelineStore.save('group:$id', const <ChatMessage>[]);
+        }
         await _persistState();
       }
     });

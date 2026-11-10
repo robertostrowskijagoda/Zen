@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
@@ -224,6 +225,55 @@ void main() {
     await service.clearPanicPassword();
     expect(service.hasPanicPassword, isFalse);
     expect(await service.matchesPanicPassword('panika123'), isFalse);
+  });
+
+  test('a wrong password costs the same work with an emergency wipe password '
+      'set or not, also on an account an earlier version made', () async {
+    final List<PasswordCost> costs = <PasswordCost>[];
+    debugOnPasswordDerivation = costs.add;
+    addTearDown(() => debugOnPasswordDerivation = null);
+    const Set<String> earlierEntries = <String>{
+      appSecurityPasswordKdfStorageKey,
+      appSecuritySaltStorageKey,
+      appSecurityPasswordHashStorageKey,
+      appSecurityWrappedMasterKeyStorageKey,
+      appSecurityMasterKeyFingerprintStorageKey,
+    };
+
+    /// What the lock screen does for a wrong password, with what it cost.
+    Future<List<PasswordCost>> wrongAttempt({
+      required bool panic,
+      bool earlier = false,
+    }) async {
+      final _MapStore store = _MapStore();
+      final LocalAppSecurityService made = LocalAppSecurityService(
+        credentialsStore: store,
+        passwordIterations: 10,
+      );
+      await made.initialize(settings: const AppSettings());
+      await made.setPassword('the-real-password');
+      if (panic) {
+        await made.setPanicPassword('wipe-everything');
+      }
+      if (earlier) {
+        // As 1.16.2 left it: only the password's entries.
+        store.values.removeWhere((String k, _) => !earlierEntries.contains(k));
+      }
+      final LocalAppSecurityService service = LocalAppSecurityService(
+        credentialsStore: store,
+        passwordIterations: 10,
+      );
+      await service.initialize(settings: const AppSettings());
+      costs.clear();
+      expect(await service.matchesPanicPassword('guess-1234'), isFalse);
+      expect(await service.unlock('guess-1234'), isFalse);
+      return List<PasswordCost>.of(costs);
+    }
+
+    final List<PasswordCost> withPanic = await wrongAttempt(panic: true);
+    expect(withPanic, hasLength(2));
+    expect(await wrongAttempt(panic: false), withPanic);
+    expect(await wrongAttempt(panic: false, earlier: true), withPanic);
   });
 
   test(
@@ -751,4 +801,18 @@ final class _HeldDeletes implements AppSecurityCredentialsStore {
     await gate?.future;
     await _inner.delete(key);
   }
+}
+
+/// Secure storage as a map whose entries a test can look at.
+final class _MapStore implements AppSecurityCredentialsStore {
+  final Map<String, String> values = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+
+  @override
+  Future<void> delete(String key) async => values.remove(key);
 }

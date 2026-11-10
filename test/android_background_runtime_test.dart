@@ -248,6 +248,75 @@ void main() {
     );
   });
 
+  test('a watchdog wake asks the app at once and ends as soon as its '
+      'heartbeat comes', () async {
+    final List<String> said = <String>[];
+    final Completer<void> heartbeat = Completer<void>();
+    final Stopwatch took = Stopwatch()..start();
+    final Future<bool> wake = watchdogWakeAsks(
+      probe: () => said.add('probe'),
+      answered: heartbeat.future,
+    );
+    expect(said, <String>['probe'], reason: 'before anything is waited for');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    heartbeat.complete();
+    expect(await wake, isTrue);
+    expect(
+      took.elapsed,
+      lessThan(kAndroidBackgroundProbeWait),
+      reason: 'not the time of a heartbeat and the wait of a probe after it',
+    );
+  });
+
+  test('a watchdog wake the app does not answer ends after the wait of '
+      'its probe', () async {
+    int probes = 0;
+    final Stopwatch took = Stopwatch()..start();
+    final bool heard = await watchdogWakeAsks(
+      probe: () => probes++,
+      answered: Completer<void>().future,
+      wait: const Duration(milliseconds: 80),
+    );
+    expect(heard, isFalse);
+    expect(probes, 1);
+    expect(
+      took.elapsed,
+      greaterThanOrEqualTo(const Duration(milliseconds: 80)),
+    );
+    expect(
+      kAndroidBackgroundProbeWait,
+      lessThan(kAndroidBackgroundHeartbeatInterval),
+    );
+  });
+
+  test('the service hears its repeat event only while parked beside the '
+      'app, and its other options stay as they were', () {
+    final ForegroundTaskOptions parked = androidBackgroundTaskOptions(
+      parked: true,
+    );
+    final ForegroundTaskOptions owning = androidBackgroundTaskOptions(
+      parked: false,
+    );
+    expect(parked.eventAction.type, ForegroundTaskEventType.repeat);
+    expect(
+      parked.eventAction.interval,
+      kAndroidBackgroundHeartbeatInterval.inMilliseconds,
+    );
+    expect(owning.eventAction.type, ForegroundTaskEventType.nothing);
+    for (final ForegroundTaskOptions o in <ForegroundTaskOptions>[
+      parked,
+      owning,
+    ]) {
+      expect(o.autoRunOnBoot, isTrue);
+      expect(o.autoRunOnMyPackageReplaced, isTrue);
+      expect(o.allowWakeLock, isFalse);
+      expect(o.allowWifiLock, isFalse);
+    }
+    final Map<String, dynamic> a = parked.toJson()..remove('taskEventAction');
+    final Map<String, dynamic> b = owning.toJson()..remove('taskEventAction');
+    expect(a, b);
+  });
+
   test('long in the background the app drops to receive-only', () {
     final DateTime left = DateTime(2026, 10, 22, 12);
     expect(shouldDropToReceiveOnly(backgroundSince: null, now: left), isFalse);
@@ -1092,6 +1161,57 @@ void main() {
     },
   );
 
+  test('a change of the background accounts makes a running service open its '
+      'session again at once, so it reads the list anew', () async {
+    final List<String> events = <String>[];
+    int opened = 0;
+    final TaskHandler handler = buildAndroidBackgroundTaskHandlerForTesting(
+      notices: MemoryRuntimeSystemNotificationService(),
+      openSession: (AndroidBackgroundBootstrapPayload payload) async {
+        final int n = ++opened;
+        events.add('open $n');
+        return LockedReceiverSession.empty(
+          onDispose: () => events.add('end $n'),
+        );
+      },
+    );
+    Future<void> settle() async {
+      for (int i = 0; i < 40; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    // Nothing asked for yet: nothing to reload.
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    const AndroidBackgroundBootstrapPayload active =
+        AndroidBackgroundBootstrapPayload(settings: AppSettings());
+    // The first payload is the bootstrap; the next one is acted on.
+    handler.onReceiveData(active.toData());
+    handler.onReceiveData(active.toData());
+    await settle();
+    expect(events, <String>['open 1']);
+
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    await settle();
+    expect(events, <String>['open 1', 'end 1', 'open 2']);
+
+    // Parked, nothing runs: the next session reads the list anyway.
+    handler.onReceiveData(
+      active.withMode(AndroidBackgroundRuntimeMode.standby).toData(),
+    );
+    await settle();
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundAccountsChangedType,
+    });
+    await settle();
+    expect(events, <String>['open 1', 'end 1', 'open 2', 'end 2']);
+    await handler.onDestroy(DateTime.fromMillisecondsSinceEpoch(1), false);
+  });
+
   test(
     'the stop notice can be withdrawn once the service runs again',
     () async {
@@ -1208,6 +1328,11 @@ final class _FakeAndroidBackgroundServiceController
     }
     _running = false;
   }
+
+  int accountsChangedCount = 0;
+
+  @override
+  void accountsChanged() => accountsChangedCount += 1;
 }
 
 /// The bridge's providers over fakes: no real files, no real service, and

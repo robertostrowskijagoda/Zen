@@ -110,18 +110,23 @@ String? zenOpenedFileOfLink(Uri uri) {
 /// Whether [uri] from app_links is a file, not a link to follow.
 bool isZenOpenedFileLink(Uri uri) => zenOpenedFileOfLink(uri) != null;
 
+/// Whether [path] names a network share or a device (`\\host\share`,
+/// `\\?\…`, `\\.\…`, `//host/share`), never a file Zen opens: on Windows
+/// even looking at one hands the share this user's sign-in.
+bool isRemoteOrDevicePath(String path) =>
+    RegExp(r'^[\\/]{2}').hasMatch(path.trimLeft());
+
 /// The file a computer started Zen with ("Otwórz za pomocą", a double
 /// click once Zen is the program for the file): the first argument that is
-/// an absolute path. The options (`--zen-profile=…`) are not files.
+/// an absolute local path. The options (`--zen-profile=…`), shares and
+/// devices are not files.
 String? zenOpenedFileArgument(List<String> args) {
   for (final String arg in args) {
-    if (arg.startsWith('-')) {
+    if (arg.startsWith('-') || isRemoteOrDevicePath(arg)) {
       continue;
     }
     final bool absolute =
-        arg.startsWith('/') ||
-        arg.startsWith(r'\\') ||
-        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(arg);
+        arg.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(arg);
     if (absolute) {
       return arg;
     }
@@ -152,6 +157,9 @@ final class PlatformOpenedFileReader implements OpenedFileReader {
             'uri': file,
           });
       return copied?['path'] as String?;
+    }
+    if (isRemoteOrDevicePath(file)) {
+      return null;
     }
     return await File(file).exists() ? file : null;
   }
@@ -254,6 +262,10 @@ final class ZenOpenedFiles extends ChangeNotifier {
   /// Reads [file] (a content address or a path) and lets it wait for its
   /// screen.
   Future<void> offer(String file) async {
+    if (isRemoteOrDevicePath(file)) {
+      logZenWarning('A share or a device was handed over to open; ignored');
+      return;
+    }
     final DateTime now = _now();
     final DateTime? lastAt = _lastAt;
     if (file == _last &&

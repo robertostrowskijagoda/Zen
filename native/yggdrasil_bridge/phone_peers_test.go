@@ -385,6 +385,73 @@ func TestAHoldingPhoneSkipsThePeersSetAside(t *testing.T) {
 	}
 }
 
+// A phone's pool, also a list the user made, has every TLS peer before
+// the QUIC ones (a keepalive of their own every 20 s) and the WebSocket
+// ones, in the list's order otherwise.
+func TestAPhoneTriesEveryTLSPeerBeforeQUICAndWebSocket(t *testing.T) {
+	pool := []string{
+		"quic://192.0.2.1:443", "tls://192.0.2.2:443", "wss://192.0.2.3:443",
+		"tls://192.0.2.4:443", "quic://192.0.2.5:443", "tls://192.0.2.6:443",
+	}
+	rotation := newPeerRotation(pool, 2)
+	want := []string{
+		"tls://192.0.2.2:443", "tls://192.0.2.4:443", "tls://192.0.2.6:443",
+		"quic://192.0.2.1:443", "wss://192.0.2.3:443", "quic://192.0.2.5:443",
+	}
+	for index, uri := range want {
+		if rotation.pool[index] != uri {
+			t.Fatalf("pool %v, want %v", rotation.pool, want)
+		}
+	}
+	if got := rotation.initial(); got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("dials %v first", got)
+	}
+}
+
+// A node that only receives dials TLS peers only while one of them works:
+// its stand-ins are TLS peers; QUIC or WebSocket only when every TLS peer
+// failed, and once a TLS peer answers again it goes back to it.
+func TestANodeThatOnlyReceivesKeepsToTLSWhileATLSPeerWorks(t *testing.T) {
+	pool := []string{
+		"tls://192.0.2.1:443", "quic://192.0.2.2:443", "wss://192.0.2.3:443",
+		"tls://192.0.2.4:443", "quic://192.0.2.5:443", "tls://192.0.2.6:443",
+	}
+	tlsPeers := []string{"tls://192.0.2.1:443", "tls://192.0.2.4:443", "tls://192.0.2.6:443"}
+	w := newPeerWorld(t, pool, phoneExtraAccountPeerCount)
+	w.untilUp(1, time.Minute)
+	w.dead[tlsPeers[1]] = true
+	w.kill(tlsPeers[0])
+	for _, peer := range w.dialled {
+		if peerScheme(peer) != "tls" {
+			t.Fatalf("a TLS peer still may work, yet it dials %v", w.dialled)
+		}
+	}
+	w.untilUp(1, time.Minute)
+	w.run(time.Minute)
+	if len(w.dialled) != 1 || w.dialled[0] != tlsPeers[2] {
+		t.Fatalf("the TLS peer that works, alone: %v", w.dialled)
+	}
+
+	// Every TLS peer goes: QUIC or WebSocket rather than nothing.
+	w.dead[tlsPeers[0]] = true
+	w.kill(tlsPeers[2])
+	w.untilUp(1, 5*time.Minute)
+	w.run(time.Minute)
+	if len(w.dialled) != 1 || peerScheme(w.dialled[0]) == "tls" {
+		t.Fatalf("no TLS peer works: %v", w.dialled)
+	}
+
+	// A TLS peer answers again: the node goes back to it in a while.
+	w.dead = map[string]bool{}
+	w.run(phonePeerLightRetry + time.Minute)
+	if len(w.dialled) != 1 || peerScheme(w.dialled[0]) != "tls" || w.upCount() != 1 {
+		t.Fatalf("back on TLS: %v", w.dialled)
+	}
+	if w.most > 2 {
+		t.Fatalf("%d dialled at once", w.most)
+	}
+}
+
 func TestPhoneRotationFillsUpAndSkipsDuplicates(t *testing.T) {
 	rotation := newPeerRotation([]string{"a", "a", "b", "", "c"}, 4)
 	dialled := rotation.initial()

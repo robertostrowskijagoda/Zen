@@ -116,17 +116,34 @@ final class _FfiGoBluetoothApi implements GoBluetoothApi {
 /// Bluetooth through the Go bridge: on Linux the streams (polled while
 /// running) with BlueZ's adverts ([le]); on Windows the RFCOMM streams with
 /// paired devices, inside [WindowsBluetoothRadio].
+///
+/// The bridge is asked every [pollEvery] while a dial waits for its outcome
+/// and for [busyFor] after the links did something (the start, a dial, a
+/// stream that came, a friend's device seen nearby: a stream from them
+/// is likely to follow), and every [idlePollEvery] otherwise: a computer
+/// in the tray asked twice a second for good. An incoming stream waits 15 s
+/// in the bridge for its answer (btIncomingWait, bluetooth_link.go), so
+/// one that comes while idle is answered within 5 s, and the polls after it
+/// are quick again.
 final class GoBluetoothRadio implements NativeLinkRadio {
   GoBluetoothRadio({
     GoBluetoothApi? go,
     BluezLe? le,
     this.pollEvery = const Duration(milliseconds: 500),
+    this.idlePollEvery = const Duration(seconds: 5),
+    this.busyFor = const Duration(seconds: 30),
     this.dialTimeout = const Duration(seconds: 45),
   }) : _go = go,
        _le = le;
 
   final BluezLe? _le;
   final Duration pollEvery;
+  final Duration idlePollEvery;
+
+  /// How long the polls stay quick after the links did something: longer
+  /// than a friend's device takes to dial once both saw each other
+  /// (waitForPeer, 20 s, native_stream_local_link.dart).
+  final Duration busyFor;
 
   /// A dial whose outcome has not come by then counts as failed.
   final Duration dialTimeout;
@@ -136,6 +153,12 @@ final class GoBluetoothRadio implements NativeLinkRadio {
   bool _started = false;
   int _psm = 0;
   Timer? _poll;
+
+  /// [_poll] waits [pollEvery] (not [idlePollEvery]).
+  bool _pollingQuickly = false;
+
+  /// Runs out [busyFor] after the links last did something.
+  Timer? _busy;
   final StreamController<Map<Object?, Object?>> _events =
       StreamController<Map<Object?, Object?>>.broadcast();
   final Map<String, Completer<bool>> _dials = <String, Completer<bool>>{};
@@ -187,8 +210,35 @@ final class GoBluetoothRadio implements NativeLinkRadio {
     final Object? psm = info['psm'];
     _psm = psm is int ? psm : 0;
     _started = true;
-    _poll ??= Timer.periodic(pollEvery, (_) => pollOnce());
+    _noteActivity();
     return true;
+  }
+
+  /// Whether the bridge is asked quickly now.
+  bool get _quick => _dials.isNotEmpty || (_busy?.isActive ?? false);
+
+  void _schedulePoll() {
+    _poll?.cancel();
+    _poll = null;
+    if (!_started) {
+      return;
+    }
+    _pollingQuickly = _quick;
+    _poll = Timer(_pollingQuickly ? pollEvery : idlePollEvery, () {
+      _poll = null;
+      pollOnce();
+      _schedulePoll();
+    });
+  }
+
+  /// The links did something: quick polls for [busyFor], starting now
+  /// rather than after an idle wait.
+  void _noteActivity() {
+    _busy?.cancel();
+    _busy = Timer(busyFor, () {});
+    if (_started && (_poll == null || !_pollingQuickly)) {
+      _schedulePoll();
+    }
   }
 
   @override
@@ -196,6 +246,8 @@ final class GoBluetoothRadio implements NativeLinkRadio {
     _started = false;
     _poll?.cancel();
     _poll = null;
+    _busy?.cancel();
+    _busy = null;
     _api?.call('YggBtLinkStopJson');
     await _le?.stop();
     for (final Completer<bool> dial in _dials.values) {
@@ -225,6 +277,7 @@ final class GoBluetoothRadio implements NativeLinkRadio {
       if (seen == null || !_started) {
         return;
       }
+      _noteActivity();
       _events.add(<Object?, Object?>{
         'type': 'seen',
         'device': device,
@@ -262,6 +315,7 @@ final class GoBluetoothRadio implements NativeLinkRadio {
       return false;
     }
     final Completer<bool> done = _dials[id] = Completer<bool>();
+    _noteActivity();
     try {
       return await done.future.timeout(dialTimeout, onTimeout: () => false);
     } finally {
@@ -296,9 +350,11 @@ final class GoBluetoothRadio implements NativeLinkRadio {
     if (state == null) {
       return;
     }
+    bool active = false;
     final Object? incoming = state['incoming'];
     if (incoming is List) {
       for (final String id in incoming.whereType<String>()) {
+        active = true;
         _events.add(<Object?, Object?>{'type': 'incoming', 'id': id});
       }
     }
@@ -307,15 +363,21 @@ final class GoBluetoothRadio implements NativeLinkRadio {
       for (final MapEntry<dynamic, dynamic> dial in dials.entries) {
         final Completer<bool>? done = _dials[dial.key];
         if (done != null && !done.isCompleted) {
+          active = true;
           done.complete(dial.value == 'ok');
         }
       }
+    }
+    if (active) {
+      _noteActivity();
     }
     if (state['listening'] == false) {
       // The radio went away (Bluetooth off): the link starts it again.
       _started = false;
       _poll?.cancel();
       _poll = null;
+      _busy?.cancel();
+      _busy = null;
       _events.add(<Object?, Object?>{'type': 'radio', 'on': false});
     }
   }

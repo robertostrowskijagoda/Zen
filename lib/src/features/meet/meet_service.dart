@@ -211,8 +211,20 @@ final class MeetService extends ChangeNotifier {
   String? Function(String address)? sessionKeyOf;
 
   /// Device keys a friend's friend list names (address → fingerprint): the
-  /// app pins them in the bridge (set by the app).
+  /// app pins them in the bridge (set by the app). Only new or changed
+  /// keys, never for this device's friends or own devices.
   void Function(Map<String, String> keys)? onVouchedKeys;
+
+  /// This account's other devices (set by the app): their keys come from
+  /// their own signed hellos, never from a friend's list.
+  Iterable<String> Function()? ownDevices;
+
+  /// What each friend's lists vouched for in this run (friend → address →
+  /// key). A pin cannot be taken back, so a friend names at most
+  /// [kMaxFriendListEntries] addresses in all: later lists may change those
+  /// keys but add nobody past that.
+  final Map<String, Map<String, String>> _vouchedBy =
+      <String, Map<String, String>>{};
 
   /// The alarm key while it is read ([alarmKey]).
   LedgerKeyPair? _alarmKeyPair;
@@ -624,16 +636,48 @@ final class MeetService extends ChangeNotifier {
     list
       ..remove(from)
       ..removeWhere((String a, String _) => host.isSelf(a));
-    keys.removeWhere((String a, String _) => !list.containsKey(a));
-    if (keys.isNotEmpty) {
-      onVouchedKeys?.call(keys);
-    }
+    _vouch(from, keys, list);
     final Object? d = payload['d'];
     final String digest = d is String && d.length <= 64 && d.isNotEmpty
         ? d
         : crypto.sha256.convert(utf8.encode(jsonEncode(list))).toString();
     _book = await store.setFriendList(from, list, digest);
     notifyListeners();
+  }
+
+  /// Passes on the keys [from]'s list names for people it lists: only new
+  /// or changed ones, none for this device's friends or own devices (their
+  /// signed hellos pin those), and none for addresses past [from]'s share.
+  void _vouch(String from, Map<String, String> keys, Map<String, String> list) {
+    if (keys.isEmpty || onVouchedKeys == null) {
+      return;
+    }
+    final Set<String> own = <String>{
+      for (final String a in ownDevices?.call() ?? const <String>[]) _key(a),
+    };
+    final Map<String, String> before = _vouchedBy.putIfAbsent(
+      from,
+      () => <String, String>{},
+    );
+    final Map<String, String> fresh = <String, String>{};
+    keys.forEach((String address, String key) {
+      if (!list.containsKey(address) ||
+          before[address] == key ||
+          own.contains(address) ||
+          host.isFriend(address) ||
+          accountOf?.call(address) != null) {
+        return;
+      }
+      if (!before.containsKey(address) &&
+          before.length >= kMaxFriendListEntries) {
+        return;
+      }
+      before[address] = key;
+      fresh[address] = key;
+    });
+    if (fresh.isNotEmpty) {
+      onVouchedKeys!(fresh);
+    }
   }
 
   Future<void> _onIntent(String from, Map<String, dynamic> payload) async {

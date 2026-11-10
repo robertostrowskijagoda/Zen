@@ -40,7 +40,6 @@ void main() {
           unlockThrottleProvider.overrideWithValue(
             UnlockThrottle(
               store,
-              now: () => now,
               monotonic: () => now.difference(DateTime.utc(2026)),
             ),
           ),
@@ -224,7 +223,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
     expect(
       await store.read(appSecurityUnlockFailuresStorageKey),
-      startsWith('1:'),
+      startsWith('1;'),
     );
   });
 

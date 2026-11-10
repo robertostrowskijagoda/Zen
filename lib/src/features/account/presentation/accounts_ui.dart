@@ -19,6 +19,7 @@ import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
@@ -344,42 +345,31 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       _busy = true;
       _error = null;
     });
-    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
-    final Duration wait = await throttle.remaining();
-    if (wait > Duration.zero) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = t('Za dużo błędnych prób. Spróbuj ponownie później.');
-        });
-      }
-      return;
-    }
-    final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
-    final ZenListedAccount? picked = _picked;
-    final ZenAccountScope? scope = picked != null
-        ? await registry.scopeOf(picked)
-        : await registry.find(_id.text);
-    ZenAccountUnlockResult result = const ZenAccountUnlockResult(
-      ZenAccountUnlock.refused,
+    // A wrong ID costs what a wrong password does, and reads the same; the
+    // device's own count of guesses here (no unlock clears it) holds them
+    // off.
+    final ZenAccountUnlockResult result = await unlockOtherZenAccount(
+      typed: _id.text,
+      listed: _picked,
+      password: password,
+      current: ref.read(zenAccountProvider),
+      registry: ref.read(zenAccountRegistryProvider),
+      security: ref.read(zenAccountSecurityFactoryProvider),
+      throttle: ref.read(otherAccountThrottleProvider),
     );
-    if (scope != null && scope != ref.read(zenAccountProvider)) {
-      result = await unlockZenAccount(
-        scope,
-        password,
-        registry: registry,
-        security: ref.read(zenAccountSecurityFactoryProvider),
-      );
-    }
     if (!mounted) {
       return;
     }
+    if (result.outcome == ZenAccountUnlock.throttled) {
+      setState(() {
+        _busy = false;
+        _error = t('Za dużo błędnych prób. Spróbuj ponownie później.');
+      });
+      return;
+    }
     final AppSecurityService? security = result.security;
+    final ZenAccountScope? scope = result.scope;
     if (result.outcome == ZenAccountUnlock.opened && scope != null) {
-      await throttle.clear();
-      if (!mounted) {
-        return;
-      }
       _password.clear();
       await switchZenAccount(
         ref,
@@ -388,7 +378,6 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
       return;
     }
     // A wrong ID, a wrong password and a panic password read the same.
-    await throttle.recordFailure();
     if (result.outcome == ZenAccountUnlock.wiped) {
       ref.invalidate(zenListedAccountsProvider);
       await _loadListed();
@@ -898,6 +887,8 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
       );
     }
     final bool done = await settings.setOn(account, value);
+    // The Android service reads the list again at once.
+    ref.read(androidBackgroundServiceControllerProvider).accountsChanged();
     if (zenDesktopBackgroundPlatform && !value) {
       await applyDesktopBackgroundSetting(
         account: account,

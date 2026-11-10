@@ -145,10 +145,12 @@ func YggPqPinsJson(handle C.int) *C.char {
 	})
 }
 
-// YggPqSetPinsJson: {pins: {address: fingerprint}, keep} adds pins kept
-// from an earlier run or vouched for by friends' signed records (they win
-// over what this run merely saw). With keep, a different pin already there
-// stays and is reported: -> {taken, conflicts: {address: pinned}}.
+// YggPqSetPinsJson: {pins: {address: fingerprint}, keep, hint} adds pins
+// kept from an earlier run or vouched for by friends' signed records (they
+// win over what this run merely saw). With keep, a different pin already
+// there stays and is reported: -> {taken, conflicts: {address: pinned}}.
+// With hint the keys are only someone's word (a friend's friend list):
+// hints, which never move a pin (pq_session.go, importHints).
 //
 //export YggPqSetPinsJson
 func YggPqSetPinsJson(handle C.int, payload *C.char) *C.char {
@@ -156,6 +158,7 @@ func YggPqSetPinsJson(handle C.int, payload *C.char) *C.char {
 		var request struct {
 			Pins map[string]string `json:"pins"`
 			Keep bool              `json:"keep"`
+			Hint bool              `json:"hint"`
 		}
 		if err := json.Unmarshal([]byte(C.GoString(payload)), &request); err != nil {
 			return responseError(err)
@@ -164,7 +167,13 @@ func YggPqSetPinsJson(handle C.int, payload *C.char) *C.char {
 		if err != nil {
 			return responseError(err)
 		}
-		taken, conflicts := endpoint.importPins(request.Pins, request.Keep)
+		var taken int
+		var conflicts map[string]string
+		if request.Hint {
+			taken, conflicts = endpoint.importHints(request.Pins)
+		} else {
+			taken, conflicts = endpoint.importPins(request.Pins, request.Keep)
+		}
 		return responseOK(map[string]any{"taken": taken, "conflicts": conflicts})
 	})
 }

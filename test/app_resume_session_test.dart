@@ -334,19 +334,102 @@ void main() {
     expect(vault.wipes, greaterThanOrEqualTo(1));
   });
 
-  test('it never holds the password, only the key', () async {
+  test(
+    'it never holds the password, nor the master key in the clear',
+    () async {
+      await service.keepResumeSession();
+      final List<String> entries = <String>[
+        (await kept())!,
+        (await credentials.read(appSecurityResumeSessionKeyStorageKey))!,
+      ];
+      for (final String stored in entries) {
+        final String opened = latin1.decode(base64Decode(stored));
+        for (final String text in <String>[stored, opened]) {
+          expect(text, isNot(contains(password)));
+          expect(text, isNot(contains(base64Encode(utf8.encode(password)))));
+          expect(
+            text,
+            isNot(contains(securityHexFromBytes(utf8.encode(password)))),
+          );
+          expect(text, isNot(contains(securityHexFromBytes(masterKey))));
+          expect(text, isNot(contains(base64Encode(masterKey))));
+        }
+      }
+    },
+  );
+
+  test('what the vault seals is a one-time key, not the master key; the '
+      'entry with the master key alone opens nothing', () async {
     await service.keepResumeSession();
-    final String stored = (await kept())!;
-    final String opened = utf8.decode(base64Decode(stored));
-    for (final String text in <String>[stored, opened]) {
-      expect(text, isNot(contains(password)));
-      expect(text, isNot(contains(base64Encode(utf8.encode(password)))));
+    final String first = (await kept())!;
+    await service.keepResumeSession();
+    // A new one-time key for every time Zen leaves the screen.
+    expect(await kept(), isNot(first));
+    final Uint8List? oneTime = await vault.open(
+      base64Decode(
+        (await credentials.read(appSecurityResumeSessionKeyStorageKey))!,
+      ),
+    );
+    expect(oneTime, isNotNull);
+    expect(oneTime, isNot(masterKey));
+    await credentials.delete(appSecurityResumeSessionKeyStorageKey);
+    expect((await start()).isLocked, isTrue);
+    expect(await kept(), isNull);
+  });
+
+  test('a start after the delay deletes both entries before anything '
+      'else, also where it would not open them anyway', () async {
+    for (final AppSettings settings in <AppSettings>[
+      on,
+      off,
+      on.copyWith(lockMode: AppLockMode.never),
+    ]) {
+      await service.keepResumeSession();
+      device.wait(const Duration(minutes: 6));
+      final LocalAppSecurityService restarted = await start(settings);
+      expect(restarted.isLocked, isTrue, reason: settings.lockMode.name);
+      expect(await kept(), isNull, reason: settings.lockMode.name);
       expect(
-        text,
-        isNot(contains(securityHexFromBytes(utf8.encode(password)))),
+        await credentials.read(appSecurityResumeSessionKeyStorageKey),
+        isNull,
+        reason: settings.lockMode.name,
       );
     }
-    expect(opened, contains(securityHexFromBytes(masterKey)));
+  });
+
+  test('locking by hand and turning the setting off delete the one-time '
+      'key too', () async {
+    await service.keepResumeSession();
+    service.lock();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      await credentials.read(appSecurityResumeSessionKeyStorageKey),
+      isNull,
+    );
+    expect(await service.unlock(password), isTrue);
+    await service.keepResumeSession();
+    await service.applySettings(off);
+    expect(
+      await credentials.read(appSecurityResumeSessionKeyStorageKey),
+      isNull,
+    );
+    expect(await kept(), isNull);
+  });
+
+  test('what 1.16.2 kept (the master key itself) is deleted at the first '
+      'start and opens nothing', () async {
+    final Uint8List sealed = (await vault.seal(
+      masterKey,
+      const Duration(minutes: 5),
+    ))!;
+    await credentials.write(
+      appSecurityResumeSessionStorageKey,
+      base64Encode(sealed),
+    );
+    final LocalAppSecurityService restarted = await start();
+    expect(restarted.isLocked, isTrue);
+    expect(await kept(), isNull);
   });
 
   test('anything else in its place asks for the password, without a '
@@ -470,6 +553,7 @@ void main() {
         passwordIterations: 10,
         resumeVault: vault ? device.vault() : null,
       );
+      await security.setPassword(password);
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -496,15 +580,20 @@ void main() {
 
     const Key toggle = Key('settings-lock-keep-after-close');
 
-    testWidgets('is off, says it is a risk, and turns the setting on', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('is off, says it is a risk, and turns the setting on once '
+        'the app password is given', (WidgetTester tester) async {
       final ProviderContainer container = await pump(tester);
       expect(find.byKey(toggle), findsOneWidget);
       expect(tester.widget<SwitchListTile>(find.byKey(toggle)).value, isFalse);
       expect(find.textContaining('To ryzyko'), findsOneWidget);
       await tester.tap(find.byKey(toggle));
-      await tester.pump();
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('sensitive-access-password')),
+        password,
+      );
+      await tester.tap(find.byKey(const Key('sensitive-access-confirm')));
+      await tester.pumpAndSettle();
       expect(
         container.read(appSettingsControllerProvider).keepUnlockedAfterClose,
         isTrue,

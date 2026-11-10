@@ -268,7 +268,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
       context,
       node,
       t('Kopia całego konta (plik)'),
-      wrong: () => setState(() => _message = t('Złe hasło konta.')),
+      wrong: (String why) => setState(() => _message = why),
     )) {
       return;
     }

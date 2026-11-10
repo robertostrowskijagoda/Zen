@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -113,6 +114,39 @@ void main() {
       expect(text.text.style?.fontFamily, family, reason: key);
       expect(text.text.style?.fontSize, 12.5, reason: key);
     }
+  });
+
+  testWidgets('locking clears a secret copied to the clipboard', (
+    WidgetTester tester,
+  ) async {
+    String? clipboard;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        switch (call.method) {
+          case 'Clipboard.setData':
+            clipboard = (call.arguments as Map)['text'] as String?;
+            return null;
+          case 'Clipboard.getData':
+            return <String, Object?>{'text': clipboard};
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final MemoryAppSecurityService security = await pumpGate(tester);
+    await copyWithExpiry('klucz-konta');
+    expect(clipboard, 'klucz-konta');
+    security.lock();
+    await tester.pump();
+    await tester.pump();
+    expect(clipboard, '');
+    expect(ExpiringClipboard.instance.pendingText, isNull);
   });
 
   testWidgets('coming back in time stops the countdown', (

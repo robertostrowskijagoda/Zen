@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
+import 'package:zen/src/features/update/background_update_check.dart';
 
 final class _Alarm implements WakeTimer {
   _Alarm(
@@ -330,6 +333,75 @@ void main() {
     expect(wakes, 13, reason: 'the look\'s wakes only');
     expect(ran.where((String r) => r == 'poll'), hasLength(3));
     expect(ran.where((String r) => r == 'look'), hasLength(12));
+  });
+
+  test('with nobody around a locked phone wakes only for the presence rounds: '
+      'the look and the update check ride them', () async {
+    final Map<String, int> runs = <String, int>{};
+    void count(String name) => runs[name] = (runs[name] ?? 0) + 1;
+    const NearbyLookPolicy policy = NearbyLookPolicy();
+    late BeatTimer poll;
+    poll = ZenWake.beat('mailbox-poll', kLockedMailboxPollInterval, () async {
+      count('poll');
+      final Duration next = nextMailboxPollWait(
+        last: poll.every,
+        keptSince: false,
+      );
+      if (next != poll.every) {
+        poll.setEvery(next);
+      }
+    }, hold: const Duration(seconds: 10));
+    ZenWake.beat(
+      'presence-round',
+      kLockedPresenceRoundEvery,
+      () async => count('round'),
+    );
+    late BeatTimer look;
+    look = ZenWake.beat(
+      'nearby-look',
+      policy.every,
+      () async {
+        count('look');
+        final Duration next = nextNearbyLookWait(
+          last: look.every,
+          fresh: false,
+          base: policy.every,
+          max: policy.longest,
+        );
+        if (next != look.every) {
+          look.setEvery(next);
+        }
+      },
+      hold: policy.window + const Duration(seconds: 5),
+      whileIdle: false,
+    );
+    ZenWake.beat(
+      'update-check',
+      kUpdateBeatAtMost,
+      () async => count('update'),
+      whileIdle: false,
+    );
+    const int hour = 60 * 60 * 1000;
+    final List<int> wakesPerHour = <int>[];
+    for (int h = 0; h < 6; h++) {
+      int wakes = 0;
+      runs.clear();
+      while (now < (h + 1) * hour) {
+        final List<_Alarm> live = platform.live.toList()
+          ..sort((_Alarm a, _Alarm b) => a.delay.compareTo(b.delay));
+        now += live.first.delay.inMilliseconds;
+        await live.first.ring();
+        wakes++;
+      }
+      wakesPerHour.add(wakes);
+    }
+    // Once the polls and the looks have backed off (the first hour): one
+    // wake every ten minutes.
+    expect(wakesPerHour.skip(1), everyElement(6));
+    expect(runs['round'], 6);
+    expect(runs['look'], 3, reason: 'every 20 minutes');
+    expect(runs['update'], 6, reason: 'early on the rounds, never its own');
+    expect(runs['poll'], 2);
   });
 
   test('periods that are multiples of one another share their wakes', () async {

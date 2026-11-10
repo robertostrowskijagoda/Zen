@@ -256,9 +256,15 @@ final class ZenBootstrapper {
     this.opening,
     Future<void> Function()? prepareAccounts,
     Future<bool> Function()? receivesInBackground,
+    Future<bool> Function(ZenAccountScope scope)? isListed,
     this.maxCriticalStepRetries = 1,
     this.timeouts = const ZenStartTimeouts(),
   }) : assert(maxCriticalStepRetries >= 0),
+       _isListed =
+           isListed ??
+           (supportDirectoryLoader == null
+               ? ZenAccountRegistry().isListed
+               : null),
        _prepareForegroundLaunch = prepareForegroundLaunch,
        _prepareAccounts =
            prepareAccounts ??
@@ -298,6 +304,10 @@ final class ZenBootstrapper {
   final Future<void> Function()? _prepareForegroundLaunch;
   final Future<void> Function()? _prepareAccounts;
 
+  /// Whether an additional account is on the list (it may then be seen in
+  /// the diagnostics log); `null`: none is (tests).
+  final Future<bool> Function(ZenAccountScope scope)? _isListed;
+
   /// Whether the account opening receives in the background ("Odbieraj
   /// w tle"); `null`: no (tests).
   final Future<bool> Function()? _receivesInBackground;
@@ -330,13 +340,20 @@ final class ZenBootstrapper {
   /// service: whether it runs the node is settled after the first screen
   /// (`AndroidBackgroundRuntimeBridge`).
   Future<ZenBootstrapResult> bootstrap() async {
-    ZenStartTrace.begin();
     final ZenAccountOpening? opening = this.opening;
+    bool shown = true;
     if (opening != null) {
       // Before anything reads a folder or a secret: all of them are this
       // account's from here on.
       ZenAccounts.activate(opening.scope);
+      shown = await _shown(opening.scope);
+      if (!shown) {
+        // Not on the list: nothing of it goes into the device's log, its
+        // start included.
+        ZenDiagnosticsLog.hush();
+      }
     }
+    ZenStartTrace.begin();
     final Future<void> Function()? prepareAccounts = _prepareAccounts;
     if (prepareAccounts != null) {
       await ZenStartTrace.run<void>(
@@ -377,6 +394,7 @@ final class ZenBootstrapper {
       () => ZenDiagnosticsLog.attach(
         settingsState.supportDirectory,
         source: 'ui',
+        shown: shown,
       ),
       timeout: timeouts.optional,
       fallback: () {},
@@ -418,6 +436,24 @@ final class ZenBootstrapper {
       initialSettings: settingsState.settings,
       stores: stores,
     );
+  }
+
+  /// Whether [scope] may be seen in the diagnostics log: the default
+  /// account and the listed ones. In doubt (the secret store does not
+  /// answer), not.
+  Future<bool> _shown(ZenAccountScope scope) async {
+    final Future<bool> Function(ZenAccountScope)? isListed = _isListed;
+    if (scope.isDefault) {
+      return true;
+    }
+    if (isListed == null) {
+      return false;
+    }
+    try {
+      return await isListed(scope).timeout(const Duration(seconds: 5));
+    } on Object {
+      return false;
+    }
   }
 
   @visibleForTesting

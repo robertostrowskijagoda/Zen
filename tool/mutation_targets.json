@@ -217,5 +217,77 @@
       "test/storage_hardening_test.dart",
       "test/format_tolerance_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/security/unlock_throttle.dart",
+    "tests": [
+      "test/unlock_throttle_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/multi/account_decoys.dart",
+    "tests": [
+      "test/account_decoys_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/meet/nearby_look_policy.dart",
+    "tests": [
+      "test/nearby_look_policy_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/app/single_instance_guard.dart",
+    "tests": [
+      "test/single_instance_guard_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/opened_files.dart",
+    "tests": [
+      "test/opened_files_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pyramid/pyramid_ledger.dart",
+    "tests": [
+      "test/pyramid_ledger_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/app/app_data_reset.dart",
+    "tests": [
+      "test/app_data_reset_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/app/start_trace.dart",
+    "tests": [
+      "test/start_trace_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/account_copy.dart",
+    "tests": [
+      "test/account_copy_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/multi/background_accounts.dart",
+    "tests": [
+      "test/background_accounts_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/runtime_native_signal_transport.dart",
+    "tests": [
+      "test/runtime_native_signal_transport_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/security/app_security_service.dart",
+    "tests": [
+      "test/app_security_service_test.dart"
+    ]
   }
 ]

@@ -9,12 +9,14 @@ import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// Several accounts on one device: separate folders and secrets, hidden
@@ -321,6 +323,110 @@ void main() {
       },
     );
 
+    test('an ID that is not on this device costs the same work as a wrong '
+        'password and gets the same answer', () async {
+      final ZenAccountScope a = await registry.create();
+      final AppSecurityService own = securityFor(a);
+      await own.initialize(settings: const AppSettings());
+      await own.setPassword('haslo-konta-a');
+      await own.setPanicPassword('alarm-alarm');
+      final List<PasswordCost> costs = <PasswordCost>[];
+      debugOnPasswordDerivation = costs.add;
+      addTearDown(() => debugOnPasswordDerivation = null);
+
+      Future<List<PasswordCost>> attempt(
+        String typed, {
+        ZenAccountScope current = ZenAccountScope.defaultAccount,
+      }) async {
+        costs.clear();
+        final ZenAccountUnlockResult result = await unlockOtherZenAccount(
+          typed: typed,
+          password: 'zle-haslo-123',
+          current: current,
+          registry: registry,
+          security: securityFor,
+        );
+        expect(result.outcome, ZenAccountUnlock.refused);
+        expect(result.security, isNull);
+        return List<PasswordCost>.of(costs);
+      }
+
+      final List<PasswordCost> wrongPassword = await attempt(a.id!);
+      expect(wrongPassword, hasLength(2));
+      expect(await attempt(newAccountId(Random(99))), wrongPassword);
+      expect(await attempt('nie-id'), wrongPassword);
+      // The account open now is not opened again, at the same cost.
+      expect(await attempt(a.id!, current: a), wrongPassword);
+      expect(await registry.find(a.id!), a);
+
+      costs.clear();
+      final ZenAccountUnlockResult right = await unlockOtherZenAccount(
+        typed: formatAccountId(a.id!),
+        password: 'haslo-konta-a',
+        current: ZenAccountScope.defaultAccount,
+        registry: registry,
+        security: securityFor,
+      );
+      expect(right.outcome, ZenAccountUnlock.opened);
+      expect(right.scope, a);
+      expect(costs, hasLength(2));
+    });
+
+    test('guesses at another account are counted for the device, apart '
+        'from the lock screen, and no unlock clears the count', () async {
+      final ZenAccountScope a = await registry.create();
+      final AppSecurityService own = securityFor(a);
+      await own.initialize(settings: const AppSettings());
+      await own.setPassword('haslo-konta-a');
+      Duration steady = Duration.zero;
+      final UnlockThrottle guesses = UnlockThrottle.otherAccounts(
+        store: secrets.forDevice(),
+        monotonic: () => steady,
+      );
+      final UnlockThrottle lockScreen = UnlockThrottle(
+        secrets.forAccount(null),
+        monotonic: () => steady,
+      );
+
+      Future<ZenAccountUnlock> attempt(String typed, String password) async =>
+          (await unlockOtherZenAccount(
+            typed: typed,
+            password: password,
+            current: ZenAccountScope.defaultAccount,
+            registry: registry,
+            security: securityFor,
+            throttle: guesses,
+          )).outcome;
+
+      for (int i = 0; i < UnlockThrottle.freeFailures; i++) {
+        expect(
+          await attempt(newAccountId(Random(i)), 'zgadywane'),
+          ZenAccountUnlock.refused,
+        );
+      }
+      // The right password waits too, and the lock screen's own count
+      // (cleared by unlocking the default account) is another one.
+      expect(await attempt(a.id!, 'haslo-konta-a'), ZenAccountUnlock.throttled);
+      await lockScreen.recordFailure();
+      await lockScreen.clear();
+      expect(await guesses.remaining(), UnlockThrottle.baseDelay);
+      // The device's entry names no account.
+      expect(
+        keychain.items.keys,
+        contains(UnlockThrottle.otherAccountsStorageKey),
+      );
+
+      steady += UnlockThrottle.baseDelay;
+      expect(await attempt(a.id!, 'haslo-konta-a'), ZenAccountUnlock.opened);
+      // Opening an account cleared nothing: the next wrong guess waits
+      // longer at once.
+      expect(
+        await attempt(newAccountId(Random(50)), 'zgadywane'),
+        ZenAccountUnlock.refused,
+      );
+      expect(await guesses.remaining(), UnlockThrottle.baseDelay * 2);
+    });
+
     test('an account whose first start was cut short opens to set a '
         'password', () async {
       final ZenAccountScope a = await registry.create();
@@ -463,7 +569,15 @@ void main() {
         await File('${aHome.path}/x.bin').writeAsBytes(<int>[1, 2, 3]);
         ZenAccounts.activate(ZenAccountScope.defaultAccount);
         final int folders = (await accountFolders()).length;
-        final int entries = keychain.items.length;
+        final Set<String> entries = keychain.items.keys.toSet();
+        final Set<String> ofA = <String>{
+          for (final String key in <String>[
+            'zen_rewrite_one',
+            'zen_rewrite_two',
+            '\u0000keys',
+          ])
+            SecureStorageCredentialsStore.scopedSecretName(a.secret, key),
+        };
 
         await registry.wipeAccount(a);
 
@@ -485,8 +599,18 @@ void main() {
         );
         expect(await registry.find(b.id!), b);
         // A's two entries, its key list and the (now empty) list of listed
-        // accounts are gone; a decoy took its folder's place.
-        expect(keychain.items.length, entries - 4);
+        // accounts are gone; a decoy took its folder's place, with entries
+        // of its own like an account's.
+        expect(keychain.items.keys.toSet().intersection(ofA), isEmpty);
+        expect(
+          keychain.items.containsKey(ZenAccountRegistry.listedStorageKey),
+          isFalse,
+        );
+        final Set<String> added = keychain.items.keys.toSet().difference(
+          entries,
+        );
+        expect(added, isNotEmpty);
+        expect(added, everyElement(matches(RegExp(r'^zen_x_[0-9a-f]{40}$'))));
         expect((await accountFolders()).length, folders);
       },
     );

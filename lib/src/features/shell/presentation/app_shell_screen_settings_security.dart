@@ -364,19 +364,32 @@ Future<bool> _confirmPasswordOwner(
   if (!context.mounted) {
     return false;
   }
+  final UnlockThrottle throttle = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(unlockThrottleProvider);
   return await showDialog<bool>(
         context: context,
-        builder: (BuildContext dialogContext) =>
-            _CurrentPasswordDialog(security: security, reason: reason),
+        builder: (BuildContext dialogContext) => _CurrentPasswordDialog(
+          security: security,
+          throttle: throttle,
+          reason: reason,
+        ),
       ) ??
       false;
 }
 
-/// Asks for the current app password (checked without touching the lock).
+/// Asks for the current app password (checked without touching the lock,
+/// counted with the lock screen's attempts).
 class _CurrentPasswordDialog extends StatefulWidget {
-  const _CurrentPasswordDialog({required this.security, required this.reason});
+  const _CurrentPasswordDialog({
+    required this.security,
+    required this.throttle,
+    required this.reason,
+  });
 
   final AppSecurityService security;
+  final UnlockThrottle throttle;
   final String reason;
 
   @override
@@ -403,17 +416,21 @@ class _CurrentPasswordDialogState extends State<_CurrentPasswordDialog> {
       _busy = true;
       _error = null;
     });
-    final bool ok = await widget.security.verifyPassword(_controller.text);
+    final String password = _controller.text;
+    final PasswordTry outcome = await tryPassword(
+      widget.throttle,
+      () => widget.security.verifyPassword(password),
+    );
     if (!mounted) {
       return;
     }
-    if (ok) {
+    if (outcome.right) {
       Navigator.of(context).pop(true);
       return;
     }
     setState(() {
       _busy = false;
-      _error = t('Nieprawidłowe hasło.');
+      _error = passwordTryError(outcome, t('Nieprawidłowe hasło.'));
     });
   }
 

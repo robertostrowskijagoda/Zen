@@ -272,6 +272,7 @@ void main() {
     expect(core.modules.map((ZenModule m) => m.id), <String>[
       'signal',
       'ledger',
+      'pebbles',
       'local-links',
       'feed',
       'meet',
@@ -287,6 +288,7 @@ void main() {
       <String, ZenFeature?>{
         'signal': null,
         'ledger': null,
+        'pebbles': null,
         'local-links': null,
         'feed': null,
         'meet': null,

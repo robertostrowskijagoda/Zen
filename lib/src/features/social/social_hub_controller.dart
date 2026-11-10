@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart' show sha256Hex;
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -57,7 +58,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
-    show kGroupJoinedAck;
+    show kGroupJoinedAck, kMaxSignalIdChars;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -142,6 +143,19 @@ final Provider<Duration> callOfferWaitTimeoutProvider = Provider<Duration>((
 /// replaced in tests.
 final Provider<Future<bool> Function()> deviceLockedProbeProvider =
     Provider<Future<bool> Function()>((Ref ref) => isDeviceLocked);
+
+/// Shows the native card of a ringing call over other apps and the lock
+/// screen (call_platform_channel.dart; replaced in tests).
+typedef IncomingCallCard =
+    Future<bool> Function({
+      required String displayName,
+      required bool isVideo,
+      required String peerAddress,
+      required String acceptRouteKey,
+    });
+
+final Provider<IncomingCallCard> incomingCallCardProvider =
+    Provider<IncomingCallCard>((Ref ref) => showIncomingCallPopup);
 
 final Provider<Duration> callRingingWaitTimeoutProvider = Provider<Duration>((
   Ref ref,
@@ -756,8 +770,8 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
       // MainActivity forward is what made the whole messenger pop up.
       await setRingingCallWindowActive(false);
       final String acceptToken = await _ensureCallAcceptToken(session);
-      await showIncomingCallPopup(
-        displayName: session.displayName,
+      await ref.read(incomingCallCardProvider)(
+        displayName: _callCardName(session),
         isVideo: session.kind == CallInviteKind.video,
         peerAddress: session.peerAddress,
         // The card's "Odbierz" opens the app on this route. Its token is the
@@ -775,6 +789,25 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     await setRingingCallWindowActive(false);
     await hideIncomingCallPopup();
+  }
+
+  /// Who calls, as the card over the lock screen may say it: the caller's
+  /// name, unless the notification level of the conversation (its own, or
+  /// the general one) keeps names off notifications — as the locked
+  /// receiver's card does.
+  String _callCardName(CallSession session) {
+    final String? groupId = session.groupId;
+    final String key = groupId != null && groupId.isNotEmpty
+        ? 'group:$groupId'
+        : session.peerAddress;
+    final NotificationPrivacy level = state.notificationPrivacyFor(
+      key,
+      global: _appSettings.privacyFor(NoticeKind.call),
+    );
+    return level == NotificationPrivacy.generic ||
+            session.displayName.trim().isEmpty
+        ? t('Połączenie przychodzące')
+        : session.displayName;
   }
 
   /// The accept token of the ringing [session], created (and stored, so the
@@ -1200,6 +1233,58 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String peerAddress,
     required String messageId,
   });
+
+  /// Whether [address] is this device or another device of this account.
+  bool _isOwnDeviceAddress(String address) {
+    final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    if (self.isNotEmpty && PeerShareCodec.addressesEqual(self, address)) {
+      return true;
+    }
+    final AccountDeviceDirectory? dir = ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    return dir != null &&
+        dir.ownAccount.isNotEmpty &&
+        dir.accountOf(address) == dir.ownAccount;
+  }
+
+  /// Whether [m] was written by [author] (an address, or 'self'): the same
+  /// address, or another device of the same account.
+  bool _sameGroupAuthor(ChatMessage m, String author) {
+    if (m.isSystem) {
+      return false;
+    }
+    final bool own = author == 'self' || _isOwnDeviceAddress(author);
+    if (m.isOutgoing) {
+      return own;
+    }
+    if (own) {
+      return _isOwnDeviceAddress(m.sender);
+    }
+    if (PeerShareCodec.addressesEqual(m.sender, author)) {
+      return true;
+    }
+    final AccountDeviceDirectory? dir = ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    final String? account = dir?.accountOf(m.sender);
+    return account != null && account == dir!.accountOf(author);
+  }
+
+  /// The key the group message [signal] is kept under in its group's
+  /// timeline (see [groupMessageSlot]), or null when it is there already.
+  Future<String?> _incomingGroupMessageKey(ZenSignal signal) async {
+    final String wireId = signal.messageId!.trim();
+    final List<ChatMessage> thread = await _messageTimelineStore.load(
+      'group:${signal.groupId}',
+    );
+    return groupMessageSlot(
+      thread,
+      wireId,
+      signal.sender,
+      (ChatMessage m) => _sameGroupAuthor(m, signal.sender),
+    );
+  }
 
   Future<void> _sendMessageAck({
     required String peerAddress,

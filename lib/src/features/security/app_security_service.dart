@@ -52,6 +52,12 @@ const String appSecurityPanicPasswordHashStorageKey =
     'zen_rewrite_panic_password_hash';
 const String appSecurityPanicSaltStorageKey = 'zen_rewrite_panic_salt';
 
+/// A salt (hex) every account keeps whether it has an emergency wipe
+/// password or not: without one, a password is checked against it anyway,
+/// so a wrong password costs the same work either way.
+const String appSecurityPanicStandInSaltStorageKey =
+    'zen_rewrite_panic_stand_in_salt';
+
 /// The master key sealed by [PlatformKeyVault] (base64), for biometric
 /// unlock.
 const String appSecuritySealedBiometricTokenStorageKey =
@@ -82,13 +88,21 @@ const String appSecurityMasterKeyFingerprintStorageKey =
 const String appSecurityNeverLockMasterKeyStorageKey =
     'zen_rewrite_never_lock_master_key';
 
-/// "Nie blokuj od razu po zamknięciu aplikacji": the master key sealed by
-/// [ResumeSessionVault] (base64) when Zen leaves the screen, for a start
-/// before the lock delay is over. Opened (and deleted) by the next start;
-/// deleted when Zen comes back to the screen, is locked, the lock mode, its
-/// delay or the password changes, or the setting is turned off. Never the
-/// password.
+/// "Nie blokuj od razu po zamknięciu aplikacji": the master key encrypted
+/// (AES-256-GCM, base64) under a one-time key made when Zen leaves the
+/// screen, for a start before the lock delay is over. Useless without the
+/// one-time key ([appSecurityResumeSessionKeyStorageKey]). Deleted by the
+/// next start, whatever it finds; deleted when Zen comes back to the
+/// screen, is locked, the lock mode, its delay or the password changes, or
+/// the setting is turned off. Never the password.
 const String appSecurityResumeSessionStorageKey = 'zen_rewrite_resume_session';
+
+/// The one-time key of [appSecurityResumeSessionStorageKey], sealed by
+/// [ResumeSessionVault] (base64) for the lock delay: the vault says when it
+/// no longer opens. Deleted first thing at the next start, and with the
+/// other entry everywhere else.
+const String appSecurityResumeSessionKeyStorageKey =
+    'zen_rewrite_resume_session_key';
 
 /// Whether the person wants biometric unlock: `1` on, `0` off. Absent: on
 /// where the hardware itself asks for the person before it unwraps
@@ -107,8 +121,9 @@ const String appSecurityGuardedSettingsStorageKey =
 /// settings file.
 const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 
-/// Failed lock-screen password attempts and when the last one happened
-/// (`<count>:<epoch ms>`), see `UnlockThrottle`.
+/// Failed lock-screen password attempts and the wait still left
+/// (`<count>;<ms>`; earlier versions kept `<count>:<epoch ms>`), see
+/// `UnlockThrottle`.
 const String appSecurityUnlockFailuresStorageKey =
     'zen_rewrite_unlock_failures';
 
@@ -736,6 +751,12 @@ abstract class AppSecurityService extends ChangeNotifier {
 
   Future<bool> matchesPanicPassword(String password);
 
+  /// Does the work a wrong [password] costs this lock (the emergency wipe
+  /// password's check and the unlock: the same reads, two derivations of
+  /// the same cost) and changes nothing: for an account ID that is not on
+  /// this device, which then answers no sooner than a wrong password does.
+  Future<void> spendWrongPasswordWork(String password) async {}
+
   /// Whether biometric unlock can be offered (hardware vault present and a
   /// sealed key stored).
   Future<bool> canUnlockWithBiometrics();
@@ -1010,11 +1031,75 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   @override
   bool get hasPanicPassword => _hasPanicPassword;
 
+  /// The stand-in salt (made with the account, or at the first start of
+  /// an account an earlier version made: every account gets one, with an
+  /// emergency wipe password or without).
+  Future<void> _ensurePanicStandIn() async {
+    try {
+      if (await _credentialsStore.read(appSecurityPanicStandInSaltStorageKey) ==
+          null) {
+        await _credentialsStore.write(
+          appSecurityPanicStandInSaltStorageKey,
+          securityHexFromBytes(randomSecurityBytes(32)),
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Keeping the stand-in salt failed', error, stackTrace);
+    }
+  }
+
+  /// A derivation of [password] with [salt] whose result is not used: the
+  /// cost [kdfKey] records, else the password's, else today's.
+  Future<void> _spendDerivation(
+    String password,
+    Uint8List salt,
+    String kdfKey,
+  ) async {
+    PasswordCost cost = _cost;
+    for (final String key in <String>[
+      kdfKey,
+      appSecurityPasswordKdfStorageKey,
+    ]) {
+      final String? kdf = await _credentialsStore.read(key);
+      if (kdf == null) {
+        continue;
+      }
+      try {
+        final Object? json = jsonDecode(kdf);
+        final PasswordCost? recorded = json is Map && json['a'] == 'argon2id'
+            ? PasswordCost.fromJson(json)
+            : null;
+        if (recorded != null) {
+          cost = recorded;
+          break;
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+    await derivePasswordKey(password, salt, cost: cost);
+  }
+
+  static Uint8List _saltOrRandom(String? hex) {
+    if (hex != null && hex.length == 64) {
+      try {
+        return securityBytesFromHex(hex);
+      } on FormatException {
+        // Read as missing.
+      }
+    }
+    return randomSecurityBytes(32);
+  }
+
   @override
   Future<void> initialize({required AppSettings settings}) async {
     _applySettingsState(settings);
     _hasPassword =
         await _credentialsStore.read(appSecurityPasswordHashStorageKey) != null;
+    // "Nie blokuj od razu po zamknięciu aplikacji": whatever was kept goes
+    // before anything else, used or not.
+    final Uint8List? resumed = await _takeResumeSession();
+    await _ensurePanicStandIn();
     _hasPanicPassword =
         await _credentialsStore.read(appSecurityPanicPasswordHashStorageKey) !=
         null;
@@ -1037,8 +1122,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
           await _dropNeverLockKey();
         }
         // Closed a moment ago with "Nie blokuj od razu po zamknięciu
-        // aplikacji": the key sealed then, while it still opens.
-        final Uint8List? resumed = await _takeResumeSession();
+        // aplikacji": the key kept then, while it still opens.
         _isLocked = resumed == null;
         _encryptionKey = resumed;
       }
@@ -1254,7 +1338,17 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     final String? hashHex = await _credentialsStore.read(
       appSecurityPanicPasswordHashStorageKey,
     );
+    final String? standInHex = await _credentialsStore.read(
+      appSecurityPanicStandInSaltStorageKey,
+    );
     if (saltHex == null || hashHex == null) {
+      // None set: the same derivation against the stand-in salt, so the
+      // wait tells nothing.
+      await _spendDerivation(
+        password,
+        _saltOrRandom(standInHex),
+        appSecurityPanicKdfStorageKey,
+      );
       return false;
     }
     final Uint8List? derivedKey = await _derive(
@@ -1267,6 +1361,25 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
           securityVerifyDigest(derivedKey),
           securityBytesFromHex(hashHex),
         );
+  }
+
+  @override
+  Future<void> spendWrongPasswordWork(String password) async {
+    for (final String key in const <String>[
+      appSecurityPasswordHashStorageKey,
+      appSecurityPanicPasswordHashStorageKey,
+      appSecurityPanicSaltStorageKey,
+      appSecurityPanicStandInSaltStorageKey,
+      appSecurityPanicKdfStorageKey,
+      appSecuritySaltStorageKey,
+      appSecurityPasswordKdfStorageKey,
+      appSecurityWrappedMasterKeyStorageKey,
+    ]) {
+      await _credentialsStore.read(key);
+    }
+    for (int pass = 0; pass < 2; pass++) {
+      await derivePasswordKey(password, randomSecurityBytes(32), cost: _cost);
+    }
   }
 
   @override
@@ -1408,12 +1521,23 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     if (!_resumeSessionWanted || masterKey == null) {
       return;
     }
+    // A new one-time key every time: the vault seals it (and says when it
+    // stops opening), the master key is kept only encrypted under it.
+    final Uint8List oneTime = randomSecurityBytes(32);
     Uint8List? sealed;
+    Uint8List? encrypted;
     try {
       sealed = await _resumeVault.seal(
-        masterKey,
+        oneTime,
         Duration(seconds: _backgroundLockDelaySeconds),
       );
+      encrypted = sealed == null
+          ? null
+          : await encryptSecurityBytes(
+              masterKey,
+              oneTime,
+              aad: _resumeSessionAad,
+            );
     } on Object catch (error, stackTrace) {
       logZenError(
         'Sealing the key for after closing failed',
@@ -1421,7 +1545,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
         stackTrace,
       );
     }
-    if (sealed == null || !_resumeSessionWanted) {
+    if (sealed == null || encrypted == null || !_resumeSessionWanted) {
       // Nothing sealed, or locked meanwhile: nothing is kept.
       return;
     }
@@ -1429,8 +1553,12 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     _resumeSessionKept = true;
     try {
       await _credentialsStore.write(
-        appSecurityResumeSessionStorageKey,
+        appSecurityResumeSessionKeyStorageKey,
         base64Encode(sealed),
+      );
+      await _credentialsStore.write(
+        appSecurityResumeSessionStorageKey,
+        base64Encode(encrypted),
       );
     } on Object catch (error, stackTrace) {
       logZenError(
@@ -1454,6 +1582,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
   Future<void> _dropResumeSession({bool destroyKey = false}) =>
       _inResumeOrder(() async {
         _resumeSessionKept = false;
+        await _deleteCredential(appSecurityResumeSessionKeyStorageKey);
         await _deleteCredential(appSecurityResumeSessionStorageKey);
         if (destroyKey) {
           try {
@@ -1468,12 +1597,21 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
         }
       });
 
-  /// At the start: the master key sealed when Zen was closed, while it
-  /// still opens and the settings still want it; `null` otherwise.
-  /// Whatever was sealed is deleted either way: it serves one start.
+  /// Binds the encrypted master key to its purpose.
+  static final List<int> _resumeSessionAad = utf8.encode('zen-resume-session');
+
+  /// At the start, before anything else: the master key kept when Zen was
+  /// closed, while its one-time key still opens and the settings still
+  /// want it; `null` otherwise. Both entries are deleted either way, the
+  /// one-time key first: they serve one start, and one past its time must
+  /// not wait in the secret store for a later one.
   Future<Uint8List?> _takeResumeSession() async {
+    String? sealedKey;
     String? stored;
     try {
+      sealedKey = await _credentialsStore.read(
+        appSecurityResumeSessionKeyStorageKey,
+      );
       stored = await _credentialsStore.read(appSecurityResumeSessionStorageKey);
     } on Object catch (error, stackTrace) {
       logZenError(
@@ -1482,16 +1620,32 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
         stackTrace,
       );
     }
-    if (stored == null) {
-      return null;
+    if (sealedKey != null) {
+      await _deleteCredential(appSecurityResumeSessionKeyStorageKey);
     }
-    await _deleteCredential(appSecurityResumeSessionStorageKey);
-    if (!_keepUnlockedAfterClose || _lockMode != AppLockMode.background) {
+    if (stored != null) {
+      await _deleteCredential(appSecurityResumeSessionStorageKey);
+    }
+    if (sealedKey == null ||
+        stored == null ||
+        !_hasPassword ||
+        !_keepUnlockedAfterClose ||
+        _lockMode != AppLockMode.background) {
       return null;
     }
     try {
+      final Uint8List? oneTime = await _resumeVault.open(
+        base64Decode(sealedKey),
+      );
+      if (oneTime == null) {
+        return null;
+      }
       return await _matchingMasterKey(
-        await _resumeVault.open(base64Decode(stored)),
+        await decryptSecurityBytes(
+          base64Decode(stored),
+          oneTime,
+          aad: _resumeSessionAad,
+        ),
       );
     } on Object catch (error, stackTrace) {
       // Not something sealed: the password, as without it.
@@ -1783,6 +1937,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityWrappedMasterKeyStorageKey,
     appSecurityDeviceMasterKeyStorageKey,
     appSecurityNeverLockMasterKeyStorageKey,
+    appSecurityResumeSessionKeyStorageKey,
     appSecurityResumeSessionStorageKey,
     appSecuritySealedBiometricTokenStorageKey,
     appSecurityPasswordHashStorageKey,
@@ -1796,6 +1951,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityPanicPasswordHashStorageKey,
     appSecurityPanicSaltStorageKey,
     appSecurityPanicKdfStorageKey,
+    appSecurityPanicStandInSaltStorageKey,
     appSecurityMasterKeyFingerprintStorageKey,
     appSecurityBiometricUnlockChoiceStorageKey,
     appSecurityGuardedSettingsStorageKey,
@@ -1845,6 +2001,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       securityHexFromBytes(masterKey),
     );
     await _ensureMasterFingerprint(masterKey);
+    await _ensurePanicStandIn();
     _hasPassword = false;
     _hasPanicPassword = false;
     _isLocked = false;

@@ -19,23 +19,39 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///
 /// The device that has the account shows a code (QR): its address, a
 /// one-time public key and a secret token. The other device reads it and
-/// greets with its own one-time key, authenticated by the token, so only
-/// a device that saw the screen can ask; both show the same 6 digits and
-/// nothing is sent until the person allows it on the first device. Every
-/// message after the greeting is sealed (ChaCha20-Poly1305) with the key
-/// both one-time keys make.
+/// greets, authenticated by the token, so only a device that saw the
+/// screen can ask; both show the same 6 digits and nothing is sent until
+/// the person allows it on the first device. Every message after the
+/// greeting is sealed (ChaCha20-Poly1305) with the key both one-time keys
+/// make.
 ///
-/// Messages:
-/// * `acx_hello {v, e, m, n}`: new → old, its key, the token's tag, its
-///   name;
+/// Six digits are only safe if nobody can pick their key after learning
+/// what the other screen shows. Whoever saw the code could race the new
+/// device's greeting with a key ground until its digits fit. So, as when a
+/// device is linked (account_link.dart), the new device first greets with
+/// only a commitment to its one-time key; the old device takes the first
+/// greeting and answers it with a fresh random value; only then does the
+/// new device reveal its key, and the digits depend on that value too. A
+/// device that greets first is bound to the key it committed to, and the
+/// real new device, unanswered, shows no digits to aim at.
+///
+/// Messages (version 2):
+/// * `acx_hello {v, c, m, n}`: new → old, the commitment to its key, the
+///   token's tag of it, its name;
+/// * `acx_nonce {r}`: old → new, the fresh value (to the first greeting
+///   only);
+/// * `acx_key {e}`: new → old, its key (the one committed to);
 /// * `acx_offer {c}`: old → new (sealed), the account, its key, the
 ///   devices to greet, and the manifest's id and size;
-/// * `acx_no {}`: old → new, refused there;
+/// * `acx_no {}`: old → new, refused there (`why: version` with its `app`
+///   for a greeting of another version);
 /// * `acx_get {c}`: new → old (sealed), blocks of a file it lacks;
 /// * `acx_block {c}`: old → new (sealed), one block;
 /// * `acx_done {c}`: new → old (sealed), everything came.
 abstract final class AccountCopyMessages {
   static const String hello = 'acx_hello';
+  static const String nonce = 'acx_nonce';
+  static const String key = 'acx_key';
   static const String offer = 'acx_offer';
   static const String no = 'acx_no';
   static const String get = 'acx_get';
@@ -43,8 +59,15 @@ abstract final class AccountCopyMessages {
   static const String done = 'acx_done';
 }
 
-/// The protocol this app speaks.
-const int kAccountCopyVersion = 1;
+/// The protocol this app speaks (2: commit, then reveal). Zen 1.16.x spoke
+/// 1: it finds this version's code to be of another version and says to
+/// update first; its own code (the same fields) is read here, and its
+/// answer to this version's greeting (`acx_no`, why: version) says the
+/// same on this side.
+const int kAccountCopyVersion = 2;
+
+/// Codes this app reads: its own, and those of Zen 1.16.x (same fields).
+const Set<int> _readableTickets = <int>{1, kAccountCopyVersion};
 
 /// Prefix of the code the first device shows.
 const String kAccountCopyTicketPrefix = 'zen-copy:';
@@ -97,7 +120,7 @@ final class AccountCopyTicket {
       );
       if (json is! Map ||
           json['v'] is! int ||
-          json['v'] == kAccountCopyVersion) {
+          _readableTickets.contains(json['v'])) {
         return null;
       }
       final Object? app = json['app'];
@@ -117,7 +140,7 @@ final class AccountCopyTicket {
       final Object? json = jsonDecode(
         utf8.decode(base64Url.decode(base64Url.normalize(body))),
       );
-      if (json is! Map || json['v'] != kAccountCopyVersion) {
+      if (json is! Map || !_readableTickets.contains(json['v'])) {
         return null;
       }
       final Object? address = json['a'];
@@ -136,12 +159,28 @@ final class AccountCopyTicket {
   }
 }
 
-Future<Uint8List> _tag(Uint8List token, List<int> key) async {
+/// The token's tag of a greeting's [commitment]: only a device that read
+/// the code can make it.
+@visibleForTesting
+Future<Uint8List> accountCopyHelloTag(
+  Uint8List token,
+  List<int> commitment,
+) async {
   final Mac mac = await Hmac.sha256().calculateMac(<int>[
-    ...utf8.encode('zen.copy.hello'),
-    ...key,
+    ...utf8.encode('zen.copy.hello.v2'),
+    ...commitment,
   ], secretKey: SecretKey(token));
   return Uint8List.fromList(mac.bytes.sublist(0, 16));
+}
+
+/// What the new device greets with instead of its one-time [key].
+@visibleForTesting
+Future<Uint8List> accountCopyCommitment(List<int> key) async {
+  final Hash h = await Sha256().hash(<int>[
+    ...utf8.encode('zen.copy.commit.v2'),
+    ...key,
+  ]);
+  return Uint8List.fromList(h.bytes);
 }
 
 bool _same(List<int> a, List<int> b) {
@@ -161,6 +200,7 @@ Future<SecretKey> _sessionKey({
   required List<int> oldKey,
   required List<int> newKey,
   required List<int> token,
+  required List<int> fresh,
 }) async {
   final SecretKey shared = await _x25519.sharedSecretKey(
     keyPair: mine,
@@ -168,8 +208,8 @@ Future<SecretKey> _sessionKey({
   );
   return Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
     secretKey: shared,
-    info: utf8.encode('zen.copy.v1'),
-    nonce: <int>[...token, ...oldKey, ...newKey],
+    info: utf8.encode('zen.copy.v2'),
+    nonce: <int>[...token, ...oldKey, ...newKey, ...fresh],
   );
 }
 
@@ -278,6 +318,11 @@ final class AccountCopySource extends ChangeNotifier {
   SecretKey? _key;
   String? _peer;
 
+  /// The first greeting's commitment, name and the fresh value it got.
+  Uint8List? _commitment;
+  String _peerName = '';
+  Uint8List? _fresh;
+
   Uint8List? _manifest;
   String? _manifestId;
   Map<String, AccountArchiveBlob> _blobs = <String, AccountArchiveBlob>{};
@@ -319,6 +364,10 @@ final class AccountCopySource extends ChangeNotifier {
     final Object? type = f.payload['type'];
     if (type == AccountCopyMessages.hello) {
       await _onHello(f);
+      return;
+    }
+    if (type == AccountCopyMessages.key && _fromPeer(f)) {
+      await _onKey(f);
       return;
     }
     final SecretKey? key = _key;
@@ -370,29 +419,64 @@ final class AccountCopySource extends ChangeNotifier {
       );
       return;
     }
-    final Uint8List? theirs = unb64(f.payload['e'], length: 32);
+    final Uint8List? commitment = unb64(f.payload['c'], length: 32);
     final Uint8List? tag = unb64(f.payload['m'], length: 16);
-    if (theirs == null ||
+    if (commitment == null ||
         tag == null ||
-        !_same(await _tag(token, theirs), tag)) {
+        !_same(await accountCopyHelloTag(token, commitment), tag) ||
+        _peer != null) {
       return;
     }
+    // The first greeting with the token: bound to it and to the key it
+    // committed to, whatever comes later.
     final Object? name = f.payload['n'];
-    final String given = name is String ? name.trim() : '';
+    _peer = f.from;
+    _commitment = commitment;
+    _peerName = name is String ? name.trim() : '';
+    final Uint8List fresh = randomBytes(32);
+    _fresh = fresh;
+    await transport.send(
+      remoteAddress: f.from,
+      payload: <String, dynamic>{
+        'type': AccountCopyMessages.nonce,
+        'r': b64(fresh),
+      },
+    );
+  }
+
+  /// The greeting device's key: only the one it committed to counts.
+  Future<void> _onKey(SignalTransportFrame f) async {
+    final SimpleKeyPair? mine = _mine;
+    final Uint8List? myKey = _myKey;
+    final Uint8List? token = _token;
+    final Uint8List? commitment = _commitment;
+    final Uint8List? fresh = _fresh;
+    final Uint8List? theirs = unb64(f.payload['e'], length: 32);
+    if (mine == null ||
+        myKey == null ||
+        token == null ||
+        commitment == null ||
+        fresh == null ||
+        theirs == null ||
+        _key != null ||
+        !_same(await accountCopyCommitment(theirs), commitment)) {
+      return;
+    }
     final SecretKey key = await _sessionKey(
       mine: mine,
       theirs: theirs,
       oldKey: myKey,
       newKey: theirs,
       token: token,
+      fresh: fresh,
     );
-    if (_peer != null) {
+    if (_key != null) {
       return;
     }
-    _peer = f.from;
     _key = key;
+    final String given = _peerName;
     request = AccountCopyRequest(
-      peer: f.from,
+      peer: _peer!,
       name: given.isEmpty
           ? t('Nowe urządzenie')
           : (given.length > 40 ? given.substring(0, 40) : given),
@@ -557,6 +641,9 @@ final class AccountCopyTarget {
   StreamSubscription<SignalTransportFrame>? _sub;
   final Completer<AccountCopyOffer?> _offer = Completer<AccountCopyOffer?>();
 
+  /// The old device's fresh value (null: it said no first).
+  final Completer<Uint8List?> _fresh = Completer<Uint8List?>();
+
   /// The other device's Zen version when it said no because it speaks
   /// another protocol ('?' when it did not say which).
   String? versionMismatch;
@@ -566,23 +653,19 @@ final class AccountCopyTarget {
   bool _from(SignalTransportFrame f) =>
       PeerShareCodec.addressesEqual(f.from, ticket.address);
 
-  /// Greets the device in the ticket; returns the digits to compare.
-  Future<String> hello() async {
+  /// Greets the device in the ticket with a commitment to this device's
+  /// one-time key, reveals the key once the old device answered, and
+  /// returns the digits to compare; null when the old device said no at
+  /// once ([offer] tells why).
+  Future<String?> hello() async {
     final SimpleKeyPair mine = await _x25519.newKeyPair();
     final Uint8List pub = Uint8List.fromList(
       (await mine.extractPublicKey()).bytes,
     );
-    final SecretKey key = await _sessionKey(
-      mine: mine,
-      theirs: ticket.key,
-      oldKey: ticket.key,
-      newKey: pub,
-      token: ticket.token,
-    );
-    _key = key;
+    final Uint8List commitment = await accountCopyCommitment(pub);
     _sub = transport.frames.listen((SignalTransportFrame f) {
       if (_from(f)) {
-        unawaited(_onFrame(key, f));
+        unawaited(_onFrame(f));
       }
     });
     await transport.send(
@@ -590,23 +673,64 @@ final class AccountCopyTarget {
       payload: <String, dynamic>{
         'type': AccountCopyMessages.hello,
         'v': kAccountCopyVersion,
-        'e': b64(pub),
-        'm': b64(await _tag(ticket.token, pub)),
+        'c': b64(commitment),
+        'm': b64(await accountCopyHelloTag(ticket.token, commitment)),
         'n': deviceName,
+      },
+    );
+    final Uint8List? fresh = await _fresh.future.timeout(
+      answerTimeout,
+      onTimeout: () => throw TimeoutException(
+        t('Drugie urządzenie nie odpowiada. Czy pokazuje kod?'),
+      ),
+    );
+    if (fresh == null) {
+      return null;
+    }
+    final SecretKey key = await _sessionKey(
+      mine: mine,
+      theirs: ticket.key,
+      oldKey: ticket.key,
+      newKey: pub,
+      token: ticket.token,
+      fresh: fresh,
+    );
+    _key = key;
+    await transport.send(
+      remoteAddress: ticket.address,
+      payload: <String, dynamic>{
+        'type': AccountCopyMessages.key,
+        'e': b64(pub),
       },
     );
     return linkCheckDigits(key);
   }
 
-  Future<void> _onFrame(SecretKey key, SignalTransportFrame f) async {
+  Future<void> _onFrame(SignalTransportFrame f) async {
     final Object? type = f.payload['type'];
+    if (type == AccountCopyMessages.nonce && !_fresh.isCompleted) {
+      final Uint8List? fresh = unb64(f.payload['r'], length: 32);
+      if (fresh != null) {
+        _fresh.complete(fresh);
+      }
+      return;
+    }
     if (type == AccountCopyMessages.no && !_offer.isCompleted) {
       if (f.payload['why'] == 'version') {
         final Object? app = f.payload['app'];
         versionMismatch = app is String && isValidAppVersion(app) ? app : '?';
       }
       _offer.complete(null);
-    } else if (type == AccountCopyMessages.offer && !_offer.isCompleted) {
+      if (!_fresh.isCompleted) {
+        _fresh.complete(null);
+      }
+      return;
+    }
+    final SecretKey? key = _key;
+    if (key == null) {
+      return;
+    }
+    if (type == AccountCopyMessages.offer && !_offer.isCompleted) {
       final Map<String, dynamic>? body = await _open(
         key,
         AccountCopyMessages.offer,

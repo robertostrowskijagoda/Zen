@@ -88,14 +88,17 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
       return true;
     }
     final String? password = await askAccountPassword(context, why);
-    if (password == null) {
+    if (password == null || !mounted) {
       return false;
     }
-    final bool ok = await node.identity.unlock(password);
-    if (!ok && mounted) {
-      setState(() => _message = t('Złe hasło konta.'));
+    final String? problem = await tryAccountPassword(
+      context,
+      () => node.identity.unlock(password),
+    );
+    if (problem != null && mounted) {
+      setState(() => _message = problem);
     }
-    return ok;
+    return problem == null;
   }
 
   /// Whether [device] runs the account's household while this device keeps
@@ -659,11 +662,17 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
         context,
         t('Podłączenie urządzenia'),
       );
-      if (password == null) {
+      if (password == null || !mounted) {
         return;
       }
-      if (!await node.identity.unlock(password)) {
-        setState(() => _message = t('Złe hasło konta.'));
+      final String? problem = await tryAccountPassword(
+        context,
+        () => node.identity.unlock(password),
+      );
+      if (problem != null) {
+        if (mounted) {
+          setState(() => _message = problem);
+        }
         return;
       }
     }

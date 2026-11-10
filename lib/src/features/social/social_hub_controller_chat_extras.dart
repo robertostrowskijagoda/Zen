@@ -754,14 +754,27 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
   /// for a deletion in a group, from the group's creator.
   @override
   Future<void> _handleChatChange(ZenSignal signal, int timestamp) async {
-    final String? messageId = signal.messageId;
-    if (messageId == null) {
+    final String? wireId = signal.messageId;
+    if (wireId == null) {
       return;
     }
     final String? groupId = signal.groupId;
-    final String key = groupId == null || groupId.isEmpty
-        ? (state.friendByAddress(signal.sender)?.address ?? signal.sender)
-        : 'group:$groupId';
+    final bool inGroup = groupId != null && groupId.isNotEmpty;
+    final String key = inGroup
+        ? 'group:$groupId'
+        : (state.friendByAddress(signal.sender)?.address ?? signal.sender);
+    // An edit or a deletion of the sender's own message with this id: kept
+    // under its own key when another member's message holds the id
+    // ([groupMessageLocalId]).
+    final String own = groupMessageLocalId(wireId, signal.sender);
+    final String messageId =
+        inGroup &&
+            signal.type != ZenSignalType.messageReaction &&
+            (await _messageTimelineStore.load(
+              key,
+            )).any((ChatMessage m) => m.id == own)
+        ? own
+        : wireId;
     bool wrote(ChatMessage m) =>
         !m.isOutgoing &&
         !m.isSystem &&
@@ -1009,8 +1022,11 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
       return;
     }
     final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    final Object? id = payload['msgId'];
     final Map<String, dynamic> withGroup = <String, dynamic>{
       ...payload,
+      // The members know the message by the id it came with.
+      if (id is String) 'msgId': groupMessageWireId(id),
       'groupId': group.id,
     };
     await Future.wait(<Future<void>>[

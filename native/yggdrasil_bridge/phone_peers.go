@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 )
@@ -54,6 +55,9 @@ const (
 	// an outage asks the mailboxes for mail), so the core redials every
 	// peer at once, between the waves too, at most this often.
 	phonePeerWakeRedialEvery = time.Minute
+	// A node that only receives on a QUIC or WebSocket peer (no TLS peer
+	// worked) dials a TLS peer again this often, and moves to it once up.
+	phonePeerLightRetry = 15 * time.Minute
 	// The key in the node config the app may add to ask for a number of
 	// public peers (a node that only receives asks for fewer).
 	zenPeerTargetKey = "ZenPeerTarget"
@@ -96,6 +100,23 @@ func phonePeerTarget(requested int) int {
 		return maxPhonePeerTarget
 	}
 	return requested
+}
+
+// lightPeer tells whether a link to uri wakes the radio no more than the
+// mesh's own traffic: TLS (or plain TCP). QUIC sends a keepalive of its own
+// every 20 s; a phone dials QUIC and WebSocket peers only behind every TLS
+// one.
+func lightPeer(uri string) bool {
+	scheme := peerScheme(uri)
+	return scheme == "tls" || scheme == "tcp"
+}
+
+// lightFirst is peers with the light ones first, in their order otherwise.
+func lightFirst(peers []string) []string {
+	sort.SliceStable(peers, func(i, j int) bool {
+		return lightPeer(peers[i]) && !lightPeer(peers[j])
+	})
+	return peers
 }
 
 // firstPeers is the first count of peers (all of them when there are fewer).
@@ -149,6 +170,19 @@ type peerRotation struct {
 	waves        int
 	// When the core last redialled every peer (a wave, or a wake).
 	lastRedial time.Time
+	// Peers that failed (did not come up, or stayed down) since a peer was
+	// last up after a time with none: a node that only receives (target 1)
+	// dials QUIC or WebSocket peers only once every TLS peer is among them,
+	// and then a TLS peer again at nextLight.
+	failed    map[string]bool
+	nextLight time.Time
+}
+
+// lightOnly tells whether the rotation keeps to TLS peers while one may
+// work: a node with one peer (one that only receives, or holds) keeps that
+// link for hours with the phone locked.
+func (r *peerRotation) lightOnly() bool {
+	return r.target == 1
 }
 
 // redialOnWake reports whether the core should redial every peer now that
@@ -179,10 +213,13 @@ func (r *peerRotation) setPool(pool []string) {
 		seen[peer] = true
 		r.pool = append(r.pool, peer)
 	}
+	lightFirst(r.pool)
 	r.next = 0
 	r.dialledAt = make(map[string]time.Time)
 	r.wasUp = make(map[string]bool)
 	r.downSince = make(map[string]time.Time)
+	r.failed = make(map[string]bool)
+	r.nextLight = time.Time{}
 	r.offlineSince = time.Time{}
 	r.waves = 0
 }
@@ -262,13 +299,27 @@ func (r *peerRotation) check(now time.Time, dialled []string, up func(string) bo
 			pending = append(pending, peer)
 		default:
 			failed = append(failed, peer)
+			r.failed[peer] = true
 		}
+	}
+	if len(upNow) > 0 && !r.offlineSince.IsZero() {
+		// Up again after a time with none: what failed meanwhile failed
+		// for want of a network, most likely.
+		clear(r.failed)
+	}
+	for _, peer := range upNow {
+		delete(r.failed, peer)
 	}
 	if len(upNow) >= r.target {
 		// Enough are up: the stand-ins and the peers that stay down go.
 		r.offlineSince = time.Time{}
 		r.waves = 0
-		out := firstPeers(upNow, r.target)
+		out := firstPeers(lightFirst(upNow), r.target)
+		if !r.lightOnly() || lightPeer(out[0]) {
+			r.nextLight = time.Time{}
+		} else {
+			out = r.backToLight(now, out, pending, dialled)
+		}
 		return out, !samePeers(out, dialled), false
 	}
 	missing := r.target - len(upNow) - len(pending)
@@ -359,23 +410,77 @@ func (r *peerRotation) fill(dialled []string) []string {
 	return out
 }
 
+// backToLight is what a node with one peer, up on a QUIC or WebSocket peer
+// (out), dials: beside it a TLS peer under way, or a new one once
+// phonePeerLightRetry passed since it settled there; the TLS peer takes
+// over once up (check keeps the light ones first).
+func (r *peerRotation) backToLight(now time.Time, out, pending, dialled []string) []string {
+	for _, peer := range pending {
+		if lightPeer(peer) {
+			return append(out, peer)
+		}
+	}
+	if r.nextLight.IsZero() {
+		r.nextLight = now.Add(phonePeerLightRetry)
+		return out
+	}
+	if now.Before(r.nextLight) {
+		return out
+	}
+	r.nextLight = now.Add(phonePeerLightRetry)
+	used := make(map[string]bool, len(dialled))
+	for _, peer := range dialled {
+		used[peer] = true
+	}
+	if peer, ok := r.pick(used, func(peer string) bool {
+		return lightPeer(peer) && !r.failed[peer] && !r.aside[peer]
+	}); ok {
+		r.dialledAt[peer] = now
+		out = append(out, peer)
+	}
+	return out
+}
+
 // candidate is the next peer of the pool that is not dialled already, and
 // not set aside unless the pool has nothing else (a holding phone must not
-// be left without a way to the mesh).
+// be left without a way to the mesh). A node with one peer takes a TLS
+// peer while one has not failed, then any that has not failed, then any.
 func (r *peerRotation) candidate(used map[string]bool) (string, bool) {
 	for _, skipAside := range []bool{true, false} {
-		for i := 0; i < len(r.pool); i++ {
-			index := (r.next + i) % len(r.pool)
-			peer := r.pool[index]
-			if used[peer] || (skipAside && r.aside[peer]) {
-				continue
+		allowed := func(peer string) bool { return !skipAside || !r.aside[peer] }
+		if r.lightOnly() {
+			if peer, ok := r.pick(used, func(peer string) bool {
+				return allowed(peer) && lightPeer(peer) && !r.failed[peer]
+			}); ok {
+				return peer, true
 			}
-			r.next = (index + 1) % len(r.pool)
+			if peer, ok := r.pick(used, func(peer string) bool {
+				return allowed(peer) && !r.failed[peer]
+			}); ok {
+				return peer, true
+			}
+		}
+		if peer, ok := r.pick(used, allowed); ok {
 			return peer, true
 		}
 		if len(r.aside) == 0 {
 			break
 		}
+	}
+	return "", false
+}
+
+// pick is the next peer of the pool from r.next on that is not used and
+// that ok takes.
+func (r *peerRotation) pick(used map[string]bool, ok func(string) bool) (string, bool) {
+	for i := 0; i < len(r.pool); i++ {
+		index := (r.next + i) % len(r.pool)
+		peer := r.pool[index]
+		if used[peer] || !ok(peer) {
+			continue
+		}
+		r.next = (index + 1) % len(r.pool)
+		return peer, true
 	}
 	return "", false
 }

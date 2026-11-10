@@ -144,4 +144,18 @@ void main() {
       expect(update, contains('input.copyTo(out)'));
     });
   });
+
+  test('a secret copied from Zen is marked sensitive on the clipboard', () {
+    final String system = _source('ZenSystemBridge.kt');
+    expect(system, contains('"copySensitive" ->'));
+    final String copy = _function(system, 'private fun copySensitive');
+    expect(copy, contains('ClipDescription.EXTRA_IS_SENSITIVE'));
+    expect(copy, contains('Build.VERSION_CODES.TIRAMISU'));
+    expect(copy, contains('"android.content.extra.IS_SENSITIVE"'));
+    expect(
+      copy.indexOf('description.extras'),
+      lessThan(copy.indexOf('setPrimaryClip(clip)')),
+      reason: 'the mark is on the clip before it goes to the clipboard',
+    );
+  });
 }

@@ -95,12 +95,19 @@ computer could break. So Zen does not rely on it for identity:
   that device key.
 - The device key is **pinned** to the address at first contact and kept
   across restarts. A record signed with another key for the same address is
-  rejected.
+  rejected. A pin of a device that had a session with yours is never pushed
+  out by strangers' records, however many come, and a first contact is
+  pinned once its session opens even while strangers use up the new pins.
 - The ledger hello signs the address **together with** the device key's
   fingerprint (hybrid signature), so an address is bound to the hybrid
-  identity. Device entries in your log and friends' friend lists carry the
-  keys too, so a friend's other devices and friends of friends are pinned
-  before the first contact. A mismatch shows a warning in the chat.
+  identity. Device entries in your log carry the keys too, so a friend's
+  other devices are pinned before the first contact. A mismatch shows a
+  warning in the chat.
+- Friends' friend lists carry keys as well, but that is only a friend's
+  word: such a key is a hint. It never replaces or pushes out a pin, never
+  ends a session, and the first record the device itself signs decides; a
+  hint that contradicts a pin shows the warning. So a friend cannot cut you
+  off from anyone with lists of made-up keys.
 - A device the account cut off (lost or stolen) is cut off at friends too,
   once the revocation reaches them: its address gets no ledger traffic, no
   keys and no chat (messages go to the account's other devices, the chat
@@ -152,14 +159,22 @@ encryption falls back to DTLS-SRTP inside the relay layer.
 | The link to a public peer over `tcp://` or `ws://` | the peer offers nothing better | see which mesh keys you talk to (Zen picks only `tls://`, `quic://`, `wss://` itself; their TLS 1.3 uses X25519MLKEM768) |
 
 First contact with a stranger after a large quantum computer exists, with no
-friend vouching for their key, is trust on first use.
+signed device entry naming their key, is trust on first use (a friend's
+friend list names it only as a hint, see above).
 
 ## On the device
 
 - **Storage encryption.** A random 256-bit master key encrypts data and files
   (AES-256-GCM; per-purpose keys derived with HMAC-SHA256). It is wrapped by
   a key from your password: **Argon2id**, 19 MiB, 2 passes. Failed attempts
-  are throttled and remembered across restarts. File names are hidden.
+  are throttled and remembered across restarts: the wait still left is
+  kept, counted down on a clock the system time does not move, and starts
+  again in full after a restart. Guesses at "Inne konto" have one count
+  for the device, apart from the lock screen's, that no unlock clears. A
+  wrong password costs
+  the same work whether an emergency wipe password is set or not, and a
+  wrong account ID at "Inne konto" the same as a wrong password. File
+  names are hidden.
 - **Biometric unlock** keeps a copy of the master key wrapped by a key that
   never leaves the security hardware: Android Keystore (StrongBox when
   present), the TPM on Windows (with Windows Hello), the Secure Enclave on
@@ -173,13 +188,43 @@ friend vouching for their key, is trust on first use.
   is gone). Only choosing "Never" again, with the password, makes a new
   copy: setting a password, unlocking or restoring settings never does.
   The password is still asked for before security settings change or
-  sensitive screens open.
+  sensitive screens open: for the lock, before any choice that locks
+  later than now (a later mode, a longer delay, keeping the key after
+  closing, "Never" on an additional account); a choice that locks sooner
+  asks nothing. Every password asked inside the unlocked app (the app
+  password, the account password) counts with the lock screen's failed
+  attempts and is refused while its wait runs.
+- **"Don't lock right after closing the app"** (with the lock after
+  leaving the app) keeps the master key for a start within the lock delay
+  after Zen was closed. It is kept encrypted under a new one-time key each
+  time Zen leaves the screen, and only that one-time key is sealed with
+  the delay: on Android by a Keystore key that opens only while the phone
+  is unlocked, which checks the delay, the boot and the screen lock
+  itself; on computers and the iPhone it lies in the system's secret store
+  with its end on the clock since boot, and only Zen checks that end. What
+  remains: until something deletes them, both entries are in the secret
+  store, so on a computer any program running as the same user can read
+  them, and with them the master key, while the delay runs and, if Zen is
+  not started again, after it too (as with "Never"). The next start
+  deletes both before the lock screen shows, used or not, the one-time key
+  first; so do locking by hand, coming back to Zen, a new password,
+  another lock mode or delay, and switching the option off. What 1.16.2
+  kept here is not used: the first start asks for the password and
+  deletes it.
 - **The locked phone (Android and iPhone).** A locked Zen keeps receiving
   without the master key; see "The locked phone" below.
-- **Screens.** The wallet and other sensitive screens are protected from
-  screenshots and screen recording (Android, Windows, macOS). Clipboard
-  copies of secrets (the account key, a transfer code) expire after 60
-  seconds; the invitation code is the public address and stays.
+- **Screens.** Zen does not block screenshots, screen recording or screen
+  sharing on any screen, the wallet and the account key included: since
+  1.15.1, by choice, people may capture what they see (a start lifts the
+  protection an older version left on the window). The system's
+  recent-apps preview keeps a picture of the last screen Zen showed, also
+  while Zen is locked; whoever holds the unlocked device can look at it
+  there. Clipboard copies of secrets (the account key, a transfer code)
+  are marked as sensitive where the system knows such a mark (Android 13
+  and later; on Windows they stay out of the clipboard history and the
+  cloud clipboard), and are cleared after 60 seconds, when Zen locks and
+  when the account is left or erased; the invitation code is the public
+  address and stays.
   Notifications show the sender and the start of a message by default; the
   first-run setup asks, and "Without sender and content" or "Sender only"
   can be chosen globally or per conversation.
@@ -204,9 +249,22 @@ friend vouching for their key, is trust on first use.
   keystore entries and password. Folders are named by a keyed hash of the
   account ID; every device has 2 to 5 decoy folders from the first start,
   and a deleted account is replaced by a decoy, so the number of folders
-  stays the same. Keystore entries of extra accounts have hashed names. There
-  is no list of hidden accounts. An emergency wipe password erases its
-  account silently. An account with **"Receive in background"** on (off by default
+  stays the same. A decoy holds what an account's folder holds (the same
+  folders, file names and extensions, sizes of the same spread, random
+  content) and keystore entries of its own, as many as an account has;
+  some decoys are "used" now and then at a start, so their files change
+  as an account's in use do, the others stay as they were made, as an
+  unused account's. Decoys of earlier versions get this look at the next
+  start. Keystore entries of extra accounts have hashed names. There
+  is no list of hidden accounts. While an account that is not on the
+  list is open, nothing goes into the device's diagnostics log (plain
+  text), its start and the way back to the default account included.
+  Listing the folders or the keystore's
+  entry names does not tell a hidden account from the decoys; reading
+  what is in the files or the keystore (full access to the device) still
+  can. An emergency wipe password erases its
+  account silently, with its place in the background list and the node
+  that received for it. An account with **"Receive in background"** on (off by default
   for extra accounts) keeps its mesh node and a small receive kit under a
   separate background key, so the background service (Android) or the tray
   (computers) runs it without the password; someone with full access to the
@@ -248,10 +306,14 @@ friend vouching for their key, is trust on first use.
   file.
 - **Moving the account to another device.** The device with the account
   shows a one-time QR code: its address, a one-time X25519 key and a
-  random 128-bit token. The new device answers with its own one-time key
-  and an HMAC of it under the token, so only a device that saw the screen
-  can ask; both screens show six digits from the shared key, and nothing
-  leaves until the person taps "Allow" on the old device. Everything after
+  random 128-bit token. The new device answers with a commitment to its
+  own one-time key and an HMAC of it under the token, so only a device
+  that saw the screen can ask; the old device answers the first such
+  greeting with a fresh random value, and only then does the new device
+  reveal its key. Both screens show six digits from the shared key and
+  that value, so whoever saw the code and greets first is bound to the
+  key it committed to and cannot grind one to match the other screen.
+  Nothing leaves until the person taps "Allow" on the old device. Everything after
   that (the account key, the list of contents, the files in blocks of
   192 KB, each file checked by its SHA-256) is sealed with
   ChaCha20-Poly1305 under that key, inside the post-quantum session every

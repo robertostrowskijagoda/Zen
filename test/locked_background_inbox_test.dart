@@ -40,6 +40,8 @@ const String _stranger = 'stranger.ygg';
 const String _troll = 'troll.ygg';
 const String _mailbox = 'mailbox.ygg';
 
+const int _minuteMs = 60 * 1000;
+
 /// 60 bytes sealed and framed: length, version, KEM ciphertext, nonce,
 /// the bytes and the tag.
 const int _framed60 = 4 + 1 + kHybridCiphertextBytes + 12 + 60 + 16;
@@ -1005,6 +1007,23 @@ void main() {
         expect(notice.silent, isTrue);
       });
 
+      test('an invitation to the id of a pyramid cell chat tells of nothing: '
+          'nobody invites to one', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: names);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          'groupId': 'pyrcell-0123456789abcdef01234567',
+          'name': 'x',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          'groupId': 'grp-1',
+          'name': 'x',
+        });
+        expect(notices.activeNotifications, hasLength(1));
+      });
+
       test('a ringing call is not made quiet by the sounds switch', () async {
         await startReceiver(
           await publishFor(_masterKey()),
@@ -1237,6 +1256,117 @@ void main() {
       await receiver.stop();
       kept = await keptPresenceFrames(vault: appVault, masterKey: masterKey);
       expect(kept.single.receivedAtMillis, clock + 1000);
+    });
+
+    test('writes the statuses down when the state of a friend changes or its '
+        'written one is a few minutes old, not on every frame', () async {
+      int clock = DateTime.now().millisecondsSinceEpoch;
+      final int start = clock;
+      final Uint8List masterKey = _masterKey();
+      final BackgroundCapability capability = await publishFor(masterKey);
+      transport = MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        presence: const LockedPresenceKit(shownTo: <String>{_ada, _bob}),
+        mailboxPollInterval: Duration.zero,
+        pollAnswerGrace: Duration.zero,
+        now: () => clock,
+      );
+      await receiver.start();
+      // Zen was last open on their phones 10 minutes before (0: it is).
+      final int opened = start - 10 * _minuteMs;
+      Future<void> heard(String from, String type, String state, int at) {
+        clock = at;
+        return receiver.handleFrame(
+          SignalTransportFrame(
+            from: from,
+            payload: <String, dynamic>{
+              'type': type,
+              'state': state,
+              'lo': state == 'foreground' ? 0 : (at - opened) ~/ 1000,
+            },
+            receivedAtMillis: at,
+          ),
+        );
+      }
+
+      Future<Map<String, (String, int)>> kept() async {
+        await receiver.presenceKept;
+        return <String, (String, int)>{
+          for (final SignalTransportFrame f in await keptPresenceFrames(
+            vault: appVault,
+            masterKey: masterKey,
+          ))
+            f.from: (f.payload['state'] as String, f.receivedAtMillis),
+        };
+      }
+
+      final File file = File(
+        '${(await serviceVault.inboxFile()).parent.path}'
+        '${Platform.pathSeparator}$kKeptPresenceFileName',
+      );
+      // Ada's phone is locked: its answers say "w tle".
+      await heard(_ada, 'pong', 'background', start);
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('background', start),
+      });
+      final List<int> first = await file.readAsBytes();
+      await heard(_ada, 'ping', 'background', start + 4 * _minuteMs);
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('background', start),
+      }, reason: 'the same state, written 4 minutes ago');
+      expect(await file.readAsBytes(), first, reason: 'not written again');
+      await heard(_ada, 'pong', 'background', start + 8 * _minuteMs);
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('background', start + 8 * _minuteMs),
+      }, reason: 'written 8 minutes ago: written again');
+      // Zen was open on Ada's phone a moment, unseen here: a new last
+      // opening, written at once.
+      clock = start + 8 * _minuteMs + 30000;
+      await receiver.handleFrame(
+        SignalTransportFrame(
+          from: _ada,
+          payload: <String, dynamic>{
+            'type': 'pong',
+            'state': 'background',
+            'lo': 10,
+          },
+          receivedAtMillis: clock,
+        ),
+      );
+      expect((await kept())[_ada], ('background', clock));
+      // Zen comes on Ada's screen: at once.
+      await heard(_ada, 'ping', 'foreground', start + 9 * _minuteMs);
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('foreground', start + 9 * _minuteMs),
+      });
+      // Online, she pings every 2 minutes: every other one is written, so
+      // the one written is never more than one ping older than the newest.
+      await heard(_ada, 'ping', 'foreground', start + 11 * _minuteMs);
+      expect((await kept())[_ada], ('foreground', start + 9 * _minuteMs));
+      await heard(_ada, 'ping', 'foreground', start + 13 * _minuteMs);
+      expect((await kept())[_ada], ('foreground', start + 13 * _minuteMs));
+      // Bob for the first time: written at once, with Ada's newest.
+      await heard(_ada, 'ping', 'foreground', start + 15 * _minuteMs);
+      await heard(_bob, 'pong', 'background', start + 15 * _minuteMs + 1);
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('foreground', start + 15 * _minuteMs),
+        _bob: ('background', start + 15 * _minuteMs + 1),
+      });
+      // And everything heard when the receiver stops.
+      await heard(_ada, 'ping', 'foreground', start + 17 * _minuteMs);
+      await receiver.stop();
+      expect(await kept(), <String, (String, int)>{
+        _ada: ('foreground', start + 17 * _minuteMs),
+        _bob: ('background', start + 15 * _minuteMs + 1),
+      });
     });
 
     test('without a presence kit a pong says nothing about presence', () async {

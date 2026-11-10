@@ -7,13 +7,41 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/chip_tap_target.dart';
 
+/// How late a mode locks: the higher, the later.
+int _lateness(AppLockMode mode) => switch (mode) {
+  AppLockMode.background => 0,
+  AppLockMode.appClose => 1,
+  AppLockMode.systemRestart => 2,
+  AppLockMode.never => 3,
+};
+
+/// Whether [to] locks Zen later than [from] does: a later mode, a longer
+/// delay, or the key kept after closing where closing locked at once.
+bool locksLater(AppSettings from, AppSettings to) {
+  final int before = _lateness(from.lockMode);
+  final int after = _lateness(to.lockMode);
+  if (after != before) {
+    return after > before ||
+        (to.lockMode == AppLockMode.background && to.keepUnlockedAfterClose);
+  }
+  if (to.lockMode != AppLockMode.background) {
+    return false;
+  }
+  return to.backgroundLockDelaySeconds > from.backgroundLockDelaySeconds ||
+      (to.keepUnlockedAfterClose && !from.keepUnlockedAfterClose);
+}
+
 /// "Automatyczna blokada": when Zen locks itself, bound to the setting, with
 /// what "Nigdy" really means and the delay for "Po wyjściu z aplikacji".
-/// Asked in Ustawienia → Bezpieczeństwo and in the first-start setup.
+/// Asked in Ustawienia → Bezpieczeństwo and in the first-start setup. A
+/// choice that locks later than now ([locksLater]) asks who is there first
+/// ([confirmSensitiveAccess]); one that locks sooner does not.
 class LockModeSettingChoice extends ConsumerWidget {
   const LockModeSettingChoice({super.key});
 
@@ -28,13 +56,15 @@ class LockModeSettingChoice extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     AppSecurityService security, {
-    required AppLockMode current,
+    required AppSettings settings,
     required AppLockMode mode,
   }) async {
+    final AppLockMode current = settings.lockMode;
     // Read before any wait: the choice may be gone after the dialog.
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
     );
+    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
     final bool keepsKey =
         mode == AppLockMode.never &&
         security.hasPassword &&
@@ -45,16 +75,53 @@ class LockModeSettingChoice extends ConsumerWidget {
           await showDialog<bool>(
             context: context,
             builder: (BuildContext dialogContext) =>
-                _NeverLockDialog(security: security),
+                _NeverLockDialog(security: security, throttle: throttle),
           ) ??
           false;
       if (!kept) {
         return;
       }
-    } else if (mode == current) {
+    } else if (mode == current ||
+        !await _mayLockLater(
+          context,
+          security,
+          from: settings,
+          to: settings.copyWith(lockMode: mode),
+        )) {
       return;
     }
     await controller.setLockMode(mode);
+  }
+
+  /// Before a change from [from] to [to]: true when it locks no later, or
+  /// the person confirmed it (nothing to ask without an app password).
+  static Future<bool> _mayLockLater(
+    BuildContext context,
+    AppSecurityService security, {
+    required AppSettings from,
+    required AppSettings to,
+  }) async {
+    if (!security.hasPassword || !locksLater(from, to)) {
+      return true;
+    }
+    return context.mounted &&
+        await confirmSensitiveAccess(
+          context,
+          reason: t('Wpisz hasło aplikacji, żeby to włączyć.'),
+        );
+  }
+
+  /// Applies [to] through [apply] once [_mayLockLater] lets it.
+  static Future<void> _change(
+    BuildContext context,
+    AppSecurityService security, {
+    required AppSettings from,
+    required AppSettings to,
+    required Future<void> Function() apply,
+  }) async {
+    if (await _mayLockLater(context, security, from: from, to: to)) {
+      await apply();
+    }
   }
 
   @override
@@ -104,7 +171,7 @@ class LockModeSettingChoice extends ConsumerWidget {
                       context,
                       ref,
                       security,
-                      current: settings.lockMode,
+                      settings: settings,
                       mode: mode,
                     ),
                   ),
@@ -178,7 +245,14 @@ class LockModeSettingChoice extends ConsumerWidget {
                     label: Text(label),
                     selected: settings.backgroundLockDelaySeconds == sec,
                     onSelected: (_) => unawaited(
-                      controller.setBackgroundLockDelaySeconds(sec),
+                      _change(
+                        context,
+                        security,
+                        from: settings,
+                        to: settings.copyWith(backgroundLockDelaySeconds: sec),
+                        apply: () =>
+                            controller.setBackgroundLockDelaySeconds(sec),
+                      ),
                     ),
                   ),
                 ),
@@ -210,8 +284,15 @@ class LockModeSettingChoice extends ConsumerWidget {
                   height: 1.35,
                 ),
               ),
-              onChanged: (bool on) =>
-                  unawaited(controller.setKeepUnlockedAfterClose(on)),
+              onChanged: (bool on) => unawaited(
+                _change(
+                  context,
+                  security,
+                  from: settings,
+                  to: settings.copyWith(keepUnlockedAfterClose: on),
+                  apply: () => controller.setKeepUnlockedAfterClose(on),
+                ),
+              ),
             ),
           ],
         ],
@@ -244,9 +325,12 @@ class LockModeSettingChoice extends ConsumerWidget {
 /// the password, which unwraps the data key for the system's secret store.
 /// Pops `true` once the key is kept.
 class _NeverLockDialog extends StatefulWidget {
-  const _NeverLockDialog({required this.security});
+  const _NeverLockDialog({required this.security, required this.throttle});
 
   final AppSecurityService security;
+
+  /// The lock screen's attempts, which this password counts with.
+  final UnlockThrottle throttle;
 
   @override
   State<_NeverLockDialog> createState() => _NeverLockDialogState();
@@ -273,7 +357,13 @@ class _NeverLockDialogState extends State<_NeverLockDialog> {
       _error = null;
     });
     final String password = _controller.text;
-    final bool kept = await widget.security.keepMasterKeyForNeverLock(password);
+    final PasswordTry outcome = await tryPassword(
+      widget.throttle,
+      () => widget.security.verifyPassword(password),
+    );
+    final bool kept =
+        outcome.right &&
+        await widget.security.keepMasterKeyForNeverLock(password);
     if (!mounted) {
       return;
     }
@@ -281,17 +371,12 @@ class _NeverLockDialogState extends State<_NeverLockDialog> {
       Navigator.of(context).pop(true);
       return;
     }
-    // Told apart only when it failed: the right password and a secret store
-    // that refused the key.
-    final bool right = await widget.security.verifyPassword(password);
-    if (!mounted) {
-      return;
-    }
     setState(() {
       _busy = false;
-      _error = right
+      // The right password and a secret store that refused the key.
+      _error = outcome.right
           ? t('Nie udało się zapisać klucza. Spróbuj ponownie.')
-          : t('Nieprawidłowe hasło.');
+          : passwordTryError(outcome, t('Nieprawidłowe hasło.'));
     });
   }
 

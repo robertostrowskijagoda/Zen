@@ -74,6 +74,40 @@ abstract final class ZenDiagnosticsLog {
 
   static File? get file => _file;
 
+  /// Whether nothing is written now: an account that is not on the list
+  /// is open (or one was, and the next start has not reached its first
+  /// screen yet). Its lines are dropped, not kept for later.
+  static bool get quiet => _quiet;
+  static bool _quiet = false;
+
+  /// The start under way is of an account shown in the list after a quiet
+  /// one: the log speaks again once it reaches its first screen
+  /// ([startReached]), so the start itself (which would show that another
+  /// account was open) leaves no line.
+  static bool _speakAfterStart = false;
+
+  /// From now on nothing of this isolate is written (an account that is
+  /// not on the list is being opened), until [startReached] after a shown
+  /// account was attached again.
+  static void hush() {
+    if (!_quiet) {
+      _flushRepeats();
+    }
+    _quiet = true;
+    _speakAfterStart = false;
+    _early.clear();
+  }
+
+  /// The start under way reached its first screen.
+  static void startReached() {
+    if (_quiet && _speakAfterStart) {
+      _quiet = false;
+      _speakAfterStart = false;
+      _lastLine = null;
+      _lastLineAt = null;
+    }
+  }
+
   /// Completes once every line this isolate queued so far is written.
   static Future<void> get settled {
     _flushRepeats();
@@ -84,12 +118,25 @@ abstract final class ZenDiagnosticsLog {
   /// folder, the app's own folder above it: [diagnosticsLogFolder]).
   /// [source] names this isolate's file and tags every line, so the
   /// isolates can be told apart when reading the log back.
+  ///
+  /// An additional account that is not on the list ([shown] false) writes
+  /// nothing at all ([hush]): the log is the device's, plain text, and a
+  /// line of it would prove the account was opened. A shown account
+  /// attached after such one writes again from its first screen on
+  /// ([startReached]), without an "attached" line.
   static Future<void> attach(
     Directory supportDirectory, {
     required String source,
+    bool shown = true,
   }) async {
     try {
       final Directory folder = diagnosticsLogFolder(supportDirectory);
+      final bool account = folder.path != supportDirectory.path;
+      if (account && !shown) {
+        hush();
+      } else if (_quiet) {
+        _speakAfterStart = true;
+      }
       final File target = File(
         '${folder.path}${Platform.pathSeparator}${fileNameFor(source)}',
       );
@@ -103,10 +150,14 @@ abstract final class ZenDiagnosticsLog {
       _privatePlaces = diagnosticsPrivatePlaces(folder.path);
       _home = _homeDirectory();
       _file = target;
-      if (folder.path != supportDirectory.path) {
+      if (account) {
         // Logs earlier builds kept in the account's own folder: plain text
         // that told that folder apart from the decoys around it.
         await _delete(supportDirectory);
+      }
+      if (_quiet) {
+        _early.clear();
+        return;
       }
       final List<(DateTime, String)> early = List<(DateTime, String)>.of(
         _early,
@@ -153,6 +204,9 @@ abstract final class ZenDiagnosticsLog {
   /// Appends one line. Fire-and-forget: logging must never fail a caller, and
   /// must never block the runtime it is observing.
   static void write(String line) {
+    if (_quiet) {
+      return;
+    }
     final DateTime now = DateTime.now();
     final DateTime? first = _lastLineAt;
     // Technical samples come on their own schedule: each is kept.

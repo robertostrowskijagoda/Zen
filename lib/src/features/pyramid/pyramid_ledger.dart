@@ -184,6 +184,11 @@ final class PyrLedgerView {
   /// Treasurers caught signing two operations for one slot.
   final Map<String, List<String>> cheaters = <String, List<String>>{};
 
+  /// Operations most treasurers signed although no honest treasurer would
+  /// ([PyrLedger.breaks]: a negative amount, an order its payer did not
+  /// sign, a settlement by somebody else...) → why: they count nowhere.
+  final Map<String, String> broken = <String, String>{};
+
   int balanceOf(String key) => balances[key] ?? 0;
   int seqOf(String key) => seqs[key] ?? 0;
 
@@ -217,6 +222,68 @@ final class PyrLedger {
     final List<String> t = s.treasurersAt(op.at);
     return t.isNotEmpty &&
         op.tsigs.keys.where(t.contains).length >= t.length ~/ 2 + 1;
+  }
+
+  /// Why [op] breaks a rule of [problem] that holds however many treasurers
+  /// signed it and whoever checks it, or null: of this pyramid, dated within
+  /// the treasurers' time; an order signed by its payer, between two
+  /// accounts, of a positive amount up to [kPyrMaxAmount], with a number
+  /// and a well-formed condition. Every phone applies it when it counts the
+  /// operations ([compute]), the same way, so a dishonest majority of
+  /// treasurers gets nothing through that an honest one would refuse.
+  /// (What a settlement must meet depends on its payment: [compute].)
+  static String? breaks(PyramidRecord op, PyramidState s) {
+    if (op.pyramid != s.id) {
+      return 'inna piramida';
+    }
+    if (s.treasurerEras.isEmpty || op.at < s.treasurerEras.first.$1) {
+      return 'zlecenie sprzed skarbników';
+    }
+    if (op.type != PyrT.transfer) {
+      return op.type == PyrT.settle ? null : 'nie przelew';
+    }
+    final String from = op.str('from');
+    final String to = op.str('to');
+    final int amount = op.integer('amount');
+    if (from.isEmpty ||
+        to.isEmpty ||
+        from == to ||
+        !op.signers.contains(from) ||
+        amount <= 0 ||
+        amount > kPyrMaxAmount ||
+        op.integer('seq') < 1) {
+      return 'zły przelew';
+    }
+    final Object? cond = op.body['cond'];
+    if (cond != null) {
+      final Object? until = cond is Map ? cond['until'] : null;
+      if (cond is! Map ||
+          cond['by'] is! String ||
+          (until != null &&
+              (until is! int ||
+                  until <= op.at ||
+                  until > op.at + kPyrMaxHoldMs))) {
+        return 'zły warunek';
+      }
+    }
+    return null;
+  }
+
+  /// Why settlement [op] of [e] breaks a rule of [problem] that holds
+  /// whoever checks it, or null: settled by whom the payment waits for, or
+  /// taken back by the payer after its time; accepted no later than an
+  /// honest treasurer would sign (its time, give or take the clocks).
+  static String? _settleBreaks(PyramidRecord op, PyrEscrow e) {
+    final bool ok = op.body['ok'] == true;
+    final bool byCond = op.signers.contains(e.condBy);
+    final bool refund = !ok && op.signers.contains(e.from) && op.at >= e.until;
+    if (!byCond && !refund) {
+      return 'rozlicza odbiorca warunku albo płacący po terminie';
+    }
+    if (ok && op.at > e.until + 2 * kPyrMaxSkewMs) {
+      return 'za późno na przyjęcie';
+    }
+    return null;
   }
 
   /// Takes [op] (its signatures already checked): new, or more treasurer
@@ -352,6 +419,12 @@ final class PyrLedger {
         // stands.
         continue;
       }
+      final String? why = breaks(op, s);
+      if (why != null) {
+        // Only a dishonest majority gets it this far: it takes no slot.
+        v.broken[op.id] = why;
+        continue;
+      }
       if (op.type == PyrT.transfer) {
         _order(v, op, skip);
       } else {
@@ -454,6 +527,11 @@ final class PyrLedger {
   ) {
     final PyrEscrow? e = v.escrows[op.str('x')];
     if (e == null || e.settled != null || op.at < e.at) {
+      return;
+    }
+    final String? why = _settleBreaks(op, e);
+    if (why != null) {
+      v.broken[op.id] = why;
       return;
     }
     v

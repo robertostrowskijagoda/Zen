@@ -203,6 +203,25 @@ const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 /// [kLockedPongEvery].
 const Duration kLockedPresenceRoundEvery = Duration(minutes: 10);
 
+/// How old a friend's frame in the locked service's presence file
+/// (`presence.zbox`) may grow while newer frames of theirs say the same,
+/// before it is written again. The app reads the file when it opens and
+/// ages each status from its frame: a friend "w tle" shows as such for
+/// [kPresenceBackgroundFor] (25 min) from it, so a frame up to 5 minutes
+/// older than the newest costs them at most that much of it, while the
+/// friend's pings and pongs (every few minutes each) mostly go unwritten.
+const Duration kKeptPresenceRefreshEvery = Duration(minutes: 5);
+
+/// The same for a friend online, who counts as offline 5 minutes after
+/// their last frame (kPresenceForegroundFor) and pings every 2 while Zen is
+/// on their screen: every other ping is written, so the written one is at
+/// most a ping older than the newest and still says "online" when the app
+/// opens while the friend is on the screen.
+const Duration kKeptPresenceOnlineRefreshEvery = Duration(
+  minutes: 2,
+  seconds: 30,
+);
+
 /// A one-way presence announcement ("leaving the screen", "back", "closing"):
 /// sent to friends who have Zen open when this device's state changes
 /// (runtime_signal_module.dart). Nothing to keep for later.
@@ -634,9 +653,10 @@ final class LockedReceiver {
   int _presenceRoundAt = 0;
 
   /// The newest ping, pong or `away` of each friend, kept up to date in
-  /// [_presenceSnapshot] as they come, so the app shows their statuses the
-  /// moment it opens (BackgroundVault.keptPresence), without waiting for
-  /// this receiver to stop or for its own node.
+  /// [_presenceSnapshot] as their statuses change ([_presenceNews]), so the
+  /// app shows their statuses the moment it opens
+  /// (BackgroundVault.keptPresence), without waiting for this receiver to
+  /// stop or for its own node.
   final Map<String, SignalTransportFrame> _presenceHeard =
       <String, SignalTransportFrame>{};
   final SealedSnapshotWriter _presenceSnapshot;
@@ -1035,16 +1055,25 @@ final class LockedReceiver {
 
   /// Pings the friends who see this phone's status, at most every
   /// [presenceRoundEvery] (the ping says "w tle", as a pong would). A wake
-  /// a little early (the beat runs work due soon on a wake that comes
-  /// anyway) still counts: skipped, the round would wait a whole period
-  /// more.
+  /// early by as much as the beat may run it early ([wakeBeatEarly]: work
+  /// due soon on a wake that comes anyway), and [_roundClockSlack] more,
+  /// still counts: skipped, the round would wait a whole period more, and
+  /// the friends would hear nothing for up to two rounds.
   @visibleForTesting
   Future<void> presenceRoundForTest() => _presenceRound();
+
+  /// The beat reads its clock for a wake a moment before the round reads
+  /// its own, and the works before it on the wake take their moment too.
+  static const Duration _roundClockSlack = Duration(seconds: 1);
 
   Future<void> _presenceRound() async {
     final int at = _now();
     final int every = presenceRoundEvery.inMilliseconds;
-    if (every <= 0 || !_running || at - _presenceRoundAt < every * 3 ~/ 4) {
+    final int soonest =
+        every -
+        wakeBeatEarly(presenceRoundEvery).inMilliseconds -
+        _roundClockSlack.inMilliseconds;
+    if (every <= 0 || !_running || at - _presenceRoundAt < soonest) {
       return;
     }
     _presenceRoundAt = at;
@@ -1068,7 +1097,8 @@ final class LockedReceiver {
   Future<void> get presenceKept => _presenceSnapshot.idle;
 
   /// Notes the newest presence frame of a friend ([_presenceHeard]) and
-  /// writes them all down at once ([_keepPresence]).
+  /// writes them all down at once ([_keepPresence]) when it tells the app
+  /// something the written one does not ([_presenceNews]).
   Future<void> _notePresenceHeard(
     String from,
     SignalTransportFrame frame,
@@ -1081,21 +1111,67 @@ final class LockedReceiver {
       return;
     }
     _presenceHeard[from] = frame;
+    if (!_presenceNews(_presenceWritten[from], frame)) {
+      return;
+    }
     await _keepPresence();
+  }
+
+  /// What [_presenceSnapshot] holds of each friend (as last written).
+  final Map<String, SignalTransportFrame> _presenceWritten =
+      <String, SignalTransportFrame>{};
+
+  /// Whether [frame] is worth writing down over [written], the friend's
+  /// frame the file holds: the first one, another state, another last
+  /// opening while not online (shown only then; a minute's difference, as
+  /// `lo` is told in seconds and goes by the clocks of two phones), or the
+  /// same once the written one is
+  /// [kKeptPresenceRefreshEvery] old (an online friend's
+  /// [kKeptPresenceOnlineRefreshEvery]). A friend's frames come every few
+  /// minutes; each write seals the whole file anew and waits for the disk.
+  static bool _presenceNews(
+    SignalTransportFrame? written,
+    SignalTransportFrame frame,
+  ) {
+    if (written == null) {
+      return true;
+    }
+    final PresenceReport now = PresenceReport.fromPayload(frame.payload);
+    final PresenceReport was = PresenceReport.fromPayload(written.payload);
+    if (now.presence != was.presence) {
+      return true;
+    }
+    final bool online = now.presence == PeerPresence.online;
+    final int openedNow = now.lastOpenedAt(frame.receivedAtMillis);
+    final int openedWas = was.lastOpenedAt(written.receivedAtMillis);
+    if (!online &&
+        (openedNow - openedWas).abs() >
+            const Duration(minutes: 1).inMilliseconds) {
+      return true;
+    }
+    final Duration refresh = online
+        ? kKeptPresenceOnlineRefreshEvery
+        : kKeptPresenceRefreshEvery;
+    return frame.receivedAtMillis - written.receivedAtMillis >=
+        refresh.inMilliseconds;
   }
 
   /// Writes the newest presence frame of each friend, heard within
   /// [kPresenceRememberedFor], to [_presenceSnapshot] (with the time they
   /// came, so a status is aged as it would have been): the app reads it
   /// when it opens and shows its friends' statuses at once instead of
-  /// "nieznany". A small file, written only when a friend's status came,
-  /// while the phone is awake for that frame anyway.
+  /// "nieznany". A small file, written when a friend's status changed or
+  /// what it holds of them grew a few minutes old ([_presenceNews]), and
+  /// when the receiver stops, while the phone is awake anyway.
   Future<void> _keepPresence() {
     final int at = _now();
     _presenceHeard.removeWhere(
       (String _, SignalTransportFrame f) =>
           at - f.receivedAtMillis > kPresenceRememberedFor.inMilliseconds,
     );
+    _presenceWritten
+      ..clear()
+      ..addAll(_presenceHeard);
     return _presenceSnapshot.write(<Uint8List>[
       for (final SignalTransportFrame frame in _presenceHeard.values)
         encodeInboxFrame(frame),
@@ -1573,6 +1649,11 @@ final class LockedReceiver {
           _noticeKit.removed.contains(PeerShareCodec.normalizeAddress(from))) {
         // A removed friend's old acceptance sent again: it answers nothing
         // (the app drops it too).
+        return;
+      }
+      if (type == 'group_invite' && isManagedGroupId('${payload['groupId']}')) {
+        // A group another feature keeps (a pyramid cell's chat): nobody
+        // invites to it, and the app drops this after unlock.
         return;
       }
       if (switch (type) {

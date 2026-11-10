@@ -323,8 +323,9 @@ func selectAndroidBootstrapPeers(pool []publicPeer, count int) []string {
 
 // phonePeerCandidates is a phone's whole pool in the order it tries the
 // peers: its picks first (selectAndroidBootstrapPeers), then every other
-// encrypted peer of the pool in reserve — stable before unstable, IPv6
-// literals last (many mobile networks have none). The phone dials only a
+// encrypted peer of the pool in reserve — TLS before QUIC and WebSocket
+// (lightPeer), then stable before unstable, IPv6 literals last (many
+// mobile networks have none). The phone dials only a
 // few at once (phonePeerCount) and swaps one that stays down for the next
 // (peerRotation): with the whole pool behind its picks, a phone whose
 // picks went dead (the list is a snapshot) moves on to peers that still
@@ -345,6 +346,9 @@ func phonePeerCandidates(pool []publicPeer) []string {
 	}
 	rank := func(peer publicPeer) int {
 		score := 0
+		if !lightPeer(peer.uri) {
+			score += 4
+		}
 		if peerHostIsIPv6Literal(peer.uri) {
 			score += 2
 		}

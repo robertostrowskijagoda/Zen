@@ -1317,8 +1317,10 @@ String? _messageNotificationSuppressionKey(ZenSignal signal) {
   final String? messageId = signal.messageId?.trim();
   if (signal.type == ZenSignalType.groupMessage) {
     final String group = signal.groupId ?? sender;
+    // Per sender: another member's message with the same id is another
+    // message.
     return messageId != null && messageId.isNotEmpty
-        ? 'group:$group:$messageId'
+        ? 'group:$group:$sender:$messageId'
         : null;
   }
   return messageId != null && messageId.isNotEmpty
@@ -1730,6 +1732,9 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
   if (status == FriendRelationshipStatus.blocked) {
     return false;
   }
+  if (_isManagedGroupMembershipSignal(signal)) {
+    return false;
+  }
   switch (signal.type) {
     case ZenSignalType.friendRequest:
     case ZenSignalType.groupInvite:
@@ -1956,13 +1961,75 @@ List<String> normalizedGroupMembers(Iterable<String> addresses) {
   return result;
 }
 
+/// The key a group message with the id [wireId] by [author] (an address, or
+/// 'self') is kept under when another author's message already holds that
+/// id: members choose ids themselves, so one who learned another's id
+/// could otherwise send it first and have the real message dropped as a
+/// copy. The same for every device (from the id and the author alone).
+String groupMessageLocalId(String wireId, String author) =>
+    '$wireId$_altIdMark${sha256Hex(utf8.encode(PeerShareCodec.normalizeAddress(author))).substring(0, 16)}';
+
+const String _altIdMark = '#';
+
+/// The id members know the group message kept here as [localId] by (see
+/// [groupMessageLocalId]).
+String groupMessageWireId(String localId) {
+  final int mark = localId.lastIndexOf(_altIdMark);
+  return mark < 0 ? localId : localId.substring(0, mark);
+}
+
+/// Where in [thread] a group message with the id [wireId] by [author] goes,
+/// or null when it is already there ([byAuthor]: whether a message here is
+/// that author's). The first author of an id keeps it as it is; another
+/// author's message with it goes under [groupMessageLocalId]. An id that
+/// already looks like such a key never takes a bare slot, so nobody can
+/// take another's key in advance.
+String? groupMessageSlot(
+  List<ChatMessage> thread,
+  String wireId,
+  String author,
+  bool Function(ChatMessage message) byAuthor,
+) {
+  final String alt = groupMessageLocalId(wireId, author);
+  ChatMessage? bare;
+  for (final ChatMessage m in thread) {
+    if (m.id == alt) {
+      return null;
+    }
+    if (m.id == wireId) {
+      bare = m;
+    }
+  }
+  if (!wireId.contains(_altIdMark)) {
+    if (bare == null) {
+      return wireId;
+    }
+    if (byAuthor(bare)) {
+      return null;
+    }
+  }
+  return alt.length <= kMaxSignalIdChars ? alt : null;
+}
+
 /// Whether another feature keeps [group]'s member list
 /// ([SocialHubController.syncManagedGroups]: the pyramid's cell chats,
 /// worked out from the pyramid). Nobody's signal and no "add" in the app
 /// changes it: a cell member could otherwise bring anyone into the cell's
-/// chat on everybody's phone.
-bool isManagedGroup(GroupProfile group) =>
-    group.createdById.endsWith('-') && group.id.startsWith(group.createdById);
+/// chat on everybody's phone. Its id says so, whoever made a group under it.
+bool isManagedGroup(GroupProfile group) => isManagedGroupId(group.id);
+
+/// An invitation, member-list sync, leave, update or invitation receipt for
+/// a managed group's id: nobody's to send, as only the feature that keeps
+/// the group makes or changes it ([SocialHubController.syncManagedGroups]).
+bool _isManagedGroupMembershipSignal(ZenSignal signal) =>
+    switch (signal.type) {
+      ZenSignalType.groupInvite ||
+      ZenSignalType.groupInviteAck ||
+      ZenSignalType.groupLeave ||
+      ZenSignalType.groupUpdate => true,
+      _ => false,
+    } &&
+    isManagedGroupId(signal.groupId ?? '');
 
 /// Membership test that tolerates the different spellings of one address.
 bool groupHasMember(GroupProfile group, String address) {

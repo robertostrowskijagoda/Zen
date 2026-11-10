@@ -120,10 +120,21 @@ void main() {
         ]),
         '/home/ala/k.zenkey',
       );
-      expect(
-        zenOpenedFileArgument(<String>[r'\\serwer\kopie\k.zenkey']),
+      // A share or a device is never a file to open: just looking at one
+      // would hand the share this user's sign-in (another user of the
+      // computer could name one).
+      for (final String remote in <String>[
         r'\\serwer\kopie\k.zenkey',
-      );
+        r'\\?\C:\Users\Ala\k.zenkey',
+        r'\\.\pipe\zen',
+        '//serwer/kopie/k.zenkey',
+        r'\/serwer\kopie\k.zenkey',
+      ]) {
+        expect(zenOpenedFileArgument(<String>[remote]), isNull, reason: remote);
+        expect(isRemoteOrDevicePath(remote), isTrue, reason: remote);
+      }
+      expect(isRemoteOrDevicePath(r'C:\Users\Ala\k.zenkey'), isFalse);
+      expect(isRemoteOrDevicePath('/home/ala/k.zenkey'), isFalse);
       expect(zenOpenedFileArgument(<String>['--zen-profile=a']), isNull);
       expect(zenOpenedFileArgument(<String>['k.zenkey']), isNull);
       expect(zenOpenedFileArgument(<String>[]), isNull);
@@ -185,6 +196,19 @@ void main() {
       await files.offer('content://gone/document/1');
       expect(files.pending?.kind, ZenOpenedFileKind.other);
       expect(files.pending?.path, isNull);
+    });
+
+    test('a share or a device handed over is not even looked at', () async {
+      await files.offer(r'\\serwer\kopie\k.zenbackup');
+      await files.offer(r'\\?\UNC\serwer\kopie\k.zenbackup');
+      expect(reader.asked, isEmpty);
+      expect(files.pending, isNull);
+      expect(
+        await const PlatformOpenedFileReader().localPath(
+          r'\\serwer\kopie\k.zenbackup',
+        ),
+        isNull,
+      );
     });
 
     test('only the newest file waits', () async {

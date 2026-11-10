@@ -140,6 +140,7 @@ jobs:
           test/legal_consent_test.dart
           test/pages_site_test.dart
           test/release_contract_test.dart
+          test/security_hardening_test.dart
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() && needs.plan.outputs.code != 'true' }}

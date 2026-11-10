@@ -61,13 +61,117 @@ final Provider<RuntimePresenceConfig> runtimePresenceConfigProvider =
       return const RuntimePresenceConfig();
     });
 
-/// How often friends are pinged while Zen is on the screen. Every ping wakes
+/// How often a round of pings goes out while Zen is on the screen (each
+/// friend gets one every [presencePingEvery] rounds). Every ping wakes
 /// the radio of each friend's phone, which answers, so not often; the
 /// moments that matter are told at once: "I am here" (a ping) when Zen
 /// comes on the screen, again once the node reaches the mesh if it did not
 /// yet, to a friend as soon as they are added, and each change of this
 /// device's state to the friends who have Zen open ([kPresenceNoticeEvery]).
 const Duration kPresencePingInterval = Duration(minutes: 2);
+
+/// The rounds of pings after Zen comes on the screen (or the core starts)
+/// that go to every friend, as "I am here": the first is that, and the
+/// second settles what was remembered from before ([kPresenceSettleAfterResume]).
+/// After them each friend gets a ping every [presencePingEvery] rounds.
+const int kPresenceFullRounds = 2;
+
+/// How many rounds of pings ([kPresencePingInterval] apart) a friend waits
+/// for the next one once the first rounds on the screen are over: every
+/// round for a friend online, one not heard from yet, one whose state
+/// changed since their last ping ([stateAtLastPing]) and one whose state
+/// says nothing; every second round (4 min) for a friend "w tle", whose
+/// locked phone answers one contact at most every kLockedPongEvery (3 min
+/// 30 s), so a ping in between only woke it for nothing; every third round
+/// (6 min) for a friend not heard from for longer than "w tle" lasts
+/// ([kPresenceBackgroundFor]: shown offline by then), counted from
+/// [silentSinceMillis] when nothing came from them in this run. A friend "w
+/// tle" answers every ping that comes 4 min apart, as often as before, and
+/// tells it itself every kLockedPresenceRoundEvery as well: one ping or
+/// answer lost leaves 8 min without a word, under kPresenceOfflineAfter
+/// and far under kPresenceBackgroundFor.
+int presencePingEvery({
+  required ({PeerPresence state, int at})? heard,
+  required PeerPresence? stateAtLastPing,
+  required int silentSinceMillis,
+  required int nowMillis,
+}) {
+  final int lastWord = heard?.at ?? silentSinceMillis;
+  if (nowMillis - lastWord > kPresenceBackgroundFor.inMilliseconds) {
+    return 3;
+  }
+  if (heard == null || heard.state != stateAtLastPing) {
+    return 1;
+  }
+  return heard.state == PeerPresence.background ? 2 : 1;
+}
+
+/// Which of the targets each round of pings on the screen goes to: all of
+/// them in the first [fullRounds] after [begin] or [cameOnScreen], then
+/// each friend every [presencePingEvery] rounds from their last ping, and
+/// anyone who is no friend (a group invitation's addressee) every round.
+final class PresencePingCadence {
+  PresencePingCadence({this.fullRounds = kPresenceFullRounds});
+
+  final int fullRounds;
+  int _round = 0;
+  int _fullLeft = 0;
+  int _since = 0;
+  final Map<String, ({int round, PeerPresence? state})> _pinged =
+      <String, ({int round, PeerPresence? state})>{};
+
+  /// A run starts at [nowMillis]: nobody was heard from or pinged yet.
+  void begin(int nowMillis) {
+    _round = 0;
+    _since = nowMillis;
+    _pinged.clear();
+    _fullLeft = fullRounds;
+  }
+
+  /// Zen came on the screen: the next rounds go to everyone again.
+  void cameOnScreen() => _fullLeft = fullRounds;
+
+  /// Who of [targets] this round pings, at [nowMillis]. [heardOf]: what a
+  /// friend last said of their state in this run and when (`null`:
+  /// nothing); [isFriend]: whether a target is a friend. A round that
+  /// cannot arrive ([reachable] false) still goes to everyone and does not
+  /// count among the first ones.
+  List<String> round(
+    Iterable<String> targets, {
+    required int nowMillis,
+    required ({PeerPresence state, int at})? Function(String target) heardOf,
+    required bool Function(String target) isFriend,
+    bool reachable = true,
+  }) {
+    _round += 1;
+    final bool full = _fullLeft > 0 || !reachable;
+    if (_fullLeft > 0 && reachable) {
+      _fullLeft -= 1;
+    }
+    if (_pinged.length >= 2000) {
+      _pinged.clear();
+    }
+    final List<String> due = <String>[];
+    for (final String target in targets) {
+      final ({PeerPresence state, int at})? heard = heardOf(target);
+      final ({int round, PeerPresence? state})? last = _pinged[target];
+      final int every = full || !isFriend(target) || last == null
+          ? 1
+          : presencePingEvery(
+              heard: heard,
+              stateAtLastPing: last.state,
+              silentSinceMillis: _since,
+              nowMillis: nowMillis,
+            );
+      if (last != null && _round - last.round < every) {
+        continue;
+      }
+      _pinged[target] = (round: _round, state: heard?.state);
+      due.add(target);
+    }
+    return due;
+  }
+}
 
 /// After a round of pings that could arrive, how long the answers may take
 /// before friends who did not answer count as offline. A friend whose
@@ -287,6 +391,9 @@ final class RuntimeSignalModule extends ZenModule {
   /// What each device of each friend told of its presence in this run.
   final PresenceDevices _devices = PresenceDevices();
 
+  /// Who each round of pings goes to ([PresencePingCadence]).
+  final PresencePingCadence _cadence = PresencePingCadence();
+
   /// Without the network for [kPresenceNoNetworkAfter] ([_noNetworkTimer]
   /// runs meanwhile): friends' presence is in doubt.
   Timer? _noNetworkTimer;
@@ -321,6 +428,7 @@ final class RuntimeSignalModule extends ZenModule {
     _fresh = true;
     _heard.clear();
     _told.clear();
+    _cadence.begin(DateTime.now().millisecondsSinceEpoch);
     // Subscribe before starting. `frames` is a broadcast stream, so anything
     // emitted between start() and listen() is gone for good.
     _subscription = transport.frames.listen(
@@ -479,6 +587,9 @@ final class RuntimeSignalModule extends ZenModule {
       return;
     }
     final bool cameBack = _leftScreenAt != null;
+    if (!_wasInteractive) {
+      _cadence.cameOnScreen();
+    }
     _wasInteractive = true;
     // Back before the next round: the friends who have Zen open and heard
     // "away" hear "I am here" (nothing when it never went out).
@@ -906,7 +1017,17 @@ final class RuntimeSignalModule extends ZenModule {
     _pingTargets = peersToPing;
     final bool reachable = _reachable?.value ?? true;
     _pingedUnreachable = !reachable;
-    await _pingAll(peersToPing, hubState);
+    final List<String> due = _cadence.round(
+      peersToPing,
+      nowMillis: DateTime.now().millisecondsSinceEpoch,
+      heardOf: (String address) =>
+          _heard[PeerShareCodec.normalizeAddress(address)],
+      isFriend: (String address) =>
+          hubState.friendByAddress(address)?.status ==
+          FriendRelationshipStatus.accepted,
+      reachable: reachable,
+    );
+    await _pingAll(due, hubState);
     if (reachable && _running) {
       _armSettle(settleUnchecked: ++_reachableRounds >= 2);
       if (_reachableRounds == 1) {

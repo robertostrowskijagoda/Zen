@@ -182,6 +182,98 @@ void main() {
     expect(v.cheaters.keys, unorderedEquals(<String>[w.id('A'), w.id('S')]));
   });
 
+  test('an order no honest treasurer signs counts nowhere, even with most '
+      'treasurers\' signatures, and takes no number', () async {
+    final PyrLedger l = PyrLedger();
+    final PyramidState st = w.fold(<PyramidRecord>[
+      await fund(l, 'B1', 1000),
+    ], now: start);
+    // A1 "pays" B1 a negative amount: it would take from B1.
+    final PyramidRecord negative = await order(start, 'A1', 'B1', -700, 1);
+    expect(
+      PyrLedger.problem(negative, st, l.compute(st), start),
+      'zły przelew',
+    );
+    // A1 signs an order from B1's account.
+    final PyramidRecord notTheirs = await w.rec(
+      PyrT.transfer,
+      start + 1,
+      <String>['A1'],
+      <String, dynamic>{
+        'from': w.id('B1'),
+        'to': w.id('A1'),
+        'amount': 500,
+        'seq': 1,
+        'memo': '',
+      },
+    );
+    // Dated before there were any treasurers.
+    final PyramidRecord before = await order(t0 - day, 'B1', 'A1', 10, 1);
+    for (final PyramidRecord op in <PyramidRecord>[
+      negative,
+      notTheirs,
+      before,
+    ]) {
+      l.merge(await signed(op, five));
+      expect(PyrLedger.isFinal(l.ops[op.id]!, st), isTrue);
+    }
+    PyrLedgerView v = l.compute(st);
+    expect(v.balanceOf(w.id('B1')), 1000);
+    expect(v.balanceOf(w.id('A1')), 0);
+    expect(v.seqOf(w.id('A1')), 0);
+    expect(v.seqOf(w.id('B1')), 0);
+    expect(v.counted, isNot(contains(negative.id)));
+    expect(
+      v.broken.keys,
+      unorderedEquals(<String>[negative.id, notTheirs.id, before.id]),
+    );
+    // The numbers stay free for real orders.
+    final PyramidRecord real = await order(start + 2, 'B1', 'A1', 100, 1);
+    expect(PyrLedger.problem(real, st, v, start + 2), isNull);
+    l.merge(await signed(real, five));
+    v = l.compute(st);
+    expect(v.balanceOf(w.id('B1')), 900);
+    expect(v.balanceOf(w.id('A1')), 100);
+  });
+
+  test('a settlement counts only from whom the payment waits for, or from '
+      'the payer taking it back after its time', () async {
+    final PyrLedger l = PyrLedger();
+    final PyramidState st = w.fold(<PyramidRecord>[
+      await fund(l, 'A1', 2000),
+    ], now: start + 10 * day);
+    final PyramidRecord x = await order(
+      start,
+      'A1',
+      'B1',
+      1000,
+      1,
+      cond: <String, dynamic>{'by': w.id('B1'), 'until': start + 5 * h},
+    );
+    l.merge(await signed(x, five));
+    // The payer "accepts" for B1, takes it back early, B1 accepts days late.
+    final PyramidRecord byPayer = await settle(start + h, 'A1', x.id, true);
+    final PyramidRecord early = await settle(start + 2 * h, 'A1', x.id, false);
+    final PyramidRecord late = await settle(start + 3 * day, 'B1', x.id, true);
+    for (final PyramidRecord op in <PyramidRecord>[byPayer, early, late]) {
+      l.merge(await signed(op, five));
+    }
+    PyrLedgerView v = l.compute(st);
+    expect(v.escrows[x.id]!.settled, isNull);
+    expect(v.balanceOf(w.id('A1')), 1000);
+    expect(v.balanceOf(w.id('B1')), 0);
+    expect(
+      v.broken.keys,
+      unorderedEquals(<String>[byPayer.id, early.id, late.id]),
+    );
+    // Taken back after its time, as the payer may.
+    final PyramidRecord refund = await settle(start + 6 * h, 'A1', x.id, false);
+    l.merge(await signed(refund, five));
+    v = l.compute(st);
+    expect(v.escrows[x.id]!.settled, isFalse);
+    expect(v.balanceOf(w.id('A1')), 2000);
+  });
+
   test('a treasurer signs only the next number, the money there, fresh, '
       'within its era, between members', () async {
     final PyrLedger l = PyrLedger();

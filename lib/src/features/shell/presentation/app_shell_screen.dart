@@ -94,6 +94,8 @@ import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/device_integrity.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/diagnostics_log_file.dart';

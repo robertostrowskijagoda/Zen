@@ -32,6 +32,10 @@ const (
 	// The most of a frame looked at to classify it; a traffic frame's
 	// header (two paths and two keys) is far shorter.
 	linkFrameHeadMax = 1024
+	// The longest frame a node takes from a peer (ironwood's default
+	// peerMaxMessageSize, which the bridge keeps): a longer one ends the
+	// peering at the node, so a stream that names one is no link to count.
+	linkFrameMax = 1 << 20
 	// How long after the last frame between this node and the device at
 	// the other end the two count as talking (a hold keeps their link).
 	localLinkTalkWindow = 2 * time.Minute
@@ -111,6 +115,10 @@ func (s *linkFrameScanner) Write(p []byte) (int, error) {
 				if s.shift >= 64 {
 					s.broken = true
 				}
+				continue
+			}
+			if s.length > linkFrameMax {
+				s.broken = true
 				continue
 			}
 			s.frameLen = int(s.length) + int(s.shift/7)

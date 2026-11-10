@@ -1,8 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -10,6 +14,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/security/resume_session.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// What the app opens next: the account and, when its password was already
@@ -102,17 +107,89 @@ enum ZenAccountUnlock {
 
   /// The account's panic password: the account was wiped, silently.
   wiped,
+
+  /// Too many wrong guesses lately: nothing was tried
+  /// ([UnlockThrottle.otherAccounts]).
+  throttled,
 }
 
 /// The outcome of [unlockZenAccount].
 @immutable
 final class ZenAccountUnlockResult {
-  const ZenAccountUnlockResult(this.outcome, [this.security]);
+  const ZenAccountUnlockResult(this.outcome, [this.security, this.scope]);
 
   final ZenAccountUnlock outcome;
 
   /// Unlocked, for [ZenAccountOpening.security].
   final AppSecurityService? security;
+
+  /// The account that opened ([unlockOtherZenAccount]).
+  final ZenAccountScope? scope;
+}
+
+/// "Inne konto": the account with the ID [typed] (or the [listed] one)
+/// opened with [password], as [unlockZenAccount] does. An ID that is not
+/// on this device, and the account open now ([current]), are refused
+/// after the work a wrong password costs
+/// ([AppSecurityService.spendWrongPasswordWork]) with the same answer: the
+/// wait does not tell whether an ID exists. With [throttle] nothing is
+/// tried while a wait is on, and every refusal (a wrong ID, a wrong
+/// password, the panic password) counts; an account opened clears
+/// nothing.
+Future<ZenAccountUnlockResult> unlockOtherZenAccount({
+  String typed = '',
+  ZenListedAccount? listed,
+  required String password,
+  required ZenAccountScope current,
+  required ZenAccountRegistry registry,
+  ZenAccountSecurityFactory security = defaultZenAccountSecurity,
+  UnlockThrottle? throttle,
+}) async {
+  if (throttle != null && await throttle.remaining() > Duration.zero) {
+    return const ZenAccountUnlockResult(ZenAccountUnlock.throttled);
+  }
+  final ZenAccountUnlockResult result = await _unlockOther(
+    typed,
+    listed,
+    password,
+    current,
+    registry,
+    security,
+  );
+  if (result.outcome != ZenAccountUnlock.opened) {
+    await throttle?.recordFailure();
+  }
+  return result;
+}
+
+Future<ZenAccountUnlockResult> _unlockOther(
+  String typed,
+  ZenListedAccount? listed,
+  String password,
+  ZenAccountScope current,
+  ZenAccountRegistry registry,
+  ZenAccountSecurityFactory security,
+) async {
+  final ZenAccountScope? scope = listed != null
+      ? await registry.scopeOf(listed)
+      : await registry.find(typed);
+  if (scope == null || scope == current) {
+    final ZenAccountScope standIn =
+        scope ??
+        ZenAccountScope.derive(
+          normalizeAccountId(typed) ?? newAccountId(Random.secure()),
+          await registry.deviceSalt(),
+        );
+    await security(standIn).spendWrongPasswordWork(password);
+    return const ZenAccountUnlockResult(ZenAccountUnlock.refused);
+  }
+  final ZenAccountUnlockResult result = await unlockZenAccount(
+    scope,
+    password,
+    registry: registry,
+    security: security,
+  );
+  return ZenAccountUnlockResult(result.outcome, result.security, scope);
 }
 
 /// Checks [password] for the account [scope] before anything is switched:
@@ -194,14 +271,36 @@ Future<void> _leave(
       stackTrace,
     );
   }
+  // Nothing of this account stays on the clipboard either.
+  await clearCopiedNow();
   security.lock();
 }
 
 /// Leaves the current account and opens [opening] (read from [ref] at
-/// once, like [leaveZenAccount]).
+/// once, like [leaveZenAccount]). For an account that is not on the list
+/// the diagnostics log goes quiet first ([ZenDiagnosticsLog.hush]): the
+/// current account stopping would tell that another one opened.
 Future<void> switchZenAccount(WidgetRef ref, ZenAccountOpening opening) async {
   final ZenAccountHost host = ref.read(zenAccountHostProvider);
-  await leaveZenAccount(ref);
+  final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
+  final ZenCore core = ref.read(zenCoreProvider);
+  final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+  final RuntimeSystemNotificationService notices = ref.read(
+    runtimeSystemNotificationServiceProvider,
+  );
+  final AppSecurityService security = ref.read(appSecurityServiceProvider);
+  host.begin();
+  final ZenAccountScope scope = opening.scope;
+  bool listed = false;
+  try {
+    listed = scope.isDefault || await registry.isListed(scope);
+  } on Object {
+    // In doubt: quiet.
+  }
+  if (!listed) {
+    ZenDiagnosticsLog.hush();
+  }
+  await _leave(host, core, runtime, notices, security);
   host.request(opening);
 }
 

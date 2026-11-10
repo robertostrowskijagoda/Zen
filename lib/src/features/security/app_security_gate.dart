@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/legal_consent_stage.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
@@ -25,6 +26,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -116,9 +118,19 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     _ => false,
   };
 
+  /// Whether the app was locked at the last change seen.
+  bool? _wasLocked;
+
   /// Locked, unlocked, a password set or the settings changed.
   void _onSecurityChanged() {
     final AppSecurityService? security = _security;
+    final bool? locked = security?.isLocked;
+    if (locked == true && _wasLocked == false) {
+      // However it was locked: a secret copied before does not stay on the
+      // clipboard.
+      unawaited(clearCopiedNow());
+    }
+    _wasLocked = locked ?? _wasLocked;
     if (security == null || !_locksByTime(security)) {
       _backgroundLockTimer?.cancel();
       _backgroundLockTimer = null;
@@ -242,8 +254,8 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         ref.watch(accountSecureStepRequiredProvider) &&
         ref.watch(ledgerNodeEnabledProvider) &&
         !appSettings.accountSecureOffered;
-    // The whole app, lock screen included: Android keeps its window out of
-    // screenshots and the recent apps while the setting is on, and
+    // The whole app, lock screen included: any capture protection an older
+    // version left on the window is lifted (secure_screen.dart), and
     // every touch, click or mouse move restarts the idle lock.
     return SecureAppWindow(
       child: Listener(
@@ -502,13 +514,6 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     });
   }
 
-  static String _formatWait(Duration wait) {
-    final int seconds =
-        wait.inSeconds + (wait.inMilliseconds % 1000 > 0 ? 1 : 0);
-    final String rest = (seconds % 60).toString().padLeft(2, '0');
-    return '${seconds ~/ 60}:$rest';
-  }
-
   /// Erases this device and lets the gate carry on to a fresh start. The
   /// lock screen stays up until it is done ([_AppSecurityGateState._wiping]).
   Future<bool> _wipe() async {
@@ -740,9 +745,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               const SizedBox(height: 10),
               _GateError(
                 key: const Key('app-unlock-wait-message'),
-                text: t('Za dużo błędnych prób. Spróbuj ponownie za {time}.', {
-                  'time': _formatWait(_wait),
-                }),
+                text: passwordWaitText(_wait),
               ),
             ] else if (_errorText != null) ...<Widget>[
               const SizedBox(height: 10),

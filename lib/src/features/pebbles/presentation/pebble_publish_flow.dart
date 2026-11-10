@@ -93,7 +93,7 @@ class _PebblePublishScreenState extends ConsumerState<PebblePublishScreen> {
       context,
       node,
       t('Podpisanie kamyczka'),
-      wrong: () => setState(() => _error = t('Złe hasło konta.')),
+      wrong: (String why) => setState(() => _error = why),
     )) {
       return;
     }
