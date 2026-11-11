@@ -623,6 +623,10 @@ class EmulatorCachesTest(unittest.TestCase):
         # The system image downloads while the apps build.
         self.assertIn(') > "$RUNNER_TEMP/avd.log" 2>&1 &', workflow)
         self.assertIn("avd.status", workflow[workflow.index("name: Start the emulator"):])
+        # A download that failed is tried again before the job fails for it.
+        image = workflow[workflow.index("name: Emulator image"):
+                         workflow.index("name: The previous release")]
+        self.assertIn("for attempt in 1 2 3; do", image)
 
 
 class PinnedActionsTest(unittest.TestCase):

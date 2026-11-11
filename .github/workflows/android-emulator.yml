@@ -108,14 +108,25 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # The emulator image downloads in the background while the apps build
-      # (network, not processor); "Start the emulator" waits for it.
+      # (network, not processor); "Start the emulator" waits for it. A
+      # download that fails is tried twice more: what the network refuses
+      # once it mostly gives a moment later.
       - name: Emulator image (in the background)
         run: |
           (
             mkdir -p "$ANDROID_AVD_HOME"
             sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
             yes | "$sdkmanager" --licenses > /dev/null || true
-            if "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null \
+            install_image() {
+              for attempt in 1 2 3; do
+                "$sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE" > /dev/null \
+                  && return 0
+                echo "The download failed (try $attempt of 3)."
+                sleep 20
+              done
+              return 1
+            }
+            if install_image \
               && echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
                 create avd --force -n zen -k "$SYSTEM_IMAGE" -d pixel_6; then
               echo 0 > "$RUNNER_TEMP/avd.status"
