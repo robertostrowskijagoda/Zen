@@ -896,21 +896,21 @@ void main() {
   });
 
   group('honest and reassuring', () {
-    test('the guide says how to get the account back, with friends, next to '
-        'the missing "forgot password" e-mail', () {
+    test('the guide says how to get the account back, with close friends, '
+        'next to the missing "forgot password" e-mail', () {
       final Map<String, Map<String, String>> guide = _texts('guide/index.html');
       final Map<String, List<String>> words = <String, List<String>>{
         'en': <String>[
           'forgot password',
           'key copy',
-          'recovery circle',
-          'friends',
+          'account password',
+          'close friends',
         ],
         'pl': <String>[
           'zapomniałem hasła',
           'kopię klucza',
-          'krąg odzyskiwania',
-          'znajom',
+          'hasło konta',
+          'bliscy znajomi',
         ],
       };
       for (final MapEntry<String, List<String>> lang in words.entries) {
@@ -919,7 +919,7 @@ void main() {
           expect(start, contains(word), reason: '${lang.key}: $word');
         }
       }
-      // All the ways back, the circle's friends among them, before the
+      // All the ways back, the close friends among them, before the
       // caveat.
       final String backEn = guide['en']!['lock_3']!;
       final String backPl = guide['pl']!['lock_3']!;
@@ -927,8 +927,10 @@ void main() {
         'another device',
         'full account copy',
         'key copy',
-        'recovery circle',
-        'friends',
+        'close friends',
+        'piece of your key',
+        'account password',
+        '24 hours',
       ]) {
         expect(backEn, contains(way), reason: way);
       }
@@ -936,16 +938,111 @@ void main() {
         'drugiego urządzenia',
         'kopii całego konta',
         'kopii klucza',
-        'kręgu odzyskiwania',
-        'znajomych',
+        'bliskich znajomych',
+        'kawałek Twojego klucza',
+        'hasło konta',
+        '24 godzinach',
       ]) {
         expect(backPl, contains(way), reason: way);
       }
       expect(
-        backEn.indexOf('recovery circle'),
+        backEn.indexOf('close friends'),
         lessThan(backEn.indexOf('cannot')),
       );
-      expect(backPl.indexOf('kręgu'), lessThan(backPl.indexOf('nie da się')));
+      expect(
+        backPl.indexOf('bliskich znajomych'),
+        lessThan(backPl.indexOf('nie da się')),
+      );
+      // The wait and the largest number of close friends asked for, as the
+      // app counts them, in every language.
+      for (final MapEntry<String, Map<String, String>> lang in guide.entries) {
+        for (final String number in <String>['24', '10']) {
+          expect(
+            lang.value['lock_3'],
+            contains(number),
+            reason: '${lang.key} lock_3',
+          );
+        }
+      }
+    });
+
+    test('the copy kept by friends comes back with any way, a key copy needs '
+        "one friend's invitation code, and with no friend only the account "
+        'returns', () {
+      final Map<String, Map<String, String>> guide = _texts('guide/index.html');
+      final String en = guide['en']!['lock_4']!;
+      for (final String part in <String>[
+        'any of these ways',
+        'invitation code',
+        'no friend at all',
+        'only the account itself',
+        'no photos or files',
+      ]) {
+        expect(en, contains(part), reason: part);
+      }
+      final String pl = guide['pl']!['lock_4']!;
+      for (final String part in <String>[
+        'z każdą z tych dróg',
+        'kod zaproszenia',
+        'bez żadnego znajomego',
+        'wraca samo konto',
+        'bez zdjęć i plików',
+      ]) {
+        expect(pl, contains(part), reason: part);
+      }
+    });
+
+    test('nothing on the site still sends people to a recovery circle they '
+        'pick: every close friend holds a piece by itself', () {
+      for (final String page in <String>[
+        'index.html',
+        'guide/index.html',
+        'features/index.html',
+        'about/index.html',
+      ]) {
+        final Map<String, Map<String, String>> texts = _texts(page);
+        for (final MapEntry<String, String> text in texts['en']!.entries) {
+          expect(
+            text.value.toLowerCase(),
+            isNot(contains('recovery circle')),
+            reason: '$page en ${text.key}',
+          );
+        }
+        for (final MapEntry<String, String> text in texts['pl']!.entries) {
+          expect(
+            text.value.toLowerCase(),
+            isNot(matches(RegExp(r'kr[ąę]g(?!i)'))),
+            reason: '$page pl ${text.key}',
+          );
+        }
+      }
+      // Nor the text shown before the script runs.
+      expect(_read('guide/index.html'), isNot(contains('recovery circle')));
+      expect(_read('index.html'), isNot(contains('recovery circle')));
+    });
+
+    test('an extra account is not promised to be unnoticeable: one look at '
+        'the files does not tell it from the decoys, a long examination '
+        'may', () {
+      final Map<String, Map<String, String>> guide = _texts('guide/index.html');
+      final String en = guide['en']!['devices_3']!;
+      for (final String part in <String>[
+        'One look at the device’s files',
+        'decoys',
+        'over time may notice',
+      ]) {
+        expect(en, contains(part), reason: part);
+      }
+      final String pl = guide['pl']!['devices_3']!;
+      for (final String part in <String>[
+        'Jedno spojrzenie na pliki',
+        'wabików',
+        'przez dłuższy czas',
+      ]) {
+        expect(pl, contains(part), reason: part);
+      }
+      // The text shown before the script runs says the same.
+      expect(_read('guide/index.html'), contains('may notice'));
     });
 
     test('Zen runs no servers of its own, but never claims no server at '
@@ -1902,6 +1999,84 @@ void main() {
       expect(texts['pl']!['a7d'], contains('Piramida'));
     });
 
+    test('the features page lists what Zen has, each with an icon of the '
+        'shared sprite and a title and text in every language, Passwords '
+        'among them', () {
+      final String features = _read('features/index.html');
+      final String list = features.substring(
+        features.indexOf('<div class="features">'),
+        features.indexOf('<section class="sec" id="shots">'),
+      );
+      final List<String> icons = <String>[
+        for (final RegExpMatch m in RegExp(
+          r'<div class="feat"><div class="fi"><svg class="ico" '
+          r'aria-hidden="true"><use href="#i-([a-z]+)"/></svg></div>'
+          r'<h3 data-i="f(\d+)t">',
+        ).allMatches(list))
+          m[1]!,
+      ];
+      final Map<String, Map<String, String>> texts = _texts(
+        'features/index.html',
+      );
+      final List<String> titles = <String>[
+        for (final String key in texts['en']!.keys)
+          if (RegExp(r'^f\d+t$').hasMatch(key)) key,
+      ];
+      expect(icons, hasLength(titles.length));
+      expect(titles, hasLength(15));
+      final String js = _read('site.js');
+      for (final String icon in icons) {
+        expect(js, contains('\n    $icon: '), reason: 'icon $icon');
+      }
+      for (int i = 1; i <= 15; i++) {
+        expect(list, contains('data-i="f${i}t"'), reason: 'f$i');
+        expect(list, contains('data-i="f${i}d"'), reason: 'f$i');
+        for (final MapEntry<String, Map<String, String>> lang
+            in texts.entries) {
+          expect(lang.value['f${i}t'], isNotEmpty, reason: '${lang.key} $i');
+          expect(
+            lang.value['f${i}d']!.length,
+            greaterThan(20),
+            reason: '${lang.key} $i',
+          );
+        }
+      }
+      // Passwords: a password manager inside Zen, with the limits said.
+      expect(list, contains('<use href="#i-key"/>'));
+      expect(texts['en']!['f15t'], 'Passwords');
+      expect(texts['pl']!['f15t'], 'Hasła');
+      for (final String part in <String>[
+        'password manager',
+        'readable only on your devices',
+        'the same on all devices of your account',
+        'generator',
+        'CSV',
+        'come back with the account',
+        'Android 9 and later',
+        'unlock Zen and pick the login',
+      ]) {
+        expect(texts['en']!['f15d'], contains(part), reason: part);
+      }
+      for (final String part in <String>[
+        'Menedżer haseł',
+        'czytelne tylko na Twoich urządzeniach',
+        'takie same na wszystkich urządzeniach konta',
+        'generatorem',
+        'CSV',
+        'Wracają razem z kontem',
+        'Androidzie 9 i nowszym',
+        'odblokujesz',
+      ]) {
+        expect(texts['pl']!['f15d'], contains(part), reason: part);
+      }
+      // Android 9 is named in every language: the filling needs it.
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        expect(lang.value['f15d'], contains('Android'), reason: lang.key);
+        expect(lang.value['f15d'], contains('9'), reason: lang.key);
+        expect(lang.value['f15d'], contains('CSV'), reason: lang.key);
+      }
+    });
+
     test('what invites people never sells the offline links: not the '
         'promise, the reasons, the poster nor the text to share', () {
       final List<String> selling = <String>[
@@ -2002,7 +2177,9 @@ void main() {
         'another device',
         'full account copy',
         'key copy',
-        'recovery circle',
+        'close friends',
+        'piece of your key',
+        'account password',
         'forgot password',
       ]) {
         expect(texts['en']!['r3'], contains(way), reason: way);
@@ -2011,10 +2188,16 @@ void main() {
         'drugiego urządzenia',
         'kopii całego konta',
         'kopii klucza',
-        'kręgu odzyskiwania',
+        'bliskich znajomych',
+        'kawałek Twojego klucza',
+        'hasło konta',
         'zapomniałem hasła',
       ]) {
         expect(texts['pl']!['r3'], contains(way), reason: way);
+      }
+      // The wait is in every language, as in the guide.
+      for (final MapEntry<String, Map<String, String>> lang in texts.entries) {
+        expect(lang.value['r3'], contains('24'), reason: lang.key);
       }
       expect(texts['pl']!['q1'], 'Czy to bezpieczne?');
       // The stores as what Zen gains, not as a warning.
