@@ -289,5 +289,279 @@
     "tests": [
       "test/app_security_service_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/calls/call_video_codecs.dart",
+    "tests": [
+      "test/call_video_codecs_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_video_trace.dart",
+    "tests": [
+      "test/call_video_trace_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_media_e2ee.dart",
+    "tests": [
+      "test/call_media_e2ee_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/ledger/contacts_backup.dart",
+    "tests": [
+      "test/ledger_contacts_backup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/media/platform_picture.dart",
+    "tests": [
+      "test/profile_photo_gif_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/media/gif_shrink.dart",
+    "tests": [
+      "test/profile_photo_gif_test.dart",
+      "test/gif_files_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_autofill_bridge.dart",
+    "tests": [
+      "test/password_autofill_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_csv_import.dart",
+    "tests": [
+      "test/password_csv_import_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_entry.dart",
+    "tests": [
+      "test/password_vault_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_generator.dart",
+    "tests": [
+      "test/password_generator_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_match.dart",
+    "tests": [
+      "test/password_match_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_vault_service.dart",
+    "tests": [
+      "test/password_vault_test.dart",
+      "test/password_vault_recovery_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/password_vault_sync.dart",
+    "tests": [
+      "test/password_vault_test.dart",
+      "test/password_vault_recovery_test.dart",
+      "test/account_sync_pruning_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_autofill_host.dart",
+    "tests": [
+      "test/password_autofill_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_autofill_screen.dart",
+    "tests": [
+      "test/password_autofill_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_entry_screen.dart",
+    "tests": [
+      "test/password_screens_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_form_screen.dart",
+    "tests": [
+      "test/password_screens_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_import.dart",
+    "tests": [
+      "test/password_screens_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_vault_screen.dart",
+    "tests": [
+      "test/password_screens_test.dart",
+      "test/password_autofill_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_vault_widgets.dart",
+    "tests": [
+      "test/password_screens_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/android_background_runtime.dart",
+    "tests": [
+      "test/android_background_runtime_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/locked_receiver.dart",
+    "tests": [
+      "test/locked_background_inbox_test.dart",
+      "test/locked_presence_sim_test.dart",
+      "test/locked_alert_conformity_test.dart",
+      "test/locked_presence_open_sim_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/runtime/node_key_pins.dart",
+    "tests": [
+      "test/node_key_pins_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/relay/relay_engine.dart",
+    "tests": [
+      "test/relay_engine_test.dart",
+      "test/relay_backlog_test.dart",
+      "test/message_keeping_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/relay/relay_engine_locked.dart",
+    "tests": [
+      "test/locked_mailbox_kit_writes_test.dart",
+      "test/locked_delivery_sim_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/account_state_sync.dart",
+    "tests": [
+      "test/account_state_sync_test.dart",
+      "test/account_sync_pruning_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/circle_backup_service.dart",
+    "tests": [
+      "test/circle_backup_test.dart",
+      "test/password_vault_recovery_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/circle_backup_holder.dart",
+    "tests": [
+      "test/circle_backup_test.dart",
+      "test/password_vault_recovery_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/chat/disappearing_messages.dart",
+    "tests": [
+      "test/disappearing_messages_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/update/background_update_check.dart",
+    "tests": [
+      "test/update_notice_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/core/utils/secure_clipboard.dart",
+    "tests": [
+      "test/secure_clipboard_test.dart",
+      "test/storage_hardening_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/profile/own_profile_images.dart",
+    "tests": [
+      "test/own_profile_images_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/feed/feed_model.dart",
+    "tests": [
+      "test/thread_moderation_test.dart",
+      "test/reaction_relay_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pebbles/pebble_store.dart",
+    "tests": [
+      "test/pebble_hosting_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/domain/groups/group_profile.dart",
+    "tests": [
+      "test/group_membership_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/core/ledger/ledger_store.dart",
+    "tests": [
+      "test/ledger_checkpoint_test.dart",
+      "test/ledger_contacts_backup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/core/ledger/log_entry.dart",
+    "tests": [
+      "test/ledger_checkpoint_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/core/logging/zen_tech_log.dart",
+    "tests": [
+      "test/diagnostics_go_crash_accounts_test.dart",
+      "test/diagnostics_tech_log_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pyramid/pyramid_treasury.dart",
+    "tests": [
+      "test/pyramid_treasury_test.dart",
+      "test/pyramid_era_seal_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pyramid/pyramid_state.dart",
+    "tests": [
+      "test/pyramid_era_seal_test.dart",
+      "test/pyramid_court_anonymity_test.dart",
+      "test/pyramid_security_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/pyramid/pyramid_court.dart",
+    "tests": [
+      "test/pyramid_court_test.dart",
+      "test/pyramid_court_anonymity_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/meet/meet_service.dart",
+    "tests": [
+      "test/meet_friend_list_keys_test.dart"
+    ]
   }
 ]
