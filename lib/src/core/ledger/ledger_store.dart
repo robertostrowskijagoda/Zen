@@ -66,6 +66,15 @@ final class _WriterLog {
   /// Bytes of [entries] and [pending].
   int bytes = 0;
 
+  /// Held checkpoints that say how many entries after them carry the state
+  /// from before them ([rebaseCountOf]), oldest first: `(seq, count)`.
+  final List<(int, int)> rebases = <(int, int)>[];
+
+  /// The sender of a checkpoint waiting past a gap holds the log only from
+  /// there, but the entries it says carry the state have not all come:
+  /// the log moves to it once they have ([LedgerStore.adoptCheckpoint]).
+  bool adoptWanted = false;
+
   int get head => base + entries.length;
   String get lastId => entries.isEmpty ? baseId : entries.last.id;
 
@@ -80,6 +89,7 @@ final class _WriterLog {
       bytes -= entry.encodedLength;
     }
     entries.clear();
+    rebases.clear();
     for (final int seq in pending.keys.toList()) {
       if (seq <= newBase) {
         bytes -= pending.remove(seq)!.encodedLength;
@@ -102,11 +112,27 @@ final class _WriterLog {
     entries.removeRange(0, cut);
     base = seq - 1;
     baseId = first.prev;
+    rebases.removeWhere(((int, int) r) => r.$1 <= base);
   }
 
   void add(LogEntry entry) {
     entries.add(entry);
     bytes += entry.encodedLength;
+    final int? count = rebaseCountOf(entry);
+    if (count != null) {
+      rebases.add((entry.seq, count));
+    }
+  }
+
+  /// The newest held checkpoint whose entries carrying the state are all
+  /// held too, with something before it still held; `null` when none.
+  int? readyRebase() {
+    for (final (int seq, int count) in rebases.reversed) {
+      if (seq + count <= head) {
+        return seq > base + 1 ? seq : null;
+      }
+    }
+    return null;
   }
 
   void addPending(LogEntry entry) {
@@ -138,6 +164,7 @@ final class _WriterLog {
     if (from < entries.length) {
       entries.removeRange(from, entries.length);
     }
+    rebases.removeWhere(((int, int) r) => r.$1 > head);
   }
 
   /// Marks the log as keeping two histories: nothing more is taken.
@@ -347,6 +374,9 @@ final class LedgerStore {
         return const IngestResult(IngestStatus.rejected, 'za dużo zaległych');
       }
       log.addPending(entry);
+      if (log.adoptWanted) {
+        adoptCheckpoint(entry.space, entry.writer);
+      }
       return const IngestResult(IngestStatus.pending);
     }
     if (!_append(log, entry)) {
@@ -587,6 +617,12 @@ final class LedgerStore {
   /// the log only from that checkpoint on (it was cut there), so the gap
   /// will never be filled. Everything held before it goes. Returns whether
   /// the log moved.
+  ///
+  /// A checkpoint that says which entries after it carry the state from
+  /// before it ([rebaseCountOf]) is moved to only once all of them wait
+  /// here as well: a peer handing on the checkpoint alone (cut short, or
+  /// holding the rest back) cannot make this store give up the last whole
+  /// state it holds. The log then moves when they come.
   bool adoptCheckpoint(String space, String writer) {
     final _WriterLog? log = _logs[space]?[writer];
     if (log == null || log.forked) {
@@ -595,17 +631,118 @@ final class LedgerStore {
     final List<int> waiting =
         log.pending.keys.where((int seq) => seq > log.head + 1).toList()
           ..sort();
+    // Nothing to wait for once no checkpoint waits past a gap.
+    log.adoptWanted = false;
     for (final int seq in waiting) {
       final LogEntry checkpoint = log.pending[seq]!;
       if (!isLedgerCheckpoint(checkpoint)) {
         continue;
       }
+      final int? count = rebaseCountOf(checkpoint);
+      if (count != null) {
+        bool whole = true;
+        for (int next = seq + 1; next <= seq + count; next++) {
+          if (!log.pending.containsKey(next)) {
+            whole = false;
+            break;
+          }
+        }
+        if (!whole) {
+          log.adoptWanted = true;
+          continue;
+        }
+      }
+      log.adoptWanted = false;
       log.startAfter(seq - 1, checkpoint.prev);
       _drain(log);
       _changed.add(null);
       return true;
     }
     return false;
+  }
+
+  /// The newest held checkpoint of [writer] in [space] whose entries
+  /// carrying the state from before it ([rebaseCountOf]) are all held,
+  /// with something before it still held: what may be dropped up to by
+  /// [pruneBefore]. `null` when there is none.
+  int? readyRebase(String space, String writer) {
+    final _WriterLog? log = _logs[space]?[writer];
+    return log == null || log.forked ? null : log.readyRebase();
+  }
+
+  /// Bytes of the entries of [writer] in [space] held here (those waiting
+  /// past a gap not counted).
+  int heldBytes(String space, String writer) {
+    final _WriterLog? log = _logs[space]?[writer];
+    if (log == null) {
+      return 0;
+    }
+    int bytes = 0;
+    for (final LogEntry entry in log.entries) {
+      bytes += entry.encodedLength;
+    }
+    return bytes;
+  }
+
+  /// Takes [run], new entries of one log of this device, each following
+  /// the one before and the first following what is held: all are checked
+  /// first, then all join the log in one go, so nothing listening (a save,
+  /// a peer's sync) ever sees only some of them. Returns false, taking
+  /// none, when any does not hold.
+  Future<bool> ingestRun(List<LogEntry> run) async {
+    if (run.isEmpty) {
+      return true;
+    }
+    final List<LogEntry> checked = <LogEntry>[];
+    for (final LogEntry received in run) {
+      if (received.space != run.first.space ||
+          received.writer != run.first.writer ||
+          _precheck(received) != null) {
+        return false;
+      }
+      final DeviceCertificate? carried = received.certificate;
+      if (carried != null && !await directory.addCertificate(carried)) {
+        return false;
+      }
+      final DeviceCertificate? cert =
+          carried ?? directory.certificateOf(received.account, received.device);
+      if (cert == null) {
+        return false;
+      }
+      final LogEntry entry = carried == null
+          ? received.withCertificate(cert)
+          : received;
+      if (!await entry.verifySignature()) {
+        return false;
+      }
+      checked.add(entry);
+    }
+    // Decided on the state as it is now, with nothing awaited in between.
+    final LogEntry first = checked.first;
+    final _WriterLog? had = _logs[first.space]?[first.writer];
+    String last = had?.lastId ?? '';
+    int seq = had?.head ?? 0;
+    for (final LogEntry entry in checked) {
+      if (_precheck(entry) != null ||
+          entry.seq != seq + 1 ||
+          entry.prev != last ||
+          (had?.pending.containsKey(entry.seq) ?? false)) {
+        return false;
+      }
+      seq = entry.seq;
+      last = entry.id;
+    }
+    final _WriterLog log = _space(first.space)[first.writer] ??= _WriterLog(
+      first.account,
+      first.device,
+    );
+    for (final LogEntry entry in checked) {
+      clock.observe(entry.hlc);
+      log.add(entry);
+      _added.add(entry);
+    }
+    _changed.add(null);
+    return true;
   }
 
   /// Drops the entries of a log before its writer's checkpoint [seq] (held

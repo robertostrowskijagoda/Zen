@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,6 +7,8 @@ import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_author.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/ledger/ledger_replicator.dart';
 import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
@@ -23,10 +26,11 @@ void main() {
   late LedgerAuthor author;
   late String space;
   late List<LogEntry> log;
+  late LedgerAccountSetup setup;
 
   setUp(() async {
     a = _store();
-    final LedgerAccountSetup setup = await LedgerAccountSetup.create();
+    setup = await LedgerAccountSetup.create();
     author = LedgerAuthor(
       deviceKey: setup.deviceKey,
       certificate: setup.certificate,
@@ -178,5 +182,193 @@ void main() {
       BlobStore(backend: DiskBlobChunkBackend(MemoryLedgerDisk())),
     );
     expect(fresh.indexMissing, isTrue);
+  });
+
+  // A checkpoint that says which entries after it carry the log's state
+  // (from 1.16.5): every holder may drop what came before, once those are
+  // held; never on anyone's word but the writer's, never back.
+  group('a checkpoint that carries the state', () {
+    late List<LogEntry> start;
+
+    LedgerDraft post(int n) => (
+      kind: 'post',
+      body: <String, dynamic>{'n': n},
+      blobs: const <String>[],
+    );
+
+    setUp(() async {
+      // Entries 6 (the checkpoint, n: 2), 7 and 8.
+      start = await author.rebase(space, <LedgerDraft>[post(10), post(11)]);
+    });
+
+    Future<LedgerStore> holding(Iterable<LogEntry> entries) async {
+      final LedgerStore b = _store();
+      for (final LogEntry e in entries) {
+        await b.ingest(e);
+      }
+      return b;
+    }
+
+    test('a holder may drop what came before it only once everything it '
+        'carries is held', () async {
+      expect(rebaseCountOf(start.first), 2);
+      expect(rebaseCountOf(log[3]), isNull, reason: 'says nothing');
+      final LedgerStore b = await holding(<LogEntry>[...log, start.first]);
+      expect(b.readyRebase(space, author.writer), isNull);
+      await b.ingest(start[1]);
+      expect(b.readyRebase(space, author.writer), isNull);
+      await b.ingest(start[2]);
+      expect(b.readyRebase(space, author.writer), 6);
+      expect(b.pruneBefore(space, author.writer, 6), 5);
+      expect(b.entries(space).map((LogEntry e) => e.seq), <int>[6, 7, 8]);
+      expect(b.readyRebase(space, author.writer), isNull, reason: 'done');
+    });
+
+    test('a holder behind moves to it only with everything it carries: a '
+        'peer handing on the checkpoint alone cannot make it give up what '
+        'it holds', () async {
+      final LedgerStore b = await holding(<LogEntry>[log[0]]);
+      expect((await b.ingest(start.first)).status, IngestStatus.pending);
+      expect(b.adoptCheckpoint(space, author.writer), isFalse);
+      expect(b.entries(space).map((LogEntry e) => e.seq), <int>[1]);
+      await b.ingest(start[1]);
+      expect(b.entries(space).map((LogEntry e) => e.seq), <int>[1]);
+      // The last carried entry comes: the log moves on its own.
+      await b.ingest(start[2]);
+      expect(b.entries(space).map((LogEntry e) => e.seq), <int>[6, 7, 8]);
+      expect(b.baseOf(space, author.writer).base, 5);
+    });
+
+    test('a forged, altered, foreign or replayed checkpoint drops '
+        'nothing', () async {
+      final LedgerStore b = await holding(<LogEntry>[...log, ...start]);
+      b.pruneBefore(space, author.writer, 6);
+      // Altered: its count no longer matches its signature.
+      final Map<String, dynamic> altered = start.first.toCertifiedJson()
+        ..['seq'] = 9
+        ..['prev'] = start.last.id
+        ..['body'] = <String, dynamic>{'n': 0};
+      expect((await b.ingestJson(altered)).status, IngestStatus.rejected);
+      // Forged by another account into this one's space and log.
+      final LedgerAccountSetup other = await LedgerAccountSetup.create();
+      final LogEntry forged = await LogEntry.create(
+        deviceKey: other.deviceKey,
+        certificate: other.certificate,
+        space: space,
+        writer: author.writer,
+        seq: 9,
+        prev: start.last.id,
+        hlc: a.clock.now(),
+        kind: kLedgerCheckpointKind,
+        body: <String, dynamic>{'n': 0},
+      );
+      expect((await b.ingest(forged)).status, IngestStatus.rejected);
+      // Replayed: an older checkpoint and this one again.
+      expect((await b.ingest(log[3])).status, IngestStatus.duplicate);
+      expect((await b.ingest(start.first)).status, IngestStatus.duplicate);
+      expect(b.entries(space).map((LogEntry e) => e.seq), <int>[6, 7, 8]);
+      expect(b.baseOf(space, author.writer).base, 5);
+      // Another device of the account starting its own log over cuts only
+      // that log.
+      final (LedgerKeyPair key, DeviceCertificate cert) = await setup
+          .addDevice();
+      final LedgerAuthor sibling = LedgerAuthor(
+        deviceKey: key,
+        certificate: cert,
+        store: b,
+      );
+      await sibling.append(space, 'post', <String, dynamic>{'n': 0});
+      await sibling.rebase(space, <LedgerDraft>[]);
+      expect(b.readyRebase(space, sibling.writer), 2);
+      expect(b.readyRebase(space, author.writer), isNull);
+      expect(
+        b.entries(space).where((LogEntry e) => e.writer == author.writer),
+        hasLength(3),
+      );
+    });
+
+    test('a run joins the log in one go, or not at all', () async {
+      int changes = 0;
+      final LedgerStore b = await holding(<LogEntry>[...log, ...start]);
+      final StreamSubscription<void> sub = b.changed.listen((_) => changes++);
+      addTearDown(sub.cancel);
+      final LedgerAuthor writer = LedgerAuthor(
+        deviceKey: setup.deviceKey,
+        certificate: setup.certificate,
+        store: b,
+        writer: author.writer,
+      );
+      final List<LogEntry> run = await writer.appendRun(space, <LedgerDraft>[
+        post(20),
+        post(21),
+        post(22),
+      ]);
+      expect(run.map((LogEntry e) => e.seq), <int>[9, 10, 11]);
+      expect(changes, 1);
+      // A run that does not follow what is held takes nothing.
+      final LogEntry stray = await LogEntry.create(
+        deviceKey: setup.deviceKey,
+        certificate: setup.certificate,
+        space: space,
+        writer: author.writer,
+        seq: 13,
+        prev: run.last.id,
+        hlc: b.clock.now(),
+        kind: 'post',
+        body: const <String, dynamic>{},
+      );
+      expect(await b.ingestRun(<LogEntry>[stray]), isFalse);
+      expect(b.headOf(space, author.writer), 11);
+    });
+
+    test('a holder by the rules before 1.16.5 (it never drops anything) '
+        'keeps serving the whole log, and one behind follows a cut copy '
+        'to the checkpoint', () async {
+      final LedgerStore old = await holding(<LogEntry>[...log, ...start]);
+      final LedgerStore cut = await holding(<LogEntry>[...log, ...start]);
+      cut.pruneBefore(space, author.writer, 6);
+      final LedgerStore behind = await holding(<LogEntry>[log[0], log[1]]);
+      final LedgerStore fresh = _store();
+      final Map<String, LedgerReplicator> net = <String, LedgerReplicator>{};
+      void wire(String name, LedgerStore store) {
+        net[name] = LedgerReplicator(
+          store: store,
+          blobs: BlobStore(backend: DiskBlobChunkBackend(MemoryLedgerDisk())),
+          send: (String peer, Map<String, dynamic> message) {
+            final Map<String, dynamic> copy =
+                jsonDecode(jsonEncode(message)) as Map<String, dynamic>;
+            scheduleMicrotask(() => net[peer]?.handle(name, copy));
+          },
+          peers: () => const <String>[],
+        )..subscribe(space);
+      }
+
+      wire('old', old);
+      wire('cut', cut);
+      wire('behind', behind);
+      wire('fresh', fresh);
+      Future<void> sync(String a, String b) async {
+        for (int i = 0; i < 4; i++) {
+          net[a]!.syncWith(b);
+          net[b]!.syncWith(a);
+          for (int j = 0; j < 40; j++) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+      }
+
+      await sync('fresh', 'old');
+      expect(fresh.entries(space).map((LogEntry e) => e.seq), <int>[
+        for (int s = 1; s <= 8; s++) s,
+      ]);
+      await sync('behind', 'cut');
+      expect(behind.entries(space).map((LogEntry e) => e.seq), <int>[6, 7, 8]);
+      expect(behind.isForked(space, author.writer), isFalse);
+      // The old holder and the cut one agree on where the log is.
+      expect(
+        old.headOf(space, author.writer),
+        cut.headOf(space, author.writer),
+      );
+    });
   });
 }

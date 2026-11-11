@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/health/health_report.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -126,6 +127,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         clockSkew: clock.estimate,
         clockPeers: clock.peerCount,
         storage: _storage,
+        contactsBackupFailing: ContactsBackupNotice.instance.failing,
       ),
     );
   }
@@ -182,7 +184,10 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         child: SafeArea(
           top: false,
           child: ListenableBuilder(
-            listenable: clock,
+            listenable: Listenable.merge(<Listenable>[
+              clock,
+              ContactsBackupNotice.instance,
+            ]),
             builder: (BuildContext context, Widget? _) {
               final HealthReport report = _report(shell, clock);
               return ListView(

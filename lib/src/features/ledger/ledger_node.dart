@@ -19,6 +19,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/met_attestation.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -62,12 +63,33 @@ enum ReachResult {
 const String kDeviceRecordKind = 'device';
 
 /// The sealed backup of friends and groups in the account's `private`
-/// space (only its own devices can open it; friends keep a copy).
+/// space (only its own devices can open it; friends keep a copy). One
+/// entry while it fits ([kContactsWholeBytes]); a bigger one is a set of
+/// parts ([kContactsSetKind], `contacts_backup.dart`).
 const String kContactsKind = 'contacts';
 
 /// A friend removed or a group left on one device (so the others follow):
 /// sealed `{a}` or `{g}` in the private space.
 const String kContactRemovedKind = 'contact_removed';
+
+/// A part of a backup of friends and groups too big for one entry: sealed
+/// `{v, i}` in the private space ([splitContacts]).
+const String kContactsPartKind = 'contacts_part';
+
+/// A backup of friends and groups made of parts: sealed `{v, k, s, p, h}`
+/// in the private space, written after its parts and naming them by their
+/// place in the same log ([assembleContacts]).
+const String kContactsSetKind = 'contacts_set';
+
+/// The removals ([kContactRemovedKind]) a device wrote before it started
+/// its private log over, carried after the checkpoint with their times:
+/// sealed `{v, x: {address or group:id: millis}}` ([contactRemovalsBody]).
+const String kContactRemovalsKind = 'contact_removals';
+
+/// Bytes of superseded backups a device's private log may hold besides
+/// what is still valid before it starts over (at least as many as are
+/// valid): what bounds that log at every friend.
+const int kPrivateLogSlackBytes = 64 * 1024;
 
 /// A message sent from one device, for the account's other devices:
 /// sealed `{peer, m, f?}` in the `own` space.
@@ -795,6 +817,9 @@ final class LedgerNode {
           context: 'Reading an account device failed',
         );
       }
+      if (store.readyRebase(e.space, e.writer) != null) {
+        _scheduleRebaseDrop(e.space, e.writer);
+      }
     });
     _storeChanged = store.changed.listen((_) => _pruneRevoked());
     for (final String space in store.spaces.toList()) {
@@ -809,6 +834,8 @@ final class LedgerNode {
     await _open(_sealedEntries());
     _loaded = true;
     _ready = true;
+    // Logs whose writer started them over while this device was closed.
+    _dropReadyRebases();
     _settle();
     if (!_openedChanges.isClosed) {
       // Readable now: screens built before show what was read.
@@ -874,6 +901,7 @@ final class LedgerNode {
           maintainBridges(),
           context: 'Checking the bridges failed',
         );
+        _dropReadyRebases();
       }
     });
   }
@@ -1400,6 +1428,11 @@ final class LedgerNode {
         await gate.future;
       }
       e = await log.append(accountSpace('own', account), kind, sealed);
+    } else if (spaceKind == 'private') {
+      // Never between the entries of a backup being written.
+      e = await _privateWrite(
+        () => publish(kind, sealed, spaceKind: spaceKind, blobs: blobs),
+      );
     } else {
       e = await publish(kind, sealed, spaceKind: spaceKind, blobs: blobs);
     }
@@ -1551,6 +1584,8 @@ final class LedgerNode {
         _ownAppliedKey,
         Uint8List.fromList(utf8.encode(jsonEncode(_ownApplied.toList()))),
       );
+      // A log started over may have waited for this one to be taken.
+      _dropReadyRebases(ofAccount: account);
     }
   }
 
@@ -1571,39 +1606,44 @@ final class LedgerNode {
 
   /// When [address] (a friend) or [group] was last removed on any device
   /// of this account (HLC millis), from the sealed tombstones.
-  Map<String, int> contactRemovals() {
+  Map<String, int> contactRemovals() =>
+      _removalsIn(store.entries(accountSpace('private', account)));
+
+  /// The removals [entries] hold: tombstones ([kContactRemovedKind], at
+  /// their own time) and those carried over a checkpoint
+  /// ([kContactRemovalsKind], at the time they were made), the latest per
+  /// friend or group.
+  Map<String, int> _removalsIn(Iterable<LogEntry> entries) {
     final Map<String, int> out = <String, int>{};
-    for (final LogEntry e in store.entries(accountSpace('private', account))) {
+    void note(String k, int at) {
+      if ((out[k] ?? 0) < at) {
+        out[k] = at;
+      }
+    }
+
+    for (final LogEntry e in entries) {
+      final Map<String, dynamic>? body = _opened[e.id];
+      if (e.kind == kContactRemovalsKind) {
+        contactRemovalsOf(body).forEach(note);
+        continue;
+      }
       if (e.kind != kContactRemovedKind) {
         continue;
       }
-      final Map<String, dynamic>? body = _opened[e.id];
       final Object? a = body?['a'];
       final Object? g = body?['g'];
       final String? k = a is String
           ? PeerShareCodec.normalizeAddress(a)
           : (g is String ? 'group:$g' : null);
       if (k != null) {
-        if ((out[k] ?? 0) < e.hlc.millis) {
-          out[k] = e.hlc.millis;
-        }
+        note(k, e.hlc.millis);
       }
     }
     return out;
   }
 
   /// HLC millis of the newest friends-and-groups backup (0: none).
-  int get latestContactsMillis {
-    int newest = 0;
-    for (final LogEntry e in store.entries(accountSpace('private', account))) {
-      if (e.kind == kContactsKind &&
-          _opened.containsKey(e.id) &&
-          e.hlc.millis > newest) {
-        newest = e.hlc.millis;
-      }
-    }
-    return newest;
-  }
+  int get latestContactsMillis => _newestContacts()?.entry.hlc.millis ?? 0;
 
   /// Peers asked for a file who are not friends (group members): their
   /// answers are taken — only for files this device wants.
@@ -2091,38 +2131,423 @@ final class LedgerNode {
   }
 
   /// The newest backup of friends and groups any device of this account
-  /// saved, or `null`.
-  Map<String, dynamic>? latestContacts() {
-    LogEntry? newest;
-    for (final LogEntry e in store.entries(accountSpace('private', account))) {
-      if (e.kind == kContactsKind &&
-          _opened.containsKey(e.id) &&
-          (newest == null || e.hlc > newest.hlc)) {
-        newest = e;
+  /// saved that is here whole, or `null`.
+  Map<String, dynamic>? latestContacts() => _newestContacts()?.snapshot;
+
+  /// The newest whole backup of friends and groups held and readable (of
+  /// the log [writer] only, when given): a one-entry backup that is not cut
+  /// ([kContactsCutKey]) or a set whose parts are all here and add up to
+  /// it; with the places of the entries it is made of.
+  ({LogEntry entry, Map<String, dynamic> snapshot, List<int> seqs})?
+  _newestContacts({String? writer}) {
+    final List<LogEntry> all = store.entries(accountSpace('private', account));
+    for (final LogEntry e in all.reversed) {
+      if (writer != null && e.writer != writer) {
+        continue;
+      }
+      final Map<String, dynamic>? body = _opened[e.id];
+      if (body == null || e.account != account) {
+        continue;
+      }
+      if (e.kind == kContactsKind && !body.containsKey(kContactsCutKey)) {
+        return (entry: e, snapshot: body, seqs: <int>[e.seq]);
+      }
+      if (e.kind == kContactsSetKind) {
+        final Map<String, dynamic>? whole = _assembledSet(e, body);
+        if (whole != null) {
+          return (
+            entry: e,
+            snapshot: whole,
+            seqs: <int>[...contactsSetParts(body)!, e.seq],
+          );
+        }
       }
     }
-    return newest == null ? null : _opened[newest.id];
+    return null;
+  }
+
+  /// The last set put together ([_assembledSet]): (its id, the backup).
+  (String, Map<String, dynamic>)? _assembled;
+
+  /// The backup the set [e] (opened: [body]) stands for, from parts of its
+  /// own log; `null` while a part is missing or unreadable.
+  Map<String, dynamic>? _assembledSet(LogEntry e, Map<String, dynamic> body) {
+    final (String, Map<String, dynamic>)? had = _assembled;
+    if (had != null && had.$1 == e.id) {
+      return had.$2;
+    }
+    final Map<String, dynamic>? whole = assembleContacts(body, (int seq) {
+      final List<LogEntry> at = store.entriesAfter(
+        e.space,
+        e.writer,
+        seq - 1,
+        limit: 1,
+      );
+      return at.length == 1 &&
+              at.single.seq == seq &&
+              at.single.kind == kContactsPartKind
+          ? _opened[at.single.id]
+          : null;
+    });
+    if (whole != null) {
+      _assembled = (e.id, whole);
+    }
+    return whole;
+  }
+
+  /// Id of the newest whole backup [contactsChanged] last told of.
+  String? _contactsTold;
+
+  /// Tells [contactsChanged] when the newest whole backup is a new one
+  /// another device of this account saved.
+  void _tellContacts() {
+    final ({LogEntry entry, Map<String, dynamic> snapshot, List<int> seqs})?
+    newest = _newestContacts();
+    if (newest == null ||
+        newest.entry.id == _contactsTold ||
+        _contactsChanged.isClosed) {
+      return;
+    }
+    _contactsTold = newest.entry.id;
+    if (newest.entry.device != identity.deviceKey.id) {
+      _contactsChanged.add(null);
+    }
+  }
+
+  /// Hashes of the opened parts this device wrote, by entry id.
+  final Map<String, String> _partHashes = <String, String>{};
+
+  /// Writes after one another: a backup's entries are never split by
+  /// another private entry of this device.
+  Future<void> _privateTail = Future<void>.value();
+
+  Future<T> _privateWrite<T>(Future<T> Function() write) {
+    final Future<T> result = _privateTail.then((_) => write());
+    _privateTail = result.then((_) {}, onError: (Object _) {});
+    return result;
   }
 
   /// Saves [snapshot] (friends and groups) sealed for this account's own
-  /// devices, unless it equals the newest one. Returns whether it did.
+  /// devices, unless it equals the newest one; then starts this device's
+  /// private log over when it holds too much that no longer counts
+  /// ([kPrivateLogSlackBytes]). Returns whether anything was written. A
+  /// failure is logged and reported ([ContactsBackupNotice]).
   Future<bool> publishContacts(Map<String, dynamic> snapshot) async {
     await start();
     final Uint8List? key = identity.selfKey;
     if (key == null || _suspended) {
       return false;
     }
-    final Map<String, dynamic>? latest = latestContacts();
-    if (latest != null && jsonEncode(latest) == jsonEncode(snapshot)) {
+    return _privateWrite(() async {
+      try {
+        final Map<String, dynamic>? latest = latestContacts();
+        final bool same =
+            latest != null && jsonEncode(latest) == jsonEncode(snapshot);
+        if (!same) {
+          await _writeContacts(snapshot, key);
+        }
+        final bool over = _privateLogOverBound();
+        if (over) {
+          await _startPrivateOver(snapshot, key);
+        }
+        ContactsBackupNotice.instance.saved();
+        return !same || over;
+      } on Object catch (error) {
+        ContactsBackupNotice.instance.fail(
+          error is ContactsTooBigException
+              ? error.reason
+              : error.runtimeType.toString(),
+        );
+        return false;
+      }
+    });
+  }
+
+  /// Writes [snapshot] after what this device's private log holds: one
+  /// entry when it fits, else the parts that changed and a set.
+  Future<void> _writeContacts(Map<String, dynamic> snapshot, Uint8List key) {
+    final String space = accountSpace('private', account);
+    if (contactsJsonBytes(snapshot) <= kContactsWholeBytes) {
+      return _appendPrivate(<(String, Map<String, dynamic>)>[
+        (kContactsKind, snapshot),
+      ], key);
+    }
+    // Parts written since the log's newest checkpoint are named again.
+    final String writer = author.writer;
+    final List<LogEntry> held = store.entriesAfter(space, writer, 0);
+    int from = 0;
+    for (final LogEntry e in held) {
+      if (isLedgerCheckpoint(e)) {
+        from = e.seq;
+      }
+    }
+    final Map<String, int> have = <String, int>{
+      for (final LogEntry e in held)
+        if (e.seq > from && e.kind == kContactsPartKind)
+          if (_partHashOf(e) case final String hash) hash: e.seq,
+    };
+    return _appendContacts(
+      snapshot,
+      key,
+      head: store.headOf(space, writer),
+      have: have,
+    );
+  }
+
+  /// [_partHashes] of [e], one of this device's parts.
+  String? _partHashOf(LogEntry e) {
+    final String? known = _partHashes[e.id];
+    if (known != null) {
+      return known;
+    }
+    final Map<String, dynamic>? plain = _opened[e.id];
+    return plain == null ? null : _partHashes[e.id] = contactsHashOf(plain);
+  }
+
+  /// Appends [snapshot] in parts after entry [head] of this device's
+  /// private log, preceded by [before]: the parts [have] does not name
+  /// (by hash) and a set naming them all. With [restart] the run starts
+  /// the log over ([LedgerAuthor.rebase]).
+  Future<void> _appendContacts(
+    Map<String, dynamic> snapshot,
+    Uint8List key, {
+    required int head,
+    Map<String, int> have = const <String, int>{},
+    List<(String, Map<String, dynamic>)> before =
+        const <(String, Map<String, dynamic>)>[],
+    bool restart = false,
+  }) {
+    final ContactsSplit split = splitContacts(snapshot);
+    final Map<String, int> named = Map<String, int>.of(have);
+    final List<(String, Map<String, dynamic>)> plain =
+        <(String, Map<String, dynamic>)>[...before];
+    // The run's first entry follows [head]; after a checkpoint when
+    // starting over.
+    final int first = head + (restart ? 2 : 1);
+    final List<int> seqs = <int>[];
+    for (final Map<String, dynamic> part in split.parts) {
+      final String hash = contactsHashOf(part);
+      final int? at = named[hash];
+      if (at != null) {
+        seqs.add(at);
+        continue;
+      }
+      final int seq = first + plain.length;
+      plain.add((kContactsPartKind, part));
+      named[hash] = seq;
+      seqs.add(seq);
+    }
+    plain.add((kContactsSetKind, contactsSetOf(split, seqs)));
+    return _appendPrivate(plain, key, restart: restart, firstSeq: first);
+  }
+
+  /// Seals [plain] (kind, body) for this account's devices and appends it
+  /// to this device's private log in one run (after a checkpoint with
+  /// [restart]), keeping the opened bodies.
+  Future<void> _appendPrivate(
+    List<(String, Map<String, dynamic>)> plain,
+    Uint8List key, {
+    bool restart = false,
+    int? firstSeq,
+  }) async {
+    final List<LedgerDraft> drafts = <LedgerDraft>[
+      for (final (String kind, Map<String, dynamic> body) in plain)
+        (
+          kind: kind,
+          body: await sealForSelf(body, key, account: account),
+          blobs: const <String>[],
+        ),
+    ];
+    final Completer<void>? gate = _resumed;
+    if (gate != null) {
+      await gate.future;
+    }
+    final String space = accountSpace('private', account);
+    final List<LogEntry> run = restart
+        ? (await author.rebase(space, drafts)).sublist(1)
+        : await author.appendRun(space, drafts);
+    if (firstSeq != null && run.first.seq != firstSeq) {
+      // The parts a set names by place are not where it says: the log
+      // moved under it. Nothing else writes here meanwhile.
+      throw StateError('Kopia znajomych zapisana nie na swoim miejscu.');
+    }
+    for (int i = 0; i < run.length; i++) {
+      _opened[run[i].id] = plain[i].$2;
+      if (run[i].kind == kContactsPartKind) {
+        _partHashes[run[i].id] = contactsHashOf(plain[i].$2);
+      }
+    }
+  }
+
+  /// Whether this device's private log holds more than
+  /// [kPrivateLogSlackBytes] (or more than what is still valid, when that
+  /// is more) of backups that no longer count, removals included, or a
+  /// start over that did not finish.
+  bool _privateLogOverBound() {
+    final String space = accountSpace('private', account);
+    final String writer = author.writer;
+    final List<LogEntry> held = store.entriesAfter(space, writer, 0);
+    if (held.isEmpty) {
       return false;
     }
-    final LogEntry e = await publish(
-      kContactsKind,
-      await sealForSelf(snapshot, key, account: account),
-      spaceKind: 'private',
+    int restart = 0;
+    for (final LogEntry e in held) {
+      if (isLedgerCheckpoint(e)) {
+        restart = e.seq;
+      }
+    }
+    final LogEntry? checkpoint = restart > 0
+        ? held[restart - held.first.seq]
+        : null;
+    final int? count = checkpoint == null ? null : rebaseCountOf(checkpoint);
+    if (checkpoint != null &&
+        count != null &&
+        store.headOf(space, writer) < restart + count) {
+      return true;
+    }
+    final Set<int> live = <int>{...?_newestContacts(writer: writer)?.seqs};
+    int total = 0;
+    int valid = 0;
+    int start = 0;
+    for (final LogEntry e in held) {
+      total += e.encodedLength;
+      if (live.contains(e.seq)) {
+        valid += e.encodedLength;
+      } else if (count != null &&
+          e.seq >= restart &&
+          e.seq <= restart + count &&
+          (isLedgerCheckpoint(e) ||
+              e.kind == kContactRemovalsKind ||
+              (_opened[e.id]?.containsKey(kContactsCutKey) ?? false))) {
+        // What the last start over wrote besides the backup.
+        start += e.encodedLength;
+      }
+    }
+    final int superseded = total - valid - start;
+    return superseded >
+        (valid > kPrivateLogSlackBytes ? valid : kPrivateLogSlackBytes);
+  }
+
+  /// Starts this device's private log over: a checkpoint, then the
+  /// removals it wrote (with their times), and [snapshot] — one entry, or
+  /// a cut one entry for builds before 1.16.5 followed by every part and
+  /// the set; then everything before the checkpoint goes here, and at
+  /// every friend once it has all of it.
+  Future<void> _startPrivateOver(
+    Map<String, dynamic> snapshot,
+    Uint8List key,
+  ) async {
+    final String space = accountSpace('private', account);
+    final String writer = author.writer;
+    final Map<String, dynamic>? removals = contactRemovalsBody(
+      _removalsIn(store.entriesAfter(space, writer, 0)),
     );
-    _opened[e.id] = snapshot;
-    return true;
+    final List<(String, Map<String, dynamic>)> before =
+        <(String, Map<String, dynamic>)>[
+          if (removals != null) (kContactRemovalsKind, removals),
+        ];
+    final int head = store.headOf(space, writer);
+    if (contactsJsonBytes(snapshot) <= kContactsWholeBytes) {
+      await _appendPrivate(
+        <(String, Map<String, dynamic>)>[...before, (kContactsKind, snapshot)],
+        key,
+        restart: true,
+      );
+    } else {
+      await _appendContacts(
+        snapshot,
+        key,
+        head: head,
+        before: <(String, Map<String, dynamic>)>[
+          ...before,
+          (kContactsKind, cutContacts(snapshot)),
+        ],
+        restart: true,
+      );
+    }
+    final int? ready = store.readyRebase(space, writer);
+    if (ready != null) {
+      _dropBefore(space, writer, ready);
+    }
+  }
+
+  /// Drops what this device holds of the log [writer] in [space] before
+  /// its checkpoint [seq], with what was opened of it.
+  void _dropBefore(String space, String writer, int seq) {
+    final List<String> ids = <String>[
+      for (final LogEntry e in store.entriesAfter(space, writer, 0))
+        if (e.seq < seq) e.id,
+    ];
+    if (store.pruneBefore(space, writer, seq) > 0) {
+      for (final String id in ids) {
+        _opened.remove(id);
+        _partHashes.remove(id);
+        if (_assembled?.$1 == id) {
+          _assembled = null;
+        }
+      }
+    }
+  }
+
+  /// How long after a log's writer started it over (and all it carried
+  /// came) what came before goes here ([_scheduleRebaseDrop]): what was
+  /// still being opened or taken of it is taken first.
+  @visibleForTesting
+  static Duration rebaseDropDelay = const Duration(seconds: 30);
+
+  final Map<String, Timer> _rebaseTimers = <String, Timer>{};
+
+  void _scheduleRebaseDrop(String space, String writer) {
+    final String key = '$space|$writer';
+    if (_rebaseTimers.containsKey(key) || _stopped) {
+      return;
+    }
+    _rebaseTimers[key] = Timer(rebaseDropDelay, () {
+      _rebaseTimers.remove(key);
+      if (_stopping == null) {
+        _dropToRebase(space, writer);
+      }
+    });
+  }
+
+  /// Every log held whose writer started it over, with all it carried here
+  /// ([LedgerStore.readyRebase]), of [ofAccount] when given: what came
+  /// before goes (a little later).
+  void _dropReadyRebases({String? ofAccount}) {
+    for (final (String space, String writer, int _, bool _)
+        in store.logs.toList()) {
+      if (ofAccount != null && !space.endsWith('/$ofAccount')) {
+        continue;
+      }
+      if (store.readyRebase(space, writer) != null) {
+        _scheduleRebaseDrop(space, writer);
+      }
+    }
+  }
+
+  /// Drops what a log held here holds before its writer's newest
+  /// checkpoint whose carried entries are all here. Only by the writer's
+  /// word: never anything after it, never a log without such a
+  /// checkpoint. An entry another device of this account wrote for the
+  /// others (a removal) goes only once it was taken here.
+  void _dropToRebase(String space, String writer) {
+    final int? seq = store.readyRebase(space, writer);
+    if (seq == null || _suspended || !_ready) {
+      return;
+    }
+    for (final LogEntry e in store.entriesAfter(space, writer, 0)) {
+      if (e.seq >= seq) {
+        break;
+      }
+      if (e.account == account &&
+          e.device != identity.deviceKey.id &&
+          (e.kind == kContactRemovedKind ||
+              e.space == accountSpace('own', account)) &&
+          !_ownApplied.contains(e.id)) {
+        return; // again once it was taken ([markOwnApplied])
+      }
+    }
+    _dropBefore(space, writer, seq);
   }
 
   void _sendSiblingSync(String to, {bool answer = false}) {
@@ -3004,6 +3429,7 @@ final class LedgerNode {
 
   Future<void> _open(Iterable<LogEntry> entries) async {
     bool any = false;
+    bool contacts = false;
     for (final LogEntry e in entries.toList()) {
       if (_opened.containsKey(e.id) ||
           (_closedOwnKinds.contains(e.kind) &&
@@ -3019,10 +3445,11 @@ final class LedgerNode {
       if (plain != null) {
         _opened[e.id] = plain;
         any = true;
-        if (e.kind == kContactsKind &&
-            e.device != identity.deviceKey.id &&
-            !_contactsChanged.isClosed) {
-          _contactsChanged.add(null);
+        if ((e.kind == kContactsKind ||
+                e.kind == kContactsSetKind ||
+                e.kind == kContactsPartKind) &&
+            e.device != identity.deviceKey.id) {
+          contacts = true;
         }
         if (_isOwnShare(e) &&
             !_ownApplied.contains(e.id) &&
@@ -3030,6 +3457,11 @@ final class LedgerNode {
           _ownEntries.add(e);
         }
       }
+    }
+    if (contacts) {
+      // Once per batch, and only for a newer whole backup: a set's parts
+      // may open after the set itself.
+      _tellContacts();
     }
     if (any && !_openedChanges.isClosed) {
       _openedChanges.add(null);
@@ -3362,6 +3794,10 @@ final class LedgerNode {
     _syncTimer?.cancel();
     _unknownTimer?.cancel();
     _unknownTimer = null;
+    for (final Timer timer in _rebaseTimers.values) {
+      timer.cancel();
+    }
+    _rebaseTimers.clear();
     await _storeChanged?.cancel();
     await _devicesChanged.close();
     await _contactsChanged.close();
