@@ -2047,25 +2047,25 @@ void main() {
       expect(texts['pl']!['f15t'], 'Hasła');
       for (final String part in <String>[
         'password manager',
-        'readable only on your devices',
-        'the same on all devices of your account',
-        'generator',
+        'only on your devices',
+        'the same on all',
+        'return with the account',
+        'Generator',
         'CSV',
-        'come back with the account',
-        'Android 9 and later',
-        'unlock Zen and pick the login',
+        'Android 9+',
+        'unlock Zen and pick a login',
       ]) {
         expect(texts['en']!['f15d'], contains(part), reason: part);
       }
       for (final String part in <String>[
         'Menedżer haseł',
-        'czytelne tylko na Twoich urządzeniach',
-        'takie same na wszystkich urządzeniach konta',
-        'generatorem',
+        'zaszyfrowane, tylko na Twoich urządzeniach',
+        'takie same na każdym',
+        'wracają razem z kontem',
+        'Generator',
         'CSV',
-        'Wracają razem z kontem',
-        'Androidzie 9 i nowszym',
-        'odblokujesz',
+        'Androidzie 9+',
+        'odblokujesz Zen i wybierzesz login',
       ]) {
         expect(texts['pl']!['f15d'], contains(part), reason: part);
       }
@@ -2074,6 +2074,12 @@ void main() {
         expect(lang.value['f15d'], contains('Android'), reason: lang.key);
         expect(lang.value['f15d'], contains('9'), reason: lang.key);
         expect(lang.value['f15d'], contains('CSV'), reason: lang.key);
+        // The card stays about as tall as its neighbours.
+        expect(
+          lang.value['f15d']!.length,
+          lessThan(260),
+          reason: '${lang.key}: f15d is short',
+        );
       }
     });
 
