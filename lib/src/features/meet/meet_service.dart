@@ -639,13 +639,15 @@ final class MeetService extends ChangeNotifier {
     list
       ..remove(from)
       ..removeWhere((String a, String _) => host.isSelf(a));
-    await _vouch(from, keys, list);
     final Object? d = payload['d'];
     final String digest = d is String && d.length <= 64 && d.isNotEmpty
         ? d
         : crypto.sha256.convert(utf8.encode(jsonEncode(list))).toString();
+    // The list is kept and shown before anything else is waited for; the
+    // keys it names are passed on after.
     _book = await store.setFriendList(from, list, digest);
     notifyListeners();
+    await _vouch(from, keys, list);
   }
 
   /// Passes on the keys [from]'s list names for people it lists, when new
