@@ -551,6 +551,72 @@ class _GroupConversationScreenState
     }
   }
 
+  /// "Wyczyść historię": the group's chat goes from this phone (its
+  /// messages, files and notifications), as in a one-to-one chat; the
+  /// group and the other members' copies stay.
+  Future<void> _confirmClearHistory() async {
+    final preview = await _socialHub.previewConversationHistory(
+      peerAddress: 'group:${widget.groupId}',
+    );
+    if (!mounted || !preview.hasEntries) {
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text(t('Wyczyść historię')),
+        content: Text(
+          tn(
+            preview.messageCount,
+            one:
+                'Usuniesz {n} wpis z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            few:
+                'Usuniesz {n} wpisy z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            many:
+                'Usuniesz {n} wpisów z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            args: <String, Object?>{
+              'size': formatAttachmentSize(preview.attachmentBytes),
+            },
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('group-clear-history-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(t('Usuń')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _socialHub.clearGroupHistory(groupId: widget.groupId);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          tn(
+            preview.messageCount,
+            one: 'Usunięto {n} wpis z tej rozmowy.',
+            few: 'Usunięto {n} wpisy z tej rozmowy.',
+            many: 'Usunięto {n} wpisów z tej rozmowy.',
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Who a message may mention: the group's members, nobody else.
   List<MentionCandidate> _mentionCandidates() {
     final GroupProfile? group = ref
@@ -938,6 +1004,8 @@ class _GroupConversationScreenState
                   _showAddMemberDialog(group);
                 } else if (action == 'leave') {
                   unawaited(_confirmLeave());
+                } else if (action == 'clear') {
+                  unawaited(_confirmClearHistory());
                 } else if (action == 'disappear') {
                   unawaited(_pickDisappearingTimer());
                 } else if (action == 'location') {
@@ -1027,6 +1095,18 @@ class _GroupConversationScreenState
                     ],
                   ),
                 ),
+                if (hasMessages)
+                  PopupMenuItem<String>(
+                    key: const Key('group-clear-history-menu'),
+                    value: 'clear',
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.delete_sweep_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(t('Wyczyść historię'))),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem<String>(
                   value: 'leave',
                   child: Row(

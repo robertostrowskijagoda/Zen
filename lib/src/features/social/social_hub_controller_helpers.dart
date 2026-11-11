@@ -658,6 +658,98 @@ int _estimateInboxEntryBytes(InboxEntry entry) {
 /// otherwise its text.
 String? _signalPreviewText(ZenSignal signal) => signalNoticePreview(signal);
 
+/// The id the entry about the group message [signal] keeps
+/// ([InboxEntry.messageId]): the one its sender gave it, by which the
+/// members change and delete it.
+String? _noticeGroupMessageId(ZenSignal signal) {
+  final String? id = signal.messageId?.trim();
+  return id == null || id.isEmpty ? null : id;
+}
+
+/// Whether [entry] tells of [message] of the conversation [key] (a friend's
+/// address, or `group:<id>`): the same sender, the same chat, the same id.
+bool _entryTellsOf(InboxEntry entry, String key, ChatMessage message) {
+  final String? id = entry.messageId;
+  if (id == null || message.isOutgoing || message.isSystem) {
+    return false;
+  }
+  if (!PeerShareCodec.addressesEqual(entry.peerAddress ?? '', message.sender)) {
+    return false;
+  }
+  final String? groupId = _groupIdOfRouteKey(entry.routeKey);
+  if (key.startsWith('group:')) {
+    return groupId == key.substring('group:'.length) &&
+        id == groupMessageWireId(message.id);
+  }
+  return groupId == null && id == message.id;
+}
+
+/// Whether the queued copy [queued] (kept for the app's return) is
+/// [message] of the conversation [key]: replayed, it would put the
+/// message's words back into the list.
+bool _queuedSignalIs(QueuedSignal queued, String key, ChatMessage message) {
+  final ZenSignal signal = queued.signal;
+  if (message.isOutgoing ||
+      message.isSystem ||
+      !PeerShareCodec.addressesEqual(signal.sender, message.sender)) {
+    return false;
+  }
+  if (key.startsWith('group:')) {
+    return signal.type == ZenSignalType.groupMessage &&
+        signal.groupId == key.substring('group:'.length) &&
+        signal.messageId?.trim() == groupMessageWireId(message.id);
+  }
+  return signal.type == ZenSignalType.message &&
+      _incomingMessageIdOf(signal) == message.id;
+}
+
+/// [signal] saying [text] instead (its queued copy after an edit).
+ZenSignal _signalWithContent(ZenSignal signal, String text) => ZenSignal(
+  type: signal.type,
+  sender: signal.sender,
+  callId: signal.callId,
+  messageId: signal.messageId,
+  routeKey: signal.routeKey,
+  displayName: signal.displayName,
+  content: text,
+  messageType: signal.messageType,
+  attachmentData: signal.attachmentData,
+  attachmentEncoding: signal.attachmentEncoding,
+  fileName: signal.fileName,
+  mimeType: signal.mimeType,
+  attachmentSizeBytes: signal.attachmentSizeBytes,
+  durationMs: signal.durationMs,
+  isPlaceholder: signal.isPlaceholder,
+  attachmentTransferBytes: signal.attachmentTransferBytes,
+  chunkIndex: signal.chunkIndex,
+  chunkCount: signal.chunkCount,
+  chunkData: signal.chunkData,
+  sessionDescription: signal.sessionDescription,
+  groupId: signal.groupId,
+  groupName: signal.groupName,
+  memberAddresses: signal.memberAddresses,
+  memberNames: signal.memberNames,
+  avatarPreset: signal.avatarPreset,
+  bio: signal.bio,
+  isTyping: signal.isTyping,
+  sentAtMillis: signal.sentAtMillis,
+  inviteId: signal.inviteId,
+  cameraOn: signal.cameraOn,
+  disappearSeconds: signal.disappearSeconds,
+  miniProfile: signal.miniProfile,
+  chatExtras: signal.chatExtras,
+);
+
+/// The notification slots that can show the messages of conversation
+/// [key] from [sender] (see [_notificationDedupKeyForSignal]).
+List<String> _chatNoticeSlots(String key, String sender) {
+  if (key.startsWith('group:')) {
+    final String groupId = key.substring('group:'.length);
+    return <String>['group-message:$groupId', 'group-mention:$groupId'];
+  }
+  return <String>['message:${sender.trim()}'];
+}
+
 /// The in-app list's entry about [signal]. Group messages name their
 /// sender as [_groupSenderLabel] does and their group by the name this
 /// device keeps for it ([groups]).
@@ -752,6 +844,7 @@ InboxEntry _buildInboxEntry({
         title: label,
       ),
       peerAddress: signal.sender,
+      messageId: _incomingMessageIdOf(signal),
     ),
     ZenSignalType.callInvite => InboxEntry.fromEvents(
       id: 'call-invite-$receivedAtMillis-${signal.sender}',
@@ -888,6 +981,7 @@ InboxEntry _buildInboxEntry({
           messageId: signal.messageId,
         ),
         peerAddress: signal.sender,
+        messageId: _noticeGroupMessageId(signal),
       ),
     ZenSignalType.groupMessage => InboxEntry.fromEvents(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
@@ -904,6 +998,7 @@ InboxEntry _buildInboxEntry({
         title: groupName,
       ),
       peerAddress: signal.sender,
+      messageId: _noticeGroupMessageId(signal),
     ),
     ZenSignalType.groupCallInvite => InboxEntry.fromEvents(
       id: 'group-call-$receivedAtMillis-${signal.sender}',

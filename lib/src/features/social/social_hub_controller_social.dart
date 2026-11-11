@@ -1575,25 +1575,60 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _deleteManagedAttachmentIfPresent(message);
       await _transferStore.deleteIncoming(canonical, message.id);
       await _transferStore.deleteOutgoing(canonical, message.id);
+      await _closeRealtimeTransferSession(canonical, message.id);
     }
     _bumpTimelineRevision();
+    // Cleared for good: a chunk or a copy of one of them that comes late
+    // (a re-send, a mailbox, another device of the account) brings nothing
+    // back, and no notification keeps their words.
+    _rememberGone(canonical, messages);
+    await _forgetNoticesOf(canonical, messages, persist: false);
 
-    final FriendProfile? current = state.friendByAddress(canonical);
-    if (current == null) {
-      return;
-    }
-
-    state = state.copyWith(
-      book: state.book.edit(
-        canonical,
-        (FriendProfile f) => f.copyWith(
-          lastMessagePreview: '',
-          lastActivityLabel: '',
-          unreadCount: 0,
+    if (state.friendByAddress(canonical) != null) {
+      state = state.copyWith(
+        book: state.book.edit(
+          canonical,
+          (FriendProfile f) => f.copyWith(
+            lastMessagePreview: '',
+            lastActivityLabel: '',
+            unreadCount: 0,
+          ),
         ),
-      ),
-    );
+      );
+    }
     await _persistState();
+  }
+
+  /// Clears the chat of the group [groupId] on this phone ("Wyczyść
+  /// historię"): its messages, their files and what tells of them. The
+  /// group stays; the other members keep their copies.
+  Future<void> clearGroupHistory({required String groupId}) async {
+    await _clearGroupHistory(groupId);
+    final GroupProfile? group = state.groups[groupId];
+    if (group != null) {
+      state = state.copyWith(
+        groups: <String, GroupProfile>{
+          ...state.groups,
+          groupId: group.copyWith(lastMessagePreview: '', unreadCount: 0),
+        },
+      );
+    }
+    await _persistState();
+  }
+
+  @override
+  Future<void> _clearGroupHistory(String groupId) async {
+    final String key = 'group:$groupId';
+    final List<ChatMessage> messages = await _messageTimelineStore.load(key);
+    if (messages.isNotEmpty) {
+      await _messageTimelineStore.save(key, const <ChatMessage>[]);
+      for (final ChatMessage message in messages) {
+        await _deleteManagedAttachmentIfPresent(message);
+      }
+      _rememberGone(key, messages);
+      _bumpTimelineRevision();
+    }
+    await _forgetGroupNotices(groupId);
   }
 
   Future<void> markConversationRead(String peerAddress) async {
@@ -2434,6 +2469,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       inviteIds: removed?.receivedInviteIds ?? const <String>[],
     ).copyWith(groups: groups);
     await _persistState();
+    // Nothing in the app reaches a group's chat once it is left (or its
+    // invitation declined): its messages, files and notifications go with
+    // it instead of staying on the phone out of reach.
+    await _clearGroupHistory(groupId);
     if (removed == null) {
       return;
     }

@@ -1715,6 +1715,44 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     Map<String, dynamic> payload,
   );
 
+  /// Takes what tells of the messages [gone] of conversation [key] out of
+  /// the in-app list, the queue and the shade
+  /// (`social_hub_controller_chat_extras.dart`).
+  Future<void> _forgetNoticesOf(
+    String key,
+    Iterable<ChatMessage> gone, {
+    bool persist = true,
+  });
+
+  /// An edit that came before the message [message] (just taken in) is
+  /// applied to it now (`social_hub_controller_chat_extras.dart`).
+  Future<void> _applyChangeThatWaited(ZenSignal message);
+
+  /// Everything that tells of the group [groupId] goes (it was left).
+  Future<void> _forgetGroupNotices(String groupId);
+
+  /// Removes the group [groupId]'s chat from this phone: its messages,
+  /// their files and what tells of them.
+  Future<void> _clearGroupHistory(String groupId);
+
+  /// Remembers [messages] of conversation [key] as gone from this phone, so
+  /// a late copy of one (a re-send, a mailbox, another device of the
+  /// account) does not bring it back
+  /// (`social_hub_controller_disappearing.dart`).
+  void _rememberGone(String key, Iterable<ChatMessage> messages);
+
+  /// Whether message [messageId] of conversation [key] is remembered as
+  /// gone from this phone ([_rememberGone]).
+  bool _isRememberedGone(String key, String messageId);
+
+  /// The chat list line of the friend [peerAddress] from what [thread]
+  /// holds now (`social_hub_controller_retention.dart`).
+  void _syncFriendPreviewFromTimeline({
+    required String peerAddress,
+    required List<ChatMessage> thread,
+    required bool resetUnread,
+  });
+
   /// A conversation read on another device of this account
   /// (`social_hub_controller_messages.dart`).
   Future<void> _applyReadFromOtherDevice(

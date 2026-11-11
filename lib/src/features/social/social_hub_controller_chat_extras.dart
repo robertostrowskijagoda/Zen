@@ -16,6 +16,12 @@ const int kMaxGroupInlineFallbackBytes = 1024 * 1024;
 /// again (when the chat is opened).
 const Duration kGroupMediaFetchTimeout = Duration(minutes: 10);
 
+/// A group file whose blocks still cannot be fetched this long after its
+/// message was sent is given up: as long as mail waits for a phone that is
+/// away (two weeks), and a day for clocks that differ. Its message then says
+/// the file is not available instead of "Transfer w toku".
+const Duration kGroupMediaGiveUpAfter = Duration(days: 15);
+
 /// Longest text an edit may put in (as long as a group message).
 const int _maxEditChars = 64 * 1024;
 
@@ -358,7 +364,23 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     if (removed != null) {
       await _deleteManagedAttachmentIfPresent(removed);
     }
+    if (_groupOfKey(conversationKey) == null) {
+      // A file still on its way stops: its transfer goes (no chunk is sent
+      // any more) and so does a direct transfer in progress. The friend's
+      // phone takes the deletion as the end of the transfer too, and keeps
+      // no chunk that comes late.
+      await _transferStore.deleteOutgoing(conversationKey, messageId);
+      await _transferStore.deleteIncoming(conversationKey, messageId);
+      await _closeRealtimeTransferSession(conversationKey, messageId);
+    }
     await _forgetQuotesOf(conversationKey, messageId);
+    if (removed != null) {
+      // A group's creator deletes a member's message: what told of it here
+      // goes too.
+      await _forgetNoticesOf(conversationKey, <ChatMessage>[removed]);
+    }
+    await _refreshChatPreview(conversationKey);
+    await _persistState();
     await _sendChatChange(conversationKey, <String, dynamic>{
       'type': 'msg_delete',
       'msgId': messageId,
@@ -741,7 +763,22 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         sources.toSet().toList(),
         timeout: kGroupMediaFetchTimeout,
       );
-      if (bytes == null || !ref.mounted) {
+      if (!ref.mounted) {
+        return;
+      }
+      if (bytes == null) {
+        if (DateTime.now().millisecondsSinceEpoch - message.sentAtMillis >
+            kGroupMediaGiveUpAfter.inMilliseconds) {
+          // Nobody has its blocks any more: it says the file will not come,
+          // not "Transfer w toku" for ever.
+          await _changeTimelineMessage(
+            key,
+            messageId,
+            (ChatMessage m) => m.isDeleted || m.pendingMedia == null
+                ? null
+                : m.copyWith(pendingMedia: null, attachmentUnavailable: true),
+          );
+        }
         return;
       }
       StoredAttachment? stored;
@@ -758,7 +795,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         logZenWarning('A group file was refused: ${error.message}');
       }
       final StoredAttachment? file = stored;
-      await _changeTimelineMessage(
+      final bool taken = await _changeTimelineMessage(
         key,
         messageId,
         (ChatMessage m) => m.isDeleted
@@ -774,6 +811,11 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
                 pendingMedia: null,
               ),
       );
+      if (!taken && file != null && isMediaVaultPath(file.path)) {
+        // The message was deleted, disappeared or its chat was cleared
+        // (or left) while its file came: the file is not kept for nobody.
+        await _mediaVault.delete(file.path);
+      }
     } finally {
       _fetchingGroupMedia.remove(slot);
     }
@@ -799,13 +841,23 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         ? 'group:$groupId'
         : (state.friendByAddress(signal.sender)?.address ?? signal.sender);
     final Object? author = signal.chatExtras?[_changeAuthorKey];
+    final String? said = author is String && author.isNotEmpty ? author : null;
+    final List<ChatMessage> thread = await _messageTimelineStore.load(key);
+    if (inGroup
+        ? _holdersOf(thread, wireId).isEmpty
+        : !thread.any((ChatMessage m) => m.id == wireId)) {
+      // Not here (yet): the change came before its message, which a
+      // mailbox or another path may still bring.
+      _changeBeforeItsMessage(signal, key, wireId, said, timestamp);
+      return;
+    }
     final String? messageId = inGroup
         ? _groupChangeTarget(
-            await _messageTimelineStore.load(key),
+            thread,
             wireId,
             type: signal.type,
             sender: signal.sender,
-            author: author is String && author.isNotEmpty ? author : null,
+            author: said,
           )
         : wireId;
     if (messageId == null) {
@@ -816,7 +868,11 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         !m.isSystem &&
         PeerShareCodec.addressesEqual(m.sender, signal.sender);
     ChatMessage? removed;
-    await _changeTimelineMessage(key, messageId, (ChatMessage m) {
+    ChatMessage? before;
+    final bool changed = await _changeTimelineMessage(key, messageId, (
+      ChatMessage m,
+    ) {
+      before = m;
       switch (signal.type) {
         case ZenSignalType.messageReaction:
           if (m.isDeleted || m.isSystem) {
@@ -893,6 +949,123 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     if (gone != null) {
       await _deleteManagedAttachmentIfPresent(gone);
       await _forgetQuotesOf(key, messageId);
+      if (!inGroup) {
+        // Deleted for everyone while its file was still coming: what came
+        // of it goes, and nothing that comes later is kept.
+        await _closeRealtimeTransferSession(signal.sender, messageId);
+        await _transferStore.deleteIncoming(signal.sender, messageId);
+      }
+      await _forgetNoticesOf(key, <ChatMessage>[gone], persist: false);
+      await _refreshChatPreview(key);
+      await _persistState();
+    }
+    final ChatMessage? was = before;
+    if (changed && was != null && signal.type == ZenSignalType.messageEdit) {
+      final ChatMessage? now = (await _messageTimelineStore.load(
+        key,
+      )).where((ChatMessage m) => m.id == messageId).firstOrNull;
+      if (now != null && now.text != was.text) {
+        // Its old words go from the notifications and the chat list.
+        await _reviseNoticesOf(key, now);
+        await _refreshChatPreview(key);
+        await _persistState();
+      }
+    }
+  }
+
+  /// Edits that came before their message, by
+  /// `<conversation>|<id>|<author>`, with when they came: applied once the
+  /// message is here ([_applyChangeThatWaited]). Kept in memory only, at
+  /// most [_maxWaitingEdits], for as long as an edit is allowed.
+  final Map<String, ({ZenSignal edit, int at})> _waitingEdits =
+      <String, ({ZenSignal edit, int at})>{};
+
+  static const int _maxWaitingEdits = 256;
+
+  static String _waitingKey(String key, String wireId, String author) =>
+      '$key|$wireId|${PeerShareCodec.normalizeAddress(author)}';
+
+  /// A change to message [wireId] of [key] that is not here: a deletion by
+  /// its author (or, in a group, by the group's creator) makes the message
+  /// gone before it comes, so it is never shown when it does (and is still
+  /// acknowledged, so its sender stops); an edit waits for it. A reaction
+  /// to a message not here is nothing to keep.
+  void _changeBeforeItsMessage(
+    ZenSignal signal,
+    String key,
+    String wireId,
+    String? author,
+    int timestamp,
+  ) {
+    final String sender = PeerShareCodec.normalizeAddress(signal.sender);
+    final GroupProfile? group = _groupOfKey(key);
+    final String by = author ?? sender;
+    switch (signal.type) {
+      case ZenSignalType.messageDelete:
+        final bool mayDelete =
+            PeerShareCodec.addressesEqual(by, sender) ||
+            (group != null &&
+                PeerShareCodec.addressesEqual(group.createdById, sender));
+        if (!mayDelete || _isOwnDeviceAddress(by)) {
+          return;
+        }
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        state = state.copyWith(
+          disappearedMessages: rememberGone(
+            state.disappearedMessages,
+            key: key,
+            ids: <String>[
+              group == null ? wireId : groupMessageLocalId(wireId, by),
+            ],
+            goneAtMillis: now,
+            nowMillis: now,
+          ),
+        );
+        unawaitedLogged(
+          _persistState(),
+          context: 'Saving a deletion that came before its message',
+        );
+      case ZenSignalType.messageEdit:
+        _waitingEdits.removeWhere(
+          (String _, ({ZenSignal edit, int at}) w) =>
+              (timestamp - w.at).abs() >
+              (kChatEditWindow + _editClockSkew).inMilliseconds,
+        );
+        if (_waitingEdits.length >= _maxWaitingEdits) {
+          _waitingEdits.remove(_waitingEdits.keys.first);
+        }
+        _waitingEdits[_waitingKey(key, wireId, sender)] = (
+          edit: signal,
+          at: timestamp,
+        );
+      default:
+        return;
+    }
+  }
+
+  /// [message] (a chat or group message just taken in) had an edit waiting
+  /// for it ([_changeBeforeItsMessage]): it is applied now, and what was
+  /// said of the message's first words goes with them.
+  @override
+  Future<void> _applyChangeThatWaited(ZenSignal message) async {
+    if (_waitingEdits.isEmpty ||
+        (message.type != ZenSignalType.message &&
+            message.type != ZenSignalType.groupMessage)) {
+      return;
+    }
+    final String? wireId = message.messageId?.trim();
+    if (wireId == null || wireId.isEmpty) {
+      return;
+    }
+    final String? groupId = message.groupId;
+    final String key = groupId != null && groupId.isNotEmpty
+        ? 'group:$groupId'
+        : (state.friendByAddress(message.sender)?.address ?? message.sender);
+    final ({ZenSignal edit, int at})? waiting = _waitingEdits.remove(
+      _waitingKey(key, wireId, message.sender),
+    );
+    if (waiting != null) {
+      await _handleChatChange(waiting.edit, waiting.at);
     }
   }
 
@@ -1000,6 +1173,16 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     if (gone != null && goneId != null) {
       await _deleteManagedAttachmentIfPresent(gone);
       await _forgetQuotesOf(key, goneId);
+      if (!inGroup) {
+        // A file of one's own still going out from here stops too.
+        await _transferStore.deleteOutgoing(key, goneId);
+        await _closeRealtimeTransferSession(key, goneId);
+      }
+      // The group's creator deleted a member's message on another device:
+      // what told of it here goes as well.
+      await _forgetNoticesOf(key, <ChatMessage>[gone], persist: false);
+      await _refreshChatPreview(key);
+      await _persistState();
     }
   }
 
@@ -1094,6 +1277,261 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
               : alt),
       sender: own ? 'self' : author,
       text: reply.text,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // What tells of a message that is gone or changed
+  // ---------------------------------------------------------------------------
+
+  /// The entries in the in-app list, the copies queued for the app's return
+  /// and the notifications in the shade (and the banners in the app) that
+  /// tell of the messages [gone] of conversation [key] go with them: a
+  /// message deleted for everyone, disappeared, deleted from this device or
+  /// cleared with its chat left its words there before.
+  ///
+  /// A chat's notification stacks its last messages in one slot, so the
+  /// slot goes as a whole when it may hold one of them (an entry told of it,
+  /// or it was not read yet); what it told of the others stays in the list.
+  @override
+  Future<void> _forgetNoticesOf(
+    String key,
+    Iterable<ChatMessage> gone, {
+    bool persist = true,
+  }) async {
+    final List<ChatMessage> messages = <ChatMessage>[
+      for (final ChatMessage m in gone)
+        if (!m.isOutgoing && !m.isSystem) m,
+    ];
+    if (messages.isEmpty || !ref.mounted) {
+      return;
+    }
+    bool tells(InboxEntry e) =>
+        messages.any((ChatMessage m) => _entryTellsOf(e, key, m));
+    final List<InboxEntry> dropped = <InboxEntry>[
+      ...state.inbox.where(tells),
+      ...state.backgroundAlerts.where(tells),
+    ];
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> rest = <QueuedSignal>[
+      for (final QueuedSignal q in queue)
+        if (!messages.any((ChatMessage m) => _queuedSignalIs(q, key, m))) q,
+    ];
+    final bool queued = rest.length != queue.length;
+    if (queued) {
+      await _queueStore.save(rest);
+    }
+    if (!ref.mounted) {
+      return;
+    }
+    if (dropped.isNotEmpty || queued) {
+      state = state.copyWith(
+        inbox: state.inbox
+            .where((InboxEntry e) => !tells(e))
+            .toList(growable: false),
+        backgroundAlerts: state.backgroundAlerts
+            .where((InboxEntry e) => !tells(e))
+            .toList(growable: false),
+        pendingSignalCount: queued ? rest.length : null,
+      );
+      if (persist) {
+        await _persistState();
+      }
+    }
+    await _dismissChatNotices(
+      key,
+      messages,
+      entryIds: <String>[for (final InboxEntry e in dropped) e.id],
+      wholeSlot:
+          dropped.isNotEmpty ||
+          queued ||
+          messages.any((ChatMessage m) => m.readAtMillis == null),
+    );
+  }
+
+  /// An edit of [edited] (conversation [key]): the entries that tell of it
+  /// say its new words, its queued copy too, and the notification with the
+  /// old words leaves the shade.
+  Future<void> _reviseNoticesOf(String key, ChatMessage edited) async {
+    if (edited.isOutgoing || edited.isSystem || !ref.mounted) {
+      return;
+    }
+    final String body = chatPreviewLine(
+      edited.plainText,
+      type: edited.type,
+      fileName: edited.fileName,
+      mimeType: edited.mimeType,
+    );
+    bool tells(InboxEntry e) => _entryTellsOf(e, key, edited);
+    InboxEntry revised(InboxEntry e) => tells(e) ? e.withBody(body) : e;
+    final List<String> told = <String>[
+      for (final InboxEntry e in <InboxEntry>[
+        ...state.inbox,
+        ...state.backgroundAlerts,
+      ])
+        if (tells(e)) e.id,
+    ];
+    final List<QueuedSignal> queue = await _queueStore.load();
+    bool queued = false;
+    final List<QueuedSignal> next = <QueuedSignal>[
+      for (final QueuedSignal q in queue)
+        if (_queuedSignalIs(q, key, edited))
+          QueuedSignal(
+            id: q.id,
+            signal: _signalWithContent(q.signal, edited.text),
+            receivedAtMillis: q.receivedAtMillis,
+          )
+        else
+          q,
+    ];
+    for (int i = 0; i < queue.length; i++) {
+      if (!identical(queue[i], next[i])) {
+        queued = true;
+      }
+    }
+    if (queued) {
+      await _queueStore.save(next);
+    }
+    if (!ref.mounted) {
+      return;
+    }
+    if (told.isNotEmpty) {
+      state = state.copyWith(
+        inbox: state.inbox.map(revised).toList(growable: false),
+        backgroundAlerts: state.backgroundAlerts
+            .map(revised)
+            .toList(growable: false),
+      );
+      await _persistState();
+    }
+    await _dismissChatNotices(
+      key,
+      <ChatMessage>[edited],
+      entryIds: told,
+      wholeSlot: told.isNotEmpty || queued || edited.readAtMillis == null,
+    );
+  }
+
+  /// Everything that tells of the group [groupId] (left, or declined) goes
+  /// from the list, the queue and the shade.
+  @override
+  Future<void> _forgetGroupNotices(String groupId) async {
+    if (!ref.mounted) {
+      return;
+    }
+    bool ofGroup(InboxEntry e) => _groupIdOfRouteKey(e.routeKey) == groupId;
+    final List<String> dropped = <String>[
+      for (final InboxEntry e in <InboxEntry>[
+        ...state.inbox,
+        ...state.backgroundAlerts,
+      ])
+        if (ofGroup(e)) e.id,
+    ];
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> rest = <QueuedSignal>[
+      for (final QueuedSignal q in queue)
+        if (q.signal.type != ZenSignalType.groupMessage ||
+            q.signal.groupId != groupId)
+          q,
+    ];
+    final bool queued = rest.length != queue.length;
+    if (queued) {
+      await _queueStore.save(rest);
+    }
+    if (!ref.mounted) {
+      return;
+    }
+    if (dropped.isNotEmpty || queued) {
+      state = state.copyWith(
+        inbox: state.inbox
+            .where((InboxEntry e) => !ofGroup(e))
+            .toList(growable: false),
+        backgroundAlerts: state.backgroundAlerts
+            .where((InboxEntry e) => !ofGroup(e))
+            .toList(growable: false),
+        pendingSignalCount: queued ? rest.length : null,
+      );
+      await _persistState();
+    }
+    for (final String id in dropped) {
+      await _systemNotifications.dismiss(id);
+      await _notificationCenter.dismiss(id);
+    }
+    for (final String slot in _chatNoticeSlots('group:$groupId', '')) {
+      await _dismissNoticeSlot(slot);
+    }
+  }
+
+  /// The notifications of [entryIds] and, when [wholeSlot], the chat's
+  /// slots that can show [messages] of conversation [key].
+  Future<void> _dismissChatNotices(
+    String key,
+    List<ChatMessage> messages, {
+    required List<String> entryIds,
+    required bool wholeSlot,
+  }) async {
+    for (final String id in entryIds) {
+      await _systemNotifications.dismiss(id);
+      await _notificationCenter.dismiss(id);
+    }
+    if (!wholeSlot) {
+      return;
+    }
+    final Set<String> slots = <String>{
+      for (final ChatMessage m in messages) ..._chatNoticeSlots(key, m.sender),
+    };
+    for (final String slot in slots) {
+      await _dismissNoticeSlot(slot);
+    }
+  }
+
+  /// The shade's notification in [slot], and the app's banners of it.
+  Future<void> _dismissNoticeSlot(String slot) async {
+    await _systemNotifications.dismissSlot(slot);
+    for (final RuntimeNotification banner
+        in _notificationCenter.activeNotifications) {
+      if (banner.dedupKey == slot) {
+        await _notificationCenter.dismiss(banner.id);
+      }
+    }
+  }
+
+  /// The chat list line of conversation [key] from what it holds now (a
+  /// message in it was deleted or edited: its old words do not stay there).
+  Future<void> _refreshChatPreview(String key) async {
+    if (!ref.mounted) {
+      return;
+    }
+    final List<ChatMessage> thread = await _messageTimelineStore.load(key);
+    if (!ref.mounted) {
+      return;
+    }
+    final GroupProfile? group = _groupOfKey(key);
+    if (group == null) {
+      _syncFriendPreviewFromTimeline(
+        peerAddress: key,
+        thread: thread,
+        resetUnread: false,
+      );
+      return;
+    }
+    final ChatMessage? last = thread.isEmpty ? null : thread.last;
+    final String preview = last == null
+        ? ''
+        : chatPreviewLine(
+            chatMessageText(last),
+            type: last.type,
+            fileName: last.fileName,
+            mimeType: last.mimeType,
+          );
+    if (group.lastMessagePreview == preview) {
+      return;
+    }
+    state = state.copyWith(
+      groups: <String, GroupProfile>{
+        ...state.groups,
+        group.id: group.copyWith(lastMessagePreview: preview),
+      },
     );
   }
 

@@ -844,6 +844,18 @@ final class LockedReceiver {
   int _strangerTotal = 0;
   final Map<String, int> _lastNoticeAt = <String, int>{};
 
+  /// The messages (`<author>|<id>`) the message notice may show words of,
+  /// newest last: a deletion or an edit of one of them, or its disappearing
+  /// timer running out, takes the notice down, so the shade does not keep
+  /// what its sender took back until the app is unlocked.
+  final List<String> _noticedMessages = <String>[];
+
+  /// Timers that take the notice down when a disappearing message it shows
+  /// expires.
+  final List<Timer> _noticeExpiryTimers = <Timer>[];
+
+  static const int _maxNoticedMessages = 64;
+
   /// Records kept in this run (tests, logs).
   int get keptCount => _keptCount;
   int _keptCount = 0;
@@ -949,6 +961,11 @@ final class LockedReceiver {
     _ringTimer?.cancel();
     _ringTimer = null;
     _ringingFrom = null;
+    for (final Timer timer in _noticeExpiryTimers) {
+      timer.cancel();
+    }
+    _noticeExpiryTimers.clear();
+    _noticedMessages.clear();
     await _subscription?.cancel();
     _subscription = null;
     await _doorSubscription?.cancel();
@@ -1798,6 +1815,12 @@ final class LockedReceiver {
     BackgroundContactKind kind, {
     String from = '',
   }) async {
+    if (type == 'msg_delete' || type == 'msg_edit') {
+      if (kind != BackgroundContactKind.stranger) {
+        await _withdrawNoticeOf(from, payload);
+      }
+      return;
+    }
     if (type == 'alarm') {
       if (payload['end'] != null || kind != BackgroundContactKind.friend) {
         // Over (the app tells about it after unlock), or from someone whose
@@ -1871,6 +1894,7 @@ final class LockedReceiver {
           version: _noticeKit.versionOf(from),
         ),
       );
+      _noteNoticedMessage(from, signal);
       return;
     }
     if (_socialTypes.contains(type)) {
@@ -1937,6 +1961,70 @@ final class LockedReceiver {
           version: _noticeKit.versionOf(from),
         ),
       );
+    }
+  }
+
+  static String _noticedKey(String author, String messageId) =>
+      '${PeerShareCodec.normalizeAddress(author)}|$messageId';
+
+  /// The message notice now may show [signal]'s words: remembered, and
+  /// when the message disappears its notice is taken down then.
+  void _noteNoticedMessage(String from, ZenSignal signal) {
+    final String id = signal.messageId?.trim() ?? '';
+    if (id.isEmpty) {
+      return;
+    }
+    final String key = _noticedKey(from, id);
+    _noticedMessages
+      ..remove(key)
+      ..add(key);
+    while (_noticedMessages.length > _maxNoticedMessages) {
+      _noticedMessages.removeAt(0);
+    }
+    final int seconds = signal.disappearSeconds ?? 0;
+    if (seconds > 0 && _noticeExpiryTimers.length < _maxNoticedMessages) {
+      late final Timer timer;
+      timer = Timer(Duration(seconds: seconds), () {
+        _noticeExpiryTimers.remove(timer);
+        if (_noticedMessages.contains(key)) {
+          unawaitedLogged(
+            _takeDownMessageNotice(),
+            context: 'Locked notice of a disappeared message',
+          );
+        }
+      });
+      _noticeExpiryTimers.add(timer);
+    }
+  }
+
+  /// A deletion or an edit from [from] ([payload]): when the message notice
+  /// may show the message it means, the notice goes (the app tells of the
+  /// message as it is now after unlock).
+  Future<void> _withdrawNoticeOf(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? id = payload['msgId'];
+    if (id is! String || id.trim().isEmpty) {
+      return;
+    }
+    final Object? author = payload['author'];
+    final String key = _noticedKey(
+      author is String && author.trim().isNotEmpty ? author : from,
+      id.trim(),
+    );
+    if (_noticedMessages.contains(key) ||
+        _noticedMessages.contains(_noticedKey(from, id.trim()))) {
+      await _takeDownMessageNotice();
+    }
+  }
+
+  Future<void> _takeDownMessageNotice() async {
+    _noticedMessages.clear();
+    try {
+      await _notices.dismissSlot(kLockedMessageSlot);
+    } on Object catch (error, stackTrace) {
+      logZenError('Taking down a locked notice failed', error, stackTrace);
     }
   }
 

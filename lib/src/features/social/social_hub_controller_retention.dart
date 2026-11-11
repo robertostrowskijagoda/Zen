@@ -137,17 +137,23 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
       return true;
     }
     _bumpTimelineRevision();
+    // Gone from here for good: a late copy of it (a re-send, another
+    // device of the account) does not bring it back, and no notification
+    // keeps its words.
+    _rememberGone(key, <ChatMessage>[message]);
     if (!key.startsWith('group:')) {
       _syncFriendPreviewFromTimeline(
         peerAddress: key,
         thread: rest,
         resetUnread: false,
       );
-      await _persistState();
     }
+    await _forgetNoticesOf(key, <ChatMessage>[message], persist: false);
+    await _persistState();
     return true;
   }
 
+  @override
   void _syncFriendPreviewFromTimeline({
     required String peerAddress,
     required List<ChatMessage> thread,

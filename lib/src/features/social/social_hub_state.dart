@@ -53,6 +53,7 @@ final class InboxEntry {
     this.peerAddress,
     this.titleEvent,
     this.bodyEvent,
+    this.messageId,
   });
 
   /// An entry whose [title] (and [body], unless [bodyText] is given: what
@@ -67,6 +68,7 @@ final class InboxEntry {
     required int createdAtMillis,
     String? routeKey,
     String? peerAddress,
+    String? messageId,
   }) {
     final SocialEventText? bodyEvent = bodyText == null ? body : null;
     return InboxEntry(
@@ -79,6 +81,7 @@ final class InboxEntry {
       peerAddress: peerAddress,
       titleEvent: title,
       bodyEvent: bodyEvent,
+      messageId: messageId,
     );
   }
 
@@ -101,6 +104,12 @@ final class InboxEntry {
   /// What the body says, when it is not a friend's own words.
   final SocialEventText? bodyEvent;
 
+  /// The chat message this entry tells of (its id as its sender gave it),
+  /// for an entry about one: when the message is deleted, disappears, is
+  /// edited or its chat is cleared, the entry goes or changes with it, so
+  /// its words do not stay behind in the list or in the shade.
+  final String? messageId;
+
   /// The title in the app's current language.
   String get displayTitle => titleEvent?.render(title) ?? title;
 
@@ -121,6 +130,34 @@ final class InboxEntry {
     peerAddress: peerAddress,
     titleEvent: titleEvent ?? this.titleEvent,
     bodyEvent: bodyEvent ?? this.bodyEvent,
+    messageId: messageId,
+  );
+
+  /// This entry kept with the message it tells of ([messageId]).
+  InboxEntry withMessageId(String? messageId) => InboxEntry(
+    id: id,
+    type: type,
+    title: title,
+    body: body,
+    createdAtMillis: createdAtMillis,
+    routeKey: routeKey,
+    peerAddress: peerAddress,
+    titleEvent: titleEvent,
+    bodyEvent: bodyEvent,
+    messageId: messageId,
+  );
+
+  /// This entry saying [body] (the message it tells of was edited).
+  InboxEntry withBody(String body) => InboxEntry(
+    id: id,
+    type: type,
+    title: title,
+    body: body,
+    createdAtMillis: createdAtMillis,
+    routeKey: routeKey,
+    peerAddress: peerAddress,
+    titleEvent: titleEvent,
+    messageId: messageId,
   );
 }
 

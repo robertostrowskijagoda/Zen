@@ -662,6 +662,10 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         signal,
         receivedAtMillis: receivedAtMillis,
       );
+      // An edit that came before this message waited for it.
+      await _applyChangeThatWaited(
+        signal.withSender(PeerShareCodec.normalizeAddress(signal.sender)),
+      );
     } on Object {
       if (_controllerDisposed || !ref.mounted) {
         return;

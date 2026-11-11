@@ -359,7 +359,53 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       await _transferStore.deleteIncoming(key, message.id);
       await _transferStore.deleteOutgoing(key, message.id);
     }
+    // Its words go from the list of notifications and from the shade too.
+    if (ref.mounted) {
+      await _forgetNoticesOf(key, <ChatMessage>[
+        message,
+      ], persist: !_sweepingDisappeared);
+    }
   }
+
+  @override
+  void _rememberGone(String key, Iterable<ChatMessage> messages) {
+    if (!ref.mounted) {
+      return;
+    }
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    // Notes of the chat too (another device of the account passes its
+    // whole history on, notes included), but the newest only: copies on
+    // their way are of recent messages, and a long chat cleared must not
+    // crowd out everything else remembered.
+    final List<ChatMessage> newestFirst = messages.toList()
+      ..sort(
+        (ChatMessage a, ChatMessage b) =>
+            b.sentAtMillis.compareTo(a.sentAtMillis),
+      );
+    final List<String> ids = <String>[
+      for (final ChatMessage m in newestFirst.take(
+        kMaxDisappearedMessages ~/ 2,
+      ))
+        _disappearedIdOf(key, m),
+    ];
+    if (ids.isEmpty) {
+      return;
+    }
+    state = state.copyWith(
+      disappearedMessages: rememberGone(
+        state.disappearedMessages,
+        key: key,
+        ids: ids,
+        goneAtMillis: now,
+        nowMillis: now,
+      ),
+    );
+  }
+
+  @override
+  bool _isRememberedGone(String key, String messageId) => state
+      .disappearedMessages
+      .containsKey(disappearedMessageKey(key, messageId));
 
   /// Deletes what expired and waits for the next one.
   @override

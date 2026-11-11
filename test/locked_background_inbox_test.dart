@@ -948,6 +948,52 @@ void main() {
         expect(notices.audibleAlertCount, 1);
       });
 
+      test('a message deleted or edited by its sender takes its notice '
+          'down; another message\'s change does not', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+        await receive(_ada, <String, dynamic>{...direct, 'msgId': 'm-1'});
+        expect(notices.activeNotifications.single.body, 'Spotkajmy się o 18');
+        await receive(_ada, const <String, dynamic>{
+          'type': 'msg_delete',
+          '_rid': 'd0',
+          'msgId': 'm-other',
+        });
+        expect(notices.activeNotifications, hasLength(1));
+        await receive(_ada, const <String, dynamic>{
+          'type': 'msg_delete',
+          '_rid': 'd1',
+          'msgId': 'm-1',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 3, reason: 'the app gets them all');
+
+        await receive(_member, <String, dynamic>{...inGroup, 'msgId': 'g-1'});
+        expect(notices.activeNotifications, hasLength(1));
+        await receive(_member, const <String, dynamic>{
+          'type': 'msg_edit',
+          '_rid': 'e1',
+          'groupId': 'g1',
+          'msgId': 'g-1',
+          'text': 'Kto idzie jutro?',
+        });
+        expect(notices.activeNotifications, isEmpty);
+      });
+
+      test(
+        'the notice of a disappearing message goes when it expires',
+        () async {
+          await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+          await receive(_ada, <String, dynamic>{
+            ...direct,
+            'msgId': 'm-2',
+            'ttl': 1,
+          });
+          expect(notices.activeNotifications, hasLength(1));
+          await Future<void>.delayed(const Duration(milliseconds: 1300));
+          expect(notices.activeNotifications, isEmpty);
+        },
+      );
+
       test('"Nadawca i treść": who and what, in a group too', () async {
         RuntimeSystemNotification notice = await noticeFor(kit(), _ada, direct);
         expect(notice.title, 'Ada');

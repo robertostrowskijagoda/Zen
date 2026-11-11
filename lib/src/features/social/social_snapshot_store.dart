@@ -50,6 +50,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'mutedUntil',
     'groupNotifyAll',
     'inboxText',
+    'inboxMessages',
     'peerVersions',
     'groups',
     'friendships',
@@ -418,6 +419,12 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         inbox = _withInboxEvents(inbox, inboxText);
         backgroundAlerts = _withInboxEvents(backgroundAlerts, inboxText);
       }
+      // Which chat message each entry tells of (so it goes with it).
+      final Object? inboxMessages = decoded['inboxMessages'];
+      if (inboxMessages is Map) {
+        inbox = _withInboxMessages(inbox, inboxMessages);
+        backgroundAlerts = _withInboxMessages(backgroundAlerts, inboxMessages);
+      }
       records.addAll(friendshipRecordsFromJson(decoded['friendships']));
       final Object? clockValue = decoded['friendshipClock'];
       if (clockValue is int && clockValue > 0) {
@@ -517,6 +524,17 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       bodyEvent: SocialEventText.fromJson(saved['b']),
     );
   }
+
+  static List<InboxEntry> _withInboxMessages(
+    List<InboxEntry> entries,
+    Map<dynamic, dynamic> ids,
+  ) => <InboxEntry>[
+    for (final InboxEntry entry in entries)
+      switch (ids[entry.id]) {
+        final String id when id.isNotEmpty => entry.withMessageId(id),
+        _ => entry,
+      },
+  ];
 
   static Object? _tryDecodeJson(String raw) {
     try {
@@ -691,6 +709,13 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
                 't': ?e.titleEvent?.toJson(),
                 'b': ?e.bodyEvent?.toJson(),
               },
+        },
+        'inboxMessages': <String, String>{
+          for (final InboxEntry e in <InboxEntry>[
+            ...state.inbox,
+            ...state.backgroundAlerts,
+          ])
+            if (e.messageId != null) e.id: e.messageId!,
         },
         'peerVersions': <String, String>{
           for (final MapEntry<String, String> e

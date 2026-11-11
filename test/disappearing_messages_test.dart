@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -112,6 +113,63 @@ final class _Harness {
 
 void main() {
   group('DisappearingTimelineStore', () {
+    test('a message that arrives while a change is written stays', () async {
+      final FileMessageTimelineStore file = FileMessageTimelineStore.onDisk(
+        MemoryLedgerDisk(),
+      );
+      final DisappearingTimelineStore store = DisappearingTimelineStore(
+        file,
+        now: () => 10000,
+      )..timerFor = (String _) => 3600;
+      ChatMessage incoming(String id, int at) => ChatMessage(
+        id: id,
+        sender: ada,
+        text: 'text $id',
+        sentAtMillis: at,
+        direction: ChatMessageDirection.incoming,
+      );
+      await store.append(ada, incoming('first', 1000));
+      final List<ChatMessage> read = await store.load(ada);
+      // The change is written while a message comes in: the change reads
+      // the chat as it is when it writes, so the message is not written over.
+      final Future<void> saving = store.save(ada, <ChatMessage>[
+        for (final ChatMessage m in read) m.copyWith(text: 'changed'),
+      ]);
+      final Future<void> arrival = store.append(ada, incoming('new', 9000));
+      await Future.wait(<Future<void>>[saving, arrival]);
+      expect(
+        <String>[for (final ChatMessage m in await store.load(ada)) m.id],
+        <String>['first', 'new'],
+      );
+    });
+
+    test('a message that arrives while the sweep runs stays', () async {
+      final FileMessageTimelineStore file = FileMessageTimelineStore.onDisk(
+        MemoryLedgerDisk(),
+      );
+      final DisappearingTimelineStore store = DisappearingTimelineStore(
+        file,
+        now: () => 10000,
+      )..timerFor = (String _) => 3600;
+      ChatMessage incoming(String id, int at, {int? expires}) => ChatMessage(
+        id: id,
+        sender: ada,
+        text: 'text $id',
+        sentAtMillis: at,
+        direction: ChatMessageDirection.incoming,
+        expiresAtMillis: expires,
+      );
+      await store.append(ada, incoming('old', 1000, expires: 5000));
+      await store.append(ada, incoming('kept', 2000, expires: 50000));
+      final Future<int> sweep = store.sweep(<String>[ada]);
+      final Future<void> arrival = store.append(ada, incoming('new', 9000));
+      await Future.wait(<Future<Object?>>[sweep, arrival]);
+      expect(
+        <String>[for (final ChatMessage m in await store.load(ada)) m.id],
+        <String>['kept', 'new'],
+      );
+    });
+
     test('stamps new messages, hides expired ones and sweeps them', () async {
       int now = 10000;
       final MemoryMessageTimelineStore raw = MemoryMessageTimelineStore();

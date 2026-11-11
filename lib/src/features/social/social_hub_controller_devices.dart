@@ -193,6 +193,8 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       state = state.copyWith(groups: groups);
       await _persistState();
     });
+    // Its chat and files go here too, as on the device that left.
+    await _clearGroupHistory(groupId);
   }
 
   /// Conversation keys this device has (friends, and `group:<id>`).
@@ -269,6 +271,16 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
         unused = stored != null;
         return;
       }
+      final bool here = (await _messageTimelineStore.load(
+        key,
+      )).any((ChatMessage m) => m.id == id);
+      if (!here && _isRememberedGone(key, _syncedGoneId(key, id, message))) {
+        // Deleted from this device, or cleared with its chat (or deleted
+        // for everyone before it came): another device's copy of it does
+        // not bring it back.
+        unused = stored != null;
+        return;
+      }
       await _upsertTimelineMessage(
         peerAddress: key,
         messageId: id,
@@ -277,6 +289,11 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
         build: (ChatMessage? existing) {
           if (existing == null) {
             return withFile(message.copyWith(id: id, attachmentBytes: null));
+          }
+          if (existing.isDeleted) {
+            // Deleted for everyone: its file is not put back under it.
+            unused = stored != null;
+            return existing;
           }
           // Only fill in a file that was missing here.
           final bool missing =
@@ -298,10 +315,23 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
         },
       );
     });
-    if (unused && storedPath != null) {
-      await _mediaVault.delete(storedPath);
+    // A file written here for nothing (also one made of [bytes]) goes.
+    final String? written = stored?.path;
+    if (unused && written != null && isMediaVaultPath(written)) {
+      await _mediaVault.delete(written);
     }
   }
+
+  /// The id the synced [message], kept here as [id] in conversation [key],
+  /// would be remembered by as gone (see `_rememberGone`): in a group its
+  /// id with its author ('self' for one's own).
+  String _syncedGoneId(String key, String id, ChatMessage message) =>
+      key.startsWith('group:') && !message.isSystem
+      ? groupMessageLocalId(
+          groupMessageWireId(id),
+          message.isOutgoing ? 'self' : message.sender,
+        )
+      : id;
 
   /// The key a group message from another device of the account (or from
   /// a copy of the account) goes under here: the key of the same author's
